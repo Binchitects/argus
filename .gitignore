@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# CodeIndex runtime state (all rebuildable from GitLab)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local config with secrets
+config.yaml
+config.local.yaml
+.env
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
