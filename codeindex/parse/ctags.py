@@ -31,7 +31,7 @@ class CtagsUnavailable(RuntimeError):
 def is_public_symbol(path: str, scope: str | None, file_restricted: bool) -> bool:
     if scope:
         parts = {p.strip() for p in scope.replace("::", ".").split(".")}
-        if parts & PRIVATE_SCOPES:
+        if any(p in PRIVATE_SCOPES or p.startswith("__anon") for p in parts):
             return False
     if PurePosixPath(path).suffix.lower() in HEADER_EXTENSIONS:
         return True

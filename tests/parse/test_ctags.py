@@ -13,7 +13,9 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def parsed():
-    return ctags.extract_symbols(FIXTURES, ["decoder.h", "decoder.cpp"])
+    return ctags.extract_symbols(
+        FIXTURES, ["decoder.h", "decoder.cpp", "anon_namespace.cpp"]
+    )
 
 
 def _by_name(symbols):
@@ -46,6 +48,12 @@ def test_non_static_function_in_cpp_is_public(parsed):
     assert _by_name(parsed["decoder.cpp"])["PublicImpl"]["is_public"] == 1
 
 
+def test_anonymous_namespace_function_is_not_public(parsed):
+    helper = _by_name(parsed["anon_namespace.cpp"])["HiddenHelper"]
+    assert (helper["scope"] or "").startswith("__anon")
+    assert helper["is_public"] == 0
+
+
 def test_signature_captured(parsed):
     sig = _by_name(parsed["decoder.h"])["DecodeFrame"]["signature"]
     assert sig is not None and "const char" in sig
@@ -60,3 +68,4 @@ def test_is_public_symbol_rules():
     assert ctags.is_public_symbol("a/b.h", "eal::detail", False) is False
     assert ctags.is_public_symbol("a/b.cpp", None, False) is True
     assert ctags.is_public_symbol("a/b.cpp", None, True) is False
+    assert ctags.is_public_symbol("a/b.h", "__anon1ef920e20111", False) is False
