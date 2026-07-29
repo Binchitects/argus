@@ -118,3 +118,23 @@ def test_blob_shas_maps_every_path(cfg, project, origin):
     shas = mirror.blob_shas(m, mirror.head_sha(m, "main"))
     assert set(shas) == {"a.c"}
     assert len(shas["a.c"]) == 40
+
+
+def test_changed_files_reports_non_ascii_path_verbatim(cfg, project, origin):
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    old = mirror.head_sha(m, "main")
+
+    (origin / "файл.c").write_text("int f(void){return 9;}\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-m", "add non-ascii file")
+
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    new = mirror.head_sha(m, "main")
+    changes = mirror.changed_files(m, old, new)
+    assert changes == [mirror.Change(status="A", path="файл.c")]
+
+
+def test_head_sha_missing_branch_raises_git_error(cfg, project, origin):
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    with pytest.raises(mirror.GitError):
+        mirror.head_sha(m, "does-not-exist")

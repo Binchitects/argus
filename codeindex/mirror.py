@@ -61,8 +61,8 @@ def is_ancestor(mirror: Path, old: str, new: str) -> bool:
 
 
 def _full_listing(mirror: Path, sha: str) -> list[Change]:
-    out = _git(mirror, "ls-tree", "-r", "--name-only", sha)
-    return [Change(status="A", path=p) for p in out.splitlines() if p]
+    out = _git(mirror, "ls-tree", "-r", "--name-only", "-z", sha)
+    return [Change(status="A", path=p) for p in out.split("\0") if p]
 
 
 def changed_files(mirror: Path, old_sha: str | None, new_sha: str) -> list[Change]:
@@ -70,13 +70,14 @@ def changed_files(mirror: Path, old_sha: str | None, new_sha: str) -> list[Chang
         # First index, or history was rewritten: reindex the whole tree.
         return _full_listing(mirror, new_sha)
 
-    out = _git(mirror, "diff", "--name-status", "--no-renames",
+    out = _git(mirror, "diff", "--name-status", "--no-renames", "-z",
                f"{old_sha}..{new_sha}")
+    # With -z and --no-renames, records are NUL-separated flat fields:
+    # <status>\0<path>\0<status>\0<path>\0... (no trailing-empty rename
+    # triples, since renames are disabled).
+    fields = [f for f in out.split("\0") if f]
     changes: list[Change] = []
-    for line in out.splitlines():
-        if not line.strip():
-            continue
-        status, _, path = line.partition("\t")
+    for status, path in zip(fields[0::2], fields[1::2]):
         status = status[0]
         if status in ("A", "M", "D") and path:
             changes.append(Change(status=status, path=path))
