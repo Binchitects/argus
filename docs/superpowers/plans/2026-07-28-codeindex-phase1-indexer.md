@@ -1813,9 +1813,14 @@ def is_ancestor(mirror: Path, old: str, new: str) -> bool:
     return proc.returncode == 0
 
 
+# -z is mandatory on every command whose output we parse as paths. Without it,
+# git applies core.quotePath=true and returns any path containing non-ASCII
+# bytes, a quote, a backslash, or a control char C-escaped and double-quoted --
+# e.g. файл.c comes back as the literal "\321\204\320\260\320\271\320\273.c",
+# which would then be stored verbatim as the indexed path.
 def _full_listing(mirror: Path, sha: str) -> list[Change]:
-    out = _git(mirror, "ls-tree", "-r", "--name-only", sha)
-    return [Change(status="A", path=p) for p in out.splitlines() if p]
+    out = _git(mirror, "ls-tree", "-r", "--name-only", "-z", sha)
+    return [Change(status="A", path=p) for p in out.split("\0") if p]
 
 
 def changed_files(mirror: Path, old_sha: str | None, new_sha: str) -> list[Change]:
@@ -1823,16 +1828,16 @@ def changed_files(mirror: Path, old_sha: str | None, new_sha: str) -> list[Chang
         # First index, or history was rewritten: reindex the whole tree.
         return _full_listing(mirror, new_sha)
 
-    out = _git(mirror, "diff", "--name-status", "--no-renames",
+    out = _git(mirror, "diff", "--name-status", "--no-renames", "-z",
                f"{old_sha}..{new_sha}")
+    # With -z the output is flat alternating NUL-terminated fields
+    # (<status>\0<path>\0...), NOT the status<TAB>path lines of the plain form.
+    # --no-renames guarantees no three-field rename records.
+    fields = [f for f in out.split("\0") if f]
     changes: list[Change] = []
-    for line in out.splitlines():
-        if not line.strip():
-            continue
-        status, _, path = line.partition("\t")
-        status = status[0]
-        if status in ("A", "M", "D") and path:
-            changes.append(Change(status=status, path=path))
+    for status, path in zip(fields[0::2], fields[1::2]):
+        if status[0] in ("A", "M", "D") and path:
+            changes.append(Change(status=status[0], path=path))
     return changes
 
 
