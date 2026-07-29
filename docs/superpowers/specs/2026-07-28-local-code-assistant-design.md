@@ -176,7 +176,7 @@ Embedded:
 
 C++ has no `export` keyword, so "public symbol" needs an explicit definition. A symbol is public if
 it is **declared in a header file** (`.h`, `.hpp`, `.hxx`, `.inl`) and its enclosing scope is not a
-namespace named `detail`, `internal`, `impl`, or `anonymous`. Additionally, non-`static` functions
+namespace named `detail`, `internal`, or `impl`, and is not an anonymous namespace. Additionally, non-`static` functions
 defined in `.c`/`.cpp` files count as public even without a header declaration, since they are
 linkable across translation units. Everything else — `static` functions, members of `detail`
 namespaces, and symbols local to a `.cpp` — is indexed for `find_symbol` and `find_references` but

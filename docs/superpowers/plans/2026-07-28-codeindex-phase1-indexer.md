@@ -1217,6 +1217,10 @@ CTAGS_ARGS = [
     # n=line, K=long kind, S=signature, s=scope, e=end line,
     # f=file-limited visibility (i.e. `static`), surfaced as JSON key "file".
     "--fields=+nKSsef",
+    # Universal Ctags ships the C/C++ `prototype` kind DISABLED by default.
+    # Without these, header-only declarations (`int Foo(int);` with no body)
+    # produce no tag at all — which would drop most of a C/C++ public API.
+    "--kinds-c=+p", "--kinds-c++=+p",
     "-L", "-",   # read the file list from stdin
     "-f", "-",   # write tags to stdout
 ]
@@ -1228,9 +1232,12 @@ class CtagsUnavailable(RuntimeError):
 
 def is_public_symbol(path: str, scope: str | None, file_restricted: bool) -> bool:
     if scope:
-        parts = {p.strip() for p in scope.replace("::", ".").split(".")}
-        if parts & PRIVATE_SCOPES:
-            return False
+        for part in (p.strip() for p in scope.replace("::", ".").split(".")):
+            # A C++ anonymous namespace has internal linkage, but ctags reports
+            # it as a generated identifier like "__anond398a7c10111" — never the
+            # literal "anonymous" — and emits no "file": true for its members.
+            if part in PRIVATE_SCOPES or part.startswith("__anon"):
+                return False
     if PurePosixPath(path).suffix.lower() in HEADER_EXTENSIONS:
         return True
     return not file_restricted
