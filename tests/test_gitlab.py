@@ -63,3 +63,11 @@ def test_raises_on_auth_failure():
 
     with pytest.raises(GitLabError, match="401"):
         list_projects(CFG, client=_client(handler))
+
+
+def test_raises_on_malformed_json():
+    def handler(request):
+        return httpx.Response(200, content=b"<html>proxy error</html>")
+
+    with pytest.raises(GitLabError, match="failed to decode JSON"):
+        list_projects(CFG, client=_client(handler))

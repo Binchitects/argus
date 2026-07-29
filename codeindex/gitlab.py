@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import httpx
@@ -42,7 +43,13 @@ def list_projects(cfg: GitLabConfig, *,
                     f"GET /projects returned {response.status_code}: "
                     f"{response.text[:200]}"
                 )
-            batch = response.json()
+            try:
+                batch = response.json()
+            except json.JSONDecodeError:
+                raise GitLabError(
+                    f"GET /projects page {page}: failed to decode JSON: "
+                    f"{response.text[:200]}"
+                )
             if not batch:
                 break
             for item in batch:
