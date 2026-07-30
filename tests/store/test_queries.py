@@ -112,8 +112,42 @@ def test_index_status_reports_last_run_flags(two_repos):
 
 
 def test_index_status_reports_queued_retries(two_repos):
+    """queued_retries must count queued PATHS, not index_queue rows.
+
+    index_queue.repo_id is a PRIMARY KEY -- one row per repo, with the paths
+    JSON-packed into `reason` -- so COUNT(*) is structurally bounded at 1 and
+    a repo with 4,000 stuck paths reported "1". Phase 2 exposes this column
+    to a model that will read it as a file count, so assert exact numbers:
+    `>= 1` would be satisfied by a literal SELECT 1.
+    """
     conn, ids = two_repos
     rid = ids["g/beta"]
-    writes.enqueue_retry(conn, rid, ["a.c", "b.c"], "read error", 1234)
-    row = [r for r in queries.index_status([rid], conn)][0]
-    assert row["queued_retries"] >= 1
+
+    def queued():
+        return [r for r in queries.index_status([rid], conn)][0]["queued_retries"]
+
+    assert queued() == 0, "no index_queue row at all must report 0, not NULL"
+
+    writes.enqueue_retry(conn, rid, ["a.c"], "read error", 1234)
+    assert queued() == 1
+
+    writes.enqueue_retry(conn, rid, ["a.c", "b.c", "c.c", "d.c"], "read error", 1235)
+    assert queued() == 4
+
+    # A row whose reason is not the JSON payload (a hand-written entry, or one
+    # written before the payload format existed) must degrade to 0 rather than
+    # abort the whole status query with a malformed-JSON error.
+    conn.execute("UPDATE index_queue SET reason = 'legacy free text' WHERE repo_id = ?",
+                 (rid,))
+    conn.commit()
+    assert queued() == 0
+
+
+def test_index_status_queued_retries_is_per_repo(two_repos):
+    """One repo's queue must not be counted against another's."""
+    conn, ids = two_repos
+    writes.enqueue_retry(conn, ids["g/alpha"], ["a.c", "b.c", "c.c"], "read error", 1)
+    writes.enqueue_retry(conn, ids["g/beta"], ["z.c"], "read error", 1)
+    rows = {r["path_with_namespace"]: r["queued_retries"]
+            for r in queries.index_status(list(ids.values()), conn)}
+    assert rows == {"g/alpha": 3, "g/beta": 1}

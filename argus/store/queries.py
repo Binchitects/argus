@@ -88,7 +88,20 @@ def index_status(allowed_repo_ids: Sequence[int],
         "       (SELECT COUNT(*) FROM files   WHERE repo_id = r.id) AS files,"
         "       (SELECT COUNT(*) FROM symbols WHERE repo_id = r.id) AS symbols,"
         "       (SELECT COUNT(*) FROM index_errors WHERE repo_id = r.id) AS errors,"
-        "       (SELECT COUNT(*) FROM index_queue WHERE repo_id = r.id) AS queued_retries"
+        # index_queue.repo_id is a PRIMARY KEY: one row per repo, with the
+        # queued paths JSON-packed into `reason`. COUNT(*) is therefore a 0/1
+        # flag, not a count -- a repo with 4,000 stuck paths reported "1".
+        # Count the packed paths instead. json_valid() guards a row whose
+        # reason is not the payload (hand-written, or pre-dating the format):
+        # json_extract would otherwise abort the entire status query with a
+        # malformed-JSON error, and the outer COALESCE turns both "no queue
+        # row" and "unreadable payload" into 0.
+        "       COALESCE((SELECT CASE WHEN json_valid(reason)"
+        "                             THEN json_array_length("
+        "                                      json_extract(reason, '$.paths'))"
+        "                        END"
+        "                   FROM index_queue WHERE repo_id = r.id), 0)"
+        "         AS queued_retries"
         "  FROM repos r"
         f" WHERE r.id IN ({marks})"
         "  ORDER BY r.path_with_namespace",
