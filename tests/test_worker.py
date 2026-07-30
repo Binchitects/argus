@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -457,7 +458,7 @@ def test_retry_path_whose_symbols_fail_is_requeued(env, monkeypatch):
     monkeypatch.setattr(Path, "read_bytes", failing)
     first = _run(env)
     monkeypatch.undo()
-    assert conn.execute("SELECT COUNT(*) c FROM index_queue").fetchone()["c"] == 1
+    assert "decoder.c" in _queued_paths(conn, repo_id)
 
     # Pass N+1: it reads fine but ctags fails. It must stay queued.
     from argus.parse import ctags as ctags_mod
@@ -465,7 +466,7 @@ def test_retry_path_whose_symbols_fail_is_requeued(env, monkeypatch):
     second = _run(env, old_sha=first.sha)
     monkeypatch.undo()
     assert second.symbols_failed is True
-    assert conn.execute("SELECT COUNT(*) c FROM index_queue").fetchone()["c"] == 1, \
+    assert "decoder.c" in _queued_paths(conn, repo_id), \
         "retry-origin path was dropped after its symbol extraction failed"
 
     # Pass N+2: ctags healthy. The file must get correct symbols.
@@ -474,3 +475,75 @@ def test_retry_path_whose_symbols_fail_is_requeued(env, monkeypatch):
         "SELECT s.name FROM symbols s JOIN files f ON f.id = s.file_id"
         " WHERE f.path = 'decoder.c'")}
     assert "DecodeFrameV2" in names
+
+
+def _queued_paths(conn, repo_id):
+    row = conn.execute(
+        "SELECT reason FROM index_queue WHERE repo_id = ?", (repo_id,)
+    ).fetchone()
+    if row is None:
+        return []
+    return json.loads(row["reason"]).get("paths", [])
+
+
+def test_retry_path_with_permanently_broken_symbols_is_eventually_exhausted(
+    env, monkeypatch
+):
+    """A retry-origin path whose read/store keep succeeding but whose symbol
+    extraction keeps failing (ctags stays broken) must still hit the retry
+    cap after enough consecutive passes and stop being re-enqueued.
+
+    clear_retry_attempts must NOT clear the attempt counter for a path whose
+    symbols failed this pass -- otherwise bump_retry_attempts always inserts
+    a fresh attempts=1 row (the old row having just been deleted), attempts
+    can never reach MAX_RETRY_ATTEMPTS, and retry-exhausted can never fire.
+    One failure cycle is not enough to catch this: it takes three or more
+    consecutive passes to observe attempts failing to accumulate.
+    """
+    conn, cfg, project, repo_id, _, origin = env
+    _run(env)  # establish a baseline so later diffs are narrow
+
+    # Get decoder.c into the retry queue as a retry-origin path: it fails to
+    # read on this pass, just like test_retry_path_whose_symbols_fail_is_requeued.
+    (origin / "decoder.c").write_text(
+        '#include "decoder.h"\nint DecodeFrameV2(const char* b, int n){return n;}\n'
+    )
+    git(origin, "add", "-A")
+    git(origin, "commit", "-m", "modify decoder")
+
+    real = Path.read_bytes
+    def failing(self):
+        if self.name == "decoder.c":
+            raise OSError("simulated")
+        return real(self)
+    monkeypatch.setattr(Path, "read_bytes", failing)
+    first = _run(env)
+    monkeypatch.undo()
+    assert "decoder.c" in _queued_paths(conn, repo_id)
+
+    # ctags stays broken for several consecutive passes; decoder.c's read and
+    # store keep succeeding every time (only symbol extraction fails).
+    from argus.parse import ctags as ctags_mod
+    monkeypatch.setattr(ctags_mod.shutil, "which", lambda name: None)
+
+    previous = first.sha
+    for _ in range(writes.MAX_RETRY_ATTEMPTS + 1):
+        result = _run(env, old_sha=previous)
+        previous = result.sha
+    monkeypatch.undo()
+
+    # decoder.c must have been given up on: no longer sitting in the queue,
+    # and a retry-exhausted row recorded for it specifically.
+    assert "decoder.c" not in _queued_paths(conn, repo_id), (
+        "retry-origin path whose symbols kept failing was never exhausted"
+        " -- it is still queued for retry after more than MAX_RETRY_ATTEMPTS passes"
+    )
+    exhausted = conn.execute(
+        "SELECT path FROM index_errors WHERE repo_id = ? AND stage = 'retry-exhausted'",
+        (repo_id,),
+    ).fetchall()
+    assert any(r["path"] == "decoder.c" for r in exhausted)
+
+    # A further pass must not resurrect it or record it as queued again.
+    extra = _run(env, old_sha=previous)
+    assert "decoder.c" not in _queued_paths(conn, repo_id)

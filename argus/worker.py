@@ -165,24 +165,34 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     _apply_symbols(conn, repo_id, tree, to_parse, result, now, shas)
 
     # A queued path that is healthy again -- indexed this pass, or gone from
-    # the tree entirely -- starts over with a clean attempt count.
-    indexed_paths = set(to_parse)
+    # the tree entirely -- starts over with a clean attempt count. But when
+    # symbols_failed, NO path in to_parse actually completed (its read/store
+    # succeeded, but that alone is not "done"): clearing the counter here
+    # would let bump_retry_attempts re-insert a fresh attempts=1 row every
+    # such pass, and attempts could never reach MAX_RETRY_ATTEMPTS. Paths
+    # gone from the tree entirely are unaffected -- they can never come back
+    # through to_parse again regardless, so it is still safe to forget them.
+    indexed_paths = set(to_parse) if not result.symbols_failed else set()
     writes.clear_retry_attempts(
         conn, repo_id,
         [p for p in queued if p in indexed_paths or p not in shas],
     )
 
+    symbols_only_failed: set[str] = set()
     if result.symbols_failed:
         # A retry-origin path is not in any future diff, so if its symbols failed
         # it must stay queued or it is lost permanently.
-        failed_paths.extend(p for p in to_parse if p in retry_set)
+        symbols_only_failed = {p for p in to_parse if p in retry_set}
+        failed_paths.extend(symbols_only_failed)
 
     retryable = _cap_retries(conn, repo_id, failed_paths, now)
 
     if retryable or unreached_retry:
         reasons = []
-        if retryable:
+        if any(p not in symbols_only_failed for p in retryable):
             reasons.append("per-file read/store error")
+        if any(p in symbols_only_failed for p in retryable):
+            reasons.append("symbol extraction error")
         if unreached_retry:
             reasons.append("not reached before the repo time budget")
         writes.enqueue_retry(conn, repo_id, retryable + unreached_retry,
