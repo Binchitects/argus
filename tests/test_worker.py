@@ -127,3 +127,15 @@ def test_time_budget_stops_work_without_advancing_sha(env, monkeypatch):
     row = conn.execute("SELECT last_indexed_sha FROM repos WHERE id = ?",
                        (repo_id,)).fetchone()
     assert row["last_indexed_sha"] is None
+
+
+def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
+    from codeindex.parse import ctags
+    conn, cfg, project, repo_id, _, _ = env
+    monkeypatch.setattr(ctags.shutil, "which", lambda name: None)
+
+    result = _run(env)
+    assert result.symbols_failed is True
+    row = conn.execute("SELECT last_indexed_sha FROM repos WHERE id = ?",
+                       (repo_id,)).fetchone()
+    assert row["last_indexed_sha"] is None

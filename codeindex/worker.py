@@ -21,6 +21,7 @@ class IndexResult:
     errors: int = 0
     sha: str = ""
     timed_out: bool = False
+    symbols_failed: bool = False
 
 
 def _repo_id(conn, gitlab_id: int) -> int:
@@ -91,7 +92,7 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
 
     _apply_symbols(conn, repo_id, tree, to_parse, result, now)
 
-    if not result.timed_out:
+    if not result.timed_out and not result.symbols_failed:
         writes.set_last_indexed(conn, repo_id, new_sha, int(now()))
     return result
 
@@ -105,6 +106,7 @@ def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
     except ctags.CtagsUnavailable as exc:
         writes.record_error(conn, repo_id, None, "ctags", str(exc), int(now()))
         result.errors += 1
+        result.symbols_failed = True
         return
 
     for path in paths:
