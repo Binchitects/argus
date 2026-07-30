@@ -1,9 +1,15 @@
-from codeindex.store.db import open_db, migrate
+from codeindex.store.db import MIGRATIONS_DIR, open_db, migrate
 
 EXPECTED_TABLES = {
     "repos", "files", "symbols", "includes",
     "repo_deps", "index_errors", "index_queue", "files_fts",
+    "retry_attempts",
 }
+
+# Derived, not hardcoded: adding a migration should not require editing this.
+LATEST_VERSION = max(
+    int(p.name.split("_", 1)[0]) for p in MIGRATIONS_DIR.glob("*.sql")
+)
 
 
 def test_migrate_creates_tables(tmp_path):
@@ -19,7 +25,7 @@ def test_migrate_is_idempotent(tmp_path):
     path = tmp_path / "i.db"
     v1 = migrate(open_db(path))
     v2 = migrate(open_db(path))
-    assert v1 == v2 == 2
+    assert v1 == v2 == LATEST_VERSION
 
 
 def test_foreign_keys_enforced(tmp_path):

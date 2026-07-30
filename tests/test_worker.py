@@ -299,6 +299,54 @@ def test_symbols_failure_does_not_leave_stale_symbols_behind(env, monkeypatch):
                         (repo_id,)).fetchone()["last_indexed_sha"] == passb.sha
 
 
+def test_permanently_failing_path_is_dropped_after_the_retry_cap(env, monkeypatch):
+    """A path that can never be read must stop being re-enqueued.
+
+    Otherwise the queue never empties and index_errors grows without bound,
+    one fresh row per pass, forever.
+    """
+    first = _run(env)
+    conn, cfg, project, repo_id, _, origin = env
+
+    (origin / "decoder.c").write_text(
+        '#include "decoder.h"\nint DecodeFrame(const char* b, int n){return n + 1;}\n'
+    )
+    git(origin, "commit", "-am", "modify decoder.c")
+
+    real = Path.read_bytes
+    def never_readable(self):
+        if self.name == "decoder.c":
+            raise OSError("simulated permanent read failure")
+        return real(self)
+    monkeypatch.setattr(Path, "read_bytes", never_readable)
+
+    previous = first.sha
+    for _ in range(writes.MAX_RETRY_ATTEMPTS):
+        result = _run(env, old_sha=previous)
+        assert result.errors == 1
+        previous = result.sha
+
+    queued = conn.execute(
+        "SELECT COUNT(*) c FROM index_queue WHERE repo_id = ?", (repo_id,)
+    ).fetchone()["c"]
+    assert queued == 0
+
+    final = conn.execute(
+        "SELECT path, message FROM index_errors"
+        " WHERE repo_id = ? AND stage = 'retry-exhausted'", (repo_id,)
+    ).fetchall()
+    assert len(final) == 1
+    assert final[0]["path"] == "decoder.c"
+    assert "giving up" in final[0]["message"]
+
+    # A further pass must not resurrect it or append more error rows.
+    before = conn.execute("SELECT COUNT(*) c FROM index_errors").fetchone()["c"]
+    extra = _run(env, old_sha=previous)
+    assert extra.errors == 0
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM index_errors").fetchone()["c"] == before
+
+
 def test_timed_out_pass_does_not_discard_queued_retry_paths(env):
     """A time-budget break must not be what loses the retry queue.
 

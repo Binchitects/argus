@@ -75,8 +75,9 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # diff starts from the new SHA and the path never reappears unless
     # edited again. Union back in whatever the previous pass queued for
     # retry, as long as it still exists in the new tree.
-    retry_paths = [p for p in writes.drain_retry_paths(conn, repo_id)
-                  if p not in changed_paths and p in shas]
+    queued = writes.drain_retry_paths(conn, repo_id)
+    retry_paths = [p for p in queued
+                   if p not in changed_paths and p in shas]
     retry_set = set(retry_paths)
     # Retry paths go FIRST. They are known-stale, index_queue's row was
     # already DELETEd by the drain, and nothing re-derives them: the pass
@@ -163,18 +164,55 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
 
     _apply_symbols(conn, repo_id, tree, to_parse, result, now)
 
-    if failed_paths or unreached_retry:
+    # A queued path that is healthy again -- indexed this pass, or gone from
+    # the tree entirely -- starts over with a clean attempt count.
+    indexed_paths = set(to_parse)
+    writes.clear_retry_attempts(
+        conn, repo_id,
+        [p for p in queued if p in indexed_paths or p not in shas],
+    )
+
+    retryable = _cap_retries(conn, repo_id, failed_paths, now)
+
+    if retryable or unreached_retry:
         reasons = []
-        if failed_paths:
+        if retryable:
             reasons.append("per-file read/store error")
         if unreached_retry:
             reasons.append("not reached before the repo time budget")
-        writes.enqueue_retry(conn, repo_id, failed_paths + unreached_retry,
+        writes.enqueue_retry(conn, repo_id, retryable + unreached_retry,
                              "; ".join(reasons), int(now()))
 
     if not result.timed_out and not result.symbols_failed:
         writes.set_last_indexed(conn, repo_id, new_sha, int(now()))
     return result
+
+
+def _cap_retries(conn, repo_id: int, failed_paths: list[str], now) -> list[str]:
+    """Return the failed paths still worth retrying, giving up past the cap.
+
+    A path that can never be read (ACL denial, >260-char Windows path, AV
+    quarantine) would otherwise be re-enqueued every pass forever: the queue
+    would never empty and index_errors would grow without bound. Give up after
+    MAX_RETRY_ATTEMPTS, recording one distinguishable final row so the decision
+    is not silent. result.errors is deliberately not bumped again -- the
+    failure that triggered this already counted once.
+    """
+    if not failed_paths:
+        return []
+    attempts = writes.bump_retry_attempts(conn, repo_id, failed_paths)
+    retryable: list[str] = []
+    for path in failed_paths:
+        if attempts.get(path, 0) >= writes.MAX_RETRY_ATTEMPTS:
+            writes.record_error(
+                conn, repo_id, path, "retry-exhausted",
+                f"giving up after {writes.MAX_RETRY_ATTEMPTS} failed attempts;"
+                " no longer queued for retry",
+                int(now()),
+            )
+        else:
+            retryable.append(path)
+    return retryable
 
 
 def _already_current(conn, repo_id: int, path: str, blob_sha: str) -> bool:

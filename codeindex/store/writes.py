@@ -166,6 +166,47 @@ def enqueue_retry(conn: sqlite3.Connection, repo_id: int, paths: list[str],
     conn.commit()
 
 
+MAX_RETRY_ATTEMPTS = 3
+
+
+def bump_retry_attempts(conn: sqlite3.Connection, repo_id: int,
+                        paths: list[str]) -> dict[str, int]:
+    """Count one more failure per path; return the cumulative counts."""
+    if not paths:
+        return {}
+    conn.executemany(
+        "INSERT INTO retry_attempts (repo_id, path, attempts) VALUES (?, ?, 1)"
+        " ON CONFLICT(repo_id, path) DO UPDATE SET attempts = attempts + 1",
+        [(repo_id, path) for path in paths],
+    )
+    conn.commit()
+    wanted = set(paths)
+    return {
+        row["path"]: row["attempts"]
+        for row in conn.execute(
+            "SELECT path, attempts FROM retry_attempts WHERE repo_id = ?",
+            (repo_id,),
+        )
+        if row["path"] in wanted
+    }
+
+
+def clear_retry_attempts(conn: sqlite3.Connection, repo_id: int,
+                         paths: list[str]) -> None:
+    """Forget the failure history of paths that are healthy again.
+
+    Without this a path that failed twice long ago, recovered, and failed once
+    more years later would be given up on immediately.
+    """
+    if not paths:
+        return
+    conn.executemany(
+        "DELETE FROM retry_attempts WHERE repo_id = ? AND path = ?",
+        [(repo_id, path) for path in paths],
+    )
+    conn.commit()
+
+
 def drain_retry_paths(conn: sqlite3.Connection, repo_id: int) -> list[str]:
     """Return and clear the paths queued for retry for this repo, if any."""
     row = conn.execute(
