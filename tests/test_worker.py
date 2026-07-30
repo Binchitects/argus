@@ -193,6 +193,43 @@ def test_unchanged_files_are_skipped_not_reindexed(env):
     assert second.skipped == 4  # decoder.h, decoder.c unchanged + 2 filtered
 
 
+def test_read_error_is_retried_on_a_later_run(env, monkeypatch):
+    first = _run(env)
+    conn, cfg, project, repo_id, _, origin = env
+
+    (origin / "decoder.c").write_text(
+        '#include "decoder.h"\nint DecodeFrame(const char* b, int n){return n + 1;}\n'
+    )
+    git(origin, "commit", "-am", "modify decoder.c")
+
+    real = Path.read_bytes
+    def flaky(self):
+        if self.name == "decoder.c":
+            raise OSError("simulated transient read failure")
+        return real(self)
+    monkeypatch.setattr(Path, "read_bytes", flaky)
+
+    second = _run(env, old_sha=first.sha)
+    assert second.errors == 1
+    row = conn.execute(
+        "SELECT content FROM files WHERE repo_id = ? AND path = 'decoder.c'",
+        (repo_id,),
+    ).fetchone()
+    assert "return n;" in row["content"]  # old content retained, sha still advances
+
+    # Restore real reads. Upstream has NOT changed again, so a normal diff
+    # between second.sha and itself would be empty — only the retry queue
+    # makes the third pass revisit decoder.c.
+    monkeypatch.setattr(Path, "read_bytes", real)
+    third = _run(env, old_sha=second.sha)
+    assert third.indexed == 1
+    row = conn.execute(
+        "SELECT content FROM files WHERE repo_id = ? AND path = 'decoder.c'",
+        (repo_id,),
+    ).fetchone()
+    assert "return n + 1;" in row["content"]
+
+
 def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
     from codeindex.parse import ctags
     conn, cfg, project, repo_id, _, _ = env

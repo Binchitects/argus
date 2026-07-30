@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .config import IndexConfig
 from .gitlab import Project
-from .mirror import blob_shas, changed_files, is_ancestor
+from .mirror import Change, blob_shas, changed_files, is_ancestor
 from .parse import ctags, filters
 from .parse.includes import extract_includes
 from .store import writes
@@ -64,8 +64,19 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
             writes.delete_file(conn, repo_id, path)
             result.deleted += 1
 
+    changed_paths = {c.path for c in changes if c.status in ("A", "M")}
+    # A path that errored on a previous pass (a transient OSError, say) keeps
+    # its old content/symbols forever: the SHA still advances (blocking it
+    # would violate "one bad file must never abort a repo"), so the next
+    # diff starts from the new SHA and the path never reappears unless
+    # edited again. Union back in whatever the previous pass queued for
+    # retry, as long as it still exists in the new tree.
+    retry_paths = [p for p in writes.drain_retry_paths(conn, repo_id)
+                  if p not in changed_paths and p in shas]
     pending = [c for c in changes if c.status in ("A", "M")]
+    pending += [Change(status="M", path=p) for p in retry_paths]
     to_parse: list[str] = []
+    failed_paths: list[str] = []
 
     for change in pending:
         if now() - started > index_cfg.repo_time_budget_seconds:
@@ -84,6 +95,7 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
             writes.record_error(conn, repo_id, change.path, "read",
                                 str(exc), int(now()))
             result.errors += 1
+            failed_paths.append(change.path)
             continue
 
         # Cheap pre-checks before paying for a read: a file over the size
@@ -101,6 +113,7 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
             writes.record_error(conn, repo_id, change.path, "read",
                                 str(exc), int(now()))
             result.errors += 1
+            failed_paths.append(change.path)
             continue
 
         if not filters.should_index(
@@ -124,12 +137,17 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
             writes.record_error(conn, repo_id, change.path, "store",
                                 repr(exc), int(now()))
             result.errors += 1
+            failed_paths.append(change.path)
             continue
 
         to_parse.append(change.path)
         result.indexed += 1
 
     _apply_symbols(conn, repo_id, tree, to_parse, result, now)
+
+    if failed_paths:
+        writes.enqueue_retry(conn, repo_id, failed_paths,
+                             "per-file read/store error", int(now()))
 
     if not result.timed_out and not result.symbols_failed:
         writes.set_last_indexed(conn, repo_id, new_sha, int(now()))

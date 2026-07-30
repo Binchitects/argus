@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 
@@ -116,3 +117,46 @@ def record_error(conn: sqlite3.Connection, repo_id: int, path: str | None,
         (repo_id, path, stage, message[:2000], ts),
     )
     conn.commit()
+
+
+def enqueue_retry(conn: sqlite3.Connection, repo_id: int, paths: list[str],
+                  reason: str, ts: int) -> None:
+    """Persist paths that failed this pass so the next pass retries them.
+
+    index_queue is keyed one row per repo (repo_id PRIMARY KEY) with no
+    path column, so the failed paths are serialized as JSON into the
+    existing free-text `reason` field. An upsert replaces any previous
+    entry outright: retries are the current pass's failures, not an
+    ever-growing accumulation across passes.
+    """
+    if not paths:
+        return
+    payload = json.dumps({"reason": reason, "paths": sorted(set(paths))})
+    conn.execute(
+        """
+        INSERT INTO index_queue (repo_id, enqueued_at, reason)
+        VALUES (?, ?, ?)
+        ON CONFLICT(repo_id) DO UPDATE SET
+            enqueued_at = excluded.enqueued_at,
+            reason      = excluded.reason
+        """,
+        (repo_id, ts, payload),
+    )
+    conn.commit()
+
+
+def drain_retry_paths(conn: sqlite3.Connection, repo_id: int) -> list[str]:
+    """Return and clear the paths queued for retry for this repo, if any."""
+    row = conn.execute(
+        "SELECT reason FROM index_queue WHERE repo_id = ?", (repo_id,)
+    ).fetchone()
+    if row is None:
+        return []
+    conn.execute("DELETE FROM index_queue WHERE repo_id = ?", (repo_id,))
+    conn.commit()
+    try:
+        payload = json.loads(row["reason"])
+        paths = payload.get("paths", [])
+    except (ValueError, AttributeError):
+        return []
+    return [p for p in paths if isinstance(p, str)]
