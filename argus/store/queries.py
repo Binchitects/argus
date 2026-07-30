@@ -84,7 +84,7 @@ def index_status(allowed_repo_ids: Sequence[int],
     return conn.execute(
         "SELECT r.id AS repo_id, r.path_with_namespace, r.last_indexed_sha,"
         "       r.last_indexed_at, r.last_run_timed_out, r.last_run_symbols_failed,"
-        "       r.last_run_at,"
+        "       r.last_run_at, r.last_run_error,"
         "       (SELECT COUNT(*) FROM files   WHERE repo_id = r.id) AS files,"
         "       (SELECT COUNT(*) FROM symbols WHERE repo_id = r.id) AS symbols,"
         "       (SELECT COUNT(*) FROM index_errors WHERE repo_id = r.id) AS errors,"

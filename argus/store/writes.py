@@ -33,11 +33,21 @@ def set_last_indexed(conn: sqlite3.Connection, repo_id: int, sha: str, ts: int) 
 
 
 def record_run_state(conn: sqlite3.Connection, repo_id: int, *,
-                     timed_out: bool, symbols_failed: bool, ts: int) -> None:
+                     timed_out: bool, symbols_failed: bool, ts: int,
+                     error: str | None = None) -> None:
+    """Record that this repo was checked, and how the check went.
+
+    `ts` means "last checked", not "last did work": callers must record it on
+    every path that reaches the repo, including one that turned out to need
+    no work at all, or a current repo reads as indefinitely stale. `error` is
+    the message when the run could not complete (a failed fetch, an
+    unexpected exception) and None when it did -- passing None on a healthy
+    run is what clears a previous failure, so it must never be skipped.
+    """
     conn.execute(
         "UPDATE repos SET last_run_timed_out = ?, last_run_symbols_failed = ?,"
-        "                 last_run_at = ? WHERE id = ?",
-        (int(timed_out), int(symbols_failed), ts, repo_id),
+        "                 last_run_at = ?, last_run_error = ? WHERE id = ?",
+        (int(timed_out), int(symbols_failed), ts, error, repo_id),
     )
     conn.commit()
 
@@ -233,18 +243,37 @@ def clear_retry_attempts(conn: sqlite3.Connection, repo_id: int,
     conn.commit()
 
 
-def drain_retry_paths(conn: sqlite3.Connection, repo_id: int) -> list[str]:
-    """Return and clear the paths queued for retry for this repo, if any."""
+def peek_retry_paths(conn: sqlite3.Connection, repo_id: int) -> list[str]:
+    """Return the paths queued for retry for this repo, leaving the queue intact.
+
+    Reading and clearing are separate operations because nothing else
+    re-derives a retry path: the pass that first failed on it let the SHA
+    advance past the commit that changed it, so it never reappears in a
+    later diff. A pass that reads the queue and then dies before writing the
+    next one must leave the old queue standing, or those files are lost with
+    no record.
+    """
     row = conn.execute(
         "SELECT reason FROM index_queue WHERE repo_id = ?", (repo_id,)
     ).fetchone()
     if row is None:
         return []
-    conn.execute("DELETE FROM index_queue WHERE repo_id = ?", (repo_id,))
-    conn.commit()
     try:
         payload = json.loads(row["reason"])
         paths = payload.get("paths", [])
     except (ValueError, AttributeError):
         return []
     return [p for p in paths if isinstance(p, str)]
+
+
+def clear_retry_queue(conn: sqlite3.Connection, repo_id: int) -> None:
+    """Drop this repo's queued retries, committing the deletion."""
+    conn.execute("DELETE FROM index_queue WHERE repo_id = ?", (repo_id,))
+    conn.commit()
+
+
+def drain_retry_paths(conn: sqlite3.Connection, repo_id: int) -> list[str]:
+    """Return and clear the paths queued for retry for this repo, if any."""
+    paths = peek_retry_paths(conn, repo_id)
+    clear_retry_queue(conn, repo_id)
+    return paths

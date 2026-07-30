@@ -99,6 +99,15 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
                                        clone_url=project.http_url)
             sha = head_sha(mirror_dir, project.default_branch)
             if sha == old:
+                # index_repo is the only other writer of last-run state, and
+                # this path never calls it. Without this, a repo polled every
+                # hour for six months and correctly up to date every time
+                # reported a six-month-old last_run_at -- indistinguishable
+                # from one nothing has looked at since. Clearing the flags is
+                # right here: a previous pass that timed out or lost ctags
+                # held the SHA, so it could not have reached this branch.
+                writes.record_run_state(conn, repo_id, timed_out=False,
+                                        symbols_failed=False, ts=int(time.time()))
                 print(f"{project.path_with_namespace}: up to date")
                 continue
             tree = sync_worktree(cfg.index, project.gitlab_id, mirror_dir, sha)
@@ -106,7 +115,26 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
         except GitError as exc:
             any_repo_unhealthy = True
             writes.record_error(conn, repo_id, None, "git", str(exc), int(time.time()))
+            # Record the failure rather than leaving the PREVIOUS pass's flags
+            # and timestamp standing: a repo whose fetch has failed every run
+            # for weeks otherwise showed as clean and freshly checked.
+            writes.record_run_state(conn, repo_id, timed_out=False,
+                                    symbols_failed=False, ts=int(time.time()),
+                                    error=str(exc))
             print(f"{project.path_with_namespace}: FAILED ({exc})", file=sys.stderr)
+            continue
+        except Exception as exc:   # noqa: BLE001 - one bad repo must not end the run
+            # Nothing caught a non-GitError escaping index_repo, so it aborted
+            # the whole run: every repo after this one went unindexed, and it
+            # happened after the retry queue had been read and before any run
+            # state was recorded. Contain it to this repo and leave a record.
+            any_repo_unhealthy = True
+            writes.record_error(conn, repo_id, None, "index", repr(exc),
+                                int(time.time()))
+            writes.record_run_state(conn, repo_id, timed_out=False,
+                                    symbols_failed=False, ts=int(time.time()),
+                                    error=repr(exc))
+            print(f"{project.path_with_namespace}: FAILED ({exc!r})", file=sys.stderr)
             continue
 
         if result.timed_out or result.symbols_failed:
@@ -149,6 +177,8 @@ def _status(cfg: Config) -> int:
             flags += " TIMED-OUT"
         if row["last_run_symbols_failed"]:
             flags += " SYMBOLS-FAILED"
+        if row["last_run_error"]:
+            flags += f" RUN-FAILED({row['last_run_error'][:80]})"
         print(
             f"{row['path_with_namespace']:<40} sha={sha} at={when} "
             f"files={row['files']} symbols={row['symbols']} errors={row['errors']} "

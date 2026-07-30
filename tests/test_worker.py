@@ -375,6 +375,43 @@ def test_timed_out_pass_does_not_discard_queued_retry_paths(env):
     assert writes.drain_retry_paths(conn, repo_id) == ["decoder.c"]
 
 
+def test_unexpected_error_mid_pass_does_not_discard_the_retry_queue(env, monkeypatch):
+    """An exception between the drain and the re-enqueue must not lose paths.
+
+    index_queue's row was DELETEd up front, and nothing else re-derives a
+    retry path: the pass that first failed on it let the SHA advance past the
+    commit that changed it, so it never reappears in a later diff. An
+    unexpected failure anywhere in between therefore destroyed the queue
+    silently.
+    """
+    from argus.parse import ctags as ctags_mod
+    conn, cfg, project, repo_id, _, origin = env
+    first = _run(env)
+
+    writes.enqueue_retry(conn, repo_id, ["decoder.c"], "earlier read failure", 0)
+    # Make decoder.c genuinely stale so the retry actually reprocesses it
+    # rather than skipping it as already-current.
+    conn.execute(
+        "UPDATE files SET symbols_sha = NULL WHERE repo_id = ? AND path = 'decoder.c'",
+        (repo_id,))
+    conn.commit()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated indexer defect")
+
+    monkeypatch.setattr(ctags_mod, "extract_symbols", boom)
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+    with pytest.raises(RuntimeError):
+        worker.index_repo(conn, cfg, project, m, tree, sha, first.sha)
+    monkeypatch.undo()
+
+    assert "decoder.c" in _queued_paths(conn, repo_id), (
+        "the drained retry queue was discarded by an unexpected failure"
+    )
+
+
 def test_file_with_zero_symbols_is_not_reprocessed(env, monkeypatch):
     """An include-only .c has no symbols; it must still count as complete."""
     conn, cfg, project, repo_id, _, origin = env

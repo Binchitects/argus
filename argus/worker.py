@@ -75,7 +75,10 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # diff starts from the new SHA and the path never reappears unless
     # edited again. Union back in whatever the previous pass queued for
     # retry, as long as it still exists in the new tree.
-    queued = writes.drain_retry_paths(conn, repo_id)
+    # Read, but do not yet clear: the queue row is only replaced once this
+    # pass has reached the point where it can write the next one (see the
+    # clear_retry_queue call below).
+    queued = writes.peek_retry_paths(conn, repo_id)
     retry_paths = [p for p in queued
                    if p not in changed_paths and p in shas]
     retry_set = set(retry_paths)
@@ -201,6 +204,13 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
         failed_paths.extend(symbols_only_failed)
 
     retryable = _cap_retries(conn, repo_id, failed_paths, now)
+
+    # Only now is the previously-queued set safe to discard: everything that
+    # still needs retrying has been recomputed above and is about to be
+    # written back. Deleting it up front (the old drain) meant an unexpected
+    # exception anywhere in this function destroyed the queue permanently --
+    # nothing re-derives a retry path, so those files were simply lost.
+    writes.clear_retry_queue(conn, repo_id)
 
     if retryable or unreached_retry:
         uncovered_set = set(uncovered)
