@@ -130,6 +130,14 @@ Argus refuses to start if ctags is missing or is the wrong implementation. Witho
 
 ### Install
 
+Docker is the recommended path, because it pins ctags — see below for why that matters.
+
+```bash
+docker compose build
+```
+
+Or natively:
+
 ```bash
 pip install -e ".[dev]"
 ```
@@ -177,6 +185,26 @@ argus status --config config.yaml
 ```
 
 The first index takes hours on a large estate. After that, runs are incremental: Argus diffs the last-indexed commit against the new head and touches only what changed.
+
+### Running in Docker
+
+```bash
+export ARGUS_GITLAB_TOKEN=glpat-xxxxxxxxxxxx
+```
+
+```bash
+docker compose run --rm indexer index --config /etc/argus/config.yaml
+```
+
+```bash
+docker compose run --rm indexer status --config /etc/argus/config.yaml
+```
+
+The indexer is a batch job, not a daemon, so nothing starts on its own — `docker compose up` would be the wrong gesture. Mirrors, worktrees and the index live in the `argus-data` volume; your `config.yaml` is mounted read-only. Set `index.data_dir` and `index.db_path` to `/var/lib/argus` in that file.
+
+**Why the image pins ctags.** Argus depends on universal-ctags behaviour that varies by version: the C/C++ `prototype` kind ships *disabled by default* (without `--kinds-c=+p` the index silently loses most of a C/C++ public API), and C++ anonymous namespaces surface as generated identifiers like `__anond398a7c10111` rather than the literal `"anonymous"`. A host with a different ctags changes what gets indexed and what counts as a public symbol, with no error.
+
+The Dockerfile's `test` stage runs the **entire test suite against the pinned toolchain during the build**, so a ctags that behaves differently fails the build instead of producing an image that indexes incorrectly and reports success. The image currently pins Universal Ctags 5.9.0 (Debian bookworm) and all 127 tests pass against it.
 
 ---
 

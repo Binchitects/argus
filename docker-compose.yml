@@ -1,0 +1,38 @@
+# Argus — Phase 1 (indexer only).
+#
+# The indexer is a batch job, not a long-running service, so nothing here
+# starts automatically. Run it explicitly:
+#
+#   docker compose run --rm indexer index  --config /etc/argus/config.yaml
+#   docker compose run --rm indexer status --config /etc/argus/config.yaml
+#
+# Phase 2 adds the MCP server and a TLS reverse proxy to this same file.
+
+services:
+  indexer:
+    build:
+      context: .
+      target: runtime
+    image: argus:phase1
+    # A GitLab token must never live in the compose file or the image. Export
+    # it in the shell, or put it in a .env file next to this one (gitignored).
+    environment:
+      ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:?set ARGUS_GITLAB_TOKEN in your environment or a .env file}
+    volumes:
+      # Mirrors, worktrees and the SQLite index. The only state worth keeping —
+      # and all of it is rebuildable from GitLab, just slowly.
+      - argus-data:/var/lib/argus
+      # Read-only: the container has no reason to modify its own config.
+      - ./config.yaml:/etc/argus/config.yaml:ro
+    # The indexer shells out to git and ctags and needs no privileges of its own.
+    security_opt:
+      - no-new-privileges:true
+    # A wedged ctags or git subprocess should not be able to starve the host.
+    # Raise these once Task 6 has measured a real full index.
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+volumes:
+  argus-data:
