@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -590,3 +591,70 @@ def test_retry_path_with_permanently_broken_symbols_is_eventually_exhausted(
     # A further pass must not resurrect it or record it as queued again.
     extra = _run(env, old_sha=previous)
     assert "decoder.c" not in _queued_paths(conn, repo_id)
+
+
+def test_failure_inside_upsert_does_not_desync_fts(env, monkeypatch):
+    conn, cfg, project, repo_id, _, origin = env
+    _run(env)
+
+    (origin / "decoder.c").write_text('#include "decoder.h"\nint Marker(void){return 7;}\n')
+    git(origin, "add", "-A")
+    git(origin, "commit", "-m", "modify")
+
+    # sqlite3.Connection is a static C type: CPython refuses attribute
+    # assignment on it, at the class *or* the instance level ("cannot set
+    # 'execute' attribute of immutable type 'sqlite3.Connection'" /
+    # "object attribute 'execute' is read-only"), so it cannot be
+    # monkeypatched directly. A Connection *subclass* is an ordinary heap
+    # type and can be patched, so the failure is injected by opening a
+    # second connection to the same on-disk database through a subclass,
+    # and running the pass through that connection instead.
+    class BoomConnection(sqlite3.Connection):
+        def execute(self, sql, *a, **k):
+            if sql.strip().startswith("INSERT INTO files_fts(rowid"):
+                raise sqlite3.OperationalError("simulated mid-upsert failure")
+            return super().execute(sql, *a, **k)
+
+    boom_conn = sqlite3.connect(cfg.db_path, factory=BoomConnection)
+    boom_conn.row_factory = sqlite3.Row
+    boom_conn.execute("PRAGMA foreign_keys = ON")
+
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+    worker.index_repo(boom_conn, cfg, project, m, tree, sha, None)
+    boom_conn.close()
+
+    # Assert via MATCH, never via COUNT: files_fts is external-content, so it
+    # proxies COUNT(*) straight through to `files` -- the counts stay equal
+    # even when the term index is desynced (verified: healthy files=1
+    # fts_count=1 match=1; desynced files=1 fts_count=1 match=0).
+    #
+    # A literal `files_fts MATCH 'Marker'` count is NOT the discriminating
+    # check here, even though the fixture writes "Marker" into decoder.c:
+    # the correct fix is conn.rollback() of the *whole* implicit transaction,
+    # which undoes the UPDATE files statement too, so decoder.c's content
+    # reverts to the pre-edit "DecodeFrame" text and "Marker" is never
+    # persisted anywhere -- MATCH 'Marker' is 0 both before and after the fix.
+    # Verified empirically:
+    #   unfixed:  files.content = new "Marker" text, FTS has no row for it
+    #             -> needle="Marker", hit=None (desync: content untracked)
+    #   fixed:    files.content reverted to old "DecodeFrame" text, FTS
+    #             row also reverted -> needle="DecodeFrame", hit=found
+    # So the real invariant is: whatever `files.content` currently says must
+    # be exactly what `files_fts` can find for that rowid -- check MATCH
+    # against a word actually present in the file's current content, not a
+    # fixed literal that assumes the write went through.
+    row = conn.execute(
+        "SELECT id, content FROM files WHERE repo_id = ? AND path = ?",
+        (repo_id, "decoder.c"),
+    ).fetchone()
+    needle = "Marker" if "Marker" in row["content"] else "DecodeFrame"
+    hit = conn.execute(
+        "SELECT rowid FROM files_fts WHERE files_fts MATCH ? AND rowid = ?",
+        (needle, row["id"]),
+    ).fetchone()
+    assert hit is not None, (
+        f"FTS index desynced: files.content for decoder.c contains {needle!r} "
+        "but files_fts has no matching row for that file"
+    )

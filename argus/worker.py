@@ -129,6 +129,7 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
         try:
             data = abs_path.read_bytes()
         except (OSError, MemoryError) as exc:
+            conn.rollback()   # discard any partial FTS/files work before committing the error
             writes.record_error(conn, repo_id, change.path, "read",
                                 str(exc), int(now()))
             result.errors += 1
@@ -153,6 +154,7 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
             writes.replace_includes(conn, repo_id, file_id,
                                     extract_includes(content))
         except Exception as exc:  # one bad file must not abort the repo
+            conn.rollback()   # discard any partial FTS/files work before committing the error
             writes.record_error(conn, repo_id, change.path, "store",
                                 repr(exc), int(now()))
             result.errors += 1
