@@ -436,3 +436,41 @@ def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
         "SELECT stage FROM index_errors WHERE repo_id = ?", (repo_id,)
     ).fetchone()
     assert err["stage"] == "ctags"
+
+
+def test_retry_path_whose_symbols_fail_is_requeued(env, monkeypatch):
+    conn, cfg, project, repo_id, _, origin = env
+    _run(env)  # establish a baseline so later diffs are narrow
+
+    # Pass N: decoder.c is modified but fails to read, so it lands in the queue.
+    (origin / "decoder.c").write_text(
+        '#include "decoder.h"\nint DecodeFrameV2(const char* b, int n){return n;}\n'
+    )
+    git(origin, "add", "-A")
+    git(origin, "commit", "-m", "modify decoder")
+
+    real = Path.read_bytes
+    def failing(self):
+        if self.name == "decoder.c":
+            raise OSError("simulated")
+        return real(self)
+    monkeypatch.setattr(Path, "read_bytes", failing)
+    first = _run(env)
+    monkeypatch.undo()
+    assert conn.execute("SELECT COUNT(*) c FROM index_queue").fetchone()["c"] == 1
+
+    # Pass N+1: it reads fine but ctags fails. It must stay queued.
+    from argus.parse import ctags as ctags_mod
+    monkeypatch.setattr(ctags_mod.shutil, "which", lambda name: None)
+    second = _run(env, old_sha=first.sha)
+    monkeypatch.undo()
+    assert second.symbols_failed is True
+    assert conn.execute("SELECT COUNT(*) c FROM index_queue").fetchone()["c"] == 1, \
+        "retry-origin path was dropped after its symbol extraction failed"
+
+    # Pass N+2: ctags healthy. The file must get correct symbols.
+    _run(env, old_sha=first.sha)
+    names = {r["name"] for r in conn.execute(
+        "SELECT s.name FROM symbols s JOIN files f ON f.id = s.file_id"
+        " WHERE f.path = 'decoder.c'")}
+    assert "DecodeFrameV2" in names

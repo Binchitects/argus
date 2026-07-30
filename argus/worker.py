@@ -172,6 +172,11 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
         [p for p in queued if p in indexed_paths or p not in shas],
     )
 
+    if result.symbols_failed:
+        # A retry-origin path is not in any future diff, so if its symbols failed
+        # it must stay queued or it is lost permanently.
+        failed_paths.extend(p for p in to_parse if p in retry_set)
+
     retryable = _cap_retries(conn, repo_id, failed_paths, now)
 
     if retryable or unreached_retry:
