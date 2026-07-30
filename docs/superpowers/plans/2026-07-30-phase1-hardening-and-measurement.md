@@ -28,6 +28,7 @@ Every task's requirements implicitly include this section.
 - **No network in tests.** Real local git repos in `tmp_path`, the real ctags binary, real SQLite. No mocking the tool under test.
 - Conventional commit prefixes (`feat:`, `fix:`, `test:`, `chore:`, `docs:`).
 - Baseline suite is **91 passed, 0 skipped**. It must never go down.
+- **Every regression test must be demonstrated to fail.** Revert the production change in your working tree, run the test, capture the failing output, restore, run again, capture the pass. Report both. This is not ceremony: Task 1 shipped a test whose assertions were satisfied by unrelated fixture files, so it passed with the bug fully reintroduced. Assert on the specific behaviour under test, never on aggregate counters other fixtures can satisfy.
 - Phase 1 scope only. No embeddings, no MCP server, no ACL module, no tree-sitter, no cross-repo include resolution.
 
 ## File Structure
@@ -73,12 +74,18 @@ def test_file_with_zero_symbols_is_not_reprocessed(env, monkeypatch):
     assert "empty.c" in {r["path"] for r in conn.execute("SELECT path FROM files")}
 
     # Force the full-listing path so _already_current is what decides.
-    second = _run(env, old_sha=None)
-    skipped_paths = conn.execute(
-        "SELECT symbols_sha, blob_sha FROM files WHERE path = 'empty.c'"
-    ).fetchone()
-    assert skipped_paths["symbols_sha"] == skipped_paths["blob_sha"]
-    assert second.skipped >= 1
+    # Spy on the specific file: aggregate counters are satisfied by unrelated
+    # fixtures (build/gen.c, logo.bin are skipped by filters on every pass),
+    # so asserting `second.skipped >= 1` would pass with the bug reintroduced.
+    reprocessed = []
+    real_upsert = writes.upsert_file
+    def spy(conn_, *, repo_id, path, **kw):
+        reprocessed.append(path)
+        return real_upsert(conn_, repo_id=repo_id, path=path, **kw)
+    monkeypatch.setattr(worker.writes, "upsert_file", spy)
+
+    _run(env, old_sha=None)
+    assert "empty.c" not in reprocessed
 
 
 def test_stale_symbols_never_satisfy_the_completion_check(env, monkeypatch):
