@@ -9,6 +9,13 @@ from .filters import HEADER_EXTENSIONS
 
 PRIVATE_SCOPES = frozenset({"detail", "internal", "impl", "anonymous"})
 
+# Universal Ctags has no internal timeout of its own: one pathological
+# input that makes it spin would otherwise block the indexer forever, with
+# no error and no way to tell which repo it died on (repo_time_budget_seconds
+# is only checked in the per-file loop, never once ctags has been invoked).
+# 600s is generous even for a large real batch of files in one repo.
+CTAGS_TIMEOUT_SECONDS = 600
+
 CTAGS_ARGS = [
     "--output-format=json",
     # n=line, K=long kind, S=signature, s=scope, e=end line,
@@ -52,15 +59,21 @@ def extract_symbols(root: Path, rel_paths: list[str]) -> dict[str, list[dict]]:
     if not existing:
         return {}
 
-    proc = subprocess.run(
-        [exe, *CTAGS_ARGS],
-        input="\n".join(existing),
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    try:
+        proc = subprocess.run(
+            [exe, *CTAGS_ARGS],
+            input="\n".join(existing),
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=CTAGS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CtagsUnavailable(
+            f"ctags timed out after {CTAGS_TIMEOUT_SECONDS}s"
+        ) from exc
     if proc.returncode != 0 and not proc.stdout:
         raise CtagsUnavailable(f"ctags failed: {proc.stderr.strip()[:500]}")
 

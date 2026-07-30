@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,17 @@ def test_signature_captured(parsed):
 
 def test_missing_files_do_not_raise(tmp_path):
     assert ctags.extract_symbols(tmp_path, ["nope.c"]) == {}
+
+
+def test_subprocess_timeout_raises_ctags_unavailable(monkeypatch, tmp_path):
+    (tmp_path / "a.c").write_text("int a(void){return 1;}\n")
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="ctags", timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(ctags.subprocess, "run", fake_run)
+    with pytest.raises(ctags.CtagsUnavailable):
+        ctags.extract_symbols(tmp_path, ["a.c"])
 
 
 def test_is_public_symbol_rules():
