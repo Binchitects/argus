@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(
 def parsed():
     return ctags.extract_symbols(
         FIXTURES, ["decoder.h", "decoder.cpp", "anon_namespace.cpp"]
-    )
+    ).symbols
 
 
 def _by_name(symbols):
@@ -63,7 +63,96 @@ def test_signature_captured(parsed):
 
 
 def test_missing_files_do_not_raise(tmp_path):
-    assert ctags.extract_symbols(tmp_path, ["nope.c"]) == {}
+    assert ctags.extract_symbols(tmp_path, ["nope.c"]).symbols == {}
+
+
+def test_clean_run_covers_every_listed_path_including_symbol_free_ones(tmp_path):
+    """A file ctags parsed cleanly is covered even when it yields no tags.
+
+    ctags emits nothing at all for a symbol-free translation unit, so
+    `symbols` alone cannot distinguish "parsed, nothing to report" from
+    "never opened". Only `covered` can.
+    """
+    (tmp_path / "has_symbols.c").write_text("int Alpha(void){return 1;}\n")
+    (tmp_path / "quiet.c").write_text('#include "decoder.h"\n')
+
+    batch = ctags.extract_symbols(tmp_path, ["has_symbols.c", "quiet.c"])
+
+    assert batch.covered == frozenset({"has_symbols.c", "quiet.c"})
+    assert batch.uncovered == {}
+    assert "quiet.c" not in batch.symbols  # no tags, yet still covered
+
+
+def test_partial_batch_reports_the_blamed_path_as_uncovered(monkeypatch, tmp_path):
+    """A non-zero exit with partial stdout must not imply the whole batch ran.
+
+    good.c produced tags, quiet.c produced none but was never complained
+    about, bad.c is named in stderr. Only bad.c is uncovered -- reporting
+    quiet.c as uncovered too would make one unparseable file poison the
+    completion marker of every symbol-free file in the same batch.
+    """
+    for name in ("good.c", "quiet.c", "bad.c"):
+        (tmp_path / name).write_text("int x(void){return 1;}\n")
+
+    fake_proc = types.SimpleNamespace(
+        returncode=1,
+        stdout='{"_type":"tag","name":"good","path":"good.c","kind":"function","line":1}\n',
+        stderr='ctags: Warning: cannot open input file "bad.c" : Permission denied\n',
+    )
+    monkeypatch.setattr(ctags.subprocess, "run", lambda *a, **k: fake_proc)
+
+    batch = ctags.extract_symbols(tmp_path, ["good.c", "quiet.c", "bad.c"])
+
+    assert batch.covered == frozenset({"good.c", "quiet.c"})
+    assert set(batch.uncovered) == {"bad.c"}
+    assert "Permission denied" in batch.uncovered["bad.c"]
+
+
+def test_unattributable_failure_covers_only_paths_that_produced_tags(
+    monkeypatch, tmp_path
+):
+    """When stderr names no path, only tag-producing paths are provably covered."""
+    for name in ("good.c", "quiet.c"):
+        (tmp_path / name).write_text("int x(void){return 1;}\n")
+
+    fake_proc = types.SimpleNamespace(
+        returncode=1,
+        stdout='{"_type":"tag","name":"good","path":"good.c","kind":"function","line":1}\n',
+        stderr="ctags: internal error\n",
+    )
+    monkeypatch.setattr(ctags.subprocess, "run", lambda *a, **k: fake_proc)
+
+    batch = ctags.extract_symbols(tmp_path, ["good.c", "quiet.c"])
+
+    assert batch.covered == frozenset({"good.c"})
+    assert set(batch.uncovered) == {"quiet.c"}
+
+
+def test_path_absent_from_disk_is_uncovered_not_silently_complete(tmp_path):
+    """git can check out a name the filesystem will not hand back.
+
+    Windows reserved names (aux.c), >260-char paths and trailing-dot names
+    all fail is_file(); they are dropped from the ctags argument list, so
+    they must be reported uncovered rather than looking like a clean run
+    that happened to find no symbols.
+    """
+    (tmp_path / "real.c").write_text("int Real(void){return 1;}\n")
+
+    batch = ctags.extract_symbols(tmp_path, ["real.c", "ghost.c"])
+
+    assert batch.covered == frozenset({"real.c"})
+    assert set(batch.uncovered) == {"ghost.c"}
+
+
+def test_every_listed_path_is_either_covered_or_uncovered(tmp_path):
+    """The contract callers rely on: no path may fall through both sets."""
+    (tmp_path / "real.c").write_text("int Real(void){return 1;}\n")
+    listed = ["real.c", "ghost.c"]
+
+    batch = ctags.extract_symbols(tmp_path, listed)
+
+    assert batch.covered | set(batch.uncovered) == set(listed)
+    assert batch.covered & set(batch.uncovered) == set()
 
 
 def test_subprocess_timeout_raises_ctags_unavailable(monkeypatch, tmp_path):
@@ -94,7 +183,7 @@ def test_partial_failure_logs_stderr(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(ctags.subprocess, "run", lambda *a, **k: fake_proc)
 
     with caplog.at_level(logging.WARNING, logger=ctags.__name__):
-        results = ctags.extract_symbols(tmp_path, ["a.c"])
+        results = ctags.extract_symbols(tmp_path, ["a.c"]).symbols
 
     assert "a.c" in results  # the partial output is still returned
     assert any("parse error" in r.message for r in caplog.records)

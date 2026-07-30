@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import subprocess
+import types
 from pathlib import Path
 
 import pytest
@@ -421,6 +422,119 @@ def test_stale_symbols_never_satisfy_the_completion_check(env, monkeypatch):
     assert worker._already_current(conn, repo_id, "decoder.c",
                                    conn.execute("SELECT blob_sha FROM files WHERE id = ?",
                                                 (fid,)).fetchone()["blob_sha"]) is False
+
+
+def _partial_ctags_module(tagged_path: str, blamed_path: str):
+    """A stand-in for ctags' `subprocess` that fakes one partial batch.
+
+    Shape of a real partial batch: ctags emits what it managed to parse,
+    names the file it could not open on stderr, and exits non-zero.
+
+    A whole stand-in module is substituted rather than patching
+    ``subprocess.run`` in place, because ``ctags.subprocess`` IS the stdlib
+    module -- patching its ``run`` would also intercept mirror's git calls
+    and make index_repo fail for an unrelated reason.
+    """
+    def run(cmd, **kwargs):
+        listed = [p for p in kwargs.get("input", "").splitlines() if p]
+        stdout = "".join(
+            json.dumps({"_type": "tag", "name": "DecodeFrame", "path": path,
+                        "kind": "prototype", "line": 1}) + "\n"
+            for path in listed if path == tagged_path
+        )
+        return types.SimpleNamespace(
+            returncode=1, stdout=stdout,
+            stderr=f'ctags: Warning: cannot open input file "{blamed_path}"'
+                   " : Permission denied\n",
+        )
+    return types.SimpleNamespace(
+        run=run, TimeoutExpired=subprocess.TimeoutExpired)
+
+
+def _symbols_sha_row(conn, repo_id, path):
+    return conn.execute(
+        "SELECT blob_sha, symbols_sha FROM files WHERE repo_id = ? AND path = ?",
+        (repo_id, path),
+    ).fetchone()
+
+
+def test_partial_ctags_batch_leaves_the_uncovered_path_incomplete(env, monkeypatch):
+    """A path ctags never covered must not be stamped symbols_sha = blob_sha.
+
+    Stamping it marks it complete forever: the SHA advances, the next pass
+    skips it as already-current, and only a content edit can ever rescue it.
+    """
+    from argus.parse import ctags as ctags_mod
+    conn, cfg, project, repo_id, _, origin = env
+    # Resolve the mirror BEFORE patching: ctags.subprocess is the stdlib
+    # subprocess module itself, so patching its `run` also intercepts mirror's
+    # git invocations.
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+
+    monkeypatch.setattr(ctags_mod, "subprocess",
+                        _partial_ctags_module("decoder.h", "decoder.c"))
+    first = worker.index_repo(conn, cfg, project, m, tree, sha, None)
+    monkeypatch.undo()
+
+    row = _symbols_sha_row(conn, repo_id, "decoder.c")
+    assert row["symbols_sha"] != row["blob_sha"], (
+        "decoder.c was stamped complete even though ctags never covered it"
+    )
+    assert ("decoder.c", "symbols") in {
+        (r["path"], r["stage"]) for r in conn.execute(
+            "SELECT path, stage FROM index_errors WHERE repo_id = ?", (repo_id,))
+    }, "an uncovered path must surface in index_errors, not vanish silently"
+    assert "decoder.c" in _queued_paths(conn, repo_id)
+
+    # decoder.h was covered by the same batch and must still be complete.
+    hdr = _symbols_sha_row(conn, repo_id, "decoder.h")
+    assert hdr["symbols_sha"] == hdr["blob_sha"]
+
+    # Upstream has NOT changed, so only the retry queue can bring decoder.c
+    # back on the next pass.
+    worker.index_repo(conn, cfg, project, m, tree, sha, first.sha)
+    names = {r["name"] for r in conn.execute(
+        "SELECT s.name FROM symbols s JOIN files f ON f.id = s.file_id"
+        " WHERE f.repo_id = ? AND f.path = 'decoder.c'", (repo_id,))}
+    assert "DecodeFrame" in names
+    row = _symbols_sha_row(conn, repo_id, "decoder.c")
+    assert row["symbols_sha"] == row["blob_sha"]
+
+
+def test_path_ctags_cannot_open_is_not_stamped_complete(env, monkeypatch):
+    """git can check out a name the filesystem will not hand back.
+
+    A Windows reserved name (aux.c), a >260-char path or a trailing-dot name
+    fails is_file(), so ctags is never given it. It must be reported as a
+    failure, not stamped complete with zero symbols.
+    """
+    conn, cfg, project, repo_id, _, origin = env
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+
+    real_is_file = Path.is_file
+
+    def unopenable(self):
+        if self.name == "decoder.c":
+            return False
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", unopenable)
+    worker.index_repo(conn, cfg, project, m, tree, sha, None)
+    monkeypatch.undo()
+
+    row = _symbols_sha_row(conn, repo_id, "decoder.c")
+    assert row["symbols_sha"] != row["blob_sha"], (
+        "a path ctags could not open was stamped complete with zero symbols"
+    )
+    assert ("decoder.c", "symbols") in {
+        (r["path"], r["stage"]) for r in conn.execute(
+            "SELECT path, stage FROM index_errors WHERE repo_id = ?", (repo_id,))
+    }
+    assert "decoder.c" in _queued_paths(conn, repo_id)
 
 
 def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
