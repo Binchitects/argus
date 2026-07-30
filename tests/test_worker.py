@@ -379,16 +379,32 @@ def test_file_with_zero_symbols_is_not_reprocessed(env, monkeypatch):
     git(origin, "add", "-A")
     git(origin, "commit", "-m", "add include-only file")
 
-    first = _run(env)
+    _run(env)
     assert "empty.c" in {r["path"] for r in conn.execute("SELECT path FROM files")}
+
+    reprocessed = []
+    original_upsert_file = writes.upsert_file
+
+    def spy_upsert_file(conn, **kwargs):
+        reprocessed.append(kwargs["path"])
+        return original_upsert_file(conn, **kwargs)
+
+    monkeypatch.setattr(writes, "upsert_file", spy_upsert_file)
 
     # Force the full-listing path so _already_current is what decides.
     second = _run(env, old_sha=None)
-    skipped_paths = conn.execute(
-        "SELECT symbols_sha, blob_sha FROM files WHERE path = 'empty.c'"
-    ).fetchone()
-    assert skipped_paths["symbols_sha"] == skipped_paths["blob_sha"]
-    assert second.skipped >= 1
+
+    # empty.c has zero symbol rows by design (include-only header). Under the
+    # old "does this file have any symbol rows" proxy, that made it look
+    # incomplete forever and it would be reprocessed -- upsert_file called
+    # again for it -- on every subsequent full-listing pass. Assert directly
+    # on empty.c's own fate: build/gen.c and logo.bin are skipped by
+    # unrelated filename filters on every pass regardless of this bug, so
+    # aggregate counters like second.skipped can't tell the two behaviours
+    # apart, and second.indexed would already be 0 for reasons unrelated to
+    # empty.c if it were the only file in the repo.
+    assert "empty.c" not in reprocessed
+    assert second.indexed == 0
 
 
 def test_stale_symbols_never_satisfy_the_completion_check(env, monkeypatch):
