@@ -299,6 +299,31 @@ def test_symbols_failure_does_not_leave_stale_symbols_behind(env, monkeypatch):
                         (repo_id,)).fetchone()["last_indexed_sha"] == passb.sha
 
 
+def test_timed_out_pass_does_not_discard_queued_retry_paths(env):
+    """A time-budget break must not be what loses the retry queue.
+
+    index_repo drains and DELETEs the index_queue row up front. Nothing
+    re-enqueues an unreached retry path -- failed_paths only collects paths
+    that actually errored -- and it cannot come back via a later diff, so a
+    timed-out pass silently dropped it and the original defect recurred.
+    """
+    first = _run(env)
+    conn, cfg, project, repo_id, _, _ = env
+    writes.enqueue_retry(conn, repo_id, ["decoder.c"],
+                         "earlier read failure", 0)
+
+    budget_cfg = IndexConfig(data_dir=cfg.data_dir, db_path=cfg.db_path,
+                             repo_time_budget_seconds=0)
+    m = mirror.ensure_mirror(budget_cfg, project, clone_url=str(env[5]))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(budget_cfg, project.gitlab_id, m, sha)
+
+    result = worker.index_repo(conn, budget_cfg, project, m, tree, sha,
+                               first.sha)
+    assert result.timed_out is True
+    assert writes.drain_retry_paths(conn, repo_id) == ["decoder.c"]
+
+
 def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
     from codeindex.parse import ctags
     conn, cfg, project, repo_id, _, _ = env

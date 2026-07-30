@@ -77,14 +77,28 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # retry, as long as it still exists in the new tree.
     retry_paths = [p for p in writes.drain_retry_paths(conn, repo_id)
                   if p not in changed_paths and p in shas]
-    pending = [c for c in changes if c.status in ("A", "M")]
-    pending += [Change(status="M", path=p) for p in retry_paths]
+    retry_set = set(retry_paths)
+    # Retry paths go FIRST. They are known-stale, index_queue's row was
+    # already DELETEd by the drain, and nothing re-derives them: the pass
+    # that first failed on them let the SHA advance past the commit that
+    # changed them, so they never reappear in a later diff. Diff paths, by
+    # contrast, are safe to drop on a timeout because a timed-out pass holds
+    # the SHA and the next pass recomputes the same diff. Appending retries
+    # last made a repo_time_budget break the first thing to discard them,
+    # on exactly the big repos most likely to time out.
+    pending = [Change(status="M", path=p) for p in retry_paths]
+    pending += [c for c in changes if c.status in ("A", "M")]
     to_parse: list[str] = []
     failed_paths: list[str] = []
+    unreached_retry: list[str] = []
 
-    for change in pending:
+    for position, change in enumerate(pending):
         if now() - started > index_cfg.repo_time_budget_seconds:
             result.timed_out = True
+            # Preserve the unreached tail's retry paths before the pass ends;
+            # they have no other source to come back from.
+            unreached_retry = [c.path for c in pending[position:]
+                               if c.path in retry_set]
             break
 
         if _already_current(conn, repo_id, change.path, shas.get(change.path, "")):
@@ -149,9 +163,14 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
 
     _apply_symbols(conn, repo_id, tree, to_parse, result, now)
 
-    if failed_paths:
-        writes.enqueue_retry(conn, repo_id, failed_paths,
-                             "per-file read/store error", int(now()))
+    if failed_paths or unreached_retry:
+        reasons = []
+        if failed_paths:
+            reasons.append("per-file read/store error")
+        if unreached_retry:
+            reasons.append("not reached before the repo time budget")
+        writes.enqueue_retry(conn, repo_id, failed_paths + unreached_retry,
+                             "; ".join(reasons), int(now()))
 
     if not result.timed_out and not result.symbols_failed:
         writes.set_last_indexed(conn, repo_id, new_sha, int(now()))
