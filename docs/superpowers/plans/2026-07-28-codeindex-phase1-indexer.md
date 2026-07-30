@@ -1297,7 +1297,7 @@ def extract_symbols(root: Path, rel_paths: list[str]) -> dict[str, list[dict]]:
 - [ ] **Step 4: Run tests**
 
 Run: `pytest tests/parse/test_ctags.py -v`
-Expected: 8 passed. If they skip, install ctags first: `sudo apt install universal-ctags` (Linux) or `winget install universal-ctags.ctags` (Windows).
+Expected: 8 passed. If they skip, install ctags first: `sudo apt install universal-ctags` (Linux) or `winget install UniversalCtags.Ctags` (Windows).
 
 - [ ] **Step 5: Commit**
 
@@ -2061,6 +2061,9 @@ class IndexResult:
     errors: int = 0
     sha: str = ""
     timed_out: bool = False
+    # Distinct from timed_out on purpose: a missing ctags binary is not a
+    # timeout, and the CLI reports the two differently to the operator.
+    symbols_failed: bool = False
 
 
 def _repo_id(conn, gitlab_id: int) -> int:
@@ -2131,7 +2134,10 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
 
     _apply_symbols(conn, repo_id, tree, to_parse, result, now)
 
-    if not result.timed_out:
+    # The SHA must not advance if ANY part of the changed set is incomplete.
+    # Advancing after a ctags failure would mark these files fully indexed with
+    # zero symbols, and they would never reappear in a future diff.
+    if not result.timed_out and not result.symbols_failed:
         writes.set_last_indexed(conn, repo_id, new_sha, int(now()))
     return result
 
@@ -2145,6 +2151,7 @@ def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
     except ctags.CtagsUnavailable as exc:
         writes.record_error(conn, repo_id, None, "ctags", str(exc), int(now()))
         result.errors += 1
+        result.symbols_failed = True
         return
 
     for path in paths:
@@ -2180,7 +2187,9 @@ git commit -m "feat: add per-repo indexing orchestration"
 
 **Interfaces:**
 - Consumes: everything above.
-- Produces: `main(argv: list[str] | None = None) -> int`; subcommands `index` (`--config PATH`, optional `--repo PATH_WITH_NAMESPACE` to index one repo) and `status` (`--config PATH`).
+- Produces: `main(argv: list[str] | None = None) -> int`; subcommands `index` (`--config PATH`, optional `--repo PATH_WITH_NAMESPACE` to index one repo) and `status` (`--config PATH`); `preflight() -> str | None` returning an error message when the environment is unusable.
+
+**Preflight is required before any indexing.** `codeindex index` must verify `ctags` is on PATH and is Universal Ctags before it mirrors anything, and exit `4` with an actionable message otherwise. Without this, a host missing ctags produces a complete-looking index with no symbol layer — the exact failure Task 10's `symbols_failed` flag catches at runtime, caught here one step earlier and far more legibly. Exuberant Ctags must be rejected too: it has no `--output-format=json`, so every symbol extraction would fail.
 
 `status` is the only place in Phase 1 that reads through `queries.py`. Since the ACL module does not exist yet, the CLI is a **service-side operator tool** and passes the full set of known repo ids explicitly — it never bypasses the allowlist parameter.
 
@@ -2190,6 +2199,7 @@ git commit -m "feat: add per-repo indexing orchestration"
 
 ```python
 import subprocess
+import types
 from pathlib import Path
 
 import pytest
@@ -2256,6 +2266,32 @@ def test_status_on_empty_index_is_not_an_error(config_file, capsys):
 
 def test_bad_config_path_returns_nonzero(capsys):
     assert cli.main(["status", "--config", "/nonexistent/c.yaml"]) == 2
+
+
+def test_preflight_passes_with_universal_ctags():
+    """This host has Universal Ctags installed, so preflight must be silent."""
+    assert cli.preflight() is None
+
+
+def test_index_refuses_to_run_without_ctags(config_file, fake_projects,
+                                            monkeypatch, capsys):
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    assert cli.main(["index", "--config", str(config_file)]) == 4
+    err = capsys.readouterr().err
+    assert "ctags not found" in err
+    assert "UniversalCtags.Ctags" in err
+
+
+def test_index_refuses_exuberant_ctags(config_file, fake_projects,
+                                       monkeypatch, capsys):
+    """Exuberant Ctags has no --output-format=json; it must be rejected."""
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/ctags")
+    monkeypatch.setattr(
+        cli.subprocess, "run",
+        lambda *a, **k: types.SimpleNamespace(stdout="Exuberant Ctags 5.9~svn\n"),
+    )
+    assert cli.main(["index", "--config", str(config_file)]) == 4
+    assert "not Universal Ctags" in capsys.readouterr().err
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2271,6 +2307,8 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex.cli'`
 from __future__ import annotations
 
 import argparse
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -2283,7 +2321,35 @@ from .store.db import open_db
 from .worker import index_repo
 
 
+def preflight() -> str | None:
+    """Return an error message if the environment cannot index, else None."""
+    exe = shutil.which("ctags")
+    if exe is None:
+        return (
+            "ctags not found on PATH. Install Universal Ctags:\n"
+            "  Linux:   sudo apt install universal-ctags\n"
+            "  Windows: winget install UniversalCtags.Ctags"
+        )
+    try:
+        out = subprocess.run(
+            [exe, "--version"], capture_output=True, text=True, timeout=10
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"could not run ctags --version: {exc}"
+    if "Universal Ctags" not in out:
+        return (
+            f"{exe} is not Universal Ctags (reported: {out.splitlines()[0] if out else '?'}).\n"
+            "Exuberant Ctags has no --output-format=json and cannot be used."
+        )
+    return None
+
+
 def _index(cfg: Config, only: str | None) -> int:
+    problem = preflight()
+    if problem:
+        print(problem, file=sys.stderr)
+        return 4
+
     conn = open_db(cfg.index.db_path)
     projects = list_projects(cfg.gitlab)
     if only:
@@ -2317,11 +2383,15 @@ def _index(cfg: Config, only: str | None) -> int:
             print(f"{project.path_with_namespace}: FAILED ({exc})", file=sys.stderr)
             continue
 
+        flags = ""
+        if result.timed_out:
+            flags += " TIMED-OUT"
+        if result.symbols_failed:
+            flags += " SYMBOLS-FAILED"
         print(
             f"{project.path_with_namespace}: indexed={result.indexed} "
             f"deleted={result.deleted} skipped={result.skipped} "
-            f"errors={result.errors}"
-            f"{' TIMED-OUT' if result.timed_out else ''} "
+            f"errors={result.errors}{flags} "
             f"({time.time() - started:.1f}s)"
         )
     return 0
@@ -2425,7 +2495,7 @@ No server yet; the MCP surface arrives in Phase 2.
 
 - Python 3.11+
 - git
-- universal-ctags (`apt install universal-ctags` / `winget install universal-ctags.ctags`)
+- universal-ctags (`apt install universal-ctags` / `winget install UniversalCtags.Ctags`)
 
 ### Setup
 
@@ -2453,8 +2523,14 @@ pytest -v
 - [ ] **Step 4: Run the full suite**
 
 Run: `pytest -v`
-Expected: 66 passed — config 4, db 4, writes 6, queries 7, filters 9, ctags 8,
-includes 6, gitlab 4, mirror 7, worker 7, cli 4.
+Expected: 74 passed. Tasks 1–10 contribute 67 (the plan's original 66 plus five
+regression tests added during review — anonymous-namespace classification,
+malformed GitLab JSON, non-ASCII path round-trip, `GitError` coverage, and the
+ctags-unavailable SHA guard — minus one from an original miscount). This task
+adds 7: the 4 CLI tests plus the 3 preflight tests.
+
+No test may be skipped. A skipped ctags test means ctags is missing, which
+this task's own preflight check exists to prevent.
 
 - [ ] **Step 5: Commit**
 
