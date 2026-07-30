@@ -108,6 +108,62 @@ def test_partial_batch_reports_the_blamed_path_as_uncovered(monkeypatch, tmp_pat
     assert "Permission denied" in batch.uncovered["bad.c"]
 
 
+def test_root_path_is_not_blamed_for_a_subdirectory_namesake(monkeypatch, tmp_path):
+    """Blame must be attributed by path, not by naive substring.
+
+    `main.c` at the root and `sub/main.c` are ordinary in C repos. A plain
+    `p in stderr` test blames the root file for the subdirectory file's
+    diagnostic, and being blamed is destructive AND budgeted: the caller
+    deletes the symbols it just extracted, NULLs symbols_sha and charges a
+    retry attempt, so three such passes strand a perfectly healthy file
+    permanently symbol-less.
+    """
+    (tmp_path / "main.c").write_text("int MainRoot(void){return 0;}\n")
+    (tmp_path / "util.c").write_text("int Util(void){return 0;}\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "main.c").write_text("int MainSub(void){return 1;}\n")
+
+    fake_proc = types.SimpleNamespace(
+        returncode=1,
+        stdout='{"_type":"tag","name":"MainRoot","path":"main.c",'
+               '"kind":"function","line":1}\n',
+        stderr='ctags: Warning: cannot open input file "sub/main.c"'
+               " : Permission denied\n",
+    )
+    monkeypatch.setattr(ctags.subprocess, "run", lambda *a, **k: fake_proc)
+
+    batch = ctags.extract_symbols(tmp_path, ["main.c", "sub/main.c", "util.c"])
+
+    assert set(batch.uncovered) == {"sub/main.c"}
+    assert batch.covered == frozenset({"main.c", "util.c"})
+
+
+def test_unquoted_diagnostic_still_attributes_at_a_path_boundary(
+    monkeypatch, tmp_path
+):
+    """Not every ctags diagnostic quotes the offending path.
+
+    When none does, attribution falls back to a boundary-anchored search --
+    which must still refuse to blame `main.c` for `sub/main.c`.
+    """
+    (tmp_path / "main.c").write_text("int MainRoot(void){return 0;}\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "main.c").write_text("int MainSub(void){return 1;}\n")
+
+    fake_proc = types.SimpleNamespace(
+        returncode=1,
+        stdout='{"_type":"tag","name":"MainRoot","path":"main.c",'
+               '"kind":"function","line":1}\n',
+        stderr="ctags: sub/main.c: unexpected end of file\n",
+    )
+    monkeypatch.setattr(ctags.subprocess, "run", lambda *a, **k: fake_proc)
+
+    batch = ctags.extract_symbols(tmp_path, ["main.c", "sub/main.c"])
+
+    assert set(batch.uncovered) == {"sub/main.c"}
+    assert batch.covered == frozenset({"main.c"})
+
+
 def test_unattributable_failure_covers_only_paths_that_produced_tags(
     monkeypatch, tmp_path
 ):

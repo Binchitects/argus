@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -63,15 +64,36 @@ def _paths_named_in(paths: list[str], stderr: str) -> set[str]:
 
     ctags names the offending file in its diagnostics ("cannot open input
     file \"x.c\""), which is the only attribution available: the JSON output
-    format has no per-file markers. Matching is a substring test on a
-    separator-normalised copy of stderr, so an over-match can only ever
-    move a path from covered to uncovered -- the safe direction, since an
-    uncovered path is retried rather than declared complete.
+    format has no per-file markers.
+
+    Matching is NOT a plain substring test: `main.c` and `sub/main.c` are
+    ordinary namesakes in real C repos, and a naive `p in haystack` blames
+    the root `main.c` for a diagnostic that only ever named `sub/main.c`
+    (any path that is a substring of another listed path is at risk). That
+    is not a safe over-match -- being blamed is destructive AND budgeted:
+    the caller deletes the symbol rows ctags just extracted for the
+    wrongly-blamed path, NULLs its symbols_sha, and charges it a retry
+    attempt via `_cap_retries`. Three such passes permanently strand a
+    perfectly healthy file as symbol-less and retry-exhausted.
+
+    Each candidate path is therefore matched only at a path boundary: the
+    character immediately before and after the match (if any) must not
+    itself be a path-continuation character (word char, `.`, `/`, `-`).
+    This handles both quoted diagnostics ("cannot open input file
+    \"sub/main.c\"") and unquoted ones (ctags does not always quote the
+    path) without needing separate quote-parsing logic, since `/` counts
+    as a path-continuation character on the left: `main.c` inside
+    `sub/main.c` is always preceded by `/`, which fails the boundary check.
     """
     if not stderr:
         return set()
     haystack = stderr.replace("\\", "/")
-    return {p for p in paths if p in haystack}
+    blamed = set()
+    for p in paths:
+        pattern = r"(?<![\w./-])" + re.escape(p) + r"(?![\w./-])"
+        if re.search(pattern, haystack):
+            blamed.add(p)
+    return blamed
 
 
 def is_public_symbol(path: str, scope: str | None, file_restricted: bool) -> bool:

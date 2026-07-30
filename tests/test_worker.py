@@ -493,6 +493,34 @@ def _partial_ctags_module(tagged_path: str, blamed_path: str):
         run=run, TimeoutExpired=subprocess.TimeoutExpired)
 
 
+def _blaming_ctags_module(blamed_path: str, *, stderr: str | None = None):
+    """A stand-in `subprocess` that tags every listed path except `blamed_path`.
+
+    Models the realistic partial batch: ctags opened and parsed everything it
+    could, named the one file it could not open, and exited non-zero. Pass
+    `stderr` to model a non-zero exit that names nothing at all.
+    """
+    def run(cmd, **kwargs):
+        listed = [p for p in kwargs.get("input", "").splitlines() if p]
+        # A pseudo-tag keeps stdout non-empty so the batch is treated as
+        # partial rather than as a total failure (which raises).
+        stdout = '{"_type":"ptag","name":"JSON_OUTPUT_VERSION"}\n'
+        stdout += "".join(
+            json.dumps({"_type": "tag",
+                        "name": "Sym_" + path.replace("/", "_").replace(".", "_"),
+                        "path": path, "kind": "function", "line": 1}) + "\n"
+            for path in listed if path != blamed_path
+        )
+        return types.SimpleNamespace(
+            returncode=1, stdout=stdout,
+            stderr=stderr if stderr is not None else
+            f'ctags: Warning: cannot open input file "{blamed_path}"'
+            " : Permission denied\n",
+        )
+    return types.SimpleNamespace(
+        run=run, TimeoutExpired=subprocess.TimeoutExpired)
+
+
 def _symbols_sha_row(conn, repo_id, path):
     return conn.execute(
         "SELECT blob_sha, symbols_sha FROM files WHERE repo_id = ? AND path = ?",
@@ -543,6 +571,52 @@ def test_partial_ctags_batch_leaves_the_uncovered_path_incomplete(env, monkeypat
     assert "DecodeFrame" in names
     row = _symbols_sha_row(conn, repo_id, "decoder.c")
     assert row["symbols_sha"] == row["blob_sha"]
+
+
+def test_healthy_root_file_survives_a_subdirectory_namesake_failing(env, monkeypatch):
+    """The end-to-end cost of blaming by substring.
+
+    `main.c` at the root and `sub/main.c` (ACL-denied) is an ordinary C repo
+    layout. ctags parses the root file fine, but a substring blame test drags
+    it into `uncovered`, which deletes the symbols just extracted, NULLs its
+    symbols_sha, writes an index_errors row and charges a retry attempt --
+    three passes and a healthy file is retry-exhausted and, since the SHA has
+    advanced, permanently symbol-less.
+    """
+    from argus.parse import ctags as ctags_mod
+    conn, cfg, project, repo_id, _, origin = env
+    (origin / "main.c").write_text("int MainRoot(void){return 0;}\n")
+    (origin / "sub").mkdir()
+    (origin / "sub" / "main.c").write_text("int MainSub(void){return 1;}\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-m", "add colliding file names")
+
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+
+    monkeypatch.setattr(ctags_mod, "subprocess",
+                        _blaming_ctags_module("sub/main.c"))
+    worker.index_repo(conn, cfg, project, m, tree, sha, None)
+    monkeypatch.undo()
+
+    row = _symbols_sha_row(conn, repo_id, "main.c")
+    assert row["symbols_sha"] == row["blob_sha"], (
+        "the root main.c was blamed for sub/main.c's diagnostic and lost its"
+        " completion marker"
+    )
+    assert {r["name"] for r in conn.execute(
+        "SELECT s.name FROM symbols s JOIN files f ON f.id = s.file_id"
+        " WHERE f.repo_id = ? AND f.path = 'main.c'", (repo_id,))} == {"Sym_main_c"}
+    assert "main.c" not in {r["path"] for r in conn.execute(
+        "SELECT path FROM index_errors WHERE repo_id = ?", (repo_id,))}
+    assert _attempts(conn, repo_id, "main.c") == 0
+
+    # The file ctags actually named is still handled as a real failure.
+    sub = _symbols_sha_row(conn, repo_id, "sub/main.c")
+    assert sub["symbols_sha"] != sub["blob_sha"]
+    assert "sub/main.c" in _queued_paths(conn, repo_id)
+    assert _attempts(conn, repo_id, "sub/main.c") == 1
 
 
 def test_path_ctags_cannot_open_is_not_stamped_complete(env, monkeypatch):
