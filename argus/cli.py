@@ -46,6 +46,10 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
 
     conn = open_db(cfg.index.db_path)
 
+    projects = list_projects(cfg.gitlab)
+    if only:
+        projects = [p for p in projects if p.path_with_namespace == only]
+
     if reset_retries:
         # Explicit operator escape hatch: an automatic clear only fires once
         # a path indexes successfully again, which requires the underlying
@@ -53,19 +57,27 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
         # lets an operator forget the history immediately instead of waiting
         # for that to happen on its own.
         if only:
-            conn.execute(
-                "DELETE FROM retry_attempts WHERE repo_id IN"
-                " (SELECT id FROM repos WHERE path_with_namespace = ?)",
-                (only,),
-            )
+            if not projects:
+                # --repo was given but matched no known repo; don't clear anything
+                print(f"repo '{only}' not found in projects from GitLab")
+            else:
+                cursor = conn.execute(
+                    "DELETE FROM retry_attempts WHERE repo_id IN"
+                    " (SELECT id FROM repos WHERE path_with_namespace = ?)",
+                    (only,),
+                )
+                conn.commit()
+                rows_cleared = cursor.rowcount
+                print(f"reset retry counters for '{only}' ({rows_cleared} rows)")
         else:
-            conn.execute("DELETE FROM retry_attempts")
-        conn.commit()
-        print("reset retry counters")
+            cursor = conn.execute("DELETE FROM retry_attempts")
+            conn.commit()
+            rows_cleared = cursor.rowcount
+            if rows_cleared > 0:
+                print(f"reset {rows_cleared} retry counter entries")
+            else:
+                print("no retry counters to reset")
 
-    projects = list_projects(cfg.gitlab)
-    if only:
-        projects = [p for p in projects if p.path_with_namespace == only]
     if not projects:
         print("no repos matched")
         return 0
@@ -147,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     p_index.add_argument("--config", required=True, type=Path)
     p_index.add_argument("--repo", help="Index only this path_with_namespace")
     p_index.add_argument("--reset-retries", action="store_true",
-                         help="Clear retry counters before indexing (recovery escape hatch)")
+                         help="Clear retry counters before indexing (manual recovery only; do not use on a schedule)")
 
     p_status = sub.add_parser("status", help="Show per-repo index freshness")
     p_status.add_argument("--config", required=True, type=Path)

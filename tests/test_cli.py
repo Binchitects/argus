@@ -94,9 +94,27 @@ def test_index_returns_nonzero_when_a_repo_fails(config_file, tmp_path,
 
 
 def test_reset_retries_flag_clears_counters(config_file, fake_projects, capsys):
+    from argus.store.db import open_db
+
     assert cli.main(["index", "--config", str(config_file)]) == 0
+
+    # Insert a retry_attempts entry so there's something to clear
+    conn = open_db(config_file.parent / "data" / "i.db")
+    repo_id = conn.execute(
+        "SELECT id FROM repos WHERE path_with_namespace = ?",
+        ("g/eal",),
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO retry_attempts (repo_id, path, attempts) VALUES (?, ?, ?)",
+        (repo_id, "some/path.c", 1),
+    )
+    conn.commit()
+    conn.close()
+
     assert cli.main(["index", "--config", str(config_file), "--reset-retries"]) == 0
-    assert "reset retry counters" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # Message should indicate retry counters were reset
+    assert "reset" in out.lower() and "counter" in out.lower()
 
 
 def test_index_refuses_exuberant_ctags(config_file, fake_projects,
@@ -109,3 +127,126 @@ def test_index_refuses_exuberant_ctags(config_file, fake_projects,
     )
     assert cli.main(["index", "--config", str(config_file)]) == 4
     assert "not Universal Ctags" in capsys.readouterr().err
+
+
+def test_reset_retries_uncommitted_if_list_projects_fails(
+    config_file, fake_projects, monkeypatch, capsys
+):
+    """If list_projects fails after reset, retry_attempts must stay unchanged."""
+    from argus.gitlab import GitLabError
+    from argus.store.db import open_db
+    from argus.store import writes
+
+    # Index once to establish baseline
+    assert cli.main(["index", "--config", str(config_file)]) == 0
+    conn = open_db(config_file.parent / "data" / "i.db")
+
+    # Get repo_id and insert a retry_attempts entry
+    repo_id = conn.execute(
+        "SELECT id FROM repos WHERE path_with_namespace = ?",
+        ("g/eal",),
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO retry_attempts (repo_id, path, attempts) VALUES (?, ?, ?)",
+        (repo_id, "some/path.c", 2),
+    )
+    conn.commit()
+
+    # Verify the entry was added
+    count_before = conn.execute(
+        "SELECT COUNT(*) as cnt FROM retry_attempts WHERE repo_id = ?"
+        " AND path = 'some/path.c'",
+        (repo_id,),
+    ).fetchone()["cnt"]
+    assert count_before == 1
+    conn.close()
+
+    # Monkeypatch list_projects to raise GitLabError
+    def failing_list_projects(cfg):
+        raise GitLabError("network error")
+
+    monkeypatch.setattr(cli, "list_projects", failing_list_projects)
+
+    # Run with --reset-retries; it should fail with exit code 3
+    assert (
+        cli.main(["index", "--config", str(config_file), "--reset-retries"])
+        == 3
+    )
+
+    # Verify retry_attempts still has the entry
+    conn = open_db(config_file.parent / "data" / "i.db")
+    count_after = conn.execute(
+        "SELECT COUNT(*) as cnt FROM retry_attempts WHERE repo_id = ?"
+        " AND path = 'some/path.c'",
+        (repo_id,),
+    ).fetchone()["cnt"]
+    assert count_after == 1, "retry_attempts should not be cleared when list_projects fails"
+
+    # Verify success message was not printed
+    out = capsys.readouterr().out
+    assert (
+        "reset retry counters" not in out
+    ), "success message should not be printed when list_projects fails"
+    conn.close()
+
+
+def test_reset_retries_with_mistyped_repo_reports_no_match(
+    config_file, fake_projects, capsys
+):
+    """When --repo does not match any known repo, report distinctly."""
+    from argus.store.db import open_db
+
+    # Index once to establish baseline
+    assert cli.main(["index", "--config", str(config_file)]) == 0
+
+    # Insert a retry_attempts entry for the real repo
+    conn = open_db(config_file.parent / "data" / "i.db")
+    repo_id = conn.execute(
+        "SELECT id FROM repos WHERE path_with_namespace = ?",
+        ("g/eal",),
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO retry_attempts (repo_id, path, attempts) VALUES (?, ?, ?)",
+        (repo_id, "some/path.c", 1),
+    )
+    conn.commit()
+    conn.close()
+
+    # Run with --reset-retries --repo with mistyped name
+    assert (
+        cli.main(
+            ["index", "--config", str(config_file), "--reset-retries", "--repo", "g/nope"]
+        )
+        == 0
+    )
+
+    out = capsys.readouterr().out
+    # Should indicate the repo was not found, not silently succeed
+    assert "not found" in out or "no repos matched" in out or "did not match" in out, (
+        f"should report distinctly when --repo does not match; got: {out}"
+    )
+    assert (
+        "reset retry counters" not in out
+    ), "should not report success when no repos matched"
+
+
+def test_reset_retries_help_warns_against_scheduling(capsys):
+    """Help text for --reset-retries should warn against using on schedule."""
+    # Invoke the help output to check the text
+    try:
+        cli.main(["index", "--help"])
+    except SystemExit:
+        # argparse calls sys.exit() after printing help, which is expected
+        pass
+
+    help_text = capsys.readouterr().out
+
+    # The help should mention this is manual/not for scheduling
+    assert (
+        "manual" in help_text.lower()
+        or "schedule" in help_text.lower()
+        or "do not use on a schedule" in help_text.lower()
+        or "should not be used on a schedule" in help_text.lower()
+    ), (
+        f"help text should warn against scheduling; got: {help_text}"
+    )
