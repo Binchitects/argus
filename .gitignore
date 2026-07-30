@@ -24,3 +24,9 @@ config.local.yaml
 .idea/
 Thumbs.db
 desktop.ini
+
+# SDD scratch
+.superpowers/
+
+# Claude Code local (machine-specific) settings; shared config goes in .claude/settings.json
+.claude/settings.local.json
