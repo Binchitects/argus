@@ -1,0 +1,37 @@
+# Build context hygiene. The image installs the package from source and runs
+# the suite; nothing else needs to cross the wire.
+
+.git
+.github
+.superpowers
+.claude
+.remember
+
+# Runtime state — mirrors and the index are volumes, never baked into an image.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Real config carries a GitLab token. Only the example belongs in a build.
+config.yaml
+config.local.yaml
+.env
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+docs/
+*.md
+!README.md
+
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
