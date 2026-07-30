@@ -73,9 +73,27 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
             break
 
         abs_path = tree / change.path
+
+        try:
+            st_size = abs_path.stat().st_size
+        except OSError as exc:
+            writes.record_error(conn, repo_id, change.path, "read",
+                                str(exc), int(now()))
+            result.errors += 1
+            continue
+
+        # Cheap pre-checks before paying for a read: a file over the size
+        # cap or with an undetectable language is rejected either way by
+        # should_index below, so there is no reason to bring potentially
+        # gigabytes of it into memory first just to discard it.
+        if (st_size > index_cfg.max_file_bytes
+                or filters.detect_lang(change.path) is None):
+            result.skipped += 1
+            continue
+
         try:
             data = abs_path.read_bytes()
-        except OSError as exc:
+        except (OSError, MemoryError) as exc:
             writes.record_error(conn, repo_id, change.path, "read",
                                 str(exc), int(now()))
             result.errors += 1

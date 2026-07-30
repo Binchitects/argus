@@ -114,6 +114,32 @@ def test_unreadable_file_is_recorded_and_does_not_abort(env, monkeypatch):
     assert errs[0]["path"] == "decoder.c"
 
 
+def test_large_file_is_skipped_without_being_read(env, monkeypatch):
+    conn, cfg, project, repo_id, _, origin = env
+    (origin / "huge.c").write_text("x" * 200 + "\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-m", "add huge file")
+
+    tiny_cfg = IndexConfig(data_dir=cfg.data_dir, db_path=cfg.db_path,
+                           max_file_bytes=10)
+
+    real = Path.read_bytes
+    def guarded(self):
+        if self.name == "huge.c":
+            raise AssertionError("huge.c must be size-filtered before read_bytes")
+        return real(self)
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+
+    m = mirror.ensure_mirror(tiny_cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(tiny_cfg, project.gitlab_id, m, sha)
+    result = worker.index_repo(conn, tiny_cfg, project, m, tree, sha, None)
+
+    paths = {r["path"] for r in conn.execute("SELECT path FROM files")}
+    assert "huge.c" not in paths
+    assert result.skipped >= 1
+
+
 def test_time_budget_stops_work_without_advancing_sha(env, monkeypatch):
     conn, cfg, project, repo_id, _, _ = env
     budget_cfg = IndexConfig(data_dir=cfg.data_dir, db_path=cfg.db_path,
