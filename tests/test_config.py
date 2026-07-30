@@ -54,14 +54,28 @@ def test_non_integer_max_file_bytes_raises_config_error(tmp_path):
         Config.load(p)
 
 
-def test_config_file_is_read_as_utf8(tmp_path):
+def test_config_file_is_read_as_utf8(tmp_path, monkeypatch):
     # Windows defaults read_text() to cp1252, not UTF-8; a non-ASCII value
     # (here, in the token) must round-trip correctly regardless of locale.
+    # Asserting only on the round-trip would pass with the bug reintroduced
+    # anywhere the ambient default encoding already is UTF-8 (Linux, or under
+    # PEP 686), so assert the encoding is passed explicitly.
     p = tmp_path / "c.yaml"
     p.write_text(
         "gitlab:\n  url: https://x\n  token: tökén-ü\n"
         "index:\n  data_dir: /d\n  db_path: /d/i.db\n",
         encoding="utf-8",
     )
+
+    seen = {}
+    real_read_text = Path.read_text
+
+    def spy(self, *args, **kwargs):
+        seen["encoding"] = kwargs.get("encoding", "not passed")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", spy)
     cfg = Config.load(p)
+
+    assert seen["encoding"] == "utf-8"
     assert cfg.gitlab.token == "tökén-ü"

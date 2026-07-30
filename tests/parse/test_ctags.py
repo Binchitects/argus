@@ -68,13 +68,19 @@ def test_missing_files_do_not_raise(tmp_path):
 
 def test_subprocess_timeout_raises_ctags_unavailable(monkeypatch, tmp_path):
     (tmp_path / "a.c").write_text("int a(void){return 1;}\n")
+    seen = {}
 
     def fake_run(*args, **kwargs):
+        # Raising unconditionally would only exercise the handler: deleting
+        # timeout=CTAGS_TIMEOUT_SECONDS from the real subprocess.run call
+        # would leave this test green. Capture what was actually passed.
+        seen["timeout"] = kwargs.get("timeout", "not passed")
         raise subprocess.TimeoutExpired(cmd="ctags", timeout=kwargs.get("timeout"))
 
     monkeypatch.setattr(ctags.subprocess, "run", fake_run)
     with pytest.raises(ctags.CtagsUnavailable):
         ctags.extract_symbols(tmp_path, ["a.c"])
+    assert seen["timeout"] == ctags.CTAGS_TIMEOUT_SECONDS
 
 
 def test_partial_failure_logs_stderr(monkeypatch, tmp_path, caplog):
