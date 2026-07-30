@@ -23,7 +23,7 @@ def migrate(conn: sqlite3.Connection) -> int:
         version = int(sql_file.name.split("_", 1)[0])
         if version <= current:
             continue
-        conn.executescript(sql_file.read_text())
+        conn.executescript(sql_file.read_text(encoding="utf-8"))
         # PRAGMA does not accept bound parameters; version is a validated int.
         conn.execute(f"PRAGMA user_version = {version}")
         conn.commit()

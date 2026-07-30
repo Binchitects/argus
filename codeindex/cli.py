@@ -52,6 +52,7 @@ def _index(cfg: Config, only: str | None) -> int:
         print("no repos matched")
         return 0
 
+    any_repo_unhealthy = False
     for project in projects:
         repo_id = writes.upsert_repo(
             conn, gitlab_id=project.gitlab_id,
@@ -73,9 +74,13 @@ def _index(cfg: Config, only: str | None) -> int:
             tree = sync_worktree(cfg.index, project.gitlab_id, mirror_dir, sha)
             result = index_repo(conn, cfg.index, project, mirror_dir, tree, sha, old)
         except GitError as exc:
+            any_repo_unhealthy = True
             writes.record_error(conn, repo_id, None, "git", str(exc), int(time.time()))
             print(f"{project.path_with_namespace}: FAILED ({exc})", file=sys.stderr)
             continue
+
+        if result.timed_out or result.symbols_failed:
+            any_repo_unhealthy = True
 
         flags = ""
         if result.timed_out:
@@ -88,7 +93,10 @@ def _index(cfg: Config, only: str | None) -> int:
             f"errors={result.errors}{flags} "
             f"({time.time() - started:.1f}s)"
         )
-    return 0
+    # Exit codes 2/3/4 are already claimed (config, gitlab, preflight); use a
+    # distinct code so a cron job can tell "ran, but a repo is unhealthy"
+    # apart from those startup failures.
+    return 1 if any_repo_unhealthy else 0
 
 
 def _status(cfg: Config) -> int:

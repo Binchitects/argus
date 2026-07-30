@@ -44,6 +44,26 @@ def test_find_symbol_excludes_disallowed_repo(two_repos):
     assert rows[0]["repo_id"] == ids["g/alpha"]
 
 
+def test_find_symbol_kind_filter(two_repos):
+    conn, ids = two_repos
+    rid = ids["g/alpha"]
+    fid = conn.execute(
+        "SELECT id FROM files WHERE repo_id = ?", (rid,)
+    ).fetchone()["id"]
+    writes.replace_symbols(conn, rid, fid, [
+        {"name": "SharedName", "kind": "function", "line": 1, "end_line": 2,
+         "signature": "(void)", "scope": None, "is_public": 1},
+        {"name": "SharedName", "kind": "variable", "line": 10, "end_line": 10,
+         "signature": None, "scope": None, "is_public": 1},
+    ])
+
+    both = queries.find_symbol([rid], conn, "SharedName")
+    assert {r["kind"] for r in both} == {"function", "variable"}
+
+    only_variable = queries.find_symbol([rid], conn, "SharedName", kind="variable")
+    assert [r["kind"] for r in only_variable] == ["variable"]
+
+
 def test_search_code_excludes_disallowed_repo(two_repos):
     conn, ids = two_repos
     assert queries.search_code([ids["g/alpha"]], conn, "betaword") == []
@@ -54,6 +74,11 @@ def test_get_file_refuses_disallowed_repo(two_repos):
     conn, ids = two_repos
     assert queries.get_file([ids["g/alpha"]], conn, ids["g/beta"], "src/a.c") is None
     assert queries.get_file([ids["g/beta"]], conn, ids["g/beta"], "src/a.c") is not None
+
+
+def test_get_file_empty_allowlist_returns_none(two_repos):
+    conn, ids = two_repos
+    assert queries.get_file([], conn, ids["g/alpha"], "src/a.c") is None
 
 
 def test_index_status_excludes_disallowed_repo(two_repos):

@@ -46,7 +46,7 @@ class Config:
 
     @staticmethod
     def load(path: Path) -> "Config":
-        raw = yaml.safe_load(Path(path).read_text()) or {}
+        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
         gl = raw.get("gitlab") or {}
         ix = raw.get("index") or {}
 
@@ -64,13 +64,19 @@ class Config:
             if not ix.get(key):
                 raise ConfigError(f"index.{key} is required")
 
+        try:
+            max_file_bytes = int(ix.get("max_file_bytes", 1048576))
+            repo_time_budget_seconds = int(ix.get("repo_time_budget_seconds", 600))
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"index config value is not an integer: {exc}") from exc
+
         return Config(
             gitlab=GitLabConfig(url=url.rstrip("/"), token=token),
             index=IndexConfig(
                 data_dir=Path(ix["data_dir"]),
                 db_path=Path(ix["db_path"]),
-                max_file_bytes=int(ix.get("max_file_bytes", 1048576)),
+                max_file_bytes=max_file_bytes,
                 exclude_dirs=tuple(ix.get("exclude_dirs", DEFAULT_EXCLUDE_DIRS)),
-                repo_time_budget_seconds=int(ix.get("repo_time_budget_seconds", 600)),
+                repo_time_budget_seconds=repo_time_budget_seconds,
             ),
         )

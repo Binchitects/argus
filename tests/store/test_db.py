@@ -19,7 +19,7 @@ def test_migrate_is_idempotent(tmp_path):
     path = tmp_path / "i.db"
     v1 = migrate(open_db(path))
     v2 = migrate(open_db(path))
-    assert v1 == v2 == 1
+    assert v1 == v2 == 2
 
 
 def test_foreign_keys_enforced(tmp_path):

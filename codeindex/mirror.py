@@ -57,7 +57,18 @@ def is_ancestor(mirror: Path, old: str, new: str) -> bool:
         ["git", "merge-base", "--is-ancestor", old, new],
         cwd=mirror, capture_output=True, text=True,
     )
-    return proc.returncode == 0
+    if proc.returncode == 0:
+        return True
+    if proc.returncode == 1:
+        # Exit 1 is git's documented "no, not an ancestor" — a legitimate
+        # answer, not a failure.
+        return False
+    # Anything else (128, etc.) means an invalid or corrupt sha, not a
+    # negative answer; conflating the two would silently treat a broken
+    # ref as "force-pushed, do a full reindex" instead of surfacing it.
+    raise GitError(
+        f"git merge-base --is-ancestor failed: {proc.stderr.strip()[:500]}"
+    )
 
 
 def _full_listing(mirror: Path, sha: str) -> list[Change]:
@@ -79,6 +90,10 @@ def changed_files(mirror: Path, old_sha: str | None, new_sha: str) -> list[Chang
     changes: list[Change] = []
     for status, path in zip(fields[0::2], fields[1::2]):
         status = status[0]
+        if status == "T":
+            # Typechange (e.g. file<->symlink): real in C/C++ trees, and
+            # the content still needs to be re-read and re-stored.
+            status = "M"
         if status in ("A", "M", "D") and path:
             changes.append(Change(status=status, path=path))
     return changes

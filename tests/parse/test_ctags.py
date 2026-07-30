@@ -1,5 +1,7 @@
+import logging
 import shutil
 import subprocess
+import types
 from pathlib import Path
 
 import pytest
@@ -73,6 +75,23 @@ def test_subprocess_timeout_raises_ctags_unavailable(monkeypatch, tmp_path):
     monkeypatch.setattr(ctags.subprocess, "run", fake_run)
     with pytest.raises(ctags.CtagsUnavailable):
         ctags.extract_symbols(tmp_path, ["a.c"])
+
+
+def test_partial_failure_logs_stderr(monkeypatch, tmp_path, caplog):
+    (tmp_path / "a.c").write_text("int a(void){return 1;}\n")
+
+    fake_proc = types.SimpleNamespace(
+        returncode=1,
+        stdout='{"_type":"tag","name":"a","path":"a.c","kind":"function","line":1}\n',
+        stderr="ctags: some.c: parse error\n",
+    )
+    monkeypatch.setattr(ctags.subprocess, "run", lambda *a, **k: fake_proc)
+
+    with caplog.at_level(logging.WARNING, logger=ctags.__name__):
+        results = ctags.extract_symbols(tmp_path, ["a.c"])
+
+    assert "a.c" in results  # the partial output is still returned
+    assert any("parse error" in r.message for r in caplog.records)
 
 
 def test_is_public_symbol_rules():

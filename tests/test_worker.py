@@ -237,6 +237,11 @@ def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
 
     result = _run(env)
     assert result.symbols_failed is True
+    assert result.errors == 1
     row = conn.execute("SELECT last_indexed_sha FROM repos WHERE id = ?",
                        (repo_id,)).fetchone()
     assert row["last_indexed_sha"] is None
+    err = conn.execute(
+        "SELECT stage FROM index_errors WHERE repo_id = ?", (repo_id,)
+    ).fetchone()
+    assert err["stage"] == "ctags"

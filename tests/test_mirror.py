@@ -138,3 +138,34 @@ def test_head_sha_missing_branch_raises_git_error(cfg, project, origin):
     m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
     with pytest.raises(mirror.GitError):
         mirror.head_sha(m, "does-not-exist")
+
+
+def test_is_ancestor_raises_git_error_on_invalid_sha(cfg, project, origin):
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    head = mirror.head_sha(m, "main")
+    # Exit 1 ("not an ancestor") is a legitimate answer and must return
+    # False; exit 128 (bad/unknown object) is a broken ref and must raise
+    # rather than be silently treated as "not an ancestor".
+    with pytest.raises(mirror.GitError):
+        mirror.is_ancestor(m, "not-a-real-sha", head)
+
+
+def test_changed_files_treats_typechange_as_modify(cfg, project, origin):
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    old = mirror.head_sha(m, "main")
+
+    # Force a typechange (file -> symlink) at the git object-model level, in
+    # the working repo (which has an index), without needing real OS
+    # symlink support so this runs the same on Windows and Linux: hash a
+    # blob and re-stage a.c at symlink mode.
+    link_sha = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=origin, input="a.c\n", check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    git(origin, "update-index", "--cacheinfo", f"120000,{link_sha},a.c")
+    git(origin, "commit", "-m", "typechange a.c to symlink")
+
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    new = mirror.head_sha(m, "main")
+    changes = mirror.changed_files(m, old, new)
+    assert changes == [mirror.Change(status="M", path="a.c")]

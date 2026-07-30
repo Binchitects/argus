@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 from pathlib import Path, PurePosixPath
 
 from .filters import HEADER_EXTENSIONS
+
+logger = logging.getLogger(__name__)
 
 PRIVATE_SCOPES = frozenset({"detail", "internal", "impl", "anonymous"})
 
@@ -38,6 +41,10 @@ class CtagsUnavailable(RuntimeError):
 def is_public_symbol(path: str, scope: str | None, file_restricted: bool) -> bool:
     if scope:
         parts = {p.strip() for p in scope.replace("::", ".").split(".")}
+        # "__anon..." is an undocumented ctags-internal naming convention for
+        # anonymous-namespace scopes, not a stable public API — a future
+        # ctags release changing it would silently reclassify anonymous-
+        # namespace symbols as public.
         if any(p in PRIVATE_SCOPES or p.startswith("__anon") for p in parts):
             return False
     if PurePosixPath(path).suffix.lower() in HEADER_EXTENSIONS:
@@ -76,6 +83,15 @@ def extract_symbols(root: Path, rel_paths: list[str]) -> dict[str, list[dict]]:
         ) from exc
     if proc.returncode != 0 and not proc.stdout:
         raise CtagsUnavailable(f"ctags failed: {proc.stderr.strip()[:500]}")
+    if proc.returncode != 0 and proc.stdout:
+        # Partial batch: some tags came back, but ctags also reported a
+        # non-zero exit. There is no conn here to record it against a repo,
+        # so at least surface it in the logs instead of silently discarding
+        # proc.stderr.
+        logger.warning(
+            "ctags exited %s with partial output for %d file(s): %s",
+            proc.returncode, len(existing), proc.stderr.strip()[:500],
+        )
 
     results: dict[str, list[dict]] = {}
     for line in proc.stdout.splitlines():

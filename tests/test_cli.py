@@ -82,6 +82,17 @@ def test_index_refuses_to_run_without_ctags(config_file, fake_projects,
     assert "UniversalCtags.Ctags" in err
 
 
+def test_index_returns_nonzero_when_a_repo_fails(config_file, tmp_path,
+                                                 monkeypatch, capsys):
+    bad_project = Project(gitlab_id=99, path_with_namespace="g/bad",
+                          default_branch="main",
+                          http_url=str(tmp_path / "does-not-exist"))
+    monkeypatch.setattr(cli, "list_projects", lambda cfg: [bad_project])
+
+    assert cli.main(["index", "--config", str(config_file)]) == 1
+    assert "FAILED" in capsys.readouterr().err
+
+
 def test_index_refuses_exuberant_ctags(config_file, fake_projects,
                                        monkeypatch, capsys):
     """Exuberant Ctags has no --output-format=json; it must be rejected."""

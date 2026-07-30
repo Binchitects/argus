@@ -42,3 +42,26 @@ def test_missing_token_raises(tmp_path):
     p.write_text("gitlab:\n  url: https://x\nindex:\n  data_dir: /d\n  db_path: /d/i.db\n")
     with pytest.raises(ConfigError, match="token"):
         Config.load(p)
+
+
+def test_non_integer_max_file_bytes_raises_config_error(tmp_path):
+    p = tmp_path / "c.yaml"
+    p.write_text(
+        "gitlab:\n  url: https://x\n  token: t\n"
+        "index:\n  data_dir: /d\n  db_path: /d/i.db\n  max_file_bytes: not-a-number\n"
+    )
+    with pytest.raises(ConfigError):
+        Config.load(p)
+
+
+def test_config_file_is_read_as_utf8(tmp_path):
+    # Windows defaults read_text() to cp1252, not UTF-8; a non-ASCII value
+    # (here, in the token) must round-trip correctly regardless of locale.
+    p = tmp_path / "c.yaml"
+    p.write_text(
+        "gitlab:\n  url: https://x\n  token: tökén-ü\n"
+        "index:\n  data_dir: /d\n  db_path: /d/i.db\n",
+        encoding="utf-8",
+    )
+    cfg = Config.load(p)
+    assert cfg.gitlab.token == "tökén-ü"
