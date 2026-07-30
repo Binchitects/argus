@@ -193,6 +193,14 @@ def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
         writes.record_error(conn, repo_id, None, "ctags", str(exc), int(now()))
         result.errors += 1
         result.symbols_failed = True
+        # These files were already upserted with their new content and new
+        # blob_sha, so their surviving symbol rows now describe the previous
+        # revision. Leaving them would let _already_current skip the files on
+        # the next pass (blob_sha matches, symbol rows exist), which empties
+        # to_parse, clears symbols_failed and advances the SHA over stale
+        # symbols. Since one CtagsUnavailable (missing binary, or a timeout)
+        # strands the whole batch, that is every file modified this pass.
+        writes.clear_symbols_for_paths(conn, repo_id, paths)
         return
 
     for path in paths:

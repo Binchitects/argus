@@ -99,6 +99,27 @@ def replace_symbols(conn: sqlite3.Connection, repo_id: int, file_id: int,
     conn.commit()
 
 
+def clear_symbols_for_paths(conn: sqlite3.Connection, repo_id: int,
+                            paths: list[str]) -> None:
+    """Drop the symbol rows of these paths so they cannot look up to date.
+
+    upsert_file UPDATEs in place: after it runs, the row already carries the
+    new content and the new blob_sha while the symbol rows still describe the
+    previous revision. If symbol extraction then fails, clearing them is what
+    makes _already_current return False on the next pass -- otherwise the
+    matching blob_sha plus the surviving stale rows would skip the file
+    forever and the SHA would advance over symbols from an older revision.
+    """
+    if not paths:
+        return
+    conn.executemany(
+        "DELETE FROM symbols WHERE file_id IN"
+        " (SELECT id FROM files WHERE repo_id = ? AND path = ?)",
+        [(repo_id, path) for path in paths],
+    )
+    conn.commit()
+
+
 def replace_includes(conn: sqlite3.Connection, repo_id: int, file_id: int,
                      includes: list[dict]) -> None:
     conn.execute("DELETE FROM includes WHERE file_id = ?", (file_id,))

@@ -254,6 +254,51 @@ def test_read_error_is_retried_on_a_later_run(env, monkeypatch):
     assert "return n + 1;" in row["content"]
 
 
+def test_symbols_failure_does_not_leave_stale_symbols_behind(env, monkeypatch):
+    """A file whose symbol extraction failed must never be reported as fully
+    indexed with symbols from an older revision.
+
+    Pass A upserts the new content in place (same file_id, new blob_sha) but
+    ctags then fails, so the SHA is held. Without clearing the now-stale
+    symbol rows, pass B sees a matching blob_sha AND symbol rows, skips the
+    file, finds to_parse empty, reports symbols_failed=False and advances the
+    SHA -- leaving the old revision's symbols in place permanently.
+    """
+    from codeindex.parse import ctags
+    first = _run(env)
+    conn, cfg, project, repo_id, _, origin = env
+
+    (origin / "decoder.c").write_text(
+        '#include "decoder.h"\n'
+        "\n"
+        "/* renamed and moved down */\n"
+        "int DecodeFrameV2(const char* b, int n){return n + 2;}\n"
+    )
+    git(origin, "commit", "-am", "rename DecodeFrame to DecodeFrameV2")
+
+    # Pass A: content lands, ctags fails, SHA is held.
+    monkeypatch.setattr(ctags.shutil, "which", lambda name: None)
+    passa = _run(env, old_sha=first.sha)
+    assert passa.symbols_failed is True
+    assert conn.execute("SELECT last_indexed_sha FROM repos WHERE id = ?",
+                        (repo_id,)).fetchone()["last_indexed_sha"] == first.sha
+
+    # Pass B: ctags healthy again, same old_sha because the SHA was held.
+    monkeypatch.undo()
+    passb = _run(env, old_sha=first.sha)
+    assert passb.symbols_failed is False
+
+    stored = {
+        (r["name"], r["line"]) for r in conn.execute(
+            "SELECT s.name, s.line FROM symbols s JOIN files f ON f.id = s.file_id"
+            " WHERE f.repo_id = ? AND f.path = 'decoder.c'", (repo_id,)
+        )
+    }
+    assert stored == {("DecodeFrameV2", 4)}
+    assert conn.execute("SELECT last_indexed_sha FROM repos WHERE id = ?",
+                        (repo_id,)).fetchone()["last_indexed_sha"] == passb.sha
+
+
 def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
     from codeindex.parse import ctags
     conn, cfg, project, repo_id, _, _ = env
