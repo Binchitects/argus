@@ -43,7 +43,7 @@ Every task's requirements implicitly include this section.
 
 ---
 
-### Task H1: Replace inferred symbol completion with an explicit marker
+### Task 1: Replace inferred symbol completion with an explicit marker
 
 **Files:**
 - Create: `argus/store/migrations/004_symbols_sha.sql`
@@ -55,7 +55,7 @@ Every task's requirements implicitly include this section.
 - Consumes: existing `writes.replace_symbols(conn, repo_id, file_id, symbols)`.
 - Produces: `replace_symbols(conn, repo_id, file_id, symbols, blob_sha)` — one extra **required** positional argument, the blob sha the symbols were extracted from. `files.symbols_sha` is set to it. `_already_current` returns True only when the stored `blob_sha` matches the tree AND `symbols_sha == blob_sha`.
 
-**Why this task exists.** `_already_current` currently asks "does this file have any symbol rows?" as a proxy for "were symbols extracted successfully?". That proxy is wrong in both directions: a file that legitimately contains zero symbols (an include-only `.c`, a pure macro header) never satisfies it and is re-read, re-upserted and re-FTS-indexed on every full-listing pass; and a file whose fresh extraction failed can still satisfy it using symbol rows from an *older* revision. Making completion explicit fixes both, and it is the precondition for H2.
+**Why this task exists.** `_already_current` currently asks "does this file have any symbol rows?" as a proxy for "were symbols extracted successfully?". That proxy is wrong in both directions: a file that legitimately contains zero symbols (an include-only `.c`, a pure macro header) never satisfies it and is re-read, re-upserted and re-FTS-indexed on every full-listing pass; and a file whose fresh extraction failed can still satisfy it using symbol rows from an *older* revision. Making completion explicit fixes both, and it is the precondition for Task 2.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -194,14 +194,14 @@ git commit -m "fix: track symbol extraction completion explicitly via symbols_sh
 
 ---
 
-### Task H2: Re-enqueue retry-origin paths when symbol extraction fails
+### Task 2: Re-enqueue retry-origin paths when symbol extraction fails
 
 **Files:**
 - Modify: `argus/worker.py` (`index_repo`)
 - Test: `tests/test_worker.py`
 
 **Interfaces:**
-- Consumes: H1's `symbols_sha`; existing `writes.enqueue_retry`.
+- Consumes: Task 1's `symbols_sha`; existing `writes.enqueue_retry`.
 - Produces: no signature change. Behavioural guarantee: a path that entered a pass **from the retry queue** and whose symbol extraction then failed is re-enqueued, so it is not lost.
 
 **The hole.** A path fails to read in pass N, so it is queued and the SHA advances. In pass N+1 it arrives only via the queue, reads fine, and is upserted — then ctags fails. `symbols_failed` holds the SHA, but nothing re-enqueues it, because `failed_paths` only collects paths that *errored during the file loop*. In pass N+2 the diff no longer contains it (it changed before the current `old_sha`, which is exactly why it was queued), and the queue is empty. It is never revisited: stored with current content and no symbols, permanently, with `errors=0`.
@@ -279,7 +279,7 @@ git commit -m "fix: keep retry-origin paths queued when symbol extraction fails"
 
 ---
 
-### Task H3: Reset the retry counter on success, and give operators an escape hatch
+### Task 3: Reset the retry counter on success, and give operators an escape hatch
 
 **Files:**
 - Modify: `argus/worker.py`
@@ -360,7 +360,7 @@ git commit -m "fix: clear retry counters on success and add --reset-retries"
 
 ---
 
-### Task H4: Roll back before recording a per-file error
+### Task 4: Roll back before recording a per-file error
 
 **Files:**
 - Modify: `argus/worker.py`
@@ -430,7 +430,7 @@ git commit -m "fix: roll back partial work before recording a per-file error"
 
 ---
 
-### Task H5: Persist run state so `index_status` can report it
+### Task 5: Persist run state so `index_status` can report it
 
 **Files:**
 - Create: `argus/store/migrations/005_repo_run_state.sql`
@@ -527,7 +527,7 @@ git commit -m "feat: persist last-run state and surface it through index_status"
 
 ---
 
-### Task H6: First real index run and measurement
+### Task 6: First real index run and measurement
 
 **Files:**
 - Create: `docs/phase1-measurements.md`
@@ -612,4 +612,4 @@ git commit -m "docs: record the first full index measurements"
 
 ## What This Unblocks
 
-Phase 2's plan assumes an index whose `index_status` is trustworthy — the ACL module gates access to it, and the MCP server hands it to an agent that will believe what it says. H5 in particular is a prerequisite: without persisted run state, the agent cannot distinguish "no such symbol" from "this repo's symbols were never extracted".
+Phase 2's plan assumes an index whose `index_status` is trustworthy — the ACL module gates access to it, and the MCP server hands it to an agent that will believe what it says. Task 5 in particular is a prerequisite: without persisted run state, the agent cannot distinguish "no such symbol" from "this repo's symbols were never extracted".
