@@ -129,6 +129,30 @@ def test_time_budget_stops_work_without_advancing_sha(env, monkeypatch):
     assert row["last_indexed_sha"] is None
 
 
+def test_force_push_deletes_vanished_files(env):
+    first = _run(env)
+    conn, cfg, project, repo_id, _, origin = env
+
+    git(origin, "checkout", "-q", "--orphan", "fresh")
+    git(origin, "rm", "-q", "-rf", ".")
+    (origin / "z.c").write_text("int z(void){return 0;}\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-m", "rewritten history")
+    git(origin, "branch", "-M", "fresh", "main")
+
+    second = _run(env, old_sha=first.sha)
+
+    paths = {r["path"] for r in conn.execute("SELECT path FROM files")}
+    assert paths == {"z.c"}
+    assert second.deleted == 2  # decoder.h, decoder.c
+    orphaned_symbols = conn.execute(
+        "SELECT COUNT(*) c FROM symbols s JOIN files f ON f.id = s.file_id"
+        " WHERE f.path IN ('decoder.h', 'decoder.c')"
+    ).fetchone()["c"]
+    assert orphaned_symbols == 0
+    assert queries.search_code([repo_id], conn, "DecodeFrame") == []
+
+
 def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
     from codeindex.parse import ctags
     conn, cfg, project, repo_id, _, _ = env

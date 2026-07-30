@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .config import IndexConfig
 from .gitlab import Project
-from .mirror import blob_shas, changed_files
+from .mirror import blob_shas, changed_files, is_ancestor
 from .parse import ctags, filters
 from .parse.includes import extract_includes
 from .store import writes
@@ -38,6 +38,7 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     repo_id = _repo_id(conn, project.gitlab_id)
     result = IndexResult(repo_id=repo_id, sha=new_sha)
 
+    full_reindex = old_sha is None or not is_ancestor(mirror_path, old_sha, new_sha)
     changes = changed_files(mirror_path, old_sha, new_sha)
     shas = blob_shas(mirror_path, new_sha)
 
@@ -45,6 +46,22 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     for change in changes:
         if change.status == "D":
             writes.delete_file(conn, repo_id, change.path)
+            result.deleted += 1
+
+    if full_reindex:
+        # changed_files' full-listing fallback (first index, or a force-push
+        # that rewrote history) emits every path in the NEW tree as "A" — it
+        # never inspects the old tree, so it can never emit "D". Without this,
+        # rows for files that vanished from the tree (content, symbols,
+        # includes, FTS entries) would linger forever even though the SHA
+        # advances and search would keep returning deleted code as live.
+        existing_paths = {
+            row["path"] for row in conn.execute(
+                "SELECT path FROM files WHERE repo_id = ?", (repo_id,)
+            )
+        }
+        for path in existing_paths - shas.keys():
+            writes.delete_file(conn, repo_id, path)
             result.deleted += 1
 
     pending = [c for c in changes if c.status in ("A", "M")]
