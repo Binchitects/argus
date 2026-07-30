@@ -313,63 +313,84 @@ def test_reset_retries_uncommitted_if_list_projects_fails(
     conn.close()
 
 
-def test_reset_retries_with_mistyped_repo_reports_no_match(
-    config_file, fake_projects, capsys
-):
-    """When --repo does not match any known repo, report distinctly."""
+def _seed_retry_attempt(config_file, path="some/path.c", attempts=1):
     from argus.store.db import open_db
 
-    # Index once to establish baseline
-    assert cli.main(["index", "--config", str(config_file)]) == 0
-
-    # Insert a retry_attempts entry for the real repo
     conn = open_db(config_file.parent / "data" / "i.db")
     repo_id = conn.execute(
-        "SELECT id FROM repos WHERE path_with_namespace = ?",
-        ("g/eal",),
+        "SELECT id FROM repos WHERE path_with_namespace = ?", ("g/eal",),
     ).fetchone()["id"]
     conn.execute(
         "INSERT INTO retry_attempts (repo_id, path, attempts) VALUES (?, ?, ?)",
-        (repo_id, "some/path.c", 1),
+        (repo_id, path, attempts),
     )
     conn.commit()
     conn.close()
-
-    # Run with --reset-retries --repo with mistyped name
-    assert (
-        cli.main(
-            ["index", "--config", str(config_file), "--reset-retries", "--repo", "g/nope"]
-        )
-        == 0
-    )
-
-    out = capsys.readouterr().out
-    # Should indicate the repo was not found, not silently succeed
-    assert "not found" in out or "no repos matched" in out or "did not match" in out, (
-        f"should report distinctly when --repo does not match; got: {out}"
-    )
-    assert (
-        "reset retry counters" not in out
-    ), "should not report success when no repos matched"
+    return repo_id
 
 
-def test_reset_retries_help_warns_against_scheduling(capsys):
-    """Help text for --reset-retries should warn against using on schedule."""
-    # Invoke the help output to check the text
+def _surviving_attempts(config_file, path="some/path.c"):
+    from argus.store.db import open_db
+
+    conn = open_db(config_file.parent / "data" / "i.db")
     try:
-        cli.main(["index", "--help"])
-    except SystemExit:
-        # argparse calls sys.exit() after printing help, which is expected
-        pass
+        row = conn.execute(
+            "SELECT attempts FROM retry_attempts WHERE path = ?", (path,)
+        ).fetchone()
+        return row["attempts"] if row else None
+    finally:
+        conn.close()
 
-    help_text = capsys.readouterr().out
 
-    # The help should mention this is manual/not for scheduling
-    assert (
-        "manual" in help_text.lower()
-        or "schedule" in help_text.lower()
-        or "do not use on a schedule" in help_text.lower()
-        or "should not be used on a schedule" in help_text.lower()
-    ), (
-        f"help text should warn against scheduling; got: {help_text}"
+def test_reset_retries_with_mistyped_repo_clears_nothing(config_file,
+                                                          fake_projects, capsys):
+    """A --repo that matches nothing must name the repo AND clear nothing.
+
+    The behaviour under test is that counters survive. The earlier version
+    of this test asserted only on prose, through a
+    "not found"/"no repos matched"/"did not match" disjunction that the
+    pre-existing `print("no repos matched")` satisfies for ANY empty
+    projects list, flag or no flag -- and it inserted a retry_attempts row
+    without ever checking it was still there.
+    """
+    assert cli.main(["index", "--config", str(config_file)]) == 0
+    _seed_retry_attempt(config_file, attempts=2)
+
+    assert cli.main(
+        ["index", "--config", str(config_file), "--reset-retries",
+         "--repo", "g/nope"]
+    ) == 0
+
+    assert _surviving_attempts(config_file) == 2, (
+        "a mistyped --repo cleared retry counters it was never meant to touch"
     )
+    out = capsys.readouterr().out
+    assert "repo 'g/nope' not found" in out, (
+        f"the unmatched repo must be named, not folded into a generic"
+        f" 'no repos matched'; got: {out}"
+    )
+    assert "reset retry counters" not in out
+
+
+def test_index_without_reset_retries_preserves_counters(config_file,
+                                                         fake_projects, capsys):
+    """--reset-retries must be opt-in.
+
+    This replaces a test that asserted only on the flag's help prose -- a
+    four-way OR in which "manual" alone passed, satisfied by wording rather
+    than behaviour. Wiping accumulated retry history on every scheduled run
+    is the actual hazard that warning exists for, so assert that instead.
+    """
+    assert cli.main(["index", "--config", str(config_file)]) == 0
+    _seed_retry_attempt(config_file, attempts=2)
+
+    assert cli.main(["index", "--config", str(config_file)]) == 0
+
+    assert _surviving_attempts(config_file) == 2, (
+        "an ordinary index run wiped retry history without being asked to"
+    )
+    assert "reset" not in capsys.readouterr().out.lower()
+
+    # ...and the flag really is what clears them.
+    assert cli.main(["index", "--config", str(config_file), "--reset-retries"]) == 0
+    assert _surviving_attempts(config_file) is None
