@@ -38,13 +38,31 @@ def preflight() -> str | None:
     return None
 
 
-def _index(cfg: Config, only: str | None) -> int:
+def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
     problem = preflight()
     if problem:
         print(problem, file=sys.stderr)
         return 4
 
     conn = open_db(cfg.index.db_path)
+
+    if reset_retries:
+        # Explicit operator escape hatch: an automatic clear only fires once
+        # a path indexes successfully again, which requires the underlying
+        # cause (ACL, path length, AV quarantine) to already be fixed. This
+        # lets an operator forget the history immediately instead of waiting
+        # for that to happen on its own.
+        if only:
+            conn.execute(
+                "DELETE FROM retry_attempts WHERE repo_id IN"
+                " (SELECT id FROM repos WHERE path_with_namespace = ?)",
+                (only,),
+            )
+        else:
+            conn.execute("DELETE FROM retry_attempts")
+        conn.commit()
+        print("reset retry counters")
+
     projects = list_projects(cfg.gitlab)
     if only:
         projects = [p for p in projects if p.path_with_namespace == only]
@@ -128,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     p_index = sub.add_parser("index", help="Mirror and index repositories")
     p_index.add_argument("--config", required=True, type=Path)
     p_index.add_argument("--repo", help="Index only this path_with_namespace")
+    p_index.add_argument("--reset-retries", action="store_true",
+                         help="Clear retry counters before indexing (recovery escape hatch)")
 
     p_status = sub.add_parser("status", help="Show per-repo index freshness")
     p_status.add_argument("--config", required=True, type=Path)
@@ -142,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "index":
-            return _index(cfg, args.repo)
+            return _index(cfg, args.repo, args.reset_retries)
         return _status(cfg)
     except GitLabError as exc:
         print(f"gitlab error: {exc}", file=sys.stderr)

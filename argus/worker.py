@@ -164,19 +164,24 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
 
     _apply_symbols(conn, repo_id, tree, to_parse, result, now, shas)
 
-    # A queued path that is healthy again -- indexed this pass, or gone from
-    # the tree entirely -- starts over with a clean attempt count. But when
+    # Clear on success regardless of how the path entered this pass -- not
+    # only paths that arrived via the retry queue -- so a fixed underlying
+    # cause (an ACL, a >260-char Windows path, an AV quarantine) actually
+    # recovers. A path that exhausted the cap long ago and dropped out of
+    # the queue is never queued again; if it later comes back healthy
+    # through an ordinary diff instead, restricting the clear to `queued`
+    # would leave its stale attempts count at the cap forever. But when
     # symbols_failed, NO path in to_parse actually completed (its read/store
     # succeeded, but that alone is not "done"): clearing the counter here
     # would let bump_retry_attempts re-insert a fresh attempts=1 row every
     # such pass, and attempts could never reach MAX_RETRY_ATTEMPTS. Paths
-    # gone from the tree entirely are unaffected -- they can never come back
-    # through to_parse again regardless, so it is still safe to forget them.
+    # gone from the tree entirely are unaffected by that guard -- they can
+    # never come back through to_parse again regardless, so it is still
+    # safe to forget them even on a symbols_failed pass.
     indexed_paths = set(to_parse) if not result.symbols_failed else set()
-    writes.clear_retry_attempts(
-        conn, repo_id,
-        [p for p in queued if p in indexed_paths or p not in shas],
-    )
+    gone_paths = {p for p in queued if p not in shas}
+    if indexed_paths or gone_paths:
+        writes.clear_retry_attempts(conn, repo_id, list(indexed_paths | gone_paths))
 
     symbols_only_failed: set[str] = set()
     if result.symbols_failed:

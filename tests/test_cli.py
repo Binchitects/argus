@@ -93,6 +93,12 @@ def test_index_returns_nonzero_when_a_repo_fails(config_file, tmp_path,
     assert "FAILED" in capsys.readouterr().err
 
 
+def test_reset_retries_flag_clears_counters(config_file, fake_projects, capsys):
+    assert cli.main(["index", "--config", str(config_file)]) == 0
+    assert cli.main(["index", "--config", str(config_file), "--reset-retries"]) == 0
+    assert "reset retry counters" in capsys.readouterr().out
+
+
 def test_index_refuses_exuberant_ctags(config_file, fake_projects,
                                        monkeypatch, capsys):
     """Exuberant Ctags has no --output-format=json; it must be rejected."""

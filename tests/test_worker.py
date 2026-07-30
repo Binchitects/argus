@@ -477,6 +477,49 @@ def test_retry_path_whose_symbols_fail_is_requeued(env, monkeypatch):
     assert "DecodeFrameV2" in names
 
 
+def test_successful_index_clears_the_retry_counter(env, monkeypatch):
+    conn, cfg, project, repo_id, _, _ = env
+    conn.execute(
+        "INSERT INTO retry_attempts (repo_id, path, attempts) VALUES (?, 'decoder.c', 2)",
+        (repo_id,),
+    )
+    conn.commit()
+    _run(env)
+    row = conn.execute(
+        "SELECT attempts FROM retry_attempts WHERE repo_id = ? AND path = 'decoder.c'",
+        (repo_id,),
+    ).fetchone()
+    assert row is None, "counter should be cleared once the path indexes successfully"
+
+
+def test_symbols_failed_pass_does_not_clear_the_retry_counter(env, monkeypatch):
+    """Task 2's guard: ctags is all-or-nothing, so when it fails NO path in
+    to_parse actually completed even though its read/store succeeded.
+    Clearing retry_attempts here would let bump_retry_attempts reinsert a
+    fresh attempts=1 row every such pass, and attempts could never reach
+    MAX_RETRY_ATTEMPTS -- the exact bug Task 2 fixed. decoder.c's read/store
+    succeed this pass (it lands in to_parse), but ctags fails, so its stale
+    counter must survive untouched.
+    """
+    from argus.parse import ctags
+    conn, cfg, project, repo_id, _, _ = env
+    conn.execute(
+        "INSERT INTO retry_attempts (repo_id, path, attempts) VALUES (?, 'decoder.c', 2)",
+        (repo_id,),
+    )
+    conn.commit()
+    monkeypatch.setattr(ctags.shutil, "which", lambda name: None)
+
+    result = _run(env)
+    assert result.symbols_failed is True
+    row = conn.execute(
+        "SELECT attempts FROM retry_attempts WHERE repo_id = ? AND path = 'decoder.c'",
+        (repo_id,),
+    ).fetchone()
+    assert row is not None and row["attempts"] == 2, \
+        "counter must survive a pass whose symbol extraction failed"
+
+
 def _queued_paths(conn, repo_id):
     row = conn.execute(
         "SELECT reason FROM index_queue WHERE repo_id = ?", (repo_id,)
