@@ -883,6 +883,81 @@ def test_per_path_symbol_failure_still_exhausts_the_retry_cap(env, monkeypatch):
     assert "decoder.c" not in _queued_paths(conn, repo_id)
 
 
+def _unattributable_ctags_module(silent_paths: set):
+    """A stand-in `subprocess` for a non-zero exit that names no path at all.
+
+    Models ctags hitting an internal error rather than an ACL/open failure
+    on a specific file: it still tags everything it could (all listed paths
+    except `silent_paths`), but its stderr contains no path at all, so
+    nothing in the batch can be individually blamed for the failure.
+    """
+    def run(cmd, **kwargs):
+        listed = [p for p in kwargs.get("input", "").splitlines() if p]
+        stdout = '{"_type":"ptag","name":"JSON_OUTPUT_VERSION"}\n'
+        stdout += "".join(
+            json.dumps({"_type": "tag",
+                        "name": "Sym_" + path.replace("/", "_").replace(".", "_"),
+                        "path": path, "kind": "function", "line": 1}) + "\n"
+            for path in listed if path not in silent_paths
+        )
+        return types.SimpleNamespace(
+            returncode=1, stdout=stdout,
+            stderr="ctags: internal error: unexpected state\n",
+        )
+    return types.SimpleNamespace(
+        run=run, TimeoutExpired=subprocess.TimeoutExpired)
+
+
+def test_unattributable_batch_failure_does_not_burn_the_retry_budget(env, monkeypatch):
+    """A non-zero exit that names no path is a tool hiccup, not proof that
+    any one file is broken. quiet.c produces no tags (there is nothing in
+    it to tag), so it looks identical to a file ctags never opened -- but
+    unlike test_per_path_symbol_failure_still_exhausts_the_retry_cap, ctags
+    never names it. Charging that against its retry budget would exhaust
+    and permanently drop a file nothing was ever actually wrong with, after
+    exactly MAX_RETRY_ATTEMPTS unlucky passes.
+    """
+    from argus.parse import ctags as ctags_mod
+    conn, cfg, project, repo_id, _, origin = env
+    (origin / "quiet.c").write_text("/* no symbols here */\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-m", "add symbol-free file")
+
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+
+    monkeypatch.setattr(ctags_mod, "subprocess",
+                        _unattributable_ctags_module({"quiet.c"}))
+    previous = None
+    for _ in range(writes.MAX_RETRY_ATTEMPTS + 2):
+        result = worker.index_repo(conn, cfg, project, m, tree, sha, previous)
+        assert result.symbols_failed is False, (
+            "ctags itself ran and tagged everything it could -- this is a"
+            " per-batch attribution gap, not a repo-wide outage"
+        )
+        previous = result.sha
+    monkeypatch.undo()
+
+    assert _attempts(conn, repo_id, "quiet.c") == 0, (
+        "an unattributable miss must not be charged against the retry budget"
+    )
+    assert "quiet.c" in _queued_paths(conn, repo_id), (
+        "an unattributable miss must still come back on a later pass, or it"
+        " is lost even though it was never given a real chance to fail"
+    )
+    assert _exhausted_paths(conn, repo_id) == []
+    row = _symbols_sha_row(conn, repo_id, "quiet.c")
+    assert row["symbols_sha"] != row["blob_sha"], (
+        "an unattributable miss must not be stamped complete either"
+    )
+
+    # decoder.c produced tags every pass and must still be complete --
+    # this fix must not make genuinely covered files worse off.
+    dec = _symbols_sha_row(conn, repo_id, "decoder.c")
+    assert dec["symbols_sha"] == dec["blob_sha"]
+
+
 def test_failure_inside_upsert_does_not_desync_fts(env, monkeypatch):
     conn, cfg, project, repo_id, _, origin = env
     _run(env)

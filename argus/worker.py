@@ -170,7 +170,8 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # Paths whose read/store succeeded but that ctags never processed. These
     # are per-path failures, not a repo-wide outage: they must not be stamped
     # complete, and they must come back on a later pass.
-    uncovered = _apply_symbols(conn, repo_id, tree, to_parse, result, now, shas)
+    uncovered, unattributable = _apply_symbols(
+        conn, repo_id, tree, to_parse, result, now, shas)
     failed_paths.extend(uncovered)
 
     # Clear on success regardless of how the path entered this pass -- not
@@ -189,8 +190,10 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # safe to forget them even on a symbols_failed pass.
     # A path ctags did not cover is not "indexed" either, no matter that its
     # read and store succeeded -- clearing its counter would let it retry
-    # forever without ever accumulating attempts.
-    indexed_paths = (set(to_parse) - set(uncovered)
+    # forever without ever accumulating attempts. That includes
+    # `unattributable` paths: their counter must stay frozen (neither
+    # cleared nor bumped), same reasoning as symbols_only_failed below.
+    indexed_paths = (set(to_parse) - set(uncovered) - set(unattributable)
                      if not result.symbols_failed else set())
     gone_paths = {p for p in queued if p not in shas}
     if indexed_paths or gone_paths:
@@ -220,6 +223,12 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # exhausts: `uncovered` (one specific file ctags could not process, while
     # ctags itself was fine) went into failed_paths above and is capped
     # normally. "This path failed" bumps; "the tool was down" does not.
+    #
+    # `unattributable` is routed the same way as symbols_only_failed for the
+    # same reason: a non-zero exit that named no path means a symbol-free
+    # file in the batch cannot be told apart from one ctags never opened,
+    # so it must not be charged a per-path attempt either. It is queued
+    # directly below, bypassing _cap_retries entirely.
     symbols_only_failed: list[str] = []
     if result.symbols_failed:
         symbols_only_failed = [p for p in to_parse if p in retry_set]
@@ -233,7 +242,7 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # nothing re-derives a retry path, so those files were simply lost.
     writes.clear_retry_queue(conn, repo_id)
 
-    requeue = retryable + unreached_retry + symbols_only_failed
+    requeue = retryable + unreached_retry + symbols_only_failed + unattributable
     if requeue:
         uncovered_set = set(uncovered)
         reasons = []
@@ -243,6 +252,8 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
             reasons.append("ctags did not process the file")
         if symbols_only_failed:
             reasons.append("repo-wide symbol extraction failure")
+        if unattributable:
+            reasons.append("ctags exited non-zero without naming a file")
         if unreached_retry:
             reasons.append("not reached before the repo time budget")
         writes.enqueue_retry(conn, repo_id, requeue, "; ".join(reasons), int(now()))
@@ -313,20 +324,35 @@ def _already_current(conn, repo_id: int, path: str, blob_sha: str) -> bool:
 
 
 def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
-                   result: IndexResult, now, shas: dict[str, str]) -> list[str]:
+                   result: IndexResult, now, shas: dict[str, str]
+                   ) -> tuple[list[str], list[str]]:
     """Stamp symbols for the paths ctags covered; report the ones it did not.
 
-    Returns the paths ctags did NOT process. Those are genuine per-path
-    failures (a file it could not open, a name the filesystem refuses to hand
-    back) and the caller must treat them as such: never stamped complete,
-    surfaced in index_errors, and queued for retry. Stamping them -- which is
-    what looping blindly over `paths` did -- marks them complete forever,
-    because symbols_sha = blob_sha makes the next pass skip them as
-    already-current and the SHA has already advanced past the commit that
-    would otherwise bring them back.
+    Returns (uncovered, unattributable). Both are paths ctags did NOT
+    process, and neither is stamped complete: symbols_sha stays cleared and
+    the SHA has already advanced past the commit that would otherwise bring
+    them back, so both must be surfaced and queued for retry. Stamping them
+    -- which is what looping blindly over `paths` did -- marks them complete
+    forever, because symbols_sha = blob_sha makes the next pass skip them as
+    already-current.
+
+    The two lists differ in what the caller must do with the RETRY BUDGET:
+
+    `uncovered` is a path ctags explicitly named (a file it could not open,
+    a name the filesystem refuses to hand back) -- a genuine per-path
+    failure, so the caller charges it against `_cap_retries` same as any
+    other failed_paths entry, and it can exhaust.
+
+    `unattributable` is a path that merely could not be PROVEN covered: the
+    batch exited non-zero without naming any path, so a symbol-free file in
+    it is indistinguishable from one ctags never opened. That is "the tool
+    had a bad pass", not "this file is broken" -- the same principle that
+    already keeps a repo-wide CtagsUnavailable outage from burning the
+    retry budget (see the symbols_only_failed comment in index_repo). The
+    caller must re-enqueue these WITHOUT bumping their attempt counter.
     """
     if not paths:
-        return []
+        return [], []
     try:
         batch = ctags.extract_symbols(tree, paths)
     except ctags.CtagsUnavailable as exc:
@@ -346,9 +372,10 @@ def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
         # make a stale symbols_sha coincidentally equal the recomputed
         # blob_sha and be mistaken for complete.
         writes.clear_symbols_for_paths(conn, repo_id, paths)
-        return []
+        return [], []
 
     uncovered: list[str] = []
+    unattributable: list[str] = []
     for path in paths:
         row = conn.execute(
             "SELECT id FROM files WHERE repo_id = ? AND path = ?", (repo_id, path)
@@ -356,13 +383,20 @@ def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
         if row is None:
             continue
         if path not in batch.covered:
-            writes.record_error(
-                conn, repo_id, path, "symbols",
-                batch.uncovered.get(path, "ctags did not process this file"),
-                int(now()),
-            )
-            result.errors += 1
-            uncovered.append(path)
+            if path in batch.unattributable:
+                # Not charged against index_errors/result.errors either: we
+                # cannot prove this file is broken at all, only that this
+                # batch could not prove it clean. Logging it as a failure
+                # would misreport a tool hiccup as a per-file defect.
+                unattributable.append(path)
+            else:
+                writes.record_error(
+                    conn, repo_id, path, "symbols",
+                    batch.uncovered.get(path, "ctags did not process this file"),
+                    int(now()),
+                )
+                result.errors += 1
+                uncovered.append(path)
             continue
         # An empty list here is a real answer -- ctags opened the file and
         # found nothing taggable -- so it is stamped complete, which is the
@@ -374,5 +408,5 @@ def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
     # row was already updated in place, so surviving symbol rows describe a
     # revision the file no longer has, and a NULL symbols_sha cannot later be
     # mistaken for a match if the content is reverted to that older blob.
-    writes.clear_symbols_for_paths(conn, repo_id, uncovered)
-    return uncovered
+    writes.clear_symbols_for_paths(conn, repo_id, uncovered + unattributable)
+    return uncovered, unattributable

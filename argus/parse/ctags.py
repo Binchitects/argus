@@ -57,6 +57,14 @@ class SymbolBatch:
     symbols: dict[str, list[dict]] = field(default_factory=dict)
     covered: frozenset[str] = frozenset()
     uncovered: dict[str, str] = field(default_factory=dict)   # path -> why
+    # The subset of `uncovered` that ctags did NOT explicitly name -- a
+    # non-zero exit that named no path leaves every non-tag-producing file
+    # in the batch looking uncovered even though most of them may well have
+    # parsed cleanly and simply had nothing to tag. That is "the tool had a
+    # bad pass", not "this specific file is broken", so callers must not
+    # charge it against a per-path retry budget the way they do for a path
+    # ctags actually named (see argus.worker._apply_symbols).
+    unattributable: frozenset[str] = frozenset()
 
 
 def _paths_named_in(paths: list[str], stderr: str) -> set[str]:
@@ -200,9 +208,16 @@ def extract_symbols(root: Path, rel_paths: list[str]) -> SymbolBatch:
     # When it named nothing, no such claim can be made, so only paths that
     # actually produced tags count as covered.
     covered = listed - blamed if blamed else set(results) & listed
-    for path in sorted(listed - covered):
+    misses = sorted(listed - covered)
+    for path in misses:
         uncovered[path] = (
             f"ctags exited {proc.returncode} without covering this file: "
             f"{detail or 'no diagnostic output'}"
         )
-    return SymbolBatch(results, frozenset(covered), uncovered)
+    # `blamed` empty means the diagnostic named no path at all, so nothing
+    # in `misses` can be pinned on any one file -- they are unattributable,
+    # not per-path failures. When `blamed` is non-empty, `misses` IS
+    # `blamed` (every miss is a file ctags actually named), so there is
+    # nothing unattributable about it.
+    unattributable = frozenset(misses) if not blamed else frozenset()
+    return SymbolBatch(results, frozenset(covered), uncovered, unattributable)
