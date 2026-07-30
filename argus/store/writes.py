@@ -32,6 +32,16 @@ def set_last_indexed(conn: sqlite3.Connection, repo_id: int, sha: str, ts: int) 
     conn.commit()
 
 
+def record_run_state(conn: sqlite3.Connection, repo_id: int, *,
+                     timed_out: bool, symbols_failed: bool, ts: int) -> None:
+    conn.execute(
+        "UPDATE repos SET last_run_timed_out = ?, last_run_symbols_failed = ?,"
+        "                 last_run_at = ? WHERE id = ?",
+        (int(timed_out), int(symbols_failed), ts, repo_id),
+    )
+    conn.commit()
+
+
 def _fts_delete(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
     """Remove a row from the external-content FTS index using its OLD values."""
     conn.execute(

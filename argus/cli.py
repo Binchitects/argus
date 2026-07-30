@@ -144,9 +144,15 @@ def _status(cfg: Config) -> int:
             if row["last_indexed_at"] else "never"
         )
         sha = (row["last_indexed_sha"] or "-")[:8]
+        flags = ""
+        if row["last_run_timed_out"]:
+            flags += " TIMED-OUT"
+        if row["last_run_symbols_failed"]:
+            flags += " SYMBOLS-FAILED"
         print(
             f"{row['path_with_namespace']:<40} sha={sha} at={when} "
-            f"files={row['files']} symbols={row['symbols']} errors={row['errors']}"
+            f"files={row['files']} symbols={row['symbols']} errors={row['errors']} "
+            f"queued_retries={row['queued_retries']}{flags}"
         )
     return 0
 

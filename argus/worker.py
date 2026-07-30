@@ -207,6 +207,12 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
 
     if not result.timed_out and not result.symbols_failed:
         writes.set_last_indexed(conn, repo_id, new_sha, int(now()))
+
+    # Unconditional: a clean pass must clear a previously-set flag, or a
+    # transient timeout/ctags outage would leave index_status reporting
+    # partial coverage forever even after the repo fully recovers.
+    writes.record_run_state(conn, repo_id, timed_out=result.timed_out,
+                            symbols_failed=result.symbols_failed, ts=int(now()))
     return result
 
 

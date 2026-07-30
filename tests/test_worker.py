@@ -658,3 +658,57 @@ def test_failure_inside_upsert_does_not_desync_fts(env, monkeypatch):
         f"FTS index desynced: files.content for decoder.c contains {needle!r} "
         "but files_fts has no matching row for that file"
     )
+
+
+def test_timed_out_pass_persists_last_run_timed_out_flag(env):
+    conn, cfg, project, repo_id, _, _ = env
+    budget_cfg = IndexConfig(data_dir=cfg.data_dir, db_path=cfg.db_path,
+                             repo_time_budget_seconds=0)
+    m = mirror.ensure_mirror(budget_cfg, project, clone_url=str(env[5]))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(budget_cfg, project.gitlab_id, m, sha)
+
+    result = worker.index_repo(conn, budget_cfg, project, m, tree, sha, None)
+    assert result.timed_out is True
+    row = conn.execute(
+        "SELECT last_run_timed_out, last_run_symbols_failed FROM repos WHERE id = ?",
+        (repo_id,),
+    ).fetchone()
+    assert row["last_run_timed_out"] == 1
+    assert row["last_run_symbols_failed"] == 0
+
+
+def test_ctags_unavailable_persists_last_run_symbols_failed_flag(env, monkeypatch):
+    from argus.parse import ctags
+    conn, cfg, project, repo_id, _, _ = env
+    monkeypatch.setattr(ctags.shutil, "which", lambda name: None)
+
+    result = _run(env)
+    assert result.symbols_failed is True
+    row = conn.execute(
+        "SELECT last_run_timed_out, last_run_symbols_failed FROM repos WHERE id = ?",
+        (repo_id,),
+    ).fetchone()
+    assert row["last_run_symbols_failed"] == 1
+    assert row["last_run_timed_out"] == 0
+
+
+def test_clean_pass_clears_previously_set_last_run_timed_out_flag(env):
+    """A stale flag that never clears would be worse than no flag at all."""
+    conn, cfg, project, repo_id, _, _ = env
+    budget_cfg = IndexConfig(data_dir=cfg.data_dir, db_path=cfg.db_path,
+                             repo_time_budget_seconds=0)
+    m = mirror.ensure_mirror(budget_cfg, project, clone_url=str(env[5]))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(budget_cfg, project.gitlab_id, m, sha)
+    worker.index_repo(conn, budget_cfg, project, m, tree, sha, None)
+
+    row = conn.execute("SELECT last_run_timed_out FROM repos WHERE id = ?",
+                       (repo_id,)).fetchone()
+    assert row["last_run_timed_out"] == 1  # sanity check the flag was actually set
+
+    # A subsequent clean pass (no time limit) must clear it.
+    _run(env)
+    row = conn.execute("SELECT last_run_timed_out FROM repos WHERE id = ?",
+                       (repo_id,)).fetchone()
+    assert row["last_run_timed_out"] == 0

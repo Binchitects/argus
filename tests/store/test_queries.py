@@ -100,3 +100,20 @@ def test_allowlist_must_be_a_sequence_of_ints(two_repos):
         queries.find_symbol("all", conn, "SharedName")
     with pytest.raises(TypeError):
         queries.find_symbol([None], conn, "SharedName")
+
+
+def test_index_status_reports_last_run_flags(two_repos):
+    conn, ids = two_repos
+    rid = ids["g/alpha"]
+    writes.record_run_state(conn, rid, timed_out=True, symbols_failed=False, ts=1234)
+    row = [r for r in queries.index_status([rid], conn)][0]
+    assert row["last_run_timed_out"] == 1
+    assert row["last_run_symbols_failed"] == 0
+
+
+def test_index_status_reports_queued_retries(two_repos):
+    conn, ids = two_repos
+    rid = ids["g/beta"]
+    writes.enqueue_retry(conn, rid, ["a.c", "b.c"], "read error", 1234)
+    row = [r for r in queries.index_status([rid], conn)][0]
+    assert row["queued_retries"] >= 1
