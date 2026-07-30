@@ -388,19 +388,33 @@ def test_failure_inside_upsert_does_not_desync_fts(env, monkeypatch):
     git(origin, "add", "-A")
     git(origin, "commit", "-m", "modify")
 
-    from argus.store import writes as w
-    real_execute = sqlite3.Connection.execute
-    def boom(self, sql, *a, **k):
-        if sql.strip().startswith("INSERT INTO files_fts(rowid"):
-            raise sqlite3.OperationalError("simulated mid-upsert failure")
-        return real_execute(self, sql, *a, **k)
-    monkeypatch.setattr(sqlite3.Connection, "execute", boom)
-    _run(env, old_sha=None)
-    monkeypatch.undo()
+    # sqlite3.Connection is a static C type — CPython refuses attribute
+    # assignment on it at class or instance level, so it cannot be
+    # monkeypatched. A Connection *subclass* is an ordinary heap type, so
+    # inject the failure by running the pass through one.
+    class BoomConnection(sqlite3.Connection):
+        def execute(self, sql, *a, **k):
+            if sql.strip().startswith("INSERT INTO files_fts(rowid"):
+                raise sqlite3.OperationalError("simulated mid-upsert failure")
+            return super().execute(sql, *a, **k)
 
-    files_n = conn.execute("SELECT COUNT(*) c FROM files").fetchone()["c"]
-    fts_n = conn.execute("SELECT COUNT(*) c FROM files_fts").fetchone()["c"]
-    assert files_n == fts_n, f"FTS desynced: {files_n} files vs {fts_n} fts rows"
+    boom_conn = sqlite3.connect(cfg.db_path, factory=BoomConnection)
+    boom_conn.row_factory = sqlite3.Row
+    boom_conn.execute("PRAGMA foreign_keys = ON")
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+    worker.index_repo(boom_conn, cfg, project, m, tree, sha, None)
+    boom_conn.close()
+
+    # Assert via MATCH, never via COUNT. files_fts is external-content, so it
+    # proxies COUNT(*) straight through to `files` — the counts stay equal even
+    # when the term index is desynced. Only a MATCH reveals it. Verified:
+    # healthy files=1 fts_count=1 match=1; desynced files=1 fts_count=1 match=0.
+    hits = conn.execute(
+        "SELECT COUNT(*) c FROM files_fts WHERE files_fts MATCH 'Marker'"
+    ).fetchone()["c"]
+    assert hits == 1, "FTS index desynced: content in `files` is not searchable"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
