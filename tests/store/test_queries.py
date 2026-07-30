@@ -1,8 +1,8 @@
 import inspect
 import pytest
 
-from codeindex.store.db import open_db
-from codeindex.store import writes, queries
+from argus.store.db import open_db
+from argus.store import writes, queries
 
 
 def test_every_public_query_takes_allowlist_first():

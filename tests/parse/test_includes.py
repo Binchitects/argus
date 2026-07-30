@@ -1,4 +1,4 @@
-from codeindex.parse.includes import extract_includes
+from argus.parse.includes import extract_includes
 
 SOURCE = '''
 #include <stdio.h>

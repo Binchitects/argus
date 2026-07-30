@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from codeindex.parse import ctags
+from argus.parse import ctags
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "ctags"
 pytestmark = pytest.mark.skipif(

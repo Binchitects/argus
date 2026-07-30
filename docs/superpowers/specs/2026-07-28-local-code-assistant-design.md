@@ -1,4 +1,4 @@
-# CodeIndex — Local Code Assistant for Hermes Agent
+# Argus — Local Code Assistant for Hermes Agent
 
 **Date:** 2026-07-28
 **Status:** Design approved, pending implementation plan
@@ -15,7 +15,7 @@ code-retrieval capability of any kind: its toolset registry provides web search,
 conversational memory, and session search, but no vector store, no symbol index, and no cross-repo
 search. Its `context_engine` toolset is an empty stub. The index does not exist and must be built.
 
-This project builds **CodeIndex**: an MCP server that indexes all GitLab repos and exposes
+This project builds **Argus**: an MCP server that indexes all GitLab repos and exposes
 access-controlled code retrieval to each developer's Hermes instance.
 
 ## Non-goals
@@ -24,7 +24,7 @@ access-controlled code retrieval to each developer's Hermes instance.
 - Building the repos. No `compile_commands.json`, no clangd, no compilation is required for v1.
 - Serving as a general document RAG. This indexes source code and its adjacent docs, nothing else.
 - Multi-branch indexing. v1 indexes each repo's default branch only.
-- Write access to GitLab. CodeIndex never pushes, never opens merge requests. Developers apply
+- Write access to GitLab. Argus never pushes, never opens merge requests. Developers apply
   changes in their own local checkouts through Hermes's existing file tools.
 
 ## Topology
@@ -34,7 +34,7 @@ Two machines, one direction of dependency.
 **Index host — Linux, shared GPU box.** Runs all stateful components:
 
 - Ollama serving `qwen3.6:35b` (chat) and `nomic-embed-text` (embeddings)
-- The CodeIndex server (HTTP MCP) behind a TLS reverse proxy
+- The Argus server (HTTP MCP) behind a TLS reverse proxy
 - Bare git mirrors plus one default-branch worktree per repo
 - A single SQLite database holding the entire index
 
@@ -42,11 +42,11 @@ Two machines, one direction of dependency.
 
 ```
 model.base_url  → http://<index-host>:11434/v1        # inference
-mcp.codeindex   → https://<index-host>/mcp            # retrieval, --auth header
+mcp.argus   → https://<index-host>/mcp            # retrieval, --auth header
 ```
 
 Hermes keeps full local filesystem access, so it reads and edits the developer's own checkout.
-CodeIndex tells it *where* the change belongs; Hermes's existing local tools *make* the change.
+Argus tells it *where* the change belongs; Hermes's existing local tools *make* the change.
 
 ## Components
 
@@ -65,9 +65,9 @@ Seven modules, each with a single responsibility and an interface that can be te
 ### Package layout
 
 ```
-codeindex/
-  config.py          # typed config load from /etc/codeindex/config.yaml + env
-  cli.py             # codeindex serve | index | status | flush-acl
+argus/
+  config.py          # typed config load from /etc/argus/config.yaml + env
+  cli.py             # argus serve | index | status | flush-acl
   mirror.py          # GitLab discovery, fetch, diff detection
   parse/
     filters.py       # what to skip: binary, vendored, generated, oversize
@@ -153,7 +153,7 @@ Renames (`R` entries) are treated as delete + add. Rename tracking buys nothing 
 - Larger than 1 MB
 - Under a vendored/build path (`third_party/`, `vendor/`, `node_modules/`, `build/`, `out/`, `x64/`, `Debug/`, `Release/`)
 - Marked `linguist-generated` in `.gitattributes`
-- Matching the repo's optional `.codeindexignore`
+- Matching the repo's optional `.argusignore`
 
 Survivors go through:
 - **ctags** → symbol name, kind, file, line, signature, scope. For C/C++: functions, classes,
@@ -251,7 +251,7 @@ come from a new code path that simply never called it.
 ### Revocation and audit
 
 The cache TTL bounds the revocation window: removing someone in GitLab takes effect within
-~10 minutes, or immediately via `codeindex flush-acl` / `POST /admin/acl/flush`.
+~10 minutes, or immediately via `argus flush-acl` / `POST /admin/acl/flush`.
 
 Every query appends to `audit(ts, user_id, tool, args_json, repo_ids_json)`. At this team size the
 cost is negligible and it answers "what did the assistant show them" after the fact.
@@ -308,7 +308,7 @@ steer the agent, not to describe the exception.
 
 | Failure | Behavior |
 |---|---|
-| Index host unreachable mid-conversation | Tool returns: *"CodeIndex unavailable — fall back to ripgrep/read in the local checkout and tell the user the answer is repo-local only."* Hermes keeps its local file tools; the developer degrades to single-repo work rather than a dead session. |
+| Index host unreachable mid-conversation | Tool returns: *"Argus unavailable — fall back to ripgrep/read in the local checkout and tell the user the answer is repo-local only."* Hermes keeps its local file tools; the developer degrades to single-repo work rather than a dead session. |
 | GitLab unreachable during ACL resolve | Stale cache within grace window, else deny. |
 | ctags/tree-sitter crashes on a file | Quarantine the file, record in `index_errors`, continue the repo. One malformed header must never abort a 200k-file index. |
 | Indexer crashes mid-repo | `last_indexed_sha` advances only after the repo's full changed set commits. Restart redoes that repo's diff; all upserts are idempotent. |
@@ -345,15 +345,15 @@ The initial index is the long pole; run it before onboarding anyone.
 2. `ollama pull nomic-embed-text`; pin the chat model to `qwen3.6:35b` — **not** `:latest`.
    Today `qwen3.6:latest` and `qwen3.6:35b` share digest `07d35212591f`, but that will not hold.
 3. Create the GitLab service token with `read_api` + `read_repository`
-4. Write `/etc/codeindex/config.yaml`; start the systemd unit; confirm `/healthz`
+4. Write `/etc/argus/config.yaml`; start the systemd unit; confirm `/healthz`
 5. Run the initial full index (hours at this volume)
 6. Register the GitLab push webhook; confirm the 15-minute poll fallback is active
 7. Per developer: `hermes config set model.base_url http://<host>:11434/v1`, then
-   `hermes mcp add codeindex --url https://<host>/mcp --auth header`
+   `hermes mcp add argus --url https://<host>/mcp --auth header`
 
 ### Transport
 
-The CodeIndex server binds localhost; Caddy (or nginx) terminates TLS in front of it with an
+The Argus server binds localhost; Caddy (or nginx) terminates TLS in front of it with an
 internal-CA or self-signed certificate. This is required, not optional: `hermes mcp add --auth
 header` sends the developer's GitLab PAT on every tool call, and over plain HTTP that is a
 credential in cleartext on the wire.
@@ -391,7 +391,7 @@ leaves the box.
 
 **Phase 1 — Indexed and searchable, single user.**
 `config` + `store` (with the required-allowlist signature from the start) + `mirror` + `parse` +
-`worker`. CLI only: `codeindex index`, `codeindex status`. No server yet. Ends with a populated
+`worker`. CLI only: `argus index`, `argus status`. No server yet. Ends with a populated
 database over your real repos and a measured answer to how long a full index actually takes.
 
 **Phase 2 — Multi-user retrieval.**

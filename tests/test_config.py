@@ -1,14 +1,14 @@
 import pytest
 from pathlib import Path
-from codeindex.config import Config, ConfigError
+from argus.config import Config, ConfigError
 
 YAML = """
 gitlab:
   url: https://gitlab.internal
   token: from-file
 index:
-  data_dir: /var/lib/codeindex
-  db_path: /var/lib/codeindex/index.db
+  data_dir: /var/lib/argus
+  db_path: /var/lib/argus/index.db
 """
 
 
@@ -18,13 +18,13 @@ def test_loads_yaml(tmp_path):
     cfg = Config.load(p)
     assert cfg.gitlab.url == "https://gitlab.internal"
     assert cfg.gitlab.token == "from-file"
-    assert cfg.index.db_path == Path("/var/lib/codeindex/index.db")
+    assert cfg.index.db_path == Path("/var/lib/argus/index.db")
 
 
 def test_env_overrides_token(tmp_path, monkeypatch):
     p = tmp_path / "c.yaml"
     p.write_text(YAML)
-    monkeypatch.setenv("CODEINDEX_GITLAB_TOKEN", "from-env")
+    monkeypatch.setenv("ARGUS_GITLAB_TOKEN", "from-env")
     assert Config.load(p).gitlab.token == "from-env"
 
 

@@ -8,7 +8,7 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
-# CodeIndex runtime state (all rebuildable from GitLab)
+# Argus runtime state (all rebuildable from GitLab)
 data/
 *.db
 *.db-wal

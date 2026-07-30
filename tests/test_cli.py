@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from codeindex import cli
-from codeindex.gitlab import Project
+from argus import cli
+from argus.gitlab import Project
 
 
 def git(cwd, *args):

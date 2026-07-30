@@ -1,8 +1,8 @@
-# CodeIndex Phase 1 — Indexer Implementation Plan
+# Argus Phase 1 — Indexer Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the CodeIndex indexer — mirror every GitLab repo, extract symbols and includes from changed files, and store them in SQLite behind an access-control-safe query API, driven by a CLI.
+**Goal:** Build the Argus indexer — mirror every GitLab repo, extract symbols and includes from changed files, and store them in SQLite behind an access-control-safe query API, driven by a CLI.
 
 **Architecture:** A `mirror` module maintains bare git mirrors plus one worktree per repo and computes changed-file sets from git diffs. A `parse` package extracts symbols (universal-ctags) and `#include` directives from those files. A `store` package owns all SQLite access, split into service-side writes and allowlist-gated reads. A serialized `worker` orchestrates one repo at a time. No HTTP server, no embeddings, no MCP in this phase.
 
@@ -15,9 +15,9 @@ Spec: [`docs/superpowers/specs/2026-07-28-local-code-assistant-design.md`](../sp
 Every task's requirements implicitly include this section.
 
 - **Python `>=3.11`.** The index host is Linux; workstations run 3.13. Do not use 3.12+ syntax.
-- **`allowed_repo_ids` is the first positional parameter of every public function in `codeindex/store/queries.py`**, with no default. This is enforced by an introspection test, not by convention.
+- **`allowed_repo_ids` is the first positional parameter of every public function in `argus/store/queries.py`**, with no default. This is enforced by an introspection test, not by convention.
 - **`store/writes.py` is service-side and takes no allowlist.** Reads and writes are separate modules precisely so the allowlist rule can be stated absolutely for one of them.
-- **CodeIndex never writes to GitLab.** Read-only API calls; no pushes, no merge requests.
+- **Argus never writes to GitLab.** Read-only API calls; no pushes, no merge requests.
 - **Default branch only.** No multi-branch indexing.
 - **No network in tests.** GitLab is mocked; git operations run against temp fixture repos created by the tests.
 - **Deferred to later phases, do not build:** tree-sitter parsing, embeddings, `sqlite-vec`, the MCP server, the ACL module, cross-repo include *resolution*. Phase 1 stores raw include strings only.
@@ -28,19 +28,19 @@ Every task's requirements implicitly include this section.
 
 | File | Responsibility |
 |---|---|
-| `pyproject.toml` | Package metadata, deps, `codeindex` console script |
-| `codeindex/config.py` | Typed config loaded from YAML + env overrides |
-| `codeindex/store/db.py` | Connection setup, numbered SQL migrations |
-| `codeindex/store/migrations/001_initial.sql` | Phase 1–3 schema |
-| `codeindex/store/writes.py` | Service-side inserts/updates/deletes (no allowlist) |
-| `codeindex/store/queries.py` | Allowlist-gated reads (allowlist first positional) |
-| `codeindex/parse/filters.py` | Which files to index; language detection |
-| `codeindex/parse/ctags.py` | ctags invocation → `Symbol` records |
-| `codeindex/parse/includes.py` | `#include` extraction |
-| `codeindex/gitlab.py` | GitLab REST client (project enumeration) |
-| `codeindex/mirror.py` | git mirror/worktree lifecycle, change detection |
-| `codeindex/worker.py` | Per-repo indexing orchestration |
-| `codeindex/cli.py` | `codeindex index` / `codeindex status` |
+| `pyproject.toml` | Package metadata, deps, `argus` console script |
+| `argus/config.py` | Typed config loaded from YAML + env overrides |
+| `argus/store/db.py` | Connection setup, numbered SQL migrations |
+| `argus/store/migrations/001_initial.sql` | Phase 1–3 schema |
+| `argus/store/writes.py` | Service-side inserts/updates/deletes (no allowlist) |
+| `argus/store/queries.py` | Allowlist-gated reads (allowlist first positional) |
+| `argus/parse/filters.py` | Which files to index; language detection |
+| `argus/parse/ctags.py` | ctags invocation → `Symbol` records |
+| `argus/parse/includes.py` | `#include` extraction |
+| `argus/gitlab.py` | GitLab REST client (project enumeration) |
+| `argus/mirror.py` | git mirror/worktree lifecycle, change detection |
+| `argus/worker.py` | Per-repo indexing orchestration |
+| `argus/cli.py` | `argus index` / `argus status` |
 
 ---
 
@@ -48,8 +48,8 @@ Every task's requirements implicitly include this section.
 
 **Files:**
 - Create: `pyproject.toml`
-- Create: `codeindex/__init__.py`
-- Create: `codeindex/config.py`
+- Create: `argus/__init__.py`
+- Create: `argus/config.py`
 - Create: `tests/__init__.py`
 - Test: `tests/test_config.py`
 
@@ -64,15 +64,15 @@ Every task's requirements implicitly include this section.
 ```python
 import pytest
 from pathlib import Path
-from codeindex.config import Config, ConfigError
+from argus.config import Config, ConfigError
 
 YAML = """
 gitlab:
   url: https://gitlab.internal
   token: from-file
 index:
-  data_dir: /var/lib/codeindex
-  db_path: /var/lib/codeindex/index.db
+  data_dir: /var/lib/argus
+  db_path: /var/lib/argus/index.db
 """
 
 
@@ -82,13 +82,13 @@ def test_loads_yaml(tmp_path):
     cfg = Config.load(p)
     assert cfg.gitlab.url == "https://gitlab.internal"
     assert cfg.gitlab.token == "from-file"
-    assert cfg.index.db_path == Path("/var/lib/codeindex/index.db")
+    assert cfg.index.db_path == Path("/var/lib/argus/index.db")
 
 
 def test_env_overrides_token(tmp_path, monkeypatch):
     p = tmp_path / "c.yaml"
     p.write_text(YAML)
-    monkeypatch.setenv("CODEINDEX_GITLAB_TOKEN", "from-env")
+    monkeypatch.setenv("ARGUS_GITLAB_TOKEN", "from-env")
     assert Config.load(p).gitlab.token == "from-env"
 
 
@@ -111,7 +111,7 @@ def test_missing_token_raises(tmp_path):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_config.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'argus'`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -119,7 +119,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex'`
 
 ```toml
 [project]
-name = "codeindex"
+name = "argus"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = ["pyyaml>=6.0", "httpx>=0.27"]
@@ -128,24 +128,24 @@ dependencies = ["pyyaml>=6.0", "httpx>=0.27"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-codeindex = "codeindex.cli:main"
+argus = "argus.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["codeindex*"]
+include = ["argus*"]
 
 [tool.setuptools.package-data]
-codeindex = ["store/migrations/*.sql"]
+argus = ["store/migrations/*.sql"]
 ```
 
-`codeindex/__init__.py`: empty file.
+`argus/__init__.py`: empty file.
 
 `tests/__init__.py`: empty file.
 
-`codeindex/config.py`:
+`argus/config.py`:
 
 ```python
 from __future__ import annotations
@@ -204,10 +204,10 @@ class Config:
         if not url:
             raise ConfigError("gitlab.url is required")
 
-        token = os.environ.get("CODEINDEX_GITLAB_TOKEN") or gl.get("token")
+        token = os.environ.get("ARGUS_GITLAB_TOKEN") or gl.get("token")
         if not token:
             raise ConfigError(
-                "gitlab.token is required (set it in config or CODEINDEX_GITLAB_TOKEN)"
+                "gitlab.token is required (set it in config or ARGUS_GITLAB_TOKEN)"
             )
 
         for key in ("data_dir", "db_path"):
@@ -234,7 +234,7 @@ Expected: 4 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add pyproject.toml codeindex/__init__.py codeindex/config.py tests/__init__.py tests/test_config.py
+git add pyproject.toml argus/__init__.py argus/config.py tests/__init__.py tests/test_config.py
 git commit -m "feat: add package scaffolding and typed config loader"
 ```
 
@@ -243,9 +243,9 @@ git commit -m "feat: add package scaffolding and typed config loader"
 ### Task 2: Database connection and migrations
 
 **Files:**
-- Create: `codeindex/store/__init__.py`
-- Create: `codeindex/store/db.py`
-- Create: `codeindex/store/migrations/001_initial.sql`
+- Create: `argus/store/__init__.py`
+- Create: `argus/store/db.py`
+- Create: `argus/store/migrations/001_initial.sql`
 - Test: `tests/store/__init__.py`, `tests/store/test_db.py`
 
 **Interfaces:**
@@ -257,7 +257,7 @@ git commit -m "feat: add package scaffolding and typed config loader"
 `tests/store/test_db.py`:
 
 ```python
-from codeindex.store.db import open_db, migrate
+from argus.store.db import open_db, migrate
 
 EXPECTED_TABLES = {
     "repos", "files", "symbols", "includes",
@@ -313,14 +313,14 @@ def test_cascade_delete_removes_files(tmp_path):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/store/test_db.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex.store'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'argus.store'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/store/__init__.py`: empty file.
+`argus/store/__init__.py`: empty file.
 `tests/store/__init__.py`: empty file.
 
-`codeindex/store/migrations/001_initial.sql`:
+`argus/store/migrations/001_initial.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS repos (
@@ -405,7 +405,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
 );
 ```
 
-`codeindex/store/db.py`:
+`argus/store/db.py`:
 
 ```python
 from __future__ import annotations
@@ -455,7 +455,7 @@ Expected: 4 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/store tests/store
+git add argus/store tests/store
 git commit -m "feat: add sqlite connection, migrations and phase-1 schema"
 ```
 
@@ -464,11 +464,11 @@ git commit -m "feat: add sqlite connection, migrations and phase-1 schema"
 ### Task 3: Service-side writes
 
 **Files:**
-- Create: `codeindex/store/writes.py`
+- Create: `argus/store/writes.py`
 - Test: `tests/store/test_writes.py`
 
 **Interfaces:**
-- Consumes: `codeindex.store.db.open_db`.
+- Consumes: `argus.store.db.open_db`.
 - Produces:
   - `upsert_repo(conn, *, gitlab_id, path_with_namespace, default_branch, http_url) -> int`
   - `set_last_indexed(conn, repo_id: int, sha: str, ts: int) -> None`
@@ -488,8 +488,8 @@ FTS5 external-content mode requires explicit index maintenance: a plain `DELETE`
 
 ```python
 import pytest
-from codeindex.store.db import open_db
-from codeindex.store import writes
+from argus.store.db import open_db
+from argus.store import writes
 
 
 @pytest.fixture
@@ -591,7 +591,7 @@ Expected: FAIL with `ImportError: cannot import name 'writes'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/store/writes.py`:
+`argus/store/writes.py`:
 
 ```python
 from __future__ import annotations
@@ -722,7 +722,7 @@ Expected: 6 passed (`_fts_count` is a helper, not a test)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/store/writes.py tests/store/test_writes.py
+git add argus/store/writes.py tests/store/test_writes.py
 git commit -m "feat: add service-side store writes with FTS index maintenance"
 ```
 
@@ -731,11 +731,11 @@ git commit -m "feat: add service-side store writes with FTS index maintenance"
 ### Task 4: Allowlist-gated reads — the enforcement guarantee
 
 **Files:**
-- Create: `codeindex/store/queries.py`
+- Create: `argus/store/queries.py`
 - Test: `tests/store/test_queries.py`
 
 **Interfaces:**
-- Consumes: `codeindex.store.db.open_db`, `codeindex.store.writes`.
+- Consumes: `argus.store.db.open_db`, `argus.store.writes`.
 - Produces, all with `allowed_repo_ids: Sequence[int]` as first positional parameter:
   - `find_symbol(allowed_repo_ids, conn, name, kind=None, limit=50) -> list[sqlite3.Row]`
   - `search_code(allowed_repo_ids, conn, query, limit=50) -> list[sqlite3.Row]`
@@ -752,8 +752,8 @@ git commit -m "feat: add service-side store writes with FTS index maintenance"
 import inspect
 import pytest
 
-from codeindex.store.db import open_db
-from codeindex.store import writes, queries
+from argus.store.db import open_db
+from argus.store import writes, queries
 
 
 def test_every_public_query_takes_allowlist_first():
@@ -835,7 +835,7 @@ Expected: FAIL with `ImportError: cannot import name 'queries'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/store/queries.py`:
+`argus/store/queries.py`:
 
 ```python
 from __future__ import annotations
@@ -942,7 +942,7 @@ Expected: 7 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/store/queries.py tests/store/test_queries.py
+git add argus/store/queries.py tests/store/test_queries.py
 git commit -m "feat: add allowlist-gated read queries with enforcement test"
 ```
 
@@ -951,12 +951,12 @@ git commit -m "feat: add allowlist-gated read queries with enforcement test"
 ### Task 5: File filters and language detection
 
 **Files:**
-- Create: `codeindex/parse/__init__.py`
-- Create: `codeindex/parse/filters.py`
+- Create: `argus/parse/__init__.py`
+- Create: `argus/parse/filters.py`
 - Test: `tests/parse/__init__.py`, `tests/parse/test_filters.py`
 
 **Interfaces:**
-- Consumes: `codeindex.config.DEFAULT_EXCLUDE_DIRS`.
+- Consumes: `argus.config.DEFAULT_EXCLUDE_DIRS`.
 - Produces: `is_binary(data: bytes) -> bool`; `detect_lang(path: str) -> str | None`; `should_index(path, size, data, *, max_bytes, exclude_dirs) -> bool`.
 
 - [ ] **Step 1: Write the failing test**
@@ -964,8 +964,8 @@ git commit -m "feat: add allowlist-gated read queries with enforcement test"
 `tests/parse/test_filters.py`:
 
 ```python
-from codeindex.config import DEFAULT_EXCLUDE_DIRS
-from codeindex.parse import filters
+from argus.config import DEFAULT_EXCLUDE_DIRS
+from argus.parse import filters
 
 KW = {"max_bytes": 1000, "exclude_dirs": DEFAULT_EXCLUDE_DIRS}
 
@@ -1023,14 +1023,14 @@ def test_excluded_dir_matches_whole_component_only():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/parse/test_filters.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex.parse'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'argus.parse'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/parse/__init__.py`: empty file.
+`argus/parse/__init__.py`: empty file.
 `tests/parse/__init__.py`: empty file.
 
-`codeindex/parse/filters.py`:
+`argus/parse/filters.py`:
 
 ```python
 from __future__ import annotations
@@ -1080,7 +1080,7 @@ Expected: 9 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/parse tests/parse
+git add argus/parse tests/parse
 git commit -m "feat: add file filters and language detection"
 ```
 
@@ -1089,12 +1089,12 @@ git commit -m "feat: add file filters and language detection"
 ### Task 6: ctags symbol extraction
 
 **Files:**
-- Create: `codeindex/parse/ctags.py`
+- Create: `argus/parse/ctags.py`
 - Test: `tests/parse/test_ctags.py`
 - Test fixtures: `tests/fixtures/ctags/decoder.h`, `tests/fixtures/ctags/decoder.cpp`
 
 **Interfaces:**
-- Consumes: `codeindex.parse.filters.HEADER_EXTENSIONS`.
+- Consumes: `argus.parse.filters.HEADER_EXTENSIONS`.
 - Produces: `CtagsUnavailable` exception; `extract_symbols(root: Path, rel_paths: list[str]) -> dict[str, list[dict]]` mapping relative path → symbol dicts with keys `name, kind, line, end_line, signature, scope, is_public`; `is_public_symbol(path, scope, file_restricted) -> bool`.
 
 `is_public_symbol` implements the spec's definition: declared in a header **and** not inside a `detail`/`internal`/`impl`/`anonymous` scope, **or** a non-`static` symbol in a `.c`/`.cpp`. ctags reports file-restricted (`static`) symbols via the `file` JSON field when `--fields=+f` is passed.
@@ -1132,7 +1132,7 @@ from pathlib import Path
 
 import pytest
 
-from codeindex.parse import ctags
+from argus.parse import ctags
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "ctags"
 pytestmark = pytest.mark.skipif(
@@ -1198,7 +1198,7 @@ Expected: FAIL with `ImportError: cannot import name 'ctags'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/parse/ctags.py`:
+`argus/parse/ctags.py`:
 
 ```python
 from __future__ import annotations
@@ -1302,7 +1302,7 @@ Expected: 8 passed. If they skip, install ctags first: `sudo apt install univers
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/parse/ctags.py tests/parse/test_ctags.py tests/fixtures/ctags
+git add argus/parse/ctags.py tests/parse/test_ctags.py tests/fixtures/ctags
 git commit -m "feat: add ctags symbol extraction with public-symbol rules"
 ```
 
@@ -1311,7 +1311,7 @@ git commit -m "feat: add ctags symbol extraction with public-symbol rules"
 ### Task 7: Include extraction
 
 **Files:**
-- Create: `codeindex/parse/includes.py`
+- Create: `argus/parse/includes.py`
 - Test: `tests/parse/test_includes.py`
 
 **Interfaces:**
@@ -1323,7 +1323,7 @@ git commit -m "feat: add ctags symbol extraction with public-symbol rules"
 `tests/parse/test_includes.py`:
 
 ```python
-from codeindex.parse.includes import extract_includes
+from argus.parse.includes import extract_includes
 
 SOURCE = '''
 #include <stdio.h>
@@ -1371,11 +1371,11 @@ def test_empty_source():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/parse/test_includes.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex.parse.includes'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'argus.parse.includes'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/parse/includes.py`:
+`argus/parse/includes.py`:
 
 ```python
 from __future__ import annotations
@@ -1419,7 +1419,7 @@ Expected: 6 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/parse/includes.py tests/parse/test_includes.py
+git add argus/parse/includes.py tests/parse/test_includes.py
 git commit -m "feat: add #include extraction"
 ```
 
@@ -1428,11 +1428,11 @@ git commit -m "feat: add #include extraction"
 ### Task 8: GitLab project enumeration
 
 **Files:**
-- Create: `codeindex/gitlab.py`
+- Create: `argus/gitlab.py`
 - Test: `tests/test_gitlab.py`
 
 **Interfaces:**
-- Consumes: `codeindex.config.GitLabConfig`.
+- Consumes: `argus.config.GitLabConfig`.
 - Produces: `Project` dataclass (`gitlab_id: int`, `path_with_namespace: str`, `default_branch: str`, `http_url: str`); `GitLabError`; `list_projects(cfg: GitLabConfig, *, client=None) -> list[Project]`, paginating `GET /api/v4/projects` with `membership=false&simple=true&archived=false&per_page=100` using the service token. Projects with a null `default_branch` (empty repos) are skipped.
 
 - [ ] **Step 1: Write the failing test**
@@ -1443,8 +1443,8 @@ git commit -m "feat: add #include extraction"
 import httpx
 import pytest
 
-from codeindex.config import GitLabConfig
-from codeindex.gitlab import list_projects, GitLabError
+from argus.config import GitLabConfig
+from argus.gitlab import list_projects, GitLabError
 
 CFG = GitLabConfig(url="https://gl.test", token="tok")
 
@@ -1510,11 +1510,11 @@ def test_raises_on_auth_failure():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_gitlab.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex.gitlab'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'argus.gitlab'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/gitlab.py`:
+`argus/gitlab.py`:
 
 ```python
 from __future__ import annotations
@@ -1587,7 +1587,7 @@ Expected: 4 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/gitlab.py tests/test_gitlab.py
+git add argus/gitlab.py tests/test_gitlab.py
 git commit -m "feat: add GitLab project enumeration"
 ```
 
@@ -1596,11 +1596,11 @@ git commit -m "feat: add GitLab project enumeration"
 ### Task 9: Git mirrors, worktrees and change detection
 
 **Files:**
-- Create: `codeindex/mirror.py`
+- Create: `argus/mirror.py`
 - Test: `tests/test_mirror.py`
 
 **Interfaces:**
-- Consumes: `codeindex.gitlab.Project`, `codeindex.config.IndexConfig`.
+- Consumes: `argus.gitlab.Project`, `argus.config.IndexConfig`.
 - Produces:
   - `GitError`
   - `Change` dataclass: `status: str` (`"A"`, `"M"`, `"D"`), `path: str`
@@ -1624,9 +1624,9 @@ from pathlib import Path
 
 import pytest
 
-from codeindex.config import IndexConfig
-from codeindex import mirror
-from codeindex.gitlab import Project
+from argus.config import IndexConfig
+from argus import mirror
+from argus.gitlab import Project
 
 
 def git(cwd, *args):
@@ -1744,11 +1744,11 @@ def test_blob_shas_maps_every_path(cfg, project, origin):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_mirror.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex.mirror'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'argus.mirror'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/mirror.py`:
+`argus/mirror.py`:
 
 ```python
 from __future__ import annotations
@@ -1874,7 +1874,7 @@ Expected: 7 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/mirror.py tests/test_mirror.py
+git add argus/mirror.py tests/test_mirror.py
 git commit -m "feat: add git mirror, worktree sync and change detection"
 ```
 
@@ -1883,7 +1883,7 @@ git commit -m "feat: add git mirror, worktree sync and change detection"
 ### Task 10: Repo indexing orchestration
 
 **Files:**
-- Create: `codeindex/worker.py`
+- Create: `argus/worker.py`
 - Test: `tests/test_worker.py`
 
 **Interfaces:**
@@ -1902,11 +1902,11 @@ from pathlib import Path
 
 import pytest
 
-from codeindex.config import IndexConfig
-from codeindex.gitlab import Project
-from codeindex.store.db import open_db
-from codeindex.store import writes, queries
-from codeindex import mirror, worker
+from argus.config import IndexConfig
+from argus.gitlab import Project
+from argus.store.db import open_db
+from argus.store import writes, queries
+from argus import mirror, worker
 
 
 def git(cwd, *args):
@@ -2031,11 +2031,11 @@ def test_time_budget_stops_work_without_advancing_sha(env, monkeypatch):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_worker.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex.worker'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'argus.worker'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/worker.py`:
+`argus/worker.py`:
 
 ```python
 from __future__ import annotations
@@ -2171,16 +2171,16 @@ Expected: 7 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/worker.py tests/test_worker.py
+git add argus/worker.py tests/test_worker.py
 git commit -m "feat: add per-repo indexing orchestration"
 ```
 
 ---
 
-### Task 11: CLI — `codeindex index` and `codeindex status`
+### Task 11: CLI — `argus index` and `argus status`
 
 **Files:**
-- Create: `codeindex/cli.py`
+- Create: `argus/cli.py`
 - Create: `config.example.yaml`
 - Modify: `README.md` (create if absent)
 - Test: `tests/test_cli.py`
@@ -2189,7 +2189,7 @@ git commit -m "feat: add per-repo indexing orchestration"
 - Consumes: everything above.
 - Produces: `main(argv: list[str] | None = None) -> int`; subcommands `index` (`--config PATH`, optional `--repo PATH_WITH_NAMESPACE` to index one repo) and `status` (`--config PATH`); `preflight() -> str | None` returning an error message when the environment is unusable.
 
-**Preflight is required before any indexing.** `codeindex index` must verify `ctags` is on PATH and is Universal Ctags before it mirrors anything, and exit `4` with an actionable message otherwise. Without this, a host missing ctags produces a complete-looking index with no symbol layer — the exact failure Task 10's `symbols_failed` flag catches at runtime, caught here one step earlier and far more legibly. Exuberant Ctags must be rejected too: it has no `--output-format=json`, so every symbol extraction would fail.
+**Preflight is required before any indexing.** `argus index` must verify `ctags` is on PATH and is Universal Ctags before it mirrors anything, and exit `4` with an actionable message otherwise. Without this, a host missing ctags produces a complete-looking index with no symbol layer — the exact failure Task 10's `symbols_failed` flag catches at runtime, caught here one step earlier and far more legibly. Exuberant Ctags must be rejected too: it has no `--output-format=json`, so every symbol extraction would fail.
 
 `status` is the only place in Phase 1 that reads through `queries.py`. Since the ACL module does not exist yet, the CLI is a **service-side operator tool** and passes the full set of known repo ids explicitly — it never bypasses the allowlist parameter.
 
@@ -2204,8 +2204,8 @@ from pathlib import Path
 
 import pytest
 
-from codeindex import cli
-from codeindex.gitlab import Project
+from argus import cli
+from argus.gitlab import Project
 
 
 def git(cwd, *args):
@@ -2297,11 +2297,11 @@ def test_index_refuses_exuberant_ctags(config_file, fake_projects,
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_cli.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'codeindex.cli'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'argus.cli'`
 
 - [ ] **Step 3: Write the implementation**
 
-`codeindex/cli.py`:
+`argus/cli.py`:
 
 ```python
 from __future__ import annotations
@@ -2420,7 +2420,7 @@ def _status(cfg: Config) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="codeindex")
+    parser = argparse.ArgumentParser(prog="argus")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_index = sub.add_parser("index", help="Mirror and index repositories")
@@ -2456,13 +2456,13 @@ if __name__ == "__main__":
 ```yaml
 gitlab:
   url: https://gitlab.internal
-  # Prefer the CODEINDEX_GITLAB_TOKEN environment variable over this field.
+  # Prefer the ARGUS_GITLAB_TOKEN environment variable over this field.
   # Requires read_api + read_repository scopes.
   token: ""
 
 index:
-  data_dir: /var/lib/codeindex
-  db_path: /var/lib/codeindex/index.db
+  data_dir: /var/lib/argus
+  db_path: /var/lib/argus/index.db
   max_file_bytes: 1048576
   repo_time_budget_seconds: 600
   exclude_dirs:
@@ -2479,7 +2479,7 @@ index:
 `README.md`:
 
 ````markdown
-# CodeIndex
+# Argus
 
 Indexes self-hosted GitLab repositories and serves access-controlled code
 retrieval to Hermes Agent over MCP.
@@ -2502,15 +2502,15 @@ No server yet; the MCP surface arrives in Phase 2.
 ```bash
 pip install -e ".[dev]"
 cp config.example.yaml config.yaml   # then edit
-export CODEINDEX_GITLAB_TOKEN=glpat-...
+export ARGUS_GITLAB_TOKEN=glpat-...
 ```
 
 ### Usage
 
 ```bash
-codeindex index --config config.yaml
-codeindex index --config config.yaml --repo group/one-repo
-codeindex status --config config.yaml
+argus index --config config.yaml
+argus index --config config.yaml --repo group/one-repo
+argus status --config config.yaml
 ```
 
 ### Tests
@@ -2535,8 +2535,8 @@ this task's own preflight check exists to prevent.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add codeindex/cli.py config.example.yaml README.md tests/test_cli.py
-git commit -m "feat: add codeindex CLI with index and status commands"
+git add argus/cli.py config.example.yaml README.md tests/test_cli.py
+git commit -m "feat: add argus CLI with index and status commands"
 ```
 
 ---
@@ -2562,17 +2562,17 @@ Expected: Python 3.11+, git 2.x, "Universal Ctags". If `ctags` prints "Exuberant
 - [ ] **Step 2: Run the full index against real GitLab**
 
 ```bash
-export CODEINDEX_GITLAB_TOKEN=glpat-...
-time codeindex index --config config.yaml
+export ARGUS_GITLAB_TOKEN=glpat-...
+time argus index --config config.yaml
 ```
 Expected: one line per repo. Failures print to stderr and do not stop the run.
 
 - [ ] **Step 3: Collect the numbers**
 
 ```bash
-codeindex status --config config.yaml
-du -sh /var/lib/codeindex /var/lib/codeindex/index.db
-sqlite3 /var/lib/codeindex/index.db \
+argus status --config config.yaml
+du -sh /var/lib/argus /var/lib/argus/index.db
+sqlite3 /var/lib/argus/index.db \
   "SELECT COUNT(*) files FROM files;
    SELECT COUNT(*) symbols FROM symbols;
    SELECT COUNT(*) public_symbols FROM symbols WHERE is_public = 1;
@@ -2595,9 +2595,9 @@ git commit -m "docs: record phase 1 index measurements from first full run"
 ## Phase 1 Completion Criteria
 
 - [ ] `pytest -v` passes with no skips on a host with ctags installed
-- [ ] `codeindex index` completes a full pass over every GitLab repo
-- [ ] `codeindex status` shows a non-null SHA and non-zero symbol count per repo
-- [ ] A second `codeindex index` run reports "up to date" for unchanged repos
+- [ ] `argus index` completes a full pass over every GitLab repo
+- [ ] `argus status` shows a non-null SHA and non-zero symbol count per repo
+- [ ] A second `argus index` run reports "up to date" for unchanged repos
 - [ ] `docs/phase1-measurements.md` records the real numbers
 
 ## What Phase 2 Adds

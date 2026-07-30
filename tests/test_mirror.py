@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from codeindex.config import IndexConfig
-from codeindex import mirror
-from codeindex.gitlab import Project
+from argus.config import IndexConfig
+from argus import mirror
+from argus.gitlab import Project
 
 
 def git(cwd, *args):

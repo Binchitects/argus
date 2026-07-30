@@ -1,6 +1,6 @@
 import pytest
-from codeindex.store.db import open_db
-from codeindex.store import writes
+from argus.store.db import open_db
+from argus.store import writes
 
 
 @pytest.fixture

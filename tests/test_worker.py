@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from codeindex.config import IndexConfig
-from codeindex.gitlab import Project
-from codeindex.store.db import open_db
-from codeindex.store import writes, queries
-from codeindex import mirror, worker
+from argus.config import IndexConfig
+from argus.gitlab import Project
+from argus.store.db import open_db
+from argus.store import writes, queries
+from argus import mirror, worker
 
 
 def git(cwd, *args):
@@ -264,7 +264,7 @@ def test_symbols_failure_does_not_leave_stale_symbols_behind(env, monkeypatch):
     file, finds to_parse empty, reports symbols_failed=False and advances the
     SHA -- leaving the old revision's symbols in place permanently.
     """
-    from codeindex.parse import ctags
+    from argus.parse import ctags
     first = _run(env)
     conn, cfg, project, repo_id, _, origin = env
 
@@ -373,7 +373,7 @@ def test_timed_out_pass_does_not_discard_queued_retry_paths(env):
 
 
 def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
-    from codeindex.parse import ctags
+    from argus.parse import ctags
     conn, cfg, project, repo_id, _, _ = env
     monkeypatch.setattr(ctags.shutil, "which", lambda name: None)
 

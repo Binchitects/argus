@@ -54,10 +54,10 @@ class Config:
         if not url:
             raise ConfigError("gitlab.url is required")
 
-        token = os.environ.get("CODEINDEX_GITLAB_TOKEN") or gl.get("token")
+        token = os.environ.get("ARGUS_GITLAB_TOKEN") or gl.get("token")
         if not token:
             raise ConfigError(
-                "gitlab.token is required (set it in config or CODEINDEX_GITLAB_TOKEN)"
+                "gitlab.token is required (set it in config or ARGUS_GITLAB_TOKEN)"
             )
 
         for key in ("data_dir", "db_path"):

@@ -1,4 +1,4 @@
-from codeindex.store.db import MIGRATIONS_DIR, open_db, migrate
+from argus.store.db import MIGRATIONS_DIR, open_db, migrate
 
 EXPECTED_TABLES = {
     "repos", "files", "symbols", "includes",

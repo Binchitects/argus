@@ -1,5 +1,5 @@
-from codeindex.config import DEFAULT_EXCLUDE_DIRS
-from codeindex.parse import filters
+from argus.config import DEFAULT_EXCLUDE_DIRS
+from argus.parse import filters
 
 KW = {"max_bytes": 1000, "exclude_dirs": DEFAULT_EXCLUDE_DIRS}
 

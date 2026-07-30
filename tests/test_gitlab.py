@@ -1,8 +1,8 @@
 import httpx
 import pytest
 
-from codeindex.config import GitLabConfig
-from codeindex.gitlab import list_projects, GitLabError
+from argus.config import GitLabConfig
+from argus.gitlab import list_projects, GitLabError
 
 CFG = GitLabConfig(url="https://gl.test", token="tok")
 

@@ -104,14 +104,14 @@ Argus ships in four phases, each ending somewhere genuinely usable.
 
 | Phase | Scope | State |
 |---|---|---|
-| **1 — Indexer** | Mirroring, change detection, symbol + include extraction, SQLite store, access-gated queries, CLI | ✅ **Complete** — 74 tests |
+| **1 — Indexer** | Mirroring, change detection, symbol + include extraction, SQLite store, access-gated queries, CLI | ✅ **Complete** — 91 tests |
 | **2 — Multi-user retrieval** | ACL module, HTTP MCP server, 5 non-semantic tools, TLS, systemd | Next |
 | **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | Planned |
 | **4 — Semantic layer** | Selective embeddings, `semantic_search` | Planned |
 
 **Phase 2 delivers most of the value** — exact symbol lookup across the whole product, with real GitLab-derived permissions, before a single embedding exists. Phase 4 is deliberately last: it's the most expensive to build and the most likely to need iteration, and phases 1–3 stand on their own without it.
 
-Today Argus is a **CLI indexer**. There is no server yet; `codeindex index` and `codeindex status` are the whole surface.
+Today Argus is a **CLI indexer**. There is no server yet; `argus index` and `argus status` are the whole surface.
 
 ---
 
@@ -143,7 +143,7 @@ cp config.example.yaml config.yaml
 Set the token in the environment — it's read in preference to the file, so it never has to live in YAML:
 
 ```bash
-export CODEINDEX_GITLAB_TOKEN=glpat-xxxxxxxxxxxx
+export ARGUS_GITLAB_TOKEN=glpat-xxxxxxxxxxxx
 ```
 
 ```yaml
@@ -151,8 +151,8 @@ gitlab:
   url: https://gitlab.internal
 
 index:
-  data_dir: /var/lib/codeindex
-  db_path: /var/lib/codeindex/index.db
+  data_dir: /var/lib/argus
+  db_path: /var/lib/argus/index.db
   max_file_bytes: 1048576
   repo_time_budget_seconds: 600
   exclude_dirs: [third_party, vendor, node_modules, build, out, x64, Debug, Release]
@@ -161,19 +161,19 @@ index:
 ### Run
 
 ```bash
-codeindex index --config config.yaml
+argus index --config config.yaml
 ```
 
 Index a single repository:
 
 ```bash
-codeindex index --config config.yaml --repo group/one-repo
+argus index --config config.yaml --repo group/one-repo
 ```
 
 Check per-repo freshness:
 
 ```bash
-codeindex status --config config.yaml
+argus status --config config.yaml
 ```
 
 The first index takes hours on a large estate. After that, runs are incremental: Argus diffs the last-indexed commit against the new head and touches only what changed.
@@ -188,7 +188,7 @@ A few decisions that aren't obvious from the code:
 
 **`last_indexed_sha` advances only after a repo's entire changed set commits.** That single rule is the whole crash-recovery story: a run that dies partway replays the same diff next time, and every write is idempotent. It's also why a ctags failure blocks the advance — marking files "indexed" with zero symbols would lose them permanently, since they'd never appear in a future diff.
 
-**Tool error text is prompt text.** When something breaks, the string returned goes straight into an LLM's context and determines what it does next. `"CodeIndex unavailable — fall back to ripgrep in the local checkout and say the answer is repo-local only"` produces a far better outcome than a 503. You're programming the fallback path in English.
+**Tool error text is prompt text.** When something breaks, the string returned goes straight into an LLM's context and determines what it does next. `"Argus unavailable — fall back to ripgrep in the local checkout and say the answer is repo-local only"` produces a far better outcome than a 503. You're programming the fallback path in English.
 
 **Renames are delete + add.** Rename tracking buys nothing for an index that stores per-path rows.
 
