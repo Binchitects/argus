@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .config import IndexConfig
 from .gitlab import Project
-from .mirror import Change, blob_shas, changed_files, is_ancestor
+from .mirror import Change, blob_shas, changes_since
 from .parse import ctags, filters
 from .parse.includes import extract_includes
 from .store import writes
@@ -38,8 +38,12 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     repo_id = _repo_id(conn, project.gitlab_id)
     result = IndexResult(repo_id=repo_id, sha=new_sha)
 
-    full_reindex = old_sha is None or not is_ancestor(mirror_path, old_sha, new_sha)
-    changes = changed_files(mirror_path, old_sha, new_sha)
+    # One ancestry resolution for both answers. An old_sha that no longer
+    # resolves (mirrors dir wiped, gc pruned a force-pushed history, repo
+    # re-created upstream) routes to the full-reindex path and self-heals;
+    # making it fatal would strand the repo forever, since last_indexed_sha
+    # would stay stale and every later run would fail identically.
+    full_reindex, changes = changes_since(mirror_path, old_sha, new_sha)
     shas = blob_shas(mirror_path, new_sha)
 
     # Deletions first: they are cheap and always safe to apply.

@@ -179,6 +179,30 @@ def test_force_push_deletes_vanished_files(env):
     assert queries.search_code([repo_id], conn, "DecodeFrame") == []
 
 
+def test_unresolvable_old_sha_recovers_via_full_relisting(env):
+    """A missing old commit must self-heal, not fail the repo forever.
+
+    Routine causes: data_dir/mirrors deleted to reclaim disk while index.db
+    survives, `git gc` pruning a force-pushed history, a repo re-created in
+    GitLab. Raising here would leave last_indexed_sha stale so every later
+    run failed identically.
+    """
+    _run(env)
+    conn, cfg, project, repo_id, _, origin = env
+    git(origin, "rm", "-q", "decoder.c")
+    git(origin, "commit", "-m", "drop impl")
+
+    absent = "0" * 40  # well-formed but not an object in the mirror
+    result = _run(env, old_sha=absent)
+
+    paths = {r["path"] for r in conn.execute("SELECT path FROM files")}
+    assert paths == {"decoder.h"}  # the vanished file was deleted
+    assert result.deleted == 1
+    row = conn.execute("SELECT last_indexed_sha FROM repos WHERE id = ?",
+                       (repo_id,)).fetchone()
+    assert row["last_indexed_sha"] == result.sha
+
+
 def test_unchanged_files_are_skipped_not_reindexed(env):
     first = _run(env, old_sha=None)
     assert first.indexed == 2

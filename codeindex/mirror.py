@@ -71,16 +71,52 @@ def is_ancestor(mirror: Path, old: str, new: str) -> bool:
     )
 
 
+def commit_exists(mirror: Path, sha: str) -> bool:
+    """True if `sha` resolves to a commit object present in this mirror.
+
+    An absent old commit is routine, not corruption: an operator can delete
+    data_dir/mirrors to reclaim disk while index.db survives (ensure_mirror
+    then re-clones fresh), `git gc` prunes commits orphaned by a force-push
+    (bare mirrors keep no reflog, and gc.pruneExpire defaults to 2 weeks),
+    and a repo can be deleted and re-created in GitLab. Probing first keeps
+    is_ancestor's exit-128 GitError meaningful for genuinely unexpected git
+    failures instead of making a missing old commit a permanent repo failure.
+    """
+    proc = subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        cwd=mirror, capture_output=True, text=True,
+    )
+    return proc.returncode == 0
+
+
 def _full_listing(mirror: Path, sha: str) -> list[Change]:
     out = _git(mirror, "ls-tree", "-r", "--name-only", "-z", sha)
     return [Change(status="A", path=p) for p in out.split("\0") if p]
 
 
-def changed_files(mirror: Path, old_sha: str | None, new_sha: str) -> list[Change]:
-    if old_sha is None or not is_ancestor(mirror, old_sha, new_sha):
-        # First index, or history was rewritten: reindex the whole tree.
-        return _full_listing(mirror, new_sha)
+def changes_since(mirror: Path, old_sha: str | None,
+                  new_sha: str) -> tuple[bool, list[Change]]:
+    """Return (full_reindex, changes) in a single ancestry resolution.
 
+    Callers need both answers, and resolving them separately meant running
+    `merge-base --is-ancestor` twice per repo with a real risk of the two
+    call sites disagreeing about what an unresolvable old sha means.
+    """
+    if (old_sha is None
+            or not commit_exists(mirror, old_sha)
+            or not is_ancestor(mirror, old_sha, new_sha)):
+        # First index, history was rewritten, or the old commit is simply
+        # gone: reindex the whole tree. is_ancestor is still free to raise
+        # for an unexpected failure on the new_sha side.
+        return True, _full_listing(mirror, new_sha)
+    return False, _diff_changes(mirror, old_sha, new_sha)
+
+
+def changed_files(mirror: Path, old_sha: str | None, new_sha: str) -> list[Change]:
+    return changes_since(mirror, old_sha, new_sha)[1]
+
+
+def _diff_changes(mirror: Path, old_sha: str, new_sha: str) -> list[Change]:
     out = _git(mirror, "diff", "--name-status", "--no-renames", "-z",
                f"{old_sha}..{new_sha}")
     # With -z and --no-renames, records are NUL-separated flat fields:
