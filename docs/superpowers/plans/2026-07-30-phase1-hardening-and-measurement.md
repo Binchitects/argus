@@ -28,6 +28,7 @@ Every task's requirements implicitly include this section.
 - **No network in tests.** Real local git repos in `tmp_path`, the real ctags binary, real SQLite. No mocking the tool under test.
 - Conventional commit prefixes (`feat:`, `fix:`, `test:`, `chore:`, `docs:`).
 - Baseline suite is **91 passed, 0 skipped**. It must never go down.
+- **Every regression test must be demonstrated to fail.** Revert the production change in your working tree, run the test, capture the failing output, restore, run again, capture the pass. Report both. This is not ceremony: Task 1 shipped a test whose assertions were satisfied by unrelated fixture files, so it passed with the bug fully reintroduced. Assert on the specific behaviour under test, never on aggregate counters other fixtures can satisfy.
 - Phase 1 scope only. No embeddings, no MCP server, no ACL module, no tree-sitter, no cross-repo include resolution.
 
 ## File Structure
@@ -43,7 +44,7 @@ Every task's requirements implicitly include this section.
 
 ---
 
-### Task H1: Replace inferred symbol completion with an explicit marker
+### Task 1: Replace inferred symbol completion with an explicit marker
 
 **Files:**
 - Create: `argus/store/migrations/004_symbols_sha.sql`
@@ -55,7 +56,7 @@ Every task's requirements implicitly include this section.
 - Consumes: existing `writes.replace_symbols(conn, repo_id, file_id, symbols)`.
 - Produces: `replace_symbols(conn, repo_id, file_id, symbols, blob_sha)` — one extra **required** positional argument, the blob sha the symbols were extracted from. `files.symbols_sha` is set to it. `_already_current` returns True only when the stored `blob_sha` matches the tree AND `symbols_sha == blob_sha`.
 
-**Why this task exists.** `_already_current` currently asks "does this file have any symbol rows?" as a proxy for "were symbols extracted successfully?". That proxy is wrong in both directions: a file that legitimately contains zero symbols (an include-only `.c`, a pure macro header) never satisfies it and is re-read, re-upserted and re-FTS-indexed on every full-listing pass; and a file whose fresh extraction failed can still satisfy it using symbol rows from an *older* revision. Making completion explicit fixes both, and it is the precondition for H2.
+**Why this task exists.** `_already_current` currently asks "does this file have any symbol rows?" as a proxy for "were symbols extracted successfully?". That proxy is wrong in both directions: a file that legitimately contains zero symbols (an include-only `.c`, a pure macro header) never satisfies it and is re-read, re-upserted and re-FTS-indexed on every full-listing pass; and a file whose fresh extraction failed can still satisfy it using symbol rows from an *older* revision. Making completion explicit fixes both, and it is the precondition for Task 2.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -73,12 +74,18 @@ def test_file_with_zero_symbols_is_not_reprocessed(env, monkeypatch):
     assert "empty.c" in {r["path"] for r in conn.execute("SELECT path FROM files")}
 
     # Force the full-listing path so _already_current is what decides.
-    second = _run(env, old_sha=None)
-    skipped_paths = conn.execute(
-        "SELECT symbols_sha, blob_sha FROM files WHERE path = 'empty.c'"
-    ).fetchone()
-    assert skipped_paths["symbols_sha"] == skipped_paths["blob_sha"]
-    assert second.skipped >= 1
+    # Spy on the specific file: aggregate counters are satisfied by unrelated
+    # fixtures (build/gen.c, logo.bin are skipped by filters on every pass),
+    # so asserting `second.skipped >= 1` would pass with the bug reintroduced.
+    reprocessed = []
+    real_upsert = writes.upsert_file
+    def spy(conn_, *, repo_id, path, **kw):
+        reprocessed.append(path)
+        return real_upsert(conn_, repo_id=repo_id, path=path, **kw)
+    monkeypatch.setattr(worker.writes, "upsert_file", spy)
+
+    _run(env, old_sha=None)
+    assert "empty.c" not in reprocessed
 
 
 def test_stale_symbols_never_satisfy_the_completion_check(env, monkeypatch):
@@ -194,14 +201,14 @@ git commit -m "fix: track symbol extraction completion explicitly via symbols_sh
 
 ---
 
-### Task H2: Re-enqueue retry-origin paths when symbol extraction fails
+### Task 2: Re-enqueue retry-origin paths when symbol extraction fails
 
 **Files:**
 - Modify: `argus/worker.py` (`index_repo`)
 - Test: `tests/test_worker.py`
 
 **Interfaces:**
-- Consumes: H1's `symbols_sha`; existing `writes.enqueue_retry`.
+- Consumes: Task 1's `symbols_sha`; existing `writes.enqueue_retry`.
 - Produces: no signature change. Behavioural guarantee: a path that entered a pass **from the retry queue** and whose symbol extraction then failed is re-enqueued, so it is not lost.
 
 **The hole.** A path fails to read in pass N, so it is queued and the SHA advances. In pass N+1 it arrives only via the queue, reads fine, and is upserted — then ctags fails. `symbols_failed` holds the SHA, but nothing re-enqueues it, because `failed_paths` only collects paths that *errored during the file loop*. In pass N+2 the diff no longer contains it (it changed before the current `old_sha`, which is exactly why it was queued), and the queue is empty. It is never revisited: stored with current content and no symbols, permanently, with `errors=0`.
@@ -279,7 +286,7 @@ git commit -m "fix: keep retry-origin paths queued when symbol extraction fails"
 
 ---
 
-### Task H3: Reset the retry counter on success, and give operators an escape hatch
+### Task 3: Reset the retry counter on success, and give operators an escape hatch
 
 **Files:**
 - Modify: `argus/worker.py`
@@ -360,7 +367,7 @@ git commit -m "fix: clear retry counters on success and add --reset-retries"
 
 ---
 
-### Task H4: Roll back before recording a per-file error
+### Task 4: Roll back before recording a per-file error
 
 **Files:**
 - Modify: `argus/worker.py`
@@ -381,19 +388,33 @@ def test_failure_inside_upsert_does_not_desync_fts(env, monkeypatch):
     git(origin, "add", "-A")
     git(origin, "commit", "-m", "modify")
 
-    from argus.store import writes as w
-    real_execute = sqlite3.Connection.execute
-    def boom(self, sql, *a, **k):
-        if sql.strip().startswith("INSERT INTO files_fts(rowid"):
-            raise sqlite3.OperationalError("simulated mid-upsert failure")
-        return real_execute(self, sql, *a, **k)
-    monkeypatch.setattr(sqlite3.Connection, "execute", boom)
-    _run(env, old_sha=None)
-    monkeypatch.undo()
+    # sqlite3.Connection is a static C type — CPython refuses attribute
+    # assignment on it at class or instance level, so it cannot be
+    # monkeypatched. A Connection *subclass* is an ordinary heap type, so
+    # inject the failure by running the pass through one.
+    class BoomConnection(sqlite3.Connection):
+        def execute(self, sql, *a, **k):
+            if sql.strip().startswith("INSERT INTO files_fts(rowid"):
+                raise sqlite3.OperationalError("simulated mid-upsert failure")
+            return super().execute(sql, *a, **k)
 
-    files_n = conn.execute("SELECT COUNT(*) c FROM files").fetchone()["c"]
-    fts_n = conn.execute("SELECT COUNT(*) c FROM files_fts").fetchone()["c"]
-    assert files_n == fts_n, f"FTS desynced: {files_n} files vs {fts_n} fts rows"
+    boom_conn = sqlite3.connect(cfg.db_path, factory=BoomConnection)
+    boom_conn.row_factory = sqlite3.Row
+    boom_conn.execute("PRAGMA foreign_keys = ON")
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+    worker.index_repo(boom_conn, cfg, project, m, tree, sha, None)
+    boom_conn.close()
+
+    # Assert via MATCH, never via COUNT. files_fts is external-content, so it
+    # proxies COUNT(*) straight through to `files` — the counts stay equal even
+    # when the term index is desynced. Only a MATCH reveals it. Verified:
+    # healthy files=1 fts_count=1 match=1; desynced files=1 fts_count=1 match=0.
+    hits = conn.execute(
+        "SELECT COUNT(*) c FROM files_fts WHERE files_fts MATCH 'Marker'"
+    ).fetchone()["c"]
+    assert hits == 1, "FTS index desynced: content in `files` is not searchable"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -430,7 +451,7 @@ git commit -m "fix: roll back partial work before recording a per-file error"
 
 ---
 
-### Task H5: Persist run state so `index_status` can report it
+### Task 5: Persist run state so `index_status` can report it
 
 **Files:**
 - Create: `argus/store/migrations/005_repo_run_state.sql`
@@ -527,7 +548,7 @@ git commit -m "feat: persist last-run state and surface it through index_status"
 
 ---
 
-### Task H6: First real index run and measurement
+### Task 6: First real index run and measurement
 
 **Files:**
 - Create: `docs/phase1-measurements.md`
@@ -612,4 +633,4 @@ git commit -m "docs: record the first full index measurements"
 
 ## What This Unblocks
 
-Phase 2's plan assumes an index whose `index_status` is trustworthy — the ACL module gates access to it, and the MCP server hands it to an agent that will believe what it says. H5 in particular is a prerequisite: without persisted run state, the agent cannot distinguish "no such symbol" from "this repo's symbols were never extracted".
+Phase 2's plan assumes an index whose `index_status` is trustworthy — the ACL module gates access to it, and the MCP server hands it to an agent that will believe what it says. Task 5 in particular is a prerequisite: without persisted run state, the agent cannot distinguish "no such symbol" from "this repo's symbols were never extracted".

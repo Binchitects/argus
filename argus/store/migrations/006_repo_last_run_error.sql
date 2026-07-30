@@ -1,0 +1,14 @@
+-- Two common paths never reached index_repo, so they never refreshed any
+-- last-run state: a repo already at the head SHA (nothing to do) and a repo
+-- whose fetch failed. The first made a repo polled hourly for six months and
+-- correctly current report a six-month-old last_run_at; the second left the
+-- PREVIOUS pass's flags in place, so a repo unreachable for weeks showed as
+-- clean in `argus status`.
+--
+-- Refreshing last_run_at on both is what makes the timestamp mean "last
+-- checked". That alone would then report a failed fetch as a clean check, so
+-- the failure needs somewhere to go: NULL when the last run completed
+-- (whether or not it did any work), the error text when it did not.
+-- Deliberately not a boolean -- the message is what an operator needs, and
+-- Phase 2's qualifying agent can pass it through verbatim.
+ALTER TABLE repos ADD COLUMN last_run_error TEXT;

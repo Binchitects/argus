@@ -615,7 +615,7 @@ git commit -m "feat: add MCP server skeleton with bearer-token auth middleware"
 
 **Tool descriptions are load-bearing.** They are the only thing telling a 35B model which tool answers which question. Each description states what the tool answers, and `find_references` states plainly that it is name-based so the model qualifies its answers.
 
-`index_status` must surface the run-state flags added in the hardening plan's Task H5, so the agent can distinguish "no such symbol" from "this repo's symbols were never extracted".
+`index_status` must surface the run-state flags added in the hardening plan's Task 5, so the agent can distinguish "no such symbol" from "this repo's symbols were never extracted".
 
 - [ ] **Step 1: Write the failing tests** — each tool returns the caller's repos only; each refuses without auth; `search_code` surfaces `QueryError` as an actionable string rather than a traceback; `get_file` reports truncation; `index_status` reports a timed-out repo as partial.
 
@@ -730,10 +730,10 @@ hermes mcp test argus
 Tasks 1–3 carry complete code because they are the security boundary and the
 places where a subtle mistake is unrecoverable. Tasks 4–9 are specified to
 interface and test level rather than full listings, deliberately: their details
-depend on what the hardening plan's Task H5 actually produces and on the
+depend on what the hardening plan's Task 5 actually produces and on the
 measurement run's numbers. **Expand each into full TDD steps immediately before
 executing it**, not now — writing complete code today against interfaces that
-H5 may adjust would produce a plan that is confidently wrong.
+Task 5 may adjust would produce a plan that is confidently wrong.
 
 ## Completion Criteria
 
@@ -747,4 +747,4 @@ H5 may adjust would produce a plan that is confidently wrong.
 
 ## Deliberately Not In Phase 2
 
-`semantic_search`, `which_repo`, `repo_map`, embeddings, cross-repo include resolution, and webhook-driven indexing. Whether the webhook path is needed at all depends on the incremental-run timing measured in the hardening plan's Task H6 — if a poll cycle is fast enough, the webhook is unnecessary complexity.
+`semantic_search`, `which_repo`, `repo_map`, embeddings, cross-repo include resolution, and webhook-driven indexing. Whether the webhook path is needed at all depends on the incremental-run timing measured in the hardening plan's Task 6 — if a poll cycle is fast enough, the webhook is unnecessary complexity.

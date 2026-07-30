@@ -62,11 +62,11 @@ def test_replace_symbols_clears_previous(conn, repo_id):
     writes.replace_symbols(conn, repo_id, fid, [
         {"name": "Old", "kind": "function", "line": 1, "end_line": 3,
          "signature": "(void)", "scope": None, "is_public": 1},
-    ])
+    ], "aaa")
     writes.replace_symbols(conn, repo_id, fid, [
         {"name": "New", "kind": "function", "line": 5, "end_line": 9,
          "signature": "(int)", "scope": None, "is_public": 0},
-    ])
+    ], "aaa")
     names = [r["name"] for r in conn.execute("SELECT name FROM symbols")]
     assert names == ["New"]
 
@@ -77,9 +77,55 @@ def test_delete_file_cascades_symbols(conn, repo_id):
     writes.replace_symbols(conn, repo_id, fid, [
         {"name": "F", "kind": "function", "line": 1, "end_line": 2,
          "signature": None, "scope": None, "is_public": 1},
-    ])
+    ], "aaa")
     writes.delete_file(conn, repo_id, "a.c")
     assert conn.execute("SELECT COUNT(*) c FROM symbols").fetchone()["c"] == 0
+
+
+def test_replace_symbols_records_the_blob_sha(conn, repo_id):
+    fid = writes.upsert_file(conn, repo_id=repo_id, path="a.c", lang="c",
+                             size=1, blob_sha="aaa", content="x")
+    writes.replace_symbols(conn, repo_id, fid, [
+        {"name": "F", "kind": "function", "line": 1, "end_line": 2,
+         "signature": None, "scope": None, "is_public": 1},
+    ], "aaa")
+    assert conn.execute("SELECT symbols_sha FROM files WHERE id = ?",
+                        (fid,)).fetchone()["symbols_sha"] == "aaa"
+
+
+def test_replace_symbols_records_the_sha_even_when_empty(conn, repo_id):
+    """Zero symbols is a valid successful result, not an incomplete one."""
+    fid = writes.upsert_file(conn, repo_id=repo_id, path="b.c", lang="c",
+                             size=1, blob_sha="bbb", content="x")
+    writes.replace_symbols(conn, repo_id, fid, [], "bbb")
+    assert conn.execute("SELECT symbols_sha FROM files WHERE id = ?",
+                        (fid,)).fetchone()["symbols_sha"] == "bbb"
+
+
+def test_clear_symbols_for_paths_nulls_symbols_sha(conn, repo_id):
+    """A stale symbols_sha must not survive clear_symbols_for_paths.
+
+    If content is later edited back to be byte-identical to the blob whose
+    symbols were just cleared, the recomputed blob_sha would equal that old
+    symbols_sha again. Simulate the coincidence directly: blob_sha is never
+    changed here, so if clear_symbols_for_paths left symbols_sha holding its
+    old value, it would still equal blob_sha and worker._already_current
+    would wrongly report the file complete despite having zero symbol rows.
+    """
+    fid = writes.upsert_file(conn, repo_id=repo_id, path="a.c", lang="c",
+                             size=1, blob_sha="aaa", content="x")
+    writes.replace_symbols(conn, repo_id, fid, [
+        {"name": "F", "kind": "function", "line": 1, "end_line": 2,
+         "signature": None, "scope": None, "is_public": 1},
+    ], "aaa")
+
+    writes.clear_symbols_for_paths(conn, repo_id, ["a.c"])
+
+    row = conn.execute("SELECT symbols_sha FROM files WHERE id = ?", (fid,)).fetchone()
+    assert row["symbols_sha"] is None
+
+    from argus import worker
+    assert worker._already_current(conn, repo_id, "a.c", "aaa") is False
 
 
 def test_replace_includes(conn, repo_id):

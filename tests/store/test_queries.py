@@ -31,7 +31,7 @@ def two_repos(tmp_path):
         writes.replace_symbols(conn, rid, fid, [
             {"name": "SharedName", "kind": "function", "line": 1, "end_line": 2,
              "signature": "(void)", "scope": None, "is_public": 1},
-        ])
+        ], f"sha{gid}")
         writes.set_last_indexed(conn, rid, f"sha{gid}", 1000 + gid)
         ids[ns] = rid
     return conn, ids
@@ -55,7 +55,7 @@ def test_find_symbol_kind_filter(two_repos):
          "signature": "(void)", "scope": None, "is_public": 1},
         {"name": "SharedName", "kind": "variable", "line": 10, "end_line": 10,
          "signature": None, "scope": None, "is_public": 1},
-    ])
+    ], "sha1")
 
     both = queries.find_symbol([rid], conn, "SharedName")
     assert {r["kind"] for r in both} == {"function", "variable"}
@@ -100,3 +100,54 @@ def test_allowlist_must_be_a_sequence_of_ints(two_repos):
         queries.find_symbol("all", conn, "SharedName")
     with pytest.raises(TypeError):
         queries.find_symbol([None], conn, "SharedName")
+
+
+def test_index_status_reports_last_run_flags(two_repos):
+    conn, ids = two_repos
+    rid = ids["g/alpha"]
+    writes.record_run_state(conn, rid, timed_out=True, symbols_failed=False, ts=1234)
+    row = [r for r in queries.index_status([rid], conn)][0]
+    assert row["last_run_timed_out"] == 1
+    assert row["last_run_symbols_failed"] == 0
+
+
+def test_index_status_reports_queued_retries(two_repos):
+    """queued_retries must count queued PATHS, not index_queue rows.
+
+    index_queue.repo_id is a PRIMARY KEY -- one row per repo, with the paths
+    JSON-packed into `reason` -- so COUNT(*) is structurally bounded at 1 and
+    a repo with 4,000 stuck paths reported "1". Phase 2 exposes this column
+    to a model that will read it as a file count, so assert exact numbers:
+    `>= 1` would be satisfied by a literal SELECT 1.
+    """
+    conn, ids = two_repos
+    rid = ids["g/beta"]
+
+    def queued():
+        return [r for r in queries.index_status([rid], conn)][0]["queued_retries"]
+
+    assert queued() == 0, "no index_queue row at all must report 0, not NULL"
+
+    writes.enqueue_retry(conn, rid, ["a.c"], "read error", 1234)
+    assert queued() == 1
+
+    writes.enqueue_retry(conn, rid, ["a.c", "b.c", "c.c", "d.c"], "read error", 1235)
+    assert queued() == 4
+
+    # A row whose reason is not the JSON payload (a hand-written entry, or one
+    # written before the payload format existed) must degrade to 0 rather than
+    # abort the whole status query with a malformed-JSON error.
+    conn.execute("UPDATE index_queue SET reason = 'legacy free text' WHERE repo_id = ?",
+                 (rid,))
+    conn.commit()
+    assert queued() == 0
+
+
+def test_index_status_queued_retries_is_per_repo(two_repos):
+    """One repo's queue must not be counted against another's."""
+    conn, ids = two_repos
+    writes.enqueue_retry(conn, ids["g/alpha"], ["a.c", "b.c", "c.c"], "read error", 1)
+    writes.enqueue_retry(conn, ids["g/beta"], ["z.c"], "read error", 1)
+    rows = {r["path_with_namespace"]: r["queued_retries"]
+            for r in queries.index_status(list(ids.values()), conn)}
+    assert rows == {"g/alpha": 3, "g/beta": 1}

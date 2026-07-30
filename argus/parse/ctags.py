@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from .filters import HEADER_EXTENSIONS
@@ -38,6 +40,70 @@ class CtagsUnavailable(RuntimeError):
     """universal-ctags is not installed or is the wrong implementation."""
 
 
+@dataclass(frozen=True)
+class SymbolBatch:
+    """The result of one ctags invocation, including what it did NOT process.
+
+    The symbol map alone cannot answer "was this path processed?". ctags
+    emits no output at all for a file it parsed cleanly but that contains no
+    taggable declarations (an include-only .c, a macro-only header), which is
+    byte-for-byte indistinguishable from a file it never opened. Callers that
+    stamp a per-path completion marker need that distinction or they will
+    mark uncovered files complete forever, so it is reported explicitly:
+    every path handed to extract_symbols lands in exactly one of `covered`
+    and `uncovered`.
+    """
+
+    symbols: dict[str, list[dict]] = field(default_factory=dict)
+    covered: frozenset[str] = frozenset()
+    uncovered: dict[str, str] = field(default_factory=dict)   # path -> why
+    # The subset of `uncovered` that ctags did NOT explicitly name -- a
+    # non-zero exit that named no path leaves every non-tag-producing file
+    # in the batch looking uncovered even though most of them may well have
+    # parsed cleanly and simply had nothing to tag. That is "the tool had a
+    # bad pass", not "this specific file is broken", so callers must not
+    # charge it against a per-path retry budget the way they do for a path
+    # ctags actually named (see argus.worker._apply_symbols).
+    unattributable: frozenset[str] = frozenset()
+
+
+def _paths_named_in(paths: list[str], stderr: str) -> set[str]:
+    """The listed paths ctags explicitly complained about.
+
+    ctags names the offending file in its diagnostics ("cannot open input
+    file \"x.c\""), which is the only attribution available: the JSON output
+    format has no per-file markers.
+
+    Matching is NOT a plain substring test: `main.c` and `sub/main.c` are
+    ordinary namesakes in real C repos, and a naive `p in haystack` blames
+    the root `main.c` for a diagnostic that only ever named `sub/main.c`
+    (any path that is a substring of another listed path is at risk). That
+    is not a safe over-match -- being blamed is destructive AND budgeted:
+    the caller deletes the symbol rows ctags just extracted for the
+    wrongly-blamed path, NULLs its symbols_sha, and charges it a retry
+    attempt via `_cap_retries`. Three such passes permanently strand a
+    perfectly healthy file as symbol-less and retry-exhausted.
+
+    Each candidate path is therefore matched only at a path boundary: the
+    character immediately before and after the match (if any) must not
+    itself be a path-continuation character (word char, `.`, `/`, `-`).
+    This handles both quoted diagnostics ("cannot open input file
+    \"sub/main.c\"") and unquoted ones (ctags does not always quote the
+    path) without needing separate quote-parsing logic, since `/` counts
+    as a path-continuation character on the left: `main.c` inside
+    `sub/main.c` is always preceded by `/`, which fails the boundary check.
+    """
+    if not stderr:
+        return set()
+    haystack = stderr.replace("\\", "/")
+    blamed = set()
+    for p in paths:
+        pattern = r"(?<![\w./-])" + re.escape(p) + r"(?![\w./-])"
+        if re.search(pattern, haystack):
+            blamed.add(p)
+    return blamed
+
+
 def is_public_symbol(path: str, scope: str | None, file_restricted: bool) -> bool:
     if scope:
         parts = {p.strip() for p in scope.replace("::", ".").split(".")}
@@ -52,19 +118,36 @@ def is_public_symbol(path: str, scope: str | None, file_restricted: bool) -> boo
     return not file_restricted
 
 
-def extract_symbols(root: Path, rel_paths: list[str]) -> dict[str, list[dict]]:
-    """Run ctags over rel_paths (relative to root); return path -> symbols."""
+def extract_symbols(root: Path, rel_paths: list[str]) -> SymbolBatch:
+    """Run ctags over rel_paths (relative to root).
+
+    Returns a SymbolBatch: the extracted symbols plus an explicit account of
+    which of rel_paths were genuinely processed. Callers must not infer
+    coverage from the symbol map (see SymbolBatch).
+
+    A repo-global failure (ctags missing, wrong implementation, timed out)
+    still raises CtagsUnavailable -- that is not a per-path outcome.
+    """
     if not rel_paths:
-        return {}
+        return SymbolBatch()
     exe = shutil.which("ctags")
     if exe is None:
         raise CtagsUnavailable(
             "ctags not found on PATH — install universal-ctags on the index host"
         )
 
+    # A path git checked out that the filesystem will not hand back (a
+    # Windows reserved name like aux.c, a >260-char path, a trailing dot) is
+    # dropped from the argument list here. It was never processed, so it is
+    # uncovered -- not "processed, found nothing".
     existing = [p for p in rel_paths if (root / p).is_file()]
+    listed = set(existing)
+    uncovered = {
+        p: "not a readable file on disk when ctags ran"
+        for p in rel_paths if p not in listed
+    }
     if not existing:
-        return {}
+        return SymbolBatch(uncovered=uncovered)
 
     try:
         proc = subprocess.run(
@@ -83,15 +166,6 @@ def extract_symbols(root: Path, rel_paths: list[str]) -> dict[str, list[dict]]:
         ) from exc
     if proc.returncode != 0 and not proc.stdout:
         raise CtagsUnavailable(f"ctags failed: {proc.stderr.strip()[:500]}")
-    if proc.returncode != 0 and proc.stdout:
-        # Partial batch: some tags came back, but ctags also reported a
-        # non-zero exit. There is no conn here to record it against a repo,
-        # so at least surface it in the logs instead of silently discarding
-        # proc.stderr.
-        logger.warning(
-            "ctags exited %s with partial output for %d file(s): %s",
-            proc.returncode, len(existing), proc.stderr.strip()[:500],
-        )
 
     results: dict[str, list[dict]] = {}
     for line in proc.stdout.splitlines():
@@ -115,4 +189,35 @@ def extract_symbols(root: Path, rel_paths: list[str]) -> dict[str, list[dict]]:
             "scope": scope,
             "is_public": int(is_public_symbol(path, scope, bool(entry.get("file", False)))),
         })
-    return results
+
+    if proc.returncode == 0:
+        return SymbolBatch(results, frozenset(existing), uncovered)
+
+    # Partial batch: some tags came back, but ctags also reported a non-zero
+    # exit. There is no conn here to record it against a repo, so at least
+    # surface it in the logs instead of silently discarding proc.stderr.
+    detail = proc.stderr.strip()[:500]
+    logger.warning(
+        "ctags exited %s with partial output for %d file(s): %s",
+        proc.returncode, len(existing), detail,
+    )
+    blamed = _paths_named_in(existing, proc.stderr)
+    # When ctags named the files it choked on, everything else in the batch
+    # really was processed -- including the symbol-free ones, which is the
+    # whole reason coverage is tracked separately from the symbol map.
+    # When it named nothing, no such claim can be made, so only paths that
+    # actually produced tags count as covered.
+    covered = listed - blamed if blamed else set(results) & listed
+    misses = sorted(listed - covered)
+    for path in misses:
+        uncovered[path] = (
+            f"ctags exited {proc.returncode} without covering this file: "
+            f"{detail or 'no diagnostic output'}"
+        )
+    # `blamed` empty means the diagnostic named no path at all, so nothing
+    # in `misses` can be pinned on any one file -- they are unattributable,
+    # not per-path failures. When `blamed` is non-empty, `misses` IS
+    # `blamed` (every miss is a file ctags actually named), so there is
+    # nothing unattributable about it.
+    unattributable = frozenset(misses) if not blamed else frozenset()
+    return SymbolBatch(results, frozenset(covered), uncovered, unattributable)
