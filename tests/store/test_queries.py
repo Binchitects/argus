@@ -31,7 +31,7 @@ def two_repos(tmp_path):
         writes.replace_symbols(conn, rid, fid, [
             {"name": "SharedName", "kind": "function", "line": 1, "end_line": 2,
              "signature": "(void)", "scope": None, "is_public": 1},
-        ])
+        ], f"sha{gid}")
         writes.set_last_indexed(conn, rid, f"sha{gid}", 1000 + gid)
         ids[ns] = rid
     return conn, ids
@@ -55,7 +55,7 @@ def test_find_symbol_kind_filter(two_repos):
          "signature": "(void)", "scope": None, "is_public": 1},
         {"name": "SharedName", "kind": "variable", "line": 10, "end_line": 10,
          "signature": None, "scope": None, "is_public": 1},
-    ])
+    ], "sha1")
 
     both = queries.find_symbol([rid], conn, "SharedName")
     assert {r["kind"] for r in both} == {"function", "variable"}

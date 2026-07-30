@@ -84,7 +84,7 @@ def delete_file(conn: sqlite3.Connection, repo_id: int, path: str) -> None:
 
 
 def replace_symbols(conn: sqlite3.Connection, repo_id: int, file_id: int,
-                    symbols: list[dict]) -> None:
+                    symbols: list[dict], blob_sha: str) -> None:
     conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
     conn.executemany(
         "INSERT INTO symbols"
@@ -96,6 +96,8 @@ def replace_symbols(conn: sqlite3.Connection, repo_id: int, file_id: int,
             for s in symbols
         ],
     )
+    # An empty symbol list is a successful extraction, not an incomplete one.
+    conn.execute("UPDATE files SET symbols_sha = ? WHERE id = ?", (blob_sha, file_id))
     conn.commit()
 
 
@@ -107,14 +109,28 @@ def clear_symbols_for_paths(conn: sqlite3.Connection, repo_id: int,
     new content and the new blob_sha while the symbol rows still describe the
     previous revision. If symbol extraction then fails, clearing them is what
     makes _already_current return False on the next pass -- otherwise the
-    matching blob_sha plus the surviving stale rows would skip the file
-    forever and the SHA would advance over symbols from an older revision.
+    surviving stale rows would let the file be reported complete and the SHA
+    would advance over symbols from an older revision.
+
+    symbols_sha is cleared alongside the rows, not left holding the old
+    blob_sha. Leaving it would usually be harmless -- it is not the new
+    blob_sha, so _already_current's equality check fails regardless -- but it
+    becomes a real bug if the path's content is later edited back to be
+    byte-identical to that older blob: the recomputed blob_sha would then
+    equal the stale symbols_sha again, and _already_current would report the
+    file complete despite having zero symbol rows. NULL-ing it here closes
+    that gap and keeps the marker's meaning exact: "this blob's symbols are
+    on record," not "some past blob's were."
     """
     if not paths:
         return
     conn.executemany(
         "DELETE FROM symbols WHERE file_id IN"
         " (SELECT id FROM files WHERE repo_id = ? AND path = ?)",
+        [(repo_id, path) for path in paths],
+    )
+    conn.executemany(
+        "UPDATE files SET symbols_sha = NULL WHERE repo_id = ? AND path = ?",
         [(repo_id, path) for path in paths],
     )
     conn.commit()

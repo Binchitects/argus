@@ -372,6 +372,39 @@ def test_timed_out_pass_does_not_discard_queued_retry_paths(env):
     assert writes.drain_retry_paths(conn, repo_id) == ["decoder.c"]
 
 
+def test_file_with_zero_symbols_is_not_reprocessed(env, monkeypatch):
+    """An include-only .c has no symbols; it must still count as complete."""
+    conn, cfg, project, repo_id, _, origin = env
+    (origin / "empty.c").write_text('#include "decoder.h"\n')
+    git(origin, "add", "-A")
+    git(origin, "commit", "-m", "add include-only file")
+
+    first = _run(env)
+    assert "empty.c" in {r["path"] for r in conn.execute("SELECT path FROM files")}
+
+    # Force the full-listing path so _already_current is what decides.
+    second = _run(env, old_sha=None)
+    skipped_paths = conn.execute(
+        "SELECT symbols_sha, blob_sha FROM files WHERE path = 'empty.c'"
+    ).fetchone()
+    assert skipped_paths["symbols_sha"] == skipped_paths["blob_sha"]
+    assert second.skipped >= 1
+
+
+def test_stale_symbols_never_satisfy_the_completion_check(env, monkeypatch):
+    """symbols_sha lagging blob_sha means the file is not complete."""
+    conn, cfg, project, repo_id, _, _ = env
+    _run(env)
+    fid = conn.execute("SELECT id FROM files WHERE path = 'decoder.c'").fetchone()["id"]
+    conn.execute("UPDATE files SET symbols_sha = 'stale' WHERE id = ?", (fid,))
+    conn.commit()
+
+    from argus import worker
+    assert worker._already_current(conn, repo_id, "decoder.c",
+                                   conn.execute("SELECT blob_sha FROM files WHERE id = ?",
+                                                (fid,)).fetchone()["blob_sha"]) is False
+
+
 def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
     from argus.parse import ctags
     conn, cfg, project, repo_id, _, _ = env

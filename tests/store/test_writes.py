@@ -62,11 +62,11 @@ def test_replace_symbols_clears_previous(conn, repo_id):
     writes.replace_symbols(conn, repo_id, fid, [
         {"name": "Old", "kind": "function", "line": 1, "end_line": 3,
          "signature": "(void)", "scope": None, "is_public": 1},
-    ])
+    ], "aaa")
     writes.replace_symbols(conn, repo_id, fid, [
         {"name": "New", "kind": "function", "line": 5, "end_line": 9,
          "signature": "(int)", "scope": None, "is_public": 0},
-    ])
+    ], "aaa")
     names = [r["name"] for r in conn.execute("SELECT name FROM symbols")]
     assert names == ["New"]
 
@@ -77,9 +77,29 @@ def test_delete_file_cascades_symbols(conn, repo_id):
     writes.replace_symbols(conn, repo_id, fid, [
         {"name": "F", "kind": "function", "line": 1, "end_line": 2,
          "signature": None, "scope": None, "is_public": 1},
-    ])
+    ], "aaa")
     writes.delete_file(conn, repo_id, "a.c")
     assert conn.execute("SELECT COUNT(*) c FROM symbols").fetchone()["c"] == 0
+
+
+def test_replace_symbols_records_the_blob_sha(conn, repo_id):
+    fid = writes.upsert_file(conn, repo_id=repo_id, path="a.c", lang="c",
+                             size=1, blob_sha="aaa", content="x")
+    writes.replace_symbols(conn, repo_id, fid, [
+        {"name": "F", "kind": "function", "line": 1, "end_line": 2,
+         "signature": None, "scope": None, "is_public": 1},
+    ], "aaa")
+    assert conn.execute("SELECT symbols_sha FROM files WHERE id = ?",
+                        (fid,)).fetchone()["symbols_sha"] == "aaa"
+
+
+def test_replace_symbols_records_the_sha_even_when_empty(conn, repo_id):
+    """Zero symbols is a valid successful result, not an incomplete one."""
+    fid = writes.upsert_file(conn, repo_id=repo_id, path="b.c", lang="c",
+                             size=1, blob_sha="bbb", content="x")
+    writes.replace_symbols(conn, repo_id, fid, [], "bbb")
+    assert conn.execute("SELECT symbols_sha FROM files WHERE id = ?",
+                        (fid,)).fetchone()["symbols_sha"] == "bbb"
 
 
 def test_replace_includes(conn, repo_id):

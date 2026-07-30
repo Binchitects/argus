@@ -162,7 +162,7 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
         to_parse.append(change.path)
         result.indexed += 1
 
-    _apply_symbols(conn, repo_id, tree, to_parse, result, now)
+    _apply_symbols(conn, repo_id, tree, to_parse, result, now, shas)
 
     # A queued path that is healthy again -- indexed this pass, or gone from
     # the tree entirely -- starts over with a clean attempt count.
@@ -216,32 +216,34 @@ def _cap_retries(conn, repo_id: int, failed_paths: list[str], now) -> list[str]:
 
 
 def _already_current(conn, repo_id: int, path: str, blob_sha: str) -> bool:
-    """True if this path is already stored with this exact blob and symbols.
+    """True when this exact blob is stored AND its symbols were extracted from it.
 
     Guards against a livelock where a timed-out or repeated full-listing
     pass recomputes and redoes the same diff every run (each redo now an
     FTS delete+reinsert, slower than the first pass) without ever making
-    progress. Only skip when the stored row exists, its blob_sha matches
-    the current tree exactly, AND it already has symbol rows — otherwise a
-    file that was upserted but whose symbol pass never completed (the
-    symbols_failed path) would be skipped forever with no symbols.
+    progress. Completion is tracked explicitly via files.symbols_sha rather
+    than inferred from "does this file have any symbol rows" — that proxy
+    was wrong in both directions: a file with zero symbols (include-only
+    .c, macro-only header) never satisfied it and was redone every pass,
+    while a file whose fresh extraction failed could still satisfy it using
+    symbol rows left over from an older revision.
+
+    Keep the existing parameter name — this replaces the body only, so every
+    existing call site stays valid.
     """
     if not blob_sha:
         return False
     row = conn.execute(
-        "SELECT id FROM files WHERE repo_id = ? AND path = ? AND blob_sha = ?",
-        (repo_id, path, blob_sha),
+        "SELECT blob_sha, symbols_sha FROM files WHERE repo_id = ? AND path = ?",
+        (repo_id, path),
     ).fetchone()
     if row is None:
         return False
-    has_symbols = conn.execute(
-        "SELECT 1 FROM symbols WHERE file_id = ? LIMIT 1", (row["id"],)
-    ).fetchone()
-    return has_symbols is not None
+    return row["blob_sha"] == blob_sha and row["symbols_sha"] == blob_sha
 
 
 def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
-                   result: IndexResult, now) -> None:
+                   result: IndexResult, now, shas: dict[str, str]) -> None:
     if not paths:
         return
     try:
@@ -251,12 +253,17 @@ def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
         result.errors += 1
         result.symbols_failed = True
         # These files were already upserted with their new content and new
-        # blob_sha, so their surviving symbol rows now describe the previous
-        # revision. Leaving them would let _already_current skip the files on
-        # the next pass (blob_sha matches, symbol rows exist), which empties
-        # to_parse, clears symbols_failed and advances the SHA over stale
-        # symbols. Since one CtagsUnavailable (missing binary, or a timeout)
-        # strands the whole batch, that is every file modified this pass.
+        # blob_sha, so their surviving symbol rows still describe the
+        # previous revision -- symbols_sha was never touched this pass, so
+        # _already_current (which now compares symbols_sha to the new
+        # blob_sha) already reports these files incomplete on their own,
+        # without needing the rows cleared. Clearing them anyway is still
+        # required for two other reasons: (1) search must not keep serving
+        # symbols from a revision the file no longer has, and (2) it NULLs
+        # symbols_sha so a later edit that reverts the content to be
+        # byte-identical to an *older* successfully-extracted blob cannot
+        # make a stale symbols_sha coincidentally equal the recomputed
+        # blob_sha and be mistaken for complete.
         writes.clear_symbols_for_paths(conn, repo_id, paths)
         return
 
@@ -266,4 +273,5 @@ def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
         ).fetchone()
         if row is None:
             continue
-        writes.replace_symbols(conn, repo_id, row["id"], by_path.get(path, []))
+        writes.replace_symbols(conn, repo_id, row["id"], by_path.get(path, []),
+                               shas.get(path, ""))
