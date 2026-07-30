@@ -196,12 +196,33 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     if indexed_paths or gone_paths:
         writes.clear_retry_attempts(conn, repo_id, list(indexed_paths | gone_paths))
 
-    symbols_only_failed: set[str] = set()
+    # A retry-origin path is not in any future diff, so if the pass could not
+    # extract its symbols it must stay queued or it is lost permanently.
+    #
+    # It is re-enqueued WITHOUT going through _cap_retries, exactly as
+    # unreached_retry is. result.symbols_failed means ctags itself was
+    # unusable -- missing, wrong build, timed out -- which is repo-global and
+    # all-or-nothing: nothing is wrong with any individual file. Charging it
+    # per path exhausted every queued path simultaneously after
+    # MAX_RETRY_ATTEMPTS broken passes, dropping thousands of files forever
+    # while the next clean pass reported the repo healthy. The outage is
+    # already visible on its own, through last_run_symbols_failed.
+    #
+    # This is NOT a return to the ec446b8 defect. That was the counter being
+    # CLEARED on a symbols_failed pass, so bump_retry_attempts re-inserted a
+    # fresh attempts=1 row every pass and no path could ever reach the cap.
+    # Here the counter is left strictly untouched -- the indexed_paths guard
+    # above still refuses to clear it, and it is not bumped either -- so it
+    # stays frozen at whatever a real failure last left it at and resumes
+    # accumulating the moment one happens again.
+    #
+    # A genuine per-path symbol failure is a different thing and still
+    # exhausts: `uncovered` (one specific file ctags could not process, while
+    # ctags itself was fine) went into failed_paths above and is capped
+    # normally. "This path failed" bumps; "the tool was down" does not.
+    symbols_only_failed: list[str] = []
     if result.symbols_failed:
-        # A retry-origin path is not in any future diff, so if its symbols failed
-        # it must stay queued or it is lost permanently.
-        symbols_only_failed = {p for p in to_parse if p in retry_set}
-        failed_paths.extend(symbols_only_failed)
+        symbols_only_failed = [p for p in to_parse if p in retry_set]
 
     retryable = _cap_retries(conn, repo_id, failed_paths, now)
 
@@ -212,20 +233,19 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # nothing re-derives a retry path, so those files were simply lost.
     writes.clear_retry_queue(conn, repo_id)
 
-    if retryable or unreached_retry:
+    requeue = retryable + unreached_retry + symbols_only_failed
+    if requeue:
         uncovered_set = set(uncovered)
         reasons = []
-        if any(p not in symbols_only_failed and p not in uncovered_set
-               for p in retryable):
+        if any(p not in uncovered_set for p in retryable):
             reasons.append("per-file read/store error")
         if any(p in uncovered_set for p in retryable):
             reasons.append("ctags did not process the file")
-        if any(p in symbols_only_failed for p in retryable):
-            reasons.append("symbol extraction error")
+        if symbols_only_failed:
+            reasons.append("repo-wide symbol extraction failure")
         if unreached_retry:
             reasons.append("not reached before the repo time budget")
-        writes.enqueue_retry(conn, repo_id, retryable + unreached_retry,
-                             "; ".join(reasons), int(now()))
+        writes.enqueue_retry(conn, repo_id, requeue, "; ".join(reasons), int(now()))
 
     if not result.timed_out and not result.symbols_failed:
         writes.set_last_indexed(conn, repo_id, new_sha, int(now()))

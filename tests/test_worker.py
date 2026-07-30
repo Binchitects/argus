@@ -474,7 +474,12 @@ def _partial_ctags_module(tagged_path: str, blamed_path: str):
     """
     def run(cmd, **kwargs):
         listed = [p for p in kwargs.get("input", "").splitlines() if p]
-        stdout = "".join(
+        # A pseudo-tag line keeps stdout non-empty even when every listed
+        # path is the blamed one. Without it the batch would look like a
+        # total failure (non-zero exit, no output) and raise CtagsUnavailable
+        # instead of exercising the partial-batch path.
+        stdout = '{"_type":"ptag","name":"JSON_OUTPUT_VERSION"}\n'
+        stdout += "".join(
             json.dumps({"_type": "tag", "name": "DecodeFrame", "path": path,
                         "kind": "prototype", "line": 1}) + "\n"
             for path in listed if path == tagged_path
@@ -681,25 +686,25 @@ def _queued_paths(conn, repo_id):
     return json.loads(row["reason"]).get("paths", [])
 
 
-def test_retry_path_with_permanently_broken_symbols_is_eventually_exhausted(
-    env, monkeypatch
-):
-    """A retry-origin path whose read/store keep succeeding but whose symbol
-    extraction keeps failing (ctags stays broken) must still hit the retry
-    cap after enough consecutive passes and stop being re-enqueued.
+def _attempts(conn, repo_id, path):
+    row = conn.execute(
+        "SELECT attempts FROM retry_attempts WHERE repo_id = ? AND path = ?",
+        (repo_id, path),
+    ).fetchone()
+    return row["attempts"] if row else 0
 
-    clear_retry_attempts must NOT clear the attempt counter for a path whose
-    symbols failed this pass -- otherwise bump_retry_attempts always inserts
-    a fresh attempts=1 row (the old row having just been deleted), attempts
-    can never reach MAX_RETRY_ATTEMPTS, and retry-exhausted can never fire.
-    One failure cycle is not enough to catch this: it takes three or more
-    consecutive passes to observe attempts failing to accumulate.
-    """
+
+def _exhausted_paths(conn, repo_id):
+    return [r["path"] for r in conn.execute(
+        "SELECT path FROM index_errors WHERE repo_id = ? AND stage = 'retry-exhausted'",
+        (repo_id,))]
+
+
+def _queue_a_retry_origin_path(env, monkeypatch):
+    """Get decoder.c into the retry queue via a read failure; return the sha."""
     conn, cfg, project, repo_id, _, origin = env
-    _run(env)  # establish a baseline so later diffs are narrow
+    _run(env)  # baseline, so later diffs are narrow
 
-    # Get decoder.c into the retry queue as a retry-origin path: it fails to
-    # read on this pass, just like test_retry_path_whose_symbols_fail_is_requeued.
     (origin / "decoder.c").write_text(
         '#include "decoder.h"\nint DecodeFrameV2(const char* b, int n){return n;}\n'
     )
@@ -707,40 +712,100 @@ def test_retry_path_with_permanently_broken_symbols_is_eventually_exhausted(
     git(origin, "commit", "-m", "modify decoder")
 
     real = Path.read_bytes
+
     def failing(self):
         if self.name == "decoder.c":
             raise OSError("simulated")
         return real(self)
+
     monkeypatch.setattr(Path, "read_bytes", failing)
     first = _run(env)
     monkeypatch.undo()
     assert "decoder.c" in _queued_paths(conn, repo_id)
+    return first.sha
 
-    # ctags stays broken for several consecutive passes; decoder.c's read and
-    # store keep succeeding every time (only symbol extraction fails).
+
+def test_repo_wide_ctags_outage_does_not_burn_the_queued_paths_retry_budget(
+    env, monkeypatch
+):
+    """A ctags outage is repo-global and all-or-nothing, not a per-path fault.
+
+    Charging every retry-origin path in to_parse one attempt per broken pass
+    exhausts the entire queue at once after MAX_RETRY_ATTEMPTS passes: every
+    path gets a retry-exhausted row and is dropped forever, ending up
+    permanently symbol-less, while the very next clean pass reports the repo
+    healthy. Nothing was wrong with any of those files. They are re-enqueued
+    without bumping attempts -- exactly as unreached_retry already is -- and
+    the outage stays visible through last_run_symbols_failed.
+    """
     from argus.parse import ctags as ctags_mod
-    monkeypatch.setattr(ctags_mod.shutil, "which", lambda name: None)
+    conn, cfg, project, repo_id, _, origin = env
 
-    previous = first.sha
-    for _ in range(writes.MAX_RETRY_ATTEMPTS + 1):
+    first_sha = _queue_a_retry_origin_path(env, monkeypatch)
+    before = _attempts(conn, repo_id, "decoder.c")
+    assert before == 1, "the genuine read failure should have counted once"
+
+    # ctags stays broken for more passes than the cap allows. decoder.c's
+    # read and store succeed every time; only symbol extraction fails.
+    monkeypatch.setattr(ctags_mod.shutil, "which", lambda name: None)
+    previous = first_sha
+    outages = []
+    for _ in range(writes.MAX_RETRY_ATTEMPTS + 2):
         result = _run(env, old_sha=previous)
+        outages.append(result.symbols_failed)
+        previous = result.sha
+    monkeypatch.undo()
+    assert outages[0] is True, "sanity check: the outage was actually simulated"
+
+    assert "decoder.c" in _queued_paths(conn, repo_id), (
+        "a repo-wide ctags outage burned the queued path's retry budget and"
+        " dropped it permanently"
+    )
+    assert _attempts(conn, repo_id, "decoder.c") == before, (
+        "a tool outage must not be charged to the path's attempt counter"
+    )
+    assert _exhausted_paths(conn, repo_id) == []
+    assert conn.execute(
+        "SELECT last_run_symbols_failed FROM repos WHERE id = ?", (repo_id,)
+    ).fetchone()["last_run_symbols_failed"] == 1, (
+        "the outage must stay visible -- that is what makes not counting it safe"
+    )
+
+    # Once ctags recovers the path must actually index, and leave the queue.
+    _run(env, old_sha=previous)
+    names = {r["name"] for r in conn.execute(
+        "SELECT s.name FROM symbols s JOIN files f ON f.id = s.file_id"
+        " WHERE f.repo_id = ? AND f.path = 'decoder.c'", (repo_id,))}
+    assert "DecodeFrameV2" in names
+    assert "decoder.c" not in _queued_paths(conn, repo_id)
+    assert _attempts(conn, repo_id, "decoder.c") == 0
+
+
+def test_per_path_symbol_failure_still_exhausts_the_retry_cap(env, monkeypatch):
+    """The other half of the distinction: one file ctags cannot process IS a
+    per-path failure. It must still bump attempts and still be given up on,
+    or a permanently unreadable file is re-enqueued forever and index_errors
+    grows without bound -- the defect the cap exists to prevent.
+    """
+    from argus.parse import ctags as ctags_mod
+    conn, cfg, project, repo_id, _, origin = env
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+
+    monkeypatch.setattr(ctags_mod, "subprocess",
+                        _partial_ctags_module("decoder.h", "decoder.c"))
+    previous = None
+    for _ in range(writes.MAX_RETRY_ATTEMPTS):
+        result = worker.index_repo(conn, cfg, project, m, tree, sha, previous)
+        assert result.symbols_failed is False, (
+            "ctags itself ran; only this one file was not processed"
+        )
         previous = result.sha
     monkeypatch.undo()
 
-    # decoder.c must have been given up on: no longer sitting in the queue,
-    # and a retry-exhausted row recorded for it specifically.
-    assert "decoder.c" not in _queued_paths(conn, repo_id), (
-        "retry-origin path whose symbols kept failing was never exhausted"
-        " -- it is still queued for retry after more than MAX_RETRY_ATTEMPTS passes"
-    )
-    exhausted = conn.execute(
-        "SELECT path FROM index_errors WHERE repo_id = ? AND stage = 'retry-exhausted'",
-        (repo_id,),
-    ).fetchall()
-    assert any(r["path"] == "decoder.c" for r in exhausted)
-
-    # A further pass must not resurrect it or record it as queued again.
-    extra = _run(env, old_sha=previous)
+    assert _attempts(conn, repo_id, "decoder.c") == writes.MAX_RETRY_ATTEMPTS
+    assert _exhausted_paths(conn, repo_id) == ["decoder.c"]
     assert "decoder.c" not in _queued_paths(conn, repo_id)
 
 
