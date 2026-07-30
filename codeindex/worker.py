@@ -72,6 +72,10 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
             result.timed_out = True
             break
 
+        if _already_current(conn, repo_id, change.path, shas.get(change.path, "")):
+            result.skipped += 1
+            continue
+
         abs_path = tree / change.path
 
         try:
@@ -130,6 +134,31 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     if not result.timed_out and not result.symbols_failed:
         writes.set_last_indexed(conn, repo_id, new_sha, int(now()))
     return result
+
+
+def _already_current(conn, repo_id: int, path: str, blob_sha: str) -> bool:
+    """True if this path is already stored with this exact blob and symbols.
+
+    Guards against a livelock where a timed-out or repeated full-listing
+    pass recomputes and redoes the same diff every run (each redo now an
+    FTS delete+reinsert, slower than the first pass) without ever making
+    progress. Only skip when the stored row exists, its blob_sha matches
+    the current tree exactly, AND it already has symbol rows — otherwise a
+    file that was upserted but whose symbol pass never completed (the
+    symbols_failed path) would be skipped forever with no symbols.
+    """
+    if not blob_sha:
+        return False
+    row = conn.execute(
+        "SELECT id FROM files WHERE repo_id = ? AND path = ? AND blob_sha = ?",
+        (repo_id, path, blob_sha),
+    ).fetchone()
+    if row is None:
+        return False
+    has_symbols = conn.execute(
+        "SELECT 1 FROM symbols WHERE file_id = ? LIMIT 1", (row["id"],)
+    ).fetchone()
+    return has_symbols is not None
 
 
 def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],

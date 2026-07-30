@@ -179,6 +179,20 @@ def test_force_push_deletes_vanished_files(env):
     assert queries.search_code([repo_id], conn, "DecodeFrame") == []
 
 
+def test_unchanged_files_are_skipped_not_reindexed(env):
+    first = _run(env, old_sha=None)
+    assert first.indexed == 2
+    assert first.skipped == 2
+
+    # Simulate a repeat full-listing pass with no upstream change (e.g. a
+    # prior run timed out before advancing last_indexed_sha, so old_sha is
+    # still None on the next attempt). Without the blob-sha skip check,
+    # decoder.h and decoder.c would be redone even though nothing changed.
+    second = _run(env, old_sha=None)
+    assert second.indexed == 0
+    assert second.skipped == 4  # decoder.h, decoder.c unchanged + 2 filtered
+
+
 def test_ctags_unavailable_stops_work_without_advancing_sha(env, monkeypatch):
     from codeindex.parse import ctags
     conn, cfg, project, repo_id, _, _ = env
