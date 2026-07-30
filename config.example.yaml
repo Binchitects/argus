@@ -1,0 +1,20 @@
+gitlab:
+  url: https://gitlab.internal
+  # Prefer the CODEINDEX_GITLAB_TOKEN environment variable over this field.
+  # Requires read_api + read_repository scopes.
+  token: ""
+
+index:
+  data_dir: /var/lib/codeindex
+  db_path: /var/lib/codeindex/index.db
+  max_file_bytes: 1048576
+  repo_time_budget_seconds: 600
+  exclude_dirs:
+    - third_party
+    - vendor
+    - node_modules
+    - build
+    - out
+    - x64
+    - Debug
+    - Release

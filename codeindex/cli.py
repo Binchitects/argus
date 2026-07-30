@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+import argparse
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from .config import Config, ConfigError
+from .gitlab import GitLabError, list_projects
+from .mirror import GitError, ensure_mirror, head_sha, sync_worktree
+from .store import queries, writes
+from .store.db import open_db
+from .worker import index_repo
+
+
+def preflight() -> str | None:
+    """Return an error message if the environment cannot index, else None."""
+    exe = shutil.which("ctags")
+    if exe is None:
+        return (
+            "ctags not found on PATH. Install Universal Ctags:\n"
+            "  Linux:   sudo apt install universal-ctags\n"
+            "  Windows: winget install UniversalCtags.Ctags"
+        )
+    try:
+        out = subprocess.run(
+            [exe, "--version"], capture_output=True, text=True, timeout=10
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"could not run ctags --version: {exc}"
+    if "Universal Ctags" not in out:
+        return (
+            f"{exe} is not Universal Ctags (reported: {out.splitlines()[0] if out else '?'}).\n"
+            "Exuberant Ctags has no --output-format=json and cannot be used."
+        )
+    return None
+
+
+def _index(cfg: Config, only: str | None) -> int:
+    problem = preflight()
+    if problem:
+        print(problem, file=sys.stderr)
+        return 4
+
+    conn = open_db(cfg.index.db_path)
+    projects = list_projects(cfg.gitlab)
+    if only:
+        projects = [p for p in projects if p.path_with_namespace == only]
+    if not projects:
+        print("no repos matched")
+        return 0
+
+    for project in projects:
+        repo_id = writes.upsert_repo(
+            conn, gitlab_id=project.gitlab_id,
+            path_with_namespace=project.path_with_namespace,
+            default_branch=project.default_branch, http_url=project.http_url,
+        )
+        old = conn.execute(
+            "SELECT last_indexed_sha FROM repos WHERE id = ?", (repo_id,)
+        ).fetchone()["last_indexed_sha"]
+
+        started = time.time()
+        try:
+            mirror_dir = ensure_mirror(cfg.index, project,
+                                       clone_url=project.http_url)
+            sha = head_sha(mirror_dir, project.default_branch)
+            if sha == old:
+                print(f"{project.path_with_namespace}: up to date")
+                continue
+            tree = sync_worktree(cfg.index, project.gitlab_id, mirror_dir, sha)
+            result = index_repo(conn, cfg.index, project, mirror_dir, tree, sha, old)
+        except GitError as exc:
+            writes.record_error(conn, repo_id, None, "git", str(exc), int(time.time()))
+            print(f"{project.path_with_namespace}: FAILED ({exc})", file=sys.stderr)
+            continue
+
+        flags = ""
+        if result.timed_out:
+            flags += " TIMED-OUT"
+        if result.symbols_failed:
+            flags += " SYMBOLS-FAILED"
+        print(
+            f"{project.path_with_namespace}: indexed={result.indexed} "
+            f"deleted={result.deleted} skipped={result.skipped} "
+            f"errors={result.errors}{flags} "
+            f"({time.time() - started:.1f}s)"
+        )
+    return 0
+
+
+def _status(cfg: Config) -> int:
+    conn = open_db(cfg.index.db_path)
+    # Operator tool: pass the full known set explicitly rather than bypassing
+    # the allowlist parameter. The ACL module arrives in Phase 2.
+    all_ids = [r["id"] for r in conn.execute("SELECT id FROM repos")]
+    rows = queries.index_status(all_ids, conn)
+    if not rows:
+        print("no repos indexed")
+        return 0
+    for row in rows:
+        when = (
+            time.strftime("%Y-%m-%d %H:%M", time.localtime(row["last_indexed_at"]))
+            if row["last_indexed_at"] else "never"
+        )
+        sha = (row["last_indexed_sha"] or "-")[:8]
+        print(
+            f"{row['path_with_namespace']:<40} sha={sha} at={when} "
+            f"files={row['files']} symbols={row['symbols']} errors={row['errors']}"
+        )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="codeindex")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_index = sub.add_parser("index", help="Mirror and index repositories")
+    p_index.add_argument("--config", required=True, type=Path)
+    p_index.add_argument("--repo", help="Index only this path_with_namespace")
+
+    p_status = sub.add_parser("status", help="Show per-repo index freshness")
+    p_status.add_argument("--config", required=True, type=Path)
+
+    args = parser.parse_args(argv)
+
+    try:
+        cfg = Config.load(args.config)
+    except (ConfigError, OSError) as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        if args.command == "index":
+            return _index(cfg, args.repo)
+        return _status(cfg)
+    except GitLabError as exc:
+        print(f"gitlab error: {exc}", file=sys.stderr)
+        return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
