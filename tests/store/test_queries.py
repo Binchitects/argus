@@ -38,8 +38,15 @@ def _minimal_args_for(name, conn, target_repo_id):
         # look up target_repo_id's actual file content and search for that --
         # it will not appear in the other repo's content, so the allowlist
         # is the only thing that can make it findable.
+        # Pin to src/a.c explicitly. Its content is a single plain word, unique
+        # per repo -- exactly what this branch needs. The other two files added
+        # in Task 5 are byte-identical across repos AND full of punctuation
+        # ({ } ( )), which as a raw FTS5 MATCH query can raise. Selecting
+        # without an ORDER BY once there was more than one file per repo would
+        # have left which content came back to b-tree scan order.
         row = conn.execute(
-            "SELECT content FROM files WHERE repo_id = ?", (target_repo_id,)
+            "SELECT content FROM files WHERE repo_id = ? AND path = 'src/a.c'",
+            (target_repo_id,),
         ).fetchone()
         return {"query": row["content"]}
     if name == "get_file":
