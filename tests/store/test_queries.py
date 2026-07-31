@@ -1,4 +1,6 @@
 import inspect
+import sqlite3
+
 import pytest
 
 from argus.store.db import open_db
@@ -141,6 +143,68 @@ def test_index_status_reports_queued_retries(two_repos):
                  (rid,))
     conn.commit()
     assert queued() == 0
+
+
+def test_allowlist_larger_than_sqlite_parameter_limit(two_repos):
+    """A developer in a large GitLab group must not raise OperationalError.
+
+    Fail-closed semantics mean an exception here would be an availability bug
+    wearing a security costume: the caller cannot distinguish "the store
+    blew up" from "you are denied". The allowlist must simply work, and the
+    one row that is genuinely allowed must be the one that comes back.
+
+    SQLite's *documented default* SQLITE_MAX_VARIABLE_NUMBER is 999, but
+    builds since 3.32.0 (Dec 2019) default to 32766 -- this repo's own
+    sqlite3 measures 32766, not 999. A fixed literal like 1500 would pass
+    against both the broken and the fixed code on such a build, proving
+    nothing. Query the real compiled-in limit via Connection.getlimit and
+    exceed *that*, so this test cannot pass by accident.
+    """
+    conn, ids = two_repos
+    host_limit = conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+    big = list(range(10_000_000, 10_000_000 + host_limit + 500)) + [ids["g/alpha"]]
+    rows = queries.find_symbol(big, conn, "SharedName")
+    assert len(rows) == 1 and rows[0]["repo_id"] == ids["g/alpha"]
+
+
+def test_malformed_fts_query_returns_actionable_error(two_repos):
+    conn, ids = two_repos
+    with pytest.raises(queries.QueryError, match="search syntax"):
+        queries.search_code([ids["g/alpha"]], conn, 'unbalanced "quote')
+
+
+def test_get_file_truncates_and_says_so(two_repos):
+    conn, ids = two_repos
+    row = queries.get_file([ids["g/alpha"]], conn, ids["g/alpha"], "src/a.c", max_bytes=4)
+    assert len(row["content"]) <= 64
+    assert row["truncated"] is True
+
+
+def test_get_file_not_truncated_reports_false(two_repos):
+    """The truncated flag must be a real signal, not always True."""
+    conn, ids = two_repos
+    row = queries.get_file([ids["g/alpha"]], conn, ids["g/alpha"], "src/a.c")
+    assert row["truncated"] is False
+    assert row["content"] == "alphaword"
+
+
+def test_get_file_refusal_paths_return_exactly_none(two_repos):
+    """A denial must never be confused with a hit.
+
+    get_file used to return sqlite3.Row | None; callers check truthiness.
+    If a refused lookup returned an empty dict or an error-carrying dict
+    instead of None, every one of those truthiness checks would silently
+    invert and a denial would read as a successful fetch. Both refusal
+    paths -- disallowed repo and empty allowlist -- must return the
+    identical `None` object, not merely something falsy.
+    """
+    conn, ids = two_repos
+    disallowed = queries.get_file([ids["g/alpha"]], conn, ids["g/beta"], "src/a.c")
+    empty = queries.get_file([], conn, ids["g/alpha"], "src/a.c")
+    assert disallowed is None
+    assert empty is None
+    assert not isinstance(disallowed, dict)
+    assert not isinstance(empty, dict)
 
 
 def test_index_status_queued_retries_is_per_repo(two_repos):
