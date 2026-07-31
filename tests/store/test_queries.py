@@ -55,6 +55,31 @@ def _minimal_args_for(name, conn, target_repo_id):
 
 
 @pytest.mark.parametrize("name,fn", _public_query_functions())
+def test_every_public_query_takes_allowlist_first(name, fn):
+    """The allowlist must be the first positional parameter, with no default.
+
+    This is a distinct property from `..._actually_filters` below, and neither
+    subsumes the other. Filtering proves the parameter is *used*; this proves it
+    cannot be *omitted* -- Python itself rejects a call that leaves it out, so a
+    query added later fails at the call site rather than silently running with
+    whatever a default would supply. The design calls this converting a runtime
+    vulnerability into an import-time error; keep both tests.
+    """
+    params = list(inspect.signature(fn).parameters.values())
+    assert params, f"{name} takes no parameters at all"
+    assert params[0].name == "allowed_repo_ids", (
+        f"{name}'s first parameter is {params[0].name!r}, not allowed_repo_ids"
+    )
+    assert params[0].default is inspect.Parameter.empty, (
+        f"{name}'s allowed_repo_ids has a default -- a caller can omit it"
+    )
+    assert params[0].kind in (
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    ), f"{name}'s allowed_repo_ids is not positional"
+
+
+@pytest.mark.parametrize("name,fn", _public_query_functions())
 def test_every_public_query_actually_filters(name, fn, two_repos):
     """Declaring the allowlist parameter is not enough -- it must change
     the result. A function that accepts allowed_repo_ids and never
