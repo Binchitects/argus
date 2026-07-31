@@ -110,6 +110,34 @@ def test_requests_reporter_level_projects_only(conn):
     assert captured["min_access_level"] == "20"
 
 
+def test_developer_token_is_sent_to_gitlab_not_service_token(conn):
+    """Pins the module's entire reason to exist: GitLab must see the
+    developer's own token on every call, never the privileged service token
+    that mirrors the whole index. Swapping either header for CFG.token would
+    silently make every developer's allowlist equal the entire index, and
+    nothing else in this suite would notice -- so both requests are checked
+    independently.
+    """
+    captured = {}
+
+    def handler(request):
+        if request.url.path.endswith("/user"):
+            captured["user"] = request.headers.get("private-token")
+            return httpx.Response(200, json={"id": 7, "username": "dev"})
+        if request.url.path.endswith("/projects"):
+            captured["projects"] = request.headers.get("private-token")
+            page = dict(request.url.params).get("page", "1")
+            return httpx.Response(200, json=[{"id": 101}] if page == "1" else [])
+        return httpx.Response(404)
+
+    acl.resolve(conn, CFG, "dev-token", client=_client(handler))
+
+    assert captured["user"] == "dev-token"
+    assert captured["user"] != CFG.token
+    assert captured["projects"] == "dev-token"
+    assert captured["projects"] != CFG.token
+
+
 def test_stale_beyond_grace_denies(conn):
     acl.resolve(conn, CFG, "dev-token", client=_client(_ok_handler([{"id": 101}])),
                 now=lambda: 1000)
