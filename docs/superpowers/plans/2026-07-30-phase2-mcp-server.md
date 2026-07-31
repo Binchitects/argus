@@ -508,6 +508,8 @@ Each query runs once per chunk and concatenates, applying `limit` to the merged 
 
 `get_file` gains `max_bytes: int = 65536`, returns a plain dict with `truncated: bool`, and truncates on a character boundary.
 
+**The refusal path must keep returning `None`, never a dict.** `get_file` currently returns `sqlite3.Row | None`, and the existing tests assert `is None` / `is not None` — those survive a Row→dict change only because both a Row and a dict are truthy. If a refused lookup were changed to return an empty dict or a dict carrying an error, every caller's truthiness check silently inverts and a denial starts reading as a hit. Add a test asserting the disallowed and empty-allowlist cases return exactly `None`, not a falsy dict.
+
 - [ ] **Step 4: Run the full suite, then commit**
 
 ```bash
