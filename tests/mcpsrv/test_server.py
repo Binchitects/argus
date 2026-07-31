@@ -103,6 +103,27 @@ def test_malformed_non_bearer_header_is_rejected(cfg):
     assert "authorization" in resp.json()["error"].lower()
 
 
+def test_blank_bearer_token_is_rejected(cfg):
+    """A `Bearer` header with no (or all-whitespace) token must be caught by
+    _extract_bearer's own guard, never fall through to acl.resolve.
+
+    The status code alone (401) does not distinguish the two paths -- both
+    reject. The body does: _extract_bearer's guard produces the same
+    "...Authorization..." message as the other malformed-header cases,
+    while acl.resolve's fallback ("No credential was sent...") contains no
+    mention of "authorization" at all. That difference is exactly what this
+    assertion -- shared with the two sibling tests above -- pins down: it
+    passes today and fails if _extract_bearer's `or None` (dropping a blank
+    token) is ever removed, at which point a blank Bearer token would reach
+    acl.resolve and get denied there instead, on a message this assertion
+    does not accept.
+    """
+    _app, client = _client_for(cfg, _gitlab_ok([{"id": 101}]))
+    resp = client.get(MCP_PATH, headers={"Authorization": "Bearer "})
+    assert resp.status_code == 401
+    assert "authorization" in resp.json()["error"].lower()
+
+
 def test_healthz_needs_no_auth(cfg):
     def explode(request):
         raise AssertionError("must not call GitLab for /healthz")
