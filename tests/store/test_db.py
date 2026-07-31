@@ -67,6 +67,13 @@ def test_connect_readonly_rejects_writes(tmp_path):
         ro.execute("INSERT INTO repos (gitlab_id, path_with_namespace, default_branch,"
                    " http_url) VALUES (1, 'g/a', 'main', 'x')")
 
+    # Verify that disabling PRAGMA query_only still fails.
+    # This pins the guarantee to file-level mode=ro, not the bypassable pragma.
+    ro.execute("PRAGMA query_only = OFF")
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        ro.execute("INSERT INTO repos (gitlab_id, path_with_namespace, default_branch,"
+                   " http_url) VALUES (1, 'g/b', 'main', 'y')")
+
 
 def test_connect_readonly_can_read(tmp_path):
     from argus.store.db import open_db, connect_readonly
