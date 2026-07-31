@@ -24,6 +24,36 @@ def upsert_repo(conn: sqlite3.Connection, *, gitlab_id: int,
     ).fetchone()["id"]
 
 
+def get_acl_cache(conn: sqlite3.Connection, token_hash: str) -> sqlite3.Row | None:
+    """Look up a cached ACL resolution by SHA-256 token hash.
+
+    The raw token is never passed in or stored here -- only its hash, which
+    is what makes acl_cache safe to keep at rest.
+    """
+    return conn.execute(
+        "SELECT user_id, username, repo_ids_json, fetched_at FROM acl_cache"
+        " WHERE token_hash = ?",
+        (token_hash,),
+    ).fetchone()
+
+
+def upsert_acl_cache(conn: sqlite3.Connection, *, token_hash: str, user_id: int,
+                     username: str, repo_ids_json: str, fetched_at: int) -> None:
+    conn.execute(
+        """
+        INSERT INTO acl_cache (token_hash, user_id, username, repo_ids_json, fetched_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(token_hash) DO UPDATE SET
+            user_id       = excluded.user_id,
+            username      = excluded.username,
+            repo_ids_json = excluded.repo_ids_json,
+            fetched_at    = excluded.fetched_at
+        """,
+        (token_hash, user_id, username, repo_ids_json, fetched_at),
+    )
+    conn.commit()
+
+
 def set_last_indexed(conn: sqlite3.Connection, repo_id: int, sha: str, ts: int) -> None:
     conn.execute(
         "UPDATE repos SET last_indexed_sha = ?, last_indexed_at = ? WHERE id = ?",
