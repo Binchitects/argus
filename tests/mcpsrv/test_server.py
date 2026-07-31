@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import threading
 import time
 
@@ -9,10 +10,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.testclient import TestClient
 
+import argus.mcpsrv.server as server_mod
 from argus.config import Config, GitLabConfig, IndexConfig
 from argus.mcpsrv.server import create_app
 from argus.store import writes
 from argus.store.db import connect_readonly, open_db
+from argus.store.db import migrate as db_migrate
 
 MCP_PATH = "/mcp"  # FastMCP's default streamable_http_path
 
@@ -177,3 +180,64 @@ def test_slow_acl_resolution_does_not_block_other_requests(cfg):
     # healthz must come back well before the slow ACL round-trip finishes --
     # it must not be stuck waiting behind it on the event loop.
     assert healthz_elapsed[0] < delay / 2
+
+
+def test_create_app_migrates_schema_before_any_request(tmp_path):
+    """`create_app` must apply schema before serving traffic.
+
+    A never-migrated database is an empty sqlite file with no tables at
+    all -- if migration only happened lazily on the first request, this
+    reproduces the trap the reviewer flagged: the very first inbound
+    request would be the one applying schema, and until then (or if the
+    server never gets an authenticated request) the file has no acl_cache
+    table for acl.resolve's cache lookup to use.
+
+    No request is issued here at all: the schema must already be present
+    the moment create_app returns.
+    """
+    db_path = tmp_path / "argus.db"
+    sqlite3.connect(db_path).close()  # bare file, no migration applied
+
+    cfg = Config(
+        gitlab=GitLabConfig(url="https://gl.test", token="service-token"),
+        index=IndexConfig(data_dir=tmp_path / "data", db_path=db_path),
+    )
+
+    create_app(cfg, client=_mock_client(_gitlab_ok([])))
+
+    conn = connect_readonly(db_path)
+    try:
+        names = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )}
+    finally:
+        conn.close()
+    assert {"acl_cache", "repos"} <= names
+
+
+def test_middleware_does_not_migrate_per_request(cfg, monkeypatch):
+    """Schema migration is a startup concern, not a per-request one.
+
+    `open_db` (connect + migrate) previously ran on every incoming request
+    via the middleware; that gives untrusted inbound traffic the ability to
+    trigger a schema change -- e.g. the first request after deploying a
+    build carrying a new migration applies it. Assert migrate is invoked
+    exactly once (at create_app time) no matter how many requests follow.
+    """
+    calls = []
+
+    def counting_migrate(conn):
+        calls.append(None)
+        return db_migrate(conn)
+
+    # raising=False: if a reverted implementation no longer imports `migrate`
+    # into this module at all, this simply adds an inert attribute rather
+    # than erroring, so the assertion below fails cleanly on its own merits.
+    monkeypatch.setattr(server_mod, "migrate", counting_migrate, raising=False)
+
+    app = create_app(cfg, client=_mock_client(_gitlab_ok([{"id": 101}])))
+    client = TestClient(app.streamable_http_app(), raise_server_exceptions=False)
+    for _ in range(3):
+        client.get(MCP_PATH, headers={"Authorization": "Bearer dev-token"})
+
+    assert len(calls) == 1

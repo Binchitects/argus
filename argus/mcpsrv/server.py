@@ -11,7 +11,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .. import acl
 from ..config import Config
-from ..store.db import open_db
+from ..store.db import connect, migrate
 from .errors import unauthorized
 
 HEALTHZ_PATH = "/healthz"
@@ -50,13 +50,14 @@ class BearerAuthMiddleware:
     Connection strategy: `acl.resolve` upserts the ACL cache, so it needs a
     read-write connection, and `sqlite3` connections are not safe to share
     across concurrent requests even with `check_same_thread=False`. This
-    middleware opens one connection per incoming HTTP request via
-    `argus.store.db.open_db` and closes it before returning -- no connection
-    is held across requests or threaded through server state. Task 7's
-    read-only tool queries follow the same per-request pattern with
-    `connect_readonly`. A short-lived sqlite connection is cheap next to the
-    GitLab round-trip `acl.resolve` already makes on a cache miss, so this is
-    the simplest defensible choice, not a performance compromise.
+    middleware opens one plain `connect()` connection per incoming HTTP
+    request and closes it before returning -- no connection is held across
+    requests or threaded through server state, and no schema migration runs
+    here (see `create_app`). Task 7's read-only tool queries follow the same
+    per-request pattern with `connect_readonly`. A short-lived sqlite
+    connection is cheap next to the GitLab round-trip `acl.resolve` already
+    makes on a cache miss, so this is the simplest defensible choice, not a
+    performance compromise.
 
     Blocking I/O and the event loop: `acl.resolve` performs synchronous
     `httpx.Client` calls (a `/user` request plus up to `MAX_PAGES` sequential
@@ -82,7 +83,7 @@ class BearerAuthMiddleware:
         class docstring) so the open/use/close sequence never crosses
         threads, satisfying `sqlite3`'s `check_same_thread=True` default.
         """
-        conn = open_db(self.cfg.index.db_path)
+        conn = connect(self.cfg.index.db_path)
         try:
             return acl.resolve(conn, self.cfg.gitlab, token, client=self.client)
         finally:
@@ -155,7 +156,26 @@ def create_app(cfg: Config, *, client: httpx.Client | None = None) -> FastMCP:
     opens (and closes) its own real client per call. Tests pass an
     `httpx.Client(transport=httpx.MockTransport(...))` so no test reaches a
     real GitLab host.
+
+    Migration runs exactly once, here, at startup -- never on the
+    per-request connection `BearerAuthMiddleware` opens. `migrate()` applies
+    schema, and this project's own discipline is that an applied migration is
+    never edited; `connect_readonly`'s docstring is stricter still ("the
+    server must never write index data"). Migrating on the per-request
+    connection would hand unauthenticated inbound traffic the ability to
+    trigger a schema change purely by arriving first -- e.g. the very first
+    request after deploying a build carrying a new migration applies it.
+    This call is still required, not merely an optimisation: a plain
+    `connect()` against a database that has never been migrated creates an
+    empty file with no tables, and the ACL-cache lookup inside `acl.resolve`
+    would then fail with "no such table".
     """
+    conn = connect(cfg.index.db_path)
+    try:
+        migrate(conn)
+    finally:
+        conn.close()
+
     server = _ArgusFastMCP(cfg, client=client, name="argus")
 
     @server.custom_route(HEALTHZ_PATH, methods=["GET"])
