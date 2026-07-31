@@ -25,6 +25,17 @@ class AclDenied(Exception):
     """Access could not be established. The message is read by an agent."""
 
 
+class _GitLabUnwell(Exception):
+    """Internal signal: GitLab responded but with a 5xx.
+
+    Deliberately not AclDenied. A 5xx behind a load balancer is the normal
+    presentation of an outage -- more common than a raw transport failure --
+    and must reach the same stale-cache grace window as
+    ``httpx.HTTPError``, rather than denying immediately. This type never
+    escapes ``resolve``.
+    """
+
+
 @dataclass(frozen=True)
 class Identity:
     user_id: int
@@ -59,6 +70,8 @@ def _fetch(cfg: GitLabConfig, token: str, client: httpx.Client) -> tuple[int, st
             "Your GitLab token was rejected. Refresh it and re-run "
             "`hermes mcp add argus --url <url> --auth header`."
         )
+    if me.status_code >= 500:
+        raise _GitLabUnwell(f"GitLab returned {me.status_code} for /user.")
     if me.status_code != 200:
         raise AclDenied(f"GitLab returned {me.status_code} for /user.")
     user = me.json()
@@ -71,6 +84,8 @@ def _fetch(cfg: GitLabConfig, token: str, client: httpx.Client) -> tuple[int, st
                     "simple": "true", "per_page": PER_PAGE, "page": page},
             headers={"PRIVATE-TOKEN": token},
         )
+        if resp.status_code >= 500:
+            raise _GitLabUnwell(f"GitLab returned {resp.status_code} listing your projects.")
         if resp.status_code != 200:
             raise AclDenied(f"GitLab returned {resp.status_code} listing your projects.")
         batch = resp.json()
@@ -100,16 +115,21 @@ def resolve(conn: sqlite3.Connection, cfg: GitLabConfig, token: str, *,
         user_id, username, gitlab_ids = _fetch(cfg, token, client)
     except AclDenied:
         raise
-    except httpx.HTTPError as exc:
-        # GitLab unreachable (connection/timeout/transport failure -- not a
-        # bug in this module). Serve stale inside the grace window; deny
-        # otherwise. Catching only httpx.HTTPError, rather than a bare
-        # Exception, matters: a bare except would silently reclassify an
-        # actual programming error in _fetch (a KeyError, an AssertionError
-        # from a test double, ...) as "GitLab is down" and paper over it with
-        # a stale-cache response or a generic deny, instead of surfacing it.
+    except (httpx.HTTPError, ValueError, _GitLabUnwell) as exc:
+        # "GitLab is unwell": connection/timeout/transport failure, a 5xx
+        # (_GitLabUnwell), or a 200 with an unparseable body (json.JSONDecodeError,
+        # a ValueError) -- none of these are a bug in this module, and none of
+        # them are GitLab telling us the token is bad. Serve stale inside the
+        # grace window; deny otherwise. Narrowing to exactly these types,
+        # rather than a bare except, matters: a bare except would silently
+        # reclassify an actual programming error in _fetch (a KeyError, an
+        # AssertionError from a test double, ...) as "GitLab is down" and
+        # paper over it with a stale-cache response or a generic deny,
+        # instead of surfacing it. AclDenied (401/403 -- "GitLab says no") is
+        # re-raised above and never reaches this branch, so a revoked token
+        # cannot keep working off a cached entry.
         if cached is not None and age < STALE_GRACE_SECONDS:
-            log.warning("GitLab unreachable (%s); serving ACL cached %.0fs ago", exc, age)
+            log.warning("GitLab is unwell (%s); serving ACL cached %.0fs ago", exc, age)
             return Identity(cached["user_id"], cached["username"],
                             json.loads(cached["repo_ids_json"]))
         raise AclDenied(

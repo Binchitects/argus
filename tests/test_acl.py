@@ -146,3 +146,62 @@ def test_stale_beyond_grace_denies(conn):
     with pytest.raises(acl.AclDenied):
         acl.resolve(conn, CFG, "dev-token", client=_client(down),
                     now=lambda: 1000 + 100_000)
+
+
+def test_gitlab_5xx_with_fresh_cache_serves_stale(conn):
+    """A 502/503 is the normal presentation of a GitLab outage behind a load
+    balancer -- far more common than a raw transport failure -- and must be
+    treated the same way: serve the still-fresh-enough cache instead of a
+    hard deny.
+    """
+    acl.resolve(conn, CFG, "dev-token", client=_client(_ok_handler([{"id": 101}])),
+                now=lambda: 1000)
+
+    def bad_gateway(request):
+        return httpx.Response(502, text="Bad Gateway")
+
+    ident = acl.resolve(conn, CFG, "dev-token", client=_client(bad_gateway),
+                        now=lambda: 1000 + 900)
+    assert len(ident.allowed_repo_ids) == 1
+
+
+def test_gitlab_5xx_with_no_cache_denies(conn):
+    def bad_gateway(request):
+        return httpx.Response(503, text="Service Unavailable")
+
+    with pytest.raises(acl.AclDenied):
+        acl.resolve(conn, CFG, "unknown-token", client=_client(bad_gateway))
+
+
+def test_gitlab_malformed_body_with_cache_serves_stale(conn):
+    """A proxy returning HTTP 200 with an HTML error page makes resp.json()
+    raise json.JSONDecodeError (a ValueError), which is not an
+    httpx.HTTPError. It must still be classified as an outage -- and must
+    never escape as an unhandled exception, since token and cfg are live
+    locals in these frames.
+    """
+    acl.resolve(conn, CFG, "dev-token", client=_client(_ok_handler([{"id": 101}])),
+                now=lambda: 1000)
+
+    def html_error_page(request):
+        return httpx.Response(200, text="<html>upstream proxy error</html>")
+
+    ident = acl.resolve(conn, CFG, "dev-token", client=_client(html_error_page),
+                        now=lambda: 1000 + 900)
+    assert len(ident.allowed_repo_ids) == 1
+
+
+def test_revoked_token_denies_even_with_valid_cache(conn):
+    """A 401 means GitLab says no, not GitLab is unwell: it must deny
+    immediately and never fall back to a cached allowlist, or a revoked
+    token would keep granting access for up to an hour off a stale entry.
+    """
+    acl.resolve(conn, CFG, "dev-token", client=_client(_ok_handler([{"id": 101}])),
+                now=lambda: 1000)
+
+    def unauthorized(request):
+        return httpx.Response(401, json={"message": "401 Unauthorized"})
+
+    with pytest.raises(acl.AclDenied, match="token"):
+        acl.resolve(conn, CFG, "dev-token", client=_client(unauthorized),
+                    now=lambda: 1000 + 900)
