@@ -240,6 +240,17 @@ import-time error.
 Security bugs of this class almost never come from someone deliberately bypassing a check. They
 come from a new code path that simply never called it.
 
+**One reviewed exception to the SQL-level filter.** Multi-row queries filter with
+`WHERE repo_id IN (:allowed)` because the allowlist is the only thing bounding their result. A
+point lookup like `get_file` already names a single `repo_id`, so it checks membership in Python
+**before** issuing the query — a row belonging to a disallowed repo is never fetched and then
+discarded, so there is no window in which unauthorised content exists in the process. The reason
+this is not merely a style choice: each repo id becomes its own SQL placeholder, so an allowlist
+approaching SQLite's variable limit would make a single-file fetch *raise*. Under fail-closed
+semantics an exception must never be confused with a denial — that is an availability bug wearing a
+security costume. The exception is documented at the call site; do not "restore consistency" by
+adding an `IN (...)` clause there.
+
 ### Leaks closed explicitly
 
 - **Graph traversal.** `repo_map` and `which_repo` walk dependency edges. An edge pointing at an

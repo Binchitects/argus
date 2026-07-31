@@ -125,9 +125,22 @@ def search_code(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
 def get_file(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
              repo_id: int, path: str, max_bytes: int = 65536) -> dict | None:
     _, ids = _placeholders(allowed_repo_ids)
-    # A point lookup only ever needs one row, so membership is checked in
-    # Python rather than building a chunked IN (...) -- this also means an
-    # oversized allowlist can never make a single-file fetch raise.
+    # DELIBERATE, REVIEWED EXCEPTION to the design's "filter in SQL" rule.
+    #
+    # The other three queries filter with `WHERE repo_id IN (:allowed)` because
+    # they return many rows and the allowlist is the only thing bounding them.
+    # This is a point lookup: the caller already names one repo_id, so the check
+    # is a single membership test, and doing it in Python has two advantages --
+    # an oversized allowlist can never make a single-file fetch raise, and no
+    # chunking loop is needed for a query that returns at most one row.
+    #
+    # The ordering is what makes this equivalent to the SQL form, so keep it:
+    # the check runs BEFORE conn.execute, so a row belonging to a disallowed
+    # repo is never fetched and then discarded. There is no window in which
+    # unauthorised content exists in this process.
+    #
+    # Do not "restore consistency" by adding an IN (...) clause here -- that
+    # reintroduces the parameter-limit failure this pattern exists to avoid.
     if repo_id not in ids:
         return None
     row = conn.execute(
