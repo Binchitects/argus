@@ -105,7 +105,11 @@ def resolve(conn: sqlite3.Connection, cfg: GitLabConfig, token: str, *,
     cached = writes.get_acl_cache(conn, key)
     age = (now() - cached["fetched_at"]) if cached else None
 
-    if cached is not None and age < TTL_SECONDS:
+    # age is bounded below by zero: a backwards clock step (an NTP
+    # correction) would otherwise make age negative, which is always less
+    # than TTL_SECONDS, and serve the cached entry as "fresh" indefinitely
+    # regardless of how long it has actually been since it was fetched.
+    if cached is not None and 0 <= age < TTL_SECONDS:
         return Identity(cached["user_id"], cached["username"],
                         json.loads(cached["repo_ids_json"]))
 

@@ -48,7 +48,12 @@ def test_unknown_gitlab_project_is_dropped_not_allowed(conn):
 
 def test_token_is_never_stored_in_plaintext(conn):
     acl.resolve(conn, CFG, "super-secret", client=_client(_ok_handler([{"id": 101}])))
-    blob = json.dumps([dict(r) for r in conn.execute("SELECT * FROM acl_cache")])
+    rows = conn.execute("SELECT * FROM acl_cache").fetchall()
+    # A row must actually have been written -- otherwise the absence of the
+    # token below is vacuous (an empty result also contains no plaintext).
+    assert len(rows) == 1
+    blob = json.dumps([dict(r) for r in rows])
+    assert blob != "[]"
     assert "super-secret" not in blob
 
 
@@ -205,3 +210,60 @@ def test_revoked_token_denies_even_with_valid_cache(conn):
     with pytest.raises(acl.AclDenied, match="token"):
         acl.resolve(conn, CFG, "dev-token", client=_client(unauthorized),
                     now=lambda: 1000 + 900)
+
+
+def _paged_handler(pages):
+    """Serve one page of projects per call; page index beyond len(pages)
+    returns empty, ending the loop the same way _ok_handler does for page 1.
+    """
+    def handler(request):
+        if request.url.path.endswith("/user"):
+            return httpx.Response(200, json={"id": 7, "username": "dev"})
+        if request.url.path.endswith("/projects"):
+            page = int(dict(request.url.params).get("page", "1"))
+            body = pages[page - 1] if page <= len(pages) else []
+            return httpx.Response(200, json=body)
+        return httpx.Response(404)
+    return handler
+
+
+def test_pagination_collects_projects_across_pages(conn):
+    """_ok_handler returns everything on page 1, so it can't catch an
+    implementation that dropped the pagination loop. This exercises a real
+    second page and asserts both pages' projects end up in the allowlist.
+    """
+    ident = acl.resolve(conn, CFG, "dev-token",
+                        client=_client(_paged_handler([[{"id": 101}], [{"id": 102}]])))
+    rid_a = conn.execute("SELECT id FROM repos WHERE gitlab_id = 101").fetchone()["id"]
+    rid_b = conn.execute("SELECT id FROM repos WHERE gitlab_id = 102").fetchone()["id"]
+    assert set(ident.allowed_repo_ids) == {rid_a, rid_b}
+
+
+def test_backwards_clock_step_does_not_serve_expired_cache_forever(conn):
+    """A backwards NTP correction can make now() < fetched_at, so age is
+    negative. `age < TTL_SECONDS` alone treats that as "fresh" indefinitely;
+    the age window must be bounded below by zero so the cache is refetched
+    instead.
+    """
+    acl.resolve(conn, CFG, "dev-token", client=_client(_ok_handler([{"id": 101}])),
+                now=lambda: 1000)
+    ident = acl.resolve(conn, CFG, "dev-token",
+                        client=_client(_ok_handler([{"id": 101}, {"id": 102}])),
+                        now=lambda: 500)
+    assert len(ident.allowed_repo_ids) == 2
+
+
+def test_stale_serve_does_not_extend_fetched_at(conn):
+    """Serving stale must not rewrite fetched_at -- otherwise repeated calls
+    during a long outage would keep pushing the grace window forward and the
+    cache would never actually expire.
+    """
+    acl.resolve(conn, CFG, "dev-token", client=_client(_ok_handler([{"id": 101}])),
+                now=lambda: 1000)
+
+    def down(request):
+        raise httpx.ConnectError("unreachable")
+
+    acl.resolve(conn, CFG, "dev-token", client=_client(down), now=lambda: 1000 + 900)
+    row = conn.execute("SELECT fetched_at FROM acl_cache").fetchone()
+    assert row["fetched_at"] == 1000
