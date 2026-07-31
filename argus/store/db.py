@@ -35,3 +35,16 @@ def open_db(db_path: Path | str) -> sqlite3.Connection:
     conn = connect(db_path)
     migrate(conn)
     return conn
+
+
+def connect_readonly(db_path: Path | str) -> sqlite3.Connection:
+    """Open the index read-only. The server must never write index data.
+
+    check_same_thread=False because an HTTP server is concurrent; the caller
+    is responsible for using one connection per request or per thread.
+    """
+    uri = f"file:{Path(db_path).as_posix()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA query_only = ON")
+    return conn
