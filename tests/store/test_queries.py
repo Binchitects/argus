@@ -7,18 +7,71 @@ from argus.store.db import open_db
 from argus.store import writes, queries
 
 
-def test_every_public_query_takes_allowlist_first():
-    """The enforcement guarantee: a new query cannot forget the allowlist."""
-    offenders = []
-    for name, fn in inspect.getmembers(queries, inspect.isfunction):
-        if name.startswith("_") or fn.__module__ != queries.__name__:
-            continue
-        params = list(inspect.signature(fn).parameters.values())
-        if not params or params[0].name != "allowed_repo_ids":
-            offenders.append(f"{name}: first param is not allowed_repo_ids")
-        elif params[0].default is not inspect.Parameter.empty:
-            offenders.append(f"{name}: allowed_repo_ids has a default")
-    assert offenders == []
+def _public_query_functions():
+    """Every public function in queries.py, found by reflection.
+
+    New query functions (Phase 2 Task 5+: find_references, MCP-tool-backing
+    queries) are picked up automatically -- nobody has to remember to add
+    them to a list here.
+    """
+    return [
+        (name, fn) for name, fn in inspect.getmembers(queries, inspect.isfunction)
+        if not name.startswith("_") and fn.__module__ == queries.__name__
+    ]
+
+
+def _minimal_args_for(name, conn, target_repo_id):
+    """The extra keyword args each query needs to return something for
+    ``target_repo_id``, beyond ``allowed_repo_ids`` and ``conn``.
+
+    Written explicitly, one branch per function that exists today. An
+    unknown name raises rather than being silently skipped: a function
+    added later must be given real arguments here -- deliberately -- or
+    the whole test suite fails loudly, instead of quietly not testing it.
+    """
+    if name == "find_symbol":
+        # Both repos in `two_repos` have a symbol named SharedName, so
+        # switching the allowlist switches which repo's row comes back.
+        return {"name": "SharedName"}
+    if name == "search_code":
+        # search_code has no repo_id argument to target with directly, so
+        # look up target_repo_id's actual file content and search for that --
+        # it will not appear in the other repo's content, so the allowlist
+        # is the only thing that can make it findable.
+        row = conn.execute(
+            "SELECT content FROM files WHERE repo_id = ?", (target_repo_id,)
+        ).fetchone()
+        return {"query": row["content"]}
+    if name == "get_file":
+        return {"repo_id": target_repo_id, "path": "src/a.c"}
+    if name == "index_status":
+        # No arguments beyond allowed_repo_ids and conn.
+        return {}
+    raise NotImplementedError(
+        f"_minimal_args_for has no branch for {name!r}. A newly added public "
+        "query function must be given deliberate arguments here before this "
+        "test can trust that it actually filters by allowed_repo_ids."
+    )
+
+
+@pytest.mark.parametrize("name,fn", _public_query_functions())
+def test_every_public_query_actually_filters(name, fn, two_repos):
+    """Declaring the allowlist parameter is not enough -- it must change
+    the result. A function that accepts allowed_repo_ids and never
+    references it would pass a signature-only check while leaking every
+    repo's data to every caller; this proves that cannot happen.
+    """
+    conn, ids = two_repos
+    a, b = ids["g/alpha"], ids["g/beta"]
+    kwargs = _minimal_args_for(name, conn, b)
+    allowed_none = fn([], conn, **kwargs)
+    allowed_wrong = fn([a], conn, **kwargs)
+    allowed_right = fn([b], conn, **kwargs)
+    assert not allowed_none, f"{name} returned data for an empty allowlist"
+    assert allowed_wrong != allowed_right, (
+        f"{name} returns the same data regardless of the allowlist "
+        "-- it is not filtering"
+    )
 
 
 @pytest.fixture
