@@ -15,7 +15,6 @@ from ..store.db import connect, migrate
 from .errors import unauthorized
 
 HEALTHZ_PATH = "/healthz"
-_BEARER_PREFIX = "Bearer "
 
 
 def _extract_bearer(header_value: str | None) -> str | None:
@@ -25,10 +24,17 @@ def _extract_bearer(header_value: str | None) -> str | None:
     non-Bearer scheme, or a Bearer header with no (or blank) token. All three
     must be rejected before acl.resolve is ever called: none of them is a
     credential acl.resolve could meaningfully evaluate.
+
+    The scheme is matched case-insensitively -- RFC 7235 draws no
+    distinction between ``Bearer`` and ``bearer`` -- while the token itself
+    stays case-sensitive.
     """
-    if not header_value or not header_value.startswith(_BEARER_PREFIX):
+    if not header_value:
         return None
-    token = header_value[len(_BEARER_PREFIX):].strip()
+    scheme, sep, token = header_value.partition(" ")
+    if not sep or scheme.lower() != "bearer":
+        return None
+    token = token.strip()
     return token or None
 
 

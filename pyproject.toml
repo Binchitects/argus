@@ -19,3 +19,14 @@ include = ["argus*"]
 
 [tool.setuptools.package-data]
 argus = ["store/migrations/*.sql"]
+
+[tool.pytest.ini_options]
+# Scoped to this exact message, not the module or the warning category in
+# general: starlette.testclient's own recommended migration (httpx2) isn't
+# adopted yet, so this one warning is expected noise on every test run. A
+# different StarletteDeprecationWarning -- a real, new deprecation -- has a
+# different message and is therefore not matched by this filter and will
+# still surface.
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette\\.testclient` is deprecated; install `httpx2` instead\\.:starlette.exceptions.StarletteDeprecationWarning",
+]

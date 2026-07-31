@@ -96,6 +96,25 @@ def test_unauthenticated_call_is_rejected(cfg):
     assert "authorization" in resp.json()["error"].lower()
 
 
+def test_unauthenticated_post_to_mcp_is_rejected(cfg):
+    """The five tests around this one all exercise auth with `client.get`,
+    proving the routing layer refuses an unauthenticated request but never
+    the tool-dispatch layer real MCP clients actually use: a JSON-RPC POST.
+    This sends one, unauthenticated, to confirm the middleware -- which runs
+    ahead of all routing -- refuses it before any tool call is dispatched.
+    """
+    def explode(request):
+        raise AssertionError("must not call GitLab for a rejected POST")
+
+    _app, client = _client_for(cfg, explode)
+    resp = client.post(
+        MCP_PATH,
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+    )
+    assert resp.status_code == 401
+    assert "authorization" in resp.json()["error"].lower()
+
+
 def test_malformed_non_bearer_header_is_rejected(cfg):
     _app, client = _client_for(cfg, _gitlab_ok([{"id": 101}]))
     resp = client.get(MCP_PATH, headers={"Authorization": "Basic dXNlcjpwYXNz"})
@@ -161,6 +180,24 @@ def test_valid_token_reaches_handler_with_correct_identity(cfg):
     assert body["user_id"] == 7
     assert body["username"] == "dev"
     assert body["allowed_repo_ids"] == [_local_repo_id(cfg, 101)]
+
+
+def test_lowercase_bearer_scheme_is_accepted(cfg):
+    """RFC 7235 makes the auth scheme case-insensitive. Hermes always sends
+    the canonical `Bearer`, but another MCP client sending `bearer` must not
+    get rejected on scheme case alone -- only the token stays case-sensitive.
+    """
+    app, _ = _client_for(cfg, _gitlab_ok([{"id": 101}]))
+
+    @app.custom_route("/whoami2", methods=["GET"])
+    async def whoami2(request: Request) -> JSONResponse:
+        return JSONResponse({"user_id": request.state.identity.user_id})
+
+    client = TestClient(app.streamable_http_app(), raise_server_exceptions=False)
+    resp = client.get("/whoami2", headers={"Authorization": "bearer dev-token"})
+
+    assert resp.status_code == 200
+    assert resp.json()["user_id"] == 7
 
 
 def test_slow_acl_resolution_does_not_block_other_requests(cfg):
