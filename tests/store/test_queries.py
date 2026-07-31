@@ -47,6 +47,13 @@ def _minimal_args_for(name, conn, target_repo_id):
     if name == "index_status":
         # No arguments beyond allowed_repo_ids and conn.
         return {}
+    if name == "find_references":
+        # Both repos in `two_repos` get an identical src/def.c defining
+        # SharedFunc and an identical src/caller.c calling it -- the text is
+        # byte-for-byte the same in both repos, so switching the allowlist
+        # is the *only* thing that can change which repo's occurrences come
+        # back (same collision strategy as find_symbol's SharedName/a.c).
+        return {"name": "SharedFunc"}
     raise NotImplementedError(
         f"_minimal_args_for has no branch for {name!r}. A newly added public "
         "query function must be given deliberate arguments here before this "
@@ -99,6 +106,20 @@ def test_every_public_query_actually_filters(name, fn, two_repos):
     )
 
 
+DEF_C = (
+    "int SharedFunc(void) {\n"
+    "    return 1;\n"
+    "}\n"
+)
+
+CALLER_C = (
+    "void useIt(void) {\n"
+    "    SharedFunc();\n"
+    "    SharedFuncV2();\n"
+    "}\n"
+)
+
+
 @pytest.fixture
 def two_repos(tmp_path):
     conn = open_db(tmp_path / "i.db")
@@ -114,6 +135,23 @@ def two_repos(tmp_path):
         ], f"sha{gid}")
         writes.set_last_indexed(conn, rid, f"sha{gid}", 1000 + gid)
         ids[ns] = rid
+
+        # Additive extension for find_references (Task 5): a definition file
+        # and a caller file, with byte-identical content in both repos --
+        # required so the generic allowlist-filtering test (which drives
+        # find_references through _minimal_args_for) has no unique-content
+        # shortcut to pass by accident, exactly as SharedName/src/a.c already
+        # do for find_symbol. src/a.c itself is untouched: several existing
+        # tests (e.g. test_get_file_not_truncated_reports_false) assert its
+        # content equals the bare word exactly.
+        def_fid = writes.upsert_file(conn, repo_id=rid, path="src/def.c", lang="c",
+                                     size=len(DEF_C), blob_sha=f"def{gid}", content=DEF_C)
+        writes.replace_symbols(conn, rid, def_fid, [
+            {"name": "SharedFunc", "kind": "function", "line": 1, "end_line": 3,
+             "signature": "(void)", "scope": None, "is_public": 1},
+        ], f"def{gid}")
+        writes.upsert_file(conn, repo_id=rid, path="src/caller.c", lang="c",
+                           size=len(CALLER_C), blob_sha=f"caller{gid}", content=CALLER_C)
     return conn, ids
 
 
@@ -293,3 +331,72 @@ def test_index_status_queued_retries_is_per_repo(two_repos):
     rows = {r["path_with_namespace"]: r["queued_retries"]
             for r in queries.index_status(list(ids.values()), conn)}
     assert rows == {"g/alpha": 3, "g/beta": 1}
+
+
+def test_find_references_finds_caller_in_another_file(two_repos):
+    conn, ids = two_repos
+    rows = queries.find_references([ids["g/alpha"]], conn, "SharedFunc")
+    paths = {r["path"] for r in rows}
+    assert "src/def.c" in paths
+    assert "src/caller.c" in paths, "the call site in a different file was not found"
+
+
+def test_find_references_marks_definition_site(two_repos):
+    conn, ids = two_repos
+    rows = queries.find_references([ids["g/alpha"]], conn, "SharedFunc")
+    by_path = {r["path"]: r for r in rows}
+
+    definition = by_path["src/def.c"]
+    assert definition["is_definition"] is True
+    assert definition["line"] == 1
+    assert definition["repo"] == "g/alpha"
+    assert "SharedFunc" in definition["context"]
+
+    call_site = by_path["src/caller.c"]
+    assert call_site["is_definition"] is False
+
+
+def test_find_references_excludes_disallowed_repo(two_repos):
+    conn, ids = two_repos
+    rows = queries.find_references([ids["g/alpha"]], conn, "SharedFunc")
+    assert rows, "expected occurrences in g/alpha"
+    assert all(r["repo"] == "g/alpha" for r in rows), (
+        "a row from g/beta leaked through an allowlist that only names g/alpha"
+    )
+
+
+def test_find_references_unknown_name_returns_empty(two_repos):
+    conn, ids = two_repos
+    assert queries.find_references([ids["g/alpha"]], conn, "NoSuchIdentifierXYZ") == []
+
+
+def test_find_references_does_not_match_substring_of_longer_identifier(two_repos):
+    """`SharedFunc` must not match the `SharedFuncV2` call on caller.c's next line.
+
+    src/caller.c (see CALLER_C) has "SharedFunc();" on line 2 and
+    "SharedFuncV2();" on line 3, in the *same already-shortlisted* file --
+    this is exactly the shape that catches a naive substring/`in` scan of
+    the FTS-shortlisted lines instead of a real `\\b` word-boundary match.
+    """
+    conn, ids = two_repos
+    rows = queries.find_references([ids["g/alpha"]], conn, "SharedFunc")
+    caller_lines = sorted(r["line"] for r in rows if r["path"] == "src/caller.c")
+    assert caller_lines == [2], (
+        f"expected only line 2 (bare SharedFunc) in src/caller.c, got {caller_lines} "
+        "-- line 3 is SharedFuncV2 and must not match"
+    )
+    assert not any("SharedFuncV2" in r["context"] for r in rows if r["path"] == "src/caller.c" and r["line"] != 3)
+
+
+def test_find_references_honours_limit(two_repos):
+    conn, ids = two_repos
+    rid = ids["g/alpha"]
+    many_content = "".join(f"SharedFunc(); // call {i}\n" for i in range(10))
+    writes.upsert_file(conn, repo_id=rid, path="src/many.c", lang="c",
+                       size=len(many_content), blob_sha="many1", content=many_content)
+
+    unlimited = queries.find_references([rid], conn, "SharedFunc", limit=1000)
+    assert len(unlimited) >= 12  # 1 (def.c) + 1 (caller.c) + 10 (many.c)
+
+    limited = queries.find_references([rid], conn, "SharedFunc", limit=5)
+    assert len(limited) == 5

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Sequence
 
@@ -201,3 +202,88 @@ def index_status(allowed_repo_ids: Sequence[int],
         ).fetchall())
     rows.sort(key=lambda r: r["path_with_namespace"])
     return rows
+
+
+def find_references(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
+                    name: str, limit: int = 100) -> list[dict]:
+    """Find lexical occurrences of `name` and flag the ones ctags knows as definitions.
+
+    NAME-BASED, NOT SEMANTIC -- this is scope-blind textual matching, not a
+    reference resolver, and that is a deliberate scope decision. ctags (the
+    only thing in this index that runs a real parser) extracts *definitions*
+    only; nothing here resolves an identifier occurrence back to the
+    declaration it actually refers to. Concretely:
+
+      - A returned row can be a real call, a comment that happens to mention
+        the name, a string literal, or an unrelated identifier in another
+        language that is spelled the same way. This function cannot tell
+        those apart.
+      - `is_definition=True` means "ctags recorded a symbol with this exact
+        name at this exact file and line" -- it is not a claim that this is
+        the *only* definition, or that any particular non-definition row
+        calls it.
+      - Calls made through a macro, a function pointer, or any indirection
+        ctags does not see are invisible to this function -- there is
+        nothing here to find them with.
+
+    A real reference index needs a parser with scope resolution; that is
+    out of scope for this phase. Treat every result as a lead to inspect,
+    not a confirmed reference.
+
+    Implementation: FTS5 (`files_fts`) shortlists candidate files cheaply,
+    then each candidate's `files.content` is scanned line by line with a
+    strict word-boundary regex (`\\bname\\b`) to produce line numbers and
+    context. The word-boundary step is not optional -- FTS5's own
+    tokenisation is not trusted to enforce identifier boundaries by itself,
+    and a naive substring scan of a shortlisted file's lines would let
+    `DecodeFrame` match a line that only contains `DecodeFrameV2`. A false
+    hit here is worse than a miss: the agent calling this tool will repeat
+    it with confidence.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids:
+        return []
+
+    pattern = re.compile(r"\b" + re.escape(name) + r"\b")
+    fts_query = '"' + name.replace('"', '""') + '"'
+
+    results: list[dict] = []
+    for chunk in _chunks(ids, reserve=1):  # name (FTS MATCH string)
+        marks = ",".join("?" for _ in chunk)
+        try:
+            file_rows = conn.execute(
+                "SELECT f.id AS file_id, r.path_with_namespace AS repo,"
+                "       f.path, f.content"
+                "  FROM files_fts"
+                "  JOIN files f ON f.id = files_fts.rowid"
+                "  JOIN repos r ON r.id = f.repo_id"
+                f" WHERE files_fts MATCH ? AND f.repo_id IN ({marks})",
+                [fts_query, *chunk],
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # `name` contains characters FTS5's MATCH parser rejects even
+            # quoted. This is a references lookup, not a raw search box --
+            # there is no query syntax for a caller to fix, so degrade to
+            # "no candidates in this chunk" instead of raising QueryError.
+            file_rows = []
+
+        for frow in file_rows:
+            def_lines = {
+                row["line"]
+                for row in conn.execute(
+                    "SELECT line FROM symbols WHERE file_id = ? AND name = ?",
+                    (frow["file_id"], name),
+                )
+            }
+            for lineno, line in enumerate(frow["content"].splitlines(), start=1):
+                if pattern.search(line):
+                    results.append({
+                        "repo": frow["repo"],
+                        "path": frow["path"],
+                        "line": lineno,
+                        "context": line,
+                        "is_definition": lineno in def_lines,
+                    })
+
+    results.sort(key=lambda r: (r["repo"], r["path"], r["line"]))
+    return results[:limit]
