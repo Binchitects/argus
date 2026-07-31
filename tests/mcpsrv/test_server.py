@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+
 import httpx
 import pytest
 from starlette.requests import Request
@@ -32,6 +35,22 @@ def _gitlab_ok(projects):
 
 def _gitlab_revokes(request):
     return httpx.Response(401, json={"message": "401 Unauthorized"})
+
+
+def _slow_gitlab(projects, delay_seconds):
+    """A GitLab double whose `/user` response takes `delay_seconds` to
+    return, simulating the round-trip a real cache-miss auth makes."""
+
+    def handler(request):
+        if request.url.path.endswith("/user"):
+            time.sleep(delay_seconds)
+            return httpx.Response(200, json={"id": 7, "username": "dev"})
+        if request.url.path.endswith("/projects"):
+            page = dict(request.url.params).get("page", "1")
+            return httpx.Response(200, json=projects if page == "1" else [])
+        return httpx.Response(404)
+
+    return handler
 
 
 @pytest.fixture
@@ -118,3 +137,43 @@ def test_valid_token_reaches_handler_with_correct_identity(cfg):
     assert body["user_id"] == 7
     assert body["username"] == "dev"
     assert body["allowed_repo_ids"] == [_local_repo_id(cfg, 101)]
+
+
+def test_slow_acl_resolution_does_not_block_other_requests(cfg):
+    """A cache-miss auth makes a synchronous, several-hundred-ms-worst-case
+    GitLab round-trip. On a single-event-loop server (uvicorn), running that
+    synchronously in the request coroutine stalls every other in-flight
+    connection for the duration -- one slow login blocks the whole server.
+
+    This reproduces that shape: one request's ACL resolution is artificially
+    slow, and a concurrent, auth-exempt `/healthz` request must still return
+    promptly rather than queuing up behind it.
+    """
+    delay = 0.3
+    _app, client = _client_for(cfg, _slow_gitlab([{"id": 101}], delay))
+
+    with client:
+        healthz_elapsed = []
+
+        def call_healthz():
+            # Give the auth request a head start so it is mid-flight
+            # (blocked on the mocked GitLab call) when healthz fires.
+            time.sleep(delay / 6)
+            start = time.perf_counter()
+            resp = client.get("/healthz")
+            healthz_elapsed.append(time.perf_counter() - start)
+            assert resp.status_code == 200
+
+        def call_auth():
+            client.get(MCP_PATH, headers={"Authorization": "Bearer dev-token"})
+
+        t_auth = threading.Thread(target=call_auth)
+        t_healthz = threading.Thread(target=call_healthz)
+        t_auth.start()
+        t_healthz.start()
+        t_auth.join()
+        t_healthz.join()
+
+    # healthz must come back well before the slow ACL round-trip finishes --
+    # it must not be stuck waiting behind it on the event loop.
+    assert healthz_elapsed[0] < delay / 2

@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -56,12 +57,36 @@ class BearerAuthMiddleware:
     `connect_readonly`. A short-lived sqlite connection is cheap next to the
     GitLab round-trip `acl.resolve` already makes on a cache miss, so this is
     the simplest defensible choice, not a performance compromise.
+
+    Blocking I/O and the event loop: `acl.resolve` performs synchronous
+    `httpx.Client` calls (a `/user` request plus up to `MAX_PAGES` sequential
+    `/projects` pages, each with a 15s timeout), and `open_db`/`sqlite3` are
+    synchronous too. Run directly on `__call__`'s coroutine, that would
+    execute on uvicorn's single event-loop thread and stall every other
+    in-flight connection for the duration of one cache-miss auth. `_resolve_identity`
+    therefore runs inside `starlette.concurrency.run_in_threadpool`, which
+    hands the whole open/use/close sequence to a single worker thread so it
+    never crosses threads, keeping `sqlite3`'s default `check_same_thread=True`
+    satisfied.
     """
 
     def __init__(self, app: ASGIApp, cfg: Config, client: httpx.Client | None = None):
         self.app = app
         self.cfg = cfg
         self.client = client
+
+    def _resolve_identity(self, token: str) -> acl.Identity:
+        """Open a connection, resolve the identity, close the connection.
+
+        Runs entirely inside one `run_in_threadpool` worker thread (see the
+        class docstring) so the open/use/close sequence never crosses
+        threads, satisfying `sqlite3`'s `check_same_thread=True` default.
+        """
+        conn = open_db(self.cfg.index.db_path)
+        try:
+            return acl.resolve(conn, self.cfg.gitlab, token, client=self.client)
+        finally:
+            conn.close()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope.get("path") == HEALTHZ_PATH:
@@ -77,14 +102,11 @@ class BearerAuthMiddleware:
             await response(scope, receive, send)
             return
 
-        conn = open_db(self.cfg.index.db_path)
         try:
-            identity = acl.resolve(conn, self.cfg.gitlab, token, client=self.client)
+            identity = await run_in_threadpool(self._resolve_identity, token)
         except acl.AclDenied as exc:
             await unauthorized(str(exc))(scope, receive, send)
             return
-        finally:
-            conn.close()
 
         # scope is the same mapping FastMCP's transports carry through to
         # ServerMessageMetadata.request_context, so a tool handler in Task 7
