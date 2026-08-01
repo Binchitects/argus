@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import time
+
 import httpx
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
@@ -11,11 +14,21 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .. import acl
 from ..config import Config
+from ..store import writes
 from ..store.db import connect, migrate
 from .errors import unauthorized
 from .tools import register_tools
 
 HEALTHZ_PATH = "/healthz"
+
+log = logging.getLogger(__name__)
+
+# The tool column is NOT NULL, but a request denied here (in the middleware,
+# ahead of FastMCP's own routing) has no tool identity yet -- the JSON-RPC
+# body naming one, if any, is unparsed at this point. This fixed sentinel
+# marks "denied before any tool was dispatched" rather than leaving the
+# column blank or parsing the body just to populate it.
+_DENIED_AT_GATE_TOOL = "<auth_denied>"
 
 
 def _extract_bearer(header_value: str | None) -> str | None:
@@ -96,6 +109,48 @@ class BearerAuthMiddleware:
         finally:
             conn.close()
 
+    def _write_denied_audit(self) -> None:
+        """Record that a request was denied before any tool ever ran.
+
+        An `AclDenied` here is exactly what an audit log exists to capture
+        (Task 8) -- a developer attempted access and was refused. `user_id`
+        and `username` are None: no identity was ever resolved. `tool` is
+        the fixed `_DENIED_AT_GATE_TOOL` sentinel, not a name read from the
+        request body -- this middleware runs ahead of FastMCP's own JSON-RPC
+        parsing, and reading the body here for a value with no other use
+        would mean consuming the ASGI receive stream for it.
+
+        Opens its own read-write connection (`connect`, never
+        `connect_readonly`), separate from `_resolve_identity`'s: this call
+        happens strictly after that one has already returned control (via
+        the `except AclDenied` branch in `__call__`), so the two never
+        overlap on the same connection, but each keeps its own independent
+        open/use/close cycle regardless.
+        """
+        conn = connect(self.cfg.index.db_path)
+        try:
+            writes.record_audit(
+                conn, ts=int(time.time()), user_id=None, username=None,
+                tool=_DENIED_AT_GATE_TOOL, args_json="{}", repo_ids_json=None,
+            )
+        finally:
+            conn.close()
+
+    async def _audit_denied(self) -> None:
+        """Run `_write_denied_audit` off the event loop; never let it raise.
+
+        Same one-thread-per-connection discipline as `_resolve_identity`:
+        the whole open/execute/commit/close sequence runs inside a single
+        `run_in_threadpool` call. A failed audit write (disk full, database
+        locked) must not turn an already-decided 401 into a 500 or an
+        unhandled exception -- the failure is logged and swallowed so the
+        caller in `__call__` always reaches `unauthorized(...)` next.
+        """
+        try:
+            await run_in_threadpool(self._write_denied_audit)
+        except Exception:
+            log.warning("failed to record audit row for a denied request", exc_info=True)
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope.get("path") == HEALTHZ_PATH:
             await self.app(scope, receive, send)
@@ -113,6 +168,7 @@ class BearerAuthMiddleware:
         try:
             identity = await run_in_threadpool(self._resolve_identity, token)
         except acl.AclDenied as exc:
+            await self._audit_denied()
             await unauthorized(str(exc))(scope, receive, send)
             return
 

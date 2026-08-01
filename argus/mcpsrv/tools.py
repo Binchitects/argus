@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -9,10 +12,12 @@ from starlette.concurrency import run_in_threadpool
 
 from .. import acl
 from ..config import Config
-from ..store import queries
-from ..store.db import connect_readonly
+from ..store import queries, writes
+from ..store.db import connect, connect_readonly
 
 T = TypeVar("T")
+
+log = logging.getLogger(__name__)
 
 
 class IndexUnavailable(Exception):
@@ -101,6 +106,82 @@ async def run_readonly(db_path: Path | str, fn: Callable[[Any], T]) -> T:
             conn.close()
 
     return await run_in_threadpool(_call)
+
+
+async def _record_audit(db_path: Path | str, *, user_id: int | None, username: str | None,
+                        tool: str, args: dict, repo_ids: list[int] | None) -> None:
+    """Append one audit row for a tool-call attempt, on its own connection.
+
+    Deliberately a *separate* `run_in_threadpool` hop from `run_readonly`'s,
+    not a piggyback on it, for two reasons:
+
+    1. This is a write, and it needs a write connection (`connect`, never
+       `connect_readonly`) -- opening it inside `run_readonly`'s closure
+       would mean that helper's contract is no longer "read-only query,
+       wrapped for a clean error", which is exactly the property
+       `test_run_readonly_wraps_unexpected_errors` and
+       `test_run_readonly_lets_query_error_and_lookup_error_through` pin.
+    2. This write must happen whether the query succeeded or raised (see
+       `_with_audit` below); `run_readonly` already has its own, unrelated
+       exception-wrapping logic (`IndexUnavailable`) that only applies to
+       the query itself.
+
+    Each hop still keeps its own connection's entire open/use/close sequence
+    on the single worker thread the enclosing `run_in_threadpool` call
+    grants it, preserving the one-thread-per-connection invariant
+    `run_readonly` documents -- there are just two such hops per tool call
+    instead of one. The extra hop is negligible next to the query and the
+    GitLab round-trips `acl.resolve` already tolerates elsewhere in this
+    server.
+
+    Never raises: a failed audit write (disk full, database locked) must
+    not turn a real, successful tool result into a failure for the
+    developer. The failure is logged and swallowed here so a caller that
+    awaits this in a `finally` block never has it replace or mask whatever
+    exception (or result) the tool call itself produced.
+    """
+    def _write() -> None:
+        conn = connect(db_path)
+        try:
+            writes.record_audit(
+                conn, ts=int(time.time()), user_id=user_id, username=username,
+                tool=tool, args_json=json.dumps(args),
+                repo_ids_json=json.dumps(repo_ids) if repo_ids is not None else None,
+            )
+        finally:
+            conn.close()
+
+    try:
+        await run_in_threadpool(_write)
+    except Exception:
+        log.warning("failed to record audit row for tool=%s", tool, exc_info=True)
+
+
+async def _with_audit(db_path: Path | str, tool: str, identity: acl.Identity,
+                      args: dict, call: Callable[[], Any]) -> Any:
+    """Await `call()`, recording exactly one audit row for the attempt either way.
+
+    An audit log exists to answer "what did the assistant show them", and
+    that question is just as real for a call that raised (a denied
+    `get_file`, a query error) as for one that returned data -- an attempted
+    access is worth recording, not only a successful one. The `finally`
+    below fires on both paths and does not affect which one the caller
+    ultimately sees: `_record_audit` never raises, so a real exception from
+    `call()` propagates unchanged, and a real result is returned unchanged.
+
+    `args` must be built by the caller from ONLY the tool's own typed
+    parameters (never `ctx`, never `identity`) -- `ctx` carries the request
+    that the raw bearer token lives on, and passing it here (or anything
+    derived from it beyond the already-resolved, token-free `Identity`)
+    would risk that token reaching `args_json`.
+    """
+    try:
+        return await call()
+    finally:
+        await _record_audit(
+            db_path, user_id=identity.user_id, username=identity.username,
+            tool=tool, args=args, repo_ids=identity.allowed_repo_ids,
+        )
 
 
 async def find_symbol_impl(db_path: Path | str, identity: acl.Identity, name: str,
@@ -272,30 +353,52 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
     never one it constructs or defaults itself. Every handler routes its
     sqlite work through `run_readonly` so it never blocks the event loop
     (see that function's docstring).
+
+    Every handler also records one audit row per call via `_with_audit`
+    (Task 8) -- on success and on failure alike, since a denied or errored
+    attempt is exactly what an audit log exists to capture. `args` passed to
+    `_with_audit` is built from each tool's own typed parameters only, never
+    from `ctx` or `identity`, so the caller's bearer token can never reach
+    `args_json` (see `_with_audit`'s docstring).
     """
     db_path = cfg.index.db_path
 
     @server.tool(name="find_symbol", description=_FIND_SYMBOL_DESC)
     async def find_symbol(name: str, kind: str | None = None, *, ctx: Context) -> list[dict]:
         identity = _identity(ctx)
-        return await find_symbol_impl(db_path, identity, name, kind=kind)
+        return await _with_audit(
+            db_path, "find_symbol", identity, {"name": name, "kind": kind},
+            lambda: find_symbol_impl(db_path, identity, name, kind=kind),
+        )
 
     @server.tool(name="find_references", description=_FIND_REFERENCES_DESC)
     async def find_references(name: str, *, ctx: Context) -> list[dict]:
         identity = _identity(ctx)
-        return await find_references_impl(db_path, identity, name)
+        return await _with_audit(
+            db_path, "find_references", identity, {"name": name},
+            lambda: find_references_impl(db_path, identity, name),
+        )
 
     @server.tool(name="search_code", description=_SEARCH_CODE_DESC)
     async def search_code(query: str, *, ctx: Context) -> list[dict]:
         identity = _identity(ctx)
-        return await search_code_impl(db_path, identity, query)
+        return await _with_audit(
+            db_path, "search_code", identity, {"query": query},
+            lambda: search_code_impl(db_path, identity, query),
+        )
 
     @server.tool(name="get_file", description=_GET_FILE_DESC)
     async def get_file(repo_id: int, path: str, *, ctx: Context) -> dict[str, Any]:
         identity = _identity(ctx)
-        return await get_file_impl(db_path, identity, repo_id, path)
+        return await _with_audit(
+            db_path, "get_file", identity, {"repo_id": repo_id, "path": path},
+            lambda: get_file_impl(db_path, identity, repo_id, path),
+        )
 
     @server.tool(name="index_status", description=_INDEX_STATUS_DESC)
     async def index_status(*, ctx: Context) -> list[dict]:
         identity = _identity(ctx)
-        return await index_status_impl(db_path, identity)
+        return await _with_audit(
+            db_path, "index_status", identity, {},
+            lambda: index_status_impl(db_path, identity),
+        )

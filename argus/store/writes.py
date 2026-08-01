@@ -307,3 +307,31 @@ def drain_retry_paths(conn: sqlite3.Connection, repo_id: int) -> list[str]:
     paths = peek_retry_paths(conn, repo_id)
     clear_retry_queue(conn, repo_id)
     return paths
+
+
+def record_audit(conn: sqlite3.Connection, *, ts: int, user_id: int | None,
+                 username: str | None, tool: str, args_json: str,
+                 repo_ids_json: str | None) -> None:
+    """Append one audit row: one call attempt, one row.
+
+    `conn` must be a read-write connection (`connect`, never
+    `connect_readonly`) -- this is the one write the MCP server's otherwise
+    strictly read-only request path performs, and it needs its own
+    connection separate from the one used to run the query itself (see
+    `argus.mcpsrv.tools._record_audit`).
+
+    `user_id`/`username` are None for a call denied before any identity was
+    resolved (an `AclDenied` at the auth gate) -- the columns are nullable
+    for exactly that reason. `tool` is NOT NULL; callers denied before a
+    specific tool was identified pass a fixed sentinel rather than leaving it
+    blank. Recording happens whether the call succeeded or failed: this
+    table has no outcome column by design (see migration 007) -- its job is
+    "what was this identity shown or did they attempt", not a full
+    success/failure request log.
+    """
+    conn.execute(
+        "INSERT INTO audit (ts, user_id, username, tool, args_json, repo_ids_json)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (ts, user_id, username, tool, args_json, repo_ids_json),
+    )
+    conn.commit()
