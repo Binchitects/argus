@@ -7,6 +7,7 @@ import httpx
 import pytest
 from starlette.testclient import TestClient
 
+import argus.mcpsrv.server as server_mod
 from argus.config import Config, GitLabConfig, IndexConfig
 from argus.mcpsrv.server import create_app
 from argus.store import writes
@@ -213,3 +214,80 @@ def test_audit_write_failure_does_not_break_tool_call(repo_cfg, monkeypatch):
 
     assert result["isError"] is False
     assert result["structuredContent"]["content"] == "int"
+
+
+# ---------------------------------------------------------------------------
+# The `token is None` branch -- a missing Authorization header, a non-Bearer
+# scheme, and a blank Bearer token -- rejects before acl.resolve is ever
+# called, so no Identity, and previously no audit row, ever existed for it.
+# An anonymous or garbage-token prober is exactly the traffic an audit log
+# exists to catch, so each of these three shapes must write one row too.
+# ---------------------------------------------------------------------------
+
+def _assert_single_denied_audit_row(cfg) -> dict:
+    rows = _audit_rows(cfg.index.db_path)
+    assert len(rows) == 1
+    assert rows[0]["user_id"] is None
+    assert rows[0]["username"] is None
+    assert rows[0]["tool"] == server_mod._DENIED_AT_GATE_TOOL
+    return rows[0]
+
+
+def test_missing_auth_header_writes_audit_row(repo_cfg):
+    cfg, _rid = repo_cfg
+    app = create_app(cfg, client=_mock_client(_gitlab_ok([{"id": 101}])))
+    client = TestClient(app.streamable_http_app(), raise_server_exceptions=False)
+
+    resp = client.get(MCP_PATH)
+    assert resp.status_code == 401
+
+    row = _assert_single_denied_audit_row(cfg)
+    assert SECRET_TOKEN not in json.dumps(row)
+
+
+def test_non_bearer_scheme_writes_audit_row(repo_cfg):
+    cfg, _rid = repo_cfg
+    app = create_app(cfg, client=_mock_client(_gitlab_ok([{"id": 101}])))
+    client = TestClient(app.streamable_http_app(), raise_server_exceptions=False)
+
+    # The credential-shaped value after "Basic" is exactly what must never
+    # reach the audit row: a non-Bearer scheme is rejected by _extract_bearer
+    # without ever being treated as a token, but the row itself must prove it.
+    resp = client.get(MCP_PATH, headers={"Authorization": f"Basic {SECRET_TOKEN}"})
+    assert resp.status_code == 401
+
+    row = _assert_single_denied_audit_row(cfg)
+    assert SECRET_TOKEN not in json.dumps(row)
+
+
+def test_blank_bearer_token_writes_audit_row(repo_cfg):
+    cfg, _rid = repo_cfg
+    app = create_app(cfg, client=_mock_client(_gitlab_ok([{"id": 101}])))
+    client = TestClient(app.streamable_http_app(), raise_server_exceptions=False)
+
+    resp = client.get(MCP_PATH, headers={"Authorization": "Bearer "})
+    assert resp.status_code == 401
+
+    row = _assert_single_denied_audit_row(cfg)
+    assert SECRET_TOKEN not in json.dumps(row)
+
+
+# ---------------------------------------------------------------------------
+# A failing audit write at the `token is None` gate must not turn an
+# already-decided 401 into a 500, exactly like the existing AclDenied path.
+# ---------------------------------------------------------------------------
+
+def test_audit_write_failure_at_gate_still_returns_401(repo_cfg, monkeypatch):
+    cfg, _rid = repo_cfg
+
+    def _boom(conn, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(server_mod.writes, "record_audit", _boom)
+
+    app = create_app(cfg, client=_mock_client(_gitlab_ok([{"id": 101}])))
+    client = TestClient(app.streamable_http_app(), raise_server_exceptions=False)
+
+    resp = client.get(MCP_PATH)  # no Authorization header at all
+
+    assert resp.status_code == 401

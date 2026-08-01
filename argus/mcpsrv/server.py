@@ -112,20 +112,24 @@ class BearerAuthMiddleware:
     def _write_denied_audit(self) -> None:
         """Record that a request was denied before any tool ever ran.
 
-        An `AclDenied` here is exactly what an audit log exists to capture
-        (Task 8) -- a developer attempted access and was refused. `user_id`
-        and `username` are None: no identity was ever resolved. `tool` is
-        the fixed `_DENIED_AT_GATE_TOOL` sentinel, not a name read from the
-        request body -- this middleware runs ahead of FastMCP's own JSON-RPC
-        parsing, and reading the body here for a value with no other use
-        would mean consuming the ASGI receive stream for it.
+        Called from both places `__call__` rejects a request ahead of tool
+        dispatch: a missing/malformed/non-Bearer/blank-token header (`token
+        is None`) and an `AclDenied` from resolution. Either way this is
+        exactly what an audit log exists to capture (Task 8) -- a developer
+        attempted access and was refused. `user_id` and `username` are None:
+        no identity was ever resolved (in the `token is None` case, none was
+        even attempted). `tool` is the fixed `_DENIED_AT_GATE_TOOL` sentinel,
+        not a name read from the request body -- this middleware runs ahead
+        of FastMCP's own JSON-RPC parsing, and reading the body here for a
+        value with no other use would mean consuming the ASGI receive stream
+        for it.
 
         Opens its own read-write connection (`connect`, never
-        `connect_readonly`), separate from `_resolve_identity`'s: this call
-        happens strictly after that one has already returned control (via
-        the `except AclDenied` branch in `__call__`), so the two never
-        overlap on the same connection, but each keeps its own independent
-        open/use/close cycle regardless.
+        `connect_readonly`), separate from `_resolve_identity`'s: whenever
+        both run in the same request (the `AclDenied` path), this call
+        happens strictly after `_resolve_identity` has already returned
+        control, so the two never overlap on the same connection -- but each
+        keeps its own independent open/use/close cycle regardless.
         """
         conn = connect(self.cfg.index.db_path)
         try:
@@ -158,6 +162,7 @@ class BearerAuthMiddleware:
 
         token = _extract_bearer(Headers(scope=scope).get("authorization"))
         if token is None:
+            await self._audit_denied()
             response = unauthorized(
                 "Missing or malformed Authorization header. "
                 "Expected 'Authorization: Bearer <token>'."
