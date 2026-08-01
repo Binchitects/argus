@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TypeVar
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -14,6 +15,16 @@ from ..store.db import connect_readonly
 T = TypeVar("T")
 
 
+class IndexUnavailable(Exception):
+    """The read-only index could not be reached for reasons unrelated to the query.
+
+    Error text is prompt text: a raw `sqlite3.OperationalError` (a missing,
+    locked, or corrupt database file) is exactly the wrong string to hand a
+    model -- it reads like a query problem the model should retry or rewrite,
+    when the actual cause is operational and out of its hands.
+    """
+
+
 def _identity(ctx: Context) -> acl.Identity:
     """Read the caller's resolved Identity out of the request BearerAuthMiddleware attached.
 
@@ -25,11 +36,23 @@ def _identity(ctx: Context) -> acl.Identity:
     scope the middleware populated. So `.state.identity` here is exactly the
     Identity the middleware attached, never one a tool constructs or defaults
     itself.
+
+    Fails closed if that invariant is ever violated -- a missing request or a
+    request with no identity attached both raise here, explicitly, rather
+    than falling through to an internals-leaking
+    `AttributeError: 'NoneType' object has no attribute 'state'`.
     """
-    return ctx.request_context.request.state.identity
+    request = ctx.request_context.request
+    identity = getattr(request, "state", None) and getattr(request.state, "identity", None)
+    if identity is None:
+        raise LookupError(
+            "No authenticated identity is attached to this request; refusing "
+            "to proceed."
+        )
+    return identity
 
 
-async def run_readonly(db_path: Any, fn: Callable[[Any], T]) -> T:
+async def run_readonly(db_path: Path | str, fn: Callable[[Any], T]) -> T:
     """Run `fn(conn)` against a read-only connection, off the event loop.
 
     Every tool handler below is `async def`, but `argus.store.queries` and
@@ -50,18 +73,37 @@ async def run_readonly(db_path: Any, fn: Callable[[Any], T]) -> T:
     `connect_readonly`, never `open_db`: tool queries must not write to the
     index and must not run schema migrations. Migration happens exactly once,
     at server startup, in `create_app`.
+
+    Anything `fn` raises that is a `queries.QueryError` or a `LookupError`
+    is a deliberate, already-actionable signal (a bad query, a missing row)
+    and propagates unchanged. Anything else -- most notably
+    `sqlite3.OperationalError` from a missing, locked, or corrupt database --
+    is not something the caller can fix by rewriting its query, so it is
+    wrapped into `IndexUnavailable` with a clean, agent-directed message
+    instead of a raw SQLite string.
     """
     def _call() -> T:
-        conn = connect_readonly(db_path)
+        try:
+            conn = connect_readonly(db_path)
+        except Exception as exc:
+            raise IndexUnavailable(
+                "The index is unavailable; do not retry this query."
+            ) from exc
         try:
             return fn(conn)
+        except (queries.QueryError, LookupError):
+            raise
+        except Exception as exc:
+            raise IndexUnavailable(
+                "The index is unavailable; do not retry this query."
+            ) from exc
         finally:
             conn.close()
 
     return await run_in_threadpool(_call)
 
 
-async def find_symbol_impl(db_path: Any, identity: acl.Identity, name: str,
+async def find_symbol_impl(db_path: Path | str, identity: acl.Identity, name: str,
                             kind: str | None = None) -> list[dict]:
     rows = await run_readonly(
         db_path,
@@ -70,7 +112,7 @@ async def find_symbol_impl(db_path: Any, identity: acl.Identity, name: str,
     return [dict(row) for row in rows]
 
 
-async def find_references_impl(db_path: Any, identity: acl.Identity, name: str) -> list[dict]:
+async def find_references_impl(db_path: Path | str, identity: acl.Identity, name: str) -> list[dict]:
     # queries.find_references already returns list[dict] (unlike the other
     # three, which return list[sqlite3.Row]) -- no conversion needed.
     #
@@ -109,7 +151,7 @@ async def find_references_impl(db_path: Any, identity: acl.Identity, name: str) 
 _DANGLING_REGEX_SUGGESTION = ", or use regex=True."
 
 
-async def search_code_impl(db_path: Any, identity: acl.Identity, query: str) -> list[dict]:
+async def search_code_impl(db_path: Path | str, identity: acl.Identity, query: str) -> list[dict]:
     # queries.QueryError's message is otherwise already actionable prompt
     # text (see queries.py) and FastMCP's tool dispatch turns any exception
     # raised here into an isError=True CallToolResult carrying str(exc) --
@@ -127,7 +169,7 @@ async def search_code_impl(db_path: Any, identity: acl.Identity, query: str) -> 
     return [dict(row) for row in rows]
 
 
-async def get_file_impl(db_path: Any, identity: acl.Identity, repo_id: int,
+async def get_file_impl(db_path: Path | str, identity: acl.Identity, repo_id: int,
                          path: str) -> dict[str, Any]:
     result = await run_readonly(
         db_path,
@@ -147,7 +189,7 @@ async def get_file_impl(db_path: Any, identity: acl.Identity, repo_id: int,
     return result
 
 
-async def index_status_impl(db_path: Any, identity: acl.Identity) -> list[dict]:
+async def index_status_impl(db_path: Path | str, identity: acl.Identity) -> list[dict]:
     rows = await run_readonly(
         db_path,
         lambda conn: queries.index_status(identity.allowed_repo_ids, conn),
@@ -160,7 +202,8 @@ _FIND_SYMBOL_DESC = (
     "DEFINED, across the repos you have access to. Answers questions like "
     "'where is DecodeFrame defined?' or 'what class implements X?'. Returns "
     "each definition site: repo_id, path_with_namespace, file path, line "
-    "range, kind, signature, scope, and visibility. Optionally narrow with "
+    "range, kind, signature, scope, and `is_public` (0/1 -- 1 means public "
+    "visibility). Optionally narrow with "
     "`kind` (e.g. 'function', 'class', 'struct'). This is a DEFINITION "
     "lookup only -- it does not find call sites, comments, or other "
     "mentions of the name; use find_references for that."

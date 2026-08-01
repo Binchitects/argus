@@ -128,30 +128,17 @@ def test_get_file_impl_returns_only_callers_repo(two_repos_db):
     result = asyncio.run(tools.get_file_impl(db_path, identity, ids["g/alpha"], "src/a.c"))
     assert result["content"] == "alphaword"
 
-    with pytest.raises(LookupError):
+    with pytest.raises(LookupError) as exc_info:
         asyncio.run(tools.get_file_impl(db_path, identity, ids["g/beta"], "src/a.c"))
-
-
-# ---------------------------------------------------------------------------
-# find_references results must be able to feed straight into get_file: the
-# primary "find a mention, read that file" workflow must not dead-end for
-# lack of a repo_id.
-# ---------------------------------------------------------------------------
-
-def test_find_references_result_repo_id_feeds_get_file(two_repos_db):
-    db_path, ids = two_repos_db
-    identity = _identity(ids["g/beta"])
-    rows = asyncio.run(tools.find_references_impl(db_path, identity, "SharedFunc"))
-    assert rows, "expected at least one occurrence of SharedFunc"
-
-    hit = rows[0]
-    assert hit["repo_id"] == ids["g/beta"], (
-        "find_references must stamp repo_id so its results chain into get_file"
-    )
-
-    file_result = asyncio.run(tools.get_file_impl(db_path, identity, hit["repo_id"], hit["path"]))
-    assert file_result["path"] == hit["path"]
-    assert file_result["repo_id"] == ids["g/beta"]
+    # queries.get_file returns exactly None for both "no such repo_id in your
+    # allowlist" and "no such path in that repo" -- deliberately not
+    # distinguished, and _GET_FILE_DESC promises callers that non-oracle
+    # property. Pin the message itself, not just the exception type: it must
+    # not resolve to only one of the two explanations.
+    message = str(exc_info.value).lower()
+    assert "either" in message
+    assert "not one you have access to" in message
+    assert "does not exist" in message
 
 
 def test_index_status_impl_returns_only_callers_repo(two_repos_db):
@@ -188,6 +175,106 @@ def test_search_code_impl_error_does_not_suggest_nonexistent_regex_param(two_rep
     message = str(exc_info.value)
     assert "regex" not in message.lower()
     assert "syntax" in message.lower()
+
+
+# ---------------------------------------------------------------------------
+# find_references results must be able to feed straight into get_file: the
+# primary "find a mention, read that file" workflow must not dead-end for
+# lack of a repo_id.
+# ---------------------------------------------------------------------------
+
+def test_find_references_result_repo_id_feeds_get_file(two_repos_db):
+    db_path, ids = two_repos_db
+    identity = _identity(ids["g/beta"])
+    rows = asyncio.run(tools.find_references_impl(db_path, identity, "SharedFunc"))
+    assert rows, "expected at least one occurrence of SharedFunc"
+
+    hit = rows[0]
+    assert hit["repo_id"] == ids["g/beta"], (
+        "find_references must stamp repo_id so its results chain into get_file"
+    )
+
+    file_result = asyncio.run(tools.get_file_impl(db_path, identity, hit["repo_id"], hit["path"]))
+    assert file_result["path"] == hit["path"]
+    assert file_result["repo_id"] == ids["g/beta"]
+
+
+# ---------------------------------------------------------------------------
+# run_readonly must not let a raw sqlite error (missing/locked/corrupt db)
+# reach a caller as prompt text -- only QueryError/LookupError are
+# already-actionable and should propagate unchanged.
+# ---------------------------------------------------------------------------
+
+def test_run_readonly_wraps_unexpected_errors(tmp_path):
+    missing_db = tmp_path / "does" / "not" / "exist.db"
+    with pytest.raises(tools.IndexUnavailable) as exc_info:
+        asyncio.run(tools.run_readonly(missing_db, lambda conn: None))
+    message = str(exc_info.value)
+    assert "operationalerror" not in message.lower()
+    assert "traceback" not in message.lower()
+    assert "do not retry" in message.lower()
+
+
+def test_run_readonly_lets_query_error_and_lookup_error_through(two_repos_db):
+    db_path, _ids = two_repos_db
+
+    def _raise_query_error(conn):
+        raise queries.QueryError("bad query")
+
+    def _raise_lookup_error(conn):
+        raise LookupError("not found")
+
+    with pytest.raises(queries.QueryError):
+        asyncio.run(tools.run_readonly(db_path, _raise_query_error))
+    with pytest.raises(LookupError):
+        asyncio.run(tools.run_readonly(db_path, _raise_lookup_error))
+
+
+# ---------------------------------------------------------------------------
+# _identity must fail closed *readably* -- an explicit raise, never a raw
+# AttributeError leaking 'NoneType' object has no attribute 'state'.
+# ---------------------------------------------------------------------------
+
+class _FakeRequestContext:
+    def __init__(self, request):
+        self.request = request
+
+
+class _FakeCtx:
+    def __init__(self, request):
+        self.request_context = _FakeRequestContext(request)
+
+
+class _StateWithNoIdentity:
+    pass
+
+
+class _RequestWithNoIdentity:
+    state = _StateWithNoIdentity()
+
+
+def test_identity_fails_closed_readably_when_request_missing():
+    with pytest.raises(Exception) as exc_info:
+        tools._identity(_FakeCtx(None))
+    # Reverting the fix makes this an AttributeError leaking
+    # "'NoneType' object has no attribute 'state'" -- assert both the
+    # explicit exception type and the message text so this test cannot pass
+    # by accident against the un-fixed internals-leaking behaviour.
+    assert not isinstance(exc_info.value, AttributeError)
+    message = str(exc_info.value).lower()
+    assert "nonetype" not in message
+    assert "identity" in message
+
+
+def test_identity_fails_closed_readably_when_identity_missing():
+    with pytest.raises(Exception) as exc_info:
+        tools._identity(_FakeCtx(_RequestWithNoIdentity()))
+    # Reverting the fix makes this an AttributeError leaking
+    # "'_StateWithNoIdentity' object has no attribute 'identity'".
+    assert not isinstance(exc_info.value, AttributeError)
+    message = str(exc_info.value).lower()
+    assert "nonetype" not in message
+    assert "identity" in message
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +511,14 @@ def test_tools_list_descriptions_are_load_bearing(two_repo_cfg):
     assert "last_run_timed_out" in by_name["index_status"]
     assert "last_run_symbols_failed" in by_name["index_status"]
     assert "truncated" in by_name["get_file"].lower()
+    # find_symbol actually returns `is_public` (a 0/1 int), never a field
+    # literally named "visibility" -- name fields as they appear so a model
+    # looking for the key it was told about actually finds it.
+    assert "is_public" in by_name["find_symbol"]
+    # get_file's description must remain true now that find_references also
+    # returns repo_id (Finding 1): the primary find-a-mention/read-that-file
+    # workflow must be named as a valid repo_id source.
+    assert "find_references" in by_name["get_file"]
 
 
 # ---------------------------------------------------------------------------
