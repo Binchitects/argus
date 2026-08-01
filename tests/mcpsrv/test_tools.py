@@ -132,6 +132,28 @@ def test_get_file_impl_returns_only_callers_repo(two_repos_db):
         asyncio.run(tools.get_file_impl(db_path, identity, ids["g/beta"], "src/a.c"))
 
 
+# ---------------------------------------------------------------------------
+# find_references results must be able to feed straight into get_file: the
+# primary "find a mention, read that file" workflow must not dead-end for
+# lack of a repo_id.
+# ---------------------------------------------------------------------------
+
+def test_find_references_result_repo_id_feeds_get_file(two_repos_db):
+    db_path, ids = two_repos_db
+    identity = _identity(ids["g/beta"])
+    rows = asyncio.run(tools.find_references_impl(db_path, identity, "SharedFunc"))
+    assert rows, "expected at least one occurrence of SharedFunc"
+
+    hit = rows[0]
+    assert hit["repo_id"] == ids["g/beta"], (
+        "find_references must stamp repo_id so its results chain into get_file"
+    )
+
+    file_result = asyncio.run(tools.get_file_impl(db_path, identity, hit["repo_id"], hit["path"]))
+    assert file_result["path"] == hit["path"]
+    assert file_result["repo_id"] == ids["g/beta"]
+
+
 def test_index_status_impl_returns_only_callers_repo(two_repos_db):
     db_path, ids = two_repos_db
     rows = asyncio.run(tools.index_status_impl(db_path, _identity(ids["g/beta"])))

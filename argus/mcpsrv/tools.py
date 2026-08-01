@@ -73,10 +73,30 @@ async def find_symbol_impl(db_path: Any, identity: acl.Identity, name: str,
 async def find_references_impl(db_path: Any, identity: acl.Identity, name: str) -> list[dict]:
     # queries.find_references already returns list[dict] (unlike the other
     # three, which return list[sqlite3.Row]) -- no conversion needed.
-    return await run_readonly(
-        db_path,
-        lambda conn: queries.find_references(identity.allowed_repo_ids, conn, name),
-    )
+    #
+    # queries.find_references returns "repo" (the path_with_namespace
+    # *string*) and no repo_id at all, unlike find_symbol/search_code/
+    # index_status, which all return repo_id alongside path_with_namespace.
+    # get_file accepts only a numeric repo_id, so without this enrichment a
+    # find_references hit cannot be chained into get_file -- the primary
+    # "find a mention, read that file" workflow dead-ends. Stamp repo_id
+    # onto each row using the path_with_namespace -> repo_id map that
+    # queries.index_status(identity.allowed_repo_ids, conn) already returns,
+    # built INSIDE this same run_readonly closure so the whole lookup stays
+    # one run_in_threadpool call (see run_readonly's docstring).
+    def _run(conn: Any) -> list[dict]:
+        rows = queries.find_references(identity.allowed_repo_ids, conn, name)
+        if not rows:
+            return rows
+        repo_id_by_namespace = {
+            status["path_with_namespace"]: status["repo_id"]
+            for status in queries.index_status(identity.allowed_repo_ids, conn)
+        }
+        for row in rows:
+            row["repo_id"] = repo_id_by_namespace.get(row["repo"])
+        return rows
+
+    return await run_readonly(db_path, _run)
 
 
 async def search_code_impl(db_path: Any, identity: acl.Identity, query: str) -> list[dict]:
