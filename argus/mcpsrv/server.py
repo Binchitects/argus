@@ -13,6 +13,7 @@ from .. import acl
 from ..config import Config
 from ..store.db import connect, migrate
 from .errors import unauthorized
+from .tools import register_tools
 
 HEALTHZ_PATH = "/healthz"
 
@@ -154,8 +155,10 @@ def create_app(cfg: Config, *, client: httpx.Client | None = None) -> FastMCP:
 
     Serves Streamable HTTP (and SSE) via the official `mcp` SDK's FastMCP, so
     it works regardless of which transport Hermes negotiates. `/healthz`
-    requires no authentication; every other route is gated by
-    `BearerAuthMiddleware`. No tools are registered here -- that is Task 7.
+    requires no authentication; every other route -- including every tool
+    call -- is gated by `BearerAuthMiddleware`. The five Phase 2 retrieval
+    tools (`argus.mcpsrv.tools.register_tools`) are registered on the
+    returned server below, after migration.
 
     `client` overrides the `httpx.Client` used by `acl.resolve` on every
     request; production callers leave it None, in which case `acl.resolve`
@@ -187,5 +190,7 @@ def create_app(cfg: Config, *, client: httpx.Client | None = None) -> FastMCP:
     @server.custom_route(HEALTHZ_PATH, methods=["GET"])
     async def healthz(request: Request) -> Response:
         return JSONResponse({"status": "ok"})
+
+    register_tools(server, cfg)
 
     return server
