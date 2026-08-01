@@ -133,6 +133,44 @@ def delete_file(conn: sqlite3.Connection, repo_id: int, path: str) -> None:
     conn.commit()
 
 
+def delete_repo(conn: sqlite3.Connection, repo_id: int) -> None:
+    """Remove a repo and every dependent row, including FTS entries.
+
+    files, symbols, includes, repo_deps, index_errors, index_queue and
+    retry_attempts all carry a `repo_id` (or `file_id`) foreign key with
+    `ON DELETE CASCADE`, and this connection runs with
+    `PRAGMA foreign_keys = ON` (see store.db.connect) -- so a single
+    `DELETE FROM repos` clears all of those on its own.
+
+    files_fts does not: it is an FTS5 external-content table with no
+    triggers, so the cascade never touches it and its term entries would be
+    orphaned by a plain delete -- exactly the bug this task exists to avoid
+    (search_code would keep matching content that no longer exists in
+    `files`). Its rows must be removed with the documented FTS5 'delete'
+    command, using the OLD path/content values, before `files` disappears
+    out from under them.
+
+    This reads every file row for the repo up front and issues one
+    `_fts_delete` per row, then a single cascading `DELETE FROM repos` --
+    rather than looping `delete_file` once per path. Both are correct
+    (`delete_file` uses the same `_fts_delete` primitive); this way only
+    does the "which files does this repo have" lookup once instead of once
+    per path, and only issues one cascading delete instead of one DELETE
+    per file plus a final no-op DELETE FROM repos.
+
+    A `repo_id` that does not exist is a no-op: the SELECT returns no rows,
+    the DELETE affects none, and the transaction still commits cleanly --
+    matching `delete_file`'s treatment of a path that no longer exists.
+    """
+    rows = conn.execute(
+        "SELECT id, path, content FROM files WHERE repo_id = ?", (repo_id,)
+    ).fetchall()
+    for row in rows:
+        _fts_delete(conn, row)
+    conn.execute("DELETE FROM repos WHERE id = ?", (repo_id,))
+    conn.commit()
+
+
 def replace_symbols(conn: sqlite3.Connection, repo_id: int, file_id: int,
                     symbols: list[dict], blob_sha: str) -> None:
     conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
