@@ -174,6 +174,22 @@ def test_search_code_impl_surfaces_query_error_actionably(two_repos_db):
     assert "syntax" in message.lower()
 
 
+def test_search_code_impl_error_does_not_suggest_nonexistent_regex_param(two_repos_db):
+    """queries.search_code's QueryError text ends with '... or use regex=True.',
+    but search_code takes no `regex` argument -- neither the tool nor
+    queries.search_code itself accepts one. A model's first recovery attempt
+    after this error would otherwise be a guaranteed invalid-argument retry.
+    search_code_impl must catch QueryError and strip that dangling
+    suggestion; the message must still say enough to resubmit successfully.
+    """
+    db_path, ids = two_repos_db
+    with pytest.raises(queries.QueryError) as exc_info:
+        asyncio.run(tools.search_code_impl(db_path, _identity(ids["g/alpha"]), 'unbalanced "quote'))
+    message = str(exc_info.value)
+    assert "regex" not in message.lower()
+    assert "syntax" in message.lower()
+
+
 # ---------------------------------------------------------------------------
 # get_file must report truncation, both ways.
 # ---------------------------------------------------------------------------

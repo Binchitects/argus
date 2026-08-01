@@ -99,16 +99,31 @@ async def find_references_impl(db_path: Any, identity: acl.Identity, name: str) 
     return await run_readonly(db_path, _run)
 
 
+# queries.search_code's QueryError message ends with "... or use regex=True."
+# but search_code_impl's (and the search_code tool's) signature takes only
+# `query` -- there is no `regex` parameter here or on queries.search_code
+# either, so that suggestion is stale at its source and cannot be honoured.
+# A model's first recovery attempt after a syntax error would otherwise be a
+# guaranteed invalid-argument call. queries.py is off-limits for this fix, so
+# strip the dangling suggestion here instead.
+_DANGLING_REGEX_SUGGESTION = ", or use regex=True."
+
+
 async def search_code_impl(db_path: Any, identity: acl.Identity, query: str) -> list[dict]:
-    # queries.QueryError is deliberately left to propagate uncaught: its
-    # message is already written to be actionable prompt text (see
-    # queries.py), and FastMCP's tool dispatch turns any exception raised
-    # here into an isError=True CallToolResult carrying str(exc) -- never a
-    # raw traceback or a bare SQLite message.
-    rows = await run_readonly(
-        db_path,
-        lambda conn: queries.search_code(identity.allowed_repo_ids, conn, query),
-    )
+    # queries.QueryError's message is otherwise already actionable prompt
+    # text (see queries.py) and FastMCP's tool dispatch turns any exception
+    # raised here into an isError=True CallToolResult carrying str(exc) --
+    # never a raw traceback or a bare SQLite message -- so only the dangling
+    # regex=True suggestion needs to be caught and rewritten; everything else
+    # about the message is left alone.
+    try:
+        rows = await run_readonly(
+            db_path,
+            lambda conn: queries.search_code(identity.allowed_repo_ids, conn, query),
+        )
+    except queries.QueryError as exc:
+        message = str(exc).replace(_DANGLING_REGEX_SUGGESTION, ".")
+        raise queries.QueryError(message) from exc
     return [dict(row) for row in rows]
 
 
