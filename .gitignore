@@ -33,3 +33,4 @@ desktop.ini
 
 # Test-GitLab seeded credentials (throwaway, but still credentials)
 deploy/test-gitlab/seeded.json
+deploy/test-gitlab/work/
