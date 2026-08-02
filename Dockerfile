@@ -84,3 +84,24 @@ VOLUME ["/var/lib/argus"]
 # touches nothing, so a bare `docker run` cannot start an unintended index.
 ENTRYPOINT ["argus"]
 CMD ["status", "--config", "/etc/argus/config.yaml"]
+
+# ------------------------------------------------------------- server -------
+# The MCP retrieval server: unlike the indexer above, this IS a long-running
+# daemon and is meant to be started by `docker compose up` (see
+# docker-compose.yml). It extends `runtime` rather than duplicating its
+# apt/user/git setup -- same pinned ctags base, same non-root user, same
+# /var/lib/argus volume, just a different entrypoint and exposed port.
+FROM runtime AS server
+
+# `argus serve` binds 127.0.0.1 by default (see argus/cli.py) -- that default
+# protects a bare-metal or direct-`docker run` deployment from an accidental
+# plaintext listener on the LAN. Inside compose, Caddy runs as its own
+# container and cannot reach this one's loopback interface -- it has to reach
+# this container on the shared compose network -- so the CMD here overrides
+# --host to 0.0.0.0 explicitly. That is still safe: this image never
+# publishes 7700 to the host (see docker-compose.yml), so 0.0.0.0 only ever
+# means "reachable from Caddy inside the compose network," never "reachable
+# from the LAN." Caddy is what terminates TLS and is the only container
+# whose port reaches outside (see deploy/Caddyfile).
+EXPOSE 7700
+CMD ["serve", "--config", "/etc/argus/config.yaml", "--host", "0.0.0.0", "--port", "7700"]

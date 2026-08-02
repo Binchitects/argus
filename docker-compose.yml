@@ -1,15 +1,36 @@
-# Argus — Phase 1 (indexer only).
+# Argus — Phase 1 built the indexer; Phase 2 adds the long-running MCP
+# server and its TLS front door to this same compose file, rather than
+# introducing a second deployment mechanism.
 #
-# The indexer is a batch job, not a long-running service, so nothing here
-# starts automatically. Run it explicitly:
+# `docker compose up` starts exactly two things: `server` (the MCP daemon)
+# and `caddy` (its TLS terminator). The indexer stays a batch job with no
+# auto-starting service — it carries the `indexer` profile below precisely
+# so a plain `up` never starts it. `docker compose run` still works because
+# Compose starts an explicitly-targeted service regardless of its profile
+# (https://docs.docker.com/compose/how-tos/profiles/ — "Compose runs that
+# service regardless of whether its profile is activated"):
 #
 #   docker compose run --rm indexer index  --config /etc/argus/config.yaml
 #   docker compose run --rm indexer status --config /etc/argus/config.yaml
 #
-# Phase 2 adds the MCP server and a TLS reverse proxy to this same file.
+# Bring up the server + proxy:
+#
+#   docker compose up -d
+#
+# Revoke a developer's access immediately, ahead of the 600s ACL cache TTL
+# (argus.acl.TTL_SECONDS), instead of restarting the service:
+#
+#   docker compose exec server argus flush-acl \
+#       --config /etc/argus/config.yaml --user <gitlab-username>
+#
+# See docs/deployment.md for the full walkthrough, including Ollama, which
+# must sit behind this same proxy or be firewalled to the developer subnet —
+# it has no authentication of its own.
 
 services:
   indexer:
+    # Never starts on a plain `up` (see header comment); `run` still works.
+    profiles: ["indexer"]
     build:
       context: .
       target: runtime
@@ -34,5 +55,57 @@ services:
         limits:
           memory: 4G
 
+  server:
+    build:
+      context: .
+      target: server
+    image: argus:phase2
+    restart: unless-stopped
+    # Same token requirement as indexer: acl.resolve calls GitLab's API with
+    # each developer's own PAT, but the server itself also needs the service
+    # token wherever Config.load reads gitlab.token/ARGUS_GITLAB_TOKEN.
+    environment:
+      ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:?set ARGUS_GITLAB_TOKEN in your environment or a .env file}
+    volumes:
+      # The same index the indexer writes -- the server only ever reads it
+      # (argus/store/db.py connect_readonly is the only connection kind its
+      # request path uses; the one write, record_audit, uses connect() but
+      # touches only the audit/acl_cache tables, never index data).
+      - argus-data:/var/lib/argus
+      - ./config.yaml:/etc/argus/config.yaml:ro
+    # No `ports:` here on purpose. The server's `server` image CMD binds
+    # 0.0.0.0:7700 (see the Dockerfile) so Caddy — a separate container — can
+    # reach it on the compose network, but that port is never published to
+    # the host. The only way in from outside this compose project is through
+    # `caddy`, which terminates TLS in front of it. Publishing 7700 directly
+    # would put the developer's GitLab PAT (sent as a bearer token on every
+    # call — see hermes's `--auth header`) on the wire in plaintext.
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Persists the internal CA / ACME certificates across restarts so
+      # Caddy doesn't mint a new cert (and developers don't re-trust a new
+      # CA) every time the container recreates.
+      - caddy-data:/data
+      - caddy-config:/config
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   argus-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,54 @@
+# Argus MCP server — TLS front door.
+#
+# hermes sends the developer's GitLab PAT as a bearer token on every call
+# (`hermes mcp add argus --auth header`). Argus itself binds only inside the
+# compose network (see docker-compose.yml and the Dockerfile's `server`
+# stage) and is never published to the host — this is the only thing that
+# terminates TLS in front of it, and TLS here is not optional: without it,
+# every tool call puts that PAT in cleartext on the wire for anyone on the
+# LAN to read.
+#
+# `tls internal` (below) uses Caddy's own local CA rather than a public ACME
+# certificate. That's the right default for Argus: it typically lives on an
+# internal LAN hostname with no public DNS record, so Let's Encrypt has
+# nothing to validate against. Each developer trusts that CA once (see
+# docs/deployment.md) or clicks through a one-time certificate warning in
+# `hermes mcp add` — both still strictly better than the plaintext this file
+# exists to rule out.
+#
+# Replace `argus.internal` with this host's real name. If you DO have a
+# public domain pointed at this host and want a browser/CLI-trusted
+# certificate instead of the internal CA, delete the `tls internal` line —
+# Caddy will then obtain and renew a Let's Encrypt certificate automatically.
+# That requires port 80 to also be published (see docs/deployment.md) for
+# the ACME HTTP-01 challenge.
+
+argus.internal {
+	tls internal
+
+	reverse_proxy server:7700 {
+		# Streamable-HTTP / SSE hold long-lived connections open. Caddy's
+		# default proxy buffering/timeouts are tuned for short request/response
+		# cycles and will otherwise cut a slow tool call or a live session
+		# short mid-flight.
+		flush_interval -1
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Ollama sits behind this same proxy, or is firewalled to the developer
+# subnet — never given its own open port. It carries no credentials of its
+# own to protect, but every prompt sent through it includes your source code,
+# and Ollama's HTTP API has no authentication built in: anything that can
+# reach the port can read every prompt and completion. Uncomment and adjust
+# if Ollama runs on this host too; otherwise leave firewalled at the network
+# layer per docs/deployment.md.
+#
+# ollama.internal {
+# 	tls internal
+# 	reverse_proxy ollama:11434
+# }
