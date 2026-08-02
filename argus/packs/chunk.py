@@ -21,6 +21,16 @@ from dataclasses import dataclass
 _HEADING_RE = re.compile(r'^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$')
 _FENCE_RE = re.compile(r'^(```+|~~~+)')
 
+
+def _closes_fence(fence_match: re.Match[str], opener: tuple[str, int]) -> bool:
+    """A closing fence must use the same character as the opener and be at
+    least as long (CommonMark). A different character, or a shorter run of
+    the same character, is not a closer -- it's just fenced content (e.g. a
+    ``~~~`` line shown inside a backtick-fenced block of documentation)."""
+    marker = fence_match.group(1)
+    char, min_length = opener
+    return marker[0] == char and len(marker) >= min_length
+
 _SLUG_STRIP_RE = re.compile(r'[^\w\s-]')
 _SLUG_WHITESPACE_RE = re.compile(r'[\s_]+')
 
@@ -75,7 +85,7 @@ def _split_into_sections(text: str) -> list[_Section]:
     sections: list[_Section] = []
     current_lines: list[str] = []
     current_start = 1
-    in_fence = False
+    fence_opener: tuple[str, int] | None = None
 
     def flush() -> None:
         heading_path = " > ".join(title for _, title in stack)
@@ -85,13 +95,16 @@ def _split_into_sections(text: str) -> list[_Section]:
 
     for lineno, line in enumerate(lines, start=1):
         stripped = line.strip()
+        fence_match = _FENCE_RE.match(stripped)
 
-        if _FENCE_RE.match(stripped):
-            in_fence = not in_fence
+        if fence_opener is not None:
             current_lines.append(line)
+            if fence_match and _closes_fence(fence_match, fence_opener):
+                fence_opener = None
             continue
 
-        if in_fence:
+        if fence_match:
+            fence_opener = (fence_match.group(1)[0], len(fence_match.group(1)))
             current_lines.append(line)
             continue
 
@@ -127,28 +140,28 @@ def _split_into_blocks(lines: list[str], start_line: int) -> list[_Block]:
     blocks: list[_Block] = []
     cur: list[str] = []
     cur_start = start_line
-    in_fence = False
+    fence_opener: tuple[str, int] | None = None
 
     for offset, line in enumerate(lines):
         lineno = start_line + offset
         stripped = line.strip()
-        is_marker = bool(_FENCE_RE.match(stripped))
+        fence_match = _FENCE_RE.match(stripped)
 
-        if in_fence:
+        if fence_opener is not None:
             cur.append(line)
-            if is_marker:
+            if fence_match and _closes_fence(fence_match, fence_opener):
                 blocks.append(_Block(cur_start, "\n".join(cur), True))
                 cur = []
-                in_fence = False
+                fence_opener = None
             continue
 
-        if is_marker:
+        if fence_match:
             if cur:
                 blocks.append(_Block(cur_start, "\n".join(cur), False))
                 cur = []
             cur_start = lineno
             cur = [line]
-            in_fence = True
+            fence_opener = (fence_match.group(1)[0], len(fence_match.group(1)))
             continue
 
         if stripped == "":
@@ -162,7 +175,7 @@ def _split_into_blocks(lines: list[str], start_line: int) -> list[_Block]:
         cur.append(line)
 
     if cur:
-        blocks.append(_Block(cur_start, "\n".join(cur), in_fence))
+        blocks.append(_Block(cur_start, "\n".join(cur), fence_opener is not None))
 
     return blocks
 

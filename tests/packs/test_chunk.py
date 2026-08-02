@@ -44,12 +44,6 @@ def test_oversized_section_is_split_but_keeps_its_trail():
     assert all(chunk.embed_text(p).startswith("Top > Sec") for p in parts)
 
 
-def test_code_fences_are_not_split_mid_block():
-    src = "# T\n\n## S\n\n```python\n" + "x = 1\n" * 400 + "```\n"
-    for c in chunk.chunk_markdown(src, max_chars=500):
-        assert c.body.count("```") % 2 == 0, "split inside a fenced block"
-
-
 # --- cases the brief's Step 1 tests don't cover ---------------------------
 
 
@@ -116,3 +110,56 @@ def test_code_fence_survives_a_split_forced_by_surrounding_content():
     assert len(parts) > 1, "this content must not fit in a single chunk"
     for p in parts:
         assert p.body.count("```") % 2 == 0, "split inside a fenced block"
+
+
+# --- Finding 1: fence pairing must check marker character and length ------
+
+
+def test_backtick_fence_containing_tilde_line_survives_a_split():
+    """A ~~~ line inside a backtick-fenced block (e.g. documentation that
+    *shows* Markdown syntax) must not falsely close the fence. Paragraphs
+    before/after force a real split so this isn't vacuous."""
+    fenced_body = "\n".join(["This shows Markdown fence syntax:", "", "~~~",
+                              "some shown text", ""] * 40)
+    src = ("# T\n\n## S\n\n" + ("para " * 200) +
+           "\n\n```markdown\n" + fenced_body + "\n```\n\n" +
+           ("more " * 200) + "\n")
+    parts = [c for c in chunk.chunk_markdown(src, max_chars=500)
+             if c.heading_path == "T > S"]
+    assert len(parts) > 1, "this content must not fit in a single chunk"
+    for p in parts:
+        assert p.body.count("```") % 2 == 0, "split inside a fenced block"
+
+
+def test_tilde_fence_containing_backtick_line_survives_a_split():
+    """The reverse of the above: a ``` line inside a tilde-fenced block must
+    not falsely close it."""
+    fenced_body = "\n".join(["This shows Markdown fence syntax:", "", "```",
+                              "some shown text", ""] * 40)
+    src = ("# T\n\n## S\n\n" + ("para " * 200) +
+           "\n\n~~~markdown\n" + fenced_body + "\n~~~\n\n" +
+           ("more " * 200) + "\n")
+    parts = [c for c in chunk.chunk_markdown(src, max_chars=500)
+             if c.heading_path == "T > S"]
+    assert len(parts) > 1, "this content must not fit in a single chunk"
+    for p in parts:
+        assert p.body.count("~~~") % 2 == 0, "split inside a fenced block"
+
+
+def test_closer_shorter_than_opener_does_not_close_the_fence():
+    """Per CommonMark, a closing fence must be at least as long as the
+    opener -- a shorter run of the same character is just content. An odd
+    number of embedded short runs is used so a naive parity-toggling bug
+    (which ignores character/length and just flips a boolean) cannot pass
+    by accident of even parity."""
+    fenced_body = "\n".join(["```", "x = 1", ""] * 41)
+    src = ("# T\n\n## S\n\n" + ("para " * 200) +
+           "\n\n````python\n" + fenced_body + "\n````\n\n" +
+           ("more " * 200) + "\n")
+    parts = [c for c in chunk.chunk_markdown(src, max_chars=500)
+             if c.heading_path == "T > S"]
+    assert len(parts) > 1, "this content must not fit in a single chunk"
+    for p in parts:
+        marker_lines = [ln for ln in p.body.splitlines()
+                         if ln.strip().startswith("````")]
+        assert len(marker_lines) % 2 == 0, "split inside a fenced block"
