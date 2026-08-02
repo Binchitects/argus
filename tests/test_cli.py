@@ -3,9 +3,11 @@ import types
 from pathlib import Path
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from argus import cli
 from argus.gitlab import Project
+from argus.mcpsrv import DEFAULT_ALLOWED_HOSTS
 
 
 def git(cwd, *args):
@@ -421,7 +423,7 @@ class _FakeMcpApp:
 @pytest.fixture
 def fake_mcp_app(monkeypatch):
     fake = _FakeMcpApp()
-    monkeypatch.setattr(cli, "create_app", lambda cfg: fake)
+    monkeypatch.setattr(cli, "create_app", lambda cfg, **kwargs: fake)
     return fake
 
 
@@ -454,6 +456,112 @@ def test_serve_honours_host_and_port(config_file, fake_mcp_app):
     call = fake_mcp_app.run_calls[0]
     assert call["host"] == "10.0.0.5"
     assert call["port"] == 9999
+
+
+@pytest.fixture
+def real_mcp_app(monkeypatch):
+    """Let `_serve` build a *real* FastMCP app via the real `create_app`,
+    capturing the instance it produced, while stubbing out only `.run` so
+    the test never actually binds a socket or blocks.
+
+    `fake_mcp_app` above is deliberately too shallow for the allowlist
+    tests below: it replaces `create_app` outright, so it can never observe
+    what `create_app` actually built `transport_security` into. Patching
+    `FastMCP.run` on the class instead -- rather than replacing
+    `create_app` -- is what lets `_serve` run its real construction path
+    (migration, `_ArgusFastMCP.__init__`, `_build_transport_security`) and
+    still return before ever calling `uvicorn`.
+    """
+    captured: dict = {}
+    real_create_app = cli.create_app
+
+    def spy_create_app(cfg, **kwargs):
+        app = real_create_app(cfg, **kwargs)
+        captured["app"] = app
+        return app
+
+    def fake_run(self, transport=None):
+        captured["transport"] = transport
+
+    monkeypatch.setattr(cli, "create_app", spy_create_app)
+    monkeypatch.setattr(FastMCP, "run", fake_run)
+    return captured
+
+
+def test_serve_default_allowed_hosts_is_the_unchanged_localhost_set(
+    config_file, real_mcp_app
+):
+    """No `--allowed-host` given: the DNS-rebinding allowlist that lands on
+    the real app must be *exactly* the original loopback set -- not merely
+    "contains 127.0.0.1", which a wildcard entry like "*" would also satisfy.
+    Asserting the full, exact list (and that a wildcard/arbitrary host is
+    NOT present) is what actually distinguishes "unchanged default" from
+    "accidentally widened".
+    """
+    assert cli.main(["serve", "--config", str(config_file)]) == 0
+
+    security = real_mcp_app["app"].settings.transport_security
+    assert security.enable_dns_rebinding_protection is True
+    assert security.allowed_hosts == list(DEFAULT_ALLOWED_HOSTS)
+    assert "*" not in security.allowed_hosts
+    assert "evil.example" not in security.allowed_hosts
+
+
+def test_serve_allowed_host_reaches_transport_security_at_construction(
+    config_file, real_mcp_app
+):
+    """This is the assertion the whole fix exists for: an operator-supplied
+    `--allowed-host` must actually reach `transport_security.allowed_hosts`
+    on the app FastMCP builds -- not merely get accepted by argparse.
+
+    Before the fix, `_serve` built the app with `create_app(cfg)` (no
+    `allowed_hosts` parameter existed at all) and only ever adjusted
+    `app.settings.host`/`.port` afterwards; `transport_security` was fixed
+    at construction from FastMCP's own loopback-only default and never
+    updated. Reverting the production change makes this fail with either a
+    `TypeError` (no `allowed_hosts` kwarg on `create_app`) or, if the
+    signature happened to accept and silently drop it, the assertion below
+    failing outright.
+    """
+    assert cli.main([
+        "serve", "--config", str(config_file),
+        "--allowed-host", "argus.internal",
+    ]) == 0
+
+    security = real_mcp_app["app"].settings.transport_security
+    assert "argus.internal" in security.allowed_hosts
+    # Guard against a trivially-passing wildcard implementation: a real,
+    # unrelated hostname must still be excluded.
+    assert "evil.example" not in security.allowed_hosts
+    assert "*" not in security.allowed_hosts
+
+
+def test_serve_allowed_host_replaces_default_rather_than_widening_it(
+    config_file, real_mcp_app
+):
+    """Passing --allowed-host must not silently keep the loopback default
+    alongside it -- that would let an operator believe they've scoped the
+    allowlist down to just their proxy hostname while loopback access (and
+    anything else in the default set) quietly still works too.
+    """
+    assert cli.main([
+        "serve", "--config", str(config_file),
+        "--allowed-host", "argus.internal",
+    ]) == 0
+
+    security = real_mcp_app["app"].settings.transport_security
+    assert security.allowed_hosts == ["argus.internal"]
+
+
+def test_serve_allowed_host_is_repeatable(config_file, real_mcp_app):
+    assert cli.main([
+        "serve", "--config", str(config_file),
+        "--allowed-host", "argus.internal",
+        "--allowed-host", "argus-staging.internal",
+    ]) == 0
+
+    security = real_mcp_app["app"].settings.transport_security
+    assert security.allowed_hosts == ["argus.internal", "argus-staging.internal"]
 
 
 # ----------------------------------------------------------- flush-acl ------

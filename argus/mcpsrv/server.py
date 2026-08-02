@@ -5,6 +5,7 @@ import time
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
@@ -22,6 +23,57 @@ from .tools import register_tools
 HEALTHZ_PATH = "/healthz"
 
 log = logging.getLogger(__name__)
+
+# The Host-header allowlist FastMCP's own `__init__` would auto-compute for a
+# loopback `host` at construction time (see `_build_transport_security`'s
+# docstring below for why we no longer let it do that implicitly). Kept as
+# the explicit default here so a bare `argus serve` -- no `--allowed-host`
+# passed -- is byte-for-byte the same allowlist as before this fix.
+DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+
+
+def _build_transport_security(
+    allowed_hosts: list[str] | tuple[str, ...] | None,
+) -> TransportSecuritySettings:
+    """Build an explicit DNS-rebinding allowlist, independent of bind host.
+
+    FastMCP's `__init__` only auto-populates `transport_security` when its
+    `host` constructor argument is itself a loopback literal
+    (`127.0.0.1`/`localhost`/`::1`), and it does that exactly once, at
+    construction. `_serve` (argus/cli.py) builds this app before it applies
+    the operator's `--host`, then overrides `app.settings.host` afterwards --
+    which changes the bind address but leaves the already-computed
+    `transport_security.allowed_hosts` untouched. Behind a reverse proxy
+    (Caddy, forwarding the client's real `Host` header -- e.g.
+    `argus.internal`, see docs/deployment.md), that stale localhost-only
+    allowlist rejects every request with 421, including every `/mcp` call --
+    the only thing Hermes actually uses.
+
+    `create_app` calls this unconditionally, so `transport_security` is
+    always explicit and never left for FastMCP to infer from `host`. That
+    removes the incidental host-at-construction-time coupling that caused
+    the bug, rather than papering over the one call site (`_serve`) that
+    tripped over it.
+
+    `allowed_hosts=None` (nothing passed on the CLI) reproduces the original
+    localhost-only default exactly, including `allowed_origins` with only the
+    `http://` scheme -- matching what FastMCP itself would have computed.
+    Operator-supplied hosts get both `http://` and `https://` origins, since
+    a real deployment's client-facing scheme is `https` (terminated by
+    Caddy) while the proxy-to-server hop is often plain `http`.
+    """
+    if allowed_hosts:
+        hosts = list(allowed_hosts)
+        origins = [f"{scheme}://{h}" for h in hosts for scheme in ("http", "https")]
+    else:
+        hosts = list(DEFAULT_ALLOWED_HOSTS)
+        origins = [f"http://{h}" for h in hosts]
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=origins,
+    )
+
 
 # The tool column is NOT NULL, but a request denied here (in the middleware,
 # ahead of FastMCP's own routing) has no tool identity yet -- the JSON-RPC
@@ -211,7 +263,12 @@ class _ArgusFastMCP(FastMCP):
         return app
 
 
-def create_app(cfg: Config, *, client: httpx.Client | None = None) -> FastMCP:
+def create_app(
+    cfg: Config,
+    *,
+    client: httpx.Client | None = None,
+    allowed_hosts: list[str] | tuple[str, ...] | None = None,
+) -> FastMCP:
     """Build the Argus MCP server skeleton.
 
     Serves Streamable HTTP (and SSE) via the official `mcp` SDK's FastMCP, so
@@ -226,6 +283,13 @@ def create_app(cfg: Config, *, client: httpx.Client | None = None) -> FastMCP:
     opens (and closes) its own real client per call. Tests pass an
     `httpx.Client(transport=httpx.MockTransport(...))` so no test reaches a
     real GitLab host.
+
+    `allowed_hosts` is the operator-controlled DNS-rebinding allowlist (see
+    `_build_transport_security`); `None` reproduces the original
+    localhost-only default. It is built into `transport_security` here, at
+    construction, rather than left for `_serve` to reconcile onto
+    `app.settings` after the fact -- see `_build_transport_security`'s
+    docstring for why that reconciliation was the bug.
 
     Migration runs exactly once, here, at startup -- never on the
     per-request connection `BearerAuthMiddleware` opens. `migrate()` applies
@@ -246,7 +310,10 @@ def create_app(cfg: Config, *, client: httpx.Client | None = None) -> FastMCP:
     finally:
         conn.close()
 
-    server = _ArgusFastMCP(cfg, client=client, name="argus")
+    server = _ArgusFastMCP(
+        cfg, client=client, name="argus",
+        transport_security=_build_transport_security(allowed_hosts),
+    )
 
     @server.custom_route(HEALTHZ_PATH, methods=["GET"])
     async def healthz(request: Request) -> Response:

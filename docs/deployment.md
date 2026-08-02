@@ -47,7 +47,8 @@ docker compose ps          # expect: server, caddy — never indexer
 ```
 
 `server` runs `argus serve --config /etc/argus/config.yaml --host 0.0.0.0
---port 7700` (baked into the Dockerfile's `server` stage's `CMD`). That
+--port 7700 --allowed-host argus.internal --allowed-host argus.internal:*`
+(baked into the Dockerfile's `server` stage's `CMD`). That
 `--host 0.0.0.0` looks like it contradicts "binds localhost by default," and
 it doesn't: `argus serve`'s actual *default* — the one that applies any time
 you run it directly on a host, outside a container — is `127.0.0.1`. Inside
@@ -60,6 +61,30 @@ nothing else can reach it. **If you ever run `argus serve` directly on a
 host** (not through this compose file), leave `--host` at its default and
 put your own TLS terminator in front of it — do not bind `0.0.0.0` yourself
 without one.
+
+#### `--allowed-host` — required, and it must match `deploy/Caddyfile`
+
+The MCP SDK's `FastMCP` protects every `/mcp` call with DNS-rebinding
+protection: it only accepts requests whose `Host` header is on an explicit
+allowlist, computed once when the server object is built. `deploy/Caddyfile`
+reverse-proxies with `flush_interval -1` but does **not** rewrite the `Host`
+header — Caddy forwards the client's original header unchanged — so a
+developer hitting `https://argus.internal/mcp` arrives at `server` with
+`Host: argus.internal`. Without `--allowed-host argus.internal` that request
+is rejected with **421 Invalid Host Header**, and this is true of *every*
+`/mcp` call, i.e. everything Hermes actually does — while `/healthz` (a
+separate route this check doesn't cover) keeps returning 200 the whole time,
+which is exactly why the smoke test below no longer stops at `/healthz`.
+
+**If you change `deploy/Caddyfile`'s site address away from
+`argus.internal`, update both `--allowed-host` flags in the Dockerfile's
+`server` stage `CMD` to match** — the two must always agree. The bare form
+(`argus.internal`) matches the Host header a client sends when its URL has
+no explicit port (what `hermes mcp add argus --url https://argus.internal`
+below actually does); the `:*` wildcard form additionally covers a client
+that includes an explicit port. Defaults are otherwise unchanged: running
+`argus serve` directly, with no `--allowed-host` at all, still only accepts
+the original loopback allowlist (`127.0.0.1`, `localhost`, `::1`).
 
 ### Why TLS is mandatory, not optional
 
@@ -159,3 +184,35 @@ docker compose config                            # compose file parses; confirm
 docker compose up -d
 curl -k https://argus.internal/healthz           # {"status": "ok"} once caddy resolves TLS
 ```
+
+**`/healthz` passing is not enough — it does not prove `/mcp` works.**
+`/healthz` is a plain custom Starlette route registered outside the
+`StreamableHTTPSessionManager` that the DNS-rebinding Host-header check
+actually runs inside, so it returns 200 regardless of whether
+`--allowed-host` is configured correctly. This project shipped with `/mcp`
+rejecting every real call with `421 Invalid Host Header` while this exact
+`curl /healthz` smoke test passed. The check that actually exercises the
+thing Hermes uses has to hit `/mcp` itself, with the same `Host` header a
+real client sends:
+
+```bash
+# Use the same GitLab personal access token you'd hand to `hermes mcp add`.
+curl -k -s -o /dev/null -w '%{http_code}\n' \
+    -X POST https://argus.internal/mcp \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H "Authorization: Bearer ${ARGUS_GITLAB_TOKEN}" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
+```
+
+**Expect anything other than `421`.** A valid, currently-authorized token
+returns `200`; an invalid or expired one returns `401` from the auth gate
+(which runs, and can short-circuit, before the Host-header check ever
+sees the request — so a missing/bad token alone does *not* confirm the
+allowlist is right, only that it's reachable at all). Sending no
+JSON-RPC body at all, or one with no session established yet, can also
+surface as `400` from FastMCP's own protocol handling — still not `421`.
+The one code that specifically means Caddy's forwarded `Host` header
+isn't on the server's `--allowed-host` list is `421`; that is the one
+failure this check exists to catch, and it is the one `curl .../healthz`
+above cannot.
