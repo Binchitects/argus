@@ -163,3 +163,51 @@ def test_closer_shorter_than_opener_does_not_close_the_fence():
         marker_lines = [ln for ln in p.body.splitlines()
                          if ln.strip().startswith("````")]
         assert len(marker_lines) % 2 == 0, "split inside a fenced block"
+
+
+# --- Finding 2: anchors must be de-duplicated document-wide ---------------
+
+
+MDN_LIKE = """\
+# AbortController
+
+Intro about the interface.
+
+## Constructor
+
+### AbortController()
+
+Creates a new `AbortController` object instance.
+
+## Instance methods
+
+### AbortController.abort()
+
+Aborts a request before it has completed.
+"""
+
+
+def test_mdn_shaped_duplicate_headings_get_distinct_anchors():
+    """H1 'AbortController' and H3 'AbortController()' both slug to
+    'abortcontroller' -- they must not collide."""
+    chunks = chunk.chunk_markdown(MDN_LIKE)
+    h1 = next(c for c in chunks if c.heading_path == "AbortController")
+    h3 = next(c for c in chunks
+              if c.heading_path.endswith("AbortController()"))
+    assert h1.anchor != h3.anchor
+
+
+def test_anchors_are_unique_across_the_whole_document():
+    chunks = chunk.chunk_markdown(MDN_LIKE)
+    anchors = [c.anchor for c in chunks if c.anchor is not None]
+    assert len(anchors) == len(set(anchors))
+
+
+def test_duplicate_anchor_uses_conventional_numbered_suffix():
+    """The second colliding heading gets '-2', not some other scheme."""
+    chunks = chunk.chunk_markdown(MDN_LIKE)
+    h1 = next(c for c in chunks if c.heading_path == "AbortController")
+    h3 = next(c for c in chunks
+              if c.heading_path.endswith("AbortController()"))
+    assert h1.anchor == "abortcontroller"
+    assert h3.anchor == "abortcontroller-2"

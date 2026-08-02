@@ -31,6 +31,7 @@ def _closes_fence(fence_match: re.Match[str], opener: tuple[str, int]) -> bool:
     char, min_length = opener
     return marker[0] == char and len(marker) >= min_length
 
+
 _SLUG_STRIP_RE = re.compile(r'[^\w\s-]')
 _SLUG_WHITESPACE_RE = re.compile(r'[\s_]+')
 
@@ -61,6 +62,21 @@ def _slugify(title: str) -> str:
     return slug.strip("-")
 
 
+def _dedupe_anchor(base: str, seen: dict[str, int]) -> str:
+    """Make ``base`` unique within a document, the conventional way: the
+    first heading to produce a given slug keeps it bare, later ones get a
+    numbered suffix (``abortcontroller``, ``abortcontroller-2``, ...).
+
+    Without this, two headings that slug identically -- an H1
+    ``AbortController`` and an H3 ``AbortController()`` are a real,
+    MDN-shaped example -- would deep-link to the same anchor and silently
+    strand the reader at the wrong one.
+    """
+    count = seen.get(base, 0) + 1
+    seen[base] = count
+    return base if count == 1 else f"{base}-{count}"
+
+
 @dataclass
 class _Section:
     heading_path: str
@@ -86,10 +102,14 @@ def _split_into_sections(text: str) -> list[_Section]:
     current_lines: list[str] = []
     current_start = 1
     fence_opener: tuple[str, int] | None = None
+    seen_anchors: dict[str, int] = {}
 
     def flush() -> None:
         heading_path = " > ".join(title for _, title in stack)
-        anchor = _slugify(stack[-1][1]) if stack else None
+        if stack:
+            anchor = _dedupe_anchor(_slugify(stack[-1][1]), seen_anchors)
+        else:
+            anchor = None
         sections.append(_Section(heading_path, anchor, current_start,
                                   list(current_lines)))
 
