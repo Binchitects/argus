@@ -45,8 +45,9 @@ Every task's requirements implicitly include this section.
 | `argus/mcpsrv/server.py` | FastMCP app, auth middleware, `/healthz` |
 | `argus/mcpsrv/tools.py` | The five tool handlers |
 | `argus/mcpsrv/errors.py` | Agent-facing error strings |
-| `argus/cli.py` | Modify — `argus serve` |
-| `deploy/argus.service`, `deploy/Caddyfile` | systemd unit and TLS proxy config |
+| `argus/cli.py` | Modify — `argus serve`, `argus flush-acl` |
+| `Dockerfile`, `docker-compose.yml` | Modify — add the server target and service |
+| `deploy/Caddyfile` | TLS reverse proxy config |
 
 ---
 
@@ -507,6 +508,8 @@ Each query runs once per chunk and concatenates, applying `limit` to the merged 
 
 `get_file` gains `max_bytes: int = 65536`, returns a plain dict with `truncated: bool`, and truncates on a character boundary.
 
+**The refusal path must keep returning `None`, never a dict.** `get_file` currently returns `sqlite3.Row | None`, and the existing tests assert `is None` / `is not None` — those survive a Row→dict change only because both a Row and a dict are truthy. If a refused lookup were changed to return an empty dict or a dict carrying an error, every caller's truthiness check silently inverts and a denial starts reading as a hit. Add a test asserting the disallowed and empty-allowlist cases return exactly `None`, not a falsy dict.
+
 - [ ] **Step 4: Run the full suite, then commit**
 
 ```bash
@@ -665,12 +668,17 @@ git commit -m "feat: add delete_repo with correct FTS cleanup"
 
 ---
 
-### Task 10: `argus serve`, systemd unit, TLS proxy
+### Task 10: `argus serve`, container service, TLS proxy
 
 **Files:**
 - Modify: `argus/cli.py`
-- Create: `deploy/argus.service`, `deploy/Caddyfile`, `docs/deployment.md`
+- Modify: `Dockerfile` (a `server` target), `docker-compose.yml` (a long-running `server` service plus `caddy`)
+- Create: `deploy/Caddyfile`, `docs/deployment.md`
 - Test: `tests/test_cli.py`
+
+**Deployment is Docker, not systemd.** Phase 1 already ships a pinned, build-verified image; the server extends the same compose file rather than introducing a second deployment mechanism. Note the shape difference: the indexer is a batch job with **no auto-starting service** and a read-only default command, whereas the server *is* a daemon and does start with `docker compose up`. Keep the indexer's batch semantics intact — a `docker compose up` must not begin indexing.
+
+The `test` stage in the Dockerfile runs the whole suite against the pinned toolchain during the build. Any new dependency (the `mcp` SDK) must not break that.
 
 **Interfaces:** `argus serve --config PATH [--host 127.0.0.1] [--port 7700]`. Binds localhost by default. Also `argus flush-acl --config PATH [--user USERNAME]`, which deletes `acl_cache` rows so a revocation takes effect immediately instead of waiting out the TTL.
 

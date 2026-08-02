@@ -3,9 +3,11 @@ import types
 from pathlib import Path
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from argus import cli
 from argus.gitlab import Project
+from argus.mcpsrv import DEFAULT_ALLOWED_HOSTS
 
 
 def git(cwd, *args):
@@ -394,3 +396,239 @@ def test_index_without_reset_retries_preserves_counters(config_file,
     # ...and the flag really is what clears them.
     assert cli.main(["index", "--config", str(config_file), "--reset-retries"]) == 0
     assert _surviving_attempts(config_file) is None
+
+
+# --------------------------------------------------------------- serve ------
+
+class _FakeMcpApp:
+    """Stands in for `argus.mcpsrv.create_app`'s return value.
+
+    Records the host/port assigned to `.settings` and whether/how `.run` was
+    called, without ever binding a socket or blocking -- `serve` must be
+    testable without actually serving.
+    """
+
+    def __init__(self):
+        self.settings = types.SimpleNamespace(host=None, port=None)
+        self.run_calls: list[dict] = []
+
+    def run(self, transport=None):
+        self.run_calls.append({
+            "transport": transport,
+            "host": self.settings.host,
+            "port": self.settings.port,
+        })
+
+
+@pytest.fixture
+def fake_mcp_app(monkeypatch):
+    fake = _FakeMcpApp()
+    monkeypatch.setattr(cli, "create_app", lambda cfg, **kwargs: fake)
+    return fake
+
+
+def test_serve_bad_config_returns_2(capsys):
+    assert cli.main(["serve", "--config", "/nonexistent/c.yaml"]) == 2
+    assert "config error" in capsys.readouterr().err
+
+
+def test_serve_defaults_to_localhost(config_file, fake_mcp_app):
+    """The default bind must be loopback, not a wildcard address.
+
+    Asserted explicitly (both the positive value AND that it isn't
+    "0.0.0.0") so a future change to a wildcard default fails this test
+    rather than silently opening the server to the LAN.
+    """
+    assert cli.main(["serve", "--config", str(config_file)]) == 0
+    assert len(fake_mcp_app.run_calls) == 1
+    call = fake_mcp_app.run_calls[0]
+    assert call["host"] == "127.0.0.1"
+    assert call["host"] != "0.0.0.0"
+    assert call["port"] == 7700
+    assert call["transport"] == "streamable-http"
+
+
+def test_serve_honours_host_and_port(config_file, fake_mcp_app):
+    assert cli.main([
+        "serve", "--config", str(config_file),
+        "--host", "10.0.0.5", "--port", "9999",
+    ]) == 0
+    call = fake_mcp_app.run_calls[0]
+    assert call["host"] == "10.0.0.5"
+    assert call["port"] == 9999
+
+
+@pytest.fixture
+def real_mcp_app(monkeypatch):
+    """Let `_serve` build a *real* FastMCP app via the real `create_app`,
+    capturing the instance it produced, while stubbing out only `.run` so
+    the test never actually binds a socket or blocks.
+
+    `fake_mcp_app` above is deliberately too shallow for the allowlist
+    tests below: it replaces `create_app` outright, so it can never observe
+    what `create_app` actually built `transport_security` into. Patching
+    `FastMCP.run` on the class instead -- rather than replacing
+    `create_app` -- is what lets `_serve` run its real construction path
+    (migration, `_ArgusFastMCP.__init__`, `_build_transport_security`) and
+    still return before ever calling `uvicorn`.
+    """
+    captured: dict = {}
+    real_create_app = cli.create_app
+
+    def spy_create_app(cfg, **kwargs):
+        app = real_create_app(cfg, **kwargs)
+        captured["app"] = app
+        return app
+
+    def fake_run(self, transport=None):
+        captured["transport"] = transport
+
+    monkeypatch.setattr(cli, "create_app", spy_create_app)
+    monkeypatch.setattr(FastMCP, "run", fake_run)
+    return captured
+
+
+def test_serve_default_allowed_hosts_is_the_unchanged_localhost_set(
+    config_file, real_mcp_app
+):
+    """No `--allowed-host` given: the DNS-rebinding allowlist that lands on
+    the real app must be *exactly* the original loopback set -- not merely
+    "contains 127.0.0.1", which a wildcard entry like "*" would also satisfy.
+    Asserting the full, exact list (and that a wildcard/arbitrary host is
+    NOT present) is what actually distinguishes "unchanged default" from
+    "accidentally widened".
+    """
+    assert cli.main(["serve", "--config", str(config_file)]) == 0
+
+    security = real_mcp_app["app"].settings.transport_security
+    assert security.enable_dns_rebinding_protection is True
+    assert security.allowed_hosts == list(DEFAULT_ALLOWED_HOSTS)
+    assert "*" not in security.allowed_hosts
+    assert "evil.example" not in security.allowed_hosts
+
+
+def test_serve_allowed_host_reaches_transport_security_at_construction(
+    config_file, real_mcp_app
+):
+    """This is the assertion the whole fix exists for: an operator-supplied
+    `--allowed-host` must actually reach `transport_security.allowed_hosts`
+    on the app FastMCP builds -- not merely get accepted by argparse.
+
+    Before the fix, `_serve` built the app with `create_app(cfg)` (no
+    `allowed_hosts` parameter existed at all) and only ever adjusted
+    `app.settings.host`/`.port` afterwards; `transport_security` was fixed
+    at construction from FastMCP's own loopback-only default and never
+    updated. Reverting the production change makes this fail with either a
+    `TypeError` (no `allowed_hosts` kwarg on `create_app`) or, if the
+    signature happened to accept and silently drop it, the assertion below
+    failing outright.
+    """
+    assert cli.main([
+        "serve", "--config", str(config_file),
+        "--allowed-host", "argus.internal",
+    ]) == 0
+
+    security = real_mcp_app["app"].settings.transport_security
+    assert "argus.internal" in security.allowed_hosts
+    # Guard against a trivially-passing wildcard implementation: a real,
+    # unrelated hostname must still be excluded.
+    assert "evil.example" not in security.allowed_hosts
+    assert "*" not in security.allowed_hosts
+
+
+def test_serve_allowed_host_replaces_default_rather_than_widening_it(
+    config_file, real_mcp_app
+):
+    """Passing --allowed-host must not silently keep the loopback default
+    alongside it -- that would let an operator believe they've scoped the
+    allowlist down to just their proxy hostname while loopback access (and
+    anything else in the default set) quietly still works too.
+    """
+    assert cli.main([
+        "serve", "--config", str(config_file),
+        "--allowed-host", "argus.internal",
+    ]) == 0
+
+    security = real_mcp_app["app"].settings.transport_security
+    assert security.allowed_hosts == ["argus.internal"]
+
+
+def test_serve_allowed_host_is_repeatable(config_file, real_mcp_app):
+    assert cli.main([
+        "serve", "--config", str(config_file),
+        "--allowed-host", "argus.internal",
+        "--allowed-host", "argus-staging.internal",
+    ]) == 0
+
+    security = real_mcp_app["app"].settings.transport_security
+    assert security.allowed_hosts == ["argus.internal", "argus-staging.internal"]
+
+
+# ----------------------------------------------------------- flush-acl ------
+
+def _seed_acl_cache(config_file, entries):
+    """entries: list of (token_hash, user_id, username)."""
+    from argus.store.db import open_db
+    from argus.store import writes
+
+    conn = open_db(config_file.parent / "data" / "i.db")
+    for token_hash, user_id, username in entries:
+        writes.upsert_acl_cache(
+            conn, token_hash=token_hash, user_id=user_id, username=username,
+            repo_ids_json="[]", fetched_at=1,
+        )
+    conn.close()
+
+
+def _acl_cache_usernames(config_file):
+    from argus.store.db import open_db
+
+    conn = open_db(config_file.parent / "data" / "i.db")
+    try:
+        return sorted(r["username"] for r in conn.execute("SELECT username FROM acl_cache"))
+    finally:
+        conn.close()
+
+
+def test_flush_acl_clears_all_rows(config_file, capsys):
+    _seed_acl_cache(config_file, [("h1", 1, "alice"), ("h2", 2, "bob")])
+
+    assert cli.main(["flush-acl", "--config", str(config_file)]) == 0
+
+    assert _acl_cache_usernames(config_file) == []
+    assert "2" in capsys.readouterr().out
+
+
+def test_flush_acl_with_user_clears_only_that_user(config_file):
+    _seed_acl_cache(config_file, [("h1", 1, "alice"), ("h2", 2, "bob")])
+
+    assert cli.main(
+        ["flush-acl", "--config", str(config_file), "--user", "alice"]
+    ) == 0
+
+    assert _acl_cache_usernames(config_file) == ["bob"]
+
+
+def test_flush_acl_user_matching_nobody_is_reported_distinctly(config_file, capsys):
+    """A --user that matches no cached row must be named, and must leave
+    every other user's cache entry untouched -- distinct from the message an
+    already-empty (or fully-cleared) cache produces."""
+    _seed_acl_cache(config_file, [("h1", 1, "alice")])
+
+    assert cli.main(
+        ["flush-acl", "--config", str(config_file), "--user", "nope"]
+    ) == 0
+
+    out = capsys.readouterr().out
+    assert "'nope' not in acl cache" in out
+    assert _acl_cache_usernames(config_file) == ["alice"]
+
+
+def test_flush_acl_nothing_to_clear_message_differs_from_user_not_found(
+    config_file, capsys
+):
+    assert cli.main(["flush-acl", "--config", str(config_file)]) == 0
+
+    out = capsys.readouterr().out
+    assert "no acl cache entries to clear" in out
+    assert "not in acl cache" not in out

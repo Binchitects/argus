@@ -24,6 +24,36 @@ def upsert_repo(conn: sqlite3.Connection, *, gitlab_id: int,
     ).fetchone()["id"]
 
 
+def get_acl_cache(conn: sqlite3.Connection, token_hash: str) -> sqlite3.Row | None:
+    """Look up a cached ACL resolution by SHA-256 token hash.
+
+    The raw token is never passed in or stored here -- only its hash, which
+    is what makes acl_cache safe to keep at rest.
+    """
+    return conn.execute(
+        "SELECT user_id, username, repo_ids_json, fetched_at FROM acl_cache"
+        " WHERE token_hash = ?",
+        (token_hash,),
+    ).fetchone()
+
+
+def upsert_acl_cache(conn: sqlite3.Connection, *, token_hash: str, user_id: int,
+                     username: str, repo_ids_json: str, fetched_at: int) -> None:
+    conn.execute(
+        """
+        INSERT INTO acl_cache (token_hash, user_id, username, repo_ids_json, fetched_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(token_hash) DO UPDATE SET
+            user_id       = excluded.user_id,
+            username      = excluded.username,
+            repo_ids_json = excluded.repo_ids_json,
+            fetched_at    = excluded.fetched_at
+        """,
+        (token_hash, user_id, username, repo_ids_json, fetched_at),
+    )
+    conn.commit()
+
+
 def set_last_indexed(conn: sqlite3.Connection, repo_id: int, sha: str, ts: int) -> None:
     conn.execute(
         "UPDATE repos SET last_indexed_sha = ?, last_indexed_at = ? WHERE id = ?",
@@ -100,6 +130,44 @@ def delete_file(conn: sqlite3.Connection, repo_id: int, path: str) -> None:
         return
     _fts_delete(conn, row)
     conn.execute("DELETE FROM files WHERE id = ?", (row["id"],))
+    conn.commit()
+
+
+def delete_repo(conn: sqlite3.Connection, repo_id: int) -> None:
+    """Remove a repo and every dependent row, including FTS entries.
+
+    files, symbols, includes, repo_deps, index_errors, index_queue and
+    retry_attempts all carry a `repo_id` (or `file_id`) foreign key with
+    `ON DELETE CASCADE`, and this connection runs with
+    `PRAGMA foreign_keys = ON` (see store.db.connect) -- so a single
+    `DELETE FROM repos` clears all of those on its own.
+
+    files_fts does not: it is an FTS5 external-content table with no
+    triggers, so the cascade never touches it and its term entries would be
+    orphaned by a plain delete -- exactly the bug this task exists to avoid
+    (search_code would keep matching content that no longer exists in
+    `files`). Its rows must be removed with the documented FTS5 'delete'
+    command, using the OLD path/content values, before `files` disappears
+    out from under them.
+
+    This reads every file row for the repo up front and issues one
+    `_fts_delete` per row, then a single cascading `DELETE FROM repos` --
+    rather than looping `delete_file` once per path. Both are correct
+    (`delete_file` uses the same `_fts_delete` primitive); this way only
+    does the "which files does this repo have" lookup once instead of once
+    per path, and only issues one cascading delete instead of one DELETE
+    per file plus a final no-op DELETE FROM repos.
+
+    A `repo_id` that does not exist is a no-op: the SELECT returns no rows,
+    the DELETE affects none, and the transaction still commits cleanly --
+    matching `delete_file`'s treatment of a path that no longer exists.
+    """
+    rows = conn.execute(
+        "SELECT id, path, content FROM files WHERE repo_id = ?", (repo_id,)
+    ).fetchall()
+    for row in rows:
+        _fts_delete(conn, row)
+    conn.execute("DELETE FROM repos WHERE id = ?", (repo_id,))
     conn.commit()
 
 
@@ -277,3 +345,31 @@ def drain_retry_paths(conn: sqlite3.Connection, repo_id: int) -> list[str]:
     paths = peek_retry_paths(conn, repo_id)
     clear_retry_queue(conn, repo_id)
     return paths
+
+
+def record_audit(conn: sqlite3.Connection, *, ts: int, user_id: int | None,
+                 username: str | None, tool: str, args_json: str,
+                 repo_ids_json: str | None) -> None:
+    """Append one audit row: one call attempt, one row.
+
+    `conn` must be a read-write connection (`connect`, never
+    `connect_readonly`) -- this is the one write the MCP server's otherwise
+    strictly read-only request path performs, and it needs its own
+    connection separate from the one used to run the query itself (see
+    `argus.mcpsrv.tools._record_audit`).
+
+    `user_id`/`username` are None for a call denied before any identity was
+    resolved (an `AclDenied` at the auth gate) -- the columns are nullable
+    for exactly that reason. `tool` is NOT NULL; callers denied before a
+    specific tool was identified pass a fixed sentinel rather than leaving it
+    blank. Recording happens whether the call succeeded or failed: this
+    table has no outcome column by design (see migration 007) -- its job is
+    "what was this identity shown or did they attempt", not a full
+    success/failure request log.
+    """
+    conn.execute(
+        "INSERT INTO audit (ts, user_id, username, tool, args_json, repo_ids_json)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (ts, user_id, username, tool, args_json, repo_ids_json),
+    )
+    conn.commit()

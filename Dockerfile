@@ -84,3 +84,46 @@ VOLUME ["/var/lib/argus"]
 # touches nothing, so a bare `docker run` cannot start an unintended index.
 ENTRYPOINT ["argus"]
 CMD ["status", "--config", "/etc/argus/config.yaml"]
+
+# ------------------------------------------------------------- server -------
+# The MCP retrieval server: unlike the indexer above, this IS a long-running
+# daemon and is meant to be started by `docker compose up` (see
+# docker-compose.yml). It extends `runtime` rather than duplicating its
+# apt/user/git setup -- same pinned ctags base, same non-root user, same
+# /var/lib/argus volume, just a different entrypoint and exposed port.
+FROM runtime AS server
+
+# `argus serve` binds 127.0.0.1 by default (see argus/cli.py) -- that default
+# protects a bare-metal or direct-`docker run` deployment from an accidental
+# plaintext listener on the LAN. Inside compose, Caddy runs as its own
+# container and cannot reach this one's loopback interface -- it has to reach
+# this container on the shared compose network -- so the CMD here overrides
+# --host to 0.0.0.0 explicitly. That is still safe: this image never
+# publishes 7700 to the host (see docker-compose.yml), so 0.0.0.0 only ever
+# means "reachable from Caddy inside the compose network," never "reachable
+# from the LAN." Caddy is what terminates TLS and is the only container
+# whose port reaches outside (see deploy/Caddyfile).
+#
+# --allowed-host must match what Caddy actually forwards as the Host header,
+# not this container's own bind address above. The FastMCP SDK's
+# DNS-rebinding protection validates the inbound Host header against an
+# allowlist that is fixed once the server object is built (argus/cli.py
+# threads --allowed-host into that construction explicitly, precisely
+# because the SDK never revisits the allowlist later, e.g. when --host is
+# reassigned to 0.0.0.0 as it is above). `deploy/Caddyfile`'s `reverse_proxy`
+# is a transparent proxy -- it forwards the client's original Host header
+# unchanged (Caddy does not rewrite it to the upstream address by default)
+# -- so a developer hitting
+# https://argus.internal/mcp arrives here with `Host: argus.internal`. Left
+# at the loopback-only default, every one of those requests -- the only
+# thing Hermes actually sends -- is rejected with 421 Invalid Host Header,
+# even though /healthz (a plain custom Starlette route outside this check)
+# looks perfectly healthy the whole time. Two forms are listed because a
+# client that includes an explicit port in the URL (https://argus.internal:443/mcp)
+# arrives with a Host header carrying that port, which only the wildcard
+# form matches -- the bare form only matches when no port is present, which
+# is what `hermes mcp add argus --url https://argus.internal` (docs/deployment.md)
+# actually sends. Update both if `deploy/Caddyfile`'s site address changes.
+EXPOSE 7700
+CMD ["serve", "--config", "/etc/argus/config.yaml", "--host", "0.0.0.0", "--port", "7700", \
+     "--allowed-host", "argus.internal", "--allowed-host", "argus.internal:*"]

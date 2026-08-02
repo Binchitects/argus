@@ -9,10 +9,14 @@ from pathlib import Path
 
 from .config import Config, ConfigError
 from .gitlab import GitLabError, list_projects
+from .mcpsrv import DEFAULT_ALLOWED_HOSTS, create_app
 from .mirror import GitError, ensure_mirror, head_sha, sync_worktree
 from .store import queries, writes
 from .store.db import open_db
 from .worker import index_repo
+
+DEFAULT_SERVE_HOST = "127.0.0.1"
+DEFAULT_SERVE_PORT = 7700
 
 
 def preflight() -> str | None:
@@ -96,7 +100,8 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
         started = time.time()
         try:
             mirror_dir = ensure_mirror(cfg.index, project,
-                                       clone_url=project.http_url)
+                                       clone_url=project.http_url,
+                                       token=cfg.gitlab.token)
             sha = head_sha(mirror_dir, project.default_branch)
             if sha == old:
                 # index_repo is the only other writer of last-run state, and
@@ -187,6 +192,69 @@ def _status(cfg: Config) -> int:
     return 0
 
 
+def _serve(cfg: Config, host: str, port: int, allowed_hosts: list[str] | None) -> int:
+    """Build the MCP app and run it, bound to ``host``/``port``.
+
+    Binds localhost (`DEFAULT_SERVE_HOST`) unless the operator passes
+    `--host` explicitly -- the server trusts the auth gate for identity, not
+    the network perimeter, so it must never default to a wildcard bind.
+    `docs/deployment.md` puts Caddy in front for TLS; this process is meant
+    to be reached only through that proxy or a loopback-only tunnel.
+
+    `allowed_hosts` (from repeatable `--allowed-host`) is threaded into
+    `create_app` so it lands in `transport_security.allowed_hosts` *at
+    construction* -- FastMCP's DNS-rebinding Host-header allowlist is
+    computed once, when the app object is built, and is never revisited when
+    `app.settings.host` is reassigned below. A reverse proxy (Caddy) forwards
+    the client's real Host header (e.g. `argus.internal`), not this
+    process's own bind host, so leaving the allowlist at its loopback-only
+    default behind such a proxy makes every real `/mcp` call 421. `None`
+    (the flag not given) reproduces that original loopback-only default
+    unchanged -- see `argus.mcpsrv.server._build_transport_security`.
+    """
+    app = create_app(cfg, allowed_hosts=allowed_hosts)
+    app.settings.host = host
+    app.settings.port = port
+    app.run(transport="streamable-http")
+    return 0
+
+
+def _flush_acl(cfg: Config, user: str | None) -> int:
+    """Delete cached ACL resolutions so a GitLab revocation takes effect now.
+
+    Without this the only way to revoke access faster than the 600s TTL
+    (`argus.acl.TTL_SECONDS`) is restarting the service. `--user` scopes the
+    delete to one GitLab username (acl_cache can hold more than one row per
+    user -- one per distinct token they've authenticated with); omitted, it
+    clears every cached identity.
+
+    Mirrors `_index`'s `--reset-retries` distinction between "the thing you
+    named doesn't exist" and "there was nothing to clear": a `--user` that
+    matches no cached row is reported by name, separately from the
+    zero-rows-cleared message a bare `flush-acl` prints when the cache is
+    already empty -- an operator chasing a stale revocation needs to know
+    which of those happened.
+    """
+    conn = open_db(cfg.index.db_path)
+    if user:
+        cursor = conn.execute("DELETE FROM acl_cache WHERE username = ?", (user,))
+        conn.commit()
+        rows_cleared = cursor.rowcount
+        if rows_cleared == 0:
+            print(f"user '{user}' not in acl cache; nothing cleared")
+        else:
+            print(f"cleared acl cache for '{user}' ({rows_cleared} rows)")
+    else:
+        cursor = conn.execute("DELETE FROM acl_cache")
+        conn.commit()
+        rows_cleared = cursor.rowcount
+        if rows_cleared > 0:
+            print(f"cleared {rows_cleared} acl cache entries")
+        else:
+            print("no acl cache entries to clear")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="argus")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -200,6 +268,33 @@ def main(argv: list[str] | None = None) -> int:
     p_status = sub.add_parser("status", help="Show per-repo index freshness")
     p_status.add_argument("--config", required=True, type=Path)
 
+    p_serve = sub.add_parser("serve", help="Run the MCP retrieval server")
+    p_serve.add_argument("--config", required=True, type=Path)
+    p_serve.add_argument("--host", default=DEFAULT_SERVE_HOST,
+                         help=f"Bind address (default: {DEFAULT_SERVE_HOST})")
+    p_serve.add_argument("--port", type=int, default=DEFAULT_SERVE_PORT,
+                         help=f"Bind port (default: {DEFAULT_SERVE_PORT})")
+    p_serve.add_argument(
+        "--allowed-host", action="append", dest="allowed_hosts", metavar="HOST",
+        help=(
+            "Host header value the DNS-rebinding check will accept on /mcp "
+            "(repeatable). Default: the loopback set "
+            f"({', '.join(DEFAULT_ALLOWED_HOSTS)}) -- unchanged from a bare "
+            "`argus serve`. A reverse-proxied deployment (docs/deployment.md) "
+            "MUST pass the proxy-facing hostname Caddy forwards, e.g. "
+            "--allowed-host argus.internal, or every /mcp call is rejected "
+            "with 421 Invalid Host Header. Passing --allowed-host replaces "
+            "the default set entirely rather than adding to it; pass it more "
+            "than once to allow more than one hostname."
+        ),
+    )
+
+    p_flush_acl = sub.add_parser(
+        "flush-acl", help="Clear cached ACL resolutions ahead of their TTL"
+    )
+    p_flush_acl.add_argument("--config", required=True, type=Path)
+    p_flush_acl.add_argument("--user", help="Only clear this GitLab username's cache entries")
+
     args = parser.parse_args(argv)
 
     try:
@@ -211,6 +306,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "index":
             return _index(cfg, args.repo, args.reset_retries)
+        if args.command == "serve":
+            return _serve(cfg, args.host, args.port, args.allowed_hosts)
+        if args.command == "flush-acl":
+            return _flush_acl(cfg, args.user)
         return _status(cfg)
     except GitLabError as exc:
         print(f"gitlab error: {exc}", file=sys.stderr)

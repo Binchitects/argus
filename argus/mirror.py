@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import stat
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,13 +21,125 @@ class Change:
     path: str
 
 
-def _git(cwd: Path, *args: str) -> str:
+# --------------------------------------------------------------- credentials
+#
+# ensure_mirror is the only place a clone/fetch touches a real remote, and
+# therefore the only place a GitLab token may need to reach `git`. It must
+# never end up in three places:
+#
+#   1. a GitError message. worker.py and cli.py persist str(exc) straight
+#      into the index_errors table, which the MCP server serves queries
+#      from -- so redaction happens here, at the one point every such
+#      message is built, not at either call site.
+#   2. .git/config. The mirror is long-lived, so a credentialed remote URL
+#      would keep the token on disk for the mirror's entire life.
+#   3. a command-line argument. argv is world-readable via `ps` / a Linux
+#      `/proc/<pid>/cmdline` -- the deployment target for this project.
+#
+# GIT_ASKPASS closes all three at once: git invokes an external helper
+# program for the username/password, passing only a human-readable prompt
+# string ("Username for '...'"/"Password for '...'") as its one CLI
+# argument. The helper answers from its OWN environment (ARGUS_TOKEN_ENV,
+# set on the child process only), never from argv -- so the token never
+# touches a command line, and clone_url stays the plain http(s) URL
+# throughout, so there is nothing credentialed to strip out of
+# remote.origin.url afterward. Residual exposure: this does not, by itself,
+# hide the *username* placeholder or the fact that a clone/fetch ran with
+# GIT_ASKPASS set -- only the secret value itself never reaches argv or disk.
+ARGUS_TOKEN_ENV = "ARGUS_GIT_ASKPASS_TOKEN"
+_ASKPASS_USERNAME = "oauth2"
+
+_ASKPASS_SOURCE = '''#!/usr/bin/env python3
+"""GIT_ASKPASS helper for Argus. Not meant to be run by hand.
+
+git invokes this as a subprocess whenever a clone/fetch needs credentials,
+passing the prompt text ("Username for '...'" or "Password for '...'") as
+sys.argv[1] and reading the answer from stdout. The token itself travels
+only through the {env} environment variable, set by the parent Argus
+process on this helper's environment -- never as a command-line argument,
+never written to a file, never printed anywhere else by this script.
+"""
+import os
+import sys
+
+
+def main() -> int:
+    prompt = sys.argv[1] if len(sys.argv) > 1 else ""
+    if prompt.strip().lower().startswith("username"):
+        print("{username}")
+    else:
+        print(os.environ.get("{env}", ""))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''.format(env=ARGUS_TOKEN_ENV, username=_ASKPASS_USERNAME)
+
+
+def _askpass_program(askpass_dir: Path) -> Path:
+    """Materialize the GIT_ASKPASS helper; return the one path to hand git.
+
+    GIT_ASKPASS is executed directly, not through a shell, so its value must
+    be exactly one runnable file -- "python /path/script.py" fails with
+    "cannot spawn ... No such file or directory" because git treats the
+    whole string as a single (nonexistent) filename. On POSIX the script
+    itself, marked executable with a shebang, IS that one file. Windows has
+    no direct-exec mechanism for a bare .py file, so a tiny generated .cmd
+    wrapper naming this process's own interpreter takes its place there.
+    """
+    askpass_dir.mkdir(parents=True, exist_ok=True)
+    py_path = askpass_dir / "git_askpass.py"
+    py_path.write_text(_ASKPASS_SOURCE, encoding="utf-8")
+    if os.name == "nt":
+        cmd_path = askpass_dir / "git_askpass.cmd"
+        cmd_path.write_text(
+            f'@echo off\r\n"{sys.executable}" "{py_path}" %*\r\n',
+            encoding="utf-8",
+        )
+        return cmd_path
+    py_path.chmod(py_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return py_path
+
+
+def _auth_env(index_cfg: IndexConfig, token: str | None) -> dict[str, str] | None:
+    """Build the subprocess environment for a credentialed git operation.
+
+    Returns None (subprocess.run then inherits the current environment
+    unchanged) when no token is given -- the existing behaviour every
+    local-path test in tests/test_mirror.py depends on.
+    """
+    if not token:
+        return None
+    env = dict(os.environ)
+    env["GIT_ASKPASS"] = str(_askpass_program(index_cfg.data_dir / ".askpass"))
+    env[ARGUS_TOKEN_ENV] = token
+    return env
+
+
+def _redact(text: str, secrets: tuple[str, ...]) -> str:
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "***")
+    return text
+
+
+def _git(cwd: Path, *args: str, env: dict[str, str] | None = None,
+        secrets: tuple[str, ...] = ()) -> str:
     proc = subprocess.run(
         ["git", *args], cwd=cwd, capture_output=True,
-        text=True, encoding="utf-8", errors="replace",
+        text=True, encoding="utf-8", errors="replace", env=env,
     )
     if proc.returncode != 0:
-        raise GitError(f"git {' '.join(args)} failed: {proc.stderr.strip()[:500]}")
+        # Scrub before the GitError message is built -- this is the only
+        # place one is constructed, and both worker.py and cli.py persist
+        # str(exc) straight into index_errors. Applied to both the command
+        # echo and stderr: defense in depth, since nothing about this
+        # design puts the token in either, but a leak anywhere upstream
+        # (a proxy, a future call site) must not survive past this line.
+        cmd = _redact(" ".join(args), secrets)
+        stderr = _redact(proc.stderr.strip()[:500], secrets)
+        raise GitError(f"git {cmd} failed: {stderr}")
     return proc.stdout
 
 
@@ -37,14 +152,24 @@ def tree_path(index_cfg: IndexConfig, gitlab_id: int) -> Path:
 
 
 def ensure_mirror(index_cfg: IndexConfig, project: Project, *,
-                  clone_url: str) -> Path:
+                  clone_url: str, token: str | None = None) -> Path:
+    env = _auth_env(index_cfg, token)
+    secrets = (token,) if token else ()
+    # credential.helper is cleared for this invocation only -- a `-c`, never
+    # written to any config file -- so a configured system/global helper
+    # (Git Credential Manager on Windows, libsecret on Linux) cannot
+    # intercept the prompt ahead of GIT_ASKPASS. Without this, GCM in
+    # particular answers (or refuses) on git's behalf before our helper is
+    # ever consulted, and refuses an HTTP GitLab remote outright.
+    auth_args = ("-c", "credential.helper=") if token else ()
     path = mirror_path(index_cfg, project.gitlab_id)
     if path.exists():
-        _git(path, "fetch", "--prune", "--quiet", "origin",
-             "+refs/heads/*:refs/heads/*")
+        _git(path, *auth_args, "fetch", "--prune", "--quiet", "origin",
+             "+refs/heads/*:refs/heads/*", env=env, secrets=secrets)
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
-    _git(path.parent, "clone", "--mirror", "--quiet", clone_url, str(path))
+    _git(path.parent, *auth_args, "clone", "--mirror", "--quiet", clone_url,
+        str(path), env=env, secrets=secrets)
     return path
 
 
