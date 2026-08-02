@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Argus — review &amp; system dashboard</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1a1a18; --muted: #6b6b66; --line: #e4e4e0;
+    --card: #ffffff; --accent: #2f6f4f;
+    --crit: #b3261e; --imp: #a1610b; --min: #55606b; --ok: #2f6f4f;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16171a; --fg:#e8e8e4; --muted:#9a9a94; --line:#2c2e33;
+            --card:#1d1f23; --accent:#7fc8a0; --crit:#f2857c; --imp:#e0b060;
+            --min:#9aa6b2; --ok:#7fc8a0; }
+  }
+  :root[data-theme="dark"] { --bg:#16171a; --fg:#e8e8e4; --muted:#9a9a94;
+    --line:#2c2e33; --card:#1d1f23; --accent:#7fc8a0; --crit:#f2857c;
+    --imp:#e0b060; --min:#9aa6b2; --ok:#7fc8a0; }
+  :root[data-theme="light"] { --bg:#fbfbfa; --fg:#1a1a18; --muted:#6b6b66;
+    --line:#e4e4e0; --card:#ffffff; --accent:#2f6f4f; --crit:#b3261e;
+    --imp:#a1610b; --min:#55606b; --ok:#2f6f4f; }
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 72px; }
+  header { border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:28px; }
+  h1 { margin:0 0 4px; font-size:1.6rem; letter-spacing:-.02em; }
+  .sub { color:var(--muted); font-size:.9rem; }
+  h2 { font-size:1.05rem; margin:36px 0 12px; letter-spacing:-.01em; }
+  h2 .hint { font-weight:400; color:var(--muted); font-size:.85rem; margin-left:8px; }
+
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card .n { font-size:1.7rem; font-weight:600; letter-spacing:-.02em; }
+  .card .l { color:var(--muted); font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; }
+
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:10px; background:var(--card); }
+  table { border-collapse:collapse; width:100%; font-size:.88rem; }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { font-weight:600; color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; }
+  tbody tr:last-child td { border-bottom:none; }
+  td.wrap-cell { white-space:normal; min-width:280px; }
+
+  .bar { display:inline-block; height:7px; border-radius:4px; background:var(--accent); vertical-align:middle; }
+  .barbg { display:inline-block; width:90px; height:7px; border-radius:4px;
+           background:var(--line); vertical-align:middle; margin-right:8px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:.75rem;
+          font-weight:600; border:1px solid currentColor; }
+  .crit{color:var(--crit)} .imp{color:var(--imp)} .min{color:var(--min)} .ok{color:var(--ok)}
+  code, pre { font-family:var(--mono); font-size:.85rem; }
+  pre { background:var(--card); border:1px solid var(--line); border-radius:8px;
+        padding:12px 14px; overflow-x:auto; }
+  .note { color:var(--muted); font-size:.87rem; }
+  .warn { border-left:3px solid var(--imp); padding:10px 14px; background:var(--card);
+          border-radius:0 8px 8px 0; margin:10px 0; font-size:.88rem; }
+  .empty { color:var(--muted); padding:22px; text-align:center; }
+  button.theme { position:fixed; top:14px; right:14px; background:var(--card);
+    color:var(--fg); border:1px solid var(--line); border-radius:8px;
+    padding:6px 11px; cursor:pointer; font-size:.85rem; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="toggleTheme()">◐ theme</button>
+<div class="wrap">
+  <header>
+    <h1>Argus — review &amp; system dashboard</h1>
+    <div class="sub" id="generated">loading…</div>
+  </header>
+
+  <div id="problems"></div>
+
+  <div class="cards" id="summary"></div>
+
+  <h2>Model comparison <span class="hint">higher is better · max 18</span></h2>
+  <div class="scroll"><table id="models"><thead><tr>
+    <th>Reviewer model</th><th>Reviews</th><th>Mean score</th><th></th>
+    <th>Crit</th><th>Imp</th><th>Minor</th><th>False positives</th><th>Reproduced</th>
+  </tr></thead><tbody></tbody></table></div>
+  <p class="note">“Reproduced” counts findings the reviewer verified by executing something —
+     a revert, a probe — rather than by reading. On this project that has been the
+     strongest single predictor of whether a finding was real.</p>
+
+  <h2>Reviews</h2>
+  <div class="scroll"><table id="reviews"><thead><tr>
+    <th>Task</th><th>Reviewer</th><th>Implementer</th><th>Verdict</th>
+    <th>Findings</th><th>Score</th><th>Suite</th><th>Source</th>
+  </tr></thead><tbody></tbody></table></div>
+
+  <h2>Findings</h2>
+  <div class="scroll"><table id="findings"><thead><tr>
+    <th>Sev</th><th>Task</th><th>Location</th><th>Summary</th><th>Verified</th><th>Survived</th>
+  </tr></thead><tbody></tbody></table></div>
+
+  <h2>Index status</h2>
+  <div id="status"></div>
+
+  <h2>Managing the system</h2>
+  <p class="note">This dashboard is deliberately <strong>read-only</strong>. Wiring write
+     actions to a static page would mean either an unauthenticated endpoint or embedding a
+     credential in the page — both worse than typing a command. Run these on the index host:</p>
+  <pre id="cmds"></pre>
+</div>
+
+<script src="data.js"></script>
+<script>
+const SEV = {critical:"crit", important:"imp", minor:"min"};
+const $ = s => document.querySelector(s);
+
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const next = cur ? (cur === "dark" ? "light" : "dark") : (sysDark ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", next);
+}
+
+function card(n, l) { return `<div class="card"><div class="n">${n}</div><div class="l">${l}</div></div>`; }
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+function render(d) {
+  $("#generated").textContent =
+    `generated ${d.generated_at} · ${d.reviews.length} review(s)`;
+
+  if (d.problems?.length) {
+    $("#problems").innerHTML = d.problems.map(p =>
+      `<div class="warn"><strong>Input problem:</strong> ${esc(p)}</div>`).join("");
+  }
+
+  const all = d.reviews.flatMap(r => (r.findings || []).map(f => ({...f, task: r.task})));
+  const bySev = s => all.filter(f => f.severity === s).length;
+  const scored = d.reviews.filter(r => r._score_total != null);
+
+  $("#summary").innerHTML =
+    card(d.reviews.length, "reviews") +
+    card(all.length, "findings") +
+    card(bySev("critical"), "critical") +
+    card(bySev("important"), "important") +
+    card(d.reviews.filter(r => r.verdict === "needs_fixes").length, "needs fixes") +
+    card(scored.length ? (scored.reduce((a,r)=>a+r._score_total,0)/scored.length).toFixed(1) : "—", "mean score");
+
+  // --- per-model rollup ---
+  const models = {};
+  for (const r of d.reviews) {
+    const m = r.reviewer_model || "(unrecorded)";
+    const e = models[m] ||= {n:0, score:0, scored:0, crit:0, imp:0, min:0, fp:0, repro:0};
+    e.n++;
+    if (r._score_total != null) { e.score += r._score_total; e.scored++; }
+    for (const f of r.findings || []) {
+      if (f.severity === "critical") e.crit++;
+      else if (f.severity === "important") e.imp++;
+      else e.min++;
+      if (f.survived_scrutiny === false) e.fp++;
+      if (f.verified_by === "reproduced") e.repro++;
+    }
+  }
+  const mrows = Object.entries(models).sort((a,b) =>
+      (b[1].scored ? b[1].score/b[1].scored : -1) - (a[1].scored ? a[1].score/a[1].scored : -1));
+  $("#models tbody").innerHTML = mrows.length ? mrows.map(([m,e]) => {
+    const mean = e.scored ? (e.score/e.scored) : null;
+    const pct = mean == null ? 0 : Math.round(mean/18*90);
+    const tot = e.crit+e.imp+e.min;
+    return `<tr><td>${esc(m)}</td><td>${e.n}</td>
+      <td>${mean==null ? "—" : mean.toFixed(1)}</td>
+      <td><span class="barbg"><span class="bar" style="width:${pct}px"></span></span></td>
+      <td class="crit">${e.crit}</td><td class="imp">${e.imp}</td><td class="min">${e.min}</td>
+      <td>${e.fp}${tot ? ` <span class="note">(${Math.round(e.fp/tot*100)}%)</span>` : ""}</td>
+      <td>${e.repro}</td></tr>`;
+  }).join("") : `<tr><td colspan="9" class="empty">No reviews yet.</td></tr>`;
+
+  // --- reviews ---
+  $("#reviews tbody").innerHTML = d.reviews.length ? d.reviews.map(r => {
+    const f = r.findings || [];
+    const s = r.suite || {};
+    const vp = r.verdict === "approved"
+      ? `<span class="pill ok">approved</span>`
+      : `<span class="pill imp">needs fixes</span>`;
+    return `<tr><td>${esc(r.task)}</td><td>${esc(r.reviewer_model)}</td>
+      <td>${esc(r.implementer_model || "—")}</td><td>${vp}</td>
+      <td>${f.length}</td><td>${r._score_total ?? "—"}</td>
+      <td>${s.passed ?? "—"}p / ${s.skipped ?? "—"}s / ${s.warnings ?? "—"}w</td>
+      <td class="note">${esc(r._source)}</td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="empty">Drop filled templates in docs/review/results/ and re-run build.py.</td></tr>`;
+
+  // --- findings, most severe first ---
+  const order = {critical:0, important:1, minor:2};
+  all.sort((a,b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3));
+  $("#findings tbody").innerHTML = all.length ? all.map(f =>
+    `<tr><td><span class="pill ${SEV[f.severity]||"min"}">${esc(f.severity)}</span></td>
+      <td>${esc(f.task)}</td><td><code>${esc(f.location)}</code></td>
+      <td class="wrap-cell">${esc(f.summary)}${f.plan_mandated ? ` <span class="note">[plan-mandated]</span>` : ""}</td>
+      <td>${esc(f.verified_by || "—")}</td>
+      <td>${f.survived_scrutiny === null || f.survived_scrutiny === undefined
+            ? '<span class="note">unresolved</span>'
+            : (f.survived_scrutiny ? "yes" : '<span class="imp">no</span>')}</td></tr>`
+  ).join("") : `<tr><td colspan="6" class="empty">No findings recorded.</td></tr>`;
+
+  const st = d.index_status || {};
+  $("#status").innerHTML = st.collected
+    ? `<pre>${esc(st.raw)}</pre>`
+    : `<p class="note">Not collected — ${esc(st.reason || "unknown")}. Re-run
+       <code>python dashboard/build.py --config config.yaml</code>.</p>`;
+
+  $("#cmds").textContent = [
+    "# index every repo (batch job; not started by `docker compose up`)",
+    "docker compose --profile indexer run --rm indexer index --config /etc/argus/config.yaml",
+    "",
+    "# per-repo freshness, including partial-coverage flags",
+    "docker compose --profile indexer run --rm indexer status --config /etc/argus/config.yaml",
+    "",
+    "# revoke immediately instead of waiting out the ACL TTL",
+    "docker compose exec server argus flush-acl --config /etc/argus/config.yaml --user <username>",
+    "",
+    "# refresh this dashboard",
+    "python dashboard/build.py --config config.yaml",
+  ].join("\n");
+}
+
+if (typeof window.ARGUS_DATA === "undefined") {
+  $("#generated").textContent = "data.js not found";
+  $("#problems").innerHTML =
+    `<div class="warn"><strong>No data.</strong> Run <code>python dashboard/build.py</code>
+     first — it writes <code>dashboard/data.js</code>, which this page loads. The page makes
+     no network requests, so it works opened straight from disk.</div>`;
+} else {
+  render(window.ARGUS_DATA);
+}
+</script>
+</body>
+</html>
