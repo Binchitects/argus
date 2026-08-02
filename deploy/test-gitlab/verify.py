@@ -66,6 +66,16 @@ def main() -> int:
         gitlab=GitLabConfig(url=gitlab_url, token=admin),
         index=IndexConfig(data_dir=WORK, db_path=WORK / "index.db"),
     )
+    # `argus index` is invoked as a subprocess below, so it needs a real config
+    # file rather than the in-process object.
+    (WORK / "config.yaml").write_text(textwrap.dedent(f"""\
+        gitlab:
+          url: {gitlab_url}
+          token: "{admin}"
+        index:
+          data_dir: {WORK.as_posix()}
+          db_path: {(WORK / 'index.db').as_posix()}
+        """), encoding="utf-8")
 
     # ---------------------------------------------------------------- Q1 ---
     print("\n== Q1: does the service token see PRIVATE projects? ==")
@@ -143,8 +153,20 @@ def main() -> int:
 
     # DecodeFrame is defined in eal-core and called from BOTH other repos, so a
     # broken filter shows up as extra rows rather than as an error.
+    # GUARD AGAINST A VACUOUS PASS. If indexing failed there are no symbols at
+    # all, and every "never crosses the allowlist" assertion below is trivially
+    # true against two empty sets -- the exact failure mode this project has hit
+    # eight times. Refuse to report those as passes.
+    indexed_ok = check(
+        "index is non-empty, so the isolation checks below are meaningful",
+        counts["symbols"] > 0,
+        "no symbols indexed -- isolation assertions would pass vacuously")
+
     a_syms = queries.find_symbol(alpha.allowed_repo_ids, ro, "DecodeFrame")
     b_syms = queries.find_symbol(beta.allowed_repo_ids, ro, "DecodeFrame")
+    if indexed_ok:
+        check("DecodeFrame is actually findable by the repo that defines it",
+              len(a_syms) > 0, f"alpha found {len(a_syms)}")
     a_repos = {r["path_with_namespace"] for r in a_syms}
     b_repos = {r["path_with_namespace"] for r in b_syms}
     print(f"  find_symbol DecodeFrame: alpha={sorted(a_repos)} beta={sorted(b_repos)}")

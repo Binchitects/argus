@@ -85,13 +85,24 @@ def _rails(ruby: str) -> str:
 
 
 def wait_for_api(timeout_s: int = 1800) -> None:
-    """GitLab takes minutes to become usable; poll until the API answers."""
+    """GitLab takes minutes to become usable; poll until the API answers.
+
+    Do NOT probe `/-/readiness` from the host. GitLab restricts its monitoring
+    endpoints to an IP allowlist that is localhost-only by default, so through
+    Docker's NAT the source is the bridge gateway and the endpoint returns
+    **404** -- indistinguishable from "not up yet" if you are only checking for
+    200. In-container it returns 200, which makes the container healthcheck go
+    green while a host-side probe appears to hang forever.
+
+    `/api/v4/version` is the right signal: it needs no allowlist and answers 401
+    (not a connection error) as soon as Rails is serving.
+    """
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            r = httpx.get(f"{GITLAB}/-/readiness", timeout=10)
-            if r.status_code == 200:
-                print("gitlab: ready")
+            r = httpx.get(f"{GITLAB}/api/v4/version", timeout=10)
+            if r.status_code in (200, 401):
+                print("gitlab: API is serving")
                 return
         except Exception:
             pass
@@ -101,9 +112,17 @@ def wait_for_api(timeout_s: int = 1800) -> None:
 
 
 def admin_token() -> str:
-    """Mint an admin PAT directly, avoiding the web login flow."""
+    """Mint an admin PAT directly, avoiding the web login flow.
+
+    Idempotent by destroying any prior 'argus-seed' token first. GitLab stores
+    only the token *digest*, so a fixed token value cannot simply be re-read on
+    a re-run -- a second create collides with
+    `index_personal_access_tokens_on_token_digest` and aborts the whole seed.
+    """
     out = _rails(
         "u = User.find_by_username('root');"
+        "raise 'no root user -- run `gitlab-rake db:seed_fu` first' if u.nil?;"
+        "PersonalAccessToken.where(name: 'argus-seed').destroy_all;"
         "t = u.personal_access_tokens.create!("
         "  name: 'argus-seed', scopes: ['api','read_api','read_repository'],"
         "  expires_at: 365.days.from_now);"
@@ -112,6 +131,18 @@ def admin_token() -> str:
         "puts t.token"
     )
     return out.splitlines()[-1].strip()
+
+
+def _ok(r: httpx.Response, what: str) -> httpx.Response:
+    """raise_for_status, but show GitLab's actual complaint.
+
+    A bare 400 from /api/v4/users is unactionable; the body says exactly which
+    validation failed. It is usually the password-complexity rule -- the same
+    one that silently defeats the root-admin seed in 003_admin.rb.
+    """
+    if r.is_error:
+        raise RuntimeError(f"{what} failed: {r.status_code} {r.text[:500]}")
+    return r
 
 
 def main() -> int:
@@ -129,15 +160,25 @@ def main() -> int:
             "visibility": "private",          # the whole point
             "initialize_with_readme": True,
         })
-        r.raise_for_status()
+        if r.status_code == 400 and "already been taken" in r.text:
+            # Re-run against an instance already seeded: reuse it rather than
+            # forcing a full teardown just to retry a later step.
+            existing = _ok(c.get("/projects", params={"search": name, "simple": True}),
+                           "project lookup").json()
+            pid = next(p["id"] for p in existing if p["path"] == name)
+            project_ids[name] = pid
+            print(f"reusing existing project {name} (id={pid})")
+            continue
+        _ok(r, f"create project {name}")
         pid = r.json()["id"]
         project_ids[name] = pid
         print(f"created private project {name} (id={pid})")
 
         for path, content in files.items():
-            c.post(f"/projects/{pid}/repository/files/{path.replace('/', '%2F')}",
-                   json={"branch": "main", "content": content,
-                         "commit_message": f"add {path}"}).raise_for_status()
+            _ok(c.post(f"/projects/{pid}/repository/files/{path.replace('/', '%2F')}",
+                       json={"branch": "main", "content": content,
+                             "commit_message": f"add {path}"}),
+                f"add {path}")
         print(f"  seeded {len(files)} files")
 
     # --- developers, each scoped to exactly one project -------------------
@@ -145,22 +186,32 @@ def main() -> int:
     for username, project in MEMBERSHIPS.items():
         r = c.post("/users", json={
             "email": f"{username}@argus.test", "username": username,
-            "name": username, "password": "argus-test-pw-2026",
+            "name": username,
+            # Must clear GitLab's complexity check -- a readable passphrase is
+            # rejected with "Password must not contain commonly used
+            # combinations of words and letters".
+            "password": "Kt5wQ9rBz3Xm7Yv2Np8D",
             "skip_confirmation": True,
         })
-        r.raise_for_status()
-        uid = r.json()["id"]
+        if r.status_code == 409 or (r.status_code == 400 and "has already been taken" in r.text):
+            found = _ok(c.get("/users", params={"username": username}), "user lookup").json()
+            uid = found[0]["id"]
+            print(f"reusing existing user {username} (id={uid})")
+        else:
+            _ok(r, f"create user {username}")
+            uid = r.json()["id"]
 
-        c.post(f"/projects/{project_ids[project]}/members",
-               json={"user_id": uid, "access_level": REPORTER}).raise_for_status()
+        m = c.post(f"/projects/{project_ids[project]}/members",
+                   json={"user_id": uid, "access_level": REPORTER})
+        if not (m.status_code == 409 or (m.status_code == 400 and "already exists" in m.text)):
+            _ok(m, f"add {username} to {project}")
 
         # Impersonation tokens are the supported way to mint a token *as*
         # another user without knowing their password.
-        r = c.post(f"/users/{uid}/impersonation_tokens", json={
+        r = _ok(c.post(f"/users/{uid}/impersonation_tokens", json={
             "name": f"{username}-argus", "scopes": ["api", "read_api", "read_repository"],
             "expires_at": "2027-01-01",
-        })
-        r.raise_for_status()
+        }), f"mint token for {username}")
         users[username] = {"id": uid, "token": r.json()["token"], "member_of": project}
         print(f"created {username} (id={uid}) -> Reporter on {project}")
 

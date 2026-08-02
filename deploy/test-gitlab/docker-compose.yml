@@ -24,20 +24,32 @@ services:
     restart: unless-stopped
     shm_size: 256m
     environment:
-      GITLAB_ROOT_PASSWORD: "argus-test-root-pw-2026"
+      # Must survive GitLab's password-complexity check. A readable passphrase
+      # like "argus-test-root-pw-2026" is REJECTED with "Password must not
+      # contain commonly used combinations of words and letters", and the
+      # failure is quiet: db/fixtures/production/003_admin.rb gives up, no
+      # administrator is created, and the container still reports `healthy`
+      # because Rails is serving fine. You then discover it much later, when
+      # something tries to authenticate.
+      GITLAB_ROOT_PASSWORD: "Xq7vR2mZk9Lp4wTn6BjH"
       GITLAB_OMNIBUS_CONFIG: |
         external_url 'http://localhost:8929'
         gitlab_rails['gitlab_shell_ssh_port'] = 2224
 
         # Trim everything a throwaway verification instance does not need.
         # Without this GitLab CE happily eats 8GB+ and takes far longer to boot.
+        # NOTE: do NOT add `grafana['enable']` here. GitLab removed the bundled
+        # Grafana (deprecated 16.0, gone by 16.3), so the key is now *unknown*
+        # and `gitlab-ctl reconfigure` hard-fails with
+        #   Mixlib::Config::UnknownConfigOptionError: Reading unsupported config value grafana
+        # which crash-loops the container. Setting a removed option to `false`
+        # is not a no-op here -- it is fatal.
         prometheus_monitoring['enable'] = false
         alertmanager['enable'] = false
         node_exporter['enable'] = false
         redis_exporter['enable'] = false
         postgres_exporter['enable'] = false
         gitlab_exporter['enable'] = false
-        grafana['enable'] = false
         puma['worker_processes'] = 2
         sidekiq['max_concurrency'] = 5
         gitlab_rails['gitlab_default_projects_features_container_registry'] = false
@@ -54,8 +66,9 @@ services:
       - gitlab-logs:/var/log/gitlab
       - gitlab-data:/var/opt/gitlab
     healthcheck:
-      # GitLab's own healthcheck is slow to go green; give it a long runway.
-      test: ["CMD", "/opt/gitlab/bin/gitlab-healthcheck", "--fail", "--max-time", "10"]
+      # Hit the readiness endpoint directly rather than an internal script path,
+      # which has moved between releases. Long runway: first boot is minutes.
+      test: ["CMD", "curl", "-fsS", "--max-time", "10", "http://localhost:8929/-/readiness"]
       interval: 30s
       timeout: 15s
       retries: 40
