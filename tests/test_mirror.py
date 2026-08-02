@@ -169,3 +169,61 @@ def test_changed_files_treats_typechange_as_modify(cfg, project, origin):
     new = mirror.head_sha(m, "main")
     changes = mirror.changed_files(m, old, new)
     assert changes == [mirror.Change(status="M", path="a.c")]
+
+
+SECRET = "glpat-SUPERSECRET-do-not-leak-0001"
+
+
+def test_git_error_message_redacts_the_token(cfg, project, tmp_path):
+    """The token must never survive into a GitError message.
+
+    This is the highest-stakes redaction on the project: worker.py and cli.py
+    persist str(exc) straight into `index_errors`, and the MCP server serves
+    queries from that same database. A token reaching that table is a token
+    handed to whoever can read the index.
+
+    Asserted by putting the secret somewhere the message is built from -- the
+    command echo -- and proving it comes back masked.
+    """
+    with pytest.raises(mirror.GitError) as excinfo:
+        mirror._git(tmp_path, "rev-parse", SECRET, secrets=(SECRET,))
+    text = str(excinfo.value)
+    assert SECRET not in text, f"token leaked into GitError: {text}"
+    assert "***" in text
+
+
+def test_git_error_without_secrets_is_unredacted(cfg, project, tmp_path):
+    """Guard against the redaction test passing for the wrong reason.
+
+    If _git simply never echoed its arguments, the test above would pass with
+    redaction removed entirely. This proves the argument really is in the
+    message when no secret is declared -- so masking is what changes it.
+    """
+    with pytest.raises(mirror.GitError) as excinfo:
+        mirror._git(tmp_path, "rev-parse", SECRET)
+    assert SECRET in str(excinfo.value)
+
+
+def test_failed_authenticated_clone_leaves_no_token_in_index_errors(cfg, project, tmp_path):
+    """End of the leak path, asserted against the PERSISTED row.
+
+    Not the exception -- the row. That is what an operator, and the MCP
+    server's own database, can actually read.
+    """
+    from argus.store.db import open_db
+    from argus.store import writes
+
+    conn = open_db(tmp_path / "i.db")
+    repo_id = writes.upsert_repo(conn, gitlab_id=project.gitlab_id,
+                                 path_with_namespace=project.path_with_namespace,
+                                 default_branch="main", http_url=project.http_url)
+    try:
+        mirror.ensure_mirror(cfg, project,
+                             clone_url="http://127.0.0.1:1/nope.git", token=SECRET)
+    except mirror.GitError as exc:
+        writes.record_error(conn, repo_id, None, "git", str(exc), 1234)
+
+    rows = conn.execute("SELECT message FROM index_errors").fetchall()
+    assert rows, "expected the failed clone to record an error"
+    for r in rows:
+        assert SECRET not in r["message"], f"token persisted to index_errors: {r['message']}"

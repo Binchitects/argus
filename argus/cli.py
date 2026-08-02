@@ -100,7 +100,8 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
         started = time.time()
         try:
             mirror_dir = ensure_mirror(cfg.index, project,
-                                       clone_url=project.http_url)
+                                       clone_url=project.http_url,
+                                       token=cfg.gitlab.token)
             sha = head_sha(mirror_dir, project.default_branch)
             if sha == old:
                 # index_repo is the only other writer of last-run state, and
