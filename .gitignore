@@ -37,3 +37,6 @@ deploy/test-gitlab/work/
 
 # Task 12 measurement checkouts (large upstream clones, never committed)
 .packwork/
+
+# Built packs (large artifacts, published out of band)
+dist/
