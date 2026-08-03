@@ -1,5 +1,39 @@
 from argus.resolve import Resolution
 from argus.store.db import open_db
+from argus import resolve
+
+
+def test_path_suffixes_are_component_aligned():
+    assert resolve.path_suffixes("src/eal/eal_thread.h") == [
+        "src/eal/eal_thread.h", "eal/eal_thread.h", "eal_thread.h",
+    ]
+
+
+def test_a_single_component_path_yields_itself_only():
+    assert resolve.path_suffixes("stdio.h") == ["stdio.h"]
+
+
+def test_suffix_index_groups_files_under_every_suffix():
+    index = resolve.build_suffix_index([
+        (1, 10, "src/eal/eal_thread.h"),
+        (2, 20, "include/eal_thread.h"),
+    ])
+    assert {f[0] for f in index["eal_thread.h"]} == {1, 2}
+    assert {f[0] for f in index["eal/eal_thread.h"]} == {1}
+
+
+def test_a_longer_name_does_not_match_a_shorter_one():
+    """The defect that matters. A naive endswith makes 'eal_thread.h' match
+    'not_eal_thread.h' -- the same class of bug as the substring-blame defect
+    in Phase 1, which deleted healthy symbols."""
+    index = resolve.build_suffix_index([(1, 10, "src/not_eal_thread.h")])
+    assert "eal_thread.h" not in index
+    assert "not_eal_thread.h" in index
+
+
+def test_directory_prefixes_do_not_match_either():
+    index = resolve.build_suffix_index([(1, 10, "src/myeal/x.h")])
+    assert "eal/x.h" not in index
 
 
 def test_resolution_states_are_the_four_the_spec_names():
