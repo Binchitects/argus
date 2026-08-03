@@ -124,7 +124,7 @@ def lookup_symbol(
     symbols do not depend on it.
     """
     results: list[dict[str, Any]] = []
-    for pack in _selected(packs, lang):
+    for pack in select_packs(packs, lang):
         rows = _query(pack, """
             SELECT s.name, s.kind, s.namespace, s.anchor, s.signature,
                    d.title, d.url, d.path
@@ -157,7 +157,7 @@ def search_text(
     pack over the same kind of corpus; results are merged on it directly.
     """
     results: list[tuple[float, dict[str, Any]]] = []
-    for pack in _selected(packs, lang):
+    for pack in select_packs(packs, lang):
         try:
             rows = pack.conn.execute("""
                 SELECT d.id, d.title, d.url, d.path, d.content,
@@ -200,7 +200,7 @@ def search_docs(
     that a whole source was missing -- and the caller already knows which packs
     are incompatible, since the registry reports it at install time.
     """
-    selected = _selected(packs, lang)
+    selected = select_packs(packs, lang)
     for pack in selected:
         pack_format.require_compatible(pack.meta, model=EMBED_MODEL, dim=EMBED_DIM)
 
@@ -256,7 +256,7 @@ def search_docs(
     return [row for _, row in scored[:limit]]
 
 
-def _selected(packs: Sequence[Pack], lang: str | None) -> list[Pack]:
+def select_packs(packs: Sequence[Pack], lang: str | None) -> list[Pack]:
     """Filter packs by source.
 
     ``lang`` names the *source* ("python", "react"), not the markup. The

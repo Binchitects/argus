@@ -40,15 +40,34 @@ class IndexConfig:
 
 
 @dataclass(frozen=True)
+class PacksConfig:
+    """Where installed knowledge packs live.
+
+    Separate from IndexConfig on purpose: packs are the public corpus and
+    share nothing with the private index but a disk.
+    """
+
+    dir: Path
+
+
+@dataclass(frozen=True)
 class Config:
     gitlab: GitLabConfig
     index: IndexConfig
+    #: Optional so a Config built in code (tests, tooling) stays valid without
+    #: it; read through `packs_dir`, which supplies the default.
+    packs: PacksConfig | None = None
+
+    @property
+    def packs_dir(self) -> Path:
+        return self.packs.dir if self.packs else self.index.data_dir / "packs"
 
     @staticmethod
     def load(path: Path) -> "Config":
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
         gl = raw.get("gitlab") or {}
         ix = raw.get("index") or {}
+        pk = raw.get("packs") or {}
 
         url = gl.get("url")
         if not url:
@@ -78,5 +97,9 @@ class Config:
                 max_file_bytes=max_file_bytes,
                 exclude_dirs=tuple(ix.get("exclude_dirs", DEFAULT_EXCLUDE_DIRS)),
                 repo_time_budget_seconds=repo_time_budget_seconds,
+            ),
+            packs=PacksConfig(
+                dir=Path(pk["dir"]) if pk.get("dir")
+                else Path(ix["data_dir"]) / "packs"
             ),
         )
