@@ -83,35 +83,80 @@ A reflection test walks the module and fails on any function that doesn't take i
 
 Tools are named after the *questions developers ask*, not after retrieval mechanisms. A 35B local model picks the right tool far more reliably when the name matches the intent — tool design is prompt engineering for smaller models.
 
+**Shipped — your private code, access-controlled:**
+
 | Tool | Answers |
 |---|---|
-| `which_repo` | *"Which repo do I change for X?"* |
 | `find_symbol` | Exact definitions across every repo |
-| `find_references` | Every caller, product-wide, including cross-repo |
-| `search_code` | Fast lexical/regex over millions of lines |
-| `semantic_search` | Vague conceptual queries |
-| `repo_map` | Dependency graph — what breaks if I change this |
+| `find_references` | Every mention, product-wide, including cross-repo |
+| `search_code` | Fast lexical search over millions of lines |
 | `get_file` | Access-checked content fetch |
 | `index_status` | Per-repo freshness, so the agent can qualify stale answers |
 
-That last one looks like a throwaway and isn't: it's what stops an agent confidently answering from a three-week-stale index. It can say *"this repo was last indexed 4 hours ago"* instead of silently guessing.
+**Shipped — public documentation, no access control (there is nothing to gate):**
+
+| Tool | Answers |
+|---|---|
+| `docs_lookup` | Exact API name → the page and anchor that *define* it |
+| `docs_search` | Conceptual questions against Python and React docs |
+
+**Planned:** `which_repo` (*"which repo do I change for X?"*), `repo_map`
+(dependency graph), `semantic_search` (embeddings over your own code).
+
+`index_status` looks like a throwaway and isn't: it's what stops an agent confidently answering from a three-week-stale index. It can say *"this repo was last indexed 4 hours ago"* instead of silently guessing.
+
+---
+
+## Knowledge packs
+
+Your developers don't only ask about your code. They ask what `useState` returns and how `os.path.join` treats an absolute segment — and answering that from a model's memory is how you get confident, outdated, unciteable answers.
+
+A **knowledge pack** is one SQLite file holding a public documentation corpus: prose, API symbols, and embeddings. Build it once, share it, and nobody else has to regenerate it.
+
+```bash
+argus pack install https://example.org/python-3.13.arguspack --sha256 <digest>
+argus pack list
+argus pack info python          # licence and attribution, in full
+```
+
+Two are built and measured:
+
+| | Documents | Chunks | Symbols | Size |
+|---|---|---|---|---|
+| Python 3.13 | 516 | 13,164 | 18,027 | 28.5 MB |
+| React (react.dev) | 222 | 4,755 | 125 | 9.1 MB |
+
+Three properties make them worth the format:
+
+**Lookups are exact, not approximate.** Symbols come from the upstream project's own index — Sphinx's `objects.inv` for Python, react.dev's pinned MDX anchors — so `docs_lookup("os.path.join")` resolves to the definition, not to whichever paragraph mentions the name.
+
+**Every result is attributable.** `source`, `url`, `license` and `attribution` ride along on every hit, and the tool descriptions tell the model to cite them. `argus pack info` prints the licence in full — that output is how you meet the redistribution obligation.
+
+**They're small enough to move.** Embeddings are stored binary-quantized (96 bytes/chunk) for a coarse pass, with int8 (768 bytes) for rescoring. float32 would be 3072. At a million chunks that's the difference between a 96 MB scan and a 3 GB one.
+
+Measured recall@10 against an exact float32 baseline: **0.946**. Full numbers, including the misses, in [`docs/pack-measurements.md`](docs/pack-measurements.md). Usage in [`docs/knowledge-packs.md`](docs/knowledge-packs.md).
+
+Packs are a *separate corpus*. Nothing in the pack query path can reach the private index — that's asserted structurally by a test, not left to convention.
 
 ---
 
 ## Status
 
-Argus ships in four phases, each ending somewhere genuinely usable.
+Argus ships in phases, each ending somewhere genuinely usable.
 
 | Phase | Scope | State |
 |---|---|---|
-| **1 — Indexer** | Mirroring, change detection, symbol + include extraction, SQLite store, access-gated queries, CLI | ✅ **Complete** — 91 tests |
-| **2 — Multi-user retrieval** | ACL module, HTTP MCP server, 5 non-semantic tools, TLS, systemd | Next |
+| **1 — Indexer** | Mirroring, change detection, symbol + include extraction, SQLite store, access-gated queries, CLI | ✅ **Complete** |
+| **2 — Multi-user retrieval** | ACL module, HTTP MCP server, 5 code tools, container, TLS | ✅ **Complete** |
+| **5 — Knowledge packs** | Portable public documentation packs, 2 doc tools, `argus pack` CLI | ✅ **Complete** |
 | **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | Planned |
-| **4 — Semantic layer** | Selective embeddings, `semantic_search` | Planned |
+| **4 — Semantic layer** | Selective embeddings over private code, `semantic_search` | Planned |
 
-**Phase 2 delivers most of the value** — exact symbol lookup across the whole product, with real GitLab-derived permissions, before a single embedding exists. Phase 4 is deliberately last: it's the most expensive to build and the most likely to need iteration, and phases 1–3 stand on their own without it.
+**469 tests**, passing locally and in the container, 0 skipped.
 
-Today Argus is a **CLI indexer**. There is no server yet; `argus index` and `argus status` are the whole surface.
+Phase 2 delivered most of the value — exact symbol lookup across the whole product, with real GitLab-derived permissions, before a single embedding existed. Phase 5 then added a second, entirely separate corpus: public documentation, which needs no access control and can be shared as a file.
+
+Phase 4 is deliberately last. It is the most expensive to build, the most likely to need iteration, and phases 1–3 stand on their own without it.
 
 ---
 
@@ -125,8 +170,11 @@ Today Argus is a **CLI indexer**. There is no server yet; `argus index` and `arg
   - Linux: `sudo apt install universal-ctags`
   - Windows: `winget install UniversalCtags.Ctags`
 - A GitLab personal access token with `read_api` and `read_repository`
+- [Ollama](https://ollama.com) with `nomic-embed-text` pulled — only for `docs_search` and for *building* packs. Everything else, including `docs_lookup`, works without it.
 
 Argus refuses to start if ctags is missing or is the wrong implementation. Without that check you'd get a complete-looking index with no symbol layer at all — and no error to tell you.
+
+Expect the embedder, not the index, to dominate `docs_search` latency: measured 2,254 ms to embed a query on CPU Ollama against 89 ms for the search itself.
 
 ### Install
 
@@ -164,6 +212,10 @@ index:
   max_file_bytes: 1048576
   repo_time_budget_seconds: 600
   exclude_dirs: [third_party, vendor, node_modules, build, out, x64, Debug, Release]
+
+# Optional. Defaults to <data_dir>/packs.
+packs:
+  dir: /var/lib/argus/packs
 ```
 
 ### Run

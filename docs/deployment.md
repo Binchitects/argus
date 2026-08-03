@@ -174,6 +174,40 @@ screen:
   it should never be reachable from outside the office/VPN network Hermes
   clients run on.
 
+## Knowledge packs on a deployed server
+
+Packs are public documentation and carry no access control, but they are still
+files the server reads at query time. Install them into the directory
+`packs.dir` names (default `<data_dir>/packs`) and restart nothing — packs are
+opened per request, so a pack dropped in becomes queryable immediately.
+
+```bash
+argus pack install https://example.org/python-3.13.arguspack \
+  --sha256 <digest> --config /etc/argus/config.yaml
+argus pack list --config /etc/argus/config.yaml
+```
+
+**Always pass `--sha256` when installing from a URL.** A truncated download
+that silently became a half-empty knowledge base is the failure the check
+exists to prevent; without a digest there is nothing to detect it. A pack that
+fails verification is not installed — no file, no registry entry.
+
+Two operational notes:
+
+- **`docs_search` needs Ollama; `docs_lookup` does not.** If the embedder is
+  unreachable, `docs_search` degrades to lexical matching and labels every row
+  `retrieval: "lexical"` rather than failing. Watch for that label in logs —
+  it means the embedder has been down and answers have been less precise.
+- **A pack built with a different embedding model is refused for semantic
+  search**, by design, and says so by name. It still serves `docs_lookup` and
+  lexical search. `argus pack list` marks it `[INCOMPATIBLE]`; that is the
+  thing to alert on, because it will not fix itself.
+
+The pack query path cannot reach the private index — that is enforced by a
+test that reads the module's own source, not by convention — so installing a
+third-party pack cannot expose private code. It can still serve wrong
+documentation, so install packs you trust and verify their digests.
+
 ## Verifying the deployment
 
 ```bash
