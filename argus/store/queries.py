@@ -440,14 +440,29 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
     return scored[:limit]
 
 
+def _escape_like(value: str) -> str:
+    """Escape a value bound into a LIKE pattern so it matches only itself.
+
+    SQLite's LIKE treats a bare `_` or `%` in the *bound value*, not only in
+    literal pattern text, as a wildcard -- `_` matches any one character and
+    `%` matches any run of characters. Snake_case filenames are near-
+    universal in C and Python, so an unescaped query for `unique_beta.c`
+    would also match a sibling file like `uniqueXbeta.c` in a different
+    repo. Escape the backslash first, or the backslashes just inserted in
+    front of `_`/`%` would themselves be escaped on the next pass.
+    """
+    return value.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
+
+
 def _files_named(conn, allowed: set[int], path: str) -> list[sqlite3.Row]:
     rows = []
-    for chunk in _chunks(list(allowed), 1):
+    escaped = _escape_like(path)
+    for chunk in _chunks(list(allowed), 2):  # path (equality) + path (LIKE)
         marks = ",".join("?" for _ in chunk)
         rows.extend(conn.execute(
             f"SELECT repo_id, path FROM files WHERE repo_id IN ({marks})"
-            "  AND (path = ? OR path LIKE '%/' || ?)",
-            (*chunk, path, path)).fetchall())
+            "  AND (path = ? OR path LIKE '%/' || ? ESCAPE '\\')",
+            (*chunk, path, escaped)).fetchall())
     return rows
 
 

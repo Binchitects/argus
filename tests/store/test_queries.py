@@ -564,6 +564,45 @@ def test_a_direct_hit_is_not_penalised_for_being_a_popular_repo(two_repos):
     )
 
 
+def test_which_repo_does_not_treat_underscore_as_a_wildcard(two_repos):
+    """SQLite's LIKE treats a bare `_` in the *bound value* as a wildcard
+    (matching any one character), not just in literal pattern text. Two
+    files in different repos whose paths differ only where a `_` sits must
+    not both come back as evidence for a query naming one of them.
+
+    This is not just an extra row: which_repo treats a _files_named result
+    as a *direct* hit, and direct hits are exempt from the centrality
+    penalty (`if not hits:`). A false match here both invents evidence for
+    the wrong repo and disables the correction that would otherwise damp
+    it, so a change can be attributed to a repo that was never actually
+    named.
+    """
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+
+    writes.upsert_file(conn, repo_id=alpha, path="src/unique_beta.c", lang="c",
+                       size=6, blob_sha="ubeta-a", content="alpha!")
+    # Differs from the file above only where a `_` sits (`X` instead of `_`).
+    # Under an unescaped LIKE, that `_` in the bound value would match any
+    # single character, so this unrelated file would falsely satisfy a query
+    # for unique_beta.c.
+    writes.upsert_file(conn, repo_id=beta, path="src/uniqueXbeta.c", lang="c",
+                       size=5, blob_sha="ubeta-b", content="beta!")
+
+    description = "Traceback (most recent call last):\n  at unique_beta.c:42\n"
+    assert whichrepo.detect_shape(description) == whichrepo.Shape.STACK, (
+        "test assumes stack shape, where a direct hit is unpenalised evidence"
+    )
+
+    rows = queries.which_repo([alpha, beta], conn, description)
+    repo_ids_hit = {r["repo_id"] for r in rows}
+    assert repo_ids_hit == {alpha}, (
+        f"expected evidence attributed to only alpha, got {repo_ids_hit} -- "
+        "an unescaped `_` in the LIKE pattern let src/uniqueXbeta.c in beta "
+        "match a query for src/unique_beta.c"
+    )
+
+
 def test_confidence_is_between_zero_and_one(two_repos):
     conn, ids = two_repos
     rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, "SharedName")
