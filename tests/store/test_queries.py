@@ -3,6 +3,8 @@ import sqlite3
 
 import pytest
 
+from argus.resolve import Resolution
+from argus.store import graph
 from argus.store.db import open_db
 from argus.store import writes, queries
 
@@ -61,6 +63,12 @@ def _minimal_args_for(name, conn, target_repo_id):
         # is the *only* thing that can change which repo's occurrences come
         # back (same collision strategy as find_symbol's SharedName/a.c).
         return {"name": "SharedFunc"}
+    if name == "repo_map":
+        # repo_map's third positional parameter is target_repo_id itself, so
+        # no cross-repo graph state is needed for this generic filtering
+        # check: an allowlist that excludes target_repo_id must return {}, and
+        # one that includes it must return a non-empty dict naming it.
+        return {"repo_id": target_repo_id}
     raise NotImplementedError(
         f"_minimal_args_for has no branch for {name!r}. A newly added public "
         "query function must be given deliberate arguments here before this "
@@ -407,3 +415,59 @@ def test_find_references_honours_limit(two_repos):
 
     limited = queries.find_references([rid], conn, "SharedFunc", limit=5)
     assert len(limited) == 5
+
+
+def _cross_repo_include(conn, ids) -> None:
+    """Make g/alpha depend on g/beta.
+
+    The `two_repos` fixture seeds no includes at all, so without this every
+    edge assertion below would pass over an empty graph -- proving nothing.
+    """
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+    src = conn.execute("SELECT id FROM files WHERE repo_id = ? LIMIT 1",
+                       (alpha,)).fetchone()["id"]
+    hdr = conn.execute("SELECT id FROM files WHERE repo_id = ? LIMIT 1",
+                       (beta,)).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO includes (repo_id, file_id, raw, is_angle, "
+        "resolved_file_id, resolved_repo_id, is_external, resolution) "
+        "VALUES (?, ?, 'shared.h', 0, ?, ?, 0, ?)",
+        (alpha, src, hdr, beta, Resolution.RESOLVED))
+    conn.commit()
+
+
+def test_repo_map_reports_both_directions(two_repos):
+    conn, ids = two_repos
+    _cross_repo_include(conn, ids)
+    graph.rebuild_repo_deps(conn)
+    result = queries.repo_map([ids["g/alpha"], ids["g/beta"]], conn, ids["g/alpha"])
+    assert result["repo"]["repo_id"] == ids["g/alpha"]
+    assert {d["repo_id"] for d in result["depends_on"]} == {ids["g/beta"]}
+
+
+def test_repo_map_hides_edges_touching_repos_outside_the_allowlist(two_repos):
+    """A developer who can see alpha but not beta must not learn that beta
+    exists, or that anything depends on it. Filtering happens at query time
+    against one shared graph."""
+    conn, ids = two_repos
+    _cross_repo_include(conn, ids)
+    graph.rebuild_repo_deps(conn)
+
+    visible = queries.repo_map([ids["g/alpha"]], conn, ids["g/alpha"])
+    assert visible["repo"]["repo_id"] == ids["g/alpha"], "non-empty guard"
+    assert visible["depends_on"] == []
+    assert visible["depended_on_by"] == []
+    assert str(ids["g/beta"]) not in repr(visible)
+
+
+def test_repo_map_on_a_repo_outside_the_allowlist_is_empty(two_repos):
+    conn, ids = two_repos
+    assert queries.repo_map([ids["g/alpha"]], conn, ids["g/beta"]) == {}
+
+
+def test_repo_map_with_no_graph_built_yet_is_empty_not_an_error(two_repos):
+    """Before the first resolution pass repo_deps is empty. That is a valid
+    state, not a failure."""
+    conn, ids = two_repos
+    result = queries.repo_map([ids["g/alpha"]], conn, ids["g/alpha"])
+    assert result["depends_on"] == []

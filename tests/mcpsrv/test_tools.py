@@ -502,10 +502,9 @@ def test_tools_list_descriptions_are_load_bearing(two_repo_cfg):
 
     by_name = {t["name"]: t["description"] for t in tools_list}
     assert set(by_name) == {
-        # Five over the private code index...
         "find_symbol", "find_references", "search_code", "get_file", "index_status",
-        # ...and two over the public documentation packs (Phase 5 Task 10).
         "docs_lookup", "docs_search",
+        "repo_map",
     }
     assert "name-based" in by_name["find_references"].lower() or \
         "name" in by_name["find_references"].lower() and "not" in by_name["find_references"].lower()

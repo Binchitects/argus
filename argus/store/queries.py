@@ -287,3 +287,49 @@ def find_references(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
 
     results.sort(key=lambda r: (r["repo"], r["path"], r["line"]))
     return results[:limit]
+
+
+def repo_map(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
+             repo_id: int) -> dict:
+    """Dependencies and dependents of `repo_id`, filtered to the allowlist.
+
+    `repo_deps` is a global graph, but a caller may only learn about repos
+    they can already see. An edge to a repo outside the allowlist is dropped
+    entirely rather than reported anonymously -- "depends on 1 repo you cannot
+    see" is itself a disclosure.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids or repo_id not in set(ids):
+        return {}
+
+    row = conn.execute(
+        "SELECT id, path_with_namespace FROM repos WHERE id = ?", (repo_id,)
+    ).fetchone()
+    if row is None:
+        return {}
+
+    def edges(sql: str) -> list[dict]:
+        out: list[dict] = []
+        for chunk in _chunks(list(ids), 1):
+            marks = ",".join("?" for _ in chunk)
+            out.extend(
+                {"repo_id": r["other_id"],
+                 "path_with_namespace": r["path_with_namespace"],
+                 "weight": r["weight"]}
+                for r in conn.execute(sql.format(marks=marks), (repo_id, *chunk))
+            )
+        out.sort(key=lambda e: (-e["weight"], e["path_with_namespace"]))
+        return out
+
+    return {
+        "repo": {"repo_id": row["id"],
+                 "path_with_namespace": row["path_with_namespace"]},
+        "depends_on": edges(
+            "SELECT d.to_repo_id AS other_id, r.path_with_namespace, d.weight"
+            "  FROM repo_deps d JOIN repos r ON r.id = d.to_repo_id"
+            " WHERE d.from_repo_id = ? AND d.to_repo_id IN ({marks})"),
+        "depended_on_by": edges(
+            "SELECT d.from_repo_id AS other_id, r.path_with_namespace, d.weight"
+            "  FROM repo_deps d JOIN repos r ON r.id = d.from_repo_id"
+            " WHERE d.to_repo_id = ? AND d.from_repo_id IN ({marks})"),
+    }
