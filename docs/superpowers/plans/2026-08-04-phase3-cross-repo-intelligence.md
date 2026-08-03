@@ -1486,7 +1486,9 @@ def test_index_status_reports_resolution_quality(two_repos):
     resolve_includes(conn)
     rows = queries.index_status([ids["g/alpha"]], conn)
     assert rows, "non-empty guard"
-    assert "includes_ambiguous" in rows[0]
+    # `in` on a sqlite3.Row tests its VALUES, not its column names.
+    assert "includes_ambiguous" in rows[0].keys()
+    assert rows[0]["includes_resolved"] >= 1
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1549,18 +1551,29 @@ def _resolve(cfg: Config) -> int:
 
 - [ ] **Step 4: Add the statistics to `index_status`**
 
-In `queries.index_status`, extend the per-repo dict with:
+`index_status` returns `list[sqlite3.Row]`, and a `Row` is **immutable** — it
+cannot be assigned into. The counts therefore go in as correlated subqueries
+in the existing SELECT, which is also how `files`, `symbols` and `errors` are
+already computed there.
+
+In `argus/store/queries.py`, inside `index_status`, add these three lines to
+the SELECT list immediately after the `errors` subquery and before the
+`queued_retries` comment block:
 
 ```python
-        stats = conn.execute(
-            "SELECT resolution, COUNT(*) AS n FROM includes"
-            " WHERE repo_id = ? GROUP BY resolution", (row["id"],)
-        ).fetchall()
-        counts = {s["resolution"]: s["n"] for s in stats}
-        entry["includes_resolved"] = counts.get("resolved", 0)
-        entry["includes_external"] = counts.get("external", 0)
-        entry["includes_ambiguous"] = counts.get("ambiguous", 0)
+            "       (SELECT COUNT(*) FROM includes WHERE repo_id = r.id"
+            "         AND resolution = 'resolved')  AS includes_resolved,"
+            "       (SELECT COUNT(*) FROM includes WHERE repo_id = r.id"
+            "         AND resolution = 'external')  AS includes_external,"
+            "       (SELECT COUNT(*) FROM includes WHERE repo_id = r.id"
+            "         AND resolution = 'ambiguous') AS includes_ambiguous,"
 ```
+
+The literals match `Resolution.RESOLVED` / `EXTERNAL` / `AMBIGUOUS` from Task
+1. They are inlined rather than parameterised because these subqueries sit
+inside a statement whose host parameters are the repo-id chunk, and adding
+three per-row parameters would eat into the ~999 host-parameter budget that
+`_chunks` exists to manage.
 
 - [ ] **Step 5: Run the full suite**
 
