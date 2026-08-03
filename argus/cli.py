@@ -8,15 +8,26 @@ import time
 from pathlib import Path
 
 from .config import Config, ConfigError
+from .embed import EmbeddingUnavailable
 from .gitlab import GitLabError, list_projects
 from .mcpsrv import DEFAULT_ALLOWED_HOSTS, create_app
 from .mirror import GitError, ensure_mirror, head_sha, sync_worktree
+from .packs import format as pack_format
+from .packs import registry
+from .packs.build import BuildError, build_pack, fetch_source
+from .packs.registry import RegistryError
+from .packs.sources import SOURCES
 from .store import queries, writes
 from .store.db import open_db
 from .worker import index_repo
 
 DEFAULT_SERVE_HOST = "127.0.0.1"
 DEFAULT_SERVE_PORT = 7700
+
+#: Exit code for pack build/install/registry failures. Distinct from the
+#: existing 2 (config), 3 (gitlab) and 4 (indexing) so a script can tell a
+#: pack problem from an index one.
+EXIT_PACK = 5
 
 
 def preflight() -> str | None:
@@ -255,6 +266,172 @@ def _flush_acl(cfg: Config, user: str | None) -> int:
     return 0
 
 
+
+# ---------------------------------------------------------------------------
+# argus pack ...
+# ---------------------------------------------------------------------------
+
+def _packs_dir(args) -> Path:
+    """Resolve where packs live, from --packs-dir or --config.
+
+    Both are accepted, and --packs-dir is why the public tooling works on its
+    own. `Config.load` requires a GitLab URL and token; demanding those before
+    someone can install a public documentation pack would be absurd for a
+    corpus whose whole point is that anyone can use it.
+    """
+    if getattr(args, "packs_dir", None):
+        return Path(args.packs_dir)
+    if getattr(args, "config", None):
+        return Config.load(args.config).packs_dir
+    raise ConfigError("pass --packs-dir or --config to say where packs live")
+
+
+def _describe(pack) -> str:
+    flag = "" if pack.compatible else "  [INCOMPATIBLE]"
+    size_mb = pack.size_bytes / (1024 * 1024)
+    return (f"{pack.name:<16} {pack.version:<10} {pack.embedding_model:<20} "
+            f"{size_mb:>8.1f} MB  {pack.license}{flag}")
+
+
+def _pack_build(args) -> int:
+    source_cls = SOURCES.get(args.source)
+    if source_cls is None:
+        print(f"unknown source {args.source!r}; known: {', '.join(sorted(SOURCES))}",
+              file=sys.stderr)
+        return EXIT_PACK
+    source = source_cls()
+
+    work_dir = Path(args.work_dir)
+    commit = None
+    if args.fetch:
+        print(f"fetching {source.repo_url} ({source.branch}) into {work_dir} ...")
+        commit = fetch_source(source, work_dir)
+
+    print(f"building {source.name} pack from {work_dir} ...")
+    try:
+        out = build_pack(
+            source, work_dir=work_dir, out_path=Path(args.out),
+            version=args.version, source_commit=commit or args.commit,
+        )
+    except EmbeddingUnavailable as exc:
+        # Separate from BuildError because the fix is elsewhere: start Ollama
+        # and pull the model, then rerun.
+        print(f"embedding failed: {exc}", file=sys.stderr)
+        print("is ollama running, and has the model been pulled?", file=sys.stderr)
+        return EXIT_PACK
+
+    conn = pack_format.open_pack(out)
+    try:
+        meta = pack_format.read_meta(conn)
+    finally:
+        conn.close()
+    print(f"wrote {out} ({out.stat().st_size / (1024 * 1024):.1f} MB)")
+    print(f"  docs {meta.get('doc_count')}  chunks {meta.get('chunk_count')}  "
+          f"symbols {meta.get('symbol_count')} "
+          f"(unresolved {meta.get('unresolved_symbol_count')})")
+    return 0
+
+
+def _pack_list(args) -> int:
+    packs = registry.list_installed(_packs_dir(args))
+    if not packs:
+        # Not an error: an empty registry is a normal state, and a non-zero
+        # exit would break any script that lists before installing.
+        print("no packs installed")
+        return 0
+    print(f"{'NAME':<16} {'VERSION':<10} {'MODEL':<20} {'SIZE':>11}  LICENSE")
+    for pack in packs:
+        print(_describe(pack))
+    return 0
+
+
+def _pack_install(args) -> int:
+    dest = _packs_dir(args)
+    installed = registry.install(args.source, dest_dir=dest,
+                                expected_sha256=args.sha256)
+    print(f"installed {installed.name} {installed.version} -> {installed.path}")
+    if not installed.compatible:
+        print(f"warning: {installed.incompatible_reason}", file=sys.stderr)
+        print("lookup and text search still work; semantic search does not.",
+              file=sys.stderr)
+    return 0
+
+
+def _pack_info(args) -> int:
+    dest = _packs_dir(args)
+    matches = [p for p in registry.list_installed(dest) if p.name == args.name]
+    if not matches:
+        print(f"no installed pack named {args.name!r} in {dest}", file=sys.stderr)
+        return EXIT_PACK
+    pack = matches[0]
+    meta = pack_format.read_meta(pack_format.open_pack(pack.path))
+
+    print(f"name          {pack.name}")
+    print(f"version       {pack.version}")
+    print(f"path          {pack.path}")
+    print(f"size          {pack.size_bytes / (1024 * 1024):.1f} MB")
+    print(f"model         {pack.embedding_model} ({pack.embedding_dim}d)")
+    print(f"compatible    {'yes' if pack.compatible else 'no'}")
+    if not pack.compatible:
+        print(f"              {pack.incompatible_reason}")
+    print(f"source        {meta.get('source_repo', '')}")
+    print(f"branch        {meta.get('source_branch', '')}")
+    print(f"commit        {pack.source_commit}")
+    print(f"docs          {meta.get('doc_count', '?')}")
+    print(f"chunks        {meta.get('chunk_count', '?')}")
+    print(f"symbols       {meta.get('symbol_count', '?')}")
+    # This output is how a user meets the redistribution obligation, so the
+    # licence and attribution are printed in full and never truncated.
+    print()
+    print(f"license       {pack.license}")
+    print(f"license url   {meta.get('license_url', '')}")
+    print("attribution")
+    print(f"  {pack.attribution}")
+    return 0
+
+
+def _pack_remove(args) -> int:
+    dest = _packs_dir(args)
+    if registry.remove(args.name, dest):
+        print(f"removed {args.name}")
+        return 0
+    print(f"no installed pack named {args.name!r} in {dest}", file=sys.stderr)
+    return EXIT_PACK
+
+
+def _pack_update(args) -> int:
+    dest = _packs_dir(args)
+    available = {entry.name: entry for entry in registry.fetch_index(args.index_url)}
+    installed = registry.list_installed(dest)
+    if args.name:
+        installed = [p for p in installed if p.name == args.name]
+        if not installed:
+            print(f"no installed pack named {args.name!r} in {dest}", file=sys.stderr)
+            return EXIT_PACK
+
+    updated = 0
+    for pack in installed:
+        entry = available.get(pack.name)
+        if entry is None:
+            print(f"{pack.name}: not in the index, leaving alone")
+            continue
+        if entry.version == pack.version:
+            print(f"{pack.name}: {pack.version} is current")
+            continue
+        print(f"{pack.name}: {pack.version} -> {entry.version}, downloading ...")
+        registry.install(entry.url, dest_dir=dest, expected_sha256=entry.sha256)
+        updated += 1
+    print(f"{updated} pack(s) updated")
+    return 0
+
+
+def _pack(args) -> int:
+    return {
+        "build": _pack_build, "list": _pack_list, "install": _pack_install,
+        "info": _pack_info, "remove": _pack_remove, "update": _pack_update,
+    }[args.pack_command](args)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="argus")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -295,7 +472,61 @@ def main(argv: list[str] | None = None) -> int:
     p_flush_acl.add_argument("--config", required=True, type=Path)
     p_flush_acl.add_argument("--user", help="Only clear this GitLab username's cache entries")
 
+    p_pack = sub.add_parser("pack", help="Build, install and inspect knowledge packs")
+    pack_sub = p_pack.add_subparsers(dest="pack_command", required=True)
+
+    def _where(parser: argparse.ArgumentParser) -> None:
+        # Either is enough. --packs-dir keeps the public tooling usable without
+        # a GitLab URL and token, which Config.load would otherwise demand.
+        parser.add_argument("--config", type=Path, help="Read packs.dir from this config")
+        parser.add_argument("--packs-dir", type=Path, help="Directory holding installed packs")
+
+    p_build = pack_sub.add_parser("build", help="Build a pack from a documentation source")
+    p_build.add_argument("--source", required=True,
+                         help=f"One of: {', '.join(sorted(SOURCES))}")
+    p_build.add_argument("--work-dir", required=True, type=Path,
+                         help="Checkout of the source repository")
+    p_build.add_argument("--out", required=True, type=Path, help="Pack file to write")
+    p_build.add_argument("--version", required=True, help="Version to record in the pack")
+    p_build.add_argument("--commit", help="Source commit, if work-dir is not a git checkout")
+    p_build.add_argument("--fetch", action="store_true",
+                         help="Clone or update the source into --work-dir first")
+
+    p_plist = pack_sub.add_parser("list", help="List installed packs")
+    _where(p_plist)
+
+    p_pinstall = pack_sub.add_parser("install", help="Install a pack from a path or URL")
+    p_pinstall.add_argument("source", help="Pack file path or https URL")
+    p_pinstall.add_argument("--sha256", help="Expected SHA-256; install is refused on mismatch")
+    _where(p_pinstall)
+
+    p_pinfo = pack_sub.add_parser(
+        "info", help="Show provenance, licence and attribution for an installed pack")
+    p_pinfo.add_argument("name")
+    _where(p_pinfo)
+
+    p_premove = pack_sub.add_parser("remove", help="Remove an installed pack")
+    p_premove.add_argument("name")
+    _where(p_premove)
+
+    p_pupdate = pack_sub.add_parser("update", help="Update installed packs from an index")
+    p_pupdate.add_argument("name", nargs="?", help="Only this pack (default: all)")
+    p_pupdate.add_argument("--index-url", required=True, help="Published pack index JSON")
+    _where(p_pupdate)
+
     args = parser.parse_args(argv)
+
+    # Handled before Config.load: pack commands may run with only --packs-dir,
+    # and loading a full config would demand GitLab credentials they never use.
+    if args.command == "pack":
+        try:
+            return _pack(args)
+        except ConfigError as exc:
+            print(f"config error: {exc}", file=sys.stderr)
+            return 2
+        except (BuildError, RegistryError, GitError) as exc:
+            print(f"pack error: {exc}", file=sys.stderr)
+            return EXIT_PACK
 
     try:
         cfg = Config.load(args.config)
