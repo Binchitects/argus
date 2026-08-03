@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
+from ..chunk import strip_rst_inline
 from .base import ApiSymbol, Doc
 
 DOCS_BASE_URL = "https://docs.python.org/3/"
@@ -48,11 +49,6 @@ _INVENTORY_CANDIDATES = (
 # reST section underline: three or more of a single punctuation character.
 _UNDERLINE_RE = re.compile(r"^([=\-~^\"'`#*+:.,_])\1{2,}\s*$")
 
-# Inline markup to strip from a title: roles, literals, emphasis.
-_ROLE_RE = re.compile(r":[\w:+-]+:`([^`]*)`")
-_LITERAL_RE = re.compile(r"``([^`]*)``")
-_INTERPRETED_RE = re.compile(r"`([^`]*)`")
-_EMPHASIS_RE = re.compile(r"\*{1,2}([^*]+)\*{1,2}")
 
 _DIRECTIVE_RE = re.compile(
     r"^(\s*)\.\.\s+(?:py:)?"
@@ -152,11 +148,10 @@ def extract_title(body: str) -> str:
 
 
 def _strip_markup(text: str) -> str:
-    text = _ROLE_RE.sub(r"\1", text)
-    text = _LITERAL_RE.sub(r"\1", text)
-    text = _INTERPRETED_RE.sub(r"\1", text)
-    text = _EMPHASIS_RE.sub(r"\1", text)
-    return text.strip()
+    # Shared with chunk.rst_to_atx, which strips the same markup from headings
+    # before they become anchor slugs. Two copies would drift, and the symptom
+    # would be a title and its own chunk's heading trail disagreeing.
+    return strip_rst_inline(text)
 
 
 def extract_signatures(body: str) -> dict[str, str]:

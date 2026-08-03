@@ -32,6 +32,88 @@ def _closes_fence(fence_match: re.Match[str], opener: tuple[str, int]) -> bool:
     return marker[0] == char and len(marker) >= min_length
 
 
+_RST_RULE_RE = re.compile(r'^([=\-~^"\'`#*+:.,_])\1{2,}\s*$')
+
+_RST_ROLE_RE = re.compile(r':[\w:+-]+:`([^`]*)`')
+_RST_LITERAL_RE = re.compile(r'``([^`]*)``')
+_RST_INTERPRETED_RE = re.compile(r'`([^`]*)`')
+_RST_EMPHASIS_RE = re.compile(r'\*{1,2}([^*]+)\*{1,2}')
+
+
+def strip_rst_inline(text: str) -> str:
+    """Remove reST inline markup, leaving the words.
+
+    Applied to headings before they become ATX, because the heading text goes
+    on to become both the anchor slug and the trail prepended to the embedded
+    chunk. Left in, ``:mod:`json` --- JSON encoder and decoder`` slugs to
+    ``modjson-----json-encoder-and-decoder`` -- a broken deep link -- and puts
+    role syntax into the text the embedder sees.
+    """
+    text = _RST_ROLE_RE.sub(r'\1', text)
+    text = _RST_LITERAL_RE.sub(r'\1', text)
+    text = _RST_INTERPRETED_RE.sub(r'\1', text)
+    text = _RST_EMPHASIS_RE.sub(r'\1', text)
+    return text.strip()
+
+
+def rst_to_atx(text: str) -> str:
+    """Rewrite reStructuredText section headings as ATX (``#``) headings.
+
+    ``chunk_markdown`` finds headings by their leading ``#``. reST underlines
+    them instead, so without this pass every reST document would fall through
+    to pure size-splitting and lose the heading trail -- which is the whole
+    reason the chunker carries one.
+
+    reST has no fixed character-to-level mapping: a document's levels are
+    determined by the order in which underline styles first appear, so that is
+    what is tracked here. Overlined sections count as a distinct style from
+    underlined ones using the same character, which is how reST treats them.
+
+    Line count is preserved (the rule line becomes blank) so a chunk's
+    ``start_line`` still points at the right line of the original file.
+    """
+    lines = text.splitlines()
+    out = list(lines)
+    styles: list[tuple[str, bool]] = []
+
+    def level_for(style: tuple[str, bool]) -> int:
+        if style not in styles:
+            styles.append(style)
+        return min(styles.index(style) + 1, 6)
+
+    index = 0
+    while index < len(lines):
+        current = lines[index].strip()
+        over = _RST_RULE_RE.match(current)
+
+        # Overline form: rule, title, matching rule.
+        if over and index + 2 < len(lines):
+            title = lines[index + 1].strip()
+            below = lines[index + 2].strip()
+            if (title and not _RST_RULE_RE.match(title)
+                    and _RST_RULE_RE.match(below) and below[0] == current[0]):
+                marker = "#" * level_for((current[0], True))
+                out[index] = ""
+                out[index + 1] = f"{marker} {strip_rst_inline(title)}"
+                out[index + 2] = ""
+                index += 3
+                continue
+
+        # Underline form: title, rule at least as long.
+        if current and not over and index + 1 < len(lines):
+            below = lines[index + 1].strip()
+            if _RST_RULE_RE.match(below) and len(below) >= len(current):
+                marker = "#" * level_for((below[0], False))
+                out[index] = f"{marker} {strip_rst_inline(current)}"
+                out[index + 1] = ""
+                index += 2
+                continue
+
+        index += 1
+
+    return "\n".join(out)
+
+
 def fenced_line_flags(lines: list[str]) -> list[bool]:
     """Mark each line that is inside a fenced code block, or delimits one.
 
