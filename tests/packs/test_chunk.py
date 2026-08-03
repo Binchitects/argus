@@ -237,3 +237,40 @@ def test_fenced_line_flags_does_not_close_on_a_shorter_run():
 def test_fenced_line_flags_treats_an_unclosed_fence_as_running_to_the_end():
     lines = ["prose", "```js", "code", "more code"]
     assert chunk.fenced_line_flags(lines) == [False, True, True, True]
+
+
+# --- pinned anchors -----------------------------------------------------------
+
+
+def test_a_pinned_mdx_anchor_wins_over_the_slug():
+    """react.dev fixes its anchors with an MDX comment. Slugifying the heading
+    text instead yields '#createroot-domnode-options', a fragment that does not
+    exist on the published page -- a citation that silently lands at the top."""
+    doc = "## Reference {/*reference*/}\n\ntext\n\n### `createRoot(domNode, options?)` {/*createroot*/}\n\nmore text\n"
+    chunks = chunk.chunk_markdown(doc)
+    anchors = {c.anchor for c in chunks}
+    assert "createroot" in anchors
+    assert "reference" in anchors
+
+
+def test_a_pinned_anchor_is_not_left_in_the_heading_trail():
+    """The trail is prepended to the embedded text, so invisible markup in it
+    is noise the embedder sees as content."""
+    doc = "## Reference {/*reference*/}\n\ntext\n\n### `useState(initialState)` {/*usestate*/}\n\nmore\n"
+    for c in chunk.chunk_markdown(doc):
+        assert "{/*" not in c.heading_path, c.heading_path
+        assert "*/}" not in c.heading_path, c.heading_path
+    assert any(c.heading_path == "Reference > `useState(initialState)`"
+               for c in chunk.chunk_markdown(doc))
+
+
+def test_a_heading_without_a_pinned_anchor_still_slugifies():
+    doc = "## Adding interactivity\n\ntext here\n"
+    [c] = chunk.chunk_markdown(doc)
+    assert c.anchor == "adding-interactivity"
+
+
+def test_pinned_anchors_are_still_de_duplicated():
+    doc = ("## One {/*dup*/}\n\ntext\n\n## Two {/*dup*/}\n\nmore text\n")
+    anchors = [c.anchor for c in chunk.chunk_markdown(doc)]
+    assert anchors == ["dup", "dup-2"]

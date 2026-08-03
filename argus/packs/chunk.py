@@ -21,6 +21,17 @@ from dataclasses import dataclass
 _HEADING_RE = re.compile(r'^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$')
 _FENCE_RE = re.compile(r'^(```+|~~~+)')
 
+#: An explicit anchor pinned on a heading as an MDX comment, which is how
+#: react.dev fixes the anchor its site generates:
+#:
+#:     ### `useState(initialState)` {/*usestate*/}
+#:
+#: It is invisible markup, not content, so it must not reach the heading
+#: trail -- which is prepended to the embedded text. And it is the real
+#: anchor, so a slug derived from the heading text instead would deep-link
+#: to a fragment that does not exist on the published page.
+_PINNED_ANCHOR_RE = re.compile(r'\s*\{/\*\s*(.*?)\s*\*/\}\s*$')
+
 
 def _closes_fence(fence_match: re.Match[str], opener: tuple[str, int]) -> bool:
     """A closing fence must use the same character as the opener and be at
@@ -205,7 +216,7 @@ def _split_into_sections(text: str) -> list[_Section]:
     is never mistaken for a heading.
     """
     lines = text.splitlines()
-    stack: list[tuple[int, str]] = []
+    stack: list[tuple[int, str, str]] = []
     sections: list[_Section] = []
     current_lines: list[str] = []
     current_start = 1
@@ -213,9 +224,12 @@ def _split_into_sections(text: str) -> list[_Section]:
     seen_anchors: dict[str, int] = {}
 
     def flush() -> None:
-        heading_path = " > ".join(title for _, title in stack)
+        heading_path = " > ".join(title for _, title, _ in stack)
         if stack:
-            anchor = _dedupe_anchor(_slugify(stack[-1][1]), seen_anchors)
+            # A pinned anchor wins over a slug: it is what the upstream
+            # site actually emits, and guessing produces a broken link.
+            _, title, pinned = stack[-1]
+            anchor = _dedupe_anchor(pinned or _slugify(title), seen_anchors)
         else:
             anchor = None
         sections.append(_Section(heading_path, anchor, current_start,
@@ -241,9 +255,13 @@ def _split_into_sections(text: str) -> list[_Section]:
             flush()
             level = len(heading_match.group(1))
             title = heading_match.group(2).strip()
+            pinned_match = _PINNED_ANCHOR_RE.search(title)
+            pinned = pinned_match.group(1) if pinned_match else ''
+            if pinned_match:
+                title = title[: pinned_match.start()].strip()
             while stack and stack[-1][0] >= level:
                 stack.pop()
-            stack.append((level, title))
+            stack.append((level, title, pinned))
             current_lines = []
             current_start = lineno + 1
             continue
