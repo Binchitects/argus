@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from argus import resolve
@@ -38,6 +40,11 @@ def test_cross_repo_edges_are_materialised_with_weights(db):
     hdr = _file(db, b, "include/x.h")
     _resolved(db, a, f1, b, hdr)
     _resolved(db, a, f2, b, hdr)
+    # A second include row from a file that already has one (f1 includes
+    # hdr twice). This makes COUNT(*) (3 rows) diverge from
+    # COUNT(DISTINCT file_id) (2 files), so the weight == 2 assertion below
+    # can actually catch a regression to COUNT(*).
+    _resolved(db, a, f1, b, hdr)
     db.commit()
 
     assert graph.rebuild_repo_deps(db) == 1
@@ -79,18 +86,22 @@ def test_rebuild_replaces_rather_than_accumulates(db):
 
 def test_a_failed_rebuild_leaves_the_previous_graph_intact(db, monkeypatch):
     """A half-updated graph is worse than a stale one: centrality would be
-    computed from a mixture of two passes."""
+    computed from a mixture of two passes.
+
+    The failure is engineered to happen *inside* the `with conn:` block,
+    after the DELETE has run: `_edge_rows` is patched to return a row with
+    the wrong arity (two values where the INSERT expects three), so
+    `executemany` raises a `sqlite3.ProgrammingError` mid-transaction. This
+    proves the DELETE gets rolled back rather than merely proving the
+    function never got far enough to run it."""
     a, b = _repo(db, 1, "g/app"), _repo(db, 2, "g/eal")
     src, hdr = _file(db, a, "src/one.c"), _file(db, b, "include/x.h")
     _resolved(db, a, src, b, hdr)
     db.commit()
     graph.rebuild_repo_deps(db)
 
-    def boom(*args, **kwargs):
-        raise RuntimeError("interrupted")
-
-    monkeypatch.setattr(graph, "_edge_rows", boom)
-    with pytest.raises(RuntimeError):
+    monkeypatch.setattr(graph, "_edge_rows", lambda conn: [(1, 2)])
+    with pytest.raises(sqlite3.ProgrammingError):
         graph.rebuild_repo_deps(db)
 
     assert db.execute("SELECT count(*) FROM repo_deps").fetchone()[0] == 1
