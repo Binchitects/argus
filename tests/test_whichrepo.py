@@ -7,6 +7,23 @@ def test_a_diff_is_detected_before_anything_else():
     assert whichrepo.detect_shape(text) == Shape.DIFF
 
 
+def test_a_diff_containing_frame_shaped_lines_is_still_a_diff():
+    """A diff whose hunk body happens to contain stack-frame-shaped text
+    (e.g. reviewing a change to a crash log fixture) must still be
+    classified as DIFF. This is only discriminating if the diff check runs
+    before the stack-frame check: the hunk below has two frame matches and
+    an `at ...` line, so it would be misread as Shape.STACK if the stack
+    check ran first."""
+    text = (
+        "diff --git a/tests/fixtures/crash.log b/tests/fixtures/crash.log\n"
+        "@@ -1,3 +1,4 @@\n"
+        "-  at decode_frame (src/codec/decode.c:412)\n"
+        "+  at decode_frame (src/codec/decode.c:413)\n"
+        "+  at main (src/app/main.c:88)\n"
+    )
+    assert whichrepo.detect_shape(text) == Shape.DIFF
+
+
 def test_a_stack_trace_is_detected():
     text = ("Traceback:\n"
             "  at decode_frame (src/codec/decode.c:412)\n"
