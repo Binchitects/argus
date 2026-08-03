@@ -144,8 +144,37 @@ def lookup_symbol(
                 "anchor": row["anchor"],
                 "url": _anchored(row["url"], row["anchor"]),
             }))
+
+    results.sort(key=lambda row: _authority(row, name))
     return results[:limit]
 
+
+
+def _authority(row: dict[str, Any], name: str) -> tuple:
+    """Rank the most authoritative document for a name first.
+
+    A name is often mentioned on several pages, and the reference page is the
+    one a developer asked for. On the real react.dev pack, `useState` matches
+    both `learn/typescript.md` (which has a `useState` heading in its typing
+    section) and `reference/react/useState.md`; without this, lookup returned
+    the typing footnote -- exact, correctly anchored, fully attributed, and the
+    wrong page.
+
+    The signal is source-agnostic: a page named after the symbol is that
+    symbol's reference page. Everything else falls back to path depth, so a
+    top-level reference beats a deep guide.
+    """
+    stem = row["doc_path"].rsplit("/", 1)[-1]
+    for suffix in (".md", ".mdx", ".rst", ".html"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    return (
+        row["name"] != name,                    # exact case first
+        stem.lower() != name.rsplit(".", 1)[-1].lower(),   # named-after-it first
+        row["doc_path"].count("/"),             # then shallower
+        len(row["doc_path"]),
+    )
 
 def search_text(
     packs: Sequence[Pack], query: str, lang: str | None = None, limit: int = 20,

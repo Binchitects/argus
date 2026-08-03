@@ -51,6 +51,27 @@ _RST_INTERPRETED_RE = re.compile(r'`([^`]*)`')
 _RST_EMPHASIS_RE = re.compile(r'\*{1,2}([^*]+)\*{1,2}')
 
 
+def _role_text(match: re.Match[str]) -> str:
+    """The visible text of a cross-reference role.
+
+    Sphinx has two display prefixes inside a role, and both are directives
+    rather than part of the name:
+
+    * ``!`` suppresses the hyperlink -- ``:mod:`!os.path``` displays
+      ``os.path``. CPython uses this form in 255 of its library documents, so
+      carrying the ``!`` through put it into the title, the heading trail, and
+      therefore the embedded text of a quarter of the Python pack.
+    * ``~`` displays only the last dotted component --
+      ``:meth:`~os.path.join``` displays ``join``.
+    """
+    inner = match.group(1)
+    if inner.startswith("!"):
+        return inner[1:]
+    if inner.startswith("~"):
+        return inner[1:].rsplit(".", 1)[-1]
+    return inner
+
+
 def strip_rst_inline(text: str) -> str:
     """Remove reST inline markup, leaving the words.
 
@@ -60,7 +81,7 @@ def strip_rst_inline(text: str) -> str:
     ``modjson-----json-encoder-and-decoder`` -- a broken deep link -- and puts
     role syntax into the text the embedder sees.
     """
-    text = _RST_ROLE_RE.sub(r'\1', text)
+    text = _RST_ROLE_RE.sub(_role_text, text)
     text = _RST_LITERAL_RE.sub(r'\1', text)
     text = _RST_INTERPRETED_RE.sub(r'\1', text)
     text = _RST_EMPHASIS_RE.sub(r'\1', text)

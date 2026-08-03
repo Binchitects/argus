@@ -18,9 +18,12 @@ from argus.packs.sources.python_docs import InventoryError, PythonDocs
 
 FIXTURE = Path(__file__).parent / "fixtures" / "python"
 
-# The real inventory on this machine, used for an external-validation test that
-# skips where it is absent. 17,080 entries of ground truth beats any fixture.
-REAL_INVENTORY = Path("C:/Python313/Doc/html/objects.inv")
+# A 1,531-entry excerpt of CPython 3.13's real published inventory, copied
+# byte-for-byte. Checked in rather than read from wherever this happens to run:
+# the previous version pointed at a local CPython install and silently skipped
+# on every machine without one -- including the container, which is the only
+# place the suite is actually gated.
+SAMPLE_INVENTORY = Path(__file__).parent / "fixtures" / "python_inventory_sample.inv"
 
 
 @pytest.fixture
@@ -231,24 +234,33 @@ def test_missing_inventory_names_where_it_looked(source, tmp_path):
 # --- external validation ------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not REAL_INVENTORY.is_file(),
-    reason="CPython's built HTML docs are not installed here",
-)
-def test_parses_the_real_cpython_inventory_end_to_end():
-    """Validation against an artifact this project did not author.
+def test_parses_a_broad_sample_of_the_real_cpython_inventory():
+    """Validation against data this project did not author.
 
-    The fixture is a 14-line excerpt; this is all 17,080 entries. If the
-    parser has a shape assumption the excerpt happens not to exercise, it
-    fails here.
+    The small fixture is 14 entries; this is 1,531 real ones spanning 20
+    domains, 97 names containing spaces, 150 anchorless documents and 1,077
+    uses of the "$" abbreviation. If the parser has a shape assumption the
+    small fixture happens not to exercise, it fails here.
     """
-    entries = python_docs.parse_objects_inv(REAL_INVENTORY.read_bytes())
-    assert len(entries) > 10_000, f"only {len(entries)} entries -- excerpt, not the real file?"
+    entries = python_docs.parse_objects_inv(SAMPLE_INVENTORY.read_bytes())
+    assert len(entries) > 1_000, f"only {len(entries)} entries -- wrong fixture?"
 
     names = {e.name for e in entries}
     assert "os.path.join" in names
-    assert any(" " in n for n in names), "expected names containing spaces"
+    assert len([n for n in names if " " in n]) > 50, "expected names containing spaces"
+    # py/c/std are the domains; the variety is in the roles (function,
+    # method, label, term, macro, ...), which is what must survive the split.
+    assert {e.domain for e in entries} >= {"py", "c", "std"}
+    assert len({e.role for e in entries}) >= 10, "expected many roles"
+    assert not any(e.uri.endswith("$") for e in entries), "unexpanded '$' remains"
 
     join = next(e for e in entries if e.name == "os.path.join")
     assert join.uri == "library/os.path.html#os.path.join"
-    assert not any(e.uri.endswith("$") for e in entries), "unexpanded '$' remains"
+
+
+def test_the_sample_inventory_exercises_the_anchorless_skip():
+    """The 150 anchorless entries must actually reach iter_symbols' skip, not
+    merely sit in the fixture."""
+    entries = python_docs.parse_objects_inv(SAMPLE_INVENTORY.read_bytes())
+    anchorless = [e for e in entries if "#" not in e.uri]
+    assert len(anchorless) > 100, f"only {len(anchorless)} anchorless entries"

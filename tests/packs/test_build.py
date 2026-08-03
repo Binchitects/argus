@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -180,7 +181,9 @@ def test_symbols_resolve_to_their_document_despite_differing_extensions(react_pa
         "useState",
     )
     assert row, "useState did not resolve to a document"
-    assert row[0][0] == "reference/react/useState.md"
+    # Several documents mention it, as on the real site; the reference page
+    # must be among them with its source-file extension intact.
+    assert "reference/react/useState.md" in {r[0] for r in row}
 
 
 def test_no_symbol_is_stored_without_a_document(react_pack):
@@ -296,21 +299,48 @@ def test_unknown_source_commit_raises_before_anything_is_written(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_work_dir_merely_inside_a_repo_does_not_borrow_its_commit():
-    """git rev-parse searches upwards. The fixtures live inside this project's
-    own checkout, so without a root check the pack would record CodeAssistant's
-    HEAD as react.dev's source commit -- a commit that is real, verifiable, and
-    from the wrong project entirely."""
-    inside_a_repo = FIXTURES / "react"
-    assert (Path(__file__).parents[2] / ".git").is_dir(), "expected to be inside a repo"
-    assert build.resolve_commit(inside_a_repo) is None
+def _init_repo(path: Path) -> str:
+    """A throwaway git repo, so the test does not depend on where it runs.
+
+    The earlier version asserted things about this project's own .git, which
+    the container image does not copy -- so both tests failed there while
+    passing locally.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    (path / "seed.txt").write_text("seed", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+         "commit", "-qm", "seed"],
+        cwd=path, check=True,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=path, capture_output=True, text=True,
+    ).stdout.strip()
 
 
-def test_the_repository_root_itself_still_resolves():
+def test_a_work_dir_merely_inside_a_repo_does_not_borrow_its_commit(tmp_path):
+    """git rev-parse searches upwards. Without a root check, a work directory
+    that merely sits inside some other checkout records THAT repository's HEAD
+    as the pack's provenance -- a commit that is real, verifiable, and from the
+    wrong project entirely."""
+    repo = tmp_path / "outer"
+    _init_repo(repo)
+    nested = repo / "docs" / "subtree"
+    nested.mkdir(parents=True)
+
+    assert build.resolve_commit(nested) is None
+
+
+def test_the_repository_root_itself_still_resolves(tmp_path):
     """The check must not reject the case it exists to serve."""
-    repo_root = Path(__file__).parents[2]
-    resolved = build.resolve_commit(repo_root)
-    assert resolved and len(resolved) == 40, resolved
+    repo = tmp_path / "root"
+    expected = _init_repo(repo)
+
+    resolved = build.resolve_commit(repo)
+    assert resolved == expected
+    assert len(resolved) == 40
 
 
 def test_a_failure_mid_build_leaves_no_output_and_no_temp_file(tmp_path):

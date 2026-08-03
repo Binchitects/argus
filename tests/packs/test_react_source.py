@@ -136,7 +136,10 @@ def test_iter_docs_on_a_tree_without_the_subtree_yields_nothing(source, tmp_path
 
 
 def test_useState_yields_a_symbol_with_its_pinned_anchor(symbols):
-    [symbol] = [s for s in symbols if s.name == "useState"]
+    # The typing guide also has a `useState` heading, exactly as react.dev
+    # does; the adapter emits both and ranking decides which wins downstream.
+    [symbol] = [s for s in symbols
+                if s.name == "useState" and s.namespace == "reference/react"]
     assert symbol.kind == "hook"
     assert symbol.anchor == "usestate"
     assert symbol.doc_path == "reference/react/useState"
@@ -161,7 +164,7 @@ def test_dotted_call_headings_are_captured(symbols):
 
 
 def test_namespace_distinguishes_react_from_react_dom(symbols):
-    assert {s.namespace for s in symbols if s.name == "useState"} == {"reference/react"}
+    assert "reference/react" in {s.namespace for s in symbols if s.name == "useState"}
     assert {s.namespace for s in symbols if s.name == "createRoot"} == {
         "reference/react-dom/client"
     }

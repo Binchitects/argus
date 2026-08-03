@@ -164,13 +164,16 @@ def test_lookup_symbol_resolves_to_an_anchored_url(both):
 
 
 def test_lookup_symbol_finds_a_react_hook(both):
-    [row] = packs.lookup_symbol(both, "useState")
-    assert row["source"] == "react"
-    assert row["url"] == "https://react.dev/reference/react/useState#usestate"
+    # More than one document mentions useState, as on the real site; the
+    # authoritative one must come first.
+    rows = packs.lookup_symbol(both, "useState")
+    assert rows
+    assert rows[0]["source"] == "react"
+    assert rows[0]["url"] == "https://react.dev/reference/react/useState#usestate"
 
 
 def test_lookup_symbol_carries_licence_and_attribution(both):
-    [row] = packs.lookup_symbol(both, "useState")
+    row = packs.lookup_symbol(both, "useState")[0]
     assert row["license"] == "CC-BY-4.0"
     assert "Meta Platforms" in row["attribution"]
 
@@ -295,3 +298,18 @@ def test_scores_are_real_cosines_not_coarse_rank_order(both):
     assert rows[0]["score"] == pytest.approx(1.0, abs=1e-3), rows[0]["score"]
     assert rows[0]["score"] < 1.0
     assert all(-1.0 <= r["score"] <= 1.0 for r in rows)
+
+
+def test_lookup_prefers_the_reference_page_over_a_passing_mention(both):
+    """Found by the Task 12 measurement run against the real react.dev pack.
+
+    `useState` is documented on reference/react/useState.md and also has a
+    heading in learn/typescript.md's typing section. Both are genuine symbols;
+    only one is what someone looking up useState wants. Before the fix, lookup
+    returned the typing footnote -- exact, correctly anchored, fully
+    attributed, and the wrong page.
+    """
+    rows = packs.lookup_symbol(both, "useState")
+    assert len(rows) > 1, "fixture no longer reproduces the collision"
+    assert rows[0]["doc_path"] == "reference/react/useState.md"
+    assert rows[0]["url"] == "https://react.dev/reference/react/useState#usestate"

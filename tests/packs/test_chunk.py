@@ -274,3 +274,24 @@ def test_pinned_anchors_are_still_de_duplicated():
     doc = ("## One {/*dup*/}\n\ntext\n\n## Two {/*dup*/}\n\nmore text\n")
     anchors = [c.anchor for c in chunk.chunk_markdown(doc)]
     assert anchors == ["dup", "dup-2"]
+
+
+def test_a_bang_prefix_in_a_role_is_a_display_directive_not_part_of_the_name():
+    """`:mod:`!os.path`` is Sphinx's suppress-the-hyperlink form. CPython uses
+    it in 255 library documents, so carrying the '!' through put it into the
+    title, the heading trail, and thus the embedded text of a quarter of the
+    Python pack."""
+    assert chunk.strip_rst_inline(":mod:`!os.path` --- Common pathname manipulations") == (
+        "os.path --- Common pathname manipulations"
+    )
+    assert chunk.strip_rst_inline(":mod:`!email.utils`: Miscellaneous utilities") == (
+        "email.utils: Miscellaneous utilities"
+    )
+
+
+def test_a_tilde_prefix_shows_only_the_last_component():
+    assert chunk.strip_rst_inline(":meth:`~os.path.join` joins paths") == "join joins paths"
+
+
+def test_an_unprefixed_role_is_unchanged():
+    assert chunk.strip_rst_inline(":mod:`json` --- JSON encoder") == "json --- JSON encoder"

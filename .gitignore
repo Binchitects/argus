@@ -34,3 +34,6 @@ desktop.ini
 # Test-GitLab seeded credentials (throwaway, but still credentials)
 deploy/test-gitlab/seeded.json
 deploy/test-gitlab/work/
+
+# Task 12 measurement checkouts (large upstream clones, never committed)
+.packwork/
