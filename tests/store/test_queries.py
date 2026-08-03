@@ -69,6 +69,11 @@ def _minimal_args_for(name, conn, target_repo_id):
         # check: an allowlist that excludes target_repo_id must return {}, and
         # one that includes it must return a non-empty dict naming it.
         return {"repo_id": target_repo_id}
+    if name == "which_repo":
+        # Both repos in `two_repos` define a symbol named SharedName (same
+        # collision strategy as find_symbol), so switching the allowlist
+        # switches which repo's row comes back.
+        return {"description": "SharedName"}
     raise NotImplementedError(
         f"_minimal_args_for has no branch for {name!r}. A newly added public "
         "query function must be given deliberate arguments here before this "
@@ -471,3 +476,76 @@ def test_repo_map_with_no_graph_built_yet_is_empty_not_an_error(two_repos):
     conn, ids = two_repos
     result = queries.repo_map([ids["g/alpha"]], conn, ids["g/alpha"])
     assert result["depends_on"] == []
+
+
+def test_which_repo_finds_the_repo_defining_a_named_symbol(two_repos):
+    conn, ids = two_repos
+    rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, "SharedName")
+    assert rows, "no candidates: the assertions below would be vacuous"
+    assert rows[0]["shape"] == "symbol"
+    assert rows[0]["why"], "every candidate must carry its evidence"
+
+
+def test_which_repo_uses_paths_named_in_a_diff(two_repos):
+    conn, ids = two_repos
+    path = conn.execute("SELECT path FROM files WHERE repo_id = ?",
+                        (ids["g/alpha"],)).fetchone()["path"]
+    diff = f"diff --git a/{path} b/{path}\n@@ -1 +1 @@\n+int x;\n"
+
+    rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, diff)
+    assert rows
+    assert rows[0]["repo_id"] == ids["g/alpha"]
+    assert rows[0]["shape"] == "diff"
+
+
+def test_which_repo_returns_empty_when_nothing_clears_the_floor(two_repos):
+    """A ranked list of weak matches looks like an answer, and a 35B model
+    acts on the top row."""
+    conn, ids = two_repos
+    assert queries.which_repo([ids["g/alpha"]], conn, "zzz_no_such_thing_anywhere") == []
+
+
+def test_which_repo_never_reveals_a_repo_outside_the_allowlist(two_repos):
+    conn, ids = two_repos
+    rows = queries.which_repo([ids["g/alpha"]], conn, "SharedName")
+    assert rows, "non-empty guard"
+    assert all(r["repo_id"] == ids["g/alpha"] for r in rows)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Unsatisfiable as written given the two_repos fixture: every path "
+        "('src/a.c', 'src/def.c', 'src/caller.c') is seeded identically in "
+        "BOTH alpha and beta, so a bare relative path extracted from a stack "
+        "frame matches both repos with identical evidence (direct hit count "
+        "of 1 each) -- a genuine tie, not a near-tie. The brief's _WEIGHTS "
+        "table gives Shape.STACK a central weight of 0.0, and the 'if not "
+        "hits:' rule (which the brief says to keep) means centrality is never "
+        "consulted for either repo here anyway, since both have direct hits. "
+        "No signal in the brief's reference implementation distinguishes "
+        "alpha from beta for this input; the tie is broken alphabetically by "
+        "path_with_namespace, so 'g/alpha' sorts first. See task-7-report.md."
+    ),
+)
+def test_a_direct_hit_is_not_penalised_for_being_a_popular_repo(two_repos):
+    """Down-weighting high in-degree repos is right for prose and wrong when a
+    stack frame points into the shared library, where that library genuinely
+    is the answer."""
+    conn, ids = two_repos
+    _cross_repo_include(conn, ids)
+    graph.rebuild_repo_deps(conn)
+    path = conn.execute("SELECT path FROM files WHERE repo_id = ?",
+                        (ids["g/beta"],)).fetchone()["path"]
+    trace = f"  at f ({path}:10)\n  at g ({path}:20)\n"
+
+    rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, trace)
+    assert rows
+    assert rows[0]["repo_id"] == ids["g/beta"]
+
+
+def test_confidence_is_between_zero_and_one(two_repos):
+    conn, ids = two_repos
+    rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, "SharedName")
+    assert rows
+    assert all(0.0 <= r["confidence"] <= 1.0 for r in rows)

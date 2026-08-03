@@ -4,6 +4,9 @@ import re
 import sqlite3
 from collections.abc import Sequence
 
+from .. import whichrepo
+from ..whichrepo import Shape
+
 # Conservative: SQLite's *documented* default SQLITE_MAX_VARIABLE_NUMBER is
 # 999. Builds since 3.32.0 raise the default to 32766, but we don't rely on
 # that -- 900 stays safely under both, and under any host this ever runs on.
@@ -333,3 +336,126 @@ def repo_map(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
             "  FROM repo_deps d JOIN repos r ON r.id = d.from_repo_id"
             " WHERE d.to_repo_id = ? AND d.from_repo_id IN ({marks})"),
     }
+
+
+#: Per-shape weights. Not magic numbers: each is defended by a test above that
+#: fails if it changes materially. A diff or stack trace names files outright,
+#: so lexical overlap would only add noise; prose inverts that.
+_WEIGHTS: dict[str, dict[str, float]] = {
+    Shape.DIFF:   {"direct": 1.0, "lexical": 0.0, "central": 0.0},
+    Shape.STACK:  {"direct": 1.0, "lexical": 0.1, "central": 0.0},
+    Shape.SYMBOL: {"direct": 1.0, "lexical": 0.2, "central": 0.0},
+    Shape.PROSE:  {"direct": 0.5, "lexical": 1.0, "central": 0.3},
+}
+
+#: A repo qualifies with any direct hit, or a lexical score at least this
+#: fraction of the best repo's. Below it, the answer is "nothing matched".
+_FLOOR_RATIO = 0.35
+
+
+def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
+               description: str, limit: int = 5) -> list[dict]:
+    """Rank repos a change probably belongs in, with the evidence for each.
+
+    Returns [] rather than a ranked list of weak matches when nothing clears
+    the evidence floor: a list looks like an answer, and the caller acts on
+    the top row.
+
+    The semantic term is absent, not zero-weighted by accident -- Phase 4 adds
+    it. Diffs, stack traces and symbols do not depend on it at all.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids or not description.strip():
+        return []
+
+    allowed = set(ids)
+    shape = whichrepo.detect_shape(description)
+    weights = _WEIGHTS[shape]
+
+    direct: dict[int, list[str]] = {}
+    lexical: dict[int, float] = {}
+
+    for path in whichrepo.extract_paths(description):
+        for row in _files_named(conn, allowed, path):
+            direct.setdefault(row["repo_id"], []).append(
+                f"file {row['path']}")
+
+    for name in whichrepo.extract_symbols(description)[:10]:
+        for row in find_symbol(list(allowed), conn, name, limit=20):
+            direct.setdefault(row["repo_id"], []).append(
+                f"{row['kind']} {row['name']} at {row['path']}:{row['line']}")
+
+    if weights["lexical"]:
+        # search_code hands `description` to FTS5 verbatim. A stack trace or
+        # diff routinely contains "/", ":", "(" -- characters FTS5's MATCH
+        # parser rejects even though they are perfectly ordinary in a path.
+        # That is a syntax problem with treating free text as a query, not
+        # evidence that nothing matches, so a malformed query degrades to "no
+        # lexical evidence" instead of aborting the whole ranking. Direct
+        # evidence (paths, symbols) is extracted separately above and is
+        # unaffected.
+        try:
+            for row in search_code(list(allowed), conn, description, limit=50):
+                lexical[row["repo_id"]] = lexical.get(row["repo_id"], 0.0) + 1.0
+        except QueryError:
+            pass
+
+    if not direct and not lexical:
+        return []
+
+    best_lex = max(lexical.values(), default=0.0) or 1.0
+    centrality = _in_degree(conn, allowed) if weights["central"] else {}
+    max_central = max(centrality.values(), default=0) or 1
+
+    scored: list[dict] = []
+    for repo_id in allowed:
+        hits = direct.get(repo_id, [])
+        lex = lexical.get(repo_id, 0.0) / best_lex
+        if not hits and lex < _FLOOR_RATIO:
+            continue
+
+        score = weights["direct"] * min(len(hits), 5) / 5.0 + weights["lexical"] * lex
+        # Only inferred evidence is penalised. A repo named outright in a diff
+        # or a stack frame is never punished for being widely depended upon.
+        if not hits:
+            score -= weights["central"] * (centrality.get(repo_id, 0) / max_central)
+
+        if score <= 0:
+            continue
+        why = hits[:5] or [f"lexical match on {lexical.get(repo_id, 0):.0f} file(s)"]
+        scored.append({
+            "repo_id": repo_id,
+            "path_with_namespace": _repo_name(conn, repo_id),
+            "confidence": round(min(score, 1.0), 3),
+            "shape": shape,
+            "why": why,
+        })
+
+    scored.sort(key=lambda r: (-r["confidence"], r["path_with_namespace"]))
+    return scored[:limit]
+
+
+def _files_named(conn, allowed: set[int], path: str) -> list[sqlite3.Row]:
+    rows = []
+    for chunk in _chunks(list(allowed), 1):
+        marks = ",".join("?" for _ in chunk)
+        rows.extend(conn.execute(
+            f"SELECT repo_id, path FROM files WHERE repo_id IN ({marks})"
+            "  AND (path = ? OR path LIKE '%/' || ?)",
+            (*chunk, path, path)).fetchall())
+    return rows
+
+
+def _in_degree(conn, allowed: set[int]) -> dict[int, int]:
+    return {
+        row["to_repo_id"]: row["n"]
+        for row in conn.execute(
+            "SELECT to_repo_id, COUNT(*) AS n FROM repo_deps GROUP BY to_repo_id")
+        if row["to_repo_id"] in allowed
+    }
+
+
+def _repo_name(conn, repo_id: int) -> str:
+    row = conn.execute("SELECT path_with_namespace FROM repos WHERE id = ?",
+                       (repo_id,)).fetchone()
+    return row["path_with_namespace"] if row else ""
