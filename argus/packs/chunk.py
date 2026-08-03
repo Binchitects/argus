@@ -32,6 +32,32 @@ def _closes_fence(fence_match: re.Match[str], opener: tuple[str, int]) -> bool:
     return marker[0] == char and len(marker) >= min_length
 
 
+def fenced_line_flags(lines: list[str]) -> list[bool]:
+    """Mark each line that is inside a fenced code block, or delimits one.
+
+    Exposed so other modules can tell prose from code without reimplementing
+    fence pairing. A second implementation would be a second place to get the
+    marker-type-and-length rule wrong, and the two would drift: the source
+    adapters strip JSX and import lines from prose, but those same lines are
+    legitimate content inside a documentation example.
+    """
+    flags: list[bool] = []
+    fence_opener: tuple[str, int] | None = None
+    for line in lines:
+        fence_match = _FENCE_RE.match(line.strip())
+        if fence_opener is not None:
+            flags.append(True)
+            if fence_match and _closes_fence(fence_match, fence_opener):
+                fence_opener = None
+            continue
+        if fence_match:
+            fence_opener = (fence_match.group(1)[0], len(fence_match.group(1)))
+            flags.append(True)
+            continue
+        flags.append(False)
+    return flags
+
+
 _SLUG_STRIP_RE = re.compile(r'[^\w\s-]')
 _SLUG_WHITESPACE_RE = re.compile(r'[\s_]+')
 

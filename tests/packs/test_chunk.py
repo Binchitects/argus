@@ -211,3 +211,29 @@ def test_duplicate_anchor_uses_conventional_numbered_suffix():
               if c.heading_path.endswith("AbortController()"))
     assert h1.anchor == "abortcontroller"
     assert h3.anchor == "abortcontroller-2"
+
+
+# --- fenced_line_flags: shared with the source adapters -----------------------
+
+
+def test_fenced_line_flags_marks_the_fence_and_its_contents():
+    lines = ["prose", "```js", "code", "```", "after"]
+    assert chunk.fenced_line_flags(lines) == [False, True, True, True, False]
+
+
+def test_fenced_line_flags_does_not_close_on_a_different_marker():
+    """The Task 2 defect, pinned on the shared helper: a '~~~' line inside a
+    backtick fence is content, not a closer. The adapters rely on this to tell
+    a documented import statement from a real one."""
+    lines = ["```md", "~~~", "import x from 'y';", "```", "prose"]
+    assert chunk.fenced_line_flags(lines) == [True, True, True, True, False]
+
+
+def test_fenced_line_flags_does_not_close_on_a_shorter_run():
+    lines = ["````", "```", "still inside", "````", "out"]
+    assert chunk.fenced_line_flags(lines) == [True, True, True, True, False]
+
+
+def test_fenced_line_flags_treats_an_unclosed_fence_as_running_to_the_end():
+    lines = ["prose", "```js", "code", "more code"]
+    assert chunk.fenced_line_flags(lines) == [False, True, True, True]
