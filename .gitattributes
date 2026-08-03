@@ -1,0 +1,5 @@
+# Sphinx inventories are a plaintext header followed by a zlib payload. Git's
+# binary heuristic would probably spare them, but CRLF conversion of the
+# compressed bytes would corrupt the fixture silently -- the test would fail
+# only on a fresh checkout, on someone else's machine.
+*.inv binary

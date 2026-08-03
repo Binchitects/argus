@@ -12,12 +12,26 @@ from starlette.concurrency import run_in_threadpool
 
 from .. import acl
 from ..config import Config
-from ..store import queries, writes
+from ..embed import EMBED_DIM, EMBED_MODEL, EmbeddingUnavailable, embed_batch
+from ..packs import format as pack_format
+from ..packs.registry import PACK_SUFFIX
+from ..store import packs as packs_store, queries, writes
 from ..store.db import connect, connect_readonly
 
 T = TypeVar("T")
 
 log = logging.getLogger(__name__)
+
+
+class DocsUnavailable(Exception):
+    """Documentation packs could not be queried, for reasons the model cannot fix.
+
+    Same principle as `IndexUnavailable`: the text is prompt text. "No packs
+    are installed" and "this pack was built with a different embedding model"
+    are operator problems, and a model told only "error" will retry forever.
+    Each message therefore names the specific pack and says what remains
+    usable.
+    """
 
 
 class IndexUnavailable(Exception):
@@ -104,6 +118,54 @@ async def run_readonly(db_path: Path | str, fn: Callable[[Any], T]) -> T:
             ) from exc
         finally:
             conn.close()
+
+    return await run_in_threadpool(_call)
+
+
+async def run_packs(packs_dir: Path | str, fn: Callable[[list], T]) -> T:
+    """Open every installed pack, run `fn(packs)`, close them -- off the event loop.
+
+    One `run_in_threadpool` call for the whole open/query/close sequence, for
+    exactly the reason `run_readonly` documents: pack queries are synchronous
+    sqlite, and running them on the request coroutine would stall every other
+    in-flight request. Anything `fn` needs -- including embedding the query,
+    which is a blocking HTTP call to Ollama -- happens inside this one hop, so
+    a search never crosses threads and never touches the loop.
+
+    Packs are opened per call rather than held open at startup. The
+    alternative is a connection created on one thread and used on whichever
+    threadpool worker happens to serve the request, which is precisely the
+    cross-thread use `run_readonly` exists to avoid. Reopening costs a file
+    open and an already-resident extension load.
+    """
+    def _call() -> T:
+        directory = Path(packs_dir)
+        paths = sorted(directory.glob(f"*{PACK_SUFFIX}")) if directory.is_dir() else []
+        if not paths:
+            raise DocsUnavailable(
+                "No documentation packs are installed on this server, so there "
+                "is nothing to look up. Do not retry -- this is a server "
+                "configuration matter for the operator, not a query you can "
+                "rephrase."
+            )
+        try:
+            opened = packs_store.open_packs(paths)
+        except Exception as exc:
+            raise DocsUnavailable(
+                "The installed documentation packs could not be opened; do not "
+                "retry this query."
+            ) from exc
+        try:
+            return fn(opened)
+        except (DocsUnavailable, packs_store.PackQueryError):
+            raise
+        except Exception as exc:
+            raise DocsUnavailable(
+                "The documentation packs are unavailable; do not retry this "
+                "query."
+            ) from exc
+        finally:
+            packs_store.close_packs(opened)
 
     return await run_in_threadpool(_call)
 
@@ -278,6 +340,105 @@ async def index_status_impl(db_path: Path | str, identity: acl.Identity) -> list
     return [dict(row) for row in rows]
 
 
+async def docs_lookup_impl(packs_dir: Path | str, name: str,
+                           lang: str | None = None, limit: int = 20) -> list[dict]:
+    return await run_packs(
+        packs_dir,
+        lambda opened: packs_store.lookup_symbol(opened, name, lang=lang, limit=limit),
+    )
+
+
+async def docs_search_impl(packs_dir: Path | str, query: str,
+                           lang: str | None = None, limit: int = 10) -> list[dict]:
+    """Embed the query and search, all inside one threadpool hop.
+
+    Two degradations, both explicit rather than silent:
+
+    * If the embedder is unreachable the search falls back to lexical matching
+      over the same packs and every row is labelled ``retrieval: "lexical"``.
+      Returning nothing would be worse, and returning lexical hits while
+      calling them semantic would be worse still.
+    * A pack built with a different embedding model is refused, naming the
+      pack. It is not silently skipped -- that would return fewer results with
+      nothing to say a whole source went missing -- and it is not answered
+      lexically either, because a mismatched pack means a misconfigured
+      deployment the operator needs to see.
+    """
+    def _run(opened: list) -> list[dict]:
+        selected = packs_store.select_packs(opened, lang)
+        try:
+            vectors = embed_batch([query])
+        except EmbeddingUnavailable as exc:
+            log.warning("embedder unavailable, falling back to lexical: %s", exc)
+            rows = packs_store.search_text(opened, query, lang=lang, limit=limit)
+            for row in rows:
+                row["retrieval"] = "lexical"
+                row["note"] = (
+                    "Semantic search was unavailable, so these are keyword "
+                    "matches. Treat them as less precise than usual."
+                )
+            return rows
+
+        mismatched = []
+        for pack in selected:
+            try:
+                pack_format.require_compatible(
+                    pack.meta, model=EMBED_MODEL, dim=EMBED_DIM
+                )
+            except pack_format.PackMismatch:
+                mismatched.append(
+                    f"{pack.name} (built with "
+                    f"{pack.meta.get('embedding_model', 'an unknown model')})"
+                )
+        if mismatched:
+            raise DocsUnavailable(
+                f"Semantic search is unavailable: {', '.join(mismatched)} was "
+                f"built with a different embedding model than this server uses "
+                f"({EMBED_MODEL}), so its vectors are not comparable. Use "
+                f"docs_lookup with an exact API name instead -- that does not "
+                f"depend on embeddings. The operator must rebuild or remove "
+                f"the pack to restore semantic search."
+            )
+
+        rows = packs_store.search_docs(opened, vectors[0], lang=lang, limit=limit)
+        for row in rows:
+            row["retrieval"] = "semantic"
+        return rows
+
+    return await run_packs(packs_dir, _run)
+
+
+
+_DOCS_LOOKUP_DESC = (
+    "Look up an exact API name in PUBLIC documentation packs (Python, React, "
+    "and any other pack this server has installed) -- NOT this organisation's "
+    "private code. Use it when you know the name: 'os.path.join', 'useState', "
+    "'createRoot'. Matching is EXACT (case-insensitive), never fuzzy, because "
+    "the anchor comes from the upstream project's own index -- so a hit lands "
+    "on the definition itself, not on a page that merely mentions the name. "
+    "A miss returns an empty list; use docs_search for an approximate name or "
+    "a concept. Narrow with `lang` to a source name such as 'python' or "
+    "'react'. Every result carries `source`, `url`, `license` and "
+    "`attribution`: cite the url and name the source rather than presenting "
+    "the text as your own knowledge."
+)
+
+_DOCS_SEARCH_DESC = (
+    "Search PUBLIC documentation packs (Python, React, and any other pack "
+    "this server has installed) by meaning -- NOT this organisation's private "
+    "code; use search_code for that. Use it for concepts and questions "
+    "('how do I reset state when a prop changes', 'what does joining paths "
+    "do with an absolute segment') rather than exact names, which docs_lookup "
+    "resolves precisely. Narrow with `lang` to a source name such as 'python' "
+    "or 'react'. Each result carries the document title, the heading trail the "
+    "text sits under, an anchored `url`, `source`, `license` and "
+    "`attribution`: cite the url and name the source rather than presenting "
+    "the text as your own knowledge. Each result also carries `retrieval`: "
+    "'semantic' normally, or 'lexical' when the embedding service was "
+    "unreachable and the server fell back to keyword matching -- treat "
+    "'lexical' results as less precise."
+)
+
 _FIND_SYMBOL_DESC = (
     "Find where a named symbol (function, class, method, struct, etc.) is "
     "DEFINED, across the repos you have access to. Answers questions like "
@@ -345,7 +506,11 @@ _INDEX_STATUS_DESC = (
 
 
 def register_tools(server: FastMCP, cfg: Config) -> None:
-    """Register the five Phase 2 retrieval tools on `server`.
+    """Register the retrieval tools on `server`.
+
+    Five over the private code index, plus two over the public documentation
+    packs. The documentation tools take no identity and write no audit row --
+    see their registration below.
 
     Each tool pulls the caller's `Identity` from the request context (see
     `_identity`) and passes `identity.allowed_repo_ids` as the first
@@ -362,6 +527,19 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
     `args_json` (see `_with_audit`'s docstring).
     """
     db_path = cfg.index.db_path
+    packs_dir = cfg.packs_dir
+
+    @server.tool(name="docs_lookup", description=_DOCS_LOOKUP_DESC)
+    async def docs_lookup(name: str, lang: str | None = None) -> list[dict]:
+        # No identity, no allowlist, no audit row. These packs are public
+        # documentation: there is no access decision to make and nothing to
+        # record one against, and writing to the private index from the public
+        # path is exactly the coupling this split exists to prevent.
+        return await docs_lookup_impl(packs_dir, name, lang=lang)
+
+    @server.tool(name="docs_search", description=_DOCS_SEARCH_DESC)
+    async def docs_search(query: str, lang: str | None = None) -> list[dict]:
+        return await docs_search_impl(packs_dir, query, lang=lang)
 
     @server.tool(name="find_symbol", description=_FIND_SYMBOL_DESC)
     async def find_symbol(name: str, kind: str | None = None, *, ctx: Context) -> list[dict]:
