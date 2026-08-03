@@ -3,6 +3,7 @@ import sqlite3
 
 import pytest
 
+from argus import whichrepo
 from argus.resolve import Resolution
 from argus.store import graph
 from argus.store.db import open_db
@@ -512,36 +513,55 @@ def test_which_repo_never_reveals_a_repo_outside_the_allowlist(two_repos):
     assert all(r["repo_id"] == ids["g/alpha"] for r in rows)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Unsatisfiable as written given the two_repos fixture: every path "
-        "('src/a.c', 'src/def.c', 'src/caller.c') is seeded identically in "
-        "BOTH alpha and beta, so a bare relative path extracted from a stack "
-        "frame matches both repos with identical evidence (direct hit count "
-        "of 1 each) -- a genuine tie, not a near-tie. The brief's _WEIGHTS "
-        "table gives Shape.STACK a central weight of 0.0, and the 'if not "
-        "hits:' rule (which the brief says to keep) means centrality is never "
-        "consulted for either repo here anyway, since both have direct hits. "
-        "No signal in the brief's reference implementation distinguishes "
-        "alpha from beta for this input; the tie is broken alphabetically by "
-        "path_with_namespace, so 'g/alpha' sorts first. See task-7-report.md."
-    ),
-)
 def test_a_direct_hit_is_not_penalised_for_being_a_popular_repo(two_repos):
-    """Down-weighting high in-degree repos is right for prose and wrong when a
-    stack frame points into the shared library, where that library genuinely
-    is the answer."""
+    """Down-weighting high in-degree repos is right for prose and wrong when
+    evidence points directly into the shared library, where that library
+    genuinely is the answer.
+
+    The shared `two_repos` fixture cannot express this on its own: it seeds
+    the *same* relative paths in both alpha and beta, so a path-based direct
+    hit ties 1-for-1 between them and there is no signal left to break the
+    tie toward the popular one. It's also worth noting `_WEIGHTS` gives
+    Shape.STACK/DIFF/SYMBOL a central weight of 0.0, so the `if not hits:`
+    guard in `which_repo` is only ever load-bearing for Shape.PROSE (central
+    weight 0.3) -- this test therefore has to use prose-shaped input that
+    still contains a directly-named file, rather than a pure stack trace.
+
+    This test builds the extra state the property needs, on top of the
+    fixture: a file that exists ONLY in beta (so a direct hit on it can only
+    ever mean beta), plus a cross-repo include from alpha -> beta so beta has
+    non-zero in-degree, i.e. is the "popular" one.
+    """
     conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+
+    # beta-only file: a direct hit here names beta and only beta.
+    writes.upsert_file(conn, repo_id=beta, path="src/unique_beta.py", lang="python",
+                       size=6, blob_sha="uniqueb", content="unique")
+
+    # alpha depends on beta -- gives beta non-zero in-degree (it's "popular").
     _cross_repo_include(conn, ids)
     graph.rebuild_repo_deps(conn)
-    path = conn.execute("SELECT path FROM files WHERE repo_id = ?",
-                        (ids["g/beta"],)).fetchone()["path"]
-    trace = f"  at f ({path}:10)\n  at g ({path}:20)\n"
 
-    rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, trace)
+    # Prose (not a stack trace/diff/bare symbol): mentions the shared symbol
+    # SharedName (a direct hit in both repos) and the beta-only path (a direct
+    # hit in beta alone), so beta collects strictly more direct evidence than
+    # alpha while both have at least one hit each.
+    description = (
+        "The team suspects SharedName is misbehaving, possibly tied to "
+        "src/unique_beta.py:42, though nobody has filed a report yet."
+    )
+    assert whichrepo.detect_shape(description) == whichrepo.Shape.PROSE, (
+        "test assumes prose shape -- central weight is 0.0 for every other "
+        "shape, so the guard this test protects would not be exercised"
+    )
+
+    rows = queries.which_repo([alpha, beta], conn, description)
     assert rows
-    assert rows[0]["repo_id"] == ids["g/beta"]
+    assert rows[0]["repo_id"] == beta, (
+        "beta is directly named here (src/unique_beta.py) and must not be "
+        "down-ranked just because it also has incoming deps from alpha"
+    )
 
 
 def test_confidence_is_between_zero_and_one(two_repos):

@@ -398,6 +398,11 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
             for row in search_code(list(allowed), conn, description, limit=50):
                 lexical[row["repo_id"]] = lexical.get(row["repo_id"], 0.0) + 1.0
         except QueryError:
+            # Deliberate, not defensive noise: swallowing this is exactly the
+            # degrade-to-"no lexical evidence" behaviour described above. All
+            # that is lost is this one input among several -- direct hits
+            # (paths, symbols) and centrality are computed independently and
+            # still rank the repo normally.
             pass
 
     if not direct and not lexical:
