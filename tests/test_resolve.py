@@ -71,3 +71,193 @@ def test_existing_include_rows_default_to_null_resolution(tmp_path):
     finally:
         conn.close()
     assert row[0] is None
+
+
+def _repo(conn, gitlab_id, name):
+    cur = conn.execute(
+        "INSERT INTO repos (gitlab_id, path_with_namespace, default_branch, "
+        "http_url) VALUES (?, ?, 'main', 'u')", (gitlab_id, name))
+    return cur.lastrowid
+
+
+def _file(conn, repo_id, path):
+    cur = conn.execute(
+        "INSERT INTO files (repo_id, path, size, blob_sha, content) "
+        "VALUES (?, ?, 1, 'sha', '')", (repo_id, path))
+    return cur.lastrowid
+
+
+def _include(conn, repo_id, file_id, raw, is_angle=0):
+    conn.execute("INSERT INTO includes (repo_id, file_id, raw, is_angle) "
+                 "VALUES (?, ?, ?, ?)", (repo_id, file_id, raw, is_angle))
+
+
+def test_a_unique_suffix_match_resolves_across_repos(tmp_path):
+    db = open_db(tmp_path / "index.db")
+    try:
+        a = _repo(db, 1, "g/app")
+        b = _repo(db, 2, "g/eal")
+        src = _file(db, a, "src/main.c")
+        hdr = _file(db, b, "include/eal/eal_thread.h")
+        _include(db, a, src, "eal/eal_thread.h")
+        db.commit()
+
+        counts = resolve.resolve_includes(db)
+        assert counts[resolve.Resolution.RESOLVED] == 1
+
+        row = db.execute("SELECT resolved_file_id, resolved_repo_id, resolution, "
+                         "is_external FROM includes").fetchone()
+        assert row["resolved_file_id"] == hdr
+        assert row["resolved_repo_id"] == b
+        assert row["resolution"] == resolve.Resolution.RESOLVED
+        assert row["is_external"] == 0
+    finally:
+        db.close()
+
+
+def test_an_ambiguous_include_emits_no_link_and_is_counted(tmp_path):
+    """util.h exists in a dozen repos. Choosing the most likely one produces
+    an edge that is invisible when wrong, permanent, and feeds the centrality
+    behind every future answer."""
+    db = open_db(tmp_path / "index.db")
+    try:
+        a = _repo(db, 1, "g/app")
+        b = _repo(db, 2, "g/one")
+        c = _repo(db, 3, "g/two")
+        src = _file(db, a, "src/main.c")
+        _file(db, b, "include/util.h")
+        _file(db, c, "lib/util.h")
+        _include(db, a, src, "util.h")
+        db.commit()
+
+        counts = resolve.resolve_includes(db)
+        assert counts[resolve.Resolution.AMBIGUOUS] == 1
+
+        row = db.execute("SELECT resolved_repo_id, resolution FROM includes").fetchone()
+        assert row["resolved_repo_id"] is None, "an ambiguous include must link nothing"
+        assert row["resolution"] == resolve.Resolution.AMBIGUOUS
+    finally:
+        db.close()
+
+
+def test_same_repo_wins_over_a_foreign_match(tmp_path):
+    db = open_db(tmp_path / "index.db")
+    try:
+        a = _repo(db, 1, "g/app")
+        b = _repo(db, 2, "g/other")
+        src = _file(db, a, "src/main.c")
+        mine = _file(db, a, "src/util.h")
+        _file(db, b, "lib/util.h")
+        _include(db, a, src, "util.h")
+        db.commit()
+
+        resolve.resolve_includes(db)
+        row = db.execute("SELECT resolved_file_id, resolved_repo_id FROM includes").fetchone()
+        assert row["resolved_file_id"] == mine
+        assert row["resolved_repo_id"] == a
+    finally:
+        db.close()
+
+
+def test_a_quoted_relative_include_resolves_against_its_own_directory(tmp_path):
+    db = open_db(tmp_path / "index.db")
+    try:
+        a = _repo(db, 1, "g/app")
+        src = _file(db, a, "src/eal/x.c")
+        target = _file(db, a, "src/common/util.h")
+        _include(db, a, src, "../common/util.h")
+        db.commit()
+
+        resolve.resolve_includes(db)
+        row = db.execute("SELECT resolved_file_id, resolution FROM includes").fetchone()
+        assert row["resolved_file_id"] == target
+        assert row["resolution"] == resolve.Resolution.RESOLVED
+    finally:
+        db.close()
+
+
+def test_an_unmatched_angle_include_is_external(tmp_path):
+    db = open_db(tmp_path / "index.db")
+    try:
+        a = _repo(db, 1, "g/app")
+        src = _file(db, a, "src/main.c")
+        _include(db, a, src, "stdio.h", is_angle=1)
+        db.commit()
+
+        counts = resolve.resolve_includes(db)
+        assert counts[resolve.Resolution.EXTERNAL] == 1
+        row = db.execute("SELECT is_external, resolution FROM includes").fetchone()
+        assert row["is_external"] == 1
+        assert row["resolution"] == resolve.Resolution.EXTERNAL
+    finally:
+        db.close()
+
+
+def test_an_angle_include_that_matches_an_indexed_file_is_internal(tmp_path):
+    """C projects routinely #include <eal/x.h> via -I. Treating every angle
+    include as external would erase most of the graph."""
+    db = open_db(tmp_path / "index.db")
+    try:
+        a = _repo(db, 1, "g/app")
+        b = _repo(db, 2, "g/eal")
+        src = _file(db, a, "src/main.c")
+        hdr = _file(db, b, "include/eal/x.h")
+        _include(db, a, src, "eal/x.h", is_angle=1)
+        db.commit()
+
+        resolve.resolve_includes(db)
+        row = db.execute("SELECT resolved_file_id, is_external FROM includes").fetchone()
+        assert row["resolved_file_id"] == hdr
+        assert row["is_external"] == 0
+    finally:
+        db.close()
+
+
+def test_an_unmatched_quoted_include_is_not_found(tmp_path):
+    db = open_db(tmp_path / "index.db")
+    try:
+        a = _repo(db, 1, "g/app")
+        src = _file(db, a, "src/main.c")
+        _include(db, a, src, "nowhere/missing.h")
+        db.commit()
+
+        counts = resolve.resolve_includes(db)
+        assert counts[resolve.Resolution.NOT_FOUND] == 1
+    finally:
+        db.close()
+
+
+def test_resolution_is_independent_of_insertion_order(tmp_path):
+    """An include can point into a repo indexed later in the same cycle.
+    Resolving per-repo would make the graph depend on indexing order."""
+    db = open_db(tmp_path / "index.db")
+    try:
+        b = _repo(db, 2, "g/eal")
+        a = _repo(db, 1, "g/app")
+        src = _file(db, a, "src/main.c")
+        hdr = _file(db, b, "include/eal/x.h")
+        _include(db, a, src, "eal/x.h")
+        db.commit()
+
+        resolve.resolve_includes(db)
+        row = db.execute("SELECT resolved_file_id FROM includes").fetchone()
+        assert row["resolved_file_id"] == hdr
+    finally:
+        db.close()
+
+
+def test_rerunning_resolution_is_idempotent(tmp_path):
+    db = open_db(tmp_path / "index.db")
+    try:
+        a = _repo(db, 1, "g/app")
+        b = _repo(db, 2, "g/eal")
+        src = _file(db, a, "src/main.c")
+        _file(db, b, "include/eal/x.h")
+        _include(db, a, src, "eal/x.h")
+        db.commit()
+
+        first = resolve.resolve_includes(db)
+        second = resolve.resolve_includes(db)
+        assert first == second
+    finally:
+        db.close()
