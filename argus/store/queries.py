@@ -185,6 +185,12 @@ def index_status(allowed_repo_ids: Sequence[int],
             "       (SELECT COUNT(*) FROM files   WHERE repo_id = r.id) AS files,"
             "       (SELECT COUNT(*) FROM symbols WHERE repo_id = r.id) AS symbols,"
             "       (SELECT COUNT(*) FROM index_errors WHERE repo_id = r.id) AS errors,"
+            "       (SELECT COUNT(*) FROM includes WHERE repo_id = r.id"
+            "         AND resolution = 'resolved')  AS includes_resolved,"
+            "       (SELECT COUNT(*) FROM includes WHERE repo_id = r.id"
+            "         AND resolution = 'external')  AS includes_external,"
+            "       (SELECT COUNT(*) FROM includes WHERE repo_id = r.id"
+            "         AND resolution = 'ambiguous') AS includes_ambiguous,"
             # index_queue.repo_id is a PRIMARY KEY: one row per repo, with the
             # queued paths JSON-packed into `reason`. COUNT(*) is therefore a 0/1
             # flag, not a count -- a repo with 4,000 stuck paths reported "1".

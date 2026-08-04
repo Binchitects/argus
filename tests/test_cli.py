@@ -632,3 +632,34 @@ def test_flush_acl_nothing_to_clear_message_differs_from_user_not_found(
     out = capsys.readouterr().out
     assert "no acl cache entries to clear" in out
     assert "not in acl cache" not in out
+
+
+def _config_file(tmp_path):
+    """A minimal on-disk config, independent of the `config_file` fixture
+    above (which also seeds a git `origin` this test doesn't need)."""
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "gitlab:\n  url: https://gl.test\n  token: t\n"
+        f"index:\n  data_dir: {(tmp_path / 'data').as_posix()}\n"
+        f"  db_path: {(tmp_path / 'index.db').as_posix()}\n",
+        encoding="utf-8")
+    return path
+
+
+def test_resolve_subcommand_runs_both_passes_and_reports_counts(tmp_path, capsys, monkeypatch):
+    """Resolution runs once over the whole database, then the graph rebuilds
+    from it. Order matters: rebuilding first would materialise the previous
+    pass's edges."""
+    calls = []
+    monkeypatch.setattr("argus.cli.resolve_includes",
+                        lambda conn: (calls.append("resolve"), {"resolved": 3,
+                                                                "ambiguous": 1})[1])
+    monkeypatch.setattr("argus.cli.rebuild_repo_deps",
+                        lambda conn: (calls.append("graph"), 2)[1])
+
+    assert cli.main(["resolve", "--config", str(_config_file(tmp_path))]) == 0
+    assert calls == ["resolve", "graph"]
+
+    out = capsys.readouterr().out
+    assert "resolved" in out and "ambiguous" in out
+    assert "3" in out and "1" in out

@@ -39,6 +39,11 @@ a service purely by being in the default profile set) respects the profile
 gate. That's what keeps a bare `docker compose up` from ever kicking off an
 index run.
 
+`argus index` now ends with a resolution pass and a graph rebuild. Watch the
+`ambiguous` count: a high proportion means many repos ship headers with the
+same basename, and `which_repo` will be correspondingly weaker. `argus
+resolve` re-runs both without re-indexing.
+
 ## Bringing the server up
 
 ```bash

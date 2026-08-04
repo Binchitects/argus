@@ -282,6 +282,39 @@ def test_index_status_reports_queued_retries(two_repos):
     assert queued() == 0
 
 
+def test_index_status_reports_resolution_quality(two_repos):
+    """'34% of your includes are ambiguous' tells an operator their -I layout
+    defeats suffix matching, which no tool tuning will fix.
+
+    Unlike `_cross_repo_include` (which pokes `resolution` in directly via
+    SQL for tests that only need `repo_deps` already populated), this drives
+    the real `resolve_includes` end to end -- so the target must actually be
+    a header. `_cross_repo_include`'s target is `two_repos`'s `src/a.c`, which
+    `HEADER_SUFFIXES` excludes from matching entirely; reusing it here would
+    make every include come back `not_found`, not `resolved`.
+    """
+    from argus.resolve import resolve_includes
+
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+    writes.upsert_file(conn, repo_id=beta, path="include/shared.h", lang="c",
+                       size=2, blob_sha="hdrsha", content="//")
+    src_fid = conn.execute(
+        "SELECT id FROM files WHERE repo_id = ? AND path = 'src/a.c'", (alpha,)
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO includes (repo_id, file_id, raw, is_angle) VALUES (?, ?, 'shared.h', 0)",
+        (alpha, src_fid))
+    conn.commit()
+
+    resolve_includes(conn)
+    rows = queries.index_status([alpha], conn)
+    assert rows, "non-empty guard"
+    # `in` on a sqlite3.Row tests its VALUES, not its column names.
+    assert "includes_ambiguous" in rows[0].keys()
+    assert rows[0]["includes_resolved"] >= 1
+
+
 def test_allowlist_larger_than_sqlite_parameter_limit(two_repos):
     """A developer in a large GitLab group must not raise OperationalError.
 
