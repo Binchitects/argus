@@ -348,6 +348,15 @@ async def repo_map_impl(db_path: Path | str, identity: acl.Identity,
     )
 
 
+async def which_repo_impl(db_path: Path | str, identity: acl.Identity,
+                          description: str, limit: int = 5) -> list[dict]:
+    return await run_readonly(
+        db_path,
+        lambda conn: queries.which_repo(
+            identity.allowed_repo_ids, conn, description, limit=limit),
+    )
+
+
 async def docs_lookup_impl(packs_dir: Path | str, name: str,
                            lang: str | None = None, limit: int = 20) -> list[dict]:
     return await run_packs(
@@ -523,11 +532,27 @@ _INDEX_STATUS_DESC = (
     "'not extracted yet', not 'does not exist'."
 )
 
+_WHICH_REPO_DESC = (
+    "Work out WHICH REPOSITORY a change belongs in, across the repos you have "
+    "access to. This is the tool for 'where do I add this?' when you do not "
+    "already know the repo. Accepts any of: a plain-language description of "
+    "the task -- describe what you're doing, e.g. 'add H.265 support to the "
+    "decoder' -- a symbol or function name, a stack trace "
+    "or error log pasted verbatim, or a diff you are reviewing -- paste "
+    "whichever you actually have, including multi-line text. Each candidate "
+    "comes back with `confidence` and a `why` list naming the specific files "
+    "and symbols that drove the match, so you can judge the answer instead of "
+    "trusting it. An EMPTY result means nothing matched well enough to be "
+    "worth reporting, not that the code does not exist -- fall back to "
+    "search_code with a distinctive term. Use repo_map afterwards to see what "
+    "else depends on the repo you pick."
+)
+
 
 def register_tools(server: FastMCP, cfg: Config) -> None:
     """Register the retrieval tools on `server`.
 
-    Six over the private code index, plus two over the public documentation
+    Seven over the private code index, plus two over the public documentation
     packs. The documentation tools take no identity and write no audit row --
     see their registration below.
 
@@ -606,4 +631,17 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         return await _with_audit(
             db_path, "repo_map", identity, {"repo_id": repo_id},
             lambda: repo_map_impl(db_path, identity, repo_id),
+        )
+
+    @server.tool(name="which_repo", description=_WHICH_REPO_DESC)
+    async def which_repo(description: str, *, ctx: Context) -> list[dict]:
+        identity = _identity(ctx)
+        # description is truncated to 200 chars for the audit row only -- a
+        # pasted stack trace or diff can be thousands of lines, and the audit
+        # row records what was asked, not the whole payload (see
+        # _with_audit's docstring). The full, untruncated description still
+        # goes to which_repo_impl below.
+        return await _with_audit(
+            db_path, "which_repo", identity, {"description": description[:200]},
+            lambda: which_repo_impl(db_path, identity, description),
         )
