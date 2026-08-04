@@ -95,6 +95,51 @@ def test_index_returns_nonzero_when_a_repo_fails(config_file, tmp_path,
     assert "FAILED" in capsys.readouterr().err
 
 
+def test_index_runs_resolve_before_rebuild(config_file, fake_projects, monkeypatch):
+    """resolve_includes must run before rebuild_repo_deps inside `_index`
+    itself -- not just in the `resolve` subcommand, which
+    test_resolve_subcommand_runs_both_passes_and_reports_counts pins
+    separately (it monkeypatches the same names but only exercises `_resolve`,
+    so it cannot catch a swap that is local to `_index`).
+
+    rebuild_repo_deps raises sqlite3.IntegrityError (FK on
+    repo_deps.to_repo_id) whenever an include still points at a repo deleted
+    since the last pass; resolving first clears those rows. Swapping the two
+    lines inside `_index` turns a deleted repo into an uncaught crash of the
+    whole `argus index` run -- this test pins the call order, not just that
+    both get called.
+    """
+    calls = []
+    monkeypatch.setattr(cli, "resolve_includes",
+                        lambda conn: (calls.append("resolve"), {})[1])
+    monkeypatch.setattr(cli, "rebuild_repo_deps",
+                        lambda conn: (calls.append("graph"), 0)[1])
+
+    assert cli.main(["index", "--config", str(config_file)]) == 0
+    assert calls == ["resolve", "graph"]
+
+
+def test_index_resolve_rebuild_failure_is_contained(config_file, fake_projects,
+                                                     monkeypatch, capsys):
+    """A failure in the resolve/rebuild pass must not escape as an uncaught
+    traceback, and must not be reported as exit code 1 (the code that means
+    "ran, but a repo is unhealthy") -- that would tell an operator the wrong
+    thing happened. `main` catches only ConfigError and GitLabError, and
+    nothing else wrapped resolve_includes/rebuild_repo_deps before, so this
+    is the only thing standing between an IntegrityError in
+    rebuild_repo_deps (see its docstring: an include still pointing at a
+    repo deleted since the last pass) and a crashed `argus index` run.
+    """
+    monkeypatch.setattr(cli, "rebuild_repo_deps",
+                        lambda conn: (_ for _ in ()).throw(
+                            __import__("sqlite3").IntegrityError("FOREIGN KEY constraint failed")))
+
+    result = cli.main(["index", "--config", str(config_file)])
+    assert result == 4, f"expected exit code 4 (run failure), got {result}"
+    err = capsys.readouterr().err
+    assert "resolve/rebuild failed" in err
+
+
 def _repo_row(config_file, path_with_namespace="g/eal"):
     from argus.store.db import open_db
 

@@ -473,12 +473,47 @@ def _files_named(conn, allowed: set[int], path: str) -> list[sqlite3.Row]:
 
 
 def _in_degree(conn, allowed: set[int]) -> dict[int, int]:
-    return {
-        row["to_repo_id"]: row["n"]
-        for row in conn.execute(
-            "SELECT to_repo_id, COUNT(*) AS n FROM repo_deps GROUP BY to_repo_id")
-        if row["to_repo_id"] in allowed
-    }
+    """In-degree of each allowed repo, counting only edges whose SOURCE is
+    also in the allowlist.
+
+    This used to aggregate `repo_deps` globally and filter only the target
+    (`to_repo_id`) endpoint. An edge FROM a repo the caller cannot see still
+    inflated a visible repo's in-degree under that scheme -- and in-degree
+    feeds `which_repo`'s centrality subtraction for Shape.PROSE, so a caller
+    could infer "some repo I cannot see depends on this one", and roughly how
+    many, purely from a confidence delta. That is exactly the disclosure
+    `repo_map` deliberately refuses to make (see its docstring). Constraining
+    BOTH endpoints to the allowlist closes it.
+
+    As a side effect this also means no join to `repos` is needed: a
+    dangling `from_repo_id` (a repo deleted since the last graph rebuild)
+    can never pass an IN (...) membership test against a *live* allowlist.
+
+    Chunked on both endpoints, the same way `repo_map`'s `edges()` helper
+    chunks a single endpoint -- except here two IN (...) clauses share the
+    same host-parameter budget, so each side's chunk size is halved. Chunks
+    partition the allowlist, so summing counts across the chunk x chunk grid
+    double-counts nothing: each edge's (from, to) pair falls in exactly one
+    (from_chunk, to_chunk) cell.
+    """
+    ids = list(allowed)
+    if not ids:
+        return {}
+    chunks = _chunks(ids, SQLITE_MAX_VARS // 2)
+    counts: dict[int, int] = {}
+    for from_chunk in chunks:
+        from_marks = ",".join("?" for _ in from_chunk)
+        for to_chunk in chunks:
+            to_marks = ",".join("?" for _ in to_chunk)
+            for row in conn.execute(
+                "SELECT to_repo_id, COUNT(*) AS n FROM repo_deps"
+                f" WHERE from_repo_id IN ({from_marks})"
+                f"   AND to_repo_id IN ({to_marks})"
+                " GROUP BY to_repo_id",
+                [*from_chunk, *to_chunk],
+            ):
+                counts[row["to_repo_id"]] = counts.get(row["to_repo_id"], 0) + row["n"]
+    return counts
 
 
 def _repo_name(conn, repo_id: int) -> str:

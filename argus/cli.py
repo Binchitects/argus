@@ -172,17 +172,33 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
     # One pass over the whole database, after every repo. An include can point
     # into a repo indexed later in this same cycle, so resolving per repo would
     # make the graph depend on indexing order.
-    counts = resolve_includes(conn)
-    edges = rebuild_repo_deps(conn)
+    try:
+        counts = resolve_includes(conn)
+        edges = rebuild_repo_deps(conn)
+    except Exception as exc:  # noqa: BLE001 - must not escape as an uncaught traceback
+        # Nothing else catches this: `main` handles only ConfigError and
+        # GitLabError, so an uncaught error here -- most notably
+        # sqlite3.IntegrityError from rebuild_repo_deps's FK on
+        # repo_deps.to_repo_id, raised whenever an include still points at a
+        # repo deleted since the last pass -- would discard the whole
+        # per-repo run summary printed above and exit via a raw traceback.
+        # That traceback carries no exit code of its own, so it cannot be
+        # told apart from `return 1` below ("ran, but a repo is unhealthy")
+        # by a caller checking $?. Report it the same way a per-repo failure
+        # is reported and reuse exit code 4: this is a failure of the run
+        # itself, the same category as a missing ctags binary, not a
+        # per-repo health flag.
+        print(f"resolve/rebuild failed: {exc!r}", file=sys.stderr)
+        return 4
     print(f"includes: {counts.get('resolved', 0)} resolved, "
           f"{counts.get('external', 0)} external, "
           f"{counts.get('ambiguous', 0)} ambiguous, "
           f"{counts.get('not_found', 0)} not found")
     print(f"repo graph: {edges} cross-repo edges")
 
-    # Exit codes 2/3/4 are already claimed (config, gitlab, preflight); use a
-    # distinct code so a cron job can tell "ran, but a repo is unhealthy"
-    # apart from those startup failures.
+    # Exit codes 2/3/4 are already claimed (config, gitlab, preflight/resolve);
+    # use a distinct code so a cron job can tell "ran, but a repo is
+    # unhealthy" apart from those startup/run failures.
     return 1 if any_repo_unhealthy else 0
 
 

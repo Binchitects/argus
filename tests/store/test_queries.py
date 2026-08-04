@@ -636,6 +636,86 @@ def test_which_repo_does_not_treat_underscore_as_a_wildcard(two_repos):
     )
 
 
+def test_in_degree_ignores_edges_whose_source_is_outside_the_allowlist(two_repos):
+    """A repo outside the allowlist must not be able to inflate a visible
+    repo's centrality by depending on it.
+
+    `_in_degree` used to aggregate `repo_deps` globally and filter only the
+    target (`to_repo_id`) endpoint, so an edge FROM a repo the caller cannot
+    see still counted toward a visible repo's in-degree -- and that feeds
+    `which_repo`'s centrality subtraction for Shape.PROSE. A caller could
+    infer "some repo I cannot see depends on this one" purely from a
+    confidence delta, which is exactly the disclosure `repo_map` (correctly)
+    refuses to make. This proves the fix: adding an edge from a repo outside
+    the allowlist into an in-allowlist repo must not move that repo's
+    confidence at all.
+    """
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+    gamma = writes.upsert_repo(conn, gitlab_id=99, path_with_namespace="g/gamma",
+                               default_branch="main", http_url="https://x/g/gamma")
+
+    # alpha-only content, matched lexically by an FTS query that is prose
+    # (multi-word, no diff/stack shape) yet has zero direct hits -- exactly
+    # the condition (`if not hits:`) that makes the centrality penalty live.
+    phrase = "gizmo widget doohickey"
+    writes.upsert_file(conn, repo_id=alpha, path="src/notes.txt", lang="text",
+                       size=len(phrase), blob_sha="notes1", content=phrase)
+    assert whichrepo.detect_shape(phrase) == whichrepo.Shape.PROSE
+
+    baseline = queries.which_repo([alpha, beta], conn, phrase)
+    baseline_conf = {r["repo_id"]: r["confidence"] for r in baseline}
+    assert alpha in baseline_conf, "non-empty guard"
+
+    # gamma (outside the allowlist) depends on alpha.
+    conn.execute(
+        "INSERT INTO repo_deps (from_repo_id, to_repo_id, weight) VALUES (?, ?, ?)",
+        (gamma, alpha, 1))
+    conn.commit()
+
+    after = queries.which_repo([alpha, beta], conn, phrase)
+    after_conf = {r["repo_id"]: r["confidence"] for r in after}
+
+    assert after_conf.get(alpha) == baseline_conf.get(alpha), (
+        f"alpha's confidence changed from {baseline_conf.get(alpha)} to "
+        f"{after_conf.get(alpha)} purely because a repo outside the "
+        "allowlist gained a dependency on it -- that leaks the hidden "
+        "repo's existence"
+    )
+
+
+def test_which_repo_excludes_weak_lexical_evidence_below_the_floor(two_repos):
+    """A repo whose only evidence is much weaker than the best match must be
+    excluded entirely, not returned as a low-confidence answer.
+
+    `_FLOOR_RATIO` (0.35) is unreachable by
+    `test_which_repo_returns_empty_when_nothing_clears_the_floor`, which uses
+    a query with neither direct nor lexical evidence at all and exits at the
+    earlier `if not direct and not lexical` guard. This reaches the floor for
+    real: alpha gets 3 files matching the query, beta gets 1 -- a ratio of
+    1/3 (~0.33), under 0.35. Neither repo has a direct hit, so the floor
+    check is the only thing standing between beta and a place in the result.
+    """
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+
+    phrase = "gizmo widget doohickey"
+    for i, path in enumerate(["src/n1.txt", "src/n2.txt", "src/n3.txt"]):
+        writes.upsert_file(conn, repo_id=alpha, path=path, lang="text",
+                           size=len(phrase), blob_sha=f"a{i}", content=phrase)
+    writes.upsert_file(conn, repo_id=beta, path="src/n1.txt", lang="text",
+                       size=len(phrase), blob_sha="b0", content=phrase)
+    assert whichrepo.detect_shape(phrase) == whichrepo.Shape.PROSE
+
+    rows = queries.which_repo([alpha, beta], conn, phrase)
+    repo_ids_hit = {r["repo_id"] for r in rows}
+    assert alpha in repo_ids_hit, "non-empty guard"
+    assert beta not in repo_ids_hit, (
+        "beta's lexical evidence (1 file) is only ~0.33 of alpha's (3 files) "
+        "-- under _FLOOR_RATIO -- and must not appear in the result"
+    )
+
+
 def test_confidence_is_between_zero_and_one(two_repos):
     conn, ids = two_repos
     rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, "SharedName")

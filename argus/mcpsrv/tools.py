@@ -349,11 +349,16 @@ async def repo_map_impl(db_path: Path | str, identity: acl.Identity,
 
 
 async def which_repo_impl(db_path: Path | str, identity: acl.Identity,
-                          description: str, limit: int = 5) -> list[dict]:
+                          description: str) -> list[dict]:
+    # No `limit` parameter: the registered `which_repo` tool below never
+    # exposes one to a caller, so this always ran with queries.which_repo's
+    # own default anyway. Dropping it here removes a parameter nothing could
+    # ever set to something other than that default, rather than plumbing an
+    # unused knob through the MCP tool signature for a value this server has
+    # never needed callers to tune.
     return await run_readonly(
         db_path,
-        lambda conn: queries.which_repo(
-            identity.allowed_repo_ids, conn, description, limit=limit),
+        lambda conn: queries.which_repo(identity.allowed_repo_ids, conn, description),
     )
 
 

@@ -42,7 +42,7 @@ def detect_shape(text: str) -> str:
     if frames >= 2 or (frames >= 1 and _AT_FRAME_RE.search(text)):
         return Shape.STACK
     stripped = text.strip()
-    if len(stripped.split()) <= 2 and _IDENT_RE.fullmatch(stripped):
+    if _IDENT_RE.fullmatch(stripped):
         return Shape.SYMBOL
     return Shape.PROSE
 
