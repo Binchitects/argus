@@ -94,6 +94,7 @@ Tools are named after the *questions developers ask*, not after retrieval mechan
 | `index_status` | Per-repo freshness, so the agent can qualify stale answers |
 | `which_repo` | *"Which repo do I change for X?"* — from a description, a symbol, a stack trace, or a diff |
 | `repo_map` | Which repos a given repo depends on, and which depend on it, from resolved `#include` edges |
+| `impact_of` | *"What breaks if I change this file?"* — every file that includes it, transitively, with depth |
 
 **Shipped — public documentation, no access control (there is nothing to gate):**
 
@@ -153,7 +154,7 @@ Argus ships in phases, each ending somewhere genuinely usable.
 | **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | ✅ **Complete** |
 | **4 — Semantic layer** | Selective embeddings over private code, `semantic_search` | Planned |
 
-**554 tests**, passing locally, 0 skipped.
+**559 tests**, passing locally, 0 skipped.
 
 Health indicators, how they are measured, and the charts behind them are in [`docs/kpis.md`](docs/kpis.md) — every figure measured, none estimated.
 

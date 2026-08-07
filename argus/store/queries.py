@@ -673,3 +673,102 @@ def _repo_name(conn, repo_id: int) -> str:
     row = conn.execute("SELECT path_with_namespace FROM repos WHERE id = ?",
                        (repo_id,)).fetchone()
     return row["path_with_namespace"] if row else ""
+
+
+#: How far to walk reverse-include edges by default. Three hops covers the
+#: realistic "I changed this header, what has to be rebuilt and re-reviewed"
+#: question; deeper walks in C reach most of a project and stop being an
+#: answer. Measured on real code: this index holds 5,079 two-hop chains.
+DEFAULT_IMPACT_DEPTH = 3
+
+#: Cap on files returned. `ftdebug.h` in freetype has 136 *direct* dependents;
+#: transitively a hot header reaches most of its project, and an unbounded
+#: list is not something a developer or a 35B model can act on.
+DEFAULT_IMPACT_LIMIT = 200
+
+
+def impact_of(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
+              repo_id: int, path: str, max_depth: int = DEFAULT_IMPACT_DEPTH,
+              limit: int = DEFAULT_IMPACT_LIMIT) -> dict:
+    """Files that would be affected by changing one file, transitively.
+
+    `repo_map` answers this at repository granularity, which is the right
+    altitude for "who depends on us" and the wrong one for "I am about to
+    change this struct". This walks the reverse-include edges to the files
+    themselves.
+
+    Traversal is restricted to the caller's allowlist at every hop, not just
+    when returning rows. Filtering only the output would still let a file in
+    an invisible repository act as a bridge, making two visible files appear
+    connected through a path the caller cannot see -- a weaker disclosure than
+    naming the repo, but the same kind, and this project has closed three of
+    those already.
+
+    Returns `truncated: True` rather than silently cutting the list. A blast
+    radius that is quietly incomplete is worse than one that admits its own
+    limit: the whole point is deciding what to re-check.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids or repo_id not in set(ids) or not path:
+        return {}
+
+    target = conn.execute(
+        "SELECT id, path FROM files WHERE repo_id = ? AND path = ?",
+        (repo_id, path),
+    ).fetchone()
+    if target is None:
+        return {}
+
+    depth = max(1, min(int(max_depth), 10))
+
+    # A temp table rather than an IN (...) list: the recursive walk touches the
+    # allowlist at every hop, and SQLite's ~999 host-parameter ceiling would
+    # otherwise cap how many repos a caller can have. _chunks cannot help here
+    # because the recursion has to see the whole set at once.
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _impact_allowed (repo_id INTEGER PRIMARY KEY)")
+    conn.execute("DELETE FROM _impact_allowed")
+    conn.executemany("INSERT OR IGNORE INTO _impact_allowed (repo_id) VALUES (?)",
+                     [(i,) for i in ids])
+
+    rows = conn.execute(
+        """
+        WITH RECURSIVE reached(file_id, depth) AS (
+            SELECT i.file_id, 1
+              FROM includes i
+              JOIN _impact_allowed a ON a.repo_id = i.repo_id
+             WHERE i.resolved_file_id = ? AND i.resolution = 'resolved'
+            UNION                       -- UNION, not UNION ALL: dedupes, and
+                                        -- that is what terminates cycles
+            SELECT i.file_id, r.depth + 1
+              FROM includes i
+              JOIN reached r ON i.resolved_file_id = r.file_id
+              JOIN _impact_allowed a ON a.repo_id = i.repo_id
+             WHERE i.resolution = 'resolved' AND r.depth < ?
+        )
+        SELECT f.path, p.path_with_namespace, p.id AS repo_id, MIN(r.depth) AS depth
+          FROM reached r
+          JOIN files f ON f.id = r.file_id
+          JOIN repos p ON p.id = f.repo_id
+         GROUP BY r.file_id
+         ORDER BY depth, p.path_with_namespace, f.path
+         LIMIT ?
+        """,
+        (target["id"], depth, limit + 1),
+    ).fetchall()
+
+    truncated = len(rows) > limit
+    rows = rows[:limit]
+
+    by_repo: dict[str, list[dict]] = {}
+    for row in rows:
+        by_repo.setdefault(row["path_with_namespace"], []).append(
+            {"path": row["path"], "depth": row["depth"]})
+
+    return {
+        "file": {"repo_id": repo_id, "path": target["path"]},
+        "affected_files": len(rows),
+        "affected_repos": len(by_repo),
+        "max_depth": depth,
+        "truncated": truncated,
+        "by_repo": by_repo,
+    }

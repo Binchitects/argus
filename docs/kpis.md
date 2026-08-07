@@ -138,14 +138,14 @@ This is a synthetic corpus. It validates the mechanism, not the product.
 ```mermaid
 xychart-beta
     title "Test suite growth, measured at each task"
-    x-axis ["P5 T3", "P5 T5", "P5 T7", "P5 T9", "P5 T11", "P5 done", "P3 T3", "P3 T5", "P3 T7", "P3 T9", "P3 merged", "today"]
+    x-axis ["P5 T3", "P5 T5", "P5 T7", "P5 T9", "P5 T11", "P5 done", "P3 T3", "P3 T5", "P3 T7", "P3 T9", "P3 merged", "rc1", "impact_of"]
     y-axis "tests passing" 250 --> 600
-    line [270, 309, 364, 424, 464, 469, 486, 497, 516, 521, 531, 554]
+    line [270, 309, 364, 424, 464, 469, 486, 497, 516, 521, 531, 554, 559]
 ```
 
 | Indicator | Current | Direction |
 |---|---|---|
-| Tests passing | 554 | ↑ |
+| Tests passing | 559 | ↑ |
 | Tests skipped | 0 | ↓ — a skip is coverage that silently stopped running |
 | Container suite green | yes (at 531) | — |
 

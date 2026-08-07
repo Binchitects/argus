@@ -461,6 +461,33 @@ _DOCS_SEARCH_DESC = (
     "'lexical' results as less precise."
 )
 
+
+async def impact_of_impl(db_path: Path | str, identity: acl.Identity,
+                         repo_id: int, path: str,
+                         max_depth: int = 3) -> dict[str, Any]:
+    return await run_readonly(
+        db_path,
+        lambda conn: queries.impact_of(
+            identity.allowed_repo_ids, conn, repo_id, path, max_depth=max_depth),
+    )
+
+
+_IMPACT_OF_DESC = (
+    "Find out WHAT BREAKS if you change a specific file. Give it a repo_id "
+    "and a file path -- usually a header -- and it returns every file that "
+    "includes it, directly or transitively, grouped by repository, with the "
+    "`depth` at which each was reached (1 = includes it directly). Use it "
+    "before editing a shared header, changing a struct layout, or altering a "
+    "function signature, and use it to decide what to re-test after. This is "
+    "the file-level answer; repo_map gives the same picture at repository "
+    "granularity when you only need to know which teams to warn. Files in "
+    "repos you cannot access are never reported and are never traversed, so "
+    "a result can understate the true blast radius if the change is used by "
+    "code you cannot see. `truncated: true` means there were more affected "
+    "files than were returned -- the real radius is larger, so treat the "
+    "change as wide-reaching rather than assuming the list is complete."
+)
+
 _FIND_SYMBOL_DESC = (
     "Find where a named symbol (function, class, method, struct, etc.) is "
     "DEFINED, across the repos you have access to. Answers questions like "
@@ -589,6 +616,17 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
     @server.tool(name="docs_search", description=_DOCS_SEARCH_DESC)
     async def docs_search(query: str, lang: str | None = None) -> list[dict]:
         return await docs_search_impl(packs_dir, query, lang=lang)
+
+    @server.tool(name="impact_of", description=_IMPACT_OF_DESC)
+    async def impact_of(repo_id: int, path: str, max_depth: int = 3,
+                        *, ctx: Context) -> dict[str, Any]:
+        identity = _identity(ctx)
+        return await _with_audit(
+            db_path, "impact_of", identity,
+            {"repo_id": repo_id, "path": path, "max_depth": max_depth},
+            lambda: impact_of_impl(db_path, identity, repo_id, path,
+                                   max_depth=max_depth),
+        )
 
     @server.tool(name="find_symbol", description=_FIND_SYMBOL_DESC)
     async def find_symbol(name: str, kind: str | None = None, *, ctx: Context) -> list[dict]:

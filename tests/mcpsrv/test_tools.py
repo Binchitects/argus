@@ -504,7 +504,7 @@ def test_tools_list_descriptions_are_load_bearing(two_repo_cfg):
     assert set(by_name) == {
         "find_symbol", "find_references", "search_code", "get_file", "index_status",
         "docs_lookup", "docs_search",
-        "repo_map", "which_repo",
+        "repo_map", "which_repo", "impact_of",
     }
     assert "name-based" in by_name["find_references"].lower() or \
         "name" in by_name["find_references"].lower() and "not" in by_name["find_references"].lower()
@@ -603,3 +603,25 @@ async def test_which_repo_returns_evidence_for_each_candidate(two_repo_cfg):
     rows = await tools.which_repo_impl(cfg.index.db_path, identity, "SharedName")
     assert rows, "non-empty guard"
     assert all(r["why"] for r in rows)
+
+
+def test_impact_of_description_tells_the_model_what_truncation_means():
+    """A partial blast radius read as complete is the failure this tool could
+    cause: the model would report 'only these 200 files are affected' when the
+    real answer is 'more than 200'."""
+    desc = tools._IMPACT_OF_DESC.lower()
+    assert "truncated" in desc
+    assert "larger" in desc or "understate" in desc
+
+
+def test_impact_of_description_says_invisible_repos_are_not_counted():
+    """Otherwise a developer reads an allowlist-limited answer as the whole
+    picture and ships a change that breaks code they cannot see."""
+    desc = tools._IMPACT_OF_DESC.lower()
+    assert "cannot access" in desc or "cannot see" in desc
+
+
+def test_impact_of_description_distinguishes_itself_from_repo_map():
+    """Two tools answering 'what depends on this' at different altitudes is
+    exactly the pair a small model picks wrongly without being told."""
+    assert "repo_map" in tools._IMPACT_OF_DESC

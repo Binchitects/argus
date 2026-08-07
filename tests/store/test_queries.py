@@ -52,6 +52,28 @@ def _minimal_args_for(name, conn, target_repo_id):
             (target_repo_id,),
         ).fetchone()
         return {"query": row["content"]}
+    if name == "impact_of":
+        # Give the target repo a header with a dependent inside the SAME repo,
+        # so a result exists only when that repo is in the allowlist. Both
+        # repos get one, so switching the allowlist switches the answer rather
+        # than emptying it -- the shape the generic filter test needs.
+        hdr = conn.execute(
+            "SELECT id FROM files WHERE repo_id = ? AND path = 'impact/core.h'",
+            (target_repo_id,)).fetchone()
+        if hdr is None:
+            hdr_id = writes.upsert_file(
+                conn, repo_id=target_repo_id, path="impact/core.h", lang="c",
+                size=1, blob_sha=f"ih{target_repo_id}", content="")
+            user_id = writes.upsert_file(
+                conn, repo_id=target_repo_id, path="impact/user.c", lang="c",
+                size=1, blob_sha=f"iu{target_repo_id}", content="")
+            conn.execute(
+                "INSERT INTO includes (repo_id, file_id, raw, is_angle,"
+                " resolved_file_id, resolved_repo_id, is_external, resolution)"
+                " VALUES (?, ?, 'core.h', 0, ?, ?, 0, 'resolved')",
+                (target_repo_id, user_id, hdr_id, target_repo_id))
+            conn.commit()
+        return {"repo_id": target_repo_id, "path": "impact/core.h"}
     if name == "get_file":
         return {"repo_id": target_repo_id, "path": "src/a.c"}
     if name == "index_status":
