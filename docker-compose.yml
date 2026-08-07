@@ -34,7 +34,8 @@ services:
     build:
       context: .
       target: runtime
-    image: argus:phase1
+    # One version for the whole release; override with ARGUS_VERSION.
+    image: argus:${ARGUS_VERSION:-0.1.0-rc1}
     # A GitLab token must never live in the compose file or the image. Export
     # it in the shell, or put it in a .env file next to this one (gitignored).
     environment:
@@ -49,7 +50,8 @@ services:
     security_opt:
       - no-new-privileges:true
     # A wedged ctags or git subprocess should not be able to starve the host.
-    # Raise these once Task 6 has measured a real full index.
+    # Raise these once a real full index has been measured against a
+    # production GitLab -- the pilot exists partly to produce that number.
     deploy:
       resources:
         limits:
@@ -59,7 +61,7 @@ services:
     build:
       context: .
       target: server
-    image: argus:phase2
+    image: argus:${ARGUS_VERSION:-0.1.0-rc1}
     restart: unless-stopped
     # Same token requirement as indexer: acl.resolve calls GitLab's API with
     # each developer's own PAT, but the server itself also needs the service
