@@ -261,3 +261,56 @@ def test_rerunning_resolution_is_idempotent(tmp_path):
         assert first == second
     finally:
         db.close()
+
+
+def test_a_vendored_copy_in_another_repo_does_not_become_a_false_edge(tmp_path):
+    """Found by the first real indexing run, on real public C projects.
+
+    zlib's own zconf.h is GENERATED at build time and absent from its source
+    tree, while libjpeg-turbo vendors a whole copy of zlib at
+    src/spng/zlib/zconf.h. That copy was the only candidate, so the ambiguity
+    guard never fired and `#include "zconf.h"` inside zlib resolved
+    confidently into libjpeg-turbo -- a false zlib -> libjpeg-turbo edge in a
+    graph where zlib depends on nothing.
+    """
+    db = open_db(tmp_path / "index.db")
+    try:
+        z = _repo(db, 1, "g/zlib")
+        j = _repo(db, 2, "g/libjpeg-turbo")
+        src = _file(db, z, "zlib.h")
+        _file(db, j, "src/spng/zlib/zconf.h")
+        _include(db, z, src, "zconf.h")
+        db.commit()
+
+        counts = resolve.resolve_includes(db)
+        row = db.execute("SELECT resolved_repo_id, resolution FROM includes").fetchone()
+        assert row["resolved_repo_id"] is None, (
+            "resolved into another repo's vendored copy")
+        assert counts[resolve.Resolution.NOT_FOUND] == 1
+    finally:
+        db.close()
+
+
+def test_a_library_namespacing_headers_under_its_own_name_still_resolves(tmp_path):
+    """The false positive the first version of the vendored check introduced.
+
+    `eal/include/eal/eal_thread.h` -- a library namespacing its headers under
+    a directory matching its own name -- is the most ordinary layout in C.
+    Treating that as vendored would erase legitimate edges across every
+    well-organised project.
+    """
+    db = open_db(tmp_path / "index.db")
+    try:
+        app = _repo(db, 1, "g/app")
+        eal = _repo(db, 2, "g/eal")
+        src = _file(db, app, "src/main.c")
+        hdr = _file(db, eal, "include/eal/eal_thread.h")
+        _include(db, app, src, "eal/eal_thread.h")
+        db.commit()
+
+        resolve.resolve_includes(db)
+        row = db.execute("SELECT resolved_file_id, resolved_repo_id FROM includes").fetchone()
+        assert row["resolved_file_id"] == hdr
+        assert row["resolved_repo_id"] == eal
+    finally:
+        db.close()
