@@ -692,9 +692,10 @@ def test_which_repo_excludes_weak_lexical_evidence_below_the_floor(two_repos):
     `test_which_repo_returns_empty_when_nothing_clears_the_floor`, which uses
     a query with neither direct nor lexical evidence at all and exits at the
     earlier `if not direct and not lexical` guard. This reaches the floor for
-    real: alpha gets 3 files matching the query, beta gets 1 -- a ratio of
-    1/3 (~0.33), under 0.35. Neither repo has a direct hit, so the floor
-    check is the only thing standing between beta and a place in the result.
+    real: alpha matches on 3 of its handful of files while beta's single match
+    is diluted across 40 unrelated ones, so beta's density lands far under
+    0.35 of alpha's. Neither repo has a direct hit, so the floor check is the
+    only thing standing between beta and a place in the result.
     """
     conn, ids = two_repos
     alpha, beta = ids["g/alpha"], ids["g/beta"]
@@ -705,14 +706,21 @@ def test_which_repo_excludes_weak_lexical_evidence_below_the_floor(two_repos):
                            size=len(phrase), blob_sha=f"a{i}", content=phrase)
     writes.upsert_file(conn, repo_id=beta, path="src/n1.txt", lang="text",
                        size=len(phrase), blob_sha="b0", content=phrase)
+    # Evidence is scored by density, so "fewer matches" is not the same as
+    # "weaker" -- a small repo with one match can be proportionally as strong
+    # as a larger one with three. Beta is made weak the way the floor actually
+    # measures it: its one match is diluted across many unrelated files.
+    for i in range(40):
+        writes.upsert_file(conn, repo_id=beta, path=f"src/pad{i}.txt", lang="text",
+                           size=4, blob_sha=f"p{i}", content="none")
     assert whichrepo.detect_shape(phrase) == whichrepo.Shape.PROSE
 
     rows = queries.which_repo([alpha, beta], conn, phrase)
     repo_ids_hit = {r["repo_id"] for r in rows}
     assert alpha in repo_ids_hit, "non-empty guard"
     assert beta not in repo_ids_hit, (
-        "beta's lexical evidence (1 file) is only ~0.33 of alpha's (3 files) "
-        "-- under _FLOOR_RATIO -- and must not appear in the result"
+        "beta's lexical density (1 match diluted across 44 files) is far "
+        "below alpha's -- under _FLOOR_RATIO -- so it must not appear"
     )
 
 
