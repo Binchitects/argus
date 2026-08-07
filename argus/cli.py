@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sqlite3
 import subprocess
@@ -11,6 +12,7 @@ from pathlib import Path
 from .config import Config, ConfigError
 from .embed import EmbeddingUnavailable
 from .gitlab import GitLabError, enumeration_health, list_projects
+from .kpi import LOWER_IS_BETTER, collect as collect_kpis
 from .mcpsrv import DEFAULT_ALLOWED_HOSTS, create_app
 from .mirror import GitError, ensure_mirror, head_sha, sync_worktree
 from .packs import format as pack_format
@@ -353,6 +355,34 @@ def _backup(cfg: Config, out_dir: Path, config_path: Path | None = None) -> int:
     return 0
 
 
+
+def _kpi(cfg: Config, as_json: bool) -> int:
+    """Print the automatic health indicators for this index.
+
+    `--json` exists so this can be appended to a file on a schedule and read
+    as a time series. A KPI looked at once is a number; the same KPI looked at
+    weekly is the only thing that catches slow decay -- an index quietly
+    ageing, a ctags that stopped extracting, a header layout drifting until
+    the dependency graph thins out.
+    """
+    conn = open_db(cfg.index.db_path)
+    try:
+        data = collect_kpis(conn, cfg.index.db_path)
+    finally:
+        conn.close()
+
+    if as_json:
+        print(json.dumps(data, sort_keys=True))
+        return 0
+
+    for key, value in data.items():
+        if key == "collected_at":
+            continue
+        marker = "  (lower is better)" if key in LOWER_IS_BETTER else ""
+        print(f"  {key:<26} {str(value):>12}{marker}")
+    return 0
+
+
 def _status(cfg: Config) -> int:
     conn = open_db(cfg.index.db_path)
     # Operator tool: pass the full known set explicitly rather than bypassing
@@ -668,6 +698,12 @@ def main(argv: list[str] | None = None) -> int:
     p_backup.add_argument("--out", required=True, type=Path,
                           help="Directory to write the snapshot into")
 
+    p_kpi = sub.add_parser(
+        "kpi", help="Print health indicators computed from the index")
+    p_kpi.add_argument("--config", required=True, type=Path)
+    p_kpi.add_argument("--json", action="store_true",
+                       help="Emit one JSON object, for appending to a time series")
+
     p_status = sub.add_parser("status", help="Show per-repo index freshness")
     p_status.add_argument("--config", required=True, type=Path)
 
@@ -776,6 +812,8 @@ def main(argv: list[str] | None = None) -> int:
             return _serve(cfg, args.host, args.port, args.allowed_hosts)
         if args.command == "flush-acl":
             return _flush_acl(cfg, args.user)
+        if args.command == "kpi":
+            return _kpi(cfg, args.json)
         if args.command == "backup":
             return _backup(cfg, args.out, args.config)
         if args.command == "resolve":
