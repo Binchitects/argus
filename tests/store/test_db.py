@@ -43,8 +43,8 @@ def test_foreign_keys_enforced(tmp_path):
 def test_cascade_delete_removes_files(tmp_path):
     conn = open_db(tmp_path / "i.db")
     conn.execute(
-        "INSERT INTO repos (gitlab_id, path_with_namespace, default_branch, http_url)"
-        " VALUES (1, 'g/a', 'main', 'https://x/g/a')"
+        "INSERT INTO repos (gitlab_id, path_with_namespace, default_branch, branch,"
+        " http_url) VALUES (1, 'g/a', 'main', 'main', 'https://x/g/a')"
     )
     repo_id = conn.execute("SELECT id FROM repos").fetchone()["id"]
     conn.execute(
@@ -65,14 +65,14 @@ def test_connect_readonly_rejects_writes(tmp_path):
     ro = connect_readonly(path)
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
         ro.execute("INSERT INTO repos (gitlab_id, path_with_namespace, default_branch,"
-                   " http_url) VALUES (1, 'g/a', 'main', 'x')")
+                   " branch, http_url) VALUES (1, 'g/a', 'main', 'main', 'x')")
 
     # Verify that disabling PRAGMA query_only still fails.
     # This pins the guarantee to file-level mode=ro, not the bypassable pragma.
     ro.execute("PRAGMA query_only = OFF")
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
         ro.execute("INSERT INTO repos (gitlab_id, path_with_namespace, default_branch,"
-                   " http_url) VALUES (1, 'g/b', 'main', 'y')")
+                   " branch, http_url) VALUES (1, 'g/b', 'main', 'main', 'y')")
 
 
 def test_connect_readonly_can_read(tmp_path):

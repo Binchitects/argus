@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import fnmatch
 import os
+from collections.abc import Sequence
+from urllib.parse import quote
 import stat
 import subprocess
 import sys
@@ -147,8 +150,32 @@ def mirror_path(index_cfg: IndexConfig, gitlab_id: int) -> Path:
     return index_cfg.mirrors_dir / f"{gitlab_id}.git"
 
 
-def tree_path(index_cfg: IndexConfig, gitlab_id: int) -> Path:
-    return index_cfg.trees_dir / str(gitlab_id)
+def tree_path(index_cfg: IndexConfig, gitlab_id: int,
+              branch: str | None = None) -> Path:
+    """Worktree for one project at one branch.
+
+    Keyed by project alone before a repo could be indexed at several refs --
+    which meant two branches of the same project would check out over each
+    other, and whichever ran last would silently define the contents of both.
+
+    Branch names may contain "/" (`release/v1`) and on Windows also ":" and
+    other characters a path cannot hold, so the branch component is encoded
+    rather than used raw. `branch=None` keeps the old bare path so existing
+    single-branch trees are reused instead of re-created.
+    """
+    if branch is None:
+        return index_cfg.trees_dir / str(gitlab_id)
+    return index_cfg.trees_dir / str(gitlab_id) / _branch_dir(branch)
+
+
+def _branch_dir(branch: str) -> str:
+    """A filesystem-safe, collision-free directory name for a branch.
+
+    Percent-encoding rather than replacing separators with "-": `release/v1`
+    and `release-v1` are different branches and must not land in the same
+    directory, and a lossy mapping would make one silently shadow the other.
+    """
+    return quote(branch, safe="")
 
 
 def ensure_mirror(index_cfg: IndexConfig, project: Project, *,
@@ -261,8 +288,8 @@ def _diff_changes(mirror: Path, old_sha: str, new_sha: str) -> list[Change]:
 
 
 def sync_worktree(index_cfg: IndexConfig, gitlab_id: int,
-                  mirror: Path, sha: str) -> Path:
-    tree = tree_path(index_cfg, gitlab_id)
+                  mirror: Path, sha: str, branch: str | None = None) -> Path:
+    tree = tree_path(index_cfg, gitlab_id, branch)
     if tree.exists():
         _git(tree, "checkout", "--force", "--detach", sha)
     else:
@@ -283,3 +310,35 @@ def blob_shas(mirror: Path, sha: str) -> dict[str, str]:
         if len(parts) >= 3 and path:
             result[path] = parts[2]
     return result
+
+
+def list_branches(mirror: Path) -> list[str]:
+    """Every branch in the mirror, in git's own order.
+
+    The mirror already carries them all: ensure_mirror clones with --mirror
+    and fetches "+refs/heads/*:refs/heads/*", so selecting a branch to index
+    needs no extra network round trip.
+    """
+    out = _git(mirror, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def select_branches(available: Sequence[str], patterns: Sequence[str],
+                    default_branch: str) -> list[str]:
+    """Branches to index: the default, plus anything matching `patterns`.
+
+    The default branch is included unconditionally. It is what an unqualified
+    question is answered from, so a pattern list that happens not to match it
+    -- `["v*"]` against a default of `main` -- would leave the default empty
+    while every release branch was indexed, and no error would be raised.
+
+    Order is deterministic (default first, then the rest as git listed them)
+    so that an indexing run is reproducible.
+    """
+    chosen = [default_branch] if default_branch in available else []
+    for branch in available:
+        if branch in chosen:
+            continue
+        if any(fnmatch.fnmatchcase(branch, pattern) for pattern in patterns):
+            chosen.append(branch)
+    return chosen

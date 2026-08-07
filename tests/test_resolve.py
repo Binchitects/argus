@@ -60,8 +60,8 @@ def test_existing_include_rows_default_to_null_resolution(tmp_path):
     written before this migration."""
     conn = open_db(tmp_path / "index.db")
     try:
-        conn.execute("INSERT INTO repos (gitlab_id, path_with_namespace, "
-                     "default_branch, http_url) VALUES (1, 'g/r', 'main', 'u')")
+        conn.execute("INSERT INTO repos (gitlab_id, path_with_namespace, default_branch, "
+                     "branch, http_url) VALUES (1, 'g/r', 'main', 'main', 'u')")
         conn.execute("INSERT INTO files (repo_id, path, size, blob_sha, content) "
                      "VALUES (1, 'a.c', 1, 'sha', '')")
         conn.execute("INSERT INTO includes (repo_id, file_id, raw, is_angle) "
@@ -76,7 +76,7 @@ def test_existing_include_rows_default_to_null_resolution(tmp_path):
 def _repo(conn, gitlab_id, name):
     cur = conn.execute(
         "INSERT INTO repos (gitlab_id, path_with_namespace, default_branch, "
-        "http_url) VALUES (?, ?, 'main', 'u')", (gitlab_id, name))
+        "branch, http_url) VALUES (?, ?, 'main', 'main', 'u')", (gitlab_id, name))
     return cur.lastrowid
 
 

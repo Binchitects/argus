@@ -97,6 +97,12 @@ def _minimal_args_for(name, conn, target_repo_id):
         # collision strategy as find_symbol), so switching the allowlist
         # switches which repo's row comes back.
         return {"description": "SharedName"}
+    if name == "scope_to_branch":
+        # No extra arguments: branch=None means "each project's default
+        # branch", and the two fixture repos are both on their default. The
+        # allowlist alone therefore decides the result, which is exactly the
+        # property under test.
+        return {}
     raise NotImplementedError(
         f"_minimal_args_for has no branch for {name!r}. A newly added public "
         "query function must be given deliberate arguments here before this "

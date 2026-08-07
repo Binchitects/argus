@@ -29,6 +29,17 @@ class IndexConfig:
     max_file_bytes: int = 1048576
     exclude_dirs: tuple[str, ...] = DEFAULT_EXCLUDE_DIRS
     repo_time_budget_seconds: int = 600
+    #: Glob patterns naming the branches to index, e.g. ("main", "v*").
+    #:
+    #: Empty -- the default -- means each project's default branch and nothing
+    #: else, which is what Argus did before it could index more than one. The
+    #: project's default branch is ALWAYS indexed whether or not it matches a
+    #: pattern: it is what every answer falls back to, and a config whose
+    #: patterns happen to miss it would leave the default silently empty.
+    #:
+    #: Cost is roughly linear in branches matched. A release-per-major-version
+    #: layout with v1/v2/v3 alongside main is four times the index.
+    branches: tuple[str, ...] = ()
 
     @property
     def mirrors_dir(self) -> Path:
@@ -97,6 +108,7 @@ class Config:
                 max_file_bytes=max_file_bytes,
                 exclude_dirs=tuple(ix.get("exclude_dirs", DEFAULT_EXCLUDE_DIRS)),
                 repo_time_budget_seconds=repo_time_budget_seconds,
+                branches=tuple(ix.get("branches", ()) or ()),
             ),
             packs=PacksConfig(
                 dir=Path(pk["dir"]) if pk.get("dir")

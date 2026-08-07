@@ -25,17 +25,30 @@ class IndexResult:
 
 
 def _repo_id(conn, gitlab_id: int) -> int:
-    return conn.execute(
-        "SELECT id FROM repos WHERE gitlab_id = ?", (gitlab_id,)
-    ).fetchone()["id"]
+    """The row for a project's default branch.
+
+    A project now owns one row per indexed branch, so `WHERE gitlab_id = ?`
+    alone returns an arbitrary one -- and whichever it returned would receive
+    every branch's files. Callers that know which branch they are indexing
+    pass `repo_id` to index_repo directly; this fallback resolves to the
+    default branch, which is what a caller with no branch in mind means.
+    """
+    row = conn.execute(
+        "SELECT id FROM repos WHERE gitlab_id = ?"
+        " ORDER BY (branch = default_branch) DESC, id LIMIT 1", (gitlab_id,)
+    ).fetchone()
+    return row["id"]
 
 
 def index_repo(conn, index_cfg: IndexConfig, project: Project,
                mirror_path: Path, tree: Path, new_sha: str,
-               old_sha: str | None, *, now=None) -> IndexResult:
+               old_sha: str | None, *, now=None,
+               repo_id: int | None = None) -> IndexResult:
     now = now or time.time
     started = now()
-    repo_id = _repo_id(conn, project.gitlab_id)
+    # Explicit when the caller is walking branches: the project alone no
+    # longer identifies a row.
+    repo_id = _repo_id(conn, project.gitlab_id) if repo_id is None else repo_id
     result = IndexResult(repo_id=repo_id, sha=new_sha)
 
     # One ancestry resolution for both answers. An old_sha that no longer

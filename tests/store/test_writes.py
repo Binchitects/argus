@@ -17,14 +17,36 @@ def repo_id(conn):
 
 
 def test_upsert_repo_is_idempotent(conn):
+    """Same project, same branch: one row, fields refreshed."""
     a = writes.upsert_repo(conn, gitlab_id=7, path_with_namespace="g/a",
-                           default_branch="main", http_url="https://x/g/a")
+                           default_branch="main", branch="main",
+                           http_url="https://x/g/a")
     b = writes.upsert_repo(conn, gitlab_id=7, path_with_namespace="g/a-renamed",
-                           default_branch="trunk", http_url="https://x/g/a")
+                           default_branch="main", branch="main",
+                           http_url="https://x/g/a")
     assert a == b
     row = conn.execute("SELECT * FROM repos WHERE id = ?", (a,)).fetchone()
     assert row["path_with_namespace"] == "g/a-renamed"
-    assert row["default_branch"] == "trunk"
+
+
+def test_renaming_the_default_branch_leaves_the_old_row_for_pruning(conn):
+    """A row is identified by (project, branch), so renaming the default
+    branch produces a *new* row rather than moving the old one -- the old ref
+    genuinely no longer exists.
+
+    This is deliberate. The alternative, mutating the branch of an existing
+    row, silently keeps a tree indexed under a ref that is gone. Instead the
+    stale row is left visible and removed by the indexer's prune step, which
+    is the same mechanism that handles a deleted release branch. Pinned here
+    because the two behaviours are indistinguishable until something prunes.
+    """
+    old = writes.upsert_repo(conn, gitlab_id=7, path_with_namespace="g/a",
+                             default_branch="main", branch="main", http_url="u")
+    new = writes.upsert_repo(conn, gitlab_id=7, path_with_namespace="g/a",
+                             default_branch="trunk", branch="trunk", http_url="u")
+    assert old != new
+    branches = {r["branch"] for r in conn.execute("SELECT branch FROM repos")}
+    assert branches == {"main", "trunk"}
 
 
 def test_upsert_file_replaces_content(conn, repo_id):

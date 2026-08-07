@@ -6,21 +6,34 @@ import sqlite3
 
 def upsert_repo(conn: sqlite3.Connection, *, gitlab_id: int,
                 path_with_namespace: str, default_branch: str,
-                http_url: str) -> int:
+                http_url: str, branch: str | None = None) -> int:
+    """Insert or update the row for one project *at one branch*.
+
+    `branch` defaults to `default_branch`, which is what every caller meant
+    before a repo could be indexed at more than one ref -- so existing callers
+    keep working and keep addressing the trunk row.
+
+    The conflict target is (gitlab_id, branch), and both halves matter: keyed
+    on gitlab_id alone the branches collapse onto a single row that each pass
+    overwrites, and keyed on nothing a re-index inserts a duplicate every time.
+    """
+    branch = branch or default_branch
     conn.execute(
         """
-        INSERT INTO repos (gitlab_id, path_with_namespace, default_branch, http_url)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(gitlab_id) DO UPDATE SET
+        INSERT INTO repos (gitlab_id, path_with_namespace, default_branch,
+                           branch, http_url)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(gitlab_id, branch) DO UPDATE SET
             path_with_namespace = excluded.path_with_namespace,
             default_branch      = excluded.default_branch,
             http_url            = excluded.http_url
         """,
-        (gitlab_id, path_with_namespace, default_branch, http_url),
+        (gitlab_id, path_with_namespace, default_branch, branch, http_url),
     )
     conn.commit()
     return conn.execute(
-        "SELECT id FROM repos WHERE gitlab_id = ?", (gitlab_id,)
+        "SELECT id FROM repos WHERE gitlab_id = ? AND branch = ?",
+        (gitlab_id, branch),
     ).fetchone()["id"]
 
 

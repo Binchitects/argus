@@ -14,7 +14,8 @@ from .embed import EmbeddingUnavailable
 from .gitlab import GitLabError, enumeration_health, list_projects
 from .kpi import LOWER_IS_BETTER, collect as collect_kpis
 from .mcpsrv import DEFAULT_ALLOWED_HOSTS, create_app
-from .mirror import GitError, ensure_mirror, head_sha, sync_worktree
+from .mirror import (GitError, ensure_mirror, head_sha, list_branches,
+                     select_branches, sync_worktree)
 from .packs import format as pack_format
 from .packs import registry
 from .packs.build import BuildError, build_pack, fetch_source
@@ -56,6 +57,94 @@ def preflight() -> str | None:
             "Exuberant Ctags has no --output-format=json and cannot be used."
         )
     return None
+
+
+def _index_branch(conn, cfg: Config, project, branch: str, mirror_dir) -> bool:
+    """Index one project at one branch. Returns True if it ended unhealthy.
+
+    The branch appears in the printed label only when it is not the default,
+    so single-branch output is unchanged and a line naming a branch always
+    means something other than trunk.
+    """
+    label = (project.path_with_namespace if branch == project.default_branch
+             else f"{project.path_with_namespace}@{branch}")
+    repo_id = writes.upsert_repo(
+        conn, gitlab_id=project.gitlab_id,
+        path_with_namespace=project.path_with_namespace,
+        default_branch=project.default_branch, branch=branch,
+        http_url=project.http_url,
+    )
+    old = conn.execute(
+        "SELECT last_indexed_sha FROM repos WHERE id = ?", (repo_id,)
+    ).fetchone()["last_indexed_sha"]
+
+    started = time.time()
+    try:
+        sha = head_sha(mirror_dir, branch)
+        if sha == old:
+            # index_repo is the only other writer of last-run state, and this
+            # path never calls it. Without this, a repo polled every hour for
+            # six months and correctly up to date every time reported a
+            # six-month-old last_run_at -- indistinguishable from one nothing
+            # has looked at since.
+            writes.record_run_state(conn, repo_id, timed_out=False,
+                                    symbols_failed=False, ts=int(time.time()))
+            print(f"{label}: up to date")
+            return False
+        tree = sync_worktree(cfg.index, project.gitlab_id, mirror_dir, sha, branch)
+        result = index_repo(conn, cfg.index, project, mirror_dir, tree, sha, old,
+                            repo_id=repo_id)
+    except GitError as exc:
+        writes.record_error(conn, repo_id, None, "git", str(exc), int(time.time()))
+        # Record the failure rather than leaving the PREVIOUS pass's flags and
+        # timestamp standing: a repo whose fetch has failed every run for
+        # weeks otherwise showed as clean and freshly checked.
+        writes.record_run_state(conn, repo_id, timed_out=False,
+                                symbols_failed=False, ts=int(time.time()),
+                                error=str(exc))
+        print(f"{label}: FAILED ({exc})", file=sys.stderr)
+        return True
+    except Exception as exc:   # noqa: BLE001 - one bad repo must not end the run
+        # Nothing caught a non-GitError escaping index_repo, so it aborted the
+        # whole run: every repo after this one went unindexed.
+        writes.record_error(conn, repo_id, None, "index", repr(exc), int(time.time()))
+        writes.record_run_state(conn, repo_id, timed_out=False,
+                                symbols_failed=False, ts=int(time.time()),
+                                error=repr(exc))
+        print(f"{label}: FAILED ({exc!r})", file=sys.stderr)
+        return True
+
+    flags = ""
+    if result.timed_out:
+        flags += " TIMED-OUT"
+    if result.symbols_failed:
+        flags += " SYMBOLS-FAILED"
+    print(f"{label}: indexed={result.indexed} deleted={result.deleted} "
+          f"skipped={result.skipped} errors={result.errors}{flags} "
+          f"({time.time() - started:.1f}s)")
+    return bool(result.timed_out or result.symbols_failed)
+
+
+def _prune_missing_branches(conn, project, keep) -> int:
+    """Drop rows for branches this project no longer indexes.
+
+    A release branch deleted upstream, or a default branch renamed, otherwise
+    leaves a fully populated row behind forever -- and it keeps answering
+    questions, because nothing about it looks stale: it has a real SHA and a
+    real timestamp from the last run that did find it.
+
+    The delete cascades to files, symbols and includes by foreign key.
+    """
+    marks = ",".join("?" for _ in keep) or "NULL"
+    cur = conn.execute(
+        f"DELETE FROM repos WHERE gitlab_id = ? AND branch NOT IN ({marks})",
+        (project.gitlab_id, *keep),
+    )
+    conn.commit()
+    if cur.rowcount:
+        print(f"{project.path_with_namespace}: dropped {cur.rowcount} "
+              f"branch(es) no longer indexed")
+    return cur.rowcount
 
 
 def _index(cfg: Config, only: str | None, reset_retries: bool = False,
@@ -121,74 +210,41 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
 
     any_repo_unhealthy = False
     for project in projects:
-        repo_id = writes.upsert_repo(
-            conn, gitlab_id=project.gitlab_id,
-            path_with_namespace=project.path_with_namespace,
-            default_branch=project.default_branch, http_url=project.http_url,
-        )
-        old = conn.execute(
-            "SELECT last_indexed_sha FROM repos WHERE id = ?", (repo_id,)
-        ).fetchone()["last_indexed_sha"]
-
-        started = time.time()
+        # One mirror per project, however many branches come out of it: the
+        # mirror already carries every ref (ensure_mirror fetches
+        # "+refs/heads/*"), so indexing four branches costs one fetch.
         try:
             mirror_dir = ensure_mirror(cfg.index, project,
                                        clone_url=project.http_url,
                                        token=cfg.gitlab.token)
-            sha = head_sha(mirror_dir, project.default_branch)
-            if sha == old:
-                # index_repo is the only other writer of last-run state, and
-                # this path never calls it. Without this, a repo polled every
-                # hour for six months and correctly up to date every time
-                # reported a six-month-old last_run_at -- indistinguishable
-                # from one nothing has looked at since. Clearing the flags is
-                # right here: a previous pass that timed out or lost ctags
-                # held the SHA, so it could not have reached this branch.
-                writes.record_run_state(conn, repo_id, timed_out=False,
-                                        symbols_failed=False, ts=int(time.time()))
-                print(f"{project.path_with_namespace}: up to date")
-                continue
-            tree = sync_worktree(cfg.index, project.gitlab_id, mirror_dir, sha)
-            result = index_repo(conn, cfg.index, project, mirror_dir, tree, sha, old)
+            branches = select_branches(list_branches(mirror_dir),
+                                       cfg.index.branches,
+                                       project.default_branch)
         except GitError as exc:
             any_repo_unhealthy = True
-            writes.record_error(conn, repo_id, None, "git", str(exc), int(time.time()))
-            # Record the failure rather than leaving the PREVIOUS pass's flags
-            # and timestamp standing: a repo whose fetch has failed every run
-            # for weeks otherwise showed as clean and freshly checked.
+            # No branch has been established yet, so the failure is recorded
+            # against the default-branch row -- the one an unqualified
+            # question is answered from, and so the one an operator needs to
+            # see as unhealthy.
+            repo_id = writes.upsert_repo(
+                conn, gitlab_id=project.gitlab_id,
+                path_with_namespace=project.path_with_namespace,
+                default_branch=project.default_branch,
+                branch=project.default_branch, http_url=project.http_url)
+            writes.record_error(conn, repo_id, None, "git", str(exc),
+                                int(time.time()))
             writes.record_run_state(conn, repo_id, timed_out=False,
                                     symbols_failed=False, ts=int(time.time()),
                                     error=str(exc))
             print(f"{project.path_with_namespace}: FAILED ({exc})", file=sys.stderr)
             continue
-        except Exception as exc:   # noqa: BLE001 - one bad repo must not end the run
-            # Nothing caught a non-GitError escaping index_repo, so it aborted
-            # the whole run: every repo after this one went unindexed, and it
-            # happened after the retry queue had been read and before any run
-            # state was recorded. Contain it to this repo and leave a record.
-            any_repo_unhealthy = True
-            writes.record_error(conn, repo_id, None, "index", repr(exc),
-                                int(time.time()))
-            writes.record_run_state(conn, repo_id, timed_out=False,
-                                    symbols_failed=False, ts=int(time.time()),
-                                    error=repr(exc))
-            print(f"{project.path_with_namespace}: FAILED ({exc!r})", file=sys.stderr)
-            continue
 
-        if result.timed_out or result.symbols_failed:
-            any_repo_unhealthy = True
+        for branch in branches:
+            if _index_branch(conn, cfg, project, branch, mirror_dir):
+                any_repo_unhealthy = True
 
-        flags = ""
-        if result.timed_out:
-            flags += " TIMED-OUT"
-        if result.symbols_failed:
-            flags += " SYMBOLS-FAILED"
-        print(
-            f"{project.path_with_namespace}: indexed={result.indexed} "
-            f"deleted={result.deleted} skipped={result.skipped} "
-            f"errors={result.errors}{flags} "
-            f"({time.time() - started:.1f}s)"
-        )
+        _prune_missing_branches(conn, project, branches)
+
     # One pass over the whole database, after every repo. An include can point
     # into a repo indexed later in this same cycle, so resolving per repo would
     # make the graph depend on indexing order.

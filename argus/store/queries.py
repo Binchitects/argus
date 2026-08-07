@@ -812,3 +812,66 @@ def impact_of(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
         "truncated": truncated,
         "by_repo": by_repo,
     }
+
+
+def scope_to_branch(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
+                    branch: str | None = None) -> list[int]:
+    """Narrow an allowlist to one branch per project.
+
+    `branch=None` means each project's default branch, which is what an
+    unqualified question means: answer from trunk. Naming a branch selects it
+    for every project that has it indexed.
+
+    This is a *narrowing* of an allowlist that access control already
+    produced, never a widening -- a repo id that was not permitted cannot
+    appear in the result, whatever branch is asked for. Same rule as every
+    other function here: `allowed_repo_ids` is first, positional, no default.
+
+    Without it, indexing v1/v2/v3 alongside main makes every answer worse
+    rather than better: `find_symbol` returns the same function four times,
+    once per branch, and nothing in the result says which is trunk.
+
+    An unknown branch name yields [] rather than falling back to the default.
+    Silently answering from trunk when someone asked about v2 is the failure
+    this whole feature exists to prevent.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids:
+        return []
+    out: list[int] = []
+    for chunk in _chunks(ids, 1):
+        marks = ",".join("?" for _ in chunk)
+        if branch is None:
+            rows = conn.execute(
+                f"SELECT id FROM repos WHERE id IN ({marks})"
+                "  AND branch = default_branch", chunk)
+        else:
+            rows = conn.execute(
+                f"SELECT id FROM repos WHERE id IN ({marks}) AND branch = ?",
+                (*chunk, branch))
+        out.extend(r[0] for r in rows)
+    return out
+
+
+def _branches_available(allowed_repo_ids: Sequence[int],
+                        conn: sqlite3.Connection) -> list[str]:
+    """Branch names the caller may ask for, default first.
+
+    Private on purpose. It is an error-message helper, not a query surface,
+    and it cannot satisfy test_every_public_query_actually_filters: two repos
+    both on `main` yield the same list for either allowlist, so the guard
+    could not tell a filtering implementation from a leaking one. Keeping it
+    public would have meant exempting it, which weakens the guard for every
+    function it covers.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids:
+        return []
+    seen: dict[str, int] = {}
+    for chunk in _chunks(ids, 0):
+        marks = ",".join("?" for _ in chunk)
+        for row in conn.execute(
+                f"SELECT branch, (branch = default_branch) AS is_default"
+                f"  FROM repos WHERE id IN ({marks})", chunk):
+            seen[row["branch"]] = max(seen.get(row["branch"], 0), row["is_default"])
+    return sorted(seen, key=lambda b: (-seen[b], b))

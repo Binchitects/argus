@@ -17,7 +17,7 @@ def db(tmp_path):
 def _repo(conn, gitlab_id, name):
     return conn.execute(
         "INSERT INTO repos (gitlab_id, path_with_namespace, default_branch, "
-        "http_url) VALUES (?, ?, 'main', 'u')", (gitlab_id, name)).lastrowid
+        "branch, http_url) VALUES (?, ?, 'main', 'main', 'u')", (gitlab_id, name)).lastrowid
 
 
 def _file(conn, repo_id, path):

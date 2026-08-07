@@ -246,16 +246,49 @@ async def _with_audit(db_path: Path | str, tool: str, identity: acl.Identity,
         )
 
 
+
+class UnknownBranch(queries.QueryError):
+    """Asked for a branch that is not indexed, naming the ones that are.
+
+    A QueryError because run_readonly propagates exactly those unchanged: it
+    is a mistake the caller can fix by rewriting the call, unlike the
+    IndexUnavailable case it would otherwise be flattened into. An agent told
+    "the index is unavailable; do not retry" cannot discover that it simply
+    asked for the wrong branch.
+    """
+
+
+def _scoped(conn, identity, branch: str | None):
+    """The caller's allowlist, narrowed to one branch per project.
+
+    Raising on an unknown branch rather than returning nothing is the point of
+    the feature: a developer who asks about v2 and silently receives trunk
+    answers has no way to notice, and acts on code that is not the code they
+    are changing. An empty result would read as "no such symbol".
+    """
+    scoped = queries.scope_to_branch(identity.allowed_repo_ids, conn, branch)
+    if branch is not None and not scoped and identity.allowed_repo_ids:
+        available = queries._branches_available(identity.allowed_repo_ids, conn)
+        raise UnknownBranch(
+            f"branch {branch!r} is not indexed. Indexed branches: "
+            + (", ".join(available) if available else "(none)"))
+    return scoped
+
+
 async def find_symbol_impl(db_path: Path | str, identity: acl.Identity, name: str,
-                            kind: str | None = None) -> list[dict]:
+                            kind: str | None = None,
+                            branch: str | None = None) -> list[dict]:
     rows = await run_readonly(
         db_path,
-        lambda conn: queries.find_symbol(identity.allowed_repo_ids, conn, name, kind=kind),
+        lambda conn: queries.find_symbol(_scoped(conn, identity, branch), conn,
+                                         name, kind=kind),
     )
     return [dict(row) for row in rows]
 
 
-async def find_references_impl(db_path: Path | str, identity: acl.Identity, name: str) -> list[dict]:
+async def find_references_impl(db_path: Path | str, identity: acl.Identity,
+                               name: str,
+                               branch: str | None = None) -> list[dict]:
     # queries.find_references already returns list[dict] (unlike the other
     # three, which return list[sqlite3.Row]) -- no conversion needed.
     #
@@ -270,7 +303,7 @@ async def find_references_impl(db_path: Path | str, identity: acl.Identity, name
     # built INSIDE this same run_readonly closure so the whole lookup stays
     # one run_in_threadpool call (see run_readonly's docstring).
     def _run(conn: Any) -> list[dict]:
-        rows = queries.find_references(identity.allowed_repo_ids, conn, name)
+        rows = queries.find_references(_scoped(conn, identity, branch), conn, name)
         if not rows:
             return rows
         repo_id_by_namespace = {
@@ -294,7 +327,8 @@ async def find_references_impl(db_path: Path | str, identity: acl.Identity, name
 _DANGLING_REGEX_SUGGESTION = ", or use regex=True."
 
 
-async def search_code_impl(db_path: Path | str, identity: acl.Identity, query: str) -> list[dict]:
+async def search_code_impl(db_path: Path | str, identity: acl.Identity, query: str,
+                           branch: str | None = None) -> list[dict]:
     # queries.QueryError's message is otherwise already actionable prompt
     # text (see queries.py) and FastMCP's tool dispatch turns any exception
     # raised here into an isError=True CallToolResult carrying str(exc) --
@@ -304,8 +338,15 @@ async def search_code_impl(db_path: Path | str, identity: acl.Identity, query: s
     try:
         rows = await run_readonly(
             db_path,
-            lambda conn: queries.search_code(identity.allowed_repo_ids, conn, query),
+            lambda conn: queries.search_code(_scoped(conn, identity, branch),
+                                             conn, query),
         )
+    except UnknownBranch:
+        # A QueryError subclass, so it would otherwise be caught below and
+        # rebuilt as a plain QueryError -- losing the type before the caller
+        # ever sees it. Nothing here needs rewriting; the message is already
+        # about the branch, not the FTS query.
+        raise
     except queries.QueryError as exc:
         message = str(exc).replace(_DANGLING_REGEX_SUGGESTION, ".")
         raise queries.QueryError(message) from exc
@@ -349,7 +390,8 @@ async def repo_map_impl(db_path: Path | str, identity: acl.Identity,
 
 
 async def which_repo_impl(db_path: Path | str, identity: acl.Identity,
-                          description: str) -> list[dict]:
+                          description: str,
+                          branch: str | None = None) -> list[dict]:
     # No `limit` parameter: the registered `which_repo` tool below never
     # exposes one to a caller, so this always ran with queries.which_repo's
     # own default anyway. Dropping it here removes a parameter nothing could
@@ -358,7 +400,8 @@ async def which_repo_impl(db_path: Path | str, identity: acl.Identity,
     # never needed callers to tune.
     return await run_readonly(
         db_path,
-        lambda conn: queries.which_repo(identity.allowed_repo_ids, conn, description),
+        lambda conn: queries.which_repo(_scoped(conn, identity, branch), conn,
+                                        description),
     )
 
 
@@ -629,27 +672,33 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         )
 
     @server.tool(name="find_symbol", description=_FIND_SYMBOL_DESC)
-    async def find_symbol(name: str, kind: str | None = None, *, ctx: Context) -> list[dict]:
+    async def find_symbol(name: str, kind: str | None = None,
+                          branch: str | None = None, *, ctx: Context) -> list[dict]:
         identity = _identity(ctx)
         return await _with_audit(
-            db_path, "find_symbol", identity, {"name": name, "kind": kind},
-            lambda: find_symbol_impl(db_path, identity, name, kind=kind),
+            db_path, "find_symbol", identity,
+            {"name": name, "kind": kind, "branch": branch},
+            lambda: find_symbol_impl(db_path, identity, name, kind=kind,
+                                     branch=branch),
         )
 
     @server.tool(name="find_references", description=_FIND_REFERENCES_DESC)
-    async def find_references(name: str, *, ctx: Context) -> list[dict]:
+    async def find_references(name: str, branch: str | None = None, *,
+                              ctx: Context) -> list[dict]:
         identity = _identity(ctx)
         return await _with_audit(
-            db_path, "find_references", identity, {"name": name},
-            lambda: find_references_impl(db_path, identity, name),
+            db_path, "find_references", identity,
+            {"name": name, "branch": branch},
+            lambda: find_references_impl(db_path, identity, name, branch=branch),
         )
 
     @server.tool(name="search_code", description=_SEARCH_CODE_DESC)
-    async def search_code(query: str, *, ctx: Context) -> list[dict]:
+    async def search_code(query: str, branch: str | None = None, *,
+                          ctx: Context) -> list[dict]:
         identity = _identity(ctx)
         return await _with_audit(
-            db_path, "search_code", identity, {"query": query},
-            lambda: search_code_impl(db_path, identity, query),
+            db_path, "search_code", identity, {"query": query, "branch": branch},
+            lambda: search_code_impl(db_path, identity, query, branch=branch),
         )
 
     @server.tool(name="get_file", description=_GET_FILE_DESC)
@@ -677,7 +726,8 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         )
 
     @server.tool(name="which_repo", description=_WHICH_REPO_DESC)
-    async def which_repo(description: str, *, ctx: Context) -> list[dict]:
+    async def which_repo(description: str, branch: str | None = None, *,
+                         ctx: Context) -> list[dict]:
         identity = _identity(ctx)
         # description is truncated to 200 chars for the audit row only -- a
         # pasted stack trace or diff can be thousands of lines, and the audit
@@ -685,6 +735,7 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         # _with_audit's docstring). The full, untruncated description still
         # goes to which_repo_impl below.
         return await _with_audit(
-            db_path, "which_repo", identity, {"description": description[:200]},
-            lambda: which_repo_impl(db_path, identity, description),
+            db_path, "which_repo", identity,
+            {"description": description[:200], "branch": branch},
+            lambda: which_repo_impl(db_path, identity, description, branch=branch),
         )
