@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .config import Config, ConfigError
 from .embed import EmbeddingUnavailable
-from .gitlab import GitLabError, list_projects
+from .gitlab import GitLabError, enumeration_health, list_projects
 from .mcpsrv import DEFAULT_ALLOWED_HOSTS, create_app
 from .mirror import GitError, ensure_mirror, head_sha, sync_worktree
 from .packs import format as pack_format
@@ -55,7 +55,24 @@ def preflight() -> str | None:
     return None
 
 
-def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
+def _index(cfg: Config, only: str | None, reset_retries: bool = False,
+           allow_partial: bool = False) -> int:
+    # The service token must be able to see every repository, or the index is
+    # silently partial and every answer drawn from it is confidently
+    # incomplete. Checked before any work, because the failure produces no
+    # errors of its own -- see gitlab.EnumerationHealth.
+    if not allow_partial:
+        try:
+            health = enumeration_health(cfg.gitlab)
+        except GitLabError as exc:
+            print(f"could not verify GitLab enumeration: {exc}", file=sys.stderr)
+            return 3
+        if not health.ok:
+            print(health.problem, file=sys.stderr)
+            print("\nRe-run with --allow-partial-enumeration to index anyway.",
+                  file=sys.stderr)
+            return 3
+
     problem = preflight()
     if problem:
         print(problem, file=sys.stderr)
@@ -493,6 +510,12 @@ def main(argv: list[str] | None = None) -> int:
     p_index = sub.add_parser("index", help="Mirror and index repositories")
     p_index.add_argument("--config", required=True, type=Path)
     p_index.add_argument("--repo", help="Index only this path_with_namespace")
+    p_index.add_argument(
+        "--allow-partial-enumeration", action="store_true",
+        help=("Index even when the service token cannot see every repository. "
+              "Without an admin token GitLab's membership=false returns only "
+              "PUBLIC projects, so the index would silently cover a fraction "
+              "of the estate and every answer would be confidently incomplete."))
     p_index.add_argument("--reset-retries", action="store_true",
                          help="Clear retry counters before indexing (manual recovery only; do not use on a schedule)")
 
@@ -594,7 +617,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "index":
-            return _index(cfg, args.repo, args.reset_retries)
+            return _index(cfg, args.repo, args.reset_retries,
+                          allow_partial=args.allow_partial_enumeration)
         if args.command == "serve":
             return _serve(cfg, args.host, args.port, args.allowed_hosts)
         if args.command == "flush-acl":

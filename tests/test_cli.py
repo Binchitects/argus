@@ -8,6 +8,23 @@ from mcp.server.fastmcp import FastMCP
 from argus import cli
 from argus.gitlab import Project
 from argus.mcpsrv import DEFAULT_ALLOWED_HOSTS
+from argus.gitlab import EnumerationHealth
+
+
+@pytest.fixture(autouse=True)
+def _healthy_enumeration(monkeypatch):
+    """Stub the GitLab enumeration probe for every CLI test.
+
+    `argus index` refuses to run when the service token cannot see every
+    repository, because a silently partial index makes every later answer
+    confidently incomplete. That check is a real network call to GitLab, and
+    these tests already stub `list_projects` rather than reach one. Tests that
+    exercise the guard itself override this.
+    """
+    monkeypatch.setattr(
+        cli, "enumeration_health",
+        lambda cfg, **kw: EnumerationHealth(
+            is_admin=True, visible_count=1, member_count=1))
 
 
 def git(cwd, *args):
@@ -731,3 +748,47 @@ def test_resolve_rebuild_failure_is_contained(tmp_path, capsys, monkeypatch):
     assert result == 4, f"expected exit code 4 (run failure), got {result}"
     err = capsys.readouterr().err
     assert "resolve/rebuild failed" in err
+
+
+def test_index_refuses_when_the_token_cannot_see_every_repository(
+    tmp_path, monkeypatch, capsys
+):
+    """A silently partial index is worse than no index: it succeeds, reports
+    zero errors, and every answer drawn from it is confidently incomplete."""
+    monkeypatch.setattr(cli, "enumeration_health",
+                        lambda cfg, **kw: EnumerationHealth(
+                            is_admin=False, visible_count=1, member_count=4))
+    called = []
+    monkeypatch.setattr(cli, "list_projects",
+                        lambda cfg: called.append("listed") or [])
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "gitlab:\n  url: https://gl.test\n  token: t\n"
+        f"index:\n  data_dir: {tmp_path.as_posix()}\n"
+        f"  db_path: {(tmp_path / 'i.db').as_posix()}\n", encoding="utf-8")
+
+    assert cli.main(["index", "--config", str(path)]) == 3
+    assert called == [], "indexing started despite an incomplete estate"
+    err = capsys.readouterr().err
+    assert "At least 3" in err
+    assert "--allow-partial-enumeration" in err
+
+
+def test_allow_partial_enumeration_overrides_the_refusal(tmp_path, monkeypatch):
+    """The operator can accept the limitation knowingly -- but must say so."""
+    monkeypatch.setattr(cli, "enumeration_health",
+                        lambda cfg, **kw: EnumerationHealth(
+                            is_admin=False, visible_count=1, member_count=4))
+    called = []
+    monkeypatch.setattr(cli, "list_projects",
+                        lambda cfg: called.append("listed") or [])
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "gitlab:\n  url: https://gl.test\n  token: t\n"
+        f"index:\n  data_dir: {tmp_path.as_posix()}\n"
+        f"  db_path: {(tmp_path / 'i.db').as_posix()}\n", encoding="utf-8")
+
+    cli.main(["index", "--config", str(path), "--allow-partial-enumeration"])
+    assert called == ["listed"], "the override did not let indexing proceed"
