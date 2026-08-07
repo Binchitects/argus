@@ -721,3 +721,68 @@ def test_confidence_is_between_zero_and_one(two_repos):
     rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, "SharedName")
     assert rows
     assert all(0.0 <= r["confidence"] <= 1.0 for r in rows)
+
+
+def test_which_repo_lexical_evidence_is_unaffected_by_a_repo_outside_the_allowlist(two_repos):
+    """A repo the caller cannot see must never change which *allowed* repos
+    appear in which_repo's result, or their confidence, merely by containing
+    matching content -- see `_lexical_match_counts` and `which_repo`'s
+    docstring.
+
+    Before the fix, which_repo built its lexical evidence by counting rows
+    out of `search_code`'s bm25-ranked, LIMIT-50-sliced result. bm25's IDF is
+    computed over the *entire* files_fts table, including repos outside the
+    allowlist -- so content nobody asked to see could shift which allowed
+    rows survived the LIMIT 50 cut, up to erasing an allowed repo from the
+    result entirely. Reproduced with the same shape as the finding: 60
+    alpha-matching files + 30 beta-matching files (comfortably over the
+    limit, so the cut is live), then 400 matching files added to a third
+    repo that is never in the allowlist.
+    """
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+    query = "gizmo widget"
+
+    # Interleaved insertion (so bm25 ties -- both repos' files match the
+    # query with the same term set -- do not all break toward alpha by
+    # insertion order) and an asymmetric term profile (alpha's files repeat
+    # "gizmo", beta's repeat "widget") so the two terms' relative rarity
+    # actually matters to bm25, not just document length. 60 alpha files,
+    # 30 beta -- over the LIMIT 50 `search_code` (and, pre-fix, `which_repo`)
+    # applies, so the cut this bug lives in is actually exercised.
+    for i in range(60):
+        writes.upsert_file(conn, repo_id=alpha, path=f"src/n{i}.txt", lang="text",
+                           size=20, blob_sha=f"a{i}", content="gizmo gizmo widget")
+        if i < 30:
+            writes.upsert_file(conn, repo_id=beta, path=f"src/n{i}.txt", lang="text",
+                               size=20, blob_sha=f"b{i}", content="gizmo widget widget")
+    assert whichrepo.detect_shape(query) == whichrepo.Shape.PROSE
+
+    baseline = queries.which_repo([alpha, beta], conn, query)
+    baseline_conf = {r["repo_id"]: r["confidence"] for r in baseline}
+    assert alpha in baseline_conf and beta in baseline_conf, (
+        "non-empty guard: both repos must clear the floor before the "
+        "third-repo content is added, or the rest of this test is vacuous"
+    )
+
+    # Third repo, never in the allowlist, matches "gizmo" heavily and never
+    # mentions "widget" at all -- exactly the kind of corpus-wide skew that
+    # shifts bm25's IDF for "gizmo" without the caller ever seeing a row
+    # from this repo (every query here filters `f.repo_id IN (...)` to the
+    # allowlist; gamma's own rows never come back, only its statistical
+    # footprint on the terms does).
+    gamma = writes.upsert_repo(conn, gitlab_id=99, path_with_namespace="g/gamma",
+                               default_branch="main", http_url="https://x/g/gamma")
+    for i in range(400):
+        writes.upsert_file(conn, repo_id=gamma, path=f"src/g{i}.txt", lang="text",
+                           size=20, blob_sha=f"g{i}", content="gizmo " * 20)
+
+    after = queries.which_repo([alpha, beta], conn, query)
+    after_conf = {r["repo_id"]: r["confidence"] for r in after}
+
+    assert after_conf == baseline_conf, (
+        f"which_repo's result for the allowed repos changed from "
+        f"{baseline_conf} to {after_conf} purely because a repo outside the "
+        "allowlist gained matching content -- content the caller cannot see "
+        "must not be able to erase or reweight a visible repo"
+    )

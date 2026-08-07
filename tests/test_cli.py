@@ -708,3 +708,26 @@ def test_resolve_subcommand_runs_both_passes_and_reports_counts(tmp_path, capsys
     out = capsys.readouterr().out
     assert "resolved" in out and "ambiguous" in out
     assert "3" in out and "1" in out
+
+
+def test_resolve_rebuild_failure_is_contained(tmp_path, capsys, monkeypatch):
+    """A failure in `_resolve`'s resolve_includes/rebuild_repo_deps pair must
+    not escape as an uncaught traceback, and must use the same exit code
+    `_index` uses for the identical failure.
+
+    `_resolve` had try/finally but no except, so the same
+    sqlite3.IntegrityError that `test_index_resolve_rebuild_failure_is_contained`
+    proves is contained inside `_index` (FK on repo_deps.to_repo_id, raised
+    whenever an include still points at a repo deleted since the last pass)
+    still exited `argus resolve` as a raw traceback with no exit code --
+    inconsistent with `_index`'s handling of the exact same call pair.
+    """
+    monkeypatch.setattr(
+        "argus.cli.rebuild_repo_deps",
+        lambda conn: (_ for _ in ()).throw(
+            __import__("sqlite3").IntegrityError("FOREIGN KEY constraint failed")))
+
+    result = cli.main(["resolve", "--config", str(_config_file(tmp_path))])
+    assert result == 4, f"expected exit code 4 (run failure), got {result}"
+    err = capsys.readouterr().err
+    assert "resolve/rebuild failed" in err

@@ -237,6 +237,18 @@ def _resolve(cfg: Config) -> int:
     try:
         counts = resolve_includes(conn)
         edges = rebuild_repo_deps(conn)
+    except Exception as exc:  # noqa: BLE001 - must not escape as an uncaught traceback
+        # Mirrors _index's containment of this same resolve_includes /
+        # rebuild_repo_deps pair (most notably sqlite3.IntegrityError from
+        # rebuild_repo_deps's FK on repo_deps.to_repo_id, raised whenever an
+        # include still points at a repo deleted since the last pass). Before
+        # this, `argus resolve` had try/finally but no except, so the same
+        # error that _index contains exited here as a raw traceback with no
+        # exit code -- indistinguishable from any other crash by a caller
+        # checking $?. Same exit code as _index's equivalent failure, so the
+        # two paths agree.
+        print(f"resolve/rebuild failed: {exc!r}", file=sys.stderr)
+        return 4
     finally:
         conn.close()
     for state in ("resolved", "external", "ambiguous", "not_found"):

@@ -367,6 +367,15 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
     the evidence floor: a list looks like an answer, and the caller acts on
     the top row.
 
+    Every score component here is computed from allowed repos only, and is
+    unaffected by content in repos outside the allowlist -- including the
+    lexical term, which counts matching files per allowed repo directly
+    (`_lexical_match_counts`) rather than reusing `search_code`'s bm25-ranked
+    top-N. bm25's IDF is computed over the whole `files_fts` table, so
+    ranking-and-slicing first would let a hidden repo's match volume decide
+    which *allowed* rows survive the cut -- up to erasing a visible repo from
+    the result entirely. See `_lexical_match_counts` for the fix.
+
     The semantic term is absent, not zero-weighted by accident -- Phase 4 adds
     it. Diffs, stack traces and symbols do not depend on it at all.
     """
@@ -392,17 +401,17 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
                 f"{row['kind']} {row['name']} at {row['path']}:{row['line']}")
 
     if weights["lexical"]:
-        # search_code hands `description` to FTS5 verbatim. A stack trace or
-        # diff routinely contains "/", ":", "(" -- characters FTS5's MATCH
-        # parser rejects even though they are perfectly ordinary in a path.
-        # That is a syntax problem with treating free text as a query, not
-        # evidence that nothing matches, so a malformed query degrades to "no
-        # lexical evidence" instead of aborting the whole ranking. Direct
-        # evidence (paths, symbols) is extracted separately above and is
-        # unaffected.
+        # `description` is handed to FTS5 verbatim. A stack trace or diff
+        # routinely contains "/", ":", "(" -- characters FTS5's MATCH parser
+        # rejects even though they are perfectly ordinary in a path. That is
+        # a syntax problem with treating free text as a query, not evidence
+        # that nothing matches, so a malformed query degrades to "no lexical
+        # evidence" instead of aborting the whole ranking. Direct evidence
+        # (paths, symbols) is extracted separately above and is unaffected.
         try:
-            for row in search_code(list(allowed), conn, description, limit=50):
-                lexical[row["repo_id"]] = lexical.get(row["repo_id"], 0.0) + 1.0
+            counts = _lexical_match_counts(conn, allowed, description)
+            for repo_id, n in counts.items():
+                lexical[repo_id] = float(n)
         except QueryError:
             # Deliberate, not defensive noise: swallowing this is exactly the
             # degrade-to-"no lexical evidence" behaviour described above. All
@@ -470,6 +479,53 @@ def _files_named(conn, allowed: set[int], path: str) -> list[sqlite3.Row]:
             "  AND (path = ? OR path LIKE '%/' || ? ESCAPE '\\')",
             (*chunk, path, escaped)).fetchall())
     return rows
+
+
+def _lexical_match_counts(conn, allowed: set[int], query: str) -> dict[int, int]:
+    """Per-repo count of files matching `query` in FTS5, restricted to `allowed`.
+
+    A direct COUNT(*) ... GROUP BY repo_id, not `search_code`'s bm25-ranked
+    top-N. `which_repo` only ever wants "how many allowed files matched, per
+    repo" -- a match is a match, so which one ranks higher within a repo is
+    irrelevant to that question, and computing bm25 at all would drag in its
+    IDF, which is computed over the *entire* files_fts table including repos
+    outside `allowed`. Content the caller cannot see would then be able to
+    change which allowed rows survive a rank-and-slice -- as far as making an
+    allowed repo disappear from the result once a hidden repo accumulates
+    enough matches to shift the IDF far enough. A plain per-repo count never
+    ranks anything, so it cannot be swayed by rows it never looks at.
+
+    Chunked like the other allowlist-filtered queries in this module (the
+    query string is the one reserved non-allowlist parameter per chunk).
+    Raises `QueryError` on invalid FTS5 syntax, exactly like `search_code` --
+    a diff or stack trace can still produce a MATCH expression FTS5 rejects,
+    and the caller (`which_repo`) already knows how to degrade that into "no
+    lexical evidence" instead of failing the whole query.
+    """
+    ids = list(allowed)
+    if not ids:
+        return {}
+    counts: dict[int, int] = {}
+    for chunk in _chunks(ids, reserve=1):  # query
+        marks = ",".join("?" for _ in chunk)
+        try:
+            rows = conn.execute(
+                "SELECT f.repo_id AS repo_id, COUNT(*) AS n"
+                "  FROM files_fts"
+                "  JOIN files f ON f.id = files_fts.rowid"
+                f" WHERE files_fts MATCH ? AND f.repo_id IN ({marks})"
+                " GROUP BY f.repo_id",
+                [query, *chunk],
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            raise QueryError(
+                f"That search syntax is not valid ({exc}). Try plain terms "
+                "without quotes or operators, e.g. DecodeFrame, or use "
+                "regex=True."
+            ) from exc
+        for row in rows:
+            counts[row["repo_id"]] = counts.get(row["repo_id"], 0) + row["n"]
+    return counts
 
 
 def _in_degree(conn, allowed: set[int]) -> dict[int, int]:
