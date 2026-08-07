@@ -64,3 +64,57 @@ def test_prose_stopwords_are_not_treated_as_symbols():
     swamp the real terms."""
     got = whichrepo.extract_symbols("add H.265 support to the decoder")
     assert "the" not in got and "add" not in got
+
+
+def test_a_c_filename_is_not_thrown_away_by_its_extension():
+    """The defect this guards is severe for a C/C++ index: `inflate.c` was
+    split on '.', the leaf 'c' failed the 3-character minimum, and the whole
+    token was discarded. Every .c and .h filename a developer typed extracted
+    to nothing, so `which_repo("inflate.c")` -- the most natural way to name a
+    file -- returned no answer at all rather than a wrong one.
+    """
+    assert whichrepo.extract_symbols("inflate.c") == ["inflate.c"]
+    assert "psintrp.c" in whichrepo.extract_symbols("the crash is in psintrp.c")
+    assert "pngrtran.h" in whichrepo.extract_symbols("pngrtran.h")
+
+
+def test_a_qualified_name_still_survives():
+    """The leaf rule exists for these; keep them working."""
+    assert "std::vector" in whichrepo.extract_symbols("uses std::vector here")
+    assert "obj.method" in whichrepo.extract_symbols("calls obj.method twice")
+
+
+def test_a_token_whose_every_part_is_noise_is_still_dropped():
+    """Qualifying on *any* part must not become qualifying on nothing --
+    'i.e' and 'a.b' carry no retrieval value and would be pure noise."""
+    got = whichrepo.extract_symbols("i.e. a.b is the it.of case")
+    assert "i.e" not in got and "a.b" not in got and "it.of" not in got, got
+
+
+def test_a_filename_in_prose_is_looked_up_as_a_file():
+    """`extract_paths` only recognised diff headers and stack frames, so a
+    filename mentioned in ordinary prose was neither a path nor a symbol:
+    `find_symbol("inflate.c")` matches no symbol, and nothing else looked it
+    up. `which_repo("inflate.c")` therefore returned [] -- which a caller
+    reads as "that code is not indexed here", the most misleading answer
+    available.
+    """
+    assert whichrepo.extract_paths("inflate.c") == ["inflate.c"]
+    assert whichrepo.extract_paths("the crash is in src/psaux/psintrp.c") == [
+        "src/psaux/psintrp.c"]
+
+
+def test_prose_without_a_filename_yields_no_paths():
+    """The extension is what makes a token a filename. Ordinary prose, and a
+    sentence-ending period, must not manufacture one."""
+    assert whichrepo.extract_paths("adjust the deflate compression level") == []
+    assert whichrepo.extract_paths("fix the decoder. it crashes") == []
+
+
+def test_a_diff_header_still_wins_over_a_bare_filename():
+    """A diff names the file it changes in its header; the same name also
+    appears in the hunk body. The header is the authoritative one and must
+    not be diluted by a second, less precise source."""
+    text = ("diff --git a/src/psaux/psintrp.c b/src/psaux/psintrp.c\n"
+            "@@ -1 +1 @@\n-#include \"other.h\"\n+#include \"new.h\"\n")
+    assert whichrepo.extract_paths(text) == ["src/psaux/psintrp.c"]

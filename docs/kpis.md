@@ -26,6 +26,12 @@ Measured against the test GitLab seeded with four real public C projects
 (zlib, libpng, freetype, libjpeg-turbo), since production GitLab is not
 reachable. Production numbers will differ by orders of magnitude.
 
+Rebuild with `deploy/test-gitlab/seed_corpus.py --tier baseline`, which pins
+every project to a release tag. **The first version of this corpus was cloned
+from default branches and could not be rebuilt**, so none of the figures it
+produced were falsifiable; re-pinning moved several of them, and
+`docs/index-measurements.md` records by how much.
+
 | Indicator | Baseline | Direction | Why it exists |
 |---|---|---|---|
 | `repos_indexed` / `repos` | 7 / 7 | ↑ | Coverage gap means enumeration or mirroring is failing |
@@ -33,49 +39,49 @@ reachable. Production numbers will differ by orders of magnitude.
 | `repos_unhealthy` | 0 | ↓ | Errored, timed out, or symbol extraction failed |
 | `median_repo_age_hours` | 1.5 | ↓ | Is the refresher running? |
 | `stalest_repo_hours` | 1.5 | ↓ | **An average hides one repo that stopped updating three weeks ago** |
-| `symbols_per_1k_files` | 27,608 | ↑ | **The ctags canary** |
-| `resolved_include_rate` | 0.657 | ↑ | Graph completeness |
-| `ambiguous_include_rate` | 0.012 | ↓ | Leading indicator for `which_repo` quality |
-| `cross_repo_edges` | 5 | ↑ | The dependency graph emptying out |
-| `index_mb` / `mb_per_1k_files` | 30.9 / 25.8 | ↓ | Cost, and the input to the Postgres question |
+| `symbols_per_1k_files` | 35,037 | ↑ | **The ctags canary** |
+| `resolved_include_rate` | 0.687 | ↑ | Graph completeness |
+| `ambiguous_include_rate` | 0.013 | ↓ | Leading indicator for `which_repo` quality |
+| `cross_repo_edges` | 4 | ↑ | The dependency graph emptying out |
+| `index_mb` / `mb_per_1k_files` | 29.1 / 28.4 | ↓ | Cost, and the input to the Postgres question |
 
 ### Where includes actually land
 
-Measured: 3,422 includes across the four projects.
+Measured: 3,210 includes across the four projects.
 
 ```mermaid
 pie showData
-    title Include resolution, 3422 real includes
-    "resolved" : 2247
-    "external (system headers)" : 792
-    "not_found" : 342
+    title Include resolution, 3210 real includes
+    "resolved" : 2205
+    "external (system headers)" : 734
+    "not_found" : 230
     "ambiguous" : 41
 ```
 
-**The 1.2% ambiguous share is the finding.** The design's stated worry was that
+**The 1.3% ambiguous share is the finding.** The design's stated worry was that
 many repos shipping headers with the same basename would defeat suffix
 matching. Across four real C projects it does not. A move past ~10% means the
 `-I` layout has changed in a way no tool tuning fixes.
 
-`not_found` at 10% is dominated by **generated headers** — zlib's `zconf.h` is
+`not_found` at 7.2% is dominated by **generated headers** — zlib's `zconf.h` is
 built at compile time and simply is not in the source tree. That single
 absence caused a false dependency edge before it was fixed.
 
 ### Indexing cost, per repo
 
-Measured on a cold full pass: 1,199 files in 14.8 s total, zero errors.
+Measured on a cold full pass: 1,026 files in 20.4 s total, zero errors.
 
 ```mermaid
 xychart-beta
     title "Cold-pass seconds by repo (files indexed)"
-    x-axis ["zlib (127)", "libpng (134)", "libjpeg-turbo (394)", "freetype (536)"]
-    y-axis "seconds" 0 --> 6
-    bar [1.5, 1.8, 3.7, 4.8]
+    x-axis ["zlib (103)", "libpng (117)", "libjpeg-turbo (280)", "freetype (518)"]
+    y-axis "seconds" 0 --> 9
+    bar [2.2, 2.1, 4.3, 7.8]
 ```
 
 Roughly linear in files indexed, which is what makes a full-pass estimate for
 a real estate possible **once you have measured one**. Do not extrapolate from
-1,199 files to 3M lines.
+1,026 files to 3M lines.
 
 ---
 
@@ -86,7 +92,7 @@ answer quality produces a number that rises while the answers get worse.
 
 | Indicator | Baseline | Method |
 |---|---|---|
-| `which_repo` top-1 accuracy | **9 / 10** | One question per input shape: prose, symbol, stack trace, diff |
+| `which_repo` top-1 accuracy | **9 / 10** | Ten questions a developer would actually type (see the caveat below) |
 | `docs_search` usefulness | **6 good / 2 partial / 2 wrong** | Ten real documentation questions |
 | `docs_lookup` exactness | 8 / 8 | Known API names resolve to the defining page |
 
@@ -100,6 +106,13 @@ tuned away.
 that both looked like "vendoring" from a distance. A weight tuned at 7/10
 would have papered over the first and hidden the second entirely.
 
+**These ten questions do not cover four code paths.** They were labelled one
+per input shape — prose, symbol, stack, diff — and that label was wrong:
+`detect_shape` needs a `diff --git` header to see a diff and two frames to see
+a stack, so eight of the ten take the prose path. The questions are still the
+right questions, because they are what a developer types; the coverage claim
+was the error. Real diff and stack inputs are covered by unit tests.
+
 **Do not tune constants against this set.** Ten questions is a smoke test, not
 a training set — fitting to it is how you fit to ten questions.
 
@@ -107,7 +120,7 @@ a training set — fitting to it is how you fit to ten questions.
 
 | Operation | Median | Note |
 |---|---|---|
-| `which_repo` | **0.5 ms** | Sub-millisecond on a 7-repo index |
+| `which_repo` | **0.8 ms** | Sub-millisecond on a 7-repo index |
 | `docs_lookup` | **2.1 ms** | Both packs open, 17,919 chunks |
 | `docs_search` | **88.6 ms** | Excludes query embedding |
 | query embedding | **2,254 ms** | CPU Ollama — ~25× the entire search |
@@ -143,14 +156,14 @@ This is a synthetic corpus. It validates the mechanism, not the product.
 ```mermaid
 xychart-beta
     title "Test suite growth, measured at each task"
-    x-axis ["P5 T3", "P5 T5", "P5 T7", "P5 T9", "P5 T11", "P5 done", "P3 T3", "P3 T5", "P3 T7", "P3 T9", "P3 merged", "rc1", "impact_of", "vendored"]
+    x-axis ["P5 T3", "P5 T5", "P5 T7", "P5 T9", "P5 T11", "P5 done", "P3 T3", "P3 T5", "P3 T7", "P3 T9", "P3 merged", "rc1", "impact_of", "vendored", "pinned"]
     y-axis "tests passing" 250 --> 600
-    line [270, 309, 364, 424, 464, 469, 486, 497, 516, 521, 531, 554, 559, 565]
+    line [270, 309, 364, 424, 464, 469, 486, 497, 516, 521, 531, 554, 559, 565, 571]
 ```
 
 | Indicator | Current | Direction |
 |---|---|---|
-| Tests passing | 565 | ↑ |
+| Tests passing | 571 | ↑ |
 | Tests skipped | 0 | ↓ — a skip is coverage that silently stopped running |
 | Container suite green | yes (at 531) | — |
 
@@ -161,18 +174,26 @@ xychart-beta
     title "Phase 3 defects, by the gate that caught them"
     x-axis ["per-task review", "whole-branch review", "convergence check", "first real data"]
     y-axis "defects" 0 --> 8
-    bar [6, 4, 1, 3]
+    bar [6, 4, 1, 5]
 ```
 
 This says which gate is doing the work. In Phase 3 the **whole-branch review
 found 1 Critical and 3 Important that nine per-task reviews all missed** —
 cross-module seams are structurally invisible to task-scoped review.
 
-**First contact with real data has found 3** that no fixture would have
+**First contact with real data has found 5** that no fixture would have
 produced: a vendored copy of zlib inside libjpeg-turbo, a header generated at
-build time, and freetype's bundled zlib under `src/gzip/` — a directory named
-after neither repository, which nobody writing a fixture would think to
-construct.
+build time, freetype's bundled zlib under `src/gzip/` (a directory named after
+neither repository), and — once the corpus was pinned to release tags — two
+more in `which_repo`'s input handling. A bare filename such as `inflate.c` was
+looked up neither as a path nor as a symbol and returned **nothing at all**,
+which a caller reads as "that code is not indexed"; and `extract_symbols`
+discarded any token whose extension was under three characters, which is every
+`.c` and `.h` file in the corpus.
+
+Both had been live through nine per-task reviews, a whole-branch review, and
+two earlier hand-checks that scored 9/10 — because no fixture asks about a
+file by name the way a person does.
 
 The pattern to watch: **if per-task review starts finding everything and the
 whole-branch review finds nothing, the whole-branch review has stopped

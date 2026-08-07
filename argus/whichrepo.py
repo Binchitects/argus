@@ -47,9 +47,38 @@ def detect_shape(text: str) -> str:
     return Shape.PROSE
 
 
+#: Source extensions worth treating a bare token as a filename. Deliberately a
+#: closed list rather than "any dotted token": prose ends sentences with a
+#: period, and `decoder. it` must not become a path. The extension is the only
+#: thing that distinguishes `inflate.c` from `i.e`.
+_SOURCE_EXTS = (
+    "c|h|cc|cpp|cxx|c\\+\\+|hpp|hxx|hh|inl|ipp|s|asm"      # C/C++ and assembly
+    "|py|rs|go|java|js|ts|tsx|jsx|rb|php|cs|swift|kt|m|mm"  # other languages
+    "|md|rst|txt|json|ya?ml|toml|cmake|mk"                  # docs and build
+)
+_FILE_TOKEN_RE = re.compile(
+    rf"(?<![\w/.-])([\w+.-]+(?:/[\w+.-]+)*\.(?:{_SOURCE_EXTS}))(?![\w])",
+    re.IGNORECASE,
+)
+
+
 def extract_paths(text: str) -> list[str]:
-    """File paths named explicitly, in order, without duplicates."""
-    found = _DIFF_PATH_RE.findall(text) or [m[0] for m in _FRAME_RE.findall(text)]
+    """File paths named explicitly, in order, without duplicates.
+
+    Three sources, most authoritative first. A diff names the file it changes
+    in its header, so when one is present nothing else is consulted; a stack
+    trace names one per frame; and failing both, a bare filename in prose is
+    still a filename.
+
+    That last source was missing, and its absence was not a small gap: a bare
+    `inflate.c` is not a path by the first two rules and matches no *symbol*
+    either, so `which_repo("inflate.c")` produced no evidence at all and
+    returned []. An empty result reads as "that code is not indexed here",
+    which is worse than a wrong repo -- it is a confident denial.
+    """
+    found = (_DIFF_PATH_RE.findall(text)
+             or [m[0] for m in _FRAME_RE.findall(text)]
+             or _FILE_TOKEN_RE.findall(text))
     seen, out = set(), []
     for path in found:
         normalised = path.replace("\\", "/")
@@ -63,8 +92,15 @@ def extract_symbols(text: str) -> list[str]:
     """Identifier-shaped tokens worth looking up, stopwords removed."""
     seen, out = set(), []
     for token in _IDENT_RE.findall(text):
-        leaf = re.split(r"::|\.", token)[-1]
-        if leaf.lower() in _STOPWORDS or len(leaf) < 3:
+        # Qualify on *any* part, not the last one. Taking only the last part
+        # is right for `std::vector` and `obj.method`, and catastrophic for a
+        # filename: `inflate.c` has leaf `c`, which fails the 3-character
+        # minimum, so the entire token was dropped. In a C/C++ index that
+        # silently discarded every .c and .h name a developer typed -- and
+        # `which_repo("inflate.c")` answered with nothing at all, which reads
+        # as "no such code here" rather than as a bug.
+        parts = re.split(r"::|\.", token)
+        if not any(len(p) >= 3 and p.lower() not in _STOPWORDS for p in parts):
             continue
         if token not in seen:
             seen.add(token)
