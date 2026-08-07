@@ -358,6 +358,19 @@ _WEIGHTS: dict[str, dict[str, float]] = {
 #: fraction of the best repo's. Below it, the answer is "nothing matched".
 _FLOOR_RATIO = 0.35
 
+#: Added to a repo's file count when converting its lexical match count into a
+#: density. It exists to stop a very small repo scoring a perfect 1.0 on a
+#: single incidental match: without it, a one-file repo beats a 2,000-file repo
+#: with 800 genuine matches.
+#:
+#: Ten is a defensible starting point, not a measured one. The right value
+#: depends on the size distribution of a real repository set, and this project
+#: has a standing rule against tuning retrieval constants against a handful of
+#: hand-written examples -- the pack search's candidate pool was set from a
+#: measured recall curve for exactly that reason. Revisit when `which_repo` has
+#: been run against a real GitLab instance.
+_LEXICAL_SMOOTHING = 10
+
 
 def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
                description: str, limit: int = 5) -> list[dict]:
@@ -423,14 +436,32 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
     if not direct and not lexical:
         return []
 
-    best_lex = max(lexical.values(), default=0.0) or 1.0
+    # Score lexical evidence by DENSITY, not raw volume. A repo is not more
+    # likely to be the right place to make a change merely because it is
+    # bigger, but a raw count says exactly that: measured on this code, a repo
+    # of 1,000 low-relevance files scored 1.0 while a 30-file repo that was
+    # obviously the right answer scored 0.03 and fell under the floor --
+    # erased from the result entirely, leaving `which_repo` to answer
+    # confidently with the wrong repo.
+    #
+    # The smoothing term damps the opposite failure: without it a one-file
+    # repo containing one match scores a perfect 1.0 and outranks a
+    # substantial repo with hundreds of genuine matches. Ten is a starting
+    # value, not a measured one -- see the note on _LEXICAL_SMOOTHING.
+    file_counts = _repo_file_counts(conn, allowed) if lexical else {}
+    densities = {
+        repo_id: matches / (file_counts.get(repo_id, 0) + _LEXICAL_SMOOTHING)
+        for repo_id, matches in lexical.items()
+    }
+
+    best_lex = max(densities.values(), default=0.0) or 1.0
     centrality = _in_degree(conn, allowed) if weights["central"] else {}
     max_central = max(centrality.values(), default=0) or 1
 
     scored: list[dict] = []
     for repo_id in allowed:
         hits = direct.get(repo_id, [])
-        lex = lexical.get(repo_id, 0.0) / best_lex
+        lex = densities.get(repo_id, 0.0) / best_lex
         if not hits and lex < _FLOOR_RATIO:
             continue
 
@@ -479,6 +510,26 @@ def _files_named(conn, allowed: set[int], path: str) -> list[sqlite3.Row]:
             "  AND (path = ? OR path LIKE '%/' || ? ESCAPE '\\')",
             (*chunk, path, escaped)).fetchall())
     return rows
+
+
+def _repo_file_counts(conn, allowed: set[int]) -> dict[int, int]:
+    """Indexed file count per allowed repo, for density normalisation.
+
+    Restricted to the allowlist like every other query here. That matters for
+    more than tidiness: the count is a divisor in the lexical score, so pulling
+    it from outside the allowlist would let a repo the caller cannot see change
+    a visible repo's confidence -- the same disclosure class that
+    ``_in_degree`` and ``_lexical_match_counts`` were both fixed for.
+    """
+    counts: dict[int, int] = {}
+    for chunk in _chunks(list(allowed), reserve=0):
+        marks = ",".join("?" for _ in chunk)
+        for row in conn.execute(
+            f"SELECT repo_id, COUNT(*) AS n FROM files"
+            f" WHERE repo_id IN ({marks}) GROUP BY repo_id", chunk
+        ):
+            counts[row["repo_id"]] = row["n"]
+    return counts
 
 
 def _lexical_match_counts(conn, allowed: set[int], query: str) -> dict[int, int]:

@@ -786,3 +786,62 @@ def test_which_repo_lexical_evidence_is_unaffected_by_a_repo_outside_the_allowli
         "allowlist gained matching content -- content the caller cannot see "
         "must not be able to erase or reweight a visible repo"
     )
+
+
+def _bulk_repo(conn, gitlab_id, name, n_files, body):
+    """A repo of `n_files` identical-content files, for density tests."""
+    rid = writes.upsert_repo(conn, gitlab_id=gitlab_id, path_with_namespace=name,
+                             default_branch="main", http_url=f"https://x/{name}")
+    for i in range(n_files):
+        writes.upsert_file(conn, repo_id=rid, path=f"src/f{i}.c", lang="c",
+                           size=len(body), blob_sha=f"{gitlab_id}-{i}", content=body)
+    return rid
+
+
+def test_a_large_low_density_repo_does_not_erase_a_small_dense_one(tmp_path):
+    """Found by the Phase 3 convergence check.
+
+    Scoring lexical evidence by raw match count says a repo is more likely to
+    be the right place to change merely because it is bigger. Measured on the
+    previous code, a 1,000-file repo scored 1.0 and a 30-file repo that
+    matched just as strongly scored 0.03 -- under the floor, so it vanished
+    and which_repo answered confidently with the wrong repo.
+    """
+    conn = open_db(tmp_path / "i.db")
+    try:
+        mono = _bulk_repo(conn, 1, "g/mono", 300, "zeta omega filler")
+        pay = _bulk_repo(conn, 2, "g/payments", 20, "zeta omega")
+        conn.commit()
+
+        rows = queries.which_repo([mono, pay], conn, "zeta omega")
+        names = [r["path_with_namespace"] for r in rows]
+        assert names, "no candidates -- the assertion below would be vacuous"
+        assert "g/payments" in names, (
+            f"the smaller, equally-matching repo was erased: {names}")
+    finally:
+        conn.close()
+
+
+def test_a_tiny_repo_with_one_match_does_not_outrank_a_substantial_one(tmp_path):
+    """The opposite failure, which pure density would introduce: a one-file
+    repo matching once scores a perfect 1.0 and beats a repo with hundreds of
+    genuine matches. The smoothing term in the density exists for this."""
+    conn = open_db(tmp_path / "i.db")
+    try:
+        # The big repo must be LESS dense than the tiny one, or both score a
+        # flat 1.0 and the tie breaks alphabetically -- passing for a reason
+        # unrelated to smoothing.
+        big = _bulk_repo(conn, 1, "g/substantial", 150, "zeta omega")
+        for i in range(150, 400):
+            writes.upsert_file(conn, repo_id=big, path=f"src/n{i}.c", lang="c",
+                               size=4, blob_sha=f"n{i}", content="none")
+        tiny = _bulk_repo(conn, 2, "g/tiny", 1, "zeta omega")
+        conn.commit()
+
+        rows = queries.which_repo([big, tiny], conn, "zeta omega")
+        assert rows, "no candidates"
+        assert rows[0]["path_with_namespace"] == "g/substantial", (
+            f"a one-file repo outranked a 200-file one: "
+            f"{[(r['path_with_namespace'], r['confidence']) for r in rows]}")
+    finally:
+        conn.close()
