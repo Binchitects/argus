@@ -278,3 +278,128 @@ python scratchpad/seed_real_repos.py     # clone + push the four projects
 argus index   --config ~/.argus-measure/argus.yml
 argus resolve --config ~/.argus-measure/argus.yml
 ```
+
+---
+
+# The scale run
+
+The baseline corpus is four small C libraries. Everything about cost and
+correctness at size was extrapolation until this run. Nine real projects, all
+at pinned release tags, seeded with
+`deploy/test-gitlab/seed_corpus.py --tier scale`.
+
+| | baseline | scale | factor |
+|---|---|---|---|
+| repos | 7 | 12 | 1.7× |
+| files indexed | 1,026 | **10,212** | 10.0× |
+| symbols | 35,948 | 286,785 | 8.0× |
+| includes | 3,210 | 46,815 | 14.6× |
+| `index.db` | 29.1 MB | 224 MB | 7.7× |
+| MB per 1k files | 28.4 | **21.9** | 0.77× |
+| cold full pass | 20.4 s | 7 m 48 s | 23× |
+| errors | 0 | **0** | |
+
+Added: curl `curl-8_11_0`, redis `7.4.1`, git `v2.47.0`,
+openssl `openssl-3.4.0`, postgres `REL_17_2`, ffmpeg `n7.1`.
+
+**Ambiguous includes fell to 0.09%** (43 of 46,815), from 1.3% on four repos.
+The design's stated worry — that many repos shipping headers with the same
+basename would defeat suffix matching — gets *better* with scale, not worse.
+Storage per file improved too, because a bigger corpus amortises the FTS
+dictionary.
+
+**Indexing throughput degraded**: zlib 40 files/s against postgres 12 files/s.
+Some of that is file size, and it is not yet isolated. Do not extrapolate a
+cold-pass estimate for a real estate from the total until it is.
+
+## The path lookup was linear in corpus size
+
+| | 1,026 files | 10,212 files |
+|---|---|---|
+| `which_repo` p50 | 0.37 ms | 0.91 ms |
+| `which_repo` p95 | 1.58 ms | **15.5 ms** |
+
+Effectively all of the p95 was one query shape. `_files_named` cost 15.1 ms
+whether it returned one row or three — cost independent of result size is the
+signature of a scan. `path LIKE '%/' || ?` has a leading wildcard, so no index
+on `path` can serve it.
+
+Migration 010 adds an indexed `basename` generated column. After: **0.007 ms**,
+identical rows, and p95 back to 1.9 ms. See the migration for why it is a
+virtual generated column rather than a real one with a backfill.
+
+## The dependency graph was 67% wrong
+
+The scale run produced **42 cross-repo edges**. These are famous projects, so
+ground truth is knowable — and hand-checking every edge found **28 entirely
+spurious**, including `zlib -> postgres`, `libpng -> git` and
+`libjpeg-turbo -> openssl`. zlib depends on nothing at all.
+
+This was invisible at four repos and would have been invisible at a hundred
+without someone reading the list.
+
+### Mechanism 1 — system headers, 90.1% of all cross-repo resolutions
+
+`EXTERNAL` was only reached when *nothing* matched. So any repository shipping
+a file named `string.h` captured every `#include <string.h>` in the corpus.
+postgres ships `src/include/port/win32/` — a tree of POSIX shims (`sys/socket.h`,
+`netdb.h`, `dlfcn.h`) — plus `src/include/common/string.h`, and became a sink:
+
+```
+503 x  #include <string.h>   openssl/apps/*.c  ->  postgres/src/include/common/string.h
+```
+
+That single include text created `openssl -> postgres` at weight 555.
+
+**This is the `zconf.h` defect a second time.** Its lesson was already written
+into this file — *a unique match is not evidence of correctness when the
+canonical file is missing* — but the fix was scoped to vendored directories.
+`<string.h>`'s canonical file is missing for the same reason: it is in libc,
+not in any indexed repo. The same failure walked in through a different door.
+
+Fixed with a closed set of C/POSIX/platform header names, consulted **only
+when the including repo has no candidate of its own**. That ordering is what
+makes the list safe to be generous with: a project that legitimately ships
+`param.h` or `stat.h` and includes it via `-I` still resolves locally, so the
+rule can never cost a real intra-repo edge — all it can suppress is a
+cross-repo claim, and for these names a cross-repo claim is the bug.
+
+### Mechanism 2 — more local evidence made the answer worse
+
+postgres's vendored snowball code does `#include "header.h"`, and postgres
+ships two of them. Because there were *two*, the same-repo branch — which
+required exactly one — was skipped, and control fell through to a **global**
+shortest-path tiebreak. curl's `include/curl/header.h` at depth 2 beat
+postgres's own at depth 3.
+
+Fifty includes, one fabricated `postgres -> curl` dependency, and the cause was
+that the including repo had *more* candidates rather than fewer. Fixed by
+restricting candidates to the including repo whenever it has any: the answer is
+one of those, or it is nothing.
+
+### After
+
+**42 edges → 25**, with every large false edge gone (555, 313, 50 → 0).
+
+| | before | after |
+|---|---|---|
+| edges | 42 | 25 |
+| entirely spurious | 28 (67%) | 12 (48%) |
+| worst false edge weight | 555 | 8 |
+
+Every genuine cross-repo include now carries the library's own namespace
+(`openssl/evp.h`, `curl/curl.h`, `eal/decoder.h`) or is its canonical header
+(`zlib.h`, `png.h`).
+
+### The residue, not fixed
+
+Twenty-one includes still cross a boundary on a generic single-segment name:
+`config.h` (8), `glib.h` (3), `alloc.h` (3), `atomic.h` (2), and singletons
+`builtin.h`, `builtins.h`, `mem.h`, `version.h`, `port.h`. Ten of the twelve
+remaining false edges have weight 1.
+
+**Deliberately left alone.** Extending the closed list with `config.h`,
+`mem.h` and `port.h` would be fitting a name list to nine repositories — the
+same mistake as tuning a retrieval constant against ten questions. It needs
+its own measurement across a different corpus, not another entry bolted on to
+the one that produced it.

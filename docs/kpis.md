@@ -156,14 +156,14 @@ This is a synthetic corpus. It validates the mechanism, not the product.
 ```mermaid
 xychart-beta
     title "Test suite growth, measured at each task"
-    x-axis ["P5 T3", "P5 T5", "P5 T7", "P5 T9", "P5 T11", "P5 done", "P3 T3", "P3 T5", "P3 T7", "P3 T9", "P3 merged", "rc1", "impact_of", "vendored", "pinned"]
+    x-axis ["P5 T3", "P5 T5", "P5 T7", "P5 T9", "P5 T11", "P5 done", "P3 T3", "P3 T5", "P3 T7", "P3 T9", "P3 merged", "rc1", "impact_of", "vendored", "pinned", "scale"]
     y-axis "tests passing" 250 --> 600
-    line [270, 309, 364, 424, 464, 469, 486, 497, 516, 521, 531, 554, 559, 565, 571]
+    line [270, 309, 364, 424, 464, 469, 486, 497, 516, 521, 531, 554, 559, 565, 571, 580]
 ```
 
 | Indicator | Current | Direction |
 |---|---|---|
-| Tests passing | 571 | ↑ |
+| Tests passing | 580 | ↑ |
 | Tests skipped | 0 | ↓ — a skip is coverage that silently stopped running |
 | Container suite green | yes (at 531) | — |
 
@@ -174,14 +174,14 @@ xychart-beta
     title "Phase 3 defects, by the gate that caught them"
     x-axis ["per-task review", "whole-branch review", "convergence check", "first real data"]
     y-axis "defects" 0 --> 8
-    bar [6, 4, 1, 5]
+    bar [6, 4, 1, 8]
 ```
 
 This says which gate is doing the work. In Phase 3 the **whole-branch review
 found 1 Critical and 3 Important that nine per-task reviews all missed** —
 cross-module seams are structurally invisible to task-scoped review.
 
-**First contact with real data has found 5** that no fixture would have
+**First contact with real data has found 8** that no fixture would have
 produced: a vendored copy of zlib inside libjpeg-turbo, a header generated at
 build time, freetype's bundled zlib under `src/gzip/` (a directory named after
 neither repository), and — once the corpus was pinned to release tags — two
@@ -239,3 +239,51 @@ to fixing one is admitting it happened.
 - **Embedding latency as a tracked series** — hardware, not code.
 - **Per-query latency over time**, until the index grows two orders of
   magnitude. Tracking sub-millisecond numbers is watching noise.
+
+
+---
+
+## Tier 4 — What scale changed
+
+Measured at 10,212 files across twelve repositories
+(`docs/index-measurements.md` has the full run).
+
+| Indicator | 1,026 files | 10,212 files | reading |
+|---|---|---|---|
+| `ambiguous_include_rate` | 0.0128 | **0.0009** | suffix matching improves with scale |
+| `mb_per_1k_files` | 28.4 | **21.9** | storage per file improves; FTS dictionary amortises |
+| `which_repo` p95 | 1.58 ms | 1.92 ms | after migration 010; it was 15.5 ms before |
+| `symbols_per_1k_files` | 35,037 | 28,082 | corpus mix, not a ctags failure |
+| cold full pass | 20.4 s | 7 m 48 s | **not yet linear — see below** |
+| `which_repo` top-1 | 9 / 10 | **9 / 10** | holds at 10x |
+
+**Two indicators earned their place on this run.**
+
+`ambiguous_include_rate` was defined as the leading indicator for `which_repo`
+quality, on the theory that it would *rise* with more repos shipping the same
+basenames. It fell by 14x. The reasoning was wrong and the metric is still
+useful — it now says the suffix approach is sound at size, which is the
+opposite conclusion and a more valuable one.
+
+Indexing throughput is the new worry: **zlib 40 files/s against postgres 12
+files/s**. Some is file size and none of it is isolated yet. Until it is, a
+cold-pass estimate for a real estate cannot be extrapolated from the total.
+
+### The metric that did not exist and should have
+
+Nothing here would have caught a **67% wrong dependency graph**. Every Tier 1
+indicator was healthy while 28 of 42 cross-repo edges were fabricated:
+`cross_repo_edges` was *rising*, which read as success.
+
+That is the exact failure this page opens by warning about — "a metric that
+only ever goes up is decoration". `cross_repo_edges` was decoration. It counts
+edges without asking whether any of them are real, and it was the headline
+number for graph health.
+
+There is no honest automatic replacement: correctness needs someone who knows
+that zlib depends on nothing. It belongs in Tier 2, hand-checked, alongside
+`which_repo` accuracy — and it is now recorded there.
+
+| Indicator | Baseline | Method |
+|---|---|---|
+| cross-repo edge precision | **13 / 25** | Read every edge; check it against the project's real dependencies |

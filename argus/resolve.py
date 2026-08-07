@@ -251,6 +251,56 @@ def _in_vendored_dir(repo_id: int, path: str,
     return False
 
 
+#: Headers that belong to the C standard library, POSIX, or the platform --
+#: never to an indexed repository. A closed set, not a heuristic: guessing
+#: "looks like a system header" would eventually swallow a real project header,
+#: and the cost of a wrong entry here is a permanently missing edge.
+#:
+#: C++ standard headers are absent on purpose: they are extensionless
+#: (`<vector>`), so they never match a file in the suffix index and already
+#: classify as external without help.
+SYSTEM_HEADERS = frozenset("""
+assert.h complex.h ctype.h errno.h fenv.h float.h inttypes.h iso646.h limits.h
+locale.h math.h setjmp.h signal.h stdalign.h stdarg.h stdatomic.h stdbool.h
+stddef.h stdint.h stdio.h stdlib.h stdnoreturn.h string.h tgmath.h threads.h
+time.h uchar.h wchar.h wctype.h
+aio.h alloca.h byteswap.h cpio.h dirent.h dlfcn.h endian.h err.h fcntl.h
+fmtmsg.h fnmatch.h ftw.h getopt.h glob.h grp.h iconv.h langinfo.h libgen.h
+malloc.h memory.h monetary.h ndbm.h netdb.h nl_types.h paths.h poll.h
+pthread.h pwd.h regex.h sched.h search.h semaphore.h spawn.h stdio_ext.h
+strings.h syslog.h sysexits.h sysinfo.h tar.h termios.h trace.h ulimit.h
+unistd.h utime.h utmpx.h values.h wordexp.h
+""".split()) | frozenset("""
+socket.h in.h tcp.h inet.h un.h select.h wait.h stat.h ioctl.h mman.h uio.h
+resource.h utsname.h param.h times.h ipc.h shm.h sem.h msg.h statvfs.h
+sockio.h filio.h ttycom.h if.h route.h ip.h
+""".split())
+#: The second group is the same headers reached without their directory:
+#: VMS and OS/2 put them at the top of the include path, so openssl's
+#: include/internal/sockets.h really does say `#include <socket.h>` and
+#: `#include <in.h>` under `#elif defined(OPENSSL_SYS_VMS)`. Those matched
+#: postgres's win32 shims by basename. Names like `param.h` and `stat.h` are
+#: plausible project headers too, which is safe only because the check runs
+#: solely when the including repo has no candidate of its own.
+
+#: Directories that only ever hold platform headers. `sys/socket.h` and
+#: `netinet/in.h` are as much system headers as `stdio.h`, and there are far
+#: too many to enumerate one by one.
+SYSTEM_HEADER_DIRS = frozenset({
+    "sys", "netinet", "arpa", "net", "bits", "asm", "asm-generic",
+    "linux", "rpc", "rpcsvc", "scsi", "mtd", "protocols", "xlocale",
+})
+
+
+def _is_system_header(raw: str) -> bool:
+    """True if `raw` names a C/POSIX/platform header rather than project code."""
+    name = raw.lstrip("./")
+    if name in SYSTEM_HEADERS:
+        return True
+    head, _, rest = name.partition("/")
+    return bool(rest) and head in SYSTEM_HEADER_DIRS
+
+
 def _resolve_one(inc, index, by_repo_path, repo_names=frozenset(),
                  repo_names_by_id=None,
                  vendored_dirs=frozenset()) -> tuple[FileRow | None, str]:
@@ -285,12 +335,46 @@ def _resolve_one(inc, index, by_repo_path, repo_names=frozenset(),
 
     if not candidates:
         return None, (Resolution.EXTERNAL if inc["is_angle"] else Resolution.NOT_FOUND)
+
+    # If the including repo has any candidate of its own, the answer is one of
+    # those -- or nothing. Without this the depth tiebreak below is global, and
+    # a file in an unrelated repository wins for being nearer ITS root.
+    #
+    # Measured: postgres's vendored snowball code does #include "header.h" and
+    # postgres ships two (src/include/snowball/header.h at depth 3 and
+    # .../libstemmer/header.h at 4). Because there were two, `len(same_repo)
+    # == 1` was false, control fell through, and curl's include/curl/header.h
+    # at depth 2 won outright -- 50 includes creating a postgres -> curl edge
+    # for a dependency that does not exist. Having *more* local candidates
+    # made the answer worse, which is the wrong direction for evidence.
+    same_repo = [c for c in candidates if c[1] == inc["repo_id"]]
+    if same_repo:
+        candidates = same_repo
+    elif _is_system_header(raw):
+        # No local candidate, and the name belongs to the platform rather than
+        # to any project. Resolving it into whichever repo happens to ship the
+        # same basename is the `zconf.h` defect again -- "a unique match is
+        # not evidence of correctness when the canonical file is missing" --
+        # arriving through a different door, because EXTERNAL was previously
+        # only reached when *nothing* matched.
+        #
+        # Measured on nine real projects: 90.1% of all cross-repo resolutions
+        # were system headers. postgres ships src/include/port/win32/, a tree
+        # of POSIX shims (sys/socket.h, netdb.h, dlfcn.h), which captured
+        # every such include in the corpus -- `#include <string.h>` alone
+        # landed in postgres 503 times from openssl, inventing an
+        # openssl -> postgres edge at weight 555.
+        #
+        # Deliberately checked only when the including repo has no candidate
+        # of its own. A project that legitimately ships `types.h` or `param.h`
+        # and includes it via -I keeps resolving normally; the platform list
+        # can therefore be generous without ever costing a real intra-repo
+        # edge. All it can suppress is a cross-repo claim, and for these names
+        # a cross-repo claim is what is wrong.
+        return None, Resolution.EXTERNAL
+
     if len(candidates) == 1:
         return candidates[0], Resolution.RESOLVED
-
-    same_repo = [c for c in candidates if c[1] == inc["repo_id"]]
-    if len(same_repo) == 1:
-        return same_repo[0], Resolution.RESOLVED
 
     shortest = min(c[2].count("/") for c in candidates)
     fewest = [c for c in candidates if c[2].count("/") == shortest]

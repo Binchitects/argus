@@ -464,3 +464,134 @@ def test_a_tiny_directory_is_never_enough_evidence(tmp_path):
         assert (b, "src/compat") not in resolve.find_vendored_dirs(rows)
     finally:
         db.close()
+
+
+def test_a_standard_library_header_is_external_even_if_a_repo_ships_one(tmp_path):
+    """The dominant defect in the whole cross-repo graph, measured on nine
+    real projects: 90.1% of cross-repo resolutions were system headers.
+
+    postgres ships src/include/port/win32/ -- POSIX shims named sys/socket.h,
+    netdb.h, dlfcn.h -- and src/include/common/string.h. EXTERNAL was only
+    reached when *nothing* matched, so every `#include <string.h>` in the
+    corpus landed in postgres: 503 of them from openssl alone, inventing an
+    openssl -> postgres edge at weight 555.
+    """
+    db = open_db(tmp_path / "i.db")
+    try:
+        pg = _repo(db, 1, "g/postgres")
+        ssl = _repo(db, 2, "g/openssl")
+        _file(db, pg, "src/include/common/string.h")
+        _file(db, pg, "src/include/port/win32/sys/socket.h")
+        src = _file(db, ssl, "apps/asn1parse.c")
+        _include(db, ssl, src, "string.h", is_angle=1)
+        _include(db, ssl, src, "sys/socket.h", is_angle=1)
+        db.commit()
+
+        counts = resolve.resolve_includes(db)
+        assert counts[resolve.Resolution.EXTERNAL] == 2
+        rows = db.execute("SELECT resolved_repo_id, resolution FROM includes").fetchall()
+        assert all(r["resolved_repo_id"] is None for r in rows), \
+            "a libc header was attributed to an indexed repository"
+        assert db.execute("SELECT COUNT(*) FROM repo_deps").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_a_real_library_header_still_resolves(tmp_path):
+    """The system list must not swallow project headers. zlib.h and png.h are
+    exactly the includes the graph exists to capture, and both sit one
+    character away in shape from the names being excluded."""
+    db = open_db(tmp_path / "i.db")
+    try:
+        zlib = _repo(db, 1, "g/zlib")
+        png = _repo(db, 2, "g/libpng")
+        hdr = _file(db, zlib, "zlib.h")
+        src = _file(db, png, "png.c")
+        _include(db, png, src, "zlib.h", is_angle=1)
+        db.commit()
+
+        resolve.resolve_includes(db)
+        row = db.execute("SELECT resolved_file_id, resolved_repo_id, resolution "
+                         "FROM includes").fetchone()
+        assert row["resolved_file_id"] == hdr
+        assert row["resolved_repo_id"] == zlib
+        assert row["resolution"] == resolve.Resolution.RESOLVED
+    finally:
+        db.close()
+
+
+def test_more_local_candidates_must_not_push_the_answer_into_another_repo(tmp_path):
+    """Measured: postgres's vendored snowball code does #include "header.h",
+    and postgres ships two of them. Because there were *two*, the same-repo
+    branch (which required exactly one) was skipped and a global shortest-path
+    tiebreak ran -- handing the include to curl's include/curl/header.h at
+    depth 2. Fifty includes, one fabricated postgres -> curl dependency.
+
+    Having more local evidence made the answer worse.
+    """
+    db = open_db(tmp_path / "i.db")
+    try:
+        pg = _repo(db, 1, "g/postgres")
+        curl = _repo(db, 2, "g/curl")
+        _file(db, pg, "src/include/snowball/header.h")
+        _file(db, pg, "src/include/snowball/libstemmer/header.h")
+        _file(db, curl, "include/curl/header.h")          # shallower!
+        src = _file(db, pg, "src/backend/snowball/libstemmer/api.c")
+        _include(db, pg, src, "header.h")
+        db.commit()
+
+        resolve.resolve_includes(db)
+        row = db.execute("SELECT resolved_repo_id FROM includes").fetchone()
+        assert row["resolved_repo_id"] != curl, "resolved into an unrelated repo"
+    finally:
+        db.close()
+
+
+def test_a_repo_that_owns_a_platform_shaped_name_still_resolves_it(tmp_path):
+    """`param.h`, `stat.h` and `types.h` are platform headers *and* plausible
+    project headers. Excluding them outright would delete real intra-repo
+    edges, so the platform list is consulted only when the including repo has
+    no candidate of its own -- which is what makes it safe to be generous."""
+    db = open_db(tmp_path / "i.db")
+    try:
+        mine = _repo(db, 1, "g/mine")
+        other = _repo(db, 2, "g/other")
+        hdr = _file(db, mine, "include/param.h")
+        # Deliberately SHALLOWER than the local one, so the depth tiebreak
+        # would hand the include to the other repo. Only the same-repo
+        # restriction prevents that -- with the local file at the shallower
+        # depth the test passes either way and proves nothing.
+        _file(db, other, "param.h")
+        src = _file(db, mine, "src/main.c")
+        _include(db, mine, src, "param.h", is_angle=1)
+        db.commit()
+
+        resolve.resolve_includes(db)
+        row = db.execute("SELECT resolved_file_id, resolution FROM includes").fetchone()
+        assert row["resolved_file_id"] == hdr
+        assert row["resolution"] == resolve.Resolution.RESOLVED
+    finally:
+        db.close()
+
+
+def test_a_bare_platform_name_does_not_reach_into_another_repo(tmp_path):
+    """openssl's include/internal/sockets.h includes <socket.h> and <in.h>
+    for VMS, where the platform puts them at the top of the include path.
+    Both matched postgres's src/include/port/win32/ shims by basename."""
+    db = open_db(tmp_path / "i.db")
+    try:
+        pg = _repo(db, 1, "g/postgres")
+        ssl = _repo(db, 2, "g/openssl")
+        _file(db, pg, "src/include/port/win32/sys/socket.h")
+        _file(db, pg, "src/include/port/win32/netinet/in.h")
+        src = _file(db, ssl, "include/internal/sockets.h")
+        _include(db, ssl, src, "socket.h", is_angle=1)
+        _include(db, ssl, src, "in.h", is_angle=1)
+        db.commit()
+
+        counts = resolve.resolve_includes(db)
+        assert counts[resolve.Resolution.EXTERNAL] == 2, counts
+        rows = db.execute("SELECT resolved_repo_id, resolution FROM includes").fetchall()
+        assert all(r["resolved_repo_id"] is None for r in rows),             "a platform header reached into another repository"
+    finally:
+        db.close()
