@@ -502,10 +502,9 @@ def test_tools_list_descriptions_are_load_bearing(two_repo_cfg):
 
     by_name = {t["name"]: t["description"] for t in tools_list}
     assert set(by_name) == {
-        # Five over the private code index...
         "find_symbol", "find_references", "search_code", "get_file", "index_status",
-        # ...and two over the public documentation packs (Phase 5 Task 10).
         "docs_lookup", "docs_search",
+        "repo_map", "which_repo",
     }
     assert "name-based" in by_name["find_references"].lower() or \
         "name" in by_name["find_references"].lower() and "not" in by_name["find_references"].lower()
@@ -573,3 +572,34 @@ def test_slow_tool_query_does_not_block_other_requests(two_repo_cfg, monkeypatch
         t_healthz.join()
 
     assert healthz_elapsed[0] < delay / 2
+
+
+# ---------------------------------------------------------------------------
+# which_repo (Task 8): the description is what a 35B model reads to decide
+# it may paste a stack trace in, and an empty result must not be mistaken
+# for "the code does not exist".
+# ---------------------------------------------------------------------------
+
+def test_which_repo_description_names_all_four_input_shapes():
+    """The description is what a 35B model reads to decide it may paste a
+    stack trace in. If it only mentions descriptions, it will only ever get
+    descriptions."""
+    desc = tools._WHICH_REPO_DESC.lower()
+    for word in ("stack trace", "diff", "symbol", "describ"):
+        assert word in desc, word
+
+
+def test_which_repo_description_states_the_empty_result_means_no_match():
+    assert "empty" in tools._WHICH_REPO_DESC.lower()
+
+
+@pytest.mark.anyio
+async def test_which_repo_returns_evidence_for_each_candidate(two_repo_cfg):
+    cfg, ids = two_repo_cfg
+    identity = acl.Identity(user_id=1, username="dev",
+                            allowed_repo_ids=[ids["g/alpha"], ids["g/beta"]])
+    # acl.Identity is a dataclass of exactly (user_id, username,
+    # allowed_repo_ids) -- see argus/acl.py.
+    rows = await tools.which_repo_impl(cfg.index.db_path, identity, "SharedName")
+    assert rows, "non-empty guard"
+    assert all(r["why"] for r in rows)

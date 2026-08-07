@@ -3,6 +3,9 @@ import sqlite3
 
 import pytest
 
+from argus import whichrepo
+from argus.resolve import Resolution
+from argus.store import graph
 from argus.store.db import open_db
 from argus.store import writes, queries
 
@@ -61,6 +64,17 @@ def _minimal_args_for(name, conn, target_repo_id):
         # is the *only* thing that can change which repo's occurrences come
         # back (same collision strategy as find_symbol's SharedName/a.c).
         return {"name": "SharedFunc"}
+    if name == "repo_map":
+        # repo_map's third positional parameter is target_repo_id itself, so
+        # no cross-repo graph state is needed for this generic filtering
+        # check: an allowlist that excludes target_repo_id must return {}, and
+        # one that includes it must return a non-empty dict naming it.
+        return {"repo_id": target_repo_id}
+    if name == "which_repo":
+        # Both repos in `two_repos` define a symbol named SharedName (same
+        # collision strategy as find_symbol), so switching the allowlist
+        # switches which repo's row comes back.
+        return {"description": "SharedName"}
     raise NotImplementedError(
         f"_minimal_args_for has no branch for {name!r}. A newly added public "
         "query function must be given deliberate arguments here before this "
@@ -268,6 +282,39 @@ def test_index_status_reports_queued_retries(two_repos):
     assert queued() == 0
 
 
+def test_index_status_reports_resolution_quality(two_repos):
+    """'34% of your includes are ambiguous' tells an operator their -I layout
+    defeats suffix matching, which no tool tuning will fix.
+
+    Unlike `_cross_repo_include` (which pokes `resolution` in directly via
+    SQL for tests that only need `repo_deps` already populated), this drives
+    the real `resolve_includes` end to end -- so the target must actually be
+    a header. `_cross_repo_include`'s target is `two_repos`'s `src/a.c`, which
+    `HEADER_SUFFIXES` excludes from matching entirely; reusing it here would
+    make every include come back `not_found`, not `resolved`.
+    """
+    from argus.resolve import resolve_includes
+
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+    writes.upsert_file(conn, repo_id=beta, path="include/shared.h", lang="c",
+                       size=2, blob_sha="hdrsha", content="//")
+    src_fid = conn.execute(
+        "SELECT id FROM files WHERE repo_id = ? AND path = 'src/a.c'", (alpha,)
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO includes (repo_id, file_id, raw, is_angle) VALUES (?, ?, 'shared.h', 0)",
+        (alpha, src_fid))
+    conn.commit()
+
+    resolve_includes(conn)
+    rows = queries.index_status([alpha], conn)
+    assert rows, "non-empty guard"
+    # `in` on a sqlite3.Row tests its VALUES, not its column names.
+    assert "includes_ambiguous" in rows[0].keys()
+    assert rows[0]["includes_resolved"] >= 1
+
+
 def test_allowlist_larger_than_sqlite_parameter_limit(two_repos):
     """A developer in a large GitLab group must not raise OperationalError.
 
@@ -407,3 +454,335 @@ def test_find_references_honours_limit(two_repos):
 
     limited = queries.find_references([rid], conn, "SharedFunc", limit=5)
     assert len(limited) == 5
+
+
+def _cross_repo_include(conn, ids) -> None:
+    """Make g/alpha depend on g/beta.
+
+    The `two_repos` fixture seeds no includes at all, so without this every
+    edge assertion below would pass over an empty graph -- proving nothing.
+    """
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+    src = conn.execute("SELECT id FROM files WHERE repo_id = ? LIMIT 1",
+                       (alpha,)).fetchone()["id"]
+    hdr = conn.execute("SELECT id FROM files WHERE repo_id = ? LIMIT 1",
+                       (beta,)).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO includes (repo_id, file_id, raw, is_angle, "
+        "resolved_file_id, resolved_repo_id, is_external, resolution) "
+        "VALUES (?, ?, 'shared.h', 0, ?, ?, 0, ?)",
+        (alpha, src, hdr, beta, Resolution.RESOLVED))
+    conn.commit()
+
+
+def test_repo_map_reports_both_directions(two_repos):
+    conn, ids = two_repos
+    _cross_repo_include(conn, ids)
+    graph.rebuild_repo_deps(conn)
+    result = queries.repo_map([ids["g/alpha"], ids["g/beta"]], conn, ids["g/alpha"])
+    assert result["repo"]["repo_id"] == ids["g/alpha"]
+    assert {d["repo_id"] for d in result["depends_on"]} == {ids["g/beta"]}
+
+
+def test_repo_map_hides_edges_touching_repos_outside_the_allowlist(two_repos):
+    """A developer who can see alpha but not beta must not learn that beta
+    exists, or that anything depends on it. Filtering happens at query time
+    against one shared graph."""
+    conn, ids = two_repos
+    _cross_repo_include(conn, ids)
+    graph.rebuild_repo_deps(conn)
+
+    visible = queries.repo_map([ids["g/alpha"]], conn, ids["g/alpha"])
+    assert visible["repo"]["repo_id"] == ids["g/alpha"], "non-empty guard"
+    assert visible["depends_on"] == []
+    assert visible["depended_on_by"] == []
+    assert str(ids["g/beta"]) not in repr(visible)
+
+
+def test_repo_map_on_a_repo_outside_the_allowlist_is_empty(two_repos):
+    conn, ids = two_repos
+    assert queries.repo_map([ids["g/alpha"]], conn, ids["g/beta"]) == {}
+
+
+def test_repo_map_with_no_graph_built_yet_is_empty_not_an_error(two_repos):
+    """Before the first resolution pass repo_deps is empty. That is a valid
+    state, not a failure."""
+    conn, ids = two_repos
+    result = queries.repo_map([ids["g/alpha"]], conn, ids["g/alpha"])
+    assert result["depends_on"] == []
+
+
+def test_which_repo_finds_the_repo_defining_a_named_symbol(two_repos):
+    conn, ids = two_repos
+    rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, "SharedName")
+    assert rows, "no candidates: the assertions below would be vacuous"
+    assert rows[0]["shape"] == "symbol"
+    assert rows[0]["why"], "every candidate must carry its evidence"
+
+
+def test_which_repo_uses_paths_named_in_a_diff(two_repos):
+    conn, ids = two_repos
+    path = conn.execute("SELECT path FROM files WHERE repo_id = ?",
+                        (ids["g/alpha"],)).fetchone()["path"]
+    diff = f"diff --git a/{path} b/{path}\n@@ -1 +1 @@\n+int x;\n"
+
+    rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, diff)
+    assert rows
+    assert rows[0]["repo_id"] == ids["g/alpha"]
+    assert rows[0]["shape"] == "diff"
+
+
+def test_which_repo_returns_empty_when_nothing_clears_the_floor(two_repos):
+    """A ranked list of weak matches looks like an answer, and a 35B model
+    acts on the top row."""
+    conn, ids = two_repos
+    assert queries.which_repo([ids["g/alpha"]], conn, "zzz_no_such_thing_anywhere") == []
+
+
+def test_which_repo_never_reveals_a_repo_outside_the_allowlist(two_repos):
+    conn, ids = two_repos
+    rows = queries.which_repo([ids["g/alpha"]], conn, "SharedName")
+    assert rows, "non-empty guard"
+    assert all(r["repo_id"] == ids["g/alpha"] for r in rows)
+
+
+def test_a_direct_hit_is_not_penalised_for_being_a_popular_repo(two_repos):
+    """Down-weighting high in-degree repos is right for prose and wrong when
+    evidence points directly into the shared library, where that library
+    genuinely is the answer.
+
+    The shared `two_repos` fixture cannot express this on its own: it seeds
+    the *same* relative paths in both alpha and beta, so a path-based direct
+    hit ties 1-for-1 between them and there is no signal left to break the
+    tie toward the popular one. It's also worth noting `_WEIGHTS` gives
+    Shape.STACK/DIFF/SYMBOL a central weight of 0.0, so the `if not hits:`
+    guard in `which_repo` is only ever load-bearing for Shape.PROSE (central
+    weight 0.3) -- this test therefore has to use prose-shaped input that
+    still contains a directly-named file, rather than a pure stack trace.
+
+    This test builds the extra state the property needs, on top of the
+    fixture: a file that exists ONLY in beta (so a direct hit on it can only
+    ever mean beta), plus a cross-repo include from alpha -> beta so beta has
+    non-zero in-degree, i.e. is the "popular" one.
+    """
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+
+    # beta-only file: a direct hit here names beta and only beta.
+    writes.upsert_file(conn, repo_id=beta, path="src/unique_beta.py", lang="python",
+                       size=6, blob_sha="uniqueb", content="unique")
+
+    # alpha depends on beta -- gives beta non-zero in-degree (it's "popular").
+    _cross_repo_include(conn, ids)
+    graph.rebuild_repo_deps(conn)
+
+    # Prose (not a stack trace/diff/bare symbol): mentions the shared symbol
+    # SharedName (a direct hit in both repos) and the beta-only path (a direct
+    # hit in beta alone), so beta collects strictly more direct evidence than
+    # alpha while both have at least one hit each.
+    description = (
+        "The team suspects SharedName is misbehaving, possibly tied to "
+        "src/unique_beta.py:42, though nobody has filed a report yet."
+    )
+    assert whichrepo.detect_shape(description) == whichrepo.Shape.PROSE, (
+        "test assumes prose shape -- central weight is 0.0 for every other "
+        "shape, so the guard this test protects would not be exercised"
+    )
+
+    rows = queries.which_repo([alpha, beta], conn, description)
+    assert rows
+    assert rows[0]["repo_id"] == beta, (
+        "beta is directly named here (src/unique_beta.py) and must not be "
+        "down-ranked just because it also has incoming deps from alpha"
+    )
+
+
+def test_which_repo_does_not_treat_underscore_as_a_wildcard(two_repos):
+    """SQLite's LIKE treats a bare `_` in the *bound value* as a wildcard
+    (matching any one character), not just in literal pattern text. Two
+    files in different repos whose paths differ only where a `_` sits must
+    not both come back as evidence for a query naming one of them.
+
+    This is not just an extra row: which_repo treats a _files_named result
+    as a *direct* hit, and direct hits are exempt from the centrality
+    penalty (`if not hits:`). A false match here both invents evidence for
+    the wrong repo and disables the correction that would otherwise damp
+    it, so a change can be attributed to a repo that was never actually
+    named.
+    """
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+
+    writes.upsert_file(conn, repo_id=alpha, path="src/unique_beta.c", lang="c",
+                       size=6, blob_sha="ubeta-a", content="alpha!")
+    # Differs from the file above only where a `_` sits (`X` instead of `_`).
+    # Under an unescaped LIKE, that `_` in the bound value would match any
+    # single character, so this unrelated file would falsely satisfy a query
+    # for unique_beta.c.
+    writes.upsert_file(conn, repo_id=beta, path="src/uniqueXbeta.c", lang="c",
+                       size=5, blob_sha="ubeta-b", content="beta!")
+
+    description = "Traceback (most recent call last):\n  at unique_beta.c:42\n"
+    assert whichrepo.detect_shape(description) == whichrepo.Shape.STACK, (
+        "test assumes stack shape, where a direct hit is unpenalised evidence"
+    )
+
+    rows = queries.which_repo([alpha, beta], conn, description)
+    repo_ids_hit = {r["repo_id"] for r in rows}
+    assert repo_ids_hit == {alpha}, (
+        f"expected evidence attributed to only alpha, got {repo_ids_hit} -- "
+        "an unescaped `_` in the LIKE pattern let src/uniqueXbeta.c in beta "
+        "match a query for src/unique_beta.c"
+    )
+
+
+def test_in_degree_ignores_edges_whose_source_is_outside_the_allowlist(two_repos):
+    """A repo outside the allowlist must not be able to inflate a visible
+    repo's centrality by depending on it.
+
+    `_in_degree` used to aggregate `repo_deps` globally and filter only the
+    target (`to_repo_id`) endpoint, so an edge FROM a repo the caller cannot
+    see still counted toward a visible repo's in-degree -- and that feeds
+    `which_repo`'s centrality subtraction for Shape.PROSE. A caller could
+    infer "some repo I cannot see depends on this one" purely from a
+    confidence delta, which is exactly the disclosure `repo_map` (correctly)
+    refuses to make. This proves the fix: adding an edge from a repo outside
+    the allowlist into an in-allowlist repo must not move that repo's
+    confidence at all.
+    """
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+    gamma = writes.upsert_repo(conn, gitlab_id=99, path_with_namespace="g/gamma",
+                               default_branch="main", http_url="https://x/g/gamma")
+
+    # alpha-only content, matched lexically by an FTS query that is prose
+    # (multi-word, no diff/stack shape) yet has zero direct hits -- exactly
+    # the condition (`if not hits:`) that makes the centrality penalty live.
+    phrase = "gizmo widget doohickey"
+    writes.upsert_file(conn, repo_id=alpha, path="src/notes.txt", lang="text",
+                       size=len(phrase), blob_sha="notes1", content=phrase)
+    assert whichrepo.detect_shape(phrase) == whichrepo.Shape.PROSE
+
+    baseline = queries.which_repo([alpha, beta], conn, phrase)
+    baseline_conf = {r["repo_id"]: r["confidence"] for r in baseline}
+    assert alpha in baseline_conf, "non-empty guard"
+
+    # gamma (outside the allowlist) depends on alpha.
+    conn.execute(
+        "INSERT INTO repo_deps (from_repo_id, to_repo_id, weight) VALUES (?, ?, ?)",
+        (gamma, alpha, 1))
+    conn.commit()
+
+    after = queries.which_repo([alpha, beta], conn, phrase)
+    after_conf = {r["repo_id"]: r["confidence"] for r in after}
+
+    assert after_conf.get(alpha) == baseline_conf.get(alpha), (
+        f"alpha's confidence changed from {baseline_conf.get(alpha)} to "
+        f"{after_conf.get(alpha)} purely because a repo outside the "
+        "allowlist gained a dependency on it -- that leaks the hidden "
+        "repo's existence"
+    )
+
+
+def test_which_repo_excludes_weak_lexical_evidence_below_the_floor(two_repos):
+    """A repo whose only evidence is much weaker than the best match must be
+    excluded entirely, not returned as a low-confidence answer.
+
+    `_FLOOR_RATIO` (0.35) is unreachable by
+    `test_which_repo_returns_empty_when_nothing_clears_the_floor`, which uses
+    a query with neither direct nor lexical evidence at all and exits at the
+    earlier `if not direct and not lexical` guard. This reaches the floor for
+    real: alpha gets 3 files matching the query, beta gets 1 -- a ratio of
+    1/3 (~0.33), under 0.35. Neither repo has a direct hit, so the floor
+    check is the only thing standing between beta and a place in the result.
+    """
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+
+    phrase = "gizmo widget doohickey"
+    for i, path in enumerate(["src/n1.txt", "src/n2.txt", "src/n3.txt"]):
+        writes.upsert_file(conn, repo_id=alpha, path=path, lang="text",
+                           size=len(phrase), blob_sha=f"a{i}", content=phrase)
+    writes.upsert_file(conn, repo_id=beta, path="src/n1.txt", lang="text",
+                       size=len(phrase), blob_sha="b0", content=phrase)
+    assert whichrepo.detect_shape(phrase) == whichrepo.Shape.PROSE
+
+    rows = queries.which_repo([alpha, beta], conn, phrase)
+    repo_ids_hit = {r["repo_id"] for r in rows}
+    assert alpha in repo_ids_hit, "non-empty guard"
+    assert beta not in repo_ids_hit, (
+        "beta's lexical evidence (1 file) is only ~0.33 of alpha's (3 files) "
+        "-- under _FLOOR_RATIO -- and must not appear in the result"
+    )
+
+
+def test_confidence_is_between_zero_and_one(two_repos):
+    conn, ids = two_repos
+    rows = queries.which_repo([ids["g/alpha"], ids["g/beta"]], conn, "SharedName")
+    assert rows
+    assert all(0.0 <= r["confidence"] <= 1.0 for r in rows)
+
+
+def test_which_repo_lexical_evidence_is_unaffected_by_a_repo_outside_the_allowlist(two_repos):
+    """A repo the caller cannot see must never change which *allowed* repos
+    appear in which_repo's result, or their confidence, merely by containing
+    matching content -- see `_lexical_match_counts` and `which_repo`'s
+    docstring.
+
+    Before the fix, which_repo built its lexical evidence by counting rows
+    out of `search_code`'s bm25-ranked, LIMIT-50-sliced result. bm25's IDF is
+    computed over the *entire* files_fts table, including repos outside the
+    allowlist -- so content nobody asked to see could shift which allowed
+    rows survived the LIMIT 50 cut, up to erasing an allowed repo from the
+    result entirely. Reproduced with the same shape as the finding: 60
+    alpha-matching files + 30 beta-matching files (comfortably over the
+    limit, so the cut is live), then 400 matching files added to a third
+    repo that is never in the allowlist.
+    """
+    conn, ids = two_repos
+    alpha, beta = ids["g/alpha"], ids["g/beta"]
+    query = "gizmo widget"
+
+    # Interleaved insertion (so bm25 ties -- both repos' files match the
+    # query with the same term set -- do not all break toward alpha by
+    # insertion order) and an asymmetric term profile (alpha's files repeat
+    # "gizmo", beta's repeat "widget") so the two terms' relative rarity
+    # actually matters to bm25, not just document length. 60 alpha files,
+    # 30 beta -- over the LIMIT 50 `search_code` (and, pre-fix, `which_repo`)
+    # applies, so the cut this bug lives in is actually exercised.
+    for i in range(60):
+        writes.upsert_file(conn, repo_id=alpha, path=f"src/n{i}.txt", lang="text",
+                           size=20, blob_sha=f"a{i}", content="gizmo gizmo widget")
+        if i < 30:
+            writes.upsert_file(conn, repo_id=beta, path=f"src/n{i}.txt", lang="text",
+                               size=20, blob_sha=f"b{i}", content="gizmo widget widget")
+    assert whichrepo.detect_shape(query) == whichrepo.Shape.PROSE
+
+    baseline = queries.which_repo([alpha, beta], conn, query)
+    baseline_conf = {r["repo_id"]: r["confidence"] for r in baseline}
+    assert alpha in baseline_conf and beta in baseline_conf, (
+        "non-empty guard: both repos must clear the floor before the "
+        "third-repo content is added, or the rest of this test is vacuous"
+    )
+
+    # Third repo, never in the allowlist, matches "gizmo" heavily and never
+    # mentions "widget" at all -- exactly the kind of corpus-wide skew that
+    # shifts bm25's IDF for "gizmo" without the caller ever seeing a row
+    # from this repo (every query here filters `f.repo_id IN (...)` to the
+    # allowlist; gamma's own rows never come back, only its statistical
+    # footprint on the terms does).
+    gamma = writes.upsert_repo(conn, gitlab_id=99, path_with_namespace="g/gamma",
+                               default_branch="main", http_url="https://x/g/gamma")
+    for i in range(400):
+        writes.upsert_file(conn, repo_id=gamma, path=f"src/g{i}.txt", lang="text",
+                           size=20, blob_sha=f"g{i}", content="gizmo " * 20)
+
+    after = queries.which_repo([alpha, beta], conn, query)
+    after_conf = {r["repo_id"]: r["confidence"] for r in after}
+
+    assert after_conf == baseline_conf, (
+        f"which_repo's result for the allowed repos changed from "
+        f"{baseline_conf} to {after_conf} purely because a repo outside the "
+        "allowlist gained matching content -- content the caller cannot see "
+        "must not be able to erase or reweight a visible repo"
+    )

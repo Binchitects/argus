@@ -17,8 +17,10 @@ from .packs import registry
 from .packs.build import BuildError, build_pack, fetch_source
 from .packs.registry import RegistryError
 from .packs.sources import SOURCES
+from .resolve import resolve_includes
 from .store import queries, writes
 from .store.db import open_db
+from .store.graph import rebuild_repo_deps
 from .worker import index_repo
 
 DEFAULT_SERVE_HOST = "127.0.0.1"
@@ -167,9 +169,36 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False) -> int:
             f"errors={result.errors}{flags} "
             f"({time.time() - started:.1f}s)"
         )
-    # Exit codes 2/3/4 are already claimed (config, gitlab, preflight); use a
-    # distinct code so a cron job can tell "ran, but a repo is unhealthy"
-    # apart from those startup failures.
+    # One pass over the whole database, after every repo. An include can point
+    # into a repo indexed later in this same cycle, so resolving per repo would
+    # make the graph depend on indexing order.
+    try:
+        counts = resolve_includes(conn)
+        edges = rebuild_repo_deps(conn)
+    except Exception as exc:  # noqa: BLE001 - must not escape as an uncaught traceback
+        # Nothing else catches this: `main` handles only ConfigError and
+        # GitLabError, so an uncaught error here -- most notably
+        # sqlite3.IntegrityError from rebuild_repo_deps's FK on
+        # repo_deps.to_repo_id, raised whenever an include still points at a
+        # repo deleted since the last pass -- would discard the whole
+        # per-repo run summary printed above and exit via a raw traceback.
+        # That traceback carries no exit code of its own, so it cannot be
+        # told apart from `return 1` below ("ran, but a repo is unhealthy")
+        # by a caller checking $?. Report it the same way a per-repo failure
+        # is reported and reuse exit code 4: this is a failure of the run
+        # itself, the same category as a missing ctags binary, not a
+        # per-repo health flag.
+        print(f"resolve/rebuild failed: {exc!r}", file=sys.stderr)
+        return 4
+    print(f"includes: {counts.get('resolved', 0)} resolved, "
+          f"{counts.get('external', 0)} external, "
+          f"{counts.get('ambiguous', 0)} ambiguous, "
+          f"{counts.get('not_found', 0)} not found")
+    print(f"repo graph: {edges} cross-repo edges")
+
+    # Exit codes 2/3/4 are already claimed (config, gitlab, preflight/resolve);
+    # use a distinct code so a cron job can tell "ran, but a repo is
+    # unhealthy" apart from those startup/run failures.
     return 1 if any_repo_unhealthy else 0
 
 
@@ -200,6 +229,31 @@ def _status(cfg: Config) -> int:
             f"files={row['files']} symbols={row['symbols']} errors={row['errors']} "
             f"queued_retries={row['queued_retries']}{flags}"
         )
+    return 0
+
+
+def _resolve(cfg: Config) -> int:
+    conn = open_db(cfg.index.db_path)
+    try:
+        counts = resolve_includes(conn)
+        edges = rebuild_repo_deps(conn)
+    except Exception as exc:  # noqa: BLE001 - must not escape as an uncaught traceback
+        # Mirrors _index's containment of this same resolve_includes /
+        # rebuild_repo_deps pair (most notably sqlite3.IntegrityError from
+        # rebuild_repo_deps's FK on repo_deps.to_repo_id, raised whenever an
+        # include still points at a repo deleted since the last pass). Before
+        # this, `argus resolve` had try/finally but no except, so the same
+        # error that _index contains exited here as a raw traceback with no
+        # exit code -- indistinguishable from any other crash by a caller
+        # checking $?. Same exit code as _index's equivalent failure, so the
+        # two paths agree.
+        print(f"resolve/rebuild failed: {exc!r}", file=sys.stderr)
+        return 4
+    finally:
+        conn.close()
+    for state in ("resolved", "external", "ambiguous", "not_found"):
+        print(f"{state:<12} {counts.get(state, 0)}")
+    print(f"{'edges':<12} {edges}")
     return 0
 
 
@@ -445,6 +499,10 @@ def main(argv: list[str] | None = None) -> int:
     p_status = sub.add_parser("status", help="Show per-repo index freshness")
     p_status.add_argument("--config", required=True, type=Path)
 
+    p_resolve = sub.add_parser(
+        "resolve", help="Re-resolve includes and rebuild the dependency graph")
+    p_resolve.add_argument("--config", required=True, type=Path)
+
     p_serve = sub.add_parser("serve", help="Run the MCP retrieval server")
     p_serve.add_argument("--config", required=True, type=Path)
     p_serve.add_argument("--host", default=DEFAULT_SERVE_HOST,
@@ -541,6 +599,8 @@ def main(argv: list[str] | None = None) -> int:
             return _serve(cfg, args.host, args.port, args.allowed_hosts)
         if args.command == "flush-acl":
             return _flush_acl(cfg, args.user)
+        if args.command == "resolve":
+            return _resolve(cfg)
         return _status(cfg)
     except GitLabError as exc:
         print(f"gitlab error: {exc}", file=sys.stderr)

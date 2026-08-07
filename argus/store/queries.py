@@ -4,6 +4,9 @@ import re
 import sqlite3
 from collections.abc import Sequence
 
+from .. import whichrepo
+from ..whichrepo import Shape
+
 # Conservative: SQLite's *documented* default SQLITE_MAX_VARIABLE_NUMBER is
 # 999. Builds since 3.32.0 raise the default to 32766, but we don't rely on
 # that -- 900 stays safely under both, and under any host this ever runs on.
@@ -182,6 +185,12 @@ def index_status(allowed_repo_ids: Sequence[int],
             "       (SELECT COUNT(*) FROM files   WHERE repo_id = r.id) AS files,"
             "       (SELECT COUNT(*) FROM symbols WHERE repo_id = r.id) AS symbols,"
             "       (SELECT COUNT(*) FROM index_errors WHERE repo_id = r.id) AS errors,"
+            "       (SELECT COUNT(*) FROM includes WHERE repo_id = r.id"
+            "         AND resolution = 'resolved')  AS includes_resolved,"
+            "       (SELECT COUNT(*) FROM includes WHERE repo_id = r.id"
+            "         AND resolution = 'external')  AS includes_external,"
+            "       (SELECT COUNT(*) FROM includes WHERE repo_id = r.id"
+            "         AND resolution = 'ambiguous') AS includes_ambiguous,"
             # index_queue.repo_id is a PRIMARY KEY: one row per repo, with the
             # queued paths JSON-packed into `reason`. COUNT(*) is therefore a 0/1
             # flag, not a count -- a repo with 4,000 stuck paths reported "1".
@@ -287,3 +296,283 @@ def find_references(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
 
     results.sort(key=lambda r: (r["repo"], r["path"], r["line"]))
     return results[:limit]
+
+
+def repo_map(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
+             repo_id: int) -> dict:
+    """Dependencies and dependents of `repo_id`, filtered to the allowlist.
+
+    `repo_deps` is a global graph, but a caller may only learn about repos
+    they can already see. An edge to a repo outside the allowlist is dropped
+    entirely rather than reported anonymously -- "depends on 1 repo you cannot
+    see" is itself a disclosure.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids or repo_id not in set(ids):
+        return {}
+
+    row = conn.execute(
+        "SELECT id, path_with_namespace FROM repos WHERE id = ?", (repo_id,)
+    ).fetchone()
+    if row is None:
+        return {}
+
+    def edges(sql: str) -> list[dict]:
+        out: list[dict] = []
+        for chunk in _chunks(list(ids), 1):
+            marks = ",".join("?" for _ in chunk)
+            out.extend(
+                {"repo_id": r["other_id"],
+                 "path_with_namespace": r["path_with_namespace"],
+                 "weight": r["weight"]}
+                for r in conn.execute(sql.format(marks=marks), (repo_id, *chunk))
+            )
+        out.sort(key=lambda e: (-e["weight"], e["path_with_namespace"]))
+        return out
+
+    return {
+        "repo": {"repo_id": row["id"],
+                 "path_with_namespace": row["path_with_namespace"]},
+        "depends_on": edges(
+            "SELECT d.to_repo_id AS other_id, r.path_with_namespace, d.weight"
+            "  FROM repo_deps d JOIN repos r ON r.id = d.to_repo_id"
+            " WHERE d.from_repo_id = ? AND d.to_repo_id IN ({marks})"),
+        "depended_on_by": edges(
+            "SELECT d.from_repo_id AS other_id, r.path_with_namespace, d.weight"
+            "  FROM repo_deps d JOIN repos r ON r.id = d.from_repo_id"
+            " WHERE d.to_repo_id = ? AND d.from_repo_id IN ({marks})"),
+    }
+
+
+#: Per-shape weights. Not magic numbers: each is defended by a test above that
+#: fails if it changes materially. A diff or stack trace names files outright,
+#: so lexical overlap would only add noise; prose inverts that.
+_WEIGHTS: dict[str, dict[str, float]] = {
+    Shape.DIFF:   {"direct": 1.0, "lexical": 0.0, "central": 0.0},
+    Shape.STACK:  {"direct": 1.0, "lexical": 0.1, "central": 0.0},
+    Shape.SYMBOL: {"direct": 1.0, "lexical": 0.2, "central": 0.0},
+    Shape.PROSE:  {"direct": 0.5, "lexical": 1.0, "central": 0.3},
+}
+
+#: A repo qualifies with any direct hit, or a lexical score at least this
+#: fraction of the best repo's. Below it, the answer is "nothing matched".
+_FLOOR_RATIO = 0.35
+
+
+def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
+               description: str, limit: int = 5) -> list[dict]:
+    """Rank repos a change probably belongs in, with the evidence for each.
+
+    Returns [] rather than a ranked list of weak matches when nothing clears
+    the evidence floor: a list looks like an answer, and the caller acts on
+    the top row.
+
+    Every score component here is computed from allowed repos only, and is
+    unaffected by content in repos outside the allowlist -- including the
+    lexical term, which counts matching files per allowed repo directly
+    (`_lexical_match_counts`) rather than reusing `search_code`'s bm25-ranked
+    top-N. bm25's IDF is computed over the whole `files_fts` table, so
+    ranking-and-slicing first would let a hidden repo's match volume decide
+    which *allowed* rows survive the cut -- up to erasing a visible repo from
+    the result entirely. See `_lexical_match_counts` for the fix.
+
+    The semantic term is absent, not zero-weighted by accident -- Phase 4 adds
+    it. Diffs, stack traces and symbols do not depend on it at all.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids or not description.strip():
+        return []
+
+    allowed = set(ids)
+    shape = whichrepo.detect_shape(description)
+    weights = _WEIGHTS[shape]
+
+    direct: dict[int, list[str]] = {}
+    lexical: dict[int, float] = {}
+
+    for path in whichrepo.extract_paths(description):
+        for row in _files_named(conn, allowed, path):
+            direct.setdefault(row["repo_id"], []).append(
+                f"file {row['path']}")
+
+    for name in whichrepo.extract_symbols(description)[:10]:
+        for row in find_symbol(list(allowed), conn, name, limit=20):
+            direct.setdefault(row["repo_id"], []).append(
+                f"{row['kind']} {row['name']} at {row['path']}:{row['line']}")
+
+    if weights["lexical"]:
+        # `description` is handed to FTS5 verbatim. A stack trace or diff
+        # routinely contains "/", ":", "(" -- characters FTS5's MATCH parser
+        # rejects even though they are perfectly ordinary in a path. That is
+        # a syntax problem with treating free text as a query, not evidence
+        # that nothing matches, so a malformed query degrades to "no lexical
+        # evidence" instead of aborting the whole ranking. Direct evidence
+        # (paths, symbols) is extracted separately above and is unaffected.
+        try:
+            counts = _lexical_match_counts(conn, allowed, description)
+            for repo_id, n in counts.items():
+                lexical[repo_id] = float(n)
+        except QueryError:
+            # Deliberate, not defensive noise: swallowing this is exactly the
+            # degrade-to-"no lexical evidence" behaviour described above. All
+            # that is lost is this one input among several -- direct hits
+            # (paths, symbols) and centrality are computed independently and
+            # still rank the repo normally.
+            pass
+
+    if not direct and not lexical:
+        return []
+
+    best_lex = max(lexical.values(), default=0.0) or 1.0
+    centrality = _in_degree(conn, allowed) if weights["central"] else {}
+    max_central = max(centrality.values(), default=0) or 1
+
+    scored: list[dict] = []
+    for repo_id in allowed:
+        hits = direct.get(repo_id, [])
+        lex = lexical.get(repo_id, 0.0) / best_lex
+        if not hits and lex < _FLOOR_RATIO:
+            continue
+
+        score = weights["direct"] * min(len(hits), 5) / 5.0 + weights["lexical"] * lex
+        # Only inferred evidence is penalised. A repo named outright in a diff
+        # or a stack frame is never punished for being widely depended upon.
+        if not hits:
+            score -= weights["central"] * (centrality.get(repo_id, 0) / max_central)
+
+        if score <= 0:
+            continue
+        why = hits[:5] or [f"lexical match on {lexical.get(repo_id, 0):.0f} file(s)"]
+        scored.append({
+            "repo_id": repo_id,
+            "path_with_namespace": _repo_name(conn, repo_id),
+            "confidence": round(min(score, 1.0), 3),
+            "shape": shape,
+            "why": why,
+        })
+
+    scored.sort(key=lambda r: (-r["confidence"], r["path_with_namespace"]))
+    return scored[:limit]
+
+
+def _escape_like(value: str) -> str:
+    """Escape a value bound into a LIKE pattern so it matches only itself.
+
+    SQLite's LIKE treats a bare `_` or `%` in the *bound value*, not only in
+    literal pattern text, as a wildcard -- `_` matches any one character and
+    `%` matches any run of characters. Snake_case filenames are near-
+    universal in C and Python, so an unescaped query for `unique_beta.c`
+    would also match a sibling file like `uniqueXbeta.c` in a different
+    repo. Escape the backslash first, or the backslashes just inserted in
+    front of `_`/`%` would themselves be escaped on the next pass.
+    """
+    return value.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
+
+
+def _files_named(conn, allowed: set[int], path: str) -> list[sqlite3.Row]:
+    rows = []
+    escaped = _escape_like(path)
+    for chunk in _chunks(list(allowed), 2):  # path (equality) + path (LIKE)
+        marks = ",".join("?" for _ in chunk)
+        rows.extend(conn.execute(
+            f"SELECT repo_id, path FROM files WHERE repo_id IN ({marks})"
+            "  AND (path = ? OR path LIKE '%/' || ? ESCAPE '\\')",
+            (*chunk, path, escaped)).fetchall())
+    return rows
+
+
+def _lexical_match_counts(conn, allowed: set[int], query: str) -> dict[int, int]:
+    """Per-repo count of files matching `query` in FTS5, restricted to `allowed`.
+
+    A direct COUNT(*) ... GROUP BY repo_id, not `search_code`'s bm25-ranked
+    top-N. `which_repo` only ever wants "how many allowed files matched, per
+    repo" -- a match is a match, so which one ranks higher within a repo is
+    irrelevant to that question, and computing bm25 at all would drag in its
+    IDF, which is computed over the *entire* files_fts table including repos
+    outside `allowed`. Content the caller cannot see would then be able to
+    change which allowed rows survive a rank-and-slice -- as far as making an
+    allowed repo disappear from the result once a hidden repo accumulates
+    enough matches to shift the IDF far enough. A plain per-repo count never
+    ranks anything, so it cannot be swayed by rows it never looks at.
+
+    Chunked like the other allowlist-filtered queries in this module (the
+    query string is the one reserved non-allowlist parameter per chunk).
+    Raises `QueryError` on invalid FTS5 syntax, exactly like `search_code` --
+    a diff or stack trace can still produce a MATCH expression FTS5 rejects,
+    and the caller (`which_repo`) already knows how to degrade that into "no
+    lexical evidence" instead of failing the whole query.
+    """
+    ids = list(allowed)
+    if not ids:
+        return {}
+    counts: dict[int, int] = {}
+    for chunk in _chunks(ids, reserve=1):  # query
+        marks = ",".join("?" for _ in chunk)
+        try:
+            rows = conn.execute(
+                "SELECT f.repo_id AS repo_id, COUNT(*) AS n"
+                "  FROM files_fts"
+                "  JOIN files f ON f.id = files_fts.rowid"
+                f" WHERE files_fts MATCH ? AND f.repo_id IN ({marks})"
+                " GROUP BY f.repo_id",
+                [query, *chunk],
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            raise QueryError(
+                f"That search syntax is not valid ({exc}). Try plain terms "
+                "without quotes or operators, e.g. DecodeFrame, or use "
+                "regex=True."
+            ) from exc
+        for row in rows:
+            counts[row["repo_id"]] = counts.get(row["repo_id"], 0) + row["n"]
+    return counts
+
+
+def _in_degree(conn, allowed: set[int]) -> dict[int, int]:
+    """In-degree of each allowed repo, counting only edges whose SOURCE is
+    also in the allowlist.
+
+    This used to aggregate `repo_deps` globally and filter only the target
+    (`to_repo_id`) endpoint. An edge FROM a repo the caller cannot see still
+    inflated a visible repo's in-degree under that scheme -- and in-degree
+    feeds `which_repo`'s centrality subtraction for Shape.PROSE, so a caller
+    could infer "some repo I cannot see depends on this one", and roughly how
+    many, purely from a confidence delta. That is exactly the disclosure
+    `repo_map` deliberately refuses to make (see its docstring). Constraining
+    BOTH endpoints to the allowlist closes it.
+
+    As a side effect this also means no join to `repos` is needed: a
+    dangling `from_repo_id` (a repo deleted since the last graph rebuild)
+    can never pass an IN (...) membership test against a *live* allowlist.
+
+    Chunked on both endpoints, the same way `repo_map`'s `edges()` helper
+    chunks a single endpoint -- except here two IN (...) clauses share the
+    same host-parameter budget, so each side's chunk size is halved. Chunks
+    partition the allowlist, so summing counts across the chunk x chunk grid
+    double-counts nothing: each edge's (from, to) pair falls in exactly one
+    (from_chunk, to_chunk) cell.
+    """
+    ids = list(allowed)
+    if not ids:
+        return {}
+    chunks = _chunks(ids, SQLITE_MAX_VARS // 2)
+    counts: dict[int, int] = {}
+    for from_chunk in chunks:
+        from_marks = ",".join("?" for _ in from_chunk)
+        for to_chunk in chunks:
+            to_marks = ",".join("?" for _ in to_chunk)
+            for row in conn.execute(
+                "SELECT to_repo_id, COUNT(*) AS n FROM repo_deps"
+                f" WHERE from_repo_id IN ({from_marks})"
+                f"   AND to_repo_id IN ({to_marks})"
+                " GROUP BY to_repo_id",
+                [*from_chunk, *to_chunk],
+            ):
+                counts[row["to_repo_id"]] = counts.get(row["to_repo_id"], 0) + row["n"]
+    return counts
+
+
+def _repo_name(conn, repo_id: int) -> str:
+    row = conn.execute("SELECT path_with_namespace FROM repos WHERE id = ?",
+                       (repo_id,)).fetchone()
+    return row["path_with_namespace"] if row else ""

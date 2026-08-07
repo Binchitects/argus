@@ -92,6 +92,8 @@ Tools are named after the *questions developers ask*, not after retrieval mechan
 | `search_code` | Fast lexical search over millions of lines |
 | `get_file` | Access-checked content fetch |
 | `index_status` | Per-repo freshness, so the agent can qualify stale answers |
+| `which_repo` | *"Which repo do I change for X?"* — from a description, a symbol, a stack trace, or a diff |
+| `repo_map` | Which repos a given repo depends on, and which depend on it, from resolved `#include` edges |
 
 **Shipped — public documentation, no access control (there is nothing to gate):**
 
@@ -100,8 +102,7 @@ Tools are named after the *questions developers ask*, not after retrieval mechan
 | `docs_lookup` | Exact API name → the page and anchor that *define* it |
 | `docs_search` | Conceptual questions against Python and React docs |
 
-**Planned:** `which_repo` (*"which repo do I change for X?"*), `repo_map`
-(dependency graph), `semantic_search` (embeddings over your own code).
+**Planned:** `semantic_search` (embeddings over your own code).
 
 `index_status` looks like a throwaway and isn't: it's what stops an agent confidently answering from a three-week-stale index. It can say *"this repo was last indexed 4 hours ago"* instead of silently guessing.
 
@@ -149,10 +150,10 @@ Argus ships in phases, each ending somewhere genuinely usable.
 | **1 — Indexer** | Mirroring, change detection, symbol + include extraction, SQLite store, access-gated queries, CLI | ✅ **Complete** |
 | **2 — Multi-user retrieval** | ACL module, HTTP MCP server, 5 code tools, container, TLS | ✅ **Complete** |
 | **5 — Knowledge packs** | Portable public documentation packs, 2 doc tools, `argus pack` CLI | ✅ **Complete** |
-| **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | Planned |
+| **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | ✅ **Complete** |
 | **4 — Semantic layer** | Selective embeddings over private code, `semantic_search` | Planned |
 
-**469 tests**, passing locally and in the container, 0 skipped.
+**521 tests**, passing locally and in the container, 0 skipped.
 
 Phase 2 delivered most of the value — exact symbol lookup across the whole product, with real GitLab-derived permissions, before a single embedding existed. Phase 5 then added a second, entirely separate corpus: public documentation, which needs no access control and can be shared as a file.
 

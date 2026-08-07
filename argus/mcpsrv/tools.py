@@ -340,6 +340,28 @@ async def index_status_impl(db_path: Path | str, identity: acl.Identity) -> list
     return [dict(row) for row in rows]
 
 
+async def repo_map_impl(db_path: Path | str, identity: acl.Identity,
+                        repo_id: int) -> dict[str, Any]:
+    return await run_readonly(
+        db_path,
+        lambda conn: queries.repo_map(identity.allowed_repo_ids, conn, repo_id),
+    )
+
+
+async def which_repo_impl(db_path: Path | str, identity: acl.Identity,
+                          description: str) -> list[dict]:
+    # No `limit` parameter: the registered `which_repo` tool below never
+    # exposes one to a caller, so this always ran with queries.which_repo's
+    # own default anyway. Dropping it here removes a parameter nothing could
+    # ever set to something other than that default, rather than plumbing an
+    # unused knob through the MCP tool signature for a value this server has
+    # never needed callers to tune.
+    return await run_readonly(
+        db_path,
+        lambda conn: queries.which_repo(identity.allowed_repo_ids, conn, description),
+    )
+
+
 async def docs_lookup_impl(packs_dir: Path | str, name: str,
                            lang: str | None = None, limit: int = 20) -> list[dict]:
     return await run_packs(
@@ -490,6 +512,17 @@ _GET_FILE_DESC = (
     "so do not treat a failure here as proof a repo doesn't exist."
 )
 
+_REPO_MAP_DESC = (
+    "Show which repos a given repo depends on, and which depend on it, based "
+    "on resolved #include edges across the repos you have access to. Use it "
+    "to answer 'what breaks if I change this' before editing a shared header. "
+    "`weight` is how many distinct files create the dependency, so a weight of "
+    "1 is a single #include and a weight of 300 is a core dependency. Repos "
+    "you cannot access are omitted entirely -- an empty result may mean no "
+    "dependencies, or that they are all in repos you cannot see. Returns "
+    "empty if the dependency graph has not been built yet."
+)
+
 _INDEX_STATUS_DESC = (
     "Report the indexing state of every repo you have access to: last "
     "indexed commit sha and time, file/symbol/error counts, and -- this is "
@@ -504,11 +537,27 @@ _INDEX_STATUS_DESC = (
     "'not extracted yet', not 'does not exist'."
 )
 
+_WHICH_REPO_DESC = (
+    "Work out WHICH REPOSITORY a change belongs in, across the repos you have "
+    "access to. This is the tool for 'where do I add this?' when you do not "
+    "already know the repo. Accepts any of: a plain-language description of "
+    "the task -- describe what you're doing, e.g. 'add H.265 support to the "
+    "decoder' -- a symbol or function name, a stack trace "
+    "or error log pasted verbatim, or a diff you are reviewing -- paste "
+    "whichever you actually have, including multi-line text. Each candidate "
+    "comes back with `confidence` and a `why` list naming the specific files "
+    "and symbols that drove the match, so you can judge the answer instead of "
+    "trusting it. An EMPTY result means nothing matched well enough to be "
+    "worth reporting, not that the code does not exist -- fall back to "
+    "search_code with a distinctive term. Use repo_map afterwards to see what "
+    "else depends on the repo you pick."
+)
+
 
 def register_tools(server: FastMCP, cfg: Config) -> None:
     """Register the retrieval tools on `server`.
 
-    Five over the private code index, plus two over the public documentation
+    Seven over the private code index, plus two over the public documentation
     packs. The documentation tools take no identity and write no audit row --
     see their registration below.
 
@@ -579,4 +628,25 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         return await _with_audit(
             db_path, "index_status", identity, {},
             lambda: index_status_impl(db_path, identity),
+        )
+
+    @server.tool(name="repo_map", description=_REPO_MAP_DESC)
+    async def repo_map(repo_id: int, *, ctx: Context) -> dict[str, Any]:
+        identity = _identity(ctx)
+        return await _with_audit(
+            db_path, "repo_map", identity, {"repo_id": repo_id},
+            lambda: repo_map_impl(db_path, identity, repo_id),
+        )
+
+    @server.tool(name="which_repo", description=_WHICH_REPO_DESC)
+    async def which_repo(description: str, *, ctx: Context) -> list[dict]:
+        identity = _identity(ctx)
+        # description is truncated to 200 chars for the audit row only -- a
+        # pasted stack trace or diff can be thousands of lines, and the audit
+        # row records what was asked, not the whole payload (see
+        # _with_audit's docstring). The full, untruncated description still
+        # goes to which_repo_impl below.
+        return await _with_audit(
+            db_path, "which_repo", identity, {"description": description[:200]},
+            lambda: which_repo_impl(db_path, identity, description),
         )
