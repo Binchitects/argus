@@ -39,6 +39,41 @@ a service purely by being in the default profile set) respects the profile
 gate. That's what keeps a bare `docker compose up` from ever kicking off an
 index run.
 
+## Keeping the index current
+
+An index only advances when something runs `argus index`. Without a schedule
+it silently ages: `index_status` reports the staleness faithfully, and
+everyone reads stale answers anyway.
+
+Run the refresher, which polls on an interval:
+
+```bash
+docker compose --profile indexer up -d refresher
+```
+
+It defaults to a pass every 900 seconds; set `ARGUS_INDEX_INTERVAL` to change
+it. A failing pass does not stop the loop, so a briefly unreachable GitLab
+costs one cycle rather than every cycle until somebody notices. Watch its
+logs for a *repeated* non-zero exit -- that is the signal something needs
+attention:
+
+```bash
+docker compose logs -f refresher
+```
+
+Exit 1 from a pass means "ran, but at least one repo is unhealthy", which is
+distinct from 3 (GitLab) and 4 (indexing failure). A run that ends 1 every
+cycle is a repo that has been failing to mirror for as long as that has been
+true.
+
+This is the periodic poll the design specifies as the GitLab push webhook's
+fallback. The webhook itself is not built yet; the design notes the poll alone
+is sufficient until it is.
+
+**Choose an interval you can afford.** Each pass re-fetches every mirror. The
+cost is dominated by repos that changed, but the walk is not free, and the
+right number depends on a full-pass duration measured against your own GitLab.
+
 `argus index` now ends with a resolution pass and a graph rebuild. Watch the
 `ambiguous` count: a high proportion means many repos ship headers with the
 same basename, and `which_repo` will be correspondingly weaker. `argus

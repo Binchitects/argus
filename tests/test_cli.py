@@ -6,7 +6,7 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 
 from argus import cli
-from argus.gitlab import Project
+from argus.gitlab import GitLabError, Project
 from argus.mcpsrv import DEFAULT_ALLOWED_HOSTS
 from argus.gitlab import EnumerationHealth
 
@@ -792,3 +792,65 @@ def test_allow_partial_enumeration_overrides_the_refusal(tmp_path, monkeypatch):
 
     cli.main(["index", "--config", str(path), "--allow-partial-enumeration"])
     assert called == ["listed"], "the override did not let indexing proceed"
+
+
+def _cfg_file(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "gitlab:\n  url: https://gl.test\n  token: t\n"
+        f"index:\n  data_dir: {tmp_path.as_posix()}\n"
+        f"  db_path: {(tmp_path / 'i.db').as_posix()}\n", encoding="utf-8")
+    return path
+
+
+def test_index_runs_once_by_default(tmp_path, monkeypatch):
+    """The interval is opt-in. A bare `argus index` must still be a single
+    pass -- cron jobs and manual runs depend on it exiting."""
+    passes = []
+    monkeypatch.setattr(cli, "_index", lambda *a, **k: passes.append(1) or 0)
+    cli.main(["index", "--config", str(_cfg_file(tmp_path))])
+    assert len(passes) == 1
+
+
+def test_interval_keeps_running_after_a_failing_pass(tmp_path, monkeypatch, capsys):
+    """A repo that will not mirror, or a GitLab that is briefly down, must not
+    end the loop -- the next attempt fifteen minutes later is very likely to
+    succeed."""
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise GitLabError("gitlab briefly down")
+        return 0
+
+    monkeypatch.setattr(cli, "_index", flaky)
+    cfg = cli.Config.load(_cfg_file(tmp_path))
+    last = cli._index_repeatedly(cfg, None, False, False, interval=900,
+                                 sleep=lambda _s: None, max_passes=3)
+    assert len(calls) == 3, "the loop stopped on the failing pass"
+    assert last == 0
+    assert "gitlab briefly down" in capsys.readouterr().err
+
+
+def test_interval_sleeps_between_passes_but_not_after_the_last(tmp_path, monkeypatch):
+    slept = []
+    monkeypatch.setattr(cli, "_index", lambda *a, **k: 0)
+    cfg = cli.Config.load(_cfg_file(tmp_path))
+    cli._index_repeatedly(cfg, None, False, False, interval=900,
+                          sleep=slept.append, max_passes=3)
+    assert slept == [900, 900], f"expected 2 sleeps between 3 passes, got {slept}"
+
+
+def test_interrupting_the_loop_exits_cleanly(tmp_path, monkeypatch, capsys):
+    """`docker stop` and Ctrl-C must look like a normal shutdown, not a
+    traceback."""
+    monkeypatch.setattr(cli, "_index", lambda *a, **k: 0)
+
+    def interrupt(_seconds):
+        raise KeyboardInterrupt
+
+    cfg = cli.Config.load(_cfg_file(tmp_path))
+    assert cli._index_repeatedly(cfg, None, False, False, interval=900,
+                                 sleep=interrupt, max_passes=5) == 0
+    assert "stopped" in capsys.readouterr().err

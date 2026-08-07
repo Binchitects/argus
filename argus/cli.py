@@ -219,6 +219,54 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
     return 1 if any_repo_unhealthy else 0
 
 
+
+def _index_repeatedly(cfg: Config, only: str | None, reset_retries: bool,
+                      allow_partial: bool, interval: int,
+                      sleep=time.sleep, max_passes: int | None = None) -> int:
+    """Run indexing passes forever, `interval` seconds apart.
+
+    The design specifies a GitLab push webhook with a periodic poll as its
+    fallback, and notes the poll alone is sufficient until the webhook exists.
+    This is that poll. Without it an index only advances when somebody
+    remembers to run `argus index`, and `index_status` reports freshness
+    faithfully while everyone reads stale answers.
+
+    A failing pass does not end the loop. A repo that cannot be mirrored, a
+    GitLab that is briefly down, a resolution error -- none should stop the
+    next attempt fifteen minutes later, which is very likely to succeed. The
+    exit code of each pass is reported so an operator watching logs can see a
+    repeated failure, and the last one is returned if the loop ever ends.
+
+    Interrupts exit cleanly rather than through a traceback, so `docker stop`
+    and Ctrl-C both look like a normal shutdown.
+    """
+    last = 0
+    passes = 0
+    while max_passes is None or passes < max_passes:
+        started = time.monotonic()
+        try:
+            last = _index(cfg, only, reset_retries, allow_partial=allow_partial)
+        except (GitLabError, GitError, OSError) as exc:
+            # Operational, not fatal: report and try again next interval.
+            print(f"indexing pass failed: {exc}", file=sys.stderr)
+            last = 4
+        except KeyboardInterrupt:
+            print("stopped", file=sys.stderr)
+            return last
+        passes += 1
+        if max_passes is not None and passes >= max_passes:
+            break
+        elapsed = time.monotonic() - started
+        print(f"pass finished with exit {last} in {elapsed:.1f}s; "
+              f"next in {interval}s", flush=True)
+        try:
+            sleep(interval)
+        except KeyboardInterrupt:
+            print("stopped", file=sys.stderr)
+            return last
+    return last
+
+
 def _status(cfg: Config) -> int:
     conn = open_db(cfg.index.db_path)
     # Operator tool: pass the full known set explicitly rather than bypassing
@@ -516,6 +564,15 @@ def main(argv: list[str] | None = None) -> int:
               "Without an admin token GitLab's membership=false returns only "
               "PUBLIC projects, so the index would silently cover a fraction "
               "of the estate and every answer would be confidently incomplete."))
+    p_index.add_argument(
+        "--interval", type=int, default=0, metavar="SECONDS",
+        help=("Keep running, starting a new pass every SECONDS. Without it a "
+              "single pass runs and the command exits. This is the periodic "
+              "poll the design specifies as the webhook's fallback: without "
+              "it the index only advances when someone runs this by hand, and "
+              "everyone reads stale answers while index_status reports the "
+              "staleness faithfully. 900 (15 minutes) is the documented "
+              "default cadence. A failing pass does not stop the loop."))
     p_index.add_argument("--reset-retries", action="store_true",
                          help="Clear retry counters before indexing (manual recovery only; do not use on a schedule)")
 
@@ -617,6 +674,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "index":
+            if args.interval > 0:
+                return _index_repeatedly(
+                    cfg, args.repo, args.reset_retries,
+                    args.allow_partial_enumeration, args.interval)
             return _index(cfg, args.repo, args.reset_retries,
                           allow_partial=args.allow_partial_enumeration)
         if args.command == "serve":

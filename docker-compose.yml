@@ -57,6 +57,40 @@ services:
         limits:
           memory: 4G
 
+  # Keeps the index current. Without it the index only advances when someone
+  # remembers to run `argus index`, and everyone reads stale answers while
+  # index_status reports the staleness faithfully -- honest, and useless.
+  #
+  # This is the periodic poll the design specifies as the GitLab webhook's
+  # fallback; the design notes the poll alone is sufficient until the webhook
+  # exists. A failing pass does not stop the loop, so a briefly-unreachable
+  # GitLab costs one cycle rather than every cycle until someone notices.
+  #
+  # Runs under the `indexer` profile like the one-shot indexer, so a plain
+  # `docker compose up` still starts nothing that writes. Enable it for a real
+  # deployment with:  docker compose --profile indexer up -d refresher
+  refresher:
+    profiles: ["indexer"]
+    build:
+      context: .
+      target: runtime
+    image: argus:${ARGUS_VERSION:-0.1.0-rc1}
+    restart: unless-stopped
+    command: >
+      index --config /etc/argus/config.yaml
+            --interval ${ARGUS_INDEX_INTERVAL:-900}
+    environment:
+      ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:?set ARGUS_GITLAB_TOKEN in your environment or a .env file}
+    volumes:
+      - argus-data:/var/lib/argus
+      - ./config.yaml:/etc/argus/config.yaml:ro
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
   server:
     build:
       context: .
