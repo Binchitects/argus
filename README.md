@@ -153,7 +153,9 @@ Argus ships in phases, each ending somewhere genuinely usable.
 | **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | ✅ **Complete** |
 | **4 — Semantic layer** | Selective embeddings over private code, `semantic_search` | Planned |
 
-**521 tests**, passing locally and in the container, 0 skipped.
+**554 tests**, passing locally, 0 skipped.
+
+Health indicators, how they are measured, and the charts behind them are in [`docs/kpis.md`](docs/kpis.md) — every figure measured, none estimated.
 
 Phase 2 delivered most of the value — exact symbol lookup across the whole product, with real GitLab-derived permissions, before a single embedding existed. Phase 5 then added a second, entirely separate corpus: public documentation, which needs no access control and can be shared as a file.
 

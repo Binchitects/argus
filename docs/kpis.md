@@ -5,12 +5,8 @@ project actually shipped.** A metric that only ever goes up is decoration. The
 useful ones are the ones that would have gone visibly wrong while everything
 else looked fine.
 
-Three tiers, by how they are measured. The split matters — most of what goes
-wrong in a retrieval system is invisible to anything a machine can count.
-
----
-
-## Tier 1 — Automatic, from the index
+Every number on this page was measured, not estimated. Where a figure comes
+from a small or synthetic corpus, it says so — those are shapes, not targets.
 
 ```bash
 argus kpi --config /etc/argus/config.yaml
@@ -20,113 +16,180 @@ argus kpi --config /etc/argus/config.yaml --json >> /var/log/argus-kpi.jsonl
 Append the JSON weekly. **A KPI looked at once is a number; the same KPI
 looked at weekly is the only thing that catches slow decay.**
 
+---
+
+## Tier 1 — Automatic, from the index
+
 ### Baseline, 2026-08-07
 
 Measured against the test GitLab seeded with four real public C projects
-(zlib, libpng, freetype, libjpeg-turbo). Production numbers will differ by
-orders of magnitude — this is a shape, not a target.
+(zlib, libpng, freetype, libjpeg-turbo), since production GitLab is not
+reachable. Production numbers will differ by orders of magnitude.
 
 | Indicator | Baseline | Direction | Why it exists |
 |---|---|---|---|
-| `repos_indexed` / `repos` | 7 / 7 | ↑ | Coverage. A gap means enumeration or mirroring is failing. |
-| `repos_never_indexed` | 0 | ↓ | Has no age, so it cannot appear in staleness — invisible without its own counter. |
-| `repos_unhealthy` | 0 | ↓ | Errored, timed out, or symbol extraction failed. |
-| `median_repo_age_hours` | 1.4 | ↓ | Is the refresher running? |
-| `stalest_repo_hours` | 1.4 | ↓ | **The important one.** An average hides one repo that stopped updating three weeks ago. |
-| `symbols_per_1k_files` | 27,608 | ↑ | **The ctags canary.** |
-| `resolved_include_rate` | 0.657 | ↑ | Graph completeness. |
-| `ambiguous_include_rate` | 0.012 | ↓ | Leading indicator for `which_repo` quality. |
-| `cross_repo_edges` | 5 | ↑ | The dependency graph emptying out. |
-| `index_mb` / `mb_per_1k_files` | 30.9 / 25.8 | ↓ | Cost, and the input to the Postgres question. |
+| `repos_indexed` / `repos` | 7 / 7 | ↑ | Coverage gap means enumeration or mirroring is failing |
+| `repos_never_indexed` | 0 | ↓ | Has no age, so cannot appear in staleness — invisible without its own counter |
+| `repos_unhealthy` | 0 | ↓ | Errored, timed out, or symbol extraction failed |
+| `median_repo_age_hours` | 1.5 | ↓ | Is the refresher running? |
+| `stalest_repo_hours` | 1.5 | ↓ | **An average hides one repo that stopped updating three weeks ago** |
+| `symbols_per_1k_files` | 27,608 | ↑ | **The ctags canary** |
+| `resolved_include_rate` | 0.657 | ↑ | Graph completeness |
+| `ambiguous_include_rate` | 0.012 | ↓ | Leading indicator for `which_repo` quality |
+| `cross_repo_edges` | 5 | ↑ | The dependency graph emptying out |
+| `index_mb` / `mb_per_1k_files` | 30.9 / 25.8 | ↓ | Cost, and the input to the Postgres question |
 
-### The two that earn their place
+### Where includes actually land
 
-**`symbols_per_1k_files` — the ctags canary.** Phase 1 shipped a defect where
-a missing ctags let files be marked indexed with **zero symbols, permanently**.
-Every other number stayed healthy: file counts rose, no errors were recorded,
-`index_status` reported success. This number would have cratered. A test
-asserts it halves when extraction stops.
+Measured: 3,422 includes across the four projects.
 
-**`ambiguous_include_rate` — the `which_repo` leading indicator.** A rising
-share means many repos ship headers with the same basename, so the resolver
-refuses to guess and the dependency graph thins. Answers degrade slowly and
-nothing errors. At 1.2% across four real C projects, suffix matching is not
-being defeated; a move to 10%+ means your `-I` layout has changed in a way no
-tool tuning fixes.
+```mermaid
+pie showData
+    title Include resolution, 3422 real includes
+    "resolved" : 2247
+    "external (system headers)" : 792
+    "not_found" : 342
+    "ambiguous" : 41
+```
 
-**Watch rates, not counts.** Counts grow with the estate. Shares are
-comparable across time.
+**The 1.2% ambiguous share is the finding.** The design's stated worry was that
+many repos shipping headers with the same basename would defeat suffix
+matching. Across four real C projects it does not. A move past ~10% means the
+`-I` layout has changed in a way no tool tuning fixes.
+
+`not_found` at 10% is dominated by **generated headers** — zlib's `zconf.h` is
+built at compile time and simply is not in the source tree. That single
+absence caused a false dependency edge before it was fixed.
+
+### Indexing cost, per repo
+
+Measured on a cold full pass: 1,199 files in 14.8 s total, zero errors.
+
+```mermaid
+xychart-beta
+    title "Cold-pass seconds by repo (files indexed)"
+    x-axis ["zlib (127)", "libpng (134)", "libjpeg-turbo (394)", "freetype (536)"]
+    y-axis "seconds" 0 --> 6
+    bar [1.5, 1.8, 3.7, 4.8]
+```
+
+Roughly linear in files indexed, which is what makes a full-pass estimate for
+a real estate possible **once you have measured one**. Do not extrapolate from
+1,199 files to 3M lines.
 
 ---
 
 ## Tier 2 — Hand-checked, quarterly
 
-These are the numbers that matter most, and **no machine can compute them.**
-An automatic proxy for answer quality produces a number that rises while the
-answers get worse.
+These matter most, and **no machine can compute them.** An automatic proxy for
+answer quality produces a number that rises while the answers get worse.
 
-Keep a fixed set of ~10 real questions per surface — questions your developers
-actually asked, with a known correct answer. Re-run them each quarter and
-record the **misses**, not just the score.
-
-| Indicator | Baseline | How |
+| Indicator | Baseline | Method |
 |---|---|---|
-| `which_repo` top-1 accuracy | **8/10** | One question per input shape: prose, symbol, stack trace, diff |
+| `which_repo` top-1 accuracy | **8 / 10** | One question per input shape: prose, symbol, stack trace, diff |
 | `docs_search` usefulness | **6 good / 2 partial / 2 wrong** | Ten real documentation questions |
-| `docs_lookup` exactness | 8/8 exact | Known API names resolve to the defining page |
+| `docs_lookup` exactness | 8 / 8 | Known API names resolve to the defining page |
 
-Both current miss-sets share a cause worth re-checking each time: **a page or
-repo that *discusses* something outranking the one that *defines* it.** That
-was true of `docs_search` in Phase 5 and of `which_repo`'s prose path today.
+`which_repo` was **7/10** before vendored-copy evidence was down-weighted;
+fixing that root cause moved one question. The two remaining misses are
+recorded with their causes in `docs/index-measurements.md` rather than tuned
+away.
 
 **Do not tune constants against this set.** Ten questions is a smoke test, not
-a training set — fitting to it is how you fit to ten questions. If the misses
-share a cause, fix the cause.
+a training set — fitting to it is how you fit to ten questions.
+
+### Retrieval latency, measured
+
+| Operation | Median | Note |
+|---|---|---|
+| `which_repo` | **0.5 ms** | Sub-millisecond on a 7-repo index |
+| `docs_lookup` | **2.1 ms** | Both packs open, 17,919 chunks |
+| `docs_search` | **88.6 ms** | Excludes query embedding |
+| query embedding | **2,254 ms** | CPU Ollama — ~25× the entire search |
+
+**The embedder, not the index, sets the latency a developer feels.** That is a
+property of the hardware and will change the day a GPU appears, which is why
+it is reported but not tracked.
+
+### The measurement that sized the pack format
+
+Recall@10 against an exact float32 baseline, by how many candidates the
+binary coarse pass keeps before int8 rescoring:
+
+```mermaid
+xychart-beta
+    title "Measured recall@10 vs candidate pool (2000-vector corpus)"
+    x-axis [100, 200, 300, 400, 600, 800, 1000]
+    y-axis "recall@10" 0.5 --> 1.0
+    line [0.592, 0.736, 0.838, 0.882, 0.946, 0.956, 0.970]
+```
+
+The plan's provisional pool of 300 measured **0.838 — below the 0.85 the
+design assumed.** The default is 600 (0.946). The shortfall was the coarse
+cut, not the quantization: end-to-end recall sits within 0.002 of the ceiling
+set by which candidates survive the Hamming pass, at every pool size.
+
+This is a synthetic corpus. It validates the mechanism, not the product.
 
 ---
 
 ## Tier 3 — Engineering health
 
+```mermaid
+xychart-beta
+    title "Test suite growth, measured at each task"
+    x-axis ["P5 T3", "P5 T5", "P5 T7", "P5 T9", "P5 T11", "P5 done", "P3 T3", "P3 T5", "P3 T7", "P3 T9", "P3 merged", "today"]
+    y-axis "tests passing" 250 --> 600
+    line [270, 309, 364, 424, 464, 469, 486, 497, 516, 521, 531, 554]
+```
+
 | Indicator | Current | Direction |
 |---|---|---|
 | Tests passing | 554 | ↑ |
 | Tests skipped | 0 | ↓ — a skip is coverage that silently stopped running |
-| Container suite green | yes | — |
-| Defects found *after* merge | see below | ↓ |
+| Container suite green | yes (at 531) | — |
 
-### Where defects were found
+### Where defects were found — the most useful metric here
 
-The most useful engineering metric this project has, because it says which
-gate is doing the work:
+```mermaid
+xychart-beta
+    title "Phase 3 defects, by the gate that caught them"
+    x-axis ["per-task review", "whole-branch review", "convergence check", "first real data"]
+    y-axis "defects" 0 --> 8
+    bar [6, 4, 1, 2]
+```
 
-| Found by | Phase 3 | What it implies |
-|---|---|---|
-| Per-task review | 6 | Working as intended |
-| **Whole-branch review** | **1 Critical, 3 Important** | Cross-module seams — invisible to task-scoped review |
-| **Convergence check** | 1 Important | Fix waves introduce defects; Phase 1 saw 3 |
-| **First real data** | **2** | Neither reachable from any fixture |
-| Hollow tests found | 7 | Tests that could not fail |
+This says which gate is doing the work. In Phase 3 the **whole-branch review
+found 1 Critical and 3 Important that nine per-task reviews all missed** —
+cross-module seams are structurally invisible to task-scoped review. **First
+contact with real data found 2 more** that no fixture could have produced: a
+vendored copy of zlib inside libjpeg-turbo, and a header generated at build
+time.
 
-**Track "hollow tests found".** Seven tests in Phase 3 passed while the
-behaviour they named was broken, and several came from the plan itself. Each
-was caught by a targeted revert — breaking the code and confirming the test
-notices. That practice is why the count is known at all; a project that does
-not do it has the same defects and no number.
+**Hollow tests found: 7** — tests that passed while the behaviour they named
+was broken. Several came from the implementation plan itself. Each was caught
+by a *targeted revert*: breaking the code and confirming the test notices.
+A project that does not do this has the same hollow tests and no number.
 
 The pattern to watch: **if per-task review starts finding everything and the
 whole-branch review finds nothing, the whole-branch review has stopped
 working** — not the code getting better.
 
+### Known flake
+
+On 2026-08-07 a suite run reported `3 failed, 551 passed`; three subsequent
+full runs and one targeted re-run were all clean at 554, and the failing test
+names were not captured. Unreproduced and undiagnosed. Recorded because a
+suite that gates a release cannot have transient failures, and the first step
+to fixing one is admitting it happened.
+
 ---
 
 ## What is deliberately not measured
 
-- **Query latency.** Currently 0.5 ms for `which_repo`, 2 ms `docs_lookup`,
-  89 ms `docs_search`. All far below anything a developer notices, so tracking
-  them would be watching noise. Revisit if the index grows two orders of
-  magnitude.
-- **Embedding latency**, at 2,254 ms on CPU Ollama — a property of the
-  hardware, not the code, and it will change the day a GPU appears.
 - **Usage counts.** The `audit` table records every tool call and could
   support them, but a rising call count says nothing about whether the answers
-  were right, and would be easy to mistake for success.
+  were right, and is easy to mistake for success.
+- **Embedding latency as a tracked series** — hardware, not code.
+- **Per-query latency over time**, until the index grows two orders of
+  magnitude. Tracking sub-millisecond numbers is watching noise.
