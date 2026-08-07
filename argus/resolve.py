@@ -79,6 +79,16 @@ def resolve_includes(conn: sqlite3.Connection) -> dict[str, int]:
     }
     repo_names = set(repo_names_by_id.values())
 
+    # Bundled copies of other indexed repos, found by filename cluster rather
+    # than by name or by content. See find_vendored_dirs: a copy is usually
+    # modified, so hashing misses it, and the directory is often not named
+    # after what it contains (freetype carries zlib under src/gzip).
+    vendored_dirs = find_vendored_dirs(headers + [
+        (row["id"], row["repo_id"], row["path"])
+        for row in conn.execute("SELECT id, repo_id, path FROM files")
+        if not row["path"].endswith(HEADER_SUFFIXES)
+    ])
+
     counts = {Resolution.RESOLVED: 0, Resolution.EXTERNAL: 0,
               Resolution.AMBIGUOUS: 0, Resolution.NOT_FOUND: 0}
     updates = []
@@ -90,7 +100,7 @@ def resolve_includes(conn: sqlite3.Connection) -> dict[str, int]:
 
     for inc in includes:
         match, state = _resolve_one(inc, index, by_repo_path,
-                                    repo_names, repo_names_by_id)
+                                    repo_names, repo_names_by_id, vendored_dirs)
         counts[state] += 1
         updates.append((
             match[0] if match else None,
@@ -105,8 +115,94 @@ def resolve_includes(conn: sqlite3.Connection) -> dict[str, int]:
         "is_external = ?, resolution = ? WHERE id = ?",
         updates,
     )
+
+    # Persist the vendored-copy verdict so query-time code can use it without
+    # re-deriving it. The detection needs every path in the index at once,
+    # which is far too much work to repeat per query -- so it is materialised
+    # here, once per pass, the same way repo_deps is.
+    conn.execute("UPDATE files SET is_vendored = 0 WHERE is_vendored != 0")
+    for repo_id, directory in vendored_dirs:
+        conn.execute(
+            "UPDATE files SET is_vendored = 1 WHERE repo_id = ? "
+            "  AND (path = ? OR path LIKE ? || '/%')",
+            (repo_id, directory, directory))
+
     conn.commit()
     return counts
+
+
+
+#: A directory must hold at least this many files, and this share of them must
+#: be basenames the other repo also has, before it is called a vendored copy.
+#: Set to catch a bundled library while ignoring the incidental overlap any two
+#: C projects have (`config.h`, `util.h`). Measured on real repos: freetype's
+#: src/gzip matches zlib at 88% of 16 files, libjpeg-turbo's src/spng/zlib at
+#: 95% of 20 -- both far above the noise, which sat below 4 files.
+VENDOR_MIN_FILES = 4
+VENDOR_MIN_SHARE = 0.6
+
+
+def find_vendored_dirs(rows: Iterable[FileRow],
+                       repo_names_by_id: dict[int, str] | None = None
+                       ) -> set[tuple[int, str]]:
+    """Directories that are a bundled copy of another indexed repository.
+
+    Returns ``(repo_id, directory)`` pairs. Detection is by *filename cluster*,
+    not by content: a vendored copy is nearly always modified -- measured here,
+    freetype's src/gzip/inflate.c is 57,147 bytes against zlib's 53,660 -- so
+    hashing catches only the untouched ones. Names survive the edits.
+
+    The subtle part is telling the copy from the original, because overlap is
+    symmetric. zlib's own root directory matches libjpeg-turbo at 74%, purely
+    because libjpeg-turbo bundles zlib; a naive rule would call the canonical
+    zlib a copy and drop it from resolution entirely.
+
+    The asymmetry is **depth**: a bundled copy is nested deeper than the
+    project that owns those files holds them. zlib keeps inflate.c at its root
+    (depth 0); freetype carries one at src/gzip (depth 2) and libjpeg-turbo at
+    src/spng/zlib (depth 3). So a directory is a copy only when the repo it
+    resembles keeps those same names *nearer its own root*.
+    """
+    by_repo: dict[int, list[str]] = defaultdict(list)
+    for _file_id, repo_id, path in rows:
+        by_repo[repo_id].append(path)
+
+    # basename -> shallowest depth at which each repo holds it
+    owned: dict[int, dict[str, int]] = {}
+    for repo_id, paths in by_repo.items():
+        depths: dict[str, int] = {}
+        for path in paths:
+            name = path.rsplit("/", 1)[-1]
+            depth = path.count("/")
+            if name not in depths or depth < depths[name]:
+                depths[name] = depth
+        owned[repo_id] = depths
+
+    vendored: set[tuple[int, str]] = set()
+    for repo_id, paths in by_repo.items():
+        dirs: dict[str, set[str]] = defaultdict(set)
+        for path in paths:
+            directory = path.rsplit("/", 1)[0] if "/" in path else ""
+            dirs[directory].add(path.rsplit("/", 1)[-1])
+
+        for directory, names in dirs.items():
+            if not directory or len(names) < VENDOR_MIN_FILES:
+                continue                       # a repo's own root is never a copy
+            here = directory.count("/") + 1
+            for other_id, other_names in owned.items():
+                if other_id == repo_id:
+                    continue
+                shared = names & other_names.keys()
+                if len(shared) < VENDOR_MIN_FILES:
+                    continue
+                if len(shared) / len(names) < VENDOR_MIN_SHARE:
+                    continue
+                # The owner keeps these names closer to its own root.
+                theirs = max(other_names[n] for n in shared)
+                if theirs < here:
+                    vendored.add((repo_id, directory))
+                    break
+    return vendored
 
 
 def _is_vendored_copy(path: str, own_repo: str, repo_names: set[str]) -> bool:
@@ -138,8 +234,26 @@ def _is_vendored_copy(path: str, own_repo: str, repo_names: set[str]) -> bool:
     return bool(segments & (repo_names - {own_repo}))
 
 
+
+def _in_vendored_dir(repo_id: int, path: str,
+                     vendored_dirs: set[tuple[int, str]]) -> bool:
+    """True if `path` sits inside a directory identified as a bundled copy.
+
+    Checks every ancestor directory, not just the immediate one: a copy at
+    `src/gzip` must also disqualify `src/gzip/internal/foo.h`.
+    """
+    if not vendored_dirs:
+        return False
+    parts = path.split("/")[:-1]
+    for i in range(len(parts), 0, -1):
+        if (repo_id, "/".join(parts[:i])) in vendored_dirs:
+            return True
+    return False
+
+
 def _resolve_one(inc, index, by_repo_path, repo_names=frozenset(),
-                 repo_names_by_id=None) -> tuple[FileRow | None, str]:
+                 repo_names_by_id=None,
+                 vendored_dirs=frozenset()) -> tuple[FileRow | None, str]:
     repo_names_by_id = repo_names_by_id or {}
     raw = inc["raw"].strip()
 
@@ -162,8 +276,11 @@ def _resolve_one(inc, index, by_repo_path, repo_names=frozenset(),
     # local file, not a cross-repo claim.
     outside = [c for c in candidates if c[1] != inc["repo_id"]]
     if outside:
-        canonical = [c for c in outside
-                     if not _is_vendored_copy(c[2], repo_names_by_id.get(c[1], ""), repo_names)]
+        canonical = [
+            c for c in outside
+            if not _is_vendored_copy(c[2], repo_names_by_id.get(c[1], ""), repo_names)
+            and not _in_vendored_dir(c[1], c[2], vendored_dirs)
+        ]
         candidates = [c for c in candidates if c[1] == inc["repo_id"]] + canonical
 
     if not candidates:

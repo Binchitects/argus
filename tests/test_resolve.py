@@ -314,3 +314,153 @@ def test_a_library_namespacing_headers_under_its_own_name_still_resolves(tmp_pat
         assert row["resolved_repo_id"] == eal
     finally:
         db.close()
+
+
+def _mkfile(conn, rid, path, sha=None):
+    from argus.store import writes
+    return writes.upsert_file(conn, repo_id=rid, path=path, lang="c", size=1,
+                              blob_sha=sha or path, content="x")
+
+
+def test_find_vendored_dirs_detects_a_bundled_copy_by_filename_cluster(tmp_path):
+    """Content hashing cannot do this. Measured on real repos, freetype's
+    src/gzip/inflate.c is 57,147 bytes against zlib's 53,660 -- the copy was
+    modified, so the hashes differ. The filenames survive the edits."""
+    db = open_db(tmp_path / "i.db")
+    try:
+        zlib = _repo(db, 1, "g/zlib")
+        ft = _repo(db, 2, "g/freetype")
+        for name in ("inflate.c", "deflate.c", "zutil.c", "crc32.c", "adler32.c"):
+            _mkfile(db, zlib, name)
+            _mkfile(db, ft, f"src/gzip/{name}", sha=f"modified-{name}")
+        db.commit()
+
+        rows = [(r["id"], r["repo_id"], r["path"])
+                for r in db.execute("SELECT id, repo_id, path FROM files")]
+        found = resolve.find_vendored_dirs(rows)
+        assert (ft, "src/gzip") in found
+    finally:
+        db.close()
+
+
+def test_the_original_is_never_mistaken_for_the_copy(tmp_path):
+    """Overlap is symmetric, so a naive rule flags both. Measured on the real
+    index, zlib's own root 'matches libjpeg-turbo at 74%' purely because
+    libjpeg-turbo bundles zlib -- and excluding zlib's canonical files from
+    resolution would be far worse than the bug being fixed.
+
+    The asymmetry is depth: a copy is nested deeper than its original.
+
+    The original is deliberately NOT at the repo root here. A root directory is
+    skipped outright, so a root-held original is protected by that guard and
+    this test would pass with the depth comparison deleted -- it has to sit in
+    a subdirectory to make the depth rule the only thing standing.
+    """
+    db = open_db(tmp_path / "i.db")
+    try:
+        zlib = _repo(db, 1, "g/zlib")
+        ft = _repo(db, 2, "g/freetype")
+        for name in ("inflate.c", "deflate.c", "zutil.c", "crc32.c", "adler32.c"):
+            _mkfile(db, zlib, f"src/{name}")                       # depth 1
+            _mkfile(db, ft, f"src/gzip/{name}", sha=f"m-{name}")   # depth 2 -- copy
+        db.commit()
+
+        rows = [(r["id"], r["repo_id"], r["path"])
+                for r in db.execute("SELECT id, repo_id, path FROM files")]
+        found = resolve.find_vendored_dirs(rows)
+        assert (ft, "src/gzip") in found, "the copy was missed, so nothing is proven"
+        assert (zlib, "src") not in found, "the canonical repo was called a copy"
+    finally:
+        db.close()
+
+
+def test_a_few_shared_names_in_a_large_directory_is_not_vendoring(tmp_path):
+    """Any two C projects share a `config.h`, a `util.h`, an `error.c`. Enough
+    of those coincide in a big source directory to clear the absolute count,
+    so the count alone cannot be the test -- what marks a bundled library is
+    that it is *most* of what the directory contains.
+
+    The overlap here is 5 names, above VENDOR_MIN_FILES, out of 20. Only the
+    share ratio rejects it.
+    """
+    db = open_db(tmp_path / "i.db")
+    try:
+        a = _repo(db, 1, "g/a")
+        b = _repo(db, 2, "g/b")
+        common = ("config.h", "util.h", "error.c", "list.c", "debug.h")
+        for name in common:
+            _mkfile(db, a, name)                       # depth 0, so a "owns" them
+            _mkfile(db, b, f"src/{name}", sha=f"b-{name}")
+        for i in range(15):
+            _mkfile(db, b, f"src/own{i}.c")            # b's directory is its own
+        db.commit()
+
+        rows = [(r["id"], r["repo_id"], r["path"])
+                for r in db.execute("SELECT id, repo_id, path FROM files")]
+        found = resolve.find_vendored_dirs(rows)
+        assert (b, "src") not in found, "an ordinary source dir was called vendored"
+    finally:
+        db.close()
+
+
+def test_resolve_persists_the_vendored_verdict_for_query_time(tmp_path):
+    """Detection needs every path in the index at once, so it is materialised
+    once per pass rather than re-derived on every which_repo call."""
+    db = open_db(tmp_path / "i.db")
+    try:
+        zlib = _repo(db, 1, "g/zlib")
+        ft = _repo(db, 2, "g/freetype")
+        for name in ("inflate.c", "deflate.c", "zutil.c", "crc32.c", "adler32.c"):
+            _mkfile(db, zlib, name)
+            _mkfile(db, ft, f"src/gzip/{name}", sha=f"m-{name}")
+        db.commit()
+
+        resolve.resolve_includes(db)
+        vendored = {r["path"] for r in
+                    db.execute("SELECT path FROM files WHERE is_vendored = 1")}
+        assert vendored == {f"src/gzip/{n}" for n in
+                            ("inflate.c", "deflate.c", "zutil.c", "crc32.c", "adler32.c")}
+    finally:
+        db.close()
+
+
+def test_a_rerun_clears_a_stale_vendored_mark(tmp_path):
+    """A directory that stops looking vendored must stop being marked, or the
+    flag decays into a permanent wrong answer."""
+    db = open_db(tmp_path / "i.db")
+    try:
+        a = _repo(db, 1, "g/a")
+        _mkfile(db, a, "src/vendor/x.c")
+        db.execute("UPDATE files SET is_vendored = 1")
+        db.commit()
+
+        resolve.resolve_includes(db)
+        assert db.execute(
+            "SELECT COUNT(*) FROM files WHERE is_vendored = 1").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_a_tiny_directory_is_never_enough_evidence(tmp_path):
+    """Here the share ratio is a perfect 1.0 -- every name in the directory is
+    held by another repo, nearer its root. Only the absolute floor rejects it.
+
+    Three shared names is not a bundled library, it is `config.h`, `util.h`
+    and `error.c`. Share alone cannot express that, because a small directory
+    reaches 100% overlap by accident; the two thresholds fail differently and
+    both are load-bearing.
+    """
+    db = open_db(tmp_path / "i.db")
+    try:
+        a = _repo(db, 1, "g/a")
+        b = _repo(db, 2, "g/b")
+        for name in ("config.h", "util.h", "error.c"):
+            _mkfile(db, a, name)
+            _mkfile(db, b, f"src/compat/{name}", sha=f"b-{name}")
+        db.commit()
+
+        rows = [(r["id"], r["repo_id"], r["path"])
+                for r in db.execute("SELECT id, repo_id, path FROM files")]
+        assert (b, "src/compat") not in resolve.find_vendored_dirs(rows)
+    finally:
+        db.close()

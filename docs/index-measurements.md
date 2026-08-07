@@ -102,7 +102,7 @@ Five edges, all correct. Cost of the fix: exactly two includes reclassified
 Ten questions, one per input shape, hand-checked against repos whose correct
 answer is known.
 
-**8 of 10 top-1 correct.** Latency **0.5 ms median, 0.9 ms max**.
+**9 of 10 top-1 correct.** Latency **0.5 ms median, 0.9 ms max**.
 
 | shape | question | expected | got |
 |---|---|---|---|
@@ -114,21 +114,47 @@ answer is known.
 | prose | adjust the deflate compression level | zlib | **libpng** |
 | prose | add support for a new font hinting mode | freetype | freetype |
 | stack | `png_do_expand (pngrtran.c:1234)` | libpng | libpng |
-| stack | `inflate (inflate.c:700)` | zlib | **freetype** |
+| stack | `inflate (inflate.c:700)` | zlib | zlib |
 | diff | `src/psaux/psintrp.c` | freetype | freetype |
 
-It was **7 of 10** before the second vendored-copy fix. `deflateInit2_`
-resolved to libjpeg-turbo, because its vendored zlib genuinely defines the
-symbol. Evidence found inside a vendored copy is now worth 0.2 of canonical
-evidence — down-weighted rather than dropped, because unlike a false graph
-edge it is a *real* definition, just not the one you would edit.
+It was **7 of 10** before the first vendored-copy fix and **8 of 10** before
+the second. `deflateInit2_` resolved to libjpeg-turbo, because its vendored
+zlib genuinely defines the symbol. Evidence found inside a vendored copy is
+worth 0.2 of canonical evidence — down-weighted rather than dropped, because
+unlike a false graph edge it is a *real* definition, just not the one you
+would edit.
 
-### The two remaining misses
+### How `inflate.c` was fixed, and the approach that did not work
 
-**`inflate.c` → freetype.** freetype vendors zlib under `src/gzip/`. The
-vendored-copy rule only recognises a directory named after another *indexed*
-repository, and `gzip` is not one. Catching this needs content-level duplicate
-detection — a different piece of work, not a tuning change.
+freetype vendors zlib under `src/gzip/`, a directory named after neither
+repository. The earlier note here predicted that catching it needed
+**content-level duplicate detection**. That prediction was tested and is
+**wrong**:
+
+| file | blob sha | size |
+|---|---|---|
+| `zlib/inflate.c` | `5f5d4922b715` | 53,660 |
+| `libjpeg-turbo/src/spng/zlib/inflate.c` | `5f5d4922b715` | 53,660 |
+| `freetype/src/gzip/inflate.c` | `c8125680b0c9` | 57,147 |
+
+Byte-identical for libjpeg-turbo, and **not** for freetype — the copy was
+modified. Across the whole index only 10 blob shas span repos at all. Hashing
+would have fixed exactly the case that was already fixed.
+
+What survives modification is the **filename cluster**. freetype's `src/gzip`
+holds 88% of zlib's names; libjpeg-turbo's `src/spng/zlib` holds 95%.
+
+The trap is that overlap is symmetric, so the same measurement reports
+`zlib/(root)` at 74% "matching libjpeg-turbo" — **the original flagged as the
+copy**. Dropping zlib's canonical files from resolution would be far worse
+than the bug. The discriminator is **depth**: a bundled copy sits deeper than
+the repo that owns those names (zlib at depth 0, freetype's at 2,
+libjpeg-turbo's at 3). `find_vendored_dirs()` requires ≥4 shared names, ≥60%
+of the directory, *and* that the resembled repo holds them nearer its own
+root. The verdict is persisted to `files.is_vendored` because detection needs
+every path at once and cannot run per query.
+
+### The remaining miss
 
 **"adjust the deflate compression level" → libpng.** libpng has `compression`
 struct members; zlib scored 0.50 behind it. This is the prose path, which is

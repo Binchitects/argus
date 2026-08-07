@@ -86,14 +86,19 @@ answer quality produces a number that rises while the answers get worse.
 
 | Indicator | Baseline | Method |
 |---|---|---|
-| `which_repo` top-1 accuracy | **8 / 10** | One question per input shape: prose, symbol, stack trace, diff |
+| `which_repo` top-1 accuracy | **9 / 10** | One question per input shape: prose, symbol, stack trace, diff |
 | `docs_search` usefulness | **6 good / 2 partial / 2 wrong** | Ten real documentation questions |
 | `docs_lookup` exactness | 8 / 8 | Known API names resolve to the defining page |
 
-`which_repo` was **7/10** before vendored-copy evidence was down-weighted;
-fixing that root cause moved one question. The two remaining misses are
-recorded with their causes in `docs/index-measurements.md` rather than tuned
-away.
+`which_repo` was **7/10** before vendored-copy evidence was down-weighted and
+**8/10** before bundled copies were detected by filename cluster. Both moves
+came from fixing a root cause, not from adjusting a weight. The one remaining
+miss is recorded with its cause in `docs/index-measurements.md` rather than
+tuned away.
+
+**The sequence is the point.** 7 → 8 → 9 came from two different mechanisms
+that both looked like "vendoring" from a distance. A weight tuned at 7/10
+would have papered over the first and hidden the second entirely.
 
 **Do not tune constants against this set.** Ten questions is a smoke test, not
 a training set — fitting to it is how you fit to ten questions.
@@ -138,14 +143,14 @@ This is a synthetic corpus. It validates the mechanism, not the product.
 ```mermaid
 xychart-beta
     title "Test suite growth, measured at each task"
-    x-axis ["P5 T3", "P5 T5", "P5 T7", "P5 T9", "P5 T11", "P5 done", "P3 T3", "P3 T5", "P3 T7", "P3 T9", "P3 merged", "rc1", "impact_of"]
+    x-axis ["P5 T3", "P5 T5", "P5 T7", "P5 T9", "P5 T11", "P5 done", "P3 T3", "P3 T5", "P3 T7", "P3 T9", "P3 merged", "rc1", "impact_of", "vendored"]
     y-axis "tests passing" 250 --> 600
-    line [270, 309, 364, 424, 464, 469, 486, 497, 516, 521, 531, 554, 559]
+    line [270, 309, 364, 424, 464, 469, 486, 497, 516, 521, 531, 554, 559, 565]
 ```
 
 | Indicator | Current | Direction |
 |---|---|---|
-| Tests passing | 559 | ↑ |
+| Tests passing | 565 | ↑ |
 | Tests skipped | 0 | ↓ — a skip is coverage that silently stopped running |
 | Container suite green | yes (at 531) | — |
 
@@ -156,24 +161,44 @@ xychart-beta
     title "Phase 3 defects, by the gate that caught them"
     x-axis ["per-task review", "whole-branch review", "convergence check", "first real data"]
     y-axis "defects" 0 --> 8
-    bar [6, 4, 1, 2]
+    bar [6, 4, 1, 3]
 ```
 
 This says which gate is doing the work. In Phase 3 the **whole-branch review
 found 1 Critical and 3 Important that nine per-task reviews all missed** —
-cross-module seams are structurally invisible to task-scoped review. **First
-contact with real data found 2 more** that no fixture could have produced: a
-vendored copy of zlib inside libjpeg-turbo, and a header generated at build
-time.
+cross-module seams are structurally invisible to task-scoped review.
 
-**Hollow tests found: 7** — tests that passed while the behaviour they named
-was broken. Several came from the implementation plan itself. Each was caught
-by a *targeted revert*: breaking the code and confirming the test notices.
-A project that does not do this has the same hollow tests and no number.
+**First contact with real data has found 3** that no fixture would have
+produced: a vendored copy of zlib inside libjpeg-turbo, a header generated at
+build time, and freetype's bundled zlib under `src/gzip/` — a directory named
+after neither repository, which nobody writing a fixture would think to
+construct.
 
 The pattern to watch: **if per-task review starts finding everything and the
 whole-branch review finds nothing, the whole-branch review has stopped
 working** — not the code getting better.
+
+### Hollow tests found: 9
+
+A hollow test passes while the behaviour it names is broken. Several came from
+the implementation plan itself. Each was caught by a *targeted revert*:
+breaking the code deliberately and confirming the test notices.
+
+**Two of the nine were written for the vendored-copy feature**, in the same
+session that shipped it, and both passed for the wrong reason:
+
+| the test claimed to guard | what actually made it pass |
+|---|---|
+| the depth rule that tells a copy from the original | the separate "a repo root is never a copy" guard — the original was at the root |
+| the 60% share threshold | the file-count floor, hit first: only 2 names overlapped |
+
+Neither would have failed if its guard were deleted. Both now sit in
+configurations where the named guard is the only thing standing.
+
+**This is the argument for the practice in one table.** The tests were written
+deliberately, by someone who knew the failure mode, immediately after
+measuring the bug on real data — and were still hollow. A suite without
+targeted reverts has the same hollow tests and no number.
 
 ### Known flake
 

@@ -423,8 +423,14 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
     lexical: dict[int, float] = {}
     repo_names_by_id, repo_names = _repo_basenames(conn, allowed)
 
-    def record(repo_id: int, path: str, description_text: str) -> None:
-        vendored = _is_vendored_copy(
+    def record(repo_id: int, path: str, description_text: str,
+               stored_vendored: int | None = None) -> None:
+        # The stored flag comes from find_vendored_dirs, which detects a
+        # bundled copy by filename cluster and so catches ones the name-based
+        # check cannot -- freetype carries zlib under src/gzip, a directory
+        # named after nothing. Fall back to the name check when the flag has
+        # not been computed yet (no resolution pass has run).
+        vendored = bool(stored_vendored) or _is_vendored_copy(
             path, repo_names_by_id.get(repo_id, ""), repo_names)
         direct.setdefault(repo_id, []).append(
             f"{description_text} (vendored copy)" if vendored else description_text)
@@ -433,12 +439,14 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
 
     for path in whichrepo.extract_paths(description):
         for row in _files_named(conn, allowed, path):
-            record(row["repo_id"], row["path"], f"file {row['path']}")
+            record(row["repo_id"], row["path"], f"file {row['path']}",
+                   row["is_vendored"])
 
     for name in whichrepo.extract_symbols(description)[:10]:
         for row in find_symbol(list(allowed), conn, name, limit=20):
             record(row["repo_id"], row["path"],
-                   f"{row['kind']} {row['name']} at {row['path']}:{row['line']}")
+                   f"{row['kind']} {row['name']} at {row['path']}:{row['line']}",
+                   _vendored_flag(conn, row["repo_id"], row["path"]))
 
     if weights["lexical"]:
         # `description` is handed to FTS5 verbatim. A stack trace or diff
@@ -534,11 +542,25 @@ def _files_named(conn, allowed: set[int], path: str) -> list[sqlite3.Row]:
     for chunk in _chunks(list(allowed), 2):  # path (equality) + path (LIKE)
         marks = ",".join("?" for _ in chunk)
         rows.extend(conn.execute(
-            f"SELECT repo_id, path FROM files WHERE repo_id IN ({marks})"
+            f"SELECT repo_id, path, is_vendored FROM files WHERE repo_id IN ({marks})"
             "  AND (path = ? OR path LIKE '%/' || ? ESCAPE '\\')",
             (*chunk, path, escaped)).fetchall())
     return rows
 
+
+
+
+def _vendored_flag(conn, repo_id: int, path: str) -> int:
+    """The stored is_vendored verdict for one file, or 0 if unknown.
+
+    find_symbol's projection predates this column and is shared with other
+    tools, so the flag is looked up rather than threaded through it -- one
+    indexed lookup per candidate symbol, bounded by find_symbol's own limit.
+    """
+    row = conn.execute(
+        "SELECT is_vendored FROM files WHERE repo_id = ? AND path = ?",
+        (repo_id, path)).fetchone()
+    return row["is_vendored"] if row else 0
 
 
 def _repo_basenames(conn, allowed: set[int]) -> tuple[dict[int, str], set[str]]:
