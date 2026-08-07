@@ -875,3 +875,98 @@ def test_a_tiny_repo_with_one_match_does_not_outrank_a_substantial_one(tmp_path)
             f"{[(r['path_with_namespace'], r['confidence']) for r in rows]}")
     finally:
         conn.close()
+
+
+def _basename_repo(conn, gitlab_id=1, name="g/r"):
+    return writes.upsert_repo(conn, gitlab_id=gitlab_id, path_with_namespace=name,
+                              default_branch="main", http_url=f"https://x/{name}")
+
+
+def _mk(conn, repo_id, path):
+    writes.upsert_file(conn, repo_id=repo_id, path=path, lang="c", size=1,
+                       blob_sha=path, content="")
+
+
+def test_basename_column_matches_python_for_awkward_paths(tmp_path):
+    """The generated column uses SQLite's REPLACE/RTRIM basename idiom. If it
+    disagrees with the real basename anywhere, the narrowing clause in
+    _files_named silently drops matching files -- a wrong answer, not a slow
+    one, so it is worth pinning to the cases that could break it."""
+    conn = open_db(tmp_path / "i.db")
+    try:
+        rid = _basename_repo(conn)
+        awkward = ["inflate.c", "src/psaux/psintrp.c", "a/b/a/b", "x/x",
+                   "ab/abab", "a.b.c/d.e", "dir/name with space.h",
+                   "UPPER/Mixed.H", "deep/very/nested/leaf.hpp"]
+        for p in awkward:
+            _mk(conn, rid, p)
+        conn.commit()
+        for path, basename in conn.execute("SELECT path, basename FROM files"):
+            assert basename == path.rsplit("/", 1)[-1], path
+    finally:
+        conn.close()
+
+
+def test_the_basename_lookup_is_an_index_seek_not_a_scan(tmp_path):
+    """A performance guard with teeth. `path LIKE '%/' || ?` has a leading
+    wildcard, so no index on `path` can serve it and SQLite scans every file
+    in the allowed repos -- measured at 15.1 ms on 10,212 files, growing
+    linearly with the corpus. Nothing in the results would change if this
+    regressed, so only the plan can catch it."""
+    conn = open_db(tmp_path / "i.db")
+    try:
+        rid = _basename_repo(conn)
+        _mk(conn, rid, "src/inflate.c")
+        conn.commit()
+        # Capture the statement _files_named actually runs, rather than
+        # asserting against a copy of it pasted into the test. A copy passes
+        # happily while the real query goes back to scanning -- which is what
+        # a targeted revert of the narrowing clause demonstrated.
+        seen: list[str] = []
+        conn.set_trace_callback(seen.append)
+        try:
+            queries._files_named(conn, {rid}, "inflate.c")
+        finally:
+            conn.set_trace_callback(None)
+        statements = [s for s in seen if "FROM files" in s]
+        assert statements, seen
+
+        plan = " ".join(str(r[-1]) for r in
+                        conn.execute("EXPLAIN QUERY PLAN " + statements[0]))
+        assert "idx_files_basename" in plan, plan
+        assert "SCAN files" not in plan, plan
+    finally:
+        conn.close()
+
+
+def test_narrowing_by_basename_still_finds_a_multi_segment_suffix(tmp_path):
+    """`_files_named` is called with whole path fragments too, not just bare
+    names. The narrowing clause must not break the suffix case it never
+    intended to touch."""
+    conn = open_db(tmp_path / "i.db")
+    try:
+        rid = _basename_repo(conn)
+        _mk(conn, rid, "libs/src/psaux/psintrp.c")
+        conn.commit()
+        got = [r["path"] for r in queries._files_named(
+            conn, {rid}, "src/psaux/psintrp.c")]
+        assert got == ["libs/src/psaux/psintrp.c"], got
+    finally:
+        conn.close()
+
+
+def test_an_underscore_in_a_filename_is_not_a_wildcard_after_narrowing(tmp_path):
+    """`_` is a single-character wildcard in LIKE. The narrowing param is
+    compared with `=` and so must NOT be escaped -- escaping it there would
+    make every filename containing an underscore unmatchable, which is most
+    C filenames."""
+    conn = open_db(tmp_path / "i.db")
+    try:
+        rid = _basename_repo(conn)
+        _mk(conn, rid, "src/unique_beta.c")
+        _mk(conn, rid, "src/uniqueXbeta.c")
+        conn.commit()
+        got = [r["path"] for r in queries._files_named(conn, {rid}, "unique_beta.c")]
+        assert got == ["src/unique_beta.c"], got
+    finally:
+        conn.close()

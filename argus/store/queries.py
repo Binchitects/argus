@@ -537,14 +537,32 @@ def _escape_like(value: str) -> str:
 
 
 def _files_named(conn, allowed: set[int], path: str) -> list[sqlite3.Row]:
+    """Files whose path is, or ends with a whole path segment equal to, `path`.
+
+    The `basename = ?` term is a *narrowing* clause, not the match itself. It
+    changes no results: a row can only satisfy `path = arg` or
+    `path LIKE '%/' || arg` if the last segment of its path equals the last
+    segment of `arg` -- so every matching row already has that basename, and
+    requiring it up front is free of semantics but not of cost. It turns the
+    full scan `LIKE '%/…'` forces into an index seek on idx_files_basename.
+
+    Measured on 10,212 files: 15.1 ms before, and the same 15.1 ms whether one
+    row matched or three, which is what a scan looks like. See migration 010.
+
+    The narrowing param is the *raw* leaf, because it is compared with `=`.
+    Only the LIKE operand is passed through _escape_like -- escaping the
+    equality operand would make a literal underscore in a filename unmatchable.
+    """
     rows = []
     escaped = _escape_like(path)
-    for chunk in _chunks(list(allowed), 2):  # path (equality) + path (LIKE)
+    leaf = path.rsplit("/", 1)[-1]
+    for chunk in _chunks(list(allowed), 3):  # basename + path (=) + path (LIKE)
         marks = ",".join("?" for _ in chunk)
         rows.extend(conn.execute(
             f"SELECT repo_id, path, is_vendored FROM files WHERE repo_id IN ({marks})"
+            "  AND basename = ?"
             "  AND (path = ? OR path LIKE '%/' || ? ESCAPE '\\')",
-            (*chunk, path, escaped)).fetchall())
+            (*chunk, leaf, path, escaped)).fetchall())
     return rows
 
 

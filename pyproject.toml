@@ -29,6 +29,13 @@ include = ["argus*"]
 argus = ["store/migrations/*.sql"]
 
 [tool.pytest.ini_options]
+# Argus's own tests, and nothing else. Without this, a bare `pytest` walks the
+# whole working tree -- including deploy/test-gitlab/work/trees/, where the
+# measurement corpus is checked out. curl ships its own tests/ directory, so
+# collection failed outright with a FileNotFoundError from inside curl's
+# suite. The corpus is data; it must never look like this project's tests.
+testpaths = ["tests"]
+
 # Scoped to this exact message, not the module or the warning category in
 # general: starlette.testclient's own recommended migration (httpx2) isn't
 # adopted yet, so this one warning is expected noise on every test run. A
