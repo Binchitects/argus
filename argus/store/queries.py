@@ -5,6 +5,7 @@ import sqlite3
 from collections.abc import Sequence
 
 from .. import whichrepo
+from ..resolve import _is_vendored_copy
 from ..whichrepo import Shape
 
 # Conservative: SQLite's *documented* default SQLITE_MAX_VARIABLE_NUMBER is
@@ -358,6 +359,20 @@ _WEIGHTS: dict[str, dict[str, float]] = {
 #: fraction of the best repo's. Below it, the answer is "nothing matched".
 _FLOOR_RATIO = 0.35
 
+#: What a piece of evidence is worth when it sits in a vendored copy of
+#: another repository -- libjpeg-turbo carrying zlib at src/spng/zlib/, or
+#: freetype carrying one at src/gzip/.
+#:
+#: Down-weighted rather than dropped, and the distinction matters. A false
+#: dependency edge is simply wrong, so the resolver discards it. A vendored
+#: symbol is a REAL definition: asked where `deflateInit2_` is defined,
+#: libjpeg-turbo's bundled copy is a truthful answer. Asked which repository
+#: to CHANGE, it is the wrong one -- you would be editing a vendored copy
+#: instead of upstream. Measured on real repos, full-weight vendored evidence
+#: sent 3 of 10 hand-checked questions to the bundling repo instead of the
+#: canonical one.
+_VENDORED_EVIDENCE_WEIGHT = 0.2
+
 #: Added to a repo's file count when converting its lexical match count into a
 #: density. It exists to stop a very small repo scoring a perfect 1.0 on a
 #: single incidental match: without it, a one-file repo beats a 2,000-file repo
@@ -401,17 +416,29 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
     weights = _WEIGHTS[shape]
 
     direct: dict[int, list[str]] = {}
+    #: Evidence weight per repo. A hit inside a vendored copy of another
+    #: repository counts for less than a hit in canonical source -- see
+    #: _VENDORED_EVIDENCE_WEIGHT.
+    direct_weight: dict[int, float] = {}
     lexical: dict[int, float] = {}
+    repo_names_by_id, repo_names = _repo_basenames(conn, allowed)
+
+    def record(repo_id: int, path: str, description_text: str) -> None:
+        vendored = _is_vendored_copy(
+            path, repo_names_by_id.get(repo_id, ""), repo_names)
+        direct.setdefault(repo_id, []).append(
+            f"{description_text} (vendored copy)" if vendored else description_text)
+        direct_weight[repo_id] = direct_weight.get(repo_id, 0.0) + (
+            _VENDORED_EVIDENCE_WEIGHT if vendored else 1.0)
 
     for path in whichrepo.extract_paths(description):
         for row in _files_named(conn, allowed, path):
-            direct.setdefault(row["repo_id"], []).append(
-                f"file {row['path']}")
+            record(row["repo_id"], row["path"], f"file {row['path']}")
 
     for name in whichrepo.extract_symbols(description)[:10]:
         for row in find_symbol(list(allowed), conn, name, limit=20):
-            direct.setdefault(row["repo_id"], []).append(
-                f"{row['kind']} {row['name']} at {row['path']}:{row['line']}")
+            record(row["repo_id"], row["path"],
+                   f"{row['kind']} {row['name']} at {row['path']}:{row['line']}")
 
     if weights["lexical"]:
         # `description` is handed to FTS5 verbatim. A stack trace or diff
@@ -465,7 +492,8 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
         if not hits and lex < _FLOOR_RATIO:
             continue
 
-        score = weights["direct"] * min(len(hits), 5) / 5.0 + weights["lexical"] * lex
+        strength = min(direct_weight.get(repo_id, 0.0), 5.0) / 5.0
+        score = weights["direct"] * strength + weights["lexical"] * lex
         # Only inferred evidence is penalised. A repo named outright in a diff
         # or a stack frame is never punished for being widely depended upon.
         if not hits:
@@ -510,6 +538,24 @@ def _files_named(conn, allowed: set[int], path: str) -> list[sqlite3.Row]:
             "  AND (path = ? OR path LIKE '%/' || ? ESCAPE '\\')",
             (*chunk, path, escaped)).fetchall())
     return rows
+
+
+
+def _repo_basenames(conn, allowed: set[int]) -> tuple[dict[int, str], set[str]]:
+    """(repo_id -> basename, all basenames) for the allowed repos.
+
+    Allowlist-restricted like everything else here: these names decide how
+    evidence is weighted, so drawing them from outside the allowlist would let
+    an invisible repository shift a visible one's confidence.
+    """
+    by_id: dict[int, str] = {}
+    for chunk in _chunks(list(allowed), reserve=0):
+        marks = ",".join("?" for _ in chunk)
+        for row in conn.execute(
+            f"SELECT id, path_with_namespace FROM repos WHERE id IN ({marks})", chunk
+        ):
+            by_id[row["id"]] = row["path_with_namespace"].rsplit("/", 1)[-1]
+    return by_id, set(by_id.values())
 
 
 def _repo_file_counts(conn, allowed: set[int]) -> dict[int, int]:
