@@ -1,0 +1,111 @@
+name: Release image
+
+# Publishing is driven by a git tag, so a release is always traceable to an
+# exact commit. Nothing publishes from a branch: a mutable ref producing an
+# immutable artifact is how you end up unable to say what a deployment runs.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g. 0.1.0-rc1). Tag builds infer this."
+        required: true
+
+permissions:
+  contents: read
+  packages: write        # the only reason no PAT is needed on anyone's laptop
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version and image name
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ github.event.inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"     # v0.1.0-rc1 -> 0.1.0-rc1
+          fi
+          # Docker rejects uppercase in a repository name, and GitHub logins
+          # are commonly mixed case -- so this must be lowered, not assumed.
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "version=$version"            >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$owner/argus"  >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *rc*|*alpha*|*beta*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+            *)                   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The suite runs inside the image before anything is published. This is
+      # the gate, not a formality: the `test` stage installs the same pinned
+      # ctags the runtime uses, so a distro change that breaks symbol
+      # extraction fails here rather than silently producing an index with no
+      # symbols in it.
+      - name: Run the full suite inside the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: test
+          push: false
+          no-cache: true          # a CACHED test layer proves nothing
+          load: false
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the indexer/CLI image
+        id: runtime
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+
+      - name: Build and push the server image
+        id: server
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: server
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-server
+
+      # A release candidate must never own `latest`. Someone who pulls
+      # `latest` wants the stable build, and a pilot image answering that
+      # request is a silent downgrade of their deployment.
+      - name: Move :latest (final releases only)
+        if: steps.meta.outputs.prerelease == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:latest
+
+      # Digests, not tags. A tag can be repointed; a digest is what tells you
+      # months later exactly what a given deployment is running.
+      - name: Record the published digests
+        run: |
+          {
+            echo "### Published"
+            echo
+            echo '| image | digest |'
+            echo '|---|---|'
+            echo "| \`${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}\` | \`${{ steps.runtime.outputs.digest }}\` |"
+            echo "| \`${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-server\` | \`${{ steps.server.outputs.digest }}\` |"
+            echo
+            if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+              echo "\`:latest\` was **not** moved — \`${{ steps.meta.outputs.version }}\` is a pre-release."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

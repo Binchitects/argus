@@ -250,6 +250,37 @@ documentation, so install packs you trust and verify their digests.
 
 ## Publishing a release image
 
+**Publishing runs in CI, not on a laptop.** Push a tag and
+`.github/workflows/release.yml` builds, verifies and publishes:
+
+```bash
+git tag -a v0.1.0-rc1 -m "..." && git push origin v0.1.0-rc1
+```
+
+Or run it by hand from the Actions tab with an explicit version.
+
+No credentials are needed anywhere. The workflow authenticates with
+`GITHUB_TOKEN`, which GitHub injects with `packages: write` — so no personal
+access token has to exist on anyone's machine, and none can leak from one.
+
+GHCR is **free for public packages**: the GitHub Packages storage and transfer
+quota applies only to private ones. This repository is public, so images cost
+nothing and are pullable without authentication.
+
+The workflow prints the published **digests** in the run summary. Record those
+rather than tags: a tag can be repointed, a digest cannot, and the digest is
+what tells you months later exactly what a deployment is running.
+
+### Publishing from a laptop instead
+
+`./deploy/release.sh 0.1.0-rc1` does the same thing locally, and needs
+`docker login ghcr.io` first with a **classic** PAT carrying `write:packages`.
+GHCR rejects account passwords, and fine-grained tokens are unreliable for
+package writes — a `denied: denied` at login is almost always one of those two.
+Prefer the workflow.
+
+
+
 ```bash
 docker login ghcr.io          # once; this script never handles credentials
 ./deploy/release.sh 0.1.0-rc1
