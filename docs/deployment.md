@@ -248,6 +248,43 @@ test that reads the module's own source, not by convention — so installing a
 third-party pack cannot expose private code. It can still serve wrong
 documentation, so install packs you trust and verify their digests.
 
+## Publishing a release image
+
+```bash
+docker login ghcr.io          # once; this script never handles credentials
+./deploy/release.sh 0.1.0-rc1
+```
+
+The registry path is **lowercase** — `ghcr.io/alighadyani/argus`. Docker
+rejects uppercase in a repository name, so the GitHub account's own spelling
+is not a valid image target.
+
+The script runs the full suite inside the image with `--no-cache` before
+publishing anything. A `CACHED` test layer proves nothing about the code being
+shipped, and this project has been bitten by exactly that.
+
+A version containing `rc`, `alpha` or `beta` does **not** move `:latest`. A
+release candidate grabbing `latest` is how a pilot build reaches someone who
+wanted a stable one.
+
+It prints the published digests at the end. Record them: a tag can be moved,
+a digest cannot, and the digest is what tells you months later exactly what a
+given deployment is running.
+
+### If the build cannot resolve names
+
+The script refuses up front with a specific message, because the usual cause
+is not Docker. A VPN tunnel that claims DNS with a resolver that has stopped
+answering breaks every container while leaving raw IP connectivity intact —
+`docker pull` of an already-cached image still works, `apt-get` inside a build
+does not. Check which interface owns DNS before restarting Docker:
+
+```powershell
+Get-DnsClientServerAddress -AddressFamily IPv4 |
+    Where-Object { $_.ServerAddresses } |
+    Select-Object InterfaceAlias, ServerAddresses
+```
+
 ## Verifying the deployment
 
 ```bash
