@@ -854,3 +854,70 @@ def test_interrupting_the_loop_exits_cleanly(tmp_path, monkeypatch, capsys):
     assert cli._index_repeatedly(cfg, None, False, False, interval=900,
                                  sleep=interrupt, max_passes=5) == 0
     assert "stopped" in capsys.readouterr().err
+
+
+def _seeded_index(tmp_path):
+    from argus.store.db import open_db
+    from argus.store import writes
+    conn = open_db(tmp_path / "i.db")
+    rid = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/a",
+                             default_branch="main", http_url="u")
+    writes.upsert_file(conn, repo_id=rid, path="a.c", lang="c", size=3,
+                       blob_sha="s", content="int a;")
+    conn.commit(); conn.close()
+    return _cfg_file(tmp_path)
+
+
+def test_backup_writes_a_restorable_index(tmp_path, capsys):
+    cfg_path = _seeded_index(tmp_path)
+    out = tmp_path / "snap"
+    assert cli.main(["backup", "--config", str(cfg_path), "--out", str(out)]) == 0
+
+    copied = out / "index.db"
+    assert copied.is_file()
+    assert (out / "config.yaml").is_file(), "config was not copied"
+
+    import sqlite3
+    conn = sqlite3.connect(copied)
+    try:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("SELECT COUNT(*) FROM repos").fetchone()[0] == 1
+    finally:
+        conn.close()
+    assert "integrity ok" in capsys.readouterr().out
+
+
+def test_backup_excludes_mirrors_and_trees(tmp_path):
+    """They dominate the footprint and every byte is re-fetchable from GitLab.
+    Backing them up trades a large recurring cost for a shorter one-off
+    restore, which is the wrong way round."""
+    cfg_path = _seeded_index(tmp_path)
+    (tmp_path / "mirrors").mkdir(); (tmp_path / "mirrors" / "big.pack").write_text("x")
+    (tmp_path / "trees").mkdir(); (tmp_path / "trees" / "wt.c").write_text("x")
+
+    out = tmp_path / "snap"
+    cli.main(["backup", "--config", str(cfg_path), "--out", str(out)])
+    names = {p.name for p in out.rglob("*")}
+    assert "big.pack" not in names and "wt.c" not in names
+
+
+def test_backup_of_a_missing_index_fails_rather_than_writing_an_empty_one(
+    tmp_path, capsys
+):
+    """A backup that silently succeeds with nothing in it is the worst
+    outcome: it is only discovered during a restore."""
+    cfg_path = _cfg_file(tmp_path)   # no index created
+    out = tmp_path / "snap"
+    assert cli.main(["backup", "--config", str(cfg_path), "--out", str(out)]) == 4
+    assert not (out / "index.db").exists()
+    assert "no index" in capsys.readouterr().err
+
+
+def test_backup_copies_installed_packs(tmp_path):
+    cfg_path = _seeded_index(tmp_path)
+    packs = tmp_path / "packs"; packs.mkdir()
+    (packs / "python.arguspack").write_bytes(b"not a real pack")
+
+    out = tmp_path / "snap"
+    cli.main(["backup", "--config", str(cfg_path), "--out", str(out)])
+    assert (out / "packs" / "python.arguspack").is_file()

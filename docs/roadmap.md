@@ -128,6 +128,16 @@ only once Step 0 confirms the answers are good enough to want direct access to.
 
 ---
 
+## Done since this roadmap was written
+
+- **Enumeration guard.** `argus index` now refuses when the service token
+  cannot see every repository, naming the numbers. The silent-partial-index
+  risk this document opens with is now impossible to miss.
+- **Scheduled refresh.** `argus index --interval` plus a `refresher` compose
+  service, under the existing `indexer` profile.
+- **Backup and restore.** `argus backup`, documented in
+  `docs/backup-and-restore.md`, verified by restore drill.
+
 ## Known follow-ups, carried
 
 - **`mcp` 2.0 is released**; this project pins `>=1.9,<2.0`. The upgrade

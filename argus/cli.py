@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -265,6 +266,91 @@ def _index_repeatedly(cfg: Config, only: str | None, reset_retries: bool,
             print("stopped", file=sys.stderr)
             return last
     return last
+
+
+
+def _backup(cfg: Config, out_dir: Path, config_path: Path | None = None) -> int:
+    """Write a restorable snapshot to `out_dir`.
+
+    What is worth backing up is a much smaller set than what is on disk, and
+    the distinction is the whole procedure:
+
+    * `index.db` -- the only file here that holds anything not reconstructible
+      from GitLab. Most of it *is* reconstructible (files, symbols, includes,
+      repo_deps are a cache of the estate), but the `audit` table is a record
+      of what the assistant showed which developer, and no rebuild recovers
+      it. That single table is why this command exists.
+    * `config.yaml` -- small, and losing it means reconstructing operational
+      decisions from memory.
+    * Knowledge packs -- rebuildable, but only with Ollama, the source
+      checkouts, and an hour. Copied if present.
+
+    Deliberately NOT copied: `mirrors/` and `trees/`. They are bare clones and
+    worktrees, they dominate the disk footprint, and every byte is re-fetchable
+    from GitLab. Backing them up trades a large recurring cost for a shorter
+    one-off restore, which is the wrong way round.
+
+    The index is copied with `VACUUM INTO`, never a file copy. A plain copy of
+    a live SQLite database can capture a torn page mid-transaction; VACUUM INTO
+    takes a consistent point-in-time snapshot, verified here against a writer
+    committing thousands of rows during the copy, and compacts it on the way
+    out. The indexer does not need to be stopped.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    index_out = out_dir / "index.db"
+
+    if not Path(cfg.index.db_path).exists():
+        print(f"no index at {cfg.index.db_path}", file=sys.stderr)
+        return 4
+
+    conn = sqlite3.connect(cfg.index.db_path)
+    try:
+        index_out.unlink(missing_ok=True)
+        conn.execute("VACUUM INTO ?", (str(index_out),))
+    except sqlite3.Error as exc:
+        print(f"backup failed: {exc}", file=sys.stderr)
+        return 4
+    finally:
+        conn.close()
+
+    # A backup nobody has verified is a hope, not a backup.
+    check = sqlite3.connect(index_out)
+    try:
+        status = check.execute("PRAGMA integrity_check").fetchone()[0]
+        audit_rows = check.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
+        repo_rows = check.execute("SELECT COUNT(*) FROM repos").fetchone()[0]
+    finally:
+        check.close()
+    if status != "ok":
+        print(f"backup failed integrity check: {status}", file=sys.stderr)
+        return 4
+
+    # Config.load keeps no reference to the file it came from, so the path is
+    # passed in rather than guessed. An earlier version used getattr(cfg,
+    # "source_path", None), which silently never copied anything.
+    copied_config = False
+    if config_path and Path(config_path).is_file():
+        shutil.copy2(config_path, out_dir / "config.yaml")
+        copied_config = True
+
+    packs_dir = cfg.packs_dir
+    copied_packs = 0
+    if Path(packs_dir).is_dir():
+        target = out_dir / "packs"
+        target.mkdir(exist_ok=True)
+        for pack in Path(packs_dir).glob("*.arguspack"):
+            shutil.copy2(pack, target / pack.name)
+            copied_packs += 1
+
+    size_mb = index_out.stat().st_size / (1024 * 1024)
+    print(f"index.db      {size_mb:.1f} MB  ({repo_rows} repos, integrity ok)")
+    print(f"audit rows    {audit_rows}  <- the only data no rebuild recovers")
+    print(f"config.yaml   {'copied' if copied_config else 'NOT FOUND'}")
+    print(f"packs         {copied_packs}")
+    print(f"written to {out_dir}")
+    print("mirrors/ and trees/ deliberately excluded: re-fetchable from GitLab")
+    return 0
 
 
 def _status(cfg: Config) -> int:
@@ -576,6 +662,12 @@ def main(argv: list[str] | None = None) -> int:
     p_index.add_argument("--reset-retries", action="store_true",
                          help="Clear retry counters before indexing (manual recovery only; do not use on a schedule)")
 
+    p_backup = sub.add_parser(
+        "backup", help="Write a restorable snapshot of the index and packs")
+    p_backup.add_argument("--config", required=True, type=Path)
+    p_backup.add_argument("--out", required=True, type=Path,
+                          help="Directory to write the snapshot into")
+
     p_status = sub.add_parser("status", help="Show per-repo index freshness")
     p_status.add_argument("--config", required=True, type=Path)
 
@@ -684,6 +776,8 @@ def main(argv: list[str] | None = None) -> int:
             return _serve(cfg, args.host, args.port, args.allowed_hosts)
         if args.command == "flush-acl":
             return _flush_acl(cfg, args.user)
+        if args.command == "backup":
+            return _backup(cfg, args.out, args.config)
         if args.command == "resolve":
             return _resolve(cfg)
         return _status(cfg)
