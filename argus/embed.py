@@ -20,8 +20,20 @@ import os
 
 import httpx
 
-EMBED_MODEL = "nomic-embed-text"
-EMBED_DIM = 768
+#: The embedding model, and the dimension it returns. Overridable so the model
+#: is a deployment choice rather than a constant to edit, which is what makes
+#: comparing two of them on the same corpus practical:
+#:
+#:     ARGUS_EMBED_MODEL=mxbai-embed-large ARGUS_EMBED_DIM=1024 \
+#:         python -m argus.cli pack build --source system-design ...
+#:
+#: Changing either only affects packs built afterwards. An existing pack
+#: carries its own vector-table declaration and records the model it was built
+#: with, and `require_compatible` refuses to rank it against vectors from a
+#: different space -- loudly, naming the pack, rather than returning quietly
+#: wrong results.
+EMBED_MODEL = os.environ.get("ARGUS_EMBED_MODEL", "nomic-embed-text")
+EMBED_DIM = int(os.environ.get("ARGUS_EMBED_DIM", "768"))
 
 # Ollama accepts an arbitrarily long input list, but a local model on CPU can
 # take minutes over one, and a timeout mid-way costs the whole request. Batches

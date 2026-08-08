@@ -32,7 +32,14 @@ import array
 import math
 from typing import Sequence
 
-DIM = 768
+from ..embed import EMBED_DIM
+
+#: Follows the configured embedder rather than being fixed, so a
+#: deployment can build with a different model. Existing packs are
+#: unaffected: each carries its own vector-table declaration and the
+#: dimension it was built at, and require_compatible refuses to rank
+#: across two spaces.
+DIM = EMBED_DIM
 _BYTES_BIN = DIM // 8
 _INT8_MAX = 127
 

@@ -14,6 +14,8 @@ tracked by its own ``pack_meta.pack_schema_version``, not a migration.
 from __future__ import annotations
 
 import sqlite3
+
+from ..embed import EMBED_DIM
 from pathlib import Path
 
 import sqlite_vec
@@ -72,17 +74,24 @@ CREATE VIRTUAL TABLE docs_fts USING fts5(
 );
 """
 
-# Binary-quantized: 768 bits = 96 bytes/chunk. The coarse Hamming-distance pass.
-_CREATE_VEC_BIN = """
+# Binary-quantized: EMBED_DIM bits (96 bytes at 768). The coarse Hamming pass.
+#
+# The dimension comes from the configured model rather than a literal, so a
+# deployment can build with a different embedder. It is baked into the pack at
+# creation, so an existing pack keeps its own declaration whatever the current
+# setting is -- and read_meta records the model and dimension so
+# require_compatible can refuse a mismatch instead of ranking vectors from two
+# different spaces against each other.
+_CREATE_VEC_BIN = f"""
 CREATE VIRTUAL TABLE vec_bin USING vec0(
-  chunk_id INTEGER PRIMARY KEY, embedding bit[768]
+  chunk_id INTEGER PRIMARY KEY, embedding bit[{EMBED_DIM}]
 )
 """
 
-# int8: 768 bytes/chunk. Read only for the top-k rescore of vec_bin's candidates.
-_CREATE_VEC_I8 = """
+# int8: EMBED_DIM bytes/chunk. Read only to rescore vec_bin's candidates.
+_CREATE_VEC_I8 = f"""
 CREATE VIRTUAL TABLE vec_i8 USING vec0(
-  chunk_id INTEGER PRIMARY KEY, embedding int8[768]
+  chunk_id INTEGER PRIMARY KEY, embedding int8[{EMBED_DIM}]
 )
 """
 
