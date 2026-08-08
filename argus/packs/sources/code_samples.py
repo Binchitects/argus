@@ -129,6 +129,15 @@ class _CodeRepo:
         base = self._root(root)
         seen: set[str] = set()
         for path in self._files(root):
+            # Same readability filter as iter_docs, and for the same reason
+            # inverted: a symbol must point at a page that actually exists.
+            # iter_docs skips oversized and binary files, so anchoring a
+            # sample to one of those produced a symbol whose doc was never
+            # written -- it does not error, the builder just drops it as
+            # "names a page this pack does not contain". Measured: the first
+            # wdk composite shipped 3 such symbols.
+            if _readable(path) is None:
+                continue
             relative = path.relative_to(base).as_posix()
             sample = self.sample_of(relative)
             name = sample.rsplit("/", 1)[-1]
@@ -215,6 +224,8 @@ class AlgorithmsCpp(_CodeRepo):
         base = self._root(root)
         seen: set[str] = set()
         for path in self._files(root):
+            if _readable(path) is None:
+                continue                   # see _CodeRepo.iter_symbols
             relative = path.relative_to(base).as_posix()
             name = path.stem
             topic = relative.split("/")[0] if "/" in relative else self.name

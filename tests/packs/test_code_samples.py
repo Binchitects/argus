@@ -90,3 +90,42 @@ def test_the_declared_licences_are_the_real_ones():
     assert WindowsDriverSamples().license == "MS-PL"
     assert WindowsClassicSamples().license == "MIT"
     assert AlgorithmsCpp().license == "MIT"
+
+
+def test_a_symbol_never_points_at_a_page_that_was_skipped(tmp_path):
+    """iter_docs drops oversized and binary files; iter_symbols must drop the
+    same ones. Anchoring a sample to a skipped file yields a symbol whose page
+    was never written, and the builder does not error -- it silently discards
+    it as "names a page this pack does not contain". The first wdk composite
+    shipped 3 such symbols, and nothing in a successful build said so."""
+    from argus.packs.build import _doc_key
+
+    _w(tmp_path, "Samples/Good/a.cpp")
+    # This sample's only file is oversized, so it produces no page at all.
+    _w(tmp_path, "Samples/OnlyHuge/huge.cpp", "x" * (MAX_FILE_BYTES + 1))
+    # This one leads with a binary file and has a real one after it.
+    (tmp_path / "Samples/Mixed").mkdir(parents=True)
+    (tmp_path / "Samples/Mixed/aaa_blob.h").write_bytes(b"\xff\xfe\x00\x01" * 400)
+    _w(tmp_path, "Samples/Mixed/zzz_real.cpp")
+
+    src = WindowsClassicSamples()
+    pages = {_doc_key(d.path) for d in src.iter_docs(tmp_path)}
+    symbols = list(src.iter_symbols(tmp_path))
+    assert symbols, "no symbols -- the test proves nothing"
+
+    dangling = [s.name for s in symbols if _doc_key(s.doc_path) not in pages]
+    assert dangling == [], dangling
+    assert {s.name for s in symbols} == {"Good", "Mixed"}, (
+        "a sample with no readable file at all still produced a symbol")
+
+
+def test_an_algorithm_whose_file_is_unreadable_yields_no_symbol(tmp_path):
+    from argus.packs.build import _doc_key
+
+    _w(tmp_path, "sorting/quick_sort.cpp")
+    _w(tmp_path, "sorting/huge_sort.cpp", "x" * (MAX_FILE_BYTES + 1))
+    src = AlgorithmsCpp()
+    pages = {_doc_key(d.path) for d in src.iter_docs(tmp_path)}
+    names = {s.name for s in src.iter_symbols(tmp_path)}
+    assert names == {"quick_sort"}
+    assert all(_doc_key(s.doc_path) in pages for s in src.iter_symbols(tmp_path))
