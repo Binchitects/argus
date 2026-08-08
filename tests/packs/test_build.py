@@ -351,7 +351,7 @@ def test_a_failure_mid_build_leaves_no_output_and_no_temp_file(tmp_path):
     with pytest.raises(RuntimeError, match="ollama"):
         build.build_pack(
             ReactDocs(), work_dir=FIXTURES / "react", out_path=out,
-            version="1.0.0", embed_fn=exploding, source_commit=COMMIT,
+            version="1.0.0", embed_fn=exploding, source_commit=COMMIT, use_cache=False,
         )
     assert not out.exists()
     assert list(tmp_path.iterdir()) == [], f"left behind: {list(tmp_path.iterdir())}"
@@ -370,7 +370,7 @@ def test_a_failed_rebuild_does_not_destroy_the_existing_pack(tmp_path):
     with pytest.raises(RuntimeError):
         build.build_pack(
             ReactDocs(), work_dir=FIXTURES / "react", out_path=out,
-            version="2.0.0", embed_fn=exploding, source_commit=COMMIT,
+            version="2.0.0", embed_fn=exploding, source_commit=COMMIT, use_cache=False,
         )
 
     assert out.exists(), "the previously-good pack was destroyed"
@@ -405,4 +405,10 @@ def test_rebuilding_over_a_good_pack_replaces_it(tmp_path):
         assert pack_format.read_meta(conn)["pack_version"] == "2.0.0"
     finally:
         conn.close()
-    assert list(tmp_path.iterdir()) == [out]
+    # The embedding cache is a deliberate sidecar and legitimately survives a
+    # build; what must not survive is a .building temp file. Filtering it here
+    # rather than turning the cache off keeps this test covering the real
+    # default path.
+    leftover = [p for p in tmp_path.iterdir() if p.name != ".embcache.db"]
+    assert leftover == [out], leftover
+    assert not list(tmp_path.glob("*.building")), "a temp pack survived"

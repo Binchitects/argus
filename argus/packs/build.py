@@ -31,6 +31,7 @@ import zstandard
 from .. import embed as embed_module
 from . import format as pack_format
 from .chunk import Chunk, chunk_markdown, embed_text, rst_to_atx
+from .embcache import EmbeddingCache, cache_key
 from .quantize import to_bits, to_int8
 from .sources.base import Doc, Source
 
@@ -145,6 +146,7 @@ def _git(cwd: Path, *args: str) -> None:
 def build_pack(
     source: Source, *, work_dir: Path, out_path: Path, version: str,
     embed_fn: EmbedFn | None = None, source_commit: str | None = None,
+    cache_path: Path | str | None = None, use_cache: bool = True,
 ) -> Path:
     """Build a pack for ``source`` from the checkout at ``work_dir``."""
     work_dir = Path(work_dir)
@@ -168,11 +170,27 @@ def build_pack(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = out_path.with_name(out_path.name + ".building")
 
+    # Beside the pack by default, and shared by every pack built into the
+    # same directory: the key is the embed text, so two packs covering the
+    # same corpus reuse each other's work.
+    #
+    # `use_cache=False` is for tests that assert on what a build leaves on
+    # disk, or that a failing embedder fails the build -- with a warm cache
+    # the embedder is never called, so such a test would pass vacuously.
+    if not use_cache:
+        cache_path = None
+    elif cache_path is None:
+        cache_path = out_path.parent / ".embcache.db"
+
     try:
-        _write_pack(
-            source, work_dir, temp_path, embed_fn,
-            version=version, commit=commit,
-        )
+        with EmbeddingCache(cache_path) as cache:
+            _write_pack(
+                source, work_dir, temp_path, embed_fn,
+                version=version, commit=commit, cache=cache,
+            )
+            if cache.enabled and (cache.hits or cache.misses):
+                print(f"  embeddings: {cache.hits} reused, "
+                      f"{cache.misses} computed")
         temp_path.replace(out_path)
     except BaseException:
         # Includes KeyboardInterrupt: a half-written pack left on disk is
@@ -197,7 +215,7 @@ def _require_licence(source: Source) -> None:
 
 def _write_pack(
     source: Source, work_dir: Path, temp_path: Path, embed_fn: EmbedFn,
-    *, version: str, commit: str,
+    *, version: str, commit: str, cache: EmbeddingCache | None = None,
 ) -> None:
     compressor = zstandard.ZstdCompressor(level=_ZSTD_LEVEL)
     conn = pack_format.create_pack(temp_path)
@@ -214,10 +232,10 @@ def _write_pack(
                 pending.append((chunk_id, embed_text(chunk)))
                 chunk_total += 1
                 if len(pending) >= EMBED_FLUSH:
-                    _flush_embeddings(conn, pending, embed_fn)
+                    _flush_embeddings(conn, pending, embed_fn, cache)
                     pending.clear()
 
-        _flush_embeddings(conn, pending, embed_fn)
+        _flush_embeddings(conn, pending, embed_fn, cache)
 
         symbols, skipped = _insert_symbols(conn, source, work_dir, doc_ids)
 
@@ -280,23 +298,53 @@ def _insert_chunk(conn, doc_id: int, chunk: Chunk, compressor) -> int:
     return cursor.lastrowid
 
 
-def _flush_embeddings(conn, pending: Sequence[tuple[int, str]], embed_fn: EmbedFn) -> None:
+def _flush_embeddings(conn, pending: Sequence[tuple[int, str]],
+                      embed_fn: EmbedFn,
+                      cache: EmbeddingCache | None = None) -> None:
     if not pending:
         return
-    vectors = embed_fn([text for _, text in pending])
-    if len(vectors) != len(pending):
-        raise BuildError(
-            f"embedder returned {len(vectors)} vectors for {len(pending)} "
-            f"chunks -- refusing to store misaligned embeddings"
-        )
-    for (chunk_id, _), vector in zip(pending, vectors):
+
+    model, dim = embed_module.EMBED_MODEL, embed_module.EMBED_DIM
+    # Resolved per chunk, in order, so a partially-cached flush still writes
+    # every row in the same sequence it would have without a cache.
+    resolved: list[tuple[int, bytes, bytes]] = []
+    to_embed: list[tuple[int, str, str]] = []      # (chunk_id, key, text)
+
+    for chunk_id, text in pending:
+        key = cache_key(text, model, dim) if cache is not None else ""
+        hit = cache.get(key) if cache is not None else None
+        if hit is not None:
+            resolved.append((chunk_id, hit[0], hit[1]))
+        else:
+            to_embed.append((chunk_id, key, text))
+
+    if to_embed:
+        vectors = embed_fn([text for _, _, text in to_embed])
+        if len(vectors) != len(to_embed):
+            raise BuildError(
+                f"embedder returned {len(vectors)} vectors for {len(to_embed)} "
+                f"chunks -- refusing to store misaligned embeddings"
+            )
+        fresh: list[tuple[str, bytes, bytes]] = []
+        for (chunk_id, key, _), vector in zip(to_embed, vectors):
+            bits, i8 = to_bits(vector), to_int8(vector)
+            resolved.append((chunk_id, bits, i8))
+            if cache is not None:
+                fresh.append((key, bits, i8))
+        if cache is not None:
+            # Written before the pack rows and committed immediately: this is
+            # the work worth saving, and a build killed a second from now
+            # should not have to buy it again.
+            cache.put_many(fresh)
+
+    for chunk_id, bits, i8 in resolved:
         conn.execute(
             "INSERT INTO vec_bin (chunk_id, embedding) VALUES (?, vec_bit(?))",
-            (chunk_id, to_bits(vector)),
+            (chunk_id, bits),
         )
         conn.execute(
             "INSERT INTO vec_i8 (chunk_id, embedding) VALUES (?, vec_int8(?))",
-            (chunk_id, to_int8(vector)),
+            (chunk_id, i8),
         )
 
 
