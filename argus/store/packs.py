@@ -346,6 +346,51 @@ def search_docs(
     return out
 
 
+def get_doc(packs: Sequence[Pack], doc_path: str, source: str | None = None,
+            max_chars: int = 60_000) -> dict[str, Any] | None:
+    """The full text of one documentation page.
+
+    Search returns chunks, and a chunk is a fragment. Measured against
+    qwen3.6:35b: asked which robocopy option mirrors a tree, retrieval
+    correctly ranked `cmd/robocopy.md` first -- and handed over its Syntax and
+    Examples sections, because a 40 KB reference page is many chunks and the
+    per-document cap admits two. `/MIR` lives in the options table, in a chunk
+    that never made the cut, so the model answered worse than it had with no
+    help at all.
+
+    Identifying the right page and then being unable to read it is the gap
+    this closes: `docs_lookup` and `docs_search` both return `doc_path` and
+    `source`, which is exactly what this takes. It is the packs' counterpart
+    to `get_file` on the private index.
+
+    `source` disambiguates the same path in two packs. Truncation is reported
+    rather than silent, because a caller that does not know the tail was cut
+    will conclude the document does not mention what it was looking for.
+    """
+    for pack in packs:
+        if source and pack.name.lower() != source.lower():
+            continue
+        rows = _query(pack, """
+            SELECT path, title, url, lang, content, content_len
+            FROM docs WHERE path = ?
+        """, (doc_path,))
+        if not rows:
+            continue
+        row = rows[0]
+        text = _decompress(row["content"])
+        truncated = len(text) > max_chars
+        return _attributed(pack, {
+            "doc_path": row["path"],
+            "title": row["title"],
+            "url": row["url"],
+            "lang": row["lang"],
+            "text": text[:max_chars],
+            "truncated": truncated,
+            "full_length": len(text),
+        })
+    return None
+
+
 def select_packs(packs: Sequence[Pack], lang: str | None) -> list[Pack]:
     """Filter packs by source.
 

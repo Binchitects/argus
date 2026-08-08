@@ -503,7 +503,7 @@ def test_tools_list_descriptions_are_load_bearing(two_repo_cfg):
     by_name = {t["name"]: t["description"] for t in tools_list}
     assert set(by_name) == {
         "find_symbol", "find_references", "search_code", "get_file", "index_status",
-        "docs_lookup", "docs_search",
+        "docs_lookup", "docs_search", "docs_get",
         "repo_map", "which_repo", "impact_of",
     }
     assert "name-based" in by_name["find_references"].lower() or \
@@ -625,3 +625,18 @@ def test_impact_of_description_distinguishes_itself_from_repo_map():
     """Two tools answering 'what depends on this' at different altitudes is
     exactly the pair a small model picks wrongly without being told."""
     assert "repo_map" in tools._IMPACT_OF_DESC
+
+
+def test_docs_get_description_says_why_search_alone_is_not_enough():
+    """A model that does not know this tool exists will answer from a fragment
+    and get it wrong. Measured against qwen3.6:35b: asked which robocopy option
+    mirrors a directory tree, search ranked robocopy's reference page first and
+    returned its Syntax and Examples sections -- /MIR is in the options table,
+    which was never returned, and the model answered worse than with no help.
+    """
+    desc = tools._DOCS_GET_DESC.lower()
+    assert "whole" in desc or "full" in desc
+    assert "doc_path" in desc
+    # It must say WHEN to reach for it, not merely what it does.
+    assert "reference page" in desc or "options table" in desc
+    assert "caps" in desc or "fragment" in desc

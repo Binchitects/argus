@@ -422,6 +422,23 @@ async def docs_lookup_impl(packs_dir: Path | str, name: str,
     )
 
 
+async def docs_get_impl(packs_dir: Path | str, doc_path: str,
+                        source: str | None = None,
+                        max_chars: int = 60_000) -> dict | None:
+    """Read a whole documentation page, having found it with lookup or search.
+
+    The measured gap this fills: retrieval identified robocopy's reference
+    page correctly and returned two sections of it, neither containing the
+    flag being asked about. Chunks answer "where is this discussed"; a
+    reference page's specific row needs the page.
+    """
+    return await run_packs(
+        packs_dir,
+        lambda opened: packs_store.get_doc(opened, doc_path, source=source,
+                                           max_chars=max_chars),
+    )
+
+
 async def docs_search_impl(packs_dir: Path | str, query: str,
                            lang: str | None = None, limit: int = 10) -> list[dict]:
     """Embed the query and search, all inside one threadpool hop.
@@ -481,6 +498,21 @@ async def docs_search_impl(packs_dir: Path | str, query: str,
 
     return await run_packs(packs_dir, _run)
 
+
+
+_DOCS_GET_DESC = (
+    "Read a WHOLE documentation page from a public pack, given the `doc_path` "
+    "that docs_lookup or docs_search returned. Use it whenever the answer is a "
+    "specific detail on a long reference page -- one flag among a hundred, one "
+    "row of an options table, one field of a struct. docs_search returns "
+    "fragments and deliberately caps how many come from the same page, so the "
+    "fragment holding the detail you need may not be among them. Measured: "
+    "asked which robocopy option mirrors a directory tree, search correctly "
+    "ranked robocopy's reference page first and returned its Syntax and "
+    "Examples sections -- /MIR is in the options table, which was not "
+    "returned. Pass `source` (the pack name) when the same path could exist in "
+    "two packs."
+)
 
 
 _DOCS_LOOKUP_DESC = (
@@ -656,6 +688,12 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
     """
     db_path = cfg.index.db_path
     packs_dir = cfg.packs_dir
+
+    @server.tool(name="docs_get", description=_DOCS_GET_DESC)
+    async def docs_get(doc_path: str, source: str | None = None) -> dict | None:
+        # Public documentation: no identity, no allowlist, no audit row, for
+        # the same reason as docs_lookup below.
+        return await docs_get_impl(packs_dir, doc_path, source=source)
 
     @server.tool(name="docs_lookup", description=_DOCS_LOOKUP_DESC)
     async def docs_lookup(name: str, lang: str | None = None) -> list[dict]:

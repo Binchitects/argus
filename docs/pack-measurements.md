@@ -213,14 +213,16 @@ cold pack with an empty embedding cache.
 |---|---|---|---|---|---|---|
 | `system-design` | 9 | 442 | 8 | 1.3 MB | < 1 min | 2.94 |
 | `algorithms` | 371 | 2,001 | 370 | 4.3 MB | < 1 min | 2.15 |
-| `cpp` | 9,746 | 123,212 | 37,305 | 174.7 MB | **36 min** | 1.42 |
-| `wdk` (composite) | 28,153 | 239,145 | 38,038 | 347.4 MB | **74 min** | 1.45 |
-| `scripting` (composite) | 9,302 | — | 9,302 | — | pending | — |
-| `win32` (composite) | ~71,700 | — | — | — | pending | — |
+| `scripting` (composite) | 9,302 | 46,027 | 9,302 | 70.1 MB | 13 min | 1.52 |
+| `cpp` | 9,746 | 123,212 | 37,305 | 174.7 MB | 36 min | 1.42 |
+| `wdk` (composite) | 28,176 | 245,727 | 38,041 | 358.6 MB | **74 min** | 1.46 |
+| `win32` (composite) | 71,663 | 530,559 | 87,297 | 786.2 MB | **162 min** | 1.48 |
+| **total** | **128,567** | **947,968** | **172,323** | **1.40 GB** | **~4h 45m** | |
 
-Documents and symbols for the two pending packs come from running the adapters
-over the real checkouts; their chunk counts, sizes and times are not yet
-measured and are deliberately left blank rather than estimated.
+Every pack reports **0 unresolved symbols**.
+
+The whole estate is 1.4 GB and just under five hours of CPU-only embedding,
+built once.
 
 **Cost is almost entirely embedding.** Measured throughput was 57 chunks/sec
 on `cpp` and 54 on `wdk` — steady across a 2× difference in corpus size, so a
@@ -301,3 +303,67 @@ GPU is the only lever that moves it.
 
 Both figures were taken while a pack build saturated the CPU, so they are
 pessimistic rather than flattering.
+
+---
+
+# Does this actually help an agent?
+
+The question the packs exist to answer, tested against **qwen3.6:35b** running
+locally. Fifteen questions with objectively checkable answers -- a header, an
+import library, a DLL, an IRQL, a command flag. No LLM grading: the answer
+either contains the string or it does not. Same model, temperature 0; the only
+variable is whether retrieved pack context is in the prompt.
+
+| area | closed book | with packs |
+|---|---|---|
+| win32 | 5 / 5 | 5 / 5 |
+| **wdk** | **0 / 5** | **5 / 5** |
+| scripting | 4 / 5 | 4 / 5 |
+| **total** | **9 / 15** | **14 / 15** |
+
+**WDK is where the packs earn their keep.** The model knows Win32 well and
+kernel DDI not at all -- 0 of 5 unaided, 5 of 5 with the pack. It could not
+name the header for `IoAllocateIrp` or the IRQL for `KeAcquireSpinLock`, and
+with the pack it got every one right.
+
+## How retrieval is used matters more than what is in the pack
+
+The first three runs of this test showed the packs making the model **worse**.
+None of it was the pack data. Each cause is worth stating, because an agent
+wired the wrong way will reproduce every one:
+
+**1. "Use ONLY the reference material" cost 4 correct answers.** win32 went
+5/5 to 1/5. Forbidding the model's own knowledge means a retrieval miss
+actively destroys an answer it already had. Reference material must add, not
+gate.
+
+**2. Semantic search is the wrong tool for a known API name.** Asked which DLL
+exports `SetWindowsHookExW`, `docs_search` returned `FindWindowSW` and
+`SetWindowOrgEx` -- topically adjacent, factually useless. `docs_lookup`
+returns the exact page carrying
+`Header: winuser.h; Library: User32.lib; DLL: User32.dll`. An agent that only
+searches throws away the pack's best feature.
+
+**3. A chunk is a fragment, and the answer is often in a different one.**
+Asked which robocopy option mirrors a tree, search correctly ranked robocopy's
+reference page first and returned its Syntax and Examples sections. `/MIR` is
+in the options table, in a chunk the per-document cap excluded. Scripting sat
+at 1/5 until `docs_get` was added to read the whole page: 4/5.
+
+So the retrieval chain an agent should use is:
+
+```
+docs_lookup(name)      exact API names -- authoritative, no embedding
+docs_search(question)  prose questions, and to find the right page
+docs_get(doc_path)     read that page in full before answering a detail
+```
+
+Missing any one of the three measurably costs answers.
+
+## Caveats
+
+Fifteen questions is a smoke test, not a benchmark. It covers factual recall --
+headers, libraries, IRQLs, flags -- and says nothing about whether the packs
+improve reasoning, code generation, or multi-step tasks. The one remaining
+regression (`DISM`, which the model knew and the pack talked it out of) is
+recorded rather than tuned away.
