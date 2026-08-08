@@ -303,12 +303,21 @@ async def find_references_impl(db_path: Path | str, identity: acl.Identity,
     # built INSIDE this same run_readonly closure so the whole lookup stays
     # one run_in_threadpool call (see run_readonly's docstring).
     def _run(conn: Any) -> list[dict]:
-        rows = queries.find_references(_scoped(conn, identity, branch), conn, name)
+        scoped = _scoped(conn, identity, branch)
+        rows = queries.find_references(scoped, conn, name)
         if not rows:
             return rows
+        # Built from the branch-SCOPED ids, not the whole allowlist. Once a
+        # project can be indexed at several refs it owns several repo rows
+        # with the same path_with_namespace, and a dict keyed on that name
+        # keeps whichever row the query happened to return last. The result
+        # was rows correctly scoped to the requested branch but stamped with
+        # another branch's repo_id -- so chaining into get_file(repo_id, path)
+        # read the wrong branch's copy of the file and said nothing. `scoped`
+        # holds exactly one row per project, which makes the key unique again.
         repo_id_by_namespace = {
             status["path_with_namespace"]: status["repo_id"]
-            for status in queries.index_status(identity.allowed_repo_ids, conn)
+            for status in queries.index_status(scoped, conn)
         }
         for row in rows:
             row["repo_id"] = repo_id_by_namespace.get(row["repo"])

@@ -4,7 +4,7 @@ import pytest
 from argus import acl
 from argus.mcpsrv import tools
 from argus.store.db import open_db
-from argus.store import writes
+from argus.store import queries, writes
 
 
 @pytest.fixture
@@ -76,3 +76,68 @@ async def test_a_branch_cannot_be_used_to_reach_an_unpermitted_repo(index, tmp_p
     for branch in (None, "main", "v1"):
         rows = await tools.find_symbol_impl(path, identity, "Secret", branch=branch)
         assert rows == [], f"branch={branch!r} reached an unpermitted repo"
+
+
+def test_a_reference_is_stamped_with_its_own_branch_repo_id(tmp_path):
+    """The chain that breaks silently: find_references(branch="v2") returns
+    rows correctly scoped to v2, but repo_id was looked up in a dict keyed on
+    path_with_namespace built from the WHOLE allowlist. A project indexed at
+    two refs owns two rows with that same name, so the dict kept whichever
+    came last -- and get_file(repo_id, path) then read main's copy of the
+    file while claiming to answer about v2.
+    """
+    import asyncio
+
+    db = tmp_path / "index.db"
+    conn = open_db(db)
+    try:
+        main_id = writes.upsert_repo(
+            conn, gitlab_id=1, path_with_namespace="g/app",
+            default_branch="main", http_url="u", branch="main")
+        v2_id = writes.upsert_repo(
+            conn, gitlab_id=1, path_with_namespace="g/app",
+            default_branch="main", http_url="u", branch="v2")
+        for rid, body in ((main_id, "int helper(void);\n"),
+                          (v2_id, "int helper(void);\n")):
+            writes.upsert_file(conn, repo_id=rid, path="src/a.c", lang="c",
+                               size=len(body), blob_sha=f"sha-{rid}", content=body)
+        conn.commit()
+    finally:
+        conn.close()
+
+    identity = acl.Identity(user_id=1, username="dev",
+                            allowed_repo_ids=[main_id, v2_id])
+    # Ask for TRUNK on purpose. The buggy dict keeps whichever row the query
+    # returned last, which is the higher rowid -- v2. Asking for v2 therefore
+    # passes even with the bug present, and an earlier version of this test
+    # did exactly that and proved nothing. Asking for main makes the stale
+    # entry the wrong answer.
+    rows = asyncio.run(tools.find_references_impl(db, identity, "helper",
+                                                  branch="main"))
+    assert rows, "no references found -- the test proves nothing"
+    assert {r["repo_id"] for r in rows} == {main_id}, (
+        "a trunk reference was stamped with the v2 branch's repo_id")
+
+
+def test_index_status_says_which_branch_each_row_is(tmp_path):
+    """One row per ref, all sharing a path_with_namespace. Without the ref an
+    operator sees the same repo listed three times and cannot tell which is
+    trunk."""
+    db = tmp_path / "index.db"
+    conn = open_db(db)
+    try:
+        main_id = writes.upsert_repo(
+            conn, gitlab_id=1, path_with_namespace="g/app",
+            default_branch="main", http_url="u", branch="main")
+        v2_id = writes.upsert_repo(
+            conn, gitlab_id=1, path_with_namespace="g/app",
+            default_branch="main", http_url="u", branch="v2")
+        conn.commit()
+        rows = {r["repo_id"]: r for r in
+                queries.index_status([main_id, v2_id], conn)}
+        assert rows[main_id]["branch"] == "main"
+        assert rows[v2_id]["branch"] == "v2"
+        assert rows[v2_id]["default_branch"] == "main", (
+            "nothing distinguishes the release row from trunk")
+    finally:
+        conn.close()

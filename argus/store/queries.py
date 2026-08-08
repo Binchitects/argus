@@ -180,7 +180,13 @@ def index_status(allowed_repo_ids: Sequence[int],
     for chunk in _chunks(ids, reserve=0):
         marks = ",".join("?" for _ in chunk)
         rows.extend(conn.execute(
-            "SELECT r.id AS repo_id, r.path_with_namespace, r.last_indexed_sha,"
+            # branch and default_branch are not decoration: once a project can
+            # be indexed at several refs, status returns one row per ref and
+            # every one of them carries the same path_with_namespace. Without
+            # the ref, an operator reading this list cannot tell which row is
+            # trunk, which is v2, or why the same repo appears three times.
+            "SELECT r.id AS repo_id, r.path_with_namespace,"
+            "       r.branch, r.default_branch, r.last_indexed_sha,"
             "       r.last_indexed_at, r.last_run_timed_out, r.last_run_symbols_failed,"
             "       r.last_run_at, r.last_run_error,"
             "       (SELECT COUNT(*) FROM files   WHERE repo_id = r.id) AS files,"
