@@ -134,3 +134,67 @@ measurement run.
 - `objects.inv` must be fetched separately and **matched to the branch**. An
   inventory from a different version would produce silently wrong anchors, and
   nothing downstream would notice.
+
+---
+
+# The Windows and reference packs
+
+Built with the same embedder and hardware as above. The first two are measured
+here; the three large ones are recorded when their builds land.
+
+| | system-design | algorithms |
+|---|---|---|
+| source | `donnemartin/system-design-primer` | `TheAlgorithms/C-Plus-Plus` |
+| commit | `ae9bbd7` | `b9c118f` |
+| documents | 9 | 371 |
+| chunks | 442 | 2,001 |
+| API symbols | 8 | 370 |
+| **unresolved symbols** | **0** | **0** |
+| size | **1.3 MB** | **4.3 MB** |
+| licence | CC-BY-4.0 | MIT |
+
+Zero unresolved symbols on both. That is the check worth watching: a symbol
+whose page is missing would still install, still list, and simply never
+resolve — the failure is invisible until somebody looks something up.
+
+## Retrieval, hand-checked
+
+Ten questions with a knowable right answer, run through `docs_search` against
+both packs installed together.
+
+**8 of 10 top-1 correct. 9 of 10 in the top 3.**
+
+The two that were not are more interesting than the eight that were.
+
+### "cache the results of database queries" — right pack, wrong rank
+
+Returned the Primer's main README first and the `query_cache` case study
+second. Defensible rather than wrong: the README genuinely does cover caching
+at length, and the case study is one rank below. It is recorded as a miss
+because a developer reads the first result.
+
+### "a sorting algorithm that runs in n log n" — bogo_sort
+
+The joke algorithm, O(n · n!), followed by pigeonhole sort. This is the
+sharpest limitation the code packs have, and it is structural rather than a
+tuning problem:
+
+**A code pack matches vocabulary, not properties.** Every file in `sorting/`
+says "sorting algorithm" in its header comment, so all 40 of them are near-
+identical in embedding space for a query phrased that way. The one thing that
+would separate them — asymptotic complexity — is either absent from the source
+or written as `O(n log n)` in a comment, which carries almost no semantic
+weight next to the surrounding code.
+
+So the honest statement of what these packs do:
+
+| question shape | works |
+|---|---|
+| "show me an implementation of X" | yes — `quicksort`, `dijkstra`, `binary search` all top-1 |
+| "which X has property Y" | **no** |
+| "how do I design X" (prose corpus) | yes — 5 of 6 top-1 |
+
+Not tuned away. Reranking on ten questions is how you fit to ten questions,
+and the fix that would actually work — extracting complexity into the indexed
+text — is a change to what the adapter emits, justified by a larger sample
+than this one.
