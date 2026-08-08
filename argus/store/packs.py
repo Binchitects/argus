@@ -217,6 +217,13 @@ def search_text(
     return [row for _, row in results[:limit]]
 
 
+#: How many chunks from one document may appear in a single result set.
+#: Two, not one: a long page can genuinely answer different halves of a
+#: question in different sections. Five -- what the old code allowed, since it
+#: only truncated -- is never useful.
+MAX_CHUNKS_PER_DOC = 2
+
+
 def search_docs(
     packs: Sequence[Pack], query_vec: Sequence[float], lang: str | None = None,
     limit: int = 10, coarse: int = DEFAULT_COARSE,
@@ -253,7 +260,11 @@ def search_docs(
         """, tuple(candidates))
 
         ranked = rescore(query_vec, [(r["chunk_id"], r["embedding"]) for r in vectors])
-        top = ranked[:limit]
+        # Over-fetch per pack. The merge below keeps at most MAX_CHUNKS_PER_DOC
+        # rows from any one document, so taking exactly `limit` here would let
+        # a single page's chunks consume the budget and then be discarded,
+        # returning fewer results than asked for.
+        top = ranked[:limit * MAX_CHUNKS_PER_DOC * 3]
         if not top:
             continue
 
@@ -282,7 +293,39 @@ def search_docs(
     # Comparable across packs without normalization: one pinned model, one
     # shared vector space.
     scored.sort(key=lambda pair: -pair[0])
-    return [row for _, row in scored[:limit]]
+
+    # Cap how much of the answer any single document may occupy.
+    #
+    # Measured across eight questions against four installed packs: the median
+    # top-5 held only 0.40 distinct documents, and **four of the eight returned
+    # five chunks of one page**. "Design a URL shortener" filled every slot
+    # with the same pastebin page; four of the five results were places the
+    # caller already had.
+    #
+    # This is not a ranking tweak. A search tool's job is to return distinct
+    # places to look -- depth comes from fetching the page, which the caller
+    # can already do. The cap is above 1 because two passages from a long page
+    # genuinely can answer different halves of a question; it is well below 5
+    # because nothing needs five.
+    #
+    # It also relieves near-duplicate crowding across packs: "cache
+    # invalidation strategies" put five variants of the same D3D API
+    # (the struct, its typedef, its callback) above the System Design Primer,
+    # which is the actual answer. Those are separate documents, so the cap does
+    # not fix that case on its own -- recorded in docs/pack-measurements.md
+    # rather than tuned away.
+    per_doc: dict[tuple[str, str], int] = {}
+    out: list[dict[str, Any]] = []
+    for _, row in scored:
+        key = (str(row.get("source", "")), str(row.get("doc_path", "")))
+        seen = per_doc.get(key, 0)
+        if seen >= MAX_CHUNKS_PER_DOC:
+            continue
+        per_doc[key] = seen + 1
+        out.append(row)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def select_packs(packs: Sequence[Pack], lang: str | None) -> list[Pack]:

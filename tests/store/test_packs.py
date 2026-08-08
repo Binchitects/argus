@@ -10,12 +10,15 @@ from __future__ import annotations
 import inspect
 import pathlib
 import sqlite3
+from collections import Counter
 
 import pytest
+import zstandard
 
 from argus.packs import build, format as pack_format
 from argus.packs.sources.python_docs import PythonDocs
 from argus.packs.sources.react_docs import ReactDocs
+from argus.embed import EMBED_DIM, EMBED_MODEL
 from argus.store import packs
 
 from tests.packs.test_build import COMMIT, FIXTURES, fake_embed
@@ -313,3 +316,73 @@ def test_lookup_prefers_the_reference_page_over_a_passing_mention(both):
     assert len(rows) > 1, "fixture no longer reproduces the collision"
     assert rows[0]["doc_path"] == "reference/react/useState.md"
     assert rows[0]["url"] == "https://react.dev/reference/react/useState#usestate"
+
+
+def _many_chunk_pack(tmp_path, name="big", docs=3, chunks_per_doc=8):
+    """A pack where one document has far more chunks than a result set holds."""
+    from argus.packs import format as pack_format
+    from argus.packs.quantize import to_bits, to_int8
+
+    path = tmp_path / f"{name}.arguspack"
+    conn = pack_format.create_pack(path)
+    comp = zstandard.ZstdCompressor()
+    for d in range(docs):
+        cur = conn.execute(
+            "INSERT INTO docs (path, title, url, lang, content, content_len) "
+            "VALUES (?, ?, ?, 'md', ?, 0)",
+            (f"doc{d}.md", f"Doc {d}", f"https://x/doc{d}", comp.compress(b"body")))
+        doc_id = cur.lastrowid
+        for c in range(chunks_per_doc):
+            # Doc 0's chunks score highest, so without a cap it fills the page.
+            vec = [1.0 - (d * 0.1) - (c * 0.001)] * 768
+            cur2 = conn.execute(
+                "INSERT INTO chunks (doc_id, heading_path, anchor, start_line, "
+                "text) VALUES (?, '', '', 0, ?)",
+                (doc_id, comp.compress(f"doc{d} chunk{c}".encode())))
+            cid = cur2.lastrowid
+            conn.execute("INSERT INTO vec_bin (chunk_id, embedding) "
+                         "VALUES (?, vec_bit(?))", (cid, to_bits(vec)))
+            conn.execute("INSERT INTO vec_i8 (chunk_id, embedding) "
+                         "VALUES (?, vec_int8(?))", (cid, to_int8(vec)))
+    pack_format.write_meta(
+        conn, source_name=name, source_repo="r", source_branch="b",
+        source_commit="c", license="MIT", license_url="u", attribution="a",
+        embedding_model=EMBED_MODEL, embedding_dim=EMBED_DIM,
+        builder_version=1, pack_version="1.0", doc_count=docs,
+        chunk_count=docs * chunks_per_doc, symbol_count=0,
+        unresolved_symbol_count=0)
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_one_document_cannot_fill_the_whole_result_set(tmp_path):
+    """Measured against four real packs: the median top-5 held 0.40 distinct
+    documents and four of eight queries returned five chunks of ONE page.
+    "Design a URL shortener" filled every slot with the same pastebin page, so
+    four of the five results were places the caller already had.
+
+    A search tool returns places to look; depth comes from fetching the page.
+    """
+    path = _many_chunk_pack(tmp_path)
+    opened = packs.open_packs([path])
+    try:
+        rows = packs.search_docs(opened, [1.0] * 768, limit=5)
+        assert len(rows) == 5, "the cap must not shrink the result set"
+        per_doc = Counter(r["doc_path"] for r in rows)
+        assert max(per_doc.values()) <= packs.MAX_CHUNKS_PER_DOC, per_doc
+        assert len(per_doc) >= 3, f"too few distinct documents: {per_doc}"
+    finally:
+        packs.close_packs(opened)
+
+
+def test_the_cap_still_returns_a_full_page_of_results(tmp_path):
+    """Capping without over-fetching would silently return fewer rows than
+    asked for -- the per-pack slice would be consumed by one document and then
+    discarded."""
+    path = _many_chunk_pack(tmp_path, docs=6, chunks_per_doc=10)
+    opened = packs.open_packs([path])
+    try:
+        assert len(packs.search_docs(opened, [1.0] * 768, limit=10)) == 10
+    finally:
+        packs.close_packs(opened)
