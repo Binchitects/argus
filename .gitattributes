@@ -1,5 +1,4 @@
-# Sphinx inventories are a plaintext header followed by a zlib payload. Git's
-# binary heuristic would probably spare them, but CRLF conversion of the
-# compressed bytes would corrupt the fixture silently -- the test would fail
-# only on a fresh checkout, on someone else's machine.
-*.inv binary
+# Shell scripts must keep LF endings. Git.autocrlf rewrote deploy/build-packs.sh
+# to CRLF on checkout and bash then failed with "unexpected EOF while looking
+# for matching quote" -- which silently skipped a queued pack rebuild.
+*.sh text eol=lf
