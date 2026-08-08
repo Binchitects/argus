@@ -44,4 +44,9 @@ dist/
 # Built knowledge packs. Hundreds of MB of binary SQLite, rebuildable from
 # the pinned upstream checkouts -- an artifact, not source. A `git add -A`
 # swept 1.19 GB of these into a commit and the push died on it.
-packs/
+#
+# Leading slash matters: a bare `packs/` matches any directory of that name at
+# any depth, which silently excluded argus/packs/ and tests/packs/ -- the pack
+# source tree itself. Already-tracked files kept working, so the only symptom
+# was new files there refusing to be added.
+/packs/
