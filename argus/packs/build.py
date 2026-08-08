@@ -75,6 +75,33 @@ def fetch_source(source: Source, dest: Path) -> str:
     return resolve_commit(dest) or ""
 
 
+def _resolve_source_commit(source: Source, work_dir: Path) -> str | None:
+    """The commit(s) this pack is built from.
+
+    A composite source spans several checkouts and is pointed at the parent
+    directory holding them, which is not a git repository -- so the ordinary
+    single-checkout lookup finds nothing and the build refuses to start. Such
+    a source exposes `part_checkouts`, and its provenance is genuinely plural:
+    recorded as "ddi=abc1234,samples=def5678" so a reader can verify or
+    reproduce either half.
+
+    Any part whose commit cannot be read makes the whole thing None. A
+    provenance string that silently omits one of the corpora it shipped is
+    worse than admitting the build cannot state where it came from.
+    """
+    parts = getattr(source, "part_checkouts", None)
+    if parts is None:
+        return resolve_commit(work_dir)
+
+    recorded = []
+    for name, checkout in parts(work_dir):
+        commit = resolve_commit(checkout)
+        if not commit:
+            return None
+        recorded.append(f"{name}={commit}")
+    return ",".join(recorded) or None
+
+
 def resolve_commit(work_dir: Path) -> str | None:
     """HEAD of the checkout rooted *at* ``work_dir``, or None.
 
@@ -125,7 +152,7 @@ def build_pack(
 
     _require_licence(source)
 
-    commit = source_commit or resolve_commit(work_dir)
+    commit = source_commit or _resolve_source_commit(source, work_dir)
     if not commit:
         # A redistributable artifact whose provenance cannot be stated is not
         # one anybody can verify or update.

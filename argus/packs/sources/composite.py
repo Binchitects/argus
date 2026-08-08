@@ -73,6 +73,22 @@ class _Composite:
             )
         return path
 
+    def part_checkouts(self, root: Path) -> list[tuple[str, Path]]:
+        """Each part's name and checkout directory, for provenance.
+
+        A composite pack's provenance is genuinely several commits, and the
+        parent directory it is built from is not a git checkout at all -- so
+        the single `resolve_commit(work_dir)` the builder uses finds nothing
+        and refuses to build. The builder asks for this instead and records
+        one commit per part.
+
+        Deliberately returns the directories rather than the commits: reading
+        git is the builder's job, and importing it here would be a cycle
+        (build imports sources).
+        """
+        return [(part.source.name, self._resolve(root, part))
+                for part in self.parts]
+
     def iter_docs(self, root: Path) -> Iterator[Doc]:
         for part in self.parts:
             base = self._resolve(root, part)

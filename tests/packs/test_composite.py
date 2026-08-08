@@ -83,3 +83,50 @@ def test_differing_licences_are_both_recorded():
     assert "Microsoft Public License" in wdk.attribution
     win32 = Win32WithSamples()
     assert "CC-BY-4.0" in win32.license and "MIT" in win32.license
+
+
+def test_provenance_records_every_part(tmp_path):
+    """A composite is pointed at the parent holding its checkouts, which is
+    not a git repository -- so the ordinary single-checkout lookup finds
+    nothing and the build refuses to start. Provenance here is genuinely
+    plural, and both halves have to be verifiable."""
+    import subprocess
+
+    from argus.packs.build import _resolve_source_commit
+
+    for part in ("windows-driver-docs-ddi", "Windows-driver-samples"):
+        repo = tmp_path / part
+        repo.mkdir(parents=True)
+        (repo / "f.txt").write_text(part, encoding="utf-8")
+        for args in (["init", "-q"], ["add", "."],
+                     ["-c", "user.email=t@t", "-c", "user.name=t",
+                      "commit", "-qm", part]):
+            subprocess.run(["git", *args], cwd=repo, check=True,
+                           capture_output=True)
+
+    commit = _resolve_source_commit(WdkWithSamples(), tmp_path)
+    assert commit and commit.count("=") == 2 and "," in commit
+    assert commit.startswith("wdk=")
+    assert "wdk-samples=" in commit
+
+
+def test_a_part_with_no_commit_yields_no_provenance(tmp_path):
+    """Silently omitting one corpus from the provenance string is worse than
+    admitting the build cannot say where it came from."""
+    import subprocess
+
+    from argus.packs.build import _resolve_source_commit
+
+    # One real checkout, one bare directory. Both parts missing would let a
+    # "skip the unreadable one" bug pass too -- the join of nothing is still
+    # None. Only a mixed case separates "omitted a corpus" from "found none".
+    repo = tmp_path / "windows-driver-docs-ddi"
+    repo.mkdir(parents=True)
+    (repo / "f.txt").write_text("x", encoding="utf-8")
+    for args in (["init", "-q"], ["add", "."],
+                 ["-c", "user.email=t@t", "-c", "user.name=t",
+                  "commit", "-qm", "x"]):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    (tmp_path / "Windows-driver-samples").mkdir(parents=True)
+
+    assert _resolve_source_commit(WdkWithSamples(), tmp_path) is None
