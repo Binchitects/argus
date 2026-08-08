@@ -7,6 +7,7 @@ adapter here is what makes it buildable.
 from .base import ApiSymbol, Doc, Source
 from .code_samples import AlgorithmsCpp, WindowsClassicSamples, WindowsDriverSamples
 from .microsoft_docs import CppDocs, WdkDdi, Win32Api
+from .system_design import SystemDesignPrimer
 from .python_docs import PythonDocs
 from .react_docs import ReactDocs
 
@@ -24,10 +25,11 @@ SOURCES: dict[str, type] = {
     "wdk-samples": WindowsDriverSamples,
     "win32-samples": WindowsClassicSamples,
     "algorithms": AlgorithmsCpp,
+    "system-design": SystemDesignPrimer,
 }
 
 __all__ = [
     "ApiSymbol", "Doc", "Source", "PythonDocs", "ReactDocs",
     "CppDocs", "Win32Api", "WdkDdi", "WindowsDriverSamples",
-    "WindowsClassicSamples", "AlgorithmsCpp", "SOURCES",
+    "WindowsClassicSamples", "AlgorithmsCpp", "SystemDesignPrimer", "SOURCES",
 ]
