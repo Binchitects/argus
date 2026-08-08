@@ -198,3 +198,106 @@ Not tuned away. Reranking on ten questions is how you fit to ten questions,
 and the fix that would actually work — extracting complexity into the indexed
 text — is a change to what the adapter emits, justified by a larger sample
 than this one.
+
+---
+
+# Quality and cost, per pack
+
+Everything measured on one machine: Windows 11, CPU-only Ollama 0.30.7,
+`nomic-embed-text` at 768 dimensions. No GPU. Build times are wall clock for a
+cold pack with an empty embedding cache.
+
+## Cost
+
+| pack | documents | chunks | symbols | size | build | MB / 1k chunks |
+|---|---|---|---|---|---|---|
+| `system-design` | 9 | 442 | 8 | 1.3 MB | < 1 min | 2.94 |
+| `algorithms` | 371 | 2,001 | 370 | 4.3 MB | < 1 min | 2.15 |
+| `cpp` | 9,746 | 123,212 | 37,305 | 174.7 MB | **36 min** | 1.42 |
+| `wdk` (composite) | 28,153 | 239,145 | 38,038 | 347.4 MB | **74 min** | 1.45 |
+| `scripting` (composite) | 9,302 | — | 9,302 | — | pending | — |
+| `win32` (composite) | ~71,700 | — | — | — | pending | — |
+
+Documents and symbols for the two pending packs come from running the adapters
+over the real checkouts; their chunk counts, sizes and times are not yet
+measured and are deliberately left blank rather than estimated.
+
+**Cost is almost entirely embedding.** Measured throughput was 57 chunks/sec
+on `cpp` and 54 on `wdk` — steady across a 2× difference in corpus size, so a
+build time is predictable from a chunk count once you have one:
+
+```
+minutes ≈ chunks / 55 / 60
+```
+
+**Storage improves with scale.** MB per 1,000 chunks falls from 2.94 on the
+smallest pack to ~1.42 on the largest. The per-pack overhead — schema, FTS
+dictionary, vector index headers — is fixed, so it amortises.
+
+**Chunks per document vary by an order of magnitude**, which is why a build
+estimate taken from a document count is worthless: `cpp` averages 12.6
+chunks/doc (long articles), `wdk` 8.5, `algorithms` 5.4. An early estimate here
+projected `cpp` at 47,000 chunks from a 500-document sample and it came in at
+123,212 — 2.6× off, because the sample was alphabetically first and therefore
+short.
+
+### What an interruption costs
+
+A build deletes its half-written pack on any failure, so before the embedding
+cache existed an interrupted `wdk` cost all 74 minutes. With the cache, a
+rerun re-chunks (seconds) and re-embeds only what it never reached. The first
+composite build already showed this working — `5751 reused, 233394 computed` —
+where the reused entries were text shared with an earlier build.
+
+Cache cost is ~0.8 GB for these corpora, keyed on the embed text plus model.
+It is a sidecar: deleting it costs time, never correctness.
+
+## Quality
+
+| pack | unresolved symbols | hand-checked retrieval | notes |
+|---|---|---|---|
+| `system-design` | **0** | 5 / 6 top-1 | one miss ranked the right pack, wrong page |
+| `algorithms` | **0** | 3 / 4 top-1 | fails on property questions — see below |
+| `cpp` | **0** | not yet | |
+| `wdk` (composite) | **3 → 0** | not yet | 3 was a real defect, fixed and rebuilt |
+| `scripting` | 0 (pre-build) | not yet | |
+| `win32` | pending | not yet | |
+
+**Unresolved symbols is the cheapest quality signal in the build.** A symbol
+whose page is missing still installs, still lists, and simply never resolves —
+the failure is invisible until someone looks that name up. `wdk` reporting 3
+where every other pack reported 0 was what exposed a real defect: `iter_docs`
+skipped oversized and binary files while `iter_symbols` did not, so a sample
+anchored to a skipped file produced a symbol pointing at a page that was never
+written.
+
+Combined hand-check across the two measured packs: **8 of 10 top-1, 9 of 10 in
+the top 3.** The full question set and both misses are recorded above.
+
+### The limit worth knowing before you rely on this
+
+A code pack matches vocabulary, not properties. "A sorting algorithm that runs
+in n log n" returns `bogo_sort` — O(n · n!) — because all forty files in
+`sorting/` say "sorting algorithm" in a header comment and complexity carries
+almost no semantic weight beside code.
+
+| question shape | works |
+|---|---|
+| "show me an implementation of X" | yes |
+| "how do I design X" | yes |
+| "which X has property Y" | **no** |
+
+### Retrieval cost, once installed
+
+| corpus | search, excluding embedding |
+|---|---|
+| 17,919 chunks (2 packs) | 88.6 ms |
+| 364,800 chunks (4 packs) | **460 ms** |
+
+5.2× for 20.4× the corpus — sublinear, so the two-stage binary/int8 design
+holds at size. Query embedding remains the dominant cost at **~2,500 ms** on
+CPU, roughly five times the search itself. That is hardware, not code, and a
+GPU is the only lever that moves it.
+
+Both figures were taken while a pack build saturated the CPU, so they are
+pessimistic rather than flattering.
