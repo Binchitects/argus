@@ -40,3 +40,8 @@ deploy/test-gitlab/work/
 
 # Built packs (large artifacts, published out of band)
 dist/
+
+# Built knowledge packs. Hundreds of MB of binary SQLite, rebuildable from
+# the pinned upstream checkouts -- an artifact, not source. A `git add -A`
+# swept 1.19 GB of these into a commit and the push died on it.
+packs/

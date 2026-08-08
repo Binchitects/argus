@@ -115,3 +115,60 @@ def test_cpp_symbols_carry_no_borrowed_signature(tmp_path):
            "# errors\n\n## Syntax\n\n```asm\nADD r0, r8, pc ; A2193\n```\n")
     for sym in CppDocs().iter_symbols(tmp_path):
         assert sym.signature == "", (sym.name, sym.signature)
+
+
+BLOCK_PAGE = """---
+UID: NF:wdm.KeAcquireSpinLock~r1
+title: KeAcquireSpinLock macro (wdm.h)
+req.header: wdm.h
+req.irql: <= DISPATCH_LEVEL
+api_name:
+ - KeAcquireSpinLock
+---
+
+## -description
+"""
+
+RENAMED_PAGE = """---
+UID: NF:wdm.IofCompleteRequest
+title: IoCompleteRequest macro (wdm.h)
+req.header: wdm.h
+api_name:
+ - IofCompleteRequest
+---
+
+## -description
+"""
+
+
+def test_block_style_yaml_lists_are_parsed(tmp_path):
+    """Both Microsoft repos write api_name as a block sequence, not inline
+    JSON. Treating it as an empty scalar silently dropped every alias on those
+    pages -- measured, KeAcquireSpinLock was absent from the built pack."""
+    meta, _ = parse_front_matter(BLOCK_PAGE)
+    assert meta["api_name"] == ["KeAcquireSpinLock"]
+
+
+def test_a_revision_suffix_is_not_part_of_the_name():
+    """56 DDI pages carry a ~rN suffix disambiguating upstream revisions.
+    Keeping it stores KeAcquireSpinLock~r1, which nobody will ever type."""
+    assert parse_uid("NF:wdm.KeAcquireSpinLock~r1") == (
+        "function", "wdm", "KeAcquireSpinLock")
+
+
+def test_the_documented_name_wins_when_the_uid_uses_an_internal_one(tmp_path):
+    """nf-wdm-iocompleterequest.md carries UID NF:wdm.IofCompleteRequest and
+    lists only IofCompleteRequest in api_name. The name every driver actually
+    calls appears in the title alone, so without reading it the pack cannot
+    answer a lookup for IoCompleteRequest at all."""
+    _write(tmp_path, "wdk-ddi-src/content/wdm/nf-wdm-iocompleterequest.md", RENAMED_PAGE)
+    names = {s.name for s in WdkDdi().iter_symbols(tmp_path)}
+    assert "IoCompleteRequest" in names
+    assert "IofCompleteRequest" in names
+
+
+def test_the_spin_lock_page_resolves_end_to_end(tmp_path):
+    _write(tmp_path, "wdk-ddi-src/content/wdm/nf-wdm-keacquirespinlock.md", BLOCK_PAGE)
+    syms = {s.name: s for s in WdkDdi().iter_symbols(tmp_path)}
+    assert "KeAcquireSpinLock" in syms
+    assert "DISPATCH_LEVEL" in syms["KeAcquireSpinLock"].signature

@@ -33,10 +33,19 @@ from .base import ApiSymbol, Doc
 _FRONT_MATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
 _SCALAR = re.compile(r"^([A-Za-z_][\w.\-]*)\s*:\s*(.*)$")
 _JSON_LIST = re.compile(r'"([^"]+)"')
+_BLOCK_ITEM = re.compile(r'^\s+-\s+(.*)$')
 #: The fenced block under "## Syntax" -- the declaration, not prose about it.
 _SYNTAX = re.compile(
     r"^##\s+Syntax\s*$.*?^```(?:\w+)?\s*$(.*?)^```", re.MULTILINE | re.DOTALL)
 _ATX = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$", re.MULTILINE)
+#: "IoCompleteRequest macro (wdm.h)" -> "IoCompleteRequest". The documented
+#: name is not always the UID: nf-wdm-iocompleterequest.md carries
+#: UID NF:wdm.IofCompleteRequest and lists only IofCompleteRequest in
+#: api_name, so the name every driver actually calls appears in the title
+#: alone. Without this the pack cannot answer docs_lookup("IoCompleteRequest").
+_TITLE_NAME = re.compile(
+    r"^([A-Za-z_][\w:]*)\s+(?:function|macro|structure|struct|enumeration|"
+    r"interface|callback|union|method|routine|ioctl)\b")
 
 #: UID prefix -> kind. Microsoft's own two-letter scheme; spelled out because
 #: "NF" in a retrieved result tells a reader nothing.
@@ -60,13 +69,38 @@ def parse_front_matter(text: str) -> tuple[dict[str, object], str]:
     if not match:
         return {}, text
     meta: dict[str, object] = {}
+    pending: str | None = None            # key whose block list we are inside
     for line in match.group(1).splitlines():
+        item = _BLOCK_ITEM.match(line)
+        if item and pending is not None:
+            # The key was seeded with "" when its value was empty, because at
+            # that point an empty scalar and the head of a block sequence look
+            # identical. setdefault cannot replace that "", so the list has to
+            # be installed explicitly -- otherwise every appended alias lands
+            # on a str and is silently discarded.
+            if not isinstance(meta.get(pending), list):
+                meta[pending] = []
+            meta[pending].append(item.group(1).strip().strip('"').strip("'"))
+            continue
         found = _SCALAR.match(line)
         if not found:
             continue                      # continuation or nested block
         key, raw = found.group(1), found.group(2).strip()
+        pending = None
         if raw.startswith("[") and raw.endswith("]"):
             meta[key] = _JSON_LIST.findall(raw)
+        elif raw == "":
+            # Either an empty scalar or the head of a block sequence:
+            #
+            #   api_name:
+            #    - KeAcquireSpinLock
+            #
+            # Both sdk-api and the DDI repo use this form, and treating it as
+            # an empty string silently dropped every alias on those pages.
+            # Measured: KeAcquireSpinLock and IoCompleteRequest -- core driver
+            # routines -- were absent from the built pack entirely.
+            pending = key
+            meta[key] = ""
         else:
             meta[key] = raw.strip('"').strip("'")
     return meta, text[match.end():]
@@ -86,6 +120,10 @@ def parse_uid(uid: str) -> tuple[str, str, str] | None:
     if kind is None:
         return None
     module, _, name = rest.partition(".")
+    # "NF:wdm.KeAcquireSpinLock~r1" -- the ~rN suffix disambiguates revisions
+    # of the same routine upstream and is not part of the name anyone types.
+    # Measured: 56 DDI pages carry one, and they include KeAcquireSpinLock.
+    name = name.split("~", 1)[0]
     if not name:
         # "NN:combaseapi" and friends -- a module-level page with no entity.
         return None
@@ -212,6 +250,10 @@ def _aliases(meta: dict) -> list[str]:
     calls.
     """
     out: list[str] = []
+    title = str(meta.get("title") or "")
+    named = _TITLE_NAME.match(title)
+    if named:
+        out.append(named.group(1))
     for key in ("api_name", "f1_keywords"):
         value = meta.get(key)
         if isinstance(value, list):
