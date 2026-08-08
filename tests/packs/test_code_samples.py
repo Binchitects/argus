@@ -129,3 +129,20 @@ def test_an_algorithm_whose_file_is_unreadable_yields_no_symbol(tmp_path):
     names = {s.name for s in src.iter_symbols(tmp_path)}
     assert names == {"quick_sort"}
     assert all(_doc_key(s.doc_path) in pages for s in src.iter_symbols(tmp_path))
+
+
+def test_a_large_real_source_file_is_indexed(tmp_path):
+    """The old 200 KB cut dropped 66 files across the two Microsoft sample
+    repositories, including storage/class/classpnp/src/class.c at 575 KB --
+    the storage class driver itself, and exactly the reference implementation
+    a driver developer goes looking for. The limit must sit above real code."""
+    _w(tmp_path, "Samples/Big/class.c", "// classpnp\n" + ("int x;\n" * 40_000))
+    kept = {d.path for d in WindowsClassicSamples().iter_docs(tmp_path)}
+    assert kept == {"Big/class.c"}, kept
+
+
+def test_a_pathological_blob_is_still_excluded(tmp_path):
+    _w(tmp_path, "Samples/Ok/a.cpp")
+    _w(tmp_path, "Samples/Huge/generated.cpp", "x" * (MAX_FILE_BYTES + 1))
+    kept = {d.path for d in WindowsClassicSamples().iter_docs(tmp_path)}
+    assert kept == {"Ok/a.cpp"}, kept

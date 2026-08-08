@@ -44,7 +44,25 @@ from ..packs.quantize import rescore, to_bits
 #: is unchanged and only the count of 768-byte rows read grows, about 460 KB
 #: per pack per query at this setting.
 #:
-#: Provisional pending a measurement on real embeddings over real documents.
+#: **Now measured on real embeddings over real documents, and the synthetic
+#: benchmark was pessimistic.** Against a full cosine scan of the 123,212-chunk
+#: `cpp` pack -- the same metric `rescore` uses -- recall@10 is **1.000 at
+#: every coarse value from 300 to 4000**. The coarse pass loses nothing here.
+#:
+#: Random synthetic vectors are far more uniformly distributed than real
+#: document embeddings, so the Hamming pass separates real text much more
+#: cleanly than the benchmark implied. Raising this buys no recall and costs
+#: latency: 140 ms/query at 600 against 500 ms at 4000. It stays at 600, which
+#: is now a measured choice rather than a provisional one.
+#:
+#: Note for anyone tempted to raise it far: sqlite-vec caps k at 4096.
+#:
+#: The first attempt at this measurement was wrong and reported a flat 0.700 at
+#: every setting. It used `vec_i8 MATCH` as the baseline, but that table is
+#: declared without a metric so sqlite-vec ranks it by L2 while `rescore` uses
+#: cosine -- the two disagreed on 30% of results for reasons that had nothing
+#: to do with the coarse cut. A recall curve that does not move with the knob
+#: is measuring the wrong thing.
 DEFAULT_COARSE = 600
 
 _DECOMPRESSOR = zstandard.ZstdDecompressor()

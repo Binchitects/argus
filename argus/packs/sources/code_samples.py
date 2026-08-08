@@ -46,9 +46,19 @@ SKIP_DIRS = frozenset({
     "third_party", "external", "vendor",
 })
 
-#: A single enormous generated file can dominate a pack. Measured against the
-#: Microsoft samples, real example code sits far below this.
-MAX_FILE_BYTES = 200_000
+#: A single enormous generated file can dominate a pack, but the cut has to sit
+#: above real code. Measured across both Microsoft sample repositories, the old
+#: 200 KB limit dropped 66 files totalling 24.4 MB. Most were OLE DB
+#: conformance test harnesses -- no loss -- but among them was
+#: `storage/class/classpnp/src/class.c` at 575 KB, the storage class driver
+#: itself, which is exactly the kind of reference implementation a driver
+#: developer goes looking for.
+#:
+#: 2 MB clears every file in both repositories (the largest is 1,041 KB) while
+#: still catching a pathological generated blob. The extra ~24 MB of source
+#: costs a few minutes of embedding, which is the right trade: a build runs
+#: once and the pack is read for months.
+MAX_FILE_BYTES = 2_000_000
 
 _WORD = re.compile(r"[A-Za-z0-9_]+")
 
