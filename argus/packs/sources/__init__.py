@@ -5,7 +5,7 @@ adapter here is what makes it buildable.
 """
 
 from .base import ApiSymbol, Doc, Source
-from .composite import Win32WithSamples, WdkWithSamples
+from .composite import ScriptingDocs, Win32WithSamples, WdkWithSamples
 from .code_samples import AlgorithmsCpp, WindowsClassicSamples, WindowsDriverSamples
 from .microsoft_docs import CppDocs, WdkDdi, Win32Api
 from .system_design import SystemDesignPrimer
@@ -33,11 +33,14 @@ SOURCES: dict[str, type] = {
     "win32-samples": WindowsClassicSamples,
     "algorithms": AlgorithmsCpp,
     "system-design": SystemDesignPrimer,
+    # PowerShell + cmd + Unix tools in one pack: a scripting question
+    # does not arrive already sorted by shell.
+    "scripting": ScriptingDocs,
 }
 
 __all__ = [
     "ApiSymbol", "Doc", "Source", "PythonDocs", "ReactDocs",
     "CppDocs", "Win32Api", "WdkDdi", "WindowsDriverSamples",
     "WindowsClassicSamples", "AlgorithmsCpp", "SystemDesignPrimer",
-    "Win32WithSamples", "WdkWithSamples", "SOURCES",
+    "Win32WithSamples", "WdkWithSamples", "ScriptingDocs", "SOURCES",
 ]

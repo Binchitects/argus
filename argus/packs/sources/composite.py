@@ -33,6 +33,7 @@ from typing import Iterator
 from .base import ApiSymbol, Doc, Source
 from .code_samples import WindowsClassicSamples, WindowsDriverSamples
 from .microsoft_docs import WdkDdi, Win32Api
+from .scripting import PowerShellDocs, TldrPages, WindowsCommands
 
 
 class CompositeError(RuntimeError):
@@ -154,3 +155,34 @@ class WdkWithSamples(_Composite):
     license_url: str = (
         "https://github.com/MicrosoftDocs/windows-driver-docs-ddi/blob/staging/LICENSE")
     attribution: str = _combined_attribution(_WDK_PARTS)
+
+
+_SCRIPTING_PARTS = (
+    _Part("PowerShell-Docs", PowerShellDocs(), "powershell"),
+    _Part("windowsserverdocs", WindowsCommands(), "cmd"),
+    _Part("tldr", TldrPages(), "tldr"),
+)
+
+
+@dataclass(frozen=True)
+class ScriptingDocs(_Composite):
+    """PowerShell, the Windows command line, and Unix tools in one pack.
+
+    "How do I do X from a script" does not arrive already sorted by shell.
+    Someone automating a Windows machine moves between robocopy, Get-ChildItem
+    and grep inside one task, and three packs would mean three installs and
+    three chances to be missing the one that had the answer.
+
+    The reference halves (PowerShell, Windows commands) say what every flag
+    does; tldr says what the command looks like in use. Most scripting
+    questions want the second and then the first.
+    """
+
+    name: str = "scripting"
+    parts: tuple[_Part, ...] = _SCRIPTING_PARTS
+    repo_url: str = "https://github.com/MicrosoftDocs/PowerShell-Docs"
+    branch: str = "main"
+    license: str = _combined_licence(_SCRIPTING_PARTS)
+    license_url: str = ("https://github.com/MicrosoftDocs/PowerShell-Docs/blob/"
+                        "main/LICENSE.md")
+    attribution: str = _combined_attribution(_SCRIPTING_PARTS)
