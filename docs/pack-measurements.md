@@ -367,3 +367,47 @@ headers, libraries, IRQLs, flags -- and says nothing about whether the packs
 improve reasoning, code generation, or multi-step tasks. The one remaining
 regression (`DISM`, which the model knew and the pack talked it out of) is
 recorded rather than tuned away.
+
+## Code generation and reasoning: no measurable effect
+
+The factual run above was extended with six code-generation tasks and four
+reasoning tasks, same model and method. Reasoning ran with thinking ENABLED,
+because that is qwen3.6's actual reasoning mechanism and testing it with
+thinking off would measure something nobody runs.
+
+| kind | closed book | with packs |
+|---|---|---|
+| factual recall (15 questions) | **9 / 15** | **14 / 15** |
+| code generation (6 tasks, 20 elements) | 19 / 20 | 19 / 20 |
+| reasoning (4 tasks, 7 elements) | 7 / 7 | 7 / 7 |
+
+**The reasoning result is inconclusive, not negative.** The model answered all
+four correctly with no help, so there was no headroom to detect an
+improvement -- the same saturation that made the embedding-model comparison
+unable to decide anything. A harder set might discriminate; this one cannot.
+
+**The pattern across all three is the useful finding.** On the *same subject* --
+WDK -- the model scored 0/5 on "which header declares IoAllocateIrp" while
+scoring 7/7 writing driver code and 5/5 explaining IRQL rules.
+
+| what the model already holds | what it does not |
+|---|---|
+| the shape of a DispatchRead routine | which header declares it |
+| why paged pool faults at DISPATCH_LEVEL | which `.lib` exports the allocator |
+| that GetAdaptersAddresses needs a resize loop | that the header is `iphlpapi.h` |
+
+Concepts and code shapes are in the weights, heavily represented by books,
+blogs and answers. Exact header names, import libraries and per-routine IRQL
+constraints are not -- and those are exactly what a developer stops to look up.
+
+So the honest claim for these packs is narrow and worth stating precisely:
+**they replace the lookup, not the thinking.** That is what a reference is for.
+
+### What this does not measure
+
+Grading is by required structural elements -- the API that must be called, the
+flag that must be set, the constraint that must be respected. That is a proxy:
+an answer naming `ExAllocatePool2` and `NonPagedPool` while misusing both
+scores as a pass, and this run cannot tell. Ten generation tasks and fifteen
+questions is a smoke test. Read it as evidence of *where* the packs help, not
+as a quality score.
