@@ -23,11 +23,13 @@ VERSION="${ARGUS_PACK_VERSION:-1.0}"
 
 # pack name -> checkout directory. Ordered smallest first: a cheap pack that
 # fails tells you the pipeline is broken before an eleven-hour one does.
-order=(system-design algorithms cpp wdk win32)
+order=(system-design algorithms scripting cpp wdk win32)
 declare -A checkout=(
     [system-design]="system-design-primer"
     [algorithms]="C-Plus-Plus"
     [cpp]="cpp-docs"
+    # Also a composite: PowerShell + windows-commands + tldr.
+    [scripting]="."
     # wdk and win32 are composites: reference AND samples in one pack. A
     # composite is pointed at the PARENT holding both checkouts, which is why
     # these map to "." rather than to a single repository directory.
