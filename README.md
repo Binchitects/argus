@@ -295,3 +295,89 @@ The design spec and the full implementation plan live in [`docs/superpowers/`](d
 ## License
 
 See [LICENSE](LICENSE).
+
+## Measured
+
+Every number here was measured on one machine (Windows 11, CPU-only Ollama,
+`nomic-embed-text`), not estimated. Where a figure is inconclusive it says so.
+
+### Does retrieval improve an agent?
+
+160 questions against **qwen3.6:35b**, closed book versus with pack retrieval.
+Question *and* answer are extracted from the pack pages, so ground truth is
+what Microsoft and tldr publish rather than what the test author remembered.
+
+| pack | closed book | with packs | |
+|---|---|---|---|
+| `win32` | 9 / 30 | **29 / 30** | +20 |
+| `wdk` | 9 / 30 | **25 / 30** | +16 |
+| `scripting` | 2 / 30 | **18 / 30** | +16 |
+| `cpp` (MSVC diagnostics) | 3 / 40 | **40 / 40** | +37 |
+| `cpp` (standard library) | 26 / 30 | 25 / 30 | -1 |
+| **total** | **49 / 160 (31%)** | **137 / 160 (86%)** | **+88** |
+
+**90 answers fixed, 3 broken.** The `cpp` standard-library row is the control
+and behaves like one: the model already knows which header declares
+`std::vector::push_back`, so retrieval adds nothing there. The packs earn
+their disk where the model is ignorant, not where it is fluent.
+
+**Retrieval must be wired correctly or the same packs make answers worse.**
+Measured: telling the model to "use ONLY the reference" took win32 from 5/5 to
+1/5, because a retrieval miss then destroys an answer it already had. Use
+`docs_lookup` for known API names, `docs_search` to find a page, `docs_get` to
+read it, and let the model fall back on its own knowledge.
+
+### What the packs cost
+
+| pack | documents | chunks | symbols | size | build |
+|---|---|---|---|---|---|
+| `system-design` | 9 | 442 | 8 | 1.3 MB | < 1 min |
+| `algorithms` | 371 | 2,001 | 370 | 4.3 MB | < 1 min |
+| `scripting` | 9,302 | 46,027 | 9,302 | 70.1 MB | 13 min |
+| `cpp` | 9,746 | 123,212 | 37,305 | 174.7 MB | 36 min |
+| `wdk` | 28,176 | 245,727 | 38,041 | 358.6 MB | 74 min |
+| `win32` | 71,663 | 530,559 | 87,297 | 786.2 MB | 162 min |
+| **total** | **128,567** | **947,968** | **172,323** | **1.4 GB** | **~5 h** |
+
+Every pack reports **0 unresolved symbols**. Build time is almost entirely
+embedding, at a steady ~55 chunks/sec, so `minutes = chunks / 55 / 60`. An
+interrupted build resumes from a cache rather than starting over -- the wdk
+rebuild took 3 minutes instead of 74, reusing 239,155 embeddings.
+
+### Retrieval performance
+
+| corpus | search, excluding query embedding |
+|---|---|
+| 17,919 chunks | 88.6 ms |
+| 364,800 chunks | **460 ms** |
+
+5.2x cost for 20.4x the corpus -- sublinear. Query embedding dominates what a
+user feels at ~2,500 ms on CPU; that is hardware, not code.
+
+### Index performance
+
+| | 1,026 files | 10,212 files |
+|---|---|---|
+| `which_repo` p95 | 1.58 ms | **1.92 ms** |
+| ambiguous include rate | 1.28% | **0.09%** |
+| MB per 1k files | 28.4 | 21.9 |
+
+Suffix matching gets *better* with scale, not worse. `which_repo` stayed flat
+only because an indexed `basename` column replaced a full scan; before that,
+the p95 was 15.5 ms and rising linearly.
+
+### Engineering
+
+| | |
+|---|---|
+| tests | **657 passing** |
+| hollow tests found by targeted revert | **9** |
+| cross-repo edge precision, hand-checked | 13 / 25 -> after fixes, 0 fabricated at weight > 8 |
+
+A *hollow test* passes while the behaviour it names is broken. Each was caught
+by breaking the code deliberately and confirming the test noticed. A suite
+without that step has the same hollow tests and no number.
+
+Full detail: [docs/pack-measurements.md](docs/pack-measurements.md),
+[docs/index-measurements.md](docs/index-measurements.md),
+[docs/kpis.md](docs/kpis.md), [evals/](evals/).

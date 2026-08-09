@@ -481,3 +481,38 @@ with retrieval.
 The two broken answers are the residual risk, unchanged in character from the
 earlier finding: retrieved context can still displace something the model had
 right. At 53:2 that trade is worth making, but it is not zero.
+
+
+## Corrected: the cpp pack, measured properly
+
+The 120-question run put `cpp` at 26/30 closed book against 25/30 with packs,
+and the obvious reading was to stop installing it. That reading was wrong, and
+so was the test.
+
+`cpp` is **61% MSVC-specific** -- 1,515 compiler errors, 595 warnings, 517
+build options, 955 C runtime pages -- against 733 standard-library pages. The
+question set sampled only `std::` symbols, so it asked exclusively about the
+part any competent model already knows, and judged the whole pack on a fifth
+of it.
+
+Asked about the other four fifths -- given a diagnostic message, name the code
+that produces it:
+
+| kind | closed book | with packs |
+|---|---|---|
+| error codes (20) | 1 / 20 | **20 / 20** |
+| warning codes (20) | 2 / 20 | **20 / 20** |
+| **total** | **3 / 40** | **40 / 40** |
+
+37 fixed, 0 broken. The pack stays.
+
+| what `cpp` is asked | closed book | with packs | verdict |
+|---|---|---|---|
+| which header declares `std::…` | 26 / 30 | 25 / 30 | model already knows |
+| which code produces this diagnostic | 3 / 40 | 40 / 40 | model knows almost none |
+
+**The general lesson is about testing, not about C++.** A pack is not one
+thing. Generating questions from whichever slice is easiest to extract
+measures that slice, and a confident conclusion drawn from it can be exactly
+backwards -- here it would have removed the pack with the largest single
+measured gain in the project.
