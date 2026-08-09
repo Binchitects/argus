@@ -411,3 +411,73 @@ an answer naming `ExAllocatePool2` and `NonPagedPool` while misusing both
 scores as a pass, and this run cannot tell. Ten generation tasks and fifteen
 questions is a smoke test. Read it as evidence of *where* the packs help, not
 as a quality score.
+
+---
+
+# The reliable measurement: 120 questions, ground truth from the packs
+
+Every earlier attempt wrote questions from memory and checked them afterwards.
+The worst of them marked the packs **wrong for being right**: the expected IRQL
+for `IoCreateDevice` was PASSIVE_LEVEL from recollection, Microsoft publishes
+`<= APC_LEVEL`, and the grounded answer was scored a failure for following the
+documentation.
+
+So the question set is generated **from the pack pages** -- question and answer
+extracted from the same page, meaning the expected answer is whatever the
+upstream project actually publishes. 120 questions, 30 each from win32, wdk,
+cpp and scripting, seed fixed at 20260809 so the set is reproducible.
+
+This is not circular. The claim under test is *does retrieval make the agent
+agree with the official documentation*, which is what a reference is for, and
+the closed-book arm measures how often the model already knows the documented
+fact. Were the documentation wrong, both arms would be wrong together.
+
+Selection is biased toward the hard end: names of 9 characters or more (short
+names are often common words), generic headers like `windows.h` dropped as
+guessable, and sampling shuffled across the whole corpus rather than taking
+the first N of an alphabetical list. The result is genuinely obscure --
+`DXVAHD_FEATURE_CAPS`, `MprAdminPortEnum`, `secur32.lib`.
+
+Grading reads only the final `VERDICT:` line, and `unknown` is a permitted
+answer so hedging scores as a miss. Matching against a whole reply is how an
+earlier run produced a false 10/10.
+
+## Result: qwen3.6:35b, 38% -> 81%
+
+| pack | closed book | with packs | |
+|---|---|---|---|
+| **win32** | 9 / 30 | **29 / 30** | +20 |
+| **wdk** | 9 / 30 | **25 / 30** | +16 |
+| **scripting** | 2 / 30 | **18 / 30** | +16 |
+| cpp | 26 / 30 | 25 / 30 | -1 |
+| **total** | **46 / 120** | **97 / 120** | **+51** |
+
+**53 answers fixed, 2 broken.** A 26:1 ratio, on a set large enough that the
+result is not noise.
+
+| question kind | closed book | with packs |
+|---|---|---|
+| which header declares X (82) | 38 / 82 | **72 / 82** |
+| name the command from its description (30) | 2 / 30 | **18 / 30** |
+| which import library (6) | 4 / 6 | 5 / 6 |
+| at what IRQL (2) | 2 / 2 | 2 / 2 |
+
+## What the shape of it says
+
+**`cpp` is the control, and it behaves like one.** 26/30 unaided: the model
+knows which standard header declares `std::vector::push_back`, because that is
+written down in a million places. Retrieval adds nothing there and costs one
+answer. A pack for material the model already holds is not worth its disk.
+
+**Reverse lookup is the hardest shape and the most realistic.** Given only what
+a command does, name it: 2/30 unaided. That is how a scripting question
+actually arrives -- the developer knows the goal, not the name -- and it is
+where a pack earns most.
+
+**Win32 and WDK are where the value is**, exactly as the smaller run suggested
+but now on 60 questions rather than 10. 9/30 unaided in both; 29/30 and 25/30
+with retrieval.
+
+The two broken answers are the residual risk, unchanged in character from the
+earlier finding: retrieved context can still displace something the model had
+right. At 53:2 that trade is worth making, but it is not zero.
