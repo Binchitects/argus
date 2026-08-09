@@ -758,3 +758,69 @@ tax is worth paying: +45 claims on code generation and +92 answers on facts,
 against -1 out of 20 elsewhere. But an agent that retrieves on *every* prompt
 pays it on every unrelated question, so scope retrieval to the domains the
 packs cover where that is cheap to detect.
+
+---
+
+# The last three gaps, closed
+
+## Double-tap on code generation
+
+The obvious omission from the code-generation run: it compared closed book,
+retrieval-first and verify-after, but not the strategy that won on single
+facts.
+
+| strategy | claims correct |
+|---|---|
+| closed book | 28 / 100 |
+| retrieval-first | 73 / 100 |
+| verify-after | 45 / 100 |
+| **double-tap** | **74 / 100** |
+
+74 against 73, and `docs_verify` fired on **1 of 25** retrieved answers.
+Retrieval had already put the right headers in the code, so there was almost
+nothing left to contradict.
+
+That mirrors the single-fact result exactly -- 101 against 101, verification
+rescuing 0 -- and settles what double-tap is for. It is **insurance**: worth
+its extra calls when retrieval is noisy, worth nothing when retrieval is
+clean, and across four runs it has never once lost a claim or an answer. Pay
+for it where a wrong answer is expensive, not everywhere.
+
+## algorithms and system-design
+
+Both packs had appeared in no arm of any comparison.
+
+| pack | closed book | with packs |
+|---|---|---|
+| `algorithms` | 4 / 20 | **18 / 20** |
+| `system-design` | 2 / 8 | 3 / 8 |
+| total | 6 / 28 | **21 / 28** |
+
+**15 fixed, 0 broken.**
+
+`algorithms` is the strongest per-question result in the project: 4/20 to
+18/20. The questions ask which topic directory holds a named implementation --
+a fact that exists only as the corpus's own layout, so the model has no way to
+know it and the pack states it exactly. That is the ideal shape for a pack:
+knowledge that is real, checkable, and absent from training data.
+
+`system-design` barely moves, and the reason is in its size rather than its
+quality. Nine case studies, so the questions ask which one addresses a
+described problem, and the model can often guess from the description alone --
+"design a URL shortener" is recognisably pastebin whether or not you have read
+the page. A pack of nine documents has little to add to a model that already
+knows the domain.
+
+## Complete picture, every shape measured
+
+| shape | questions | closed book | best with packs |
+|---|---|---|---|
+| Win32/WDK/scripting/cpp facts | 120 | 46 (38%) | **101 (84%)** |
+| MSVC diagnostics | 40 | 3 (8%) | **40 (100%)** |
+| multi-claim code generation | 100 claims | 28 (28%) | **74 (74%)** |
+| algorithms + system-design | 28 | 6 (21%) | **21 (75%)** |
+| **out of domain (control)** | 20 | **16 (80%)** | **15 (75%)** |
+
+Everything the packs cover improves substantially. The one place they cost
+something is the control, where a question they were never meant to answer
+still triggers retrieval.

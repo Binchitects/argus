@@ -137,9 +137,10 @@ async def main() -> None:
     print(f"{len(tasks)} tasks, {sum(len(t['claims']) for t in tasks)} claims\n")
     await tools.docs_search_impl(str(packs_dir), "warmup", limit=1)
 
-    totals = [0, 0, 0]
+    totals = [0, 0, 0, 0]
     denom = 0
     verify_fired = verify_gained = verify_lost = 0
+    dbl_fired = dbl_gained = dbl_lost = 0
 
     for i, t in enumerate(tasks, 1):
         q = TASK.format(names=t["names"])
@@ -166,17 +167,36 @@ async def main() -> None:
         verify_gained += max(0, c - a)
         verify_lost += max(0, a - c)
 
-        totals[0] += a; totals[1] += b; totals[2] += c
+        # Double-tap: verify the RETRIEVED answer, not the cold draft. Best
+        # strategy on single facts and, until now, untested on code -- which
+        # is the shape verification was designed for, since a block asserts
+        # several facts at once and each can be checked independently.
+        findings_d = await tools.docs_verify_impl(str(packs_dir), f"{q}\n{b_reply}")
+        lines_d = [f"- {f['name']}: documented {c2['field']} is {c2['documented']}"
+                   for f in findings_d for c2 in f["corrections"]]
+        if lines_d:
+            dbl_fired += 1
+            d_reply = ask(REVISE.format(draft=b_reply.strip(),
+                                        corrections="\n".join(lines_d), q=q))
+        else:
+            d_reply = b_reply
+        d = scored(d_reply, claims)
+        dbl_gained += max(0, d - b)
+        dbl_lost += max(0, b - d)
+
+        totals[0] += a; totals[1] += b; totals[2] += c; totals[3] += d
         if i % 5 == 0:
             print(f"  ... {i}/{len(tasks)}", flush=True)
 
     print(f"\n{'strategy':22}{'claims correct':>16}")
     for label, got in zip(("closed book", "retrieval-first",
-                           "verify-after"), totals):
+                           "verify-after", "double-tap"), totals):
         pct = 100.0 * got / denom if denom else 0
         print(f"{label:22}{f'{got}/{denom}':>12} {pct:5.0f}%")
     print(f"\n  docs_verify fired on {verify_fired}/{len(tasks)} drafts")
     print(f"    claims gained {verify_gained}, claims lost {verify_lost}")
+    print(f"  double-tap verified {dbl_fired}/{len(tasks)} retrieved answers")
+    print(f"    claims gained {dbl_gained}, claims lost {dbl_lost}")
 
 
 asyncio.run(main())

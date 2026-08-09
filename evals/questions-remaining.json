@@ -1,0 +1,198 @@
+[
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named tree_height?",
+  "answer": "dynamic_programming"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named heavy_light_decomposition?",
+  "answer": "range_queries"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named line_segment_intersection?",
+  "answer": "geometry"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named palindrome_of_number?",
+  "answer": "others"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named eratosthenes?",
+  "answer": "math"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named prime_numbers?",
+  "answer": "math"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named double_hash_hash_table?",
+  "answer": "hashing"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named sparse_table_range_queries?",
+  "answer": "range_queries"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named wildcard_matching?",
+  "answer": "backtracking"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named successive_approximation?",
+  "answer": "numerical_methods"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named realtime_stats?",
+  "answer": "math"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named fibonacci?",
+  "answer": "math"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named numeric_string_sort?",
+  "answer": "sorting"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named addition_rule?",
+  "answer": "probability"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named factorial_memoization?",
+  "answer": "math"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named sum_of_digits?",
+  "answer": "math"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named heap_sort?",
+  "answer": "sorting"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named check_even_odd?",
+  "answer": "bit_manipulation"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named aliquot_sum?",
+  "answer": "math"
+ },
+ {
+  "pack": "algorithms",
+  "kind": "topic",
+  "shape": "one topic name",
+  "question": "In TheAlgorithms/C-Plus-Plus, which topic directory contains the implementation named stack_using_linked_list?",
+  "answer": "data_structures"
+ },
+ {
+  "pack": "system-design",
+  "kind": "case-study",
+  "shape": "one case study name",
+  "question": "Which System Design Primer case study addresses this problem: \"Design Mint.com\"?",
+  "answer": "mint"
+ },
+ {
+  "pack": "system-design",
+  "kind": "case-study",
+  "shape": "one case study name",
+  "question": "Which System Design Primer case study addresses this problem: \"Design Pastebin.com (or Bit.ly)\"?",
+  "answer": "pastebin"
+ },
+ {
+  "pack": "system-design",
+  "kind": "case-study",
+  "shape": "one case study name",
+  "question": "Which System Design Primer case study addresses this problem: \"Design a key-value cache to save the results of the most recent web server queries\"?",
+  "answer": "query_cache"
+ },
+ {
+  "pack": "system-design",
+  "kind": "case-study",
+  "shape": "one case study name",
+  "question": "Which System Design Primer case study addresses this problem: \"Design Amazon's sales rank by category feature\"?",
+  "answer": "sales_rank"
+ },
+ {
+  "pack": "system-design",
+  "kind": "case-study",
+  "shape": "one case study name",
+  "question": "Which System Design Primer case study addresses this problem: \"Design a system that scales to millions of users on AWS\"?",
+  "answer": "scaling_aws"
+ },
+ {
+  "pack": "system-design",
+  "kind": "case-study",
+  "shape": "one case study name",
+  "question": "Which System Design Primer case study addresses this problem: \"Design the data structures for a social network\"?",
+  "answer": "social_graph"
+ },
+ {
+  "pack": "system-design",
+  "kind": "case-study",
+  "shape": "one case study name",
+  "question": "Which System Design Primer case study addresses this problem: \"Design the Twitter timeline and search\"?",
+  "answer": "twitter"
+ },
+ {
+  "pack": "system-design",
+  "kind": "case-study",
+  "shape": "one case study name",
+  "question": "Which System Design Primer case study addresses this problem: \"Design a web crawler\"?",
+  "answer": "web_crawler"
+ }
+]
