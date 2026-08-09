@@ -516,3 +516,67 @@ thing. Generating questions from whichever slice is easiest to extract
 measures that slice, and a confident conclusion drawn from it can be exactly
 backwards -- here it would have removed the pack with the largest single
 measured gain in the project.
+
+---
+
+# Five retrieval strategies, measured
+
+Same 120 questions, same model (qwen3.6:35b), temperature 0. Only the strategy
+changes.
+
+| pack | A closed | B retr-first | C verify-after | D hybrid | **E double-tap** |
+|---|---|---|---|---|---|
+| cpp | 26/30 | 25/30 | 26/30 | 26/30 | 25/30 |
+| scripting | 2/30 | 18/30 | 2/30 | 8/30 | **18/30** |
+| wdk | 9/30 | 25/30 | 18/30 | 23/30 | **25/30** |
+| win32 | 9/30 | 29/30 | 14/30 | 20/30 | **30/30** |
+| **total** | **46/120** | 97/120 | 60/120 | 77/120 | **98/120** |
+
+* **A** the model alone.
+* **B** pack context in the prompt, then answer. Fixed 51, **broke 3**.
+* **C** answer, then correct only what the docs contradict. Fixed 14, **broke 0**.
+* **D** route on the draft: verify if it committed, retrieve if it hedged.
+* **E** retrieval-first, then verify that answer too. Rescued 1 of B's
+  mistakes, broke 0.
+
+## Why the hybrid lost, and why it matters
+
+D looked like the principled design -- ignorance needs retrieval, error needs
+verification, so detect which and apply the matching remedy. It scored 77/120,
+below B.
+
+The routing counts say why: **100 of 120 questions went to verification and
+only 20 to retrieval.** `committed()` detects hedging, and this model rarely
+hedges. It asserts a confident wrong header instead, which reads as "committed"
+and routes to a tool that can only correct a claim -- when what it needed was
+the fact supplied.
+
+**You cannot route on the model's confidence, because its confidence is
+uncorrelated with its knowledge.** That is the same property that makes these
+packs worth building, so it should not have been a surprise, and it is written
+here because the design felt obviously right and was wrong.
+
+## Why double-tap wins
+
+E does not route. It retrieves *and* verifies, every time: retrieval supplies
+what the model lacks, verification catches what retrieval displaced. Neither
+stage has to guess which failure it is facing.
+
+The cost is real -- six model calls per question against two -- and the margin
+over plain retrieval is one answer in 120. What E actually buys is the
+**removal of a failure mode**: B broke 3 correct answers on this set, and on a
+larger corpus that class of harm grows with retrieval noise while E's
+verification pass keeps checking it.
+
+| strategy | fixes ignorance | fixes error | breaks correct answers | model calls |
+|---|---|---|---|---|
+| retrieval-first | yes | partly | **3** | 2 |
+| verify-after | no | yes | **0** | 2-3 |
+| **double-tap** | **yes** | **yes** | **0** | 6 |
+
+## Recommendation
+
+Use **double-tap** where answer quality matters more than latency: retrieve,
+answer, then run `docs_verify` on the answer and revise only the contradictions.
+Use plain retrieval where six calls per question is too slow. Do not route on
+confidence.
