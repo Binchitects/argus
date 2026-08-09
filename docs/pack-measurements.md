@@ -824,3 +824,52 @@ knows the domain.
 Everything the packs cover improves substantially. The one place they cost
 something is the control, where a question they were never meant to answer
 still triggers retrieval.
+
+## Native function calling changes the answer
+
+The text-protocol loop could not separate two very different failures: a model
+that *will not* call tools, and a model that *cannot emit the format*. Adding
+an instruction to check first made that harness worse (10/20 -> 4/20), which
+pointed at the format.
+
+`/api/chat` with a `tools` schema is the interface the model was trained for.
+It emits a structured `tool_calls` entry, so there is no format to break, and
+guidance about *when* to call something no longer competes with guidance about
+*how* to spell it.
+
+| harness | correct | tasks calling a tool | tool calls |
+|---|---|---|---|
+| text protocol, free | 10 / 20 | 6 / 20 | 6 |
+| text protocol, mandated | **4 / 20** | 1 / 20 | 1 |
+| **native, free** | 12 / 20 | 3 / 20 | 3 |
+| **native, nudged** | **14 / 20** | **8 / 20** | 8 |
+
+Closed book on the same 20: 8/20.
+
+**Two findings, and the second is the one that matters.**
+
+The instruction that *halved* accuracy under the text protocol *raises* it
+under native calling, 12/20 to 14/20, and nearly triples tool use, 3 to 8. The
+earlier collapse was the protocol breaking, not the model refusing. A negative
+result that reversed once the interface was right -- worth keeping precisely
+because it would have justified the wrong conclusion.
+
+But even nudged, with a schema it understands and a system message saying its
+recollection is unreliable, **the model calls a tool on only 8 of 20
+questions** -- and on this question set nearly every one has a documented
+answer it does not know. Hard-coded retrieval reaches 84% on this corpus.
+The agent, free to choose, reaches 70% of that.
+
+## What to build in the agent, not the server
+
+The gap is not retrieval quality and not tool descriptions. It is that a
+confident model does not think to look. Three things follow:
+
+* **Use the native API.** It is worth two answers and triple the tool use
+  before any other change, and it makes instructions actually land.
+* **Nudge in a system message.** Cheap, and it moved tool use from 3 to 8.
+* **Do not rely on either.** For question shapes where the documentation is
+  authoritative and the model is known weak -- headers, libraries, IRQLs,
+  diagnostic codes -- call `docs_lookup` in the harness before the model
+  answers. Every large gain measured in this document did exactly that, and no
+  amount of prompting reproduced it.
