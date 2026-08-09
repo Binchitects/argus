@@ -873,3 +873,44 @@ confident model does not think to look. Three things follow:
   diagnostic codes -- call `docs_lookup` in the harness before the model
   answers. Every large gain measured in this document did exactly that, and no
   amount of prompting reproduced it.
+
+---
+
+# Real-world phrasing: the number that qualifies all the others
+
+Every question set so far asked directly -- "which header declares X". Real
+questions arrive as symptoms: a bugcheck, a linker error, a leak, a review
+comment. 20 scenarios in that shape:
+
+| | closed book | with packs |
+|---|---|---|
+| total | 13 / 20 | **15 / 20** |
+
+Fixed 3, broke 1. Against 46 -> 101 on directly-phrased questions.
+
+| kind | closed | with packs | why |
+|---|---|---|---|
+| link-error | 3/3 | 3/3 | the symbol name is IN the error text |
+| compile-error | 1/2 | 2/2 | same -- the identifier is quoted |
+| leak | 1/2 | 2/2 | the API is named in the description |
+| debug | 1/3 | 2/3 | the *answer* is not named, only the symptom |
+| design | 0/2 | 0/2 | case studies; nine documents, model guesses anyway |
+| msvc | 2/2 | **1/2** | retrieval displaced a correct answer |
+
+**The split is entirely about whether the question names the thing being asked
+about.** "Unresolved external symbol __imp_CryptAcquireContextW" carries the
+identifier, so `docs_lookup` fires and the answer is exact. "A driver
+bugchecks with IRQL_NOT_LESS_OR_EQUAL inside a DPC" names the symptom and not
+the routine, so there is nothing to look up and semantic search must bridge
+the gap.
+
+**So 38% -> 84% overstates what a deployment will see.** That figure is on
+questions that hand retrieval its key. The honest range is: near-total on
+symptoms that quote an identifier, marginal on symptoms that do not, and the
+mix depends on what your developers paste into the agent. Stack traces, linker
+errors and compiler diagnostics quote identifiers, which is the good case and
+also the common one.
+
+The one regression is worth naming: on an MSVC question the model had right,
+retrieval displaced it. Same mechanism as everywhere else in this document,
+still not fully solved by the relevance filter.

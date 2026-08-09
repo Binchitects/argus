@@ -640,3 +640,37 @@ def test_docs_get_description_says_why_search_alone_is_not_enough():
     # It must say WHEN to reach for it, not merely what it does.
     assert "reference page" in desc or "options table" in desc
     assert "caps" in desc or "fragment" in desc
+
+
+def test_the_server_tells_clients_when_to_distrust_themselves():
+    """MCP carries `instructions` into the agent's system context, and that is
+    the only lever a server has over WHEN its tools get called.
+
+    Measured, and it is the largest single effect found: an agent given these
+    tools and left to choose called one on 3 of 20 questions, on a set where
+    nearly every question had a documented answer it did not know. Adding this
+    text as a system message took tool use to 8 of 20 and accuracy from 12/20
+    to 14/20. Without it, every retrieval improvement in the server is unused.
+    """
+    from argus.mcpsrv.server import SERVER_INSTRUCTIONS as text
+
+    lowered = text.lower()
+    # It must say the model's recollection is untrustworthy -- naming the tools
+    # is not the part that worked.
+    assert "unreliable" in lowered or "confidently wrong" in lowered
+    # And name the fact shapes measured as weak, so the advice is actionable.
+    for shape in ("header", "librar", "irql"):
+        assert shape in lowered, shape
+    # Reference material must add, never gate: the single most expensive
+    # mistake measured (win32 5/5 -> 1/5).
+    assert "your own answer stands" in lowered or "not to replace" in lowered
+
+
+def test_the_server_advertises_its_instructions():
+    """An instructions block no client receives is documentation, not a nudge."""
+    import inspect
+
+    from argus.mcpsrv import server
+
+    source = inspect.getsource(server.create_app)
+    assert "instructions=SERVER_INSTRUCTIONS" in source
