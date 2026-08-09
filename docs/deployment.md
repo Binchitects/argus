@@ -1,360 +1,234 @@
-# Deploying Argus
+# From zero to working agents
 
-Argus is deployed as Docker containers via a single `docker-compose.yml`, not
-systemd units. There is exactly one deployment mechanism for the whole
-project — the indexer (a batch job) and the MCP server (a daemon) share the
-same compose file and the same pinned, build-verified image family.
+Everything needed to stand Argus up on a new machine and connect Hermes to it.
+Ordered so that each step is verifiable before the next one depends on it --
+the failures this project actually hit were mostly silent, and each check
+below exists because something once looked fine and was not.
 
-This document covers: bringing the server up, the TLS proxy in front of it,
-running the indexer, revoking access immediately with `flush-acl`, and where
-Ollama fits into the network picture.
+---
 
-## Prerequisites
+## 1. What runs where
 
-- Docker with Compose v2 (`docker compose version`).
-- A `config.yaml` (see `config.example.yaml`) in the repo root.
-- `ARGUS_GITLAB_TOKEN` — the privileged service token that mirrors every
-  repository — exported in your shell or in a `.env` file next to
-  `docker-compose.yml` (gitignored). Never put it in the compose file or the
-  image.
-
-## The shape: one batch job, one daemon
-
-| Service | What it is | Starts with `docker compose up`? |
+| piece | where it runs | why |
 |---|---|---|
-| `indexer` | Batch job. Mirrors GitLab, parses, writes the SQLite index. | **No** — carries the `indexer` compose profile specifically so a plain `up` never begins indexing. |
-| `server` | Long-running MCP daemon (`argus serve`). Serves access-controlled retrieval to Hermes over Streamable HTTP. | Yes. |
-| `caddy` | TLS reverse proxy in front of `server`. | Yes. |
+| Argus MCP server | one server, near the GitLab instance | holds the private index; cloning repos over a WAN is the slow part |
+| knowledge packs | on that same server | 1.4 GB of SQLite, opened per request |
+| Ollama (embeddings) | same host as Argus | `docs_search` embeds every query; a network hop per search is worse than the search |
+| Hermes | each developer's PC | connects to Argus over HTTPS with a per-developer token |
 
-Run the indexer explicitly, whenever you want a pass:
+Developers install nothing but Hermes. The packs are **not** distributed to
+laptops.
 
-```bash
-docker compose run --rm indexer index  --config /etc/argus/config.yaml
-docker compose run --rm indexer status --config /etc/argus/config.yaml
-```
+---
 
-`docker compose run` starts an explicitly-named service even though it
-carries a profile that isn't active — only `up` (and anything that resolves
-a service purely by being in the default profile set) respects the profile
-gate. That's what keeps a bare `docker compose up` from ever kicking off an
-index run.
+## 2. Prerequisites
 
-## Keeping the index current
-
-An index only advances when something runs `argus index`. Without a schedule
-it silently ages: `index_status` reports the staleness faithfully, and
-everyone reads stale answers anyway.
-
-Run the refresher, which polls on an interval:
+* Python 3.13
+* `git` on PATH
+* Ollama, with `nomic-embed-text` pulled
+* A GitLab service token that can see **every** repository you intend to index
 
 ```bash
-docker compose --profile indexer up -d refresher
+ollama pull nomic-embed-text
 ```
 
-It defaults to a pass every 900 seconds; set `ARGUS_INDEX_INTERVAL` to change
-it. A failing pass does not stop the loop, so a briefly unreachable GitLab
-costs one cycle rather than every cycle until somebody notices. Watch its
-logs for a *repeated* non-zero exit -- that is the signal something needs
-attention:
+**Verify the token before anything else.** `argus/gitlab.py` enumerates with
+`membership=false`, which for a non-admin token returns only *public*
+projects. Measured on a test instance: an admin token saw 3 of 3 private
+projects, a non-admin token saw 1 of 3.
 
 ```bash
-docker compose logs -f refresher
+curl -s -H "PRIVATE-TOKEN: $ARGUS_GITLAB_TOKEN" \
+  "$GITLAB_URL/api/v4/projects?membership=false&simple=true&per_page=100" \
+  | python -c "import json,sys; print(len(json.load(sys.stdin)))"
 ```
 
-Exit 1 from a pass means "ran, but at least one repo is unhealthy", which is
-distinct from 3 (GitLab) and 4 (indexing failure). A run that ends 1 every
-cycle is a repo that has been failing to mirror for as long as that has been
-true.
+If that count is lower than what you actually have, stop. Every later
+measurement will be confidently wrong. `argus index` refuses to run in this
+state, but check anyway -- it is cheaper than discovering it later.
 
-This is the periodic poll the design specifies as the GitLab push webhook's
-fallback. The webhook itself is not built yet; the design notes the poll alone
-is sufficient until it is.
+---
 
-**Choose an interval you can afford.** Each pass re-fetches every mirror. The
-cost is dominated by repos that changed, but the walk is not free, and the
-right number depends on a full-pass duration measured against your own GitLab.
-
-`argus index` now ends with a resolution pass and a graph rebuild. Watch the
-`ambiguous` count: a high proportion means many repos ship headers with the
-same basename, and `which_repo` will be correspondingly weaker. `argus
-resolve` re-runs both without re-indexing.
-
-## Bringing the server up
+## 3. Index the private code
 
 ```bash
-docker compose up -d
-docker compose ps          # expect: server, caddy — never indexer
+export ARGUS_GITLAB_TOKEN=<service token>
+export ARGUS_GIT_ASKPASS_TOKEN=$ARGUS_GITLAB_TOKEN
+argus index --config /etc/argus/config.yaml
+argus status --config /etc/argus/config.yaml
 ```
 
-`server` runs `argus serve --config /etc/argus/config.yaml --host 0.0.0.0
---port 7700 --allowed-host argus.internal --allowed-host argus.internal:*`
-(baked into the Dockerfile's `server` stage's `CMD`). That
-`--host 0.0.0.0` looks like it contradicts "binds localhost by default," and
-it doesn't: `argus serve`'s actual *default* — the one that applies any time
-you run it directly on a host, outside a container — is `127.0.0.1`. Inside
-compose, `server` is its own container; Caddy is a *separate* container and
-cannot reach another container's loopback interface, so the image's `CMD`
-opts in to `0.0.0.0` deliberately, scoped entirely to the compose network.
-The `server` service publishes no `ports:` to the host, so `0.0.0.0` here
-never means "reachable from the LAN" — it means "reachable from Caddy," and
-nothing else can reach it. **If you ever run `argus serve` directly on a
-host** (not through this compose file), leave `--host` at its default and
-put your own TLS terminator in front of it — do not bind `0.0.0.0` yourself
-without one.
+Measured on 10,212 files across 12 repositories: 7 m 48 s cold, zero errors.
+Roughly linear in files, so estimate from your own first run rather than from
+this one.
 
-#### `--allowed-host` — required, and it must match `deploy/Caddyfile`
+Branches: by default only each project's default branch is indexed. To index
+release branches too:
 
-The MCP SDK's `FastMCP` protects every `/mcp` call with DNS-rebinding
-protection: it only accepts requests whose `Host` header is on an explicit
-allowlist, computed once when the server object is built. `deploy/Caddyfile`
-reverse-proxies with `flush_interval -1` but does **not** rewrite the `Host`
-header — Caddy forwards the client's original header unchanged — so a
-developer hitting `https://argus.internal/mcp` arrives at `server` with
-`Host: argus.internal`. Without `--allowed-host argus.internal` that request
-is rejected with **421 Invalid Host Header**, and this is true of *every*
-`/mcp` call, i.e. everything Hermes actually does — while `/healthz` (a
-separate route this check doesn't cover) keeps returning 200 the whole time,
-which is exactly why the smoke test below no longer stops at `/healthz`.
+```yaml
+index:
+  branches: ["main", "v*"]
+```
 
-**If you change `deploy/Caddyfile`'s site address away from
-`argus.internal`, update both `--allowed-host` flags in the Dockerfile's
-`server` stage `CMD` to match** — the two must always agree. The bare form
-(`argus.internal`) matches the Host header a client sends when its URL has
-no explicit port (what `hermes mcp add argus --url https://argus.internal`
-below actually does); the `:*` wildcard form additionally covers a client
-that includes an explicit port. Defaults are otherwise unchanged: running
-`argus serve` directly, with no `--allowed-host` at all, still only accepts
-the original loopback allowlist (`127.0.0.1`, `localhost`, `::1`).
+The default branch is always indexed whether or not it matches a pattern.
+Cost is roughly linear in branches matched.
 
-### Why TLS is mandatory, not optional
+Keep it fresh with `argus index --interval 3600`, or the `refresher` compose
+service.
 
-`hermes mcp add argus --url <url> --auth header` sends the developer's own
-GitLab personal access token as a bearer credential on **every single MCP
-call**. Over plain HTTP on a shared LAN, that's a live credential in
-cleartext on the wire, sniffable by anyone else on the same network segment.
-There is no deployment mode where this is acceptable, which is why the
-compose file has no path to reach `server` except through `caddy`.
+---
 
-`deploy/Caddyfile` terminates TLS using Caddy's internal CA (`tls internal`)
-by default — appropriate because Argus typically lives on an internal LAN
-hostname with no public DNS record for Let's Encrypt to validate against.
-Edit the site address in `deploy/Caddyfile` from `argus.internal` to your
-real hostname, then either:
-
-- **Trust Caddy's internal CA once per developer machine** — export it from
-  the running container and install it as a trusted root:
-
-  ```bash
-  docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt \
-      > argus-internal-ca.crt
-  # then install argus-internal-ca.crt into your OS/browser trust store
-  ```
-
-- **Or** accept the one-time self-signed certificate warning when running
-  `hermes mcp add`, if your client tooling supports that.
-- **Or**, if this host has a real public domain pointed at it, delete the
-  `tls internal` line in `deploy/Caddyfile` and open port 80 (add `- "80:80"`
-  to the `caddy` service's `ports:` in `docker-compose.yml`) — Caddy will
-  then obtain and auto-renew a browser-trusted Let's Encrypt certificate
-  instead.
-
-Point Hermes at the proxy, never at the server directly:
+## 4. Build the knowledge packs
 
 ```bash
-hermes mcp add argus --url https://argus.internal --auth header
+bash deploy/build-packs.sh
 ```
 
-## Revoking access immediately: `flush-acl`
+Sequential on purpose: embedding is CPU-bound, and four concurrent builds pin
+every core for hours. Ollama serialises the calls anyway, so concurrency costs
+heat and buys nothing.
 
-Each developer's GitLab-membership resolution is cached for 600 seconds
-(`argus.acl.TTL_SECONDS`) so every tool call doesn't round-trip GitLab. That
-means a revocation in GitLab normally takes effect within 10 minutes on its
-own. To make it effective **immediately** — e.g. someone left the team and
-you don't want to wait — flush the cache instead of restarting the service:
+| pack | documents | size | build |
+|---|---|---|---|
+| system-design | 9 | 1.3 MB | < 1 min |
+| algorithms | 371 | 4.3 MB | < 1 min |
+| scripting | 9,302 | 70 MB | 13 min |
+| cpp | 9,746 | 175 MB | 36 min |
+| wdk | 28,176 | 359 MB | 74 min |
+| win32 | 71,663 | 786 MB | 162 min |
+
+About five hours in total, once. **Run it in a terminal that outlives your
+session** -- a build killed part-way leaves no pack. It is resumable: finished
+packs are skipped, and within a pack every embedding already computed is
+reused from `packs/.embcache.db`. A rebuild after a source change took 7
+minutes instead of 13 (45,631 embeddings reused, 396 computed).
+
+Install what you built:
 
 ```bash
-# Clear one developer's cached ACL resolution
-docker compose exec server argus flush-acl \
-    --config /etc/argus/config.yaml --user jdoe
-
-# Clear everyone's (e.g. after a bulk GitLab permissions change)
-docker compose exec server argus flush-acl --config /etc/argus/config.yaml
+argus pack install packs/win32-1.0.pack --packs-dir /var/lib/argus/packs
 ```
 
-The command reports the actual number of rows cleared, and distinguishes a
-username that matched nothing in the cache from a cache that was already
-empty — the former usually means a typo or a developer who never
-authenticated, the latter means there was nothing to do. Their next request
-re-resolves against GitLab and gets the up-to-date answer.
+Install the packs matching your work. Measured: they help most where the model
+is ignorant (`win32` 9/30 -> 30/30) and not at all where it is fluent
+(`cpp` standard library 26/30 -> 25/30).
 
-## Ollama: firewall it, don't publish it
+---
 
-Ollama (the local model Hermes uses for inference) is not part of the Argus
-compose file, but it lives on the same trusted network and deserves the same
-scrutiny, for a different reason:
-
-- It carries **no GitLab credential** — nothing like the PAT the server
-  handles — so it isn't a credential-theft target the way an unproxied
-  `server` port would be.
-- It **does** carry your source code: every prompt Hermes sends it includes
-  retrieved code, and Ollama's HTTP API has **no authentication of its own**.
-  Anyone who can reach its port can read every prompt and every completion
-  that flows through it — which, for this project, means your codebase.
-
-Treat it exactly like an internal service that happens to have no login
-screen:
-
-- Never bind it to `0.0.0.0` on a host with any exposure beyond the
-  developer subnet, and never publish its port through a NAT or cloud
-  security group to anything wider than that subnet.
-- Prefer putting it behind the same Caddy instance (see the commented
-  `ollama.internal` block in `deploy/Caddyfile`) if it needs to be reachable
-  from more than one host, so it at least gets TLS and access logging.
-- Otherwise, firewall it so only the developer subnet can reach its port —
-  it should never be reachable from outside the office/VPN network Hermes
-  clients run on.
-
-## Knowledge packs on a deployed server
-
-Packs are public documentation and carry no access control, but they are still
-files the server reads at query time. Install them into the directory
-`packs.dir` names (default `<data_dir>/packs`) and restart nothing — packs are
-opened per request, so a pack dropped in becomes queryable immediately.
+## 5. Run the server
 
 ```bash
-argus pack install https://example.org/python-3.13.arguspack \
-  --sha256 <digest> --config /etc/argus/config.yaml
-argus pack list --config /etc/argus/config.yaml
+docker compose --profile server up -d
 ```
 
-**Always pass `--sha256` when installing from a URL.** A truncated download
-that silently became a half-empty knowledge base is the failure the check
-exists to prevent; without a digest there is nothing to detect it. A pack that
-fails verification is not installed — no file, no registry entry.
-
-Two operational notes:
-
-- **`docs_search` needs Ollama; `docs_lookup` does not.** If the embedder is
-  unreachable, `docs_search` degrades to lexical matching and labels every row
-  `retrieval: "lexical"` rather than failing. Watch for that label in logs —
-  it means the embedder has been down and answers have been less precise.
-- **A pack built with a different embedding model is refused for semantic
-  search**, by design, and says so by name. It still serves `docs_lookup` and
-  lexical search. `argus pack list` marks it `[INCOMPATIBLE]`; that is the
-  thing to alert on, because it will not fix itself.
-
-The pack query path cannot reach the private index — that is enforced by a
-test that reads the module's own source, not by convention — so installing a
-third-party pack cannot expose private code. It can still serve wrong
-documentation, so install packs you trust and verify their digests.
-
-## Publishing a release image
-
-**Publishing runs in CI, not on a laptop.** Push a tag and
-`.github/workflows/release.yml` builds, verifies and publishes:
+Check it answers, and that authentication is actually on:
 
 ```bash
-git tag -a v0.1.0-rc1 -m "..." && git push origin v0.1.0-rc1
+curl -sf http://localhost:8080/healthz && echo OK
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/mcp   # expect 401
 ```
 
-Or run it by hand from the Actions tab with an explicit version.
+A 200 on `/mcp` without a token means the server is open. Stop and fix that
+before handing out any address.
 
-No credentials are needed anywhere. The workflow authenticates with
-`GITHUB_TOKEN`, which GitHub injects with `packages: write` — so no personal
-access token has to exist on anyone's machine, and none can leak from one.
+---
 
-GHCR is **free for public packages**: the GitHub Packages storage and transfer
-quota applies only to private ones. This repository is public, so images cost
-nothing and are pullable without authentication.
+## 6. Connect Hermes
 
-The workflow prints the published **digests** in the run summary. Record those
-rather than tags: a tag can be repointed, a digest cannot, and the digest is
-what tells you months later exactly what a deployment is running.
+Hermes configures MCP servers from its own interface: **Settings -> MCP
+servers -> Add**.
 
-### Publishing from a laptop instead
+| field | value |
+|---|---|
+| Transport | Streamable HTTP |
+| URL | `https://argus.your-domain/mcp` |
+| Header | `Authorization: Bearer <developer's GitLab PAT>` |
 
-`./deploy/release.sh 0.1.0-rc1` does the same thing locally, and needs
-`docker login ghcr.io` first with a **classic** PAT carrying `write:packages`.
-GHCR rejects account passwords, and fine-grained tokens are unreliable for
-package writes — a `denied: denied` at login is almost always one of those two.
-Prefer the workflow.
+The token is the **developer's own** GitLab personal access token, not the
+service token. Argus resolves it to that person's repository memberships on
+every request, so two developers asking the same question get answers scoped
+to what each may see. Never distribute the service token to a workstation.
 
+### The two client settings that matter
 
+Both are measured, and both are worth more than any tuning:
+
+**Use native function calling.** Hermes must present the tools through its
+model's function-calling API, not as a text protocol the model is asked to
+imitate. A text protocol scored 10/20 on a question set and *collapsed to
+4/20* when told to check facts first, because the added prose broke the output
+format. The same instruction under a proper tools schema improved results
+instead.
+
+**Pass the server's instructions through as the system message.** Argus sends
+an `instructions` block at connect time saying that recollection of headers,
+libraries and IRQLs is unreliable. Passing it through took tool use from 3 of
+20 questions to 8, and accuracy from 12/20 to 14/20. An agent that discards it
+leaves that on the table.
+
+`deploy/agent_client_example.py` is a working ~120-line client doing both,
+against a live server. Use it to check the connection independently of Hermes:
 
 ```bash
-docker login ghcr.io          # once; this script never handles credentials
-./deploy/release.sh 0.1.0-rc1
+python deploy/agent_client_example.py https://argus.your-domain/mcp <PAT> \
+    "Which import library must I link to call CryptAcquireContextW?"
 ```
 
-The registry path is **lowercase** — `ghcr.io/alighadyani/argus`. Docker
-rejects uppercase in a repository name, so the GitHub account's own spelling
-is not a valid image target.
+It prints each tool call to stderr. If you see `-> docs_lookup(...)` and then
+`Advapi32.lib`, the whole chain works.
 
-The script runs the full suite inside the image with `--no-cache` before
-publishing anything. A `CACHED` test layer proves nothing about the code being
-shipped, and this project has been bitten by exactly that.
+---
 
-A version containing `rc`, `alpha` or `beta` does **not** move `:latest`. A
-release candidate grabbing `latest` is how a pilot build reaches someone who
-wanted a stable one.
-
-It prints the published digests at the end. Record them: a tag can be moved,
-a digest cannot, and the digest is what tells you months later exactly what a
-given deployment is running.
-
-### If the build cannot resolve names
-
-The script refuses up front with a specific message, because the usual cause
-is not Docker. A VPN tunnel that claims DNS with a resolver that has stopped
-answering breaks every container while leaving raw IP connectivity intact —
-`docker pull` of an already-cached image still works, `apt-get` inside a build
-does not. Check which interface owns DNS before restarting Docker:
-
-```powershell
-Get-DnsClientServerAddress -AddressFamily IPv4 |
-    Where-Object { $_.ServerAddresses } |
-    Select-Object InterfaceAlias, ServerAddresses
-```
-
-## Verifying the deployment
+## 7. Verify it is actually helping
 
 ```bash
-docker build --target test   -t argus:test   .   # full suite against pinned ctags
-docker build --target server -t argus:server .   # server image builds
-docker compose config                            # compose file parses; confirm
-                                                  # indexer is NOT in the default `up` set
-docker compose up -d
-curl -k https://argus.internal/healthz           # {"status": "ok"} once caddy resolves TLS
+python evals/generate_questions.py /var/lib/argus/packs evals/mine.json 30
+ARGUS_OLLAMA_URL=http://localhost:11434 \
+    python evals/run_ab.py /var/lib/argus/packs evals/mine.json
 ```
 
-**`/healthz` passing is not enough — it does not prove `/mcp` works.**
-`/healthz` is a plain custom Starlette route registered outside the
-`StreamableHTTPSessionManager` that the DNS-rebinding Host-header check
-actually runs inside, so it returns 200 regardless of whether
-`--allowed-host` is configured correctly. This project shipped with `/mcp`
-rejecting every real call with `421 Invalid Host Header` while this exact
-`curl /healthz` smoke test passed. The check that actually exercises the
-thing Hermes uses has to hit `/mcp` itself, with the same `Host` header a
-real client sends:
+This generates questions **from your own packs** and answers them with and
+without retrieval. Ground truth comes from the documentation rather than from
+whoever writes the test -- the mistake that invalidated five earlier rounds
+here was expecting `PASSIVE_LEVEL` for `IoCreateDevice` when Microsoft
+publishes `<= APC_LEVEL`, and scoring the correct answer as a failure.
 
-```bash
-# Use the same GitLab personal access token you'd hand to `hermes mcp add`.
-curl -k -s -o /dev/null -w '%{http_code}\n' \
-    -X POST https://argus.internal/mcp \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "Authorization: Bearer ${ARGUS_GITLAB_TOKEN}" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
-```
+Expect a large gap on API facts and roughly none on material the model already
+knows. If retrieval does *not* win on your corpus, that is worth knowing
+before you roll it out.
 
-**Expect anything other than `421`.** A valid, currently-authorized token
-returns `200`; an invalid or expired one returns `401` from the auth gate
-(which runs, and can short-circuit, before the Host-header check ever
-sees the request — so a missing/bad token alone does *not* confirm the
-allowlist is right, only that it's reachable at all). Sending no
-JSON-RPC body at all, or one with no session established yet, can also
-surface as `400` from FastMCP's own protocol handling — still not `421`.
-The one code that specifically means Caddy's forwarded `Host` header
-isn't on the server's `--allowed-host` list is `421`; that is the one
-failure this check exists to catch, and it is the one `curl .../healthz`
-above cannot.
+---
+
+## 8. Setting up another PC
+
+Nothing but Hermes:
+
+1. Install Hermes.
+2. Add the MCP server: URL, `Authorization: Bearer <their own PAT>`.
+3. Confirm native function calling and pass-through of server instructions.
+
+No packs, no index, no Ollama on the workstation. If a developer's answers are
+worse than a colleague's, check those two client settings first -- they are
+worth more than anything else on the client side.
+
+---
+
+## What to expect, honestly
+
+| shape | without packs | with packs |
+|---|---|---|
+| API facts, question names the API | 38% | **84%** |
+| MSVC diagnostics | 8% | **100%** |
+| multi-claim code generation | 28% | **74%** |
+| **real-world phrasing** (a bugcheck, a linker error) | **65%** | **75%** |
+| questions the packs do not cover | 80% | 75% |
+
+The headline figures are measured on questions that *name* the API. Real
+questions often do not: "unresolved external symbol __imp_CryptAcquireContextW"
+carries the identifier and retrieval nails it, while "a driver bugchecks in a
+DPC" does not and the gain is small. Stack traces, linker errors and compiler
+diagnostics all quote identifiers, which is the good case and also the common
+one.
+
+The last row is the tax: an agent retrieving on every prompt pays a little on
+every unrelated question. It is worth paying, and it is worth knowing about.
