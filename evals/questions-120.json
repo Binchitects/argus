@@ -1,0 +1,842 @@
+[
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares DXVAHD_FEATURE_CAPS?",
+  "answer": "dxvahd.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares MprAdminPortEnum?",
+  "answer": "mprapi.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "library",
+  "question": "Which import library must be linked to use ITimeTrigger.get_RandomDelay?",
+  "answer": "taskschd.lib",
+  "shape": "one .lib file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "library",
+  "question": "Which import library must be linked to use InitializeSecurityContextW?",
+  "answer": "secur32.lib",
+  "shape": "one .lib file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares IExtractIconA?",
+  "answer": "shlobj_core.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "library",
+  "question": "Which import library must be linked to use RemoveIScsiSendTargetPortalA?",
+  "answer": "iscsidsc.lib",
+  "shape": "one .lib file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares NdrDcomAsyncClientCall?",
+  "answer": "rpcndr.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares IShellWindows.OnActivated?",
+  "answer": "exdisp.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares IMixerPinConfig.SetStreamTransparent?",
+  "answer": "mpconfig.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares WICBitmapLockFlags?",
+  "answer": "wincodec.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares ITraceDataCollector.get_TraceDataProviders?",
+  "answer": "pla.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares MFCreateAsyncResult?",
+  "answer": "mfapi.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares Matrix.Equals?",
+  "answer": "gdiplusmatrix.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares IEnroll4.get_ThumbPrintWStr?",
+  "answer": "xenroll.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares IPart.GetControlInterfaceCount?",
+  "answer": "devicetopology.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "library",
+  "question": "Which import library must be linked to use ShutdownBlockReasonQuery?",
+  "answer": "user32.lib",
+  "shape": "one .lib file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares ID2D1GdiInteropRenderTarget.GetDC?",
+  "answer": "d2d1.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares DML_ACTIVATION_SIGMOID_OPERATOR_DESC?",
+  "answer": "directml.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares enumLINE_METRICS?",
+  "answer": "rectypes.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares DrawTextW?",
+  "answer": "winuser.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares SHStrDupA?",
+  "answer": "shlwapi.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares IGPMBackupDir.GetBackup?",
+  "answer": "gpmgmt.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares CertFreeCTLContext?",
+  "answer": "wincrypt.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares IApiTracingDataCollector.get_IncludeApis?",
+  "answer": "pla.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares LZOpenFileW?",
+  "answer": "lzexpand.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares SetupQueryInfVersionInformation?",
+  "answer": "setupapi.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "library",
+  "question": "Which import library must be linked to use ICameraControl.get_TiltRelative?",
+  "answer": "strmiids.lib",
+  "shape": "one .lib file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares ICrmCompensatorVariants.EndAbortVariants?",
+  "answer": "comsvcs.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares FWPS_FIELDS_STREAM_V6?",
+  "answer": "fwpsu.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "win32",
+  "kind": "header",
+  "question": "Which header declares IScheduleCollection.Clear?",
+  "answer": "pla.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares MINIPORT_WDI_TAL_TXRX_START?",
+  "answer": "dot11wificxintf.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares IOCTL_GNSS_EXECUTE_CWTEST?",
+  "answer": "gnssdriver.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares PPEP_DEVICE_ACCEPTANCE_TYPE?",
+  "answer": "pep_x.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares PPCI_EXPRESS_DESIGNATED_VENDOR_SPECIFIC_CAPABILITY?",
+  "answer": "ntddk.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares DEVICE_REMOVAL_POLICY?",
+  "answer": "wdm.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares KSMETHOD_BDA_MUX_SERVICE?",
+  "answer": "bdamedia.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares PVIDEO_SHARE_MEMORY?",
+  "answer": "ntddvdeo.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares _SRIOV_MITIGATED_RANGES_INPUT?",
+  "answer": "pcivirt.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares _URB_CONTROL_DESCRIPTOR_REQUEST?",
+  "answer": "usb.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares KSPROPERTY_SOUNDDETECTOR?",
+  "answer": "ksmedia.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares KSCAMERA_EXTENDEDPROP_PROFILE?",
+  "answer": "ksmedia.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares PPEP_WORK_COMPLETE_PERF_STATE?",
+  "answer": "pep_x.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares PGET_SCATTER_GATHER_LIST?",
+  "answer": "wdm.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares _WHEA_TIMESTAMP?",
+  "answer": "ntddk.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares StorPortStateChangeDetected?",
+  "answer": "storport.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "irql",
+  "question": "At what IRQL may AcxObjectBagRetrieveMultiString be called?",
+  "answer": "passive_level",
+  "shape": "one IRQL name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares PBDA_CAS_OPENMMIDATA?",
+  "answer": "bdatypes.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares PRI_RESERVATION_LIST?",
+  "answer": "scsi.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares D3DWDDM1_3DDI_DEVICEFUNCS?",
+  "answer": "d3d10umddi.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares _D3DKMT_CREATEDCFROMMEMORY?",
+  "answer": "d3dkmthk.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares RILCHANGEUICCLOCKPASSWORDPARAMS?",
+  "answer": "ntddrilapitypes.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares ScsiPortReadRegisterBufferUlong?",
+  "answer": "storport.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares _KSAUDIO_PACKETSIZE_CONSTRAINTS?",
+  "answer": "ksmedia.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "irql",
+  "question": "At what IRQL may IkeextSaDbGetSecurityInfo0 be called?",
+  "answer": "passive_level",
+  "shape": "one IRQL name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares IPartImage.GetImageProperties?",
+  "answer": "filterpipeline.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "library",
+  "question": "Which import library must be linked to use NdisMQueueDpc?",
+  "answer": "ndis.lib",
+  "shape": "one .lib file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares CWiauPropertyList.GetPropId?",
+  "answer": "wiautil.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares RtlLongPtrToInt8?",
+  "answer": "ntintsafe.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares D3DKMT_COMPOSITION_PRESENTHISTORYTOKEN?",
+  "answer": "d3dkmthk.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "wdk",
+  "kind": "header",
+  "question": "Which header declares PKSPIN_DESCRIPTOR_EX?",
+  "answer": "ks.h",
+  "shape": "one header file name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::unexpected?",
+  "answer": "exception",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::shared_lock::release?",
+  "answer": "shared_mutex",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::vector::insert?",
+  "answer": "vector",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::unordered_multimap::iterator?",
+  "answer": "unordered_map",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::result_of?",
+  "answer": "type_traits",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::fisher_f_distribution::min?",
+  "answer": "random",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::basic_string::find_last_not_of?",
+  "answer": "xstring",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::allocator_traits::const_void_pointer?",
+  "answer": "memory",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::filter_view?",
+  "answer": "ranges",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::list::cbegin?",
+  "answer": "list",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::queue::size_type?",
+  "answer": "queue",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::poisson_distribution::max?",
+  "answer": "random",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::ranges::rbegin?",
+  "answer": "ranges",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::chrono::duration_values?",
+  "answer": "chrono",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::chrono::year::operator-=?",
+  "answer": "chrono",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::chrono::month_weekday_last::month?",
+  "answer": "chrono",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::uniform_int_distribution::param_type::operator==?",
+  "answer": "random",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::ranges::viewable_range?",
+  "answer": "ranges",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::multimap::const_pointer?",
+  "answer": "map",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::domain_error?",
+  "answer": "stdexcept",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::u32string_view?",
+  "answer": "xstring",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::list::rend?",
+  "answer": "list",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::basic_filebuf::uflow?",
+  "answer": "fstream",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::cregex_iterator?",
+  "answer": "regex",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::negative_binomial_distribution::k?",
+  "answer": "random",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::atomic_exchange?",
+  "answer": "atomic",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::regex_token_iterator::difference_type?",
+  "answer": "regex",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::forward_list::const_reference?",
+  "answer": "forward_list",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::discrete_distribution::operator()?",
+  "answer": "random",
+  "shape": "one header name"
+ },
+ {
+  "pack": "cpp",
+  "kind": "header",
+  "question": "Which C++ standard library header provides std::transform_view::front?",
+  "answer": "ranges",
+  "shape": "one header name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Recursively detect and decode strings, supporting hex, decimal, binary, base64, URL, FromChar encodings, Caesar ciphers, and MD5, SHA1, and SHA2 hashes\"?",
+  "answer": "dcode",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"A simple HTTP/S server that supports file upload, basic authentication, and YAML rules for custom responses\"?",
+  "answer": "simplehttpserver",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Generate AI-ready prompts from a codebase (extract, filter, and format code for LLMs)\"?",
+  "answer": "code2prompt",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Execute the unit and integration tests of a Rust package\"?",
+  "answer": "cargo-test",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Reload `systemd` unit(s) otherwise restart them\"?",
+  "answer": "systemctl-reload-or-restart",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Discover and probe hosts in a network using the ARP protocol\"?",
+  "answer": "arping",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"This command is an alias of `pacman --database`\"?",
+  "answer": "pacman-d",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Report statistics for devices and partitions\"?",
+  "answer": "iostat",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Attempt to repair or decrypt a damaged BitLocker-encrypted volume\"?",
+  "answer": "repair-bde",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Get the security descriptor for a resource, such as a file or registry key\"?",
+  "answer": "get-acl",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"A C-port of the ORCA live programming environment\"?",
+  "answer": "orca-c",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Describes session configuration files, which are used in a session configuration (also known as an endpoint) to define the environment of sessions that use the session configuratio\"?",
+  "answer": "about_session_configuration_files",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Collect OSINT information about usernames across thousands of websites\"?",
+  "answer": "maigret",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"This command is an alias of `pacman --query`\"?",
+  "answer": "pacman-q",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Show a preview of updates to a stack's resources\"?",
+  "answer": "pulumi-preview",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Check if one or more systemd units have failed\"?",
+  "answer": "systemctl-is-failed",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Monitor objects on the PipeWire instance\"?",
+  "answer": "pw-mon",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Print system information for a Raspberry Pi\"?",
+  "answer": "vcgencmd",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Display the sub-projects of a Gradle project\"?",
+  "answer": "gradle-projects",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"This command is an alias of `systemd-mount --umount`\"?",
+  "answer": "systemd-umount",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Manage GPG keys used to verify TeX Live databases\"?",
+  "answer": "tlmgr-key",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"A contextual web scanner for discovering API paths and web endpoints using wordlists and kitebuilder schemas\"?",
+  "answer": "kiterunner",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Low level utility to create a tree object from the current index\"?",
+  "answer": "git-write-tree",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"**This cmdlet is only available on the Windows platform.**\"?",
+  "answer": "disable-pssessionconfiguration",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Lists the cmdlets that are designed for use with PowerShell providers\"?",
+  "answer": "about_core_commands",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Describes session configurations, which determine the users who can connect to the computer remotely and the commands they can run\"?",
+  "answer": "about_session_configurations",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Reference article for wdsutil new-multicasttransmission, which creates a new multicast transmission for an image\"?",
+  "answer": "wdsutil-new-multicasttransmission",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Swiss Army Knife SMTP, the all-purpose SMTP transaction tester\"?",
+  "answer": "swaks",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Describes how to access items from the working location in PowerShell\"?",
+  "answer": "about_locations",
+  "shape": "one command or cmdlet name"
+ },
+ {
+  "pack": "scripting",
+  "kind": "reverse",
+  "question": "Which command or cmdlet is described as: \"Generate a key file for use with Tarsnap, an online backup service\"?",
+  "answer": "tarsnap-keygen",
+  "shape": "one command or cmdlet name"
+ }
+]
