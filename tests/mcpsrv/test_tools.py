@@ -669,8 +669,32 @@ def test_the_server_tells_clients_when_to_distrust_themselves():
 def test_the_server_advertises_its_instructions():
     """An instructions block no client receives is documentation, not a nudge."""
     import inspect
+    import pathlib
 
     from argus.mcpsrv import server
 
     source = inspect.getsource(server.create_app)
     assert "instructions=SERVER_INSTRUCTIONS" in source
+
+
+def test_the_example_client_uses_the_server_instructions_and_native_calling():
+    """The reference client is the client half of every agent measurement, so
+    the three things that were measured to matter must actually be in it.
+
+    Each has a number behind it. A text action protocol scored 10/20 and
+    collapsed to 4/20 when told to check first, because the prose broke the
+    format; native tool_calls has no format to break. Passing the server's
+    instructions through took tool use from 3 of 20 questions to 8. Reading
+    schemas from the server keeps the measured guidance in the descriptions
+    instead of a paraphrase.
+    """
+    import pathlib
+
+    source = (pathlib.Path(__file__).resolve().parents[2]
+              / "deploy" / "agent_client_example.py").read_text(encoding="utf-8")
+    assert '"tools"' in source and "tool_calls" in source, "not native calling"
+    assert "init.instructions" in source or 'getattr(init, "instructions"' in source
+    assert "list_tools" in source, "schemas must come from the server"
+    # A client that drops a tool error mid-task ends the task; handing it back
+    # lets the model pick another tool.
+    assert "tool error" in source
