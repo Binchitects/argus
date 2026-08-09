@@ -386,3 +386,93 @@ def test_the_cap_still_returns_a_full_page_of_results(tmp_path):
         assert len(packs.search_docs(opened, [1.0] * 768, limit=10)) == 10
     finally:
         packs.close_packs(opened)
+
+
+def test_identifiers_are_extracted_but_prose_is_left_alone():
+    assert packs.query_terms("Which routine releases KeAcquireSpinLockAtDpcLevel?") \
+        == ["keacquirespinlockatdpclevel"]
+    assert packs.query_terms("winuser.h and User32.lib") == ["winuser.h", "user32.lib"]
+    assert packs.query_terms("POOL_FLAG_NON_PAGED") == ["pool_flag_non_paged"]
+    # Prose names nothing to require, so the filter must not engage at all.
+    assert packs.query_terms("how do I design a url shortener") == []
+
+
+def test_results_that_never_mention_the_named_api_are_dropped():
+    """Cosine ranks by topic, and in an API corpus a routine's neighbours are
+    other routines that do almost the same thing. Measured: asked which routine
+    releases a lock taken with KeAcquireSpinLockAtDpcLevel, search returned
+    KeReleaseInStackQueuedSpinLockFromDpcLevel at 0.887 plus two more spin-lock
+    APIs, none mentioning the routine asked about -- and qwen3.6:35b, which had
+    the right answer unaided, adopted one of them instead."""
+    rows = [
+        (0.9, {"title": "KeReleaseInStackQueuedSpinLockFromDpcLevel",
+               "text": "Releases a queued spin lock.", "doc_path": "a.md"}),
+        (0.8, {"title": "KeAcquireSpinLockAtDpcLevel macro",
+               "text": "KeAcquireSpinLockAtDpcLevel acquires a lock.",
+               "doc_path": "b.md"}),
+    ]
+    kept = packs._mentioning(rows, ["keacquirespinlockatdpclevel"])
+    assert [r["doc_path"] for _, r in kept] == ["b.md"]
+
+
+def test_nothing_relevant_returns_nothing_rather_than_noise():
+    """The uncomfortable half, and deliberate. The first version fell back to
+    returning everything when the filter emptied the set -- the exact behaviour
+    being fixed. Nothing found is a true statement a model can act on; four
+    confident unrelated pages are a false one."""
+    rows = [
+        (0.73, {"title": "usb/ufxclientsample", "text": "sample", "doc_path": "a.md"}),
+        (0.72, {"title": "IoCsqRemoveIrp", "text": "csq", "doc_path": "b.md"}),
+    ]
+    assert packs._mentioning(rows, ["iocreatedevice"]) == []
+
+
+def test_a_prose_query_keeps_every_result():
+    rows = [(0.7, {"title": "x", "text": "y", "doc_path": "a.md"})]
+    assert packs._mentioning(rows, []) == rows
+
+
+def test_search_docs_itself_applies_the_relevance_filter(tmp_path):
+    """Binds to search_docs, not to _mentioning. Testing the helper alone
+    passes happily while the pipeline never calls it -- which a targeted
+    revert of the call site demonstrated."""
+    from argus.packs import format as pack_format
+    from argus.packs.quantize import to_bits, to_int8
+
+    path = tmp_path / "rel.arguspack"
+    conn = pack_format.create_pack(path)
+    comp = zstandard.ZstdCompressor()
+    # Doc 0 scores highest but never names the routine; doc 1 does.
+    for i, (title, body) in enumerate((
+            ("KeReleaseInStackQueuedSpinLockFromDpcLevel", "queued spin lock"),
+            ("KeAcquireSpinLockAtDpcLevel macro",
+             "KeAcquireSpinLockAtDpcLevel acquires a spin lock"))):
+        cur = conn.execute(
+            "INSERT INTO docs (path, title, url, lang, content, content_len) "
+            "VALUES (?, ?, ?, 'md', ?, 0)",
+            (f"d{i}.md", title, f"https://x/{i}", comp.compress(b"body")))
+        doc_id = cur.lastrowid
+        vec = [1.0 - i * 0.05] * 768
+        cur2 = conn.execute(
+            "INSERT INTO chunks (doc_id, heading_path, anchor, start_line, text) "
+            "VALUES (?, '', '', 0, ?)", (doc_id, comp.compress(body.encode())))
+        conn.execute("INSERT INTO vec_bin (chunk_id, embedding) VALUES (?, vec_bit(?))",
+                     (cur2.lastrowid, to_bits(vec)))
+        conn.execute("INSERT INTO vec_i8 (chunk_id, embedding) VALUES (?, vec_int8(?))",
+                     (cur2.lastrowid, to_int8(vec)))
+    pack_format.write_meta(
+        conn, source_name="rel", source_repo="r", source_branch="b",
+        source_commit="c", license="MIT", license_url="u", attribution="a",
+        embedding_model=EMBED_MODEL, embedding_dim=EMBED_DIM, builder_version=1,
+        pack_version="1.0", doc_count=2, chunk_count=2, symbol_count=0,
+        unresolved_symbol_count=0)
+    conn.commit(); conn.close()
+
+    opened = packs.open_packs([path])
+    try:
+        rows = packs.search_docs(
+            opened, [1.0] * 768, limit=5,
+            query_text="Which routine releases KeAcquireSpinLockAtDpcLevel?")
+        assert [r["doc_path"] for r in rows] == ["d1.md"], rows
+    finally:
+        packs.close_packs(opened)

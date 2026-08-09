@@ -491,7 +491,8 @@ async def docs_search_impl(packs_dir: Path | str, query: str,
                 f"the pack to restore semantic search."
             )
 
-        rows = packs_store.search_docs(opened, vectors[0], lang=lang, limit=limit)
+        rows = packs_store.search_docs(opened, vectors[0], lang=lang,
+                                      limit=limit, query_text=query)
         for row in rows:
             row["retrieval"] = "semantic"
         return rows

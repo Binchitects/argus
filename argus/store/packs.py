@@ -21,6 +21,7 @@ model can cite what it used and under whose terms.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -235,6 +236,54 @@ def search_text(
     return [row for _, row in results[:limit]]
 
 
+#: Tokens distinctive enough that a relevant chunk should contain one:
+#: CamelCase or snake_case identifiers, command flags, dotted header names.
+#: Ordinary prose words are excluded -- requiring "which" or "driver" would
+#: filter nothing and requiring both would filter everything.
+_IDENT_RE = re.compile(
+    r"\b(?:[A-Za-z]+_[A-Za-z0-9_]+"          # snake / SCREAMING_CASE
+    r"|(?:[A-Z][a-z0-9]+){2,}[A-Za-z0-9]*"    # CamelCase
+    r"|[A-Za-z][A-Za-z0-9]*\.(?:h|lib|dll)"   # winuser.h, User32.lib
+    r"|/[A-Za-z][A-Za-z0-9:]*)\b"            # /MIR, /R:2
+)
+
+
+def query_terms(text: str) -> list[str]:
+    """Identifiers a relevant chunk ought to mention, lowercased."""
+    return [t.lower() for t in dict.fromkeys(_IDENT_RE.findall(text or ""))]
+
+
+def _mentioning(scored: list[tuple[float, dict[str, Any]]],
+                terms: list[str]) -> list[tuple[float, dict[str, Any]]]:
+    """Keep rows whose text or title contains one of `terms`.
+
+    Returns the input unchanged when the query named no identifiers -- prose
+    questions name nothing to require, and filtering them would be guesswork.
+
+    When the query DOES name identifiers and nothing mentions any of them,
+    returns empty. That is the uncomfortable half, and it is deliberate: the
+    first version fell back to returning everything, which is exactly the
+    behaviour being fixed. Asked the maximum IRQL for IoCreateDevice, the
+    corpus returned a USB sample header, IoCsqRemoveIrp and KeInitializeSpinLock
+    -- nothing about IoCreateDevice at all -- and qwen3.6:35b, which had the
+    right answer unaided, adopted one of them instead.
+
+    Nothing found is a true statement and a model can act on it. Four
+    confident, high-scoring, unrelated pages are a false one. `docs_lookup`
+    still answers named APIs exactly, and it needs no embedding to do it.
+    """
+    if not terms:
+        return scored
+    kept = [
+        (score, row) for score, row in scored
+        if any(term in str(row.get("text", "")).lower()
+               or term in str(row.get("title", "")).lower()
+               or term in str(row.get("doc_path", "")).lower()
+               for term in terms)
+    ]
+    return kept
+
+
 #: How many chunks from one document may appear in a single result set.
 #: Two, not one: a long page can genuinely answer different halves of a
 #: question in different sections. Five -- what the old code allowed, since it
@@ -244,7 +293,7 @@ MAX_CHUNKS_PER_DOC = 2
 
 def search_docs(
     packs: Sequence[Pack], query_vec: Sequence[float], lang: str | None = None,
-    limit: int = 10, coarse: int = DEFAULT_COARSE,
+    limit: int = 10, coarse: int = DEFAULT_COARSE, query_text: str = "",
 ) -> list[dict[str, Any]]:
     """Semantic search: binary coarse pass per pack, then int8 rescoring.
 
@@ -311,6 +360,25 @@ def search_docs(
     # Comparable across packs without normalization: one pinned model, one
     # shared vector space.
     scored.sort(key=lambda pair: -pair[0])
+
+    # Drop results that never mention the identifier the question is about.
+    #
+    # Cosine similarity ranks by topic, and in an API corpus every routine's
+    # neighbours are other routines that do almost the same thing. Measured
+    # against qwen3.6:35b: asked which routine releases a lock taken with
+    # KeAcquireSpinLockAtDpcLevel, search returned
+    # KeReleaseInStackQueuedSpinLockFromDpcLevel at 0.887, then
+    # KeAcquireInStackQueuedSpinLock, then KeAcquireSpinLockForDpc -- four
+    # confident, high-scoring hits, none of which mentioned the routine asked
+    # about. The model had the right answer unaided and gave it up for one of
+    # these. Asked the maximum IRQL for IoCreateDevice it got a sample header
+    # and KeInitializeSpinLock, again mentioning IoCreateDevice nowhere.
+    #
+    # So: when a query names identifiers, a chunk that contains none of them
+    # is not a weak answer, it is a different subject, and handing it to a
+    # model is worse than handing it nothing. Prose queries name no
+    # identifiers and are untouched -- there is nothing to require.
+    scored = _mentioning(scored, query_terms(query_text))
 
     # Cap how much of the answer any single document may occupy.
     #
