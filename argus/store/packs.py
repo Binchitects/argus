@@ -459,6 +459,107 @@ def get_doc(packs: Sequence[Pack], doc_path: str, source: str | None = None,
     return None
 
 
+#: Fields a requirement line states, and the shape each value takes. Used to
+#: tell "the draft says a DIFFERENT header" from "the draft does not mention a
+#: header at all" -- only the first is a contradiction worth raising.
+#: A claim about an API lives in the sentence that names it. A character
+#: window is the wrong unit: at 160 characters, "linked from User32.lib. For
+#: drivers, IoCreateDevice is in wdm.h" made User32.lib look like a claim about
+#: IoCreateDevice, and the tool would have "corrected" a right answer.
+_SENTENCES = re.compile(r"(?<=[.!?])\s+|\n+")
+
+_FIELD_SHAPES = {
+    "header": re.compile(r"\b[a-z0-9_]+\.h\b", re.I),
+    "library": re.compile(r"\b[a-z0-9_]+\.lib\b", re.I),
+    "dll": re.compile(r"\b[a-z0-9_]+\.dll\b", re.I),
+    "irql": re.compile(r"\b[A-Z]+_LEVEL\b"),
+}
+
+#: Identifiers worth checking: CamelCase API names, SCREAMING_CASE constants,
+#: Verb-Noun cmdlets, and MSVC diagnostic codes.
+_IDENTIFIER_RE = re.compile(
+    r"\b(?:[A-Z][a-z0-9]+){2,}[A-Za-z0-9_]*\b"
+    r"|\b[A-Z][A-Z0-9]{2,}(?:_[A-Z0-9]+)+\b"
+    r"|\b[A-Z][a-z]+-[A-Z][a-z]+\b"
+    r"|\bC[0-9]{4,5}\b")
+
+
+def verify_text(packs: Sequence[Pack], text: str,
+                limit: int = 40) -> list[dict[str, Any]]:
+    """Check a draft answer against the packs, reporting only what it gets wrong.
+
+    The inverse of retrieve-then-answer, and it exists because that order was
+    measured doing harm: handing a model pack context up front took win32 from
+    5/5 to 1/5, because a retrieval miss displaces knowledge the model already
+    had. Here the model answers first and the packs only speak when they
+    contradict it.
+
+    For every identifier the draft mentions that the packs know, each
+    documented field is classified:
+
+    * ``contradicted`` -- the draft states a different value of the same shape
+      (it says `user32.h`, the documentation says `winuser.h`). This is the
+      only class that should change an answer.
+    * ``confirmed`` -- the draft already states the documented value.
+    * ``unstated`` -- the draft does not mention this field. NOT an error: an
+      answer is allowed to be about something else, and flagging every
+      unmentioned fact would recreate the noise this design avoids.
+
+    Identifiers the packs do not know are absent from the result entirely.
+    Silence means "no authority here", which is the honest thing for a
+    reference to say and leaves the model's own answer standing.
+    """
+    seen: dict[str, dict[str, Any]] = {}
+    for name in dict.fromkeys(_IDENTIFIER_RE.findall(text)):
+        if len(name) < 4 or name in seen:
+            continue
+        hits = lookup_symbol(packs, name, limit=1)
+        if not hits:
+            continue
+        # Only the text AROUND this identifier counts as a claim about it.
+        # Scanning the whole draft made a mention of User32.lib anywhere flag
+        # IoCreateDevice's library as contradicted -- a correction the model
+        # would have applied, turning a right answer into a wrong one. That is
+        # exactly the harm this tool exists to avoid, so the window is narrow.
+        near = " ".join(s for s in _SENTENCES.split(text) if name in s)
+
+        documented = {k: v.strip() for k, v in
+                      (part.split(":", 1) for part in
+                       str(hits[0].get("signature", "")).split(";")
+                       if ":" in part)}
+        fields = []
+        for field, shape in _FIELD_SHAPES.items():
+            value = next((v for k, v in documented.items()
+                          if k.strip().lower() == field), "")
+            if not value:
+                continue
+            stated = {m.group(0).lower() for m in shape.finditer(near)}
+            wanted = {m.group(0).lower() for m in shape.finditer(value)}
+            if not wanted:
+                continue
+            if wanted & stated:
+                status = "confirmed"
+            elif stated:
+                status = "contradicted"
+            else:
+                status = "unstated"
+            fields.append({"field": field, "documented": value,
+                           "status": status})
+        if fields:
+            seen[name] = {
+                "name": hits[0].get("name", name),
+                "source": hits[0].get("source"),
+                "url": hits[0].get("url"),
+                "doc_path": hits[0].get("doc_path"),
+                "fields": fields,
+                "corrections": [f for f in fields
+                                if f["status"] == "contradicted"],
+            }
+        if len(seen) >= limit:
+            break
+    return list(seen.values())
+
+
 def select_packs(packs: Sequence[Pack], lang: str | None) -> list[Pack]:
     """Filter packs by source.
 

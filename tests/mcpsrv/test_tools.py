@@ -503,7 +503,7 @@ def test_tools_list_descriptions_are_load_bearing(two_repo_cfg):
     by_name = {t["name"]: t["description"] for t in tools_list}
     assert set(by_name) == {
         "find_symbol", "find_references", "search_code", "get_file", "index_status",
-        "docs_lookup", "docs_search", "docs_get",
+        "docs_lookup", "docs_search", "docs_get", "docs_verify",
         "repo_map", "which_repo", "impact_of",
     }
     assert "name-based" in by_name["find_references"].lower() or \

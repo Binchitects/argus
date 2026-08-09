@@ -422,6 +422,15 @@ async def docs_lookup_impl(packs_dir: Path | str, name: str,
     )
 
 
+async def docs_verify_impl(packs_dir: Path | str, text: str,
+                           limit: int = 40) -> list[dict]:
+    """Check a draft against the packs, returning only what it gets wrong."""
+    return await run_packs(
+        packs_dir,
+        lambda opened: packs_store.verify_text(opened, text, limit=limit),
+    )
+
+
 async def docs_get_impl(packs_dir: Path | str, doc_path: str,
                         source: str | None = None,
                         max_chars: int = 60_000) -> dict | None:
@@ -499,6 +508,24 @@ async def docs_search_impl(packs_dir: Path | str, query: str,
 
     return await run_packs(packs_dir, _run)
 
+
+
+_DOCS_VERIFY_DESC = (
+    "Check a draft answer or generated code against the documentation packs "
+    "AFTER you have written it, and correct only what it gets wrong. This is "
+    "the opposite order from docs_search, and the order matters: measured on "
+    "this server, putting pack context in front of a model BEFORE it answered "
+    "took Win32 accuracy from 5/5 to 1/5, because retrieved text displaces "
+    "knowledge the model already had. Verifying afterwards cannot do that -- "
+    "it only speaks where the documentation contradicts you. Pass your draft "
+    "as `text`. Each identifier the packs recognise comes back with its "
+    "documented header, library, DLL and IRQL, each marked `confirmed` (your "
+    "draft agrees), `contradicted` (your draft states something different -- "
+    "fix it), or `unstated` (your draft does not mention it, which is fine). "
+    "Identifiers the packs do not know are absent entirely: silence means no "
+    "authority, so your own answer stands. Use `corrections` for the list of "
+    "things to change."
+)
 
 
 _DOCS_GET_DESC = (
@@ -689,6 +716,11 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
     """
     db_path = cfg.index.db_path
     packs_dir = cfg.packs_dir
+
+    @server.tool(name="docs_verify", description=_DOCS_VERIFY_DESC)
+    async def docs_verify(text: str) -> list[dict]:
+        # Public documentation: no identity, no allowlist, no audit row.
+        return await docs_verify_impl(packs_dir, text)
 
     @server.tool(name="docs_get", description=_DOCS_GET_DESC)
     async def docs_get(doc_path: str, source: str | None = None) -> dict | None:

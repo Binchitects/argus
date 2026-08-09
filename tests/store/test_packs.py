@@ -476,3 +476,75 @@ def test_search_docs_itself_applies_the_relevance_filter(tmp_path):
         assert [r["doc_path"] for r in rows] == ["d1.md"], rows
     finally:
         packs.close_packs(opened)
+
+
+def _verify_pack(tmp_path):
+    """A pack with two APIs whose requirement lines differ."""
+    from argus.packs import format as pack_format
+    path = tmp_path / "v.arguspack"
+    conn = pack_format.create_pack(path)
+    comp = zstandard.ZstdCompressor()
+    for i, (name, sig) in enumerate((
+            ("MessageBoxW", "Header: winuser.h; Library: User32.lib; DLL: User32.dll"),
+            ("IoCreateDevice", "Header: wdm.h; Library: NtosKrnl.lib; IRQL: <= APC_LEVEL"))):
+        cur = conn.execute(
+            "INSERT INTO docs (path, title, url, lang, content, content_len) "
+            "VALUES (?, ?, ?, 'md', ?, 0)",
+            (f"{name}.md", name, f"https://x/{name}", comp.compress(b"body")))
+        conn.execute(
+            "INSERT INTO api_symbols (name, kind, namespace, doc_id, anchor, signature) "
+            "VALUES (?, 'function', 'm', ?, '', ?)", (name, cur.lastrowid, sig))
+    pack_format.write_meta(
+        conn, source_name="v", source_repo="r", source_branch="b", source_commit="c",
+        license="MIT", license_url="u", attribution="a", embedding_model=EMBED_MODEL,
+        embedding_dim=EMBED_DIM, builder_version=1, pack_version="1.0",
+        doc_count=2, chunk_count=0, symbol_count=2, unresolved_symbol_count=0)
+    conn.commit(); conn.close()
+    return path
+
+
+def test_verify_reports_only_what_the_draft_gets_wrong(tmp_path):
+    """The inverse of retrieve-then-answer, and the reason it exists: handing a
+    model pack context BEFORE it answers took win32 from 5/5 to 1/5, because
+    retrieved text displaces knowledge the model already had. Verifying after
+    can only speak where the documentation disagrees."""
+    opened = packs.open_packs([_verify_pack(tmp_path)])
+    try:
+        draft = "Call MessageBoxW, declared in user32.h and linked from User32.lib."
+        got = {r["name"]: r for r in packs.verify_text(opened, draft)}
+        fields = {f["field"]: f["status"] for f in got["MessageBoxW"]["fields"]}
+        assert fields["header"] == "contradicted"     # user32.h vs winuser.h
+        assert fields["library"] == "confirmed"
+        assert fields["dll"] == "unstated"
+        assert [c["documented"] for c in got["MessageBoxW"]["corrections"]] == ["winuser.h"]
+    finally:
+        packs.close_packs(opened)
+
+
+def test_a_claim_about_one_api_is_not_read_as_a_claim_about_another(tmp_path):
+    """The false positive that would make this tool harmful. With a character
+    window, "linked from User32.lib. For drivers, IoCreateDevice is in wdm.h"
+    made User32.lib look like a claim about IoCreateDevice, and the tool would
+    have told the model to "correct" an answer that was already right."""
+    opened = packs.open_packs([_verify_pack(tmp_path)])
+    try:
+        draft = ("Call MessageBoxW, linked from User32.lib. For drivers, "
+                 "IoCreateDevice is in wdm.h.")
+        got = {r["name"]: r for r in packs.verify_text(opened, draft)}
+        fields = {f["field"]: f["status"] for f in got["IoCreateDevice"]["fields"]}
+        assert fields["library"] == "unstated", fields
+        assert fields["header"] == "confirmed"
+        assert got["IoCreateDevice"]["corrections"] == []
+    finally:
+        packs.close_packs(opened)
+
+
+def test_an_unknown_identifier_produces_silence(tmp_path):
+    """Silence means "no authority here", which leaves the model's own answer
+    standing. Reporting something for every name would recreate the noise this
+    design exists to avoid."""
+    opened = packs.open_packs([_verify_pack(tmp_path)])
+    try:
+        assert packs.verify_text(opened, "Call SomeUnknownApiW from mystery.h.") == []
+    finally:
+        packs.close_packs(opened)
