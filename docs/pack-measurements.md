@@ -693,3 +693,68 @@ actually changed were re-embedded.
   markedly worse.
 * `algorithms` and `system-design`, which have no symbol table yielding clean
   factual questions and appear in no arm of this comparison.
+
+---
+
+# Code generation, multi-claim: the packs' strongest result
+
+Every earlier number was single-fact recall. Real work is not that shape: a
+code block asserts many facts at once, and one wrong `#include` makes the whole
+thing not build.
+
+25 tasks, each naming two APIs from **different** headers, so a correct answer
+must get four independent facts right -- two headers, two libraries. Graded per
+claim rather than per task, because a whole-block pass/fail hides the effect.
+
+| strategy | claims correct |
+|---|---|
+| closed book | **28 / 100 (28%)** |
+| **retrieval-first** | **73 / 100 (73%)** |
+| verify-after | 45 / 100 (45%) |
+
+`docs_verify` fired on 13 of 25 drafts and **gained 17 claims while losing 0**.
+
+**This is where verification earns its design.** On single-fact questions it
+gained 14 and looked marginal against retrieval's 51. On multi-claim code it
+corrects fact by fact: retrieval can only bias a whole generation, while
+verification checks each `#include` and each `.lib` independently. Zero claims
+lost across 100 is the property the design was built for, now demonstrated on
+the shape it was built for.
+
+It is also the largest lift in the project: **28% to 73%**. Writing code that
+names four correct facts is far harder than answering one, and unaided the
+model manages barely a quarter of them.
+
+Caveat the number invites: this checks that the right header and library are
+NAMED, not that the code compiles. A plausible program naming the right
+headers scores full marks.
+
+---
+
+# Out of domain: installing packs has a small tax
+
+The control every earlier measurement was missing. Six packs are always
+installed, but an agent asks about everything -- so what happens on questions
+the packs do not cover?
+
+20 questions across HTTP, Python, SQL, git, POSIX, regex, networking, Java and
+JavaScript, none of them in any installed pack.
+
+| | closed book | with packs |
+|---|---|---|
+| total | **16 / 20** | **15 / 20** |
+
+**Packs fixed 1, broke 2.** Retrieval fires on "which HTTP status means Too
+Many Requests", returns Win32 and WDK pages, and costs a net answer.
+
+Small, but real, and it is the same mechanism that took win32 from 5/5 to 1/5
+under "use ONLY the reference": irrelevant context displacing knowledge the
+model already had. The relevance filter reduced this -- an identifier-bearing
+query now drops chunks mentioning none of its identifiers -- but a question
+naming no identifiers at all has nothing to filter on.
+
+**What this means for a deployment.** The packs are worth installing and the
+tax is worth paying: +45 claims on code generation and +92 answers on facts,
+against -1 out of 20 elsewhere. But an agent that retrieves on *every* prompt
+pays it on every unrelated question, so scope retrieval to the domains the
+packs cover where that is cheap to detect.
