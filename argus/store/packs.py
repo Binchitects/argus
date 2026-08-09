@@ -509,19 +509,42 @@ def verify_text(packs: Sequence[Pack], text: str,
     Silence means "no authority here", which is the honest thing for a
     reference to say and leaves the model's own answer standing.
     """
-    seen: dict[str, dict[str, Any]] = {}
+    # Resolve first, then scope. Which names the packs actually recognise
+    # decides whether the text is about one API or several, and that decision
+    # changes how a claim is attributed.
+    resolved: list[tuple[str, dict[str, Any]]] = []
     for name in dict.fromkeys(_IDENTIFIER_RE.findall(text)):
-        if len(name) < 4 or name in seen:
+        if len(name) < 4:
             continue
         hits = lookup_symbol(packs, name, limit=1)
-        if not hits:
-            continue
+        if hits:
+            resolved.append((name, hits[0]))
+        if len(resolved) >= limit:
+            break
+    known = {name for name, _ in resolved}
+
+    seen: dict[str, dict[str, Any]] = {}
+    for name, hit in resolved:
+        hits = [hit]
         # Only the text AROUND this identifier counts as a claim about it.
         # Scanning the whole draft made a mention of User32.lib anywhere flag
         # IoCreateDevice's library as contradicted -- a correction the model
         # would have applied, turning a right answer into a wrong one. That is
         # exactly the harm this tool exists to avoid, so the window is narrow.
-        near = " ".join(s for s in _SENTENCES.split(text) if name in s)
+        # Scope a claim to the sentence naming the API -- unless the text is
+        # about exactly one API, in which case all of it is a claim about that
+        # one.
+        #
+        # Both halves are load-bearing and each was found by measurement.
+        # Without the sentence rule, "linked from User32.lib. For drivers,
+        # IoCreateDevice is in wdm.h" reads User32.lib as a claim about
+        # IoCreateDevice and "corrects" an answer that was right. Without the
+        # single-API exception, the realistic shape -- the name in the question,
+        # the claim in the answer, two different sentences -- matches nothing:
+        # measured, docs_verify fired on 0 of 120 drafts and verify-after
+        # scored identically to no packs at all.
+        near = (text if len(known) == 1
+                else " ".join(s for s in _SENTENCES.split(text) if name in s))
 
         documented = {k: v.strip() for k, v in
                       (part.split(":", 1) for part in
@@ -555,8 +578,6 @@ def verify_text(packs: Sequence[Pack], text: str,
                 "corrections": [f for f in fields
                                 if f["status"] == "contradicted"],
             }
-        if len(seen) >= limit:
-            break
     return list(seen.values())
 
 
