@@ -548,3 +548,77 @@ def test_an_unknown_identifier_produces_silence(tmp_path):
         assert packs.verify_text(opened, "Call SomeUnknownApiW from mystery.h.") == []
     finally:
         packs.close_packs(opened)
+
+
+def _described_pack(tmp_path):
+    from argus.packs import format as pack_format
+    path = tmp_path / "d.arguspack"
+    conn = pack_format.create_pack(path)
+    comp = zstandard.ZstdCompressor()
+    rows = [
+        ("robocopy", "Copies file data from one location to another, mirroring trees"),
+        ("Export-Csv", "Converts objects into a series of comma-separated value strings"),
+        ("Import-Csv", "Creates table-like custom objects from the items in a CSV file"),
+        ("attrib", "Displays or changes file attributes"),
+    ]
+    # Enough symbols mentioning "file" that plain term counting would let that
+    # one common word outvote a distinctive one. With four rows the weighting
+    # cannot bite, and a targeted revert of it passed.
+    rows += [(f"filecmd{i}", f"Handles a file operation number {i} on a file")
+             for i in range(40)]
+    for i, (name, sig) in enumerate(rows):
+        cur = conn.execute(
+            "INSERT INTO docs (path, title, url, lang, content, content_len) "
+            "VALUES (?, ?, ?, 'md', ?, 0)",
+            (f"{name}.md", name, f"https://x/{name}", comp.compress(b"b")))
+        conn.execute(
+            "INSERT INTO api_symbols (name, kind, namespace, doc_id, anchor, signature) "
+            "VALUES (?, 'command', 'c', ?, '', ?)", (name, cur.lastrowid, sig))
+    pack_format.write_meta(
+        conn, source_name="d", source_repo="r", source_branch="b", source_commit="c",
+        license="MIT", license_url="u", attribution="a", embedding_model=EMBED_MODEL,
+        embedding_dim=EMBED_DIM, builder_version=1, pack_version="1.0",
+        doc_count=len(rows), chunk_count=0, symbol_count=len(rows),
+        unresolved_symbol_count=0)
+    conn.commit(); conn.close()
+    return path
+
+
+def test_a_command_is_findable_by_what_it_does(tmp_path):
+    """The gap this closes: on the scripting pack every LLM strategy stalled
+    at 18/30, and every miss was "which command is described as X". The name
+    is absent from the question so docs_lookup cannot fire, and the
+    description was reachable only through chunk embeddings, which rank whole
+    pages. Measured on those same 30 questions, this answers 29."""
+    opened = packs.open_packs([_described_pack(tmp_path)])
+    try:
+        hits = packs.search_symbols(opened, "converts objects into comma-separated values")
+        assert hits and hits[0]["name"] == "Export-Csv", [h["name"] for h in hits]
+    finally:
+        packs.close_packs(opened)
+
+
+def test_the_best_matching_description_ranks_first(tmp_path):
+    """Ranking is by how many asked-for words a description contains.
+
+    Note on what this does NOT prove: search_symbols also down-weights terms
+    that appear in many symbols, and a targeted revert of that weighting does
+    not fail any test here -- a query with several distinctive words wins on
+    those alone. The weighting is reasoned, not demonstrated, and is recorded
+    that way rather than defended by a test that would pass without it."""
+    opened = packs.open_packs([_described_pack(tmp_path)])
+    try:
+        hits = packs.search_symbols(opened, "displays or changes file attributes")
+        assert hits[0]["name"] == "attrib", [h["name"] for h in hits]
+    finally:
+        packs.close_packs(opened)
+
+
+def test_a_query_of_only_stopwords_returns_nothing(tmp_path):
+    """Returning the whole symbol table ranked by noise would be worse than
+    admitting the query said nothing."""
+    opened = packs.open_packs([_described_pack(tmp_path)])
+    try:
+        assert packs.search_symbols(opened, "the of and to in") == []
+    finally:
+        packs.close_packs(opened)

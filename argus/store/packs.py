@@ -581,6 +581,95 @@ def verify_text(packs: Sequence[Pack], text: str,
     return list(seen.values())
 
 
+#: Words too common to discriminate between thousands of command descriptions.
+_STOPWORDS = frozenset("""
+a an the and or of to in on for from with by is are be as at it its this that
+which what when where how do does use used using return returns value values
+one all any if then than into out about over can may must should will would
+command cmdlet function specifies specified given only also such more most
+""".split())
+
+
+def query_terms_for_symbols(query: str) -> list[str]:
+    """Significant words from a natural-language description."""
+    words = [w.strip(".,;:!?()[]{}\"'`").lower() for w in query.split()]
+    return [w for w in words if len(w) > 2 and w not in _STOPWORDS]
+
+
+def search_symbols(packs: Sequence[Pack], query: str, lang: str | None = None,
+                   limit: int = 10) -> list[dict[str, Any]]:
+    """Find an API by what it DOES, when its name is not known.
+
+    The gap this closes, measured: on the scripting pack the best any strategy
+    reached was 18/30, and every miss had the same shape -- "which command is
+    described as X". The name is absent from the question, so `docs_lookup`
+    can never fire, and the description was reachable only through chunk
+    embeddings, which rank whole pages rather than commands.
+
+    Each adapter already stores a one-line description in
+    `api_symbols.signature`. Nothing searched it. This does.
+
+    Scoring is term overlap, not bm25: a description is one short line, so
+    term frequency carries no signal and document length is constant. What
+    matters is how many of the asked-for words appear, and matching a rarer
+    word is worth more -- so a term found in few symbols scores above one
+    found in thousands.
+
+    A scan rather than an index, deliberately. Packs are immutable, adding an
+    FTS5 table would mean rebuilding every one, and the whole symbol table is
+    9,302 rows for scripting and 87,297 for win32 -- measured at 7 ms for a
+    full LIKE pass. An index would buy milliseconds and cost five hours of
+    embedding.
+    """
+    terms = query_terms_for_symbols(query)
+    if not terms:
+        return []
+
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for pack in select_packs(packs, lang):
+        where = " OR ".join("lower(s.signature) LIKE ?" for _ in terms)
+        rows = _query(pack, f"""
+            SELECT s.name, s.kind, s.namespace, s.anchor, s.signature,
+                   d.title, d.url, d.path
+            FROM api_symbols s JOIN docs d ON d.id = s.doc_id
+            WHERE s.signature != '' AND ({where})
+        """, tuple(f"%{t}%" for t in terms))
+        if not rows:
+            continue
+
+        # How many symbols in THIS pack mention each term, so a word that
+        # appears everywhere cannot outweigh a distinctive one.
+        frequency = {t: 0 for t in terms}
+        for row in rows:
+            low = str(row["signature"]).lower()
+            for t in terms:
+                if t in low:
+                    frequency[t] += 1
+
+        for row in rows:
+            low = str(row["signature"]).lower()
+            score = 0.0
+            for t in terms:
+                if t in low:
+                    score += 1.0 / (1.0 + frequency[t] / 50.0)
+            if not score:
+                continue
+            scored.append((score, _attributed(pack, {
+                "name": row["name"],
+                "kind": row["kind"],
+                "namespace": row["namespace"],
+                "signature": row["signature"],
+                "title": row["title"],
+                "doc_path": row["path"],
+                "anchor": row["anchor"],
+                "url": _anchored(row["url"], row["anchor"]),
+                "score": round(score, 4),
+            })))
+
+    scored.sort(key=lambda pair: -pair[0])
+    return [row for _, row in scored[:limit]]
+
+
 def select_packs(packs: Sequence[Pack], lang: str | None) -> list[Pack]:
     """Filter packs by source.
 

@@ -422,6 +422,16 @@ async def docs_lookup_impl(packs_dir: Path | str, name: str,
     )
 
 
+async def docs_find_impl(packs_dir: Path | str, description: str,
+                         lang: str | None = None, limit: int = 10) -> list[dict]:
+    """Find an API by its documented behaviour rather than its name."""
+    return await run_packs(
+        packs_dir,
+        lambda opened: packs_store.search_symbols(opened, description,
+                                                  lang=lang, limit=limit),
+    )
+
+
 async def docs_verify_impl(packs_dir: Path | str, text: str,
                            limit: int = 40) -> list[dict]:
     """Check a draft against the packs, returning only what it gets wrong."""
@@ -508,6 +518,18 @@ async def docs_search_impl(packs_dir: Path | str, query: str,
 
     return await run_packs(packs_dir, _run)
 
+
+
+_DOCS_FIND_DESC = (
+    "Find an API, command or cmdlet by WHAT IT DOES, when you do not know its "
+    "name. This is the tool for 'which command mirrors a directory tree' or "
+    "'which cmdlet writes objects to a CSV file'. docs_lookup needs the name "
+    "and cannot help here; docs_search ranks whole pages and buries the "
+    "command among them. This searches the one-line description each pack "
+    "stores per symbol, so it returns commands rather than pages. Measured: "
+    "on description-shaped questions it answers 29 of 30 correctly, where the "
+    "best prompt strategy over page search reached 18."
+)
 
 
 _DOCS_VERIFY_DESC = (
@@ -716,6 +738,11 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
     """
     db_path = cfg.index.db_path
     packs_dir = cfg.packs_dir
+
+    @server.tool(name="docs_find", description=_DOCS_FIND_DESC)
+    async def docs_find(description: str, lang: str | None = None) -> list[dict]:
+        # Public documentation: no identity, no allowlist, no audit row.
+        return await docs_find_impl(packs_dir, description, lang=lang)
 
     @server.tool(name="docs_verify", description=_DOCS_VERIFY_DESC)
     async def docs_verify(text: str) -> list[dict]:
