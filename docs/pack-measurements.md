@@ -580,3 +580,60 @@ Use **double-tap** where answer quality matters more than latency: retrieve,
 answer, then run `docs_verify` on the answer and revise only the contradictions.
 Use plain retrieval where six calls per question is too slow. Do not route on
 confidence.
+
+## Eight strategies, and where the ceiling actually is
+
+| strategy | total | cpp | scripting | wdk | win32 |
+|---|---|---|---|---|---|
+| A closed book | 46/120 | 26 | 2 | 9 | 9 |
+| B retrieval-first | 97/120 | 25 | 18 | 25 | 29 |
+| C verify-after | 60/120 | 26 | 2 | 18 | 14 |
+| D hybrid routing | 77/120 | 26 | 8 | 23 | 20 |
+| **E double-tap** | **98/120** | 25 | 18 | 25 | **30** |
+| F extract, memory banned | 84/120 | **13** | 17 | 24 | 30 |
+| G consensus of 3 framings | 87/120 | 16 | 17 | 24 | 30 |
+| H extract, memory allowed | 95/120 | 23 | 17 | 25 | 30 |
+
+**Double-tap remains best.** Everything after it was an attempt to beat it and
+none did.
+
+### The one mistake, made three times
+
+Every strategy that constrained the model to the reference destroyed answers it
+already had:
+
+| constraint | cost |
+|---|---|
+| "use ONLY the reference material" | win32 5/5 -> 1/5 |
+| retrieval noise displacing knowledge | 3 correct answers broken |
+| "do not rely on memory" (arm F) | cpp 26/30 -> **13/30** |
+
+Arm H is F with the memory prohibition removed and nothing else changed: cpp
+recovers 13 -> 23. The prohibition was the entire damage.
+
+### Prompt engineering is finished here
+
+Four framings land within three answers of each other, and the three consensus
+framings disagreed on **0 of 120** questions. The model is stable and reads
+this corpus as well as it is going to. The next twenty answers are not in the
+prompt.
+
+### Where they are instead
+
+| pack | best | remaining gap |
+|---|---|---|
+| win32 | 30/30 | 0 |
+| cpp | 26/30 | 4 |
+| wdk | 25/30 | 5 |
+| **scripting** | **18/30** | **12** |
+
+Over half the residual loss is one question shape: scripting's reverse lookup,
+*given a description, name the command*. That is a retrieval problem, not a
+reading problem -- the identifier is absent from the question, so `docs_lookup`
+can never fire and semantic search must recover a command from its behaviour.
+
+The scripting pack stores each command's description verbatim in
+`api_symbols.signature`, and nothing searches that field. It is reachable only
+through chunk embeddings today. A full-text index over symbol descriptions is
+the concrete next move, in the same family as the `docs_get` gap: a missing
+query surface rather than a tuning problem.
