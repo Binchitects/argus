@@ -309,23 +309,37 @@ what Microsoft and tldr publish rather than what the test author remembered.
 
 | pack | closed book | with packs | |
 |---|---|---|---|
-| `win32` | 9 / 30 | **29 / 30** | +20 |
+| `win32` | 9 / 30 | **30 / 30** | +21 |
 | `wdk` | 9 / 30 | **25 / 30** | +16 |
-| `scripting` | 2 / 30 | **18 / 30** | +16 |
+| `scripting` | 2 / 30 | **21 / 30** | +19 |
 | `cpp` (MSVC diagnostics) | 3 / 40 | **40 / 40** | +37 |
 | `cpp` (standard library) | 26 / 30 | 25 / 30 | -1 |
-| **total** | **49 / 160 (31%)** | **137 / 160 (86%)** | **+88** |
+| **total** | **49 / 160 (31%)** | **141 / 160 (88%)** | **+92** |
 
-**90 answers fixed, 3 broken.** The `cpp` standard-library row is the control
+**94 answers fixed, 3 broken.** The `cpp` standard-library row is the control
 and behaves like one: the model already knows which header declares
 `std::vector::push_back`, so retrieval adds nothing there. The packs earn
 their disk where the model is ignorant, not where it is fluent.
 
 **Retrieval must be wired correctly or the same packs make answers worse.**
-Measured: telling the model to "use ONLY the reference" took win32 from 5/5 to
-1/5, because a retrieval miss then destroys an answer it already had. Use
-`docs_lookup` for known API names, `docs_search` to find a page, `docs_get` to
-read it, and let the model fall back on its own knowledge.
+Eight strategies were measured. Every one that constrained the model to the
+reference destroyed answers it already had: "use ONLY the reference" took
+win32 from 5/5 to 1/5, and "do not rely on memory" took cpp from 26/30 to
+13/30. Reference material must add, never gate.
+
+| strategy | score |
+|---|---|
+| closed book | 46 / 120 |
+| verify-after only | 60 / 120 |
+| hybrid, routed on model confidence | 78 / 120 |
+| extract-only framing | 84-95 / 120 |
+| **retrieve, answer, verify** | **101 / 120** |
+
+Use all five documentation tools, each for a different failure: `docs_lookup`
+when you know the name, `docs_find` when you know only the behaviour,
+`docs_search` to locate a page, `docs_get` to read it whole, `docs_verify` to
+check a draft afterwards. And never route on the model's confidence -- it is
+uncorrelated with its knowledge, which is the whole reason the packs exist.
 
 ### What the packs cost
 

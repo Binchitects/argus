@@ -637,3 +637,59 @@ The scripting pack stores each command's description verbatim in
 through chunk embeddings today. A full-text index over symbol descriptions is
 the concrete next move, in the same family as the `docs_get` gap: a missing
 query surface rather than a tuning problem.
+
+---
+
+# Final: 101/120, and where the remaining ceiling is
+
+After adding `docs_find` (search symbol descriptions) to the retrieval chain
+and rebuilding the scripting pack with clean descriptions:
+
+| pack | A closed | B retr-first | C verify | D hybrid | E double-tap |
+|---|---|---|---|---|---|
+| cpp | 26/30 | 25/30 | 26/30 | 26/30 | 25/30 |
+| scripting | 2/30 | **21/30** | 2/30 | 9/30 | **21/30** |
+| wdk | 9/30 | 25/30 | 18/30 | 23/30 | 25/30 |
+| win32 | 9/30 | **30/30** | 14/30 | 20/30 | **30/30** |
+| **total** | **46/120** | **101/120** | 60/120 | 78/120 | **101/120** |
+
+Scripting 18 -> 21 and the total 98 -> 101, from the new query surface plus
+the description fix.
+
+## The finding that matters more than the number
+
+**`docs_find` answers 29 of 30 scripting questions correctly on its own, and
+moved the end-to-end score by 3.** The right command now reaches the model on
+nearly every one of those questions, and it still gets 9 wrong.
+
+That is the same wall the prompt arms hit. Retrieval on this set is close to
+solved; what remains is the model reading a correct answer out of correct
+context. No query surface fixes that, and neither did four framings of the
+prompt.
+
+## Verification is insurance, not a gain
+
+On this run double-tap **rescued 0 and broke 0** -- it tied plain retrieval
+rather than beating it. Earlier, with noisier retrieval, it rescued 1 and
+prevented the 3 answers retrieval-first destroyed. Its value is proportional
+to how wrong retrieval is, so it earns its two extra calls on a noisy corpus
+and nothing on a clean one.
+
+## Cost of the rebuild
+
+Fixing the descriptions and rebuilding scripting cost 7 minutes rather than
+13: **45,631 embeddings reused, 396 computed.** Only the chunks whose text
+actually changed were re-embedded.
+
+## What is still unmeasured
+
+* Code generation and multi-claim analysis. Every number here is single-fact
+  recall, which is the shape that grades cleanly and the shape `docs_verify`
+  handles most easily. A code block asserts many facts at once and is where
+  verification should matter most.
+* `docs_find` on a user's own phrasing. The 29/30 is on questions generated
+  from the same descriptions being searched, so it shows the field is
+  searchable, not that arbitrary wording finds it. Hand-written queries did
+  markedly worse.
+* `algorithms` and `system-design`, which have no symbol table yielding clean
+  factual questions and appear in no arm of this comparison.

@@ -29,6 +29,13 @@ _SCALAR = re.compile(r"^([A-Za-z_][\w.\- ]*)\s*:\s*(.*)$")
 _ATX = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
 #: tldr states the summary as a blockquote under the heading.
 _TLDR_SUMMARY = re.compile(r"^>\s*(.+?)\s*$", re.MULTILINE)
+#: PowerShell's one-line summary. Its cmdlet pages carry no `description`
+#: front matter, so without this the extractor fell through to the first
+#: blockquote -- which is usually an admonition, not a description.
+_SYNOPSIS = re.compile(r"^##\s+SYNOPSIS\s*$\s*\n+(.+?)\s*$", re.MULTILINE)
+#: `[!NOTE]`, `[!WARNING]`, `[!CAUTION]` -- a blockquote that is markup rather
+#: than prose.
+_ADMONITION = re.compile(r"^\[!\w+\]")
 
 _SKIP_NAMES = frozenset({
     "README.md", "TOC.md", "CONTRIBUTING.md", "LICENSE.md", "index.md",
@@ -91,8 +98,22 @@ class _CommandDocs:
             heading = _ATX.search(body)
             title = heading.group(1).strip().strip("`") if heading else path.stem
         if not summary:
-            quoted = _TLDR_SUMMARY.search(body)
-            summary = quoted.group(1).strip() if quoted else ""
+            # PowerShell cmdlet pages carry no `description` front matter --
+            # the one-line summary is the SYNOPSIS section. Reaching straight
+            # for the first blockquote instead found `> [!NOTE]`, because
+            # admonitions are blockquotes too: measured, 244 of 9,302 symbol
+            # descriptions in the built pack were a bare admonition marker and
+            # 675 were under 15 characters. Those descriptions are what
+            # docs_find searches, so a marker is a symbol nobody can find.
+            synopsis = _SYNOPSIS.search(body)
+            if synopsis:
+                summary = synopsis.group(1).strip()
+        if not summary:
+            for quoted in _TLDR_SUMMARY.finditer(body):
+                candidate = quoted.group(1).strip()
+                if not _ADMONITION.match(candidate):
+                    summary = candidate
+                    break
         return title, summary, body
 
     def _url(self, relative: str, meta_url: str = "") -> str:
