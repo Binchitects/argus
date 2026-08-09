@@ -31,14 +31,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import urllib.request
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-OLLAMA_CHAT = "http://localhost:11434/api/chat"
-MODEL = "qwen3.6:35b"
+# Overridable: the model does not always live on the default port, and a
+# hardcoded endpoint fails as a bare 404 that reads like a broken MCP server.
+OLLAMA_CHAT = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/") + "/api/chat"
+MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:35b")
 MAX_TURNS = 8
 
 
