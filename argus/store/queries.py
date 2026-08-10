@@ -63,6 +63,86 @@ def _chunks(ids: list[int], reserve: int) -> list[list[int]]:
     return [ids[i:i + size] for i in range(0, len(ids), size)] or [[]]
 
 
+#: Identifiers worth resolving in a source file. Broader than the public-docs
+#: pattern -- house styles vary, so snake_case and ALL_CAPS count too -- but
+#: still not every word: a bare `i` or `len` is noise, and the index has
+#: nothing useful to say about them.
+_SOURCE_IDENT_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{4,}\b")
+
+#: Language keywords and universal library names. They appear in every file,
+#: resolve to nothing useful, and would crowd out the project's own symbols.
+_IDENT_NOISE = frozenset("""
+break case catch class const continue default delete double
+else enum extern false final float friend inline namespace operator private
+protected public register return short signed sizeof static struct switch
+template throw true typedef typename union unsigned using virtual void
+volatile while alignas constexpr decltype explicit mutable noexcept nullptr
+printf memcpy memset malloc free strlen strcpy sprintf assert include define
+ifdef ifndef endif pragma
+""".split())
+
+
+def symbol_contracts(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
+                     source: str, limit: int = 40) -> list[dict]:
+    """Where every in-house symbol a file names is actually defined.
+
+    The private-code counterpart to `docs_contracts`, and it exists for the
+    same measured reason. Asked to review a real driver, a model invented an
+    IRQL contract and built seven findings on it; the fix was to hand it the
+    documented facts *before* the review rather than offer a checker it never
+    thought to call. Internal APIs are worse in the same way -- nothing in the
+    weights knows what `AvCacheInsert` does or what it returns, so a model
+    reading a file that calls it either opens more files or guesses.
+
+    One call returns the definition site, signature and visibility of every
+    symbol the file references, so an agent editing a file already knows the
+    contracts it is up against.
+
+    Scoped to `allowed_repo_ids` like every other query here: a symbol the
+    caller may not see must not appear, and this takes source text, which is
+    exactly the shape that would leak a definition from a private repository
+    if the allowlist were skipped.
+
+    Ordered by how often each name appears, so the file's central dependencies
+    lead. Definitions inside the file being reviewed are still returned -- a
+    reviewer wants a function's own signature to hand, and cannot tell from
+    the text alone which names are local anyway.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids:
+        return []
+
+    counts: dict[str, int] = {}
+    for name in _SOURCE_IDENT_RE.findall(source or ""):
+        if name.lower() in _IDENT_NOISE:
+            continue
+        counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return []
+
+    out: list[dict] = []
+    for name in sorted(counts, key=lambda n: (-counts[n], n)):
+        rows = find_symbol(allowed_repo_ids, conn, name, limit=1)
+        if not rows:
+            continue
+        row = rows[0]
+        out.append({
+            "name": row["name"],
+            "kind": row["kind"],
+            "repo": row["path_with_namespace"],
+            "repo_id": row["repo_id"],
+            "path": row["path"],
+            "line": row["line"],
+            "signature": row["signature"],
+            "scope": row["scope"],
+            "is_public": bool(row["is_public"]),
+            "mentions": counts[name],
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 def find_symbol(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
                 name: str, kind: str | None = None,
                 limit: int = 50) -> list[sqlite3.Row]:

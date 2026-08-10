@@ -32,6 +32,13 @@ def _minimal_args_for(name, conn, target_repo_id):
     added later must be given real arguments here -- deliberately -- or
     the whole test suite fails loudly, instead of quietly not testing it.
     """
+    if name == "symbol_contracts":
+        # Takes source TEXT, not a name, which is precisely the shape that
+        # would leak a private definition if the allowlist were skipped: the
+        # caller supplies arbitrary identifiers and gets definition sites back.
+        # SharedName exists in both repos, so switching the allowlist must
+        # switch which repo's definition is returned.
+        return {"source": "int x = SharedName(1);"}
     if name == "find_symbol":
         # Both repos in `two_repos` have a symbol named SharedName, so
         # switching the allowlist switches which repo's row comes back.
@@ -974,5 +981,74 @@ def test_an_underscore_in_a_filename_is_not_a_wildcard_after_narrowing(tmp_path)
         conn.commit()
         got = [r["path"] for r in queries._files_named(conn, {rid}, "unique_beta.c")]
         assert got == ["src/unique_beta.c"], got
+    finally:
+        conn.close()
+
+
+def test_symbol_contracts_returns_definition_sites_ordered_by_use(tmp_path):
+    """The private counterpart to docs_contracts. Nothing in a model's weights
+    knows what this organisation's functions do, so a model reading a file
+    either opens more files hunting for definitions or guesses -- the same
+    failure that produced seven invented findings against public APIs."""
+    conn = open_db(tmp_path / "i.db")
+    try:
+        rid = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/av",
+                                 default_branch="main", http_url="u")
+        fid = writes.upsert_file(conn, repo_id=rid, path="src/cache.c", lang="c",
+                                 size=1, blob_sha="s", content="x")
+        # A real project may well define its own `memcpy` wrapper, so this name
+        # IS indexed -- the noise list has to be what excludes it, not its
+        # absence from the symbol table.
+        for name, line in (("AvCacheInsert", 97), ("AvCacheLookup", 55),
+                           ("memcpy", 12)):
+            conn.execute(
+                "INSERT INTO symbols (repo_id, file_id, name, kind, line, "
+                "signature, scope, is_public) VALUES (?,?,?,'function',?,?,'',1)",
+                (rid, fid, name, line, f"VOID {name}(VOID)"))
+        conn.commit()
+
+        source = ("AvCacheLookup(&k); AvCacheLookup(&k2); AvCacheInsert(&k);\n"
+                  "memcpy(a, b, n); memcpy(c, d, n); memcpy(e, f, n);\n"
+                  "return sizeof(x);")
+        rows = queries.symbol_contracts([rid], conn, source)
+        by_name = {r["name"]: r for r in rows}
+        assert set(by_name) == {"AvCacheLookup", "AvCacheInsert"}
+        assert by_name["AvCacheLookup"]["line"] == 55
+        assert by_name["AvCacheLookup"]["path"] == "src/cache.c"
+        # Mentioned twice, so it leads -- and it sorts alphabetically FIRST
+        # too, which is why the next assertion carries the ordering claim.
+        assert rows[0]["name"] == "AvCacheLookup"
+        assert rows[0]["mentions"] == 2
+        # `memcpy` IS indexed here and is mentioned more than anything else,
+        # so without the noise list it would lead the results -- pushing the
+        # project's own APIs down for a name every C file contains.
+        assert "memcpy" not in by_name, "a universal name crowded out the real APIs"
+        assert "sizeof" not in by_name and "return" not in by_name
+    finally:
+        conn.close()
+
+
+def test_symbol_contracts_never_reveals_a_repo_outside_the_allowlist(tmp_path):
+    """It takes arbitrary source TEXT, which is exactly the shape that leaks a
+    private definition if the allowlist is skipped: the caller names any
+    identifier and gets back where it lives."""
+    conn = open_db(tmp_path / "i.db")
+    try:
+        mine = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/mine",
+                                  default_branch="main", http_url="u")
+        theirs = writes.upsert_repo(conn, gitlab_id=2, path_with_namespace="g/secret",
+                                    default_branch="main", http_url="u")
+        for rid, path in ((mine, "a.c"), (theirs, "b.c")):
+            fid = writes.upsert_file(conn, repo_id=rid, path=path, lang="c",
+                                     size=1, blob_sha=f"s{rid}", content="x")
+            conn.execute(
+                "INSERT INTO symbols (repo_id, file_id, name, kind, line, "
+                "signature, scope, is_public) VALUES (?,?, 'SecretHelper',"
+                "'function', 10, 'void SecretHelper(void)', '', 1)", (rid, fid))
+        conn.commit()
+
+        rows = queries.symbol_contracts([mine], conn, "SecretHelper();")
+        assert [r["repo"] for r in rows] == ["g/mine"], rows
+        assert queries.symbol_contracts([], conn, "SecretHelper();") == []
     finally:
         conn.close()

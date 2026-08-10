@@ -275,6 +275,17 @@ def _scoped(conn, identity, branch: str | None):
     return scoped
 
 
+async def code_contracts_impl(db_path: Path | str, identity: acl.Identity,
+                              source: str, branch: str | None = None,
+                              limit: int = 40) -> list[dict]:
+    """Definition sites for every in-house symbol a source file names."""
+    def _run(conn: Any) -> list[dict]:
+        scoped = _scoped(conn, identity, branch)
+        return queries.symbol_contracts(scoped, conn, source, limit=limit)
+
+    return await run_readonly(db_path, _run)
+
+
 async def find_symbol_impl(db_path: Path | str, identity: acl.Identity, name: str,
                             kind: str | None = None,
                             branch: str | None = None) -> list[dict]:
@@ -645,6 +656,17 @@ _IMPACT_OF_DESC = (
     "change as wide-reaching rather than assuming the list is complete."
 )
 
+_CODE_CONTRACTS_DESC = (
+    "Paste a source file and get where every IN-HOUSE symbol it references is "
+    "defined -- file, line, signature, visibility -- from this organisation's "
+    "own indexed code. Use this FIRST when reading or editing a file, "
+    "alongside docs_contracts for the public APIs. Nothing in your training "
+    "knows what this organisation's functions do or return, so without it you "
+    "either open files one at a time hunting for definitions, or guess. Scoped "
+    "to the repositories you may see."
+)
+
+
 _FIND_SYMBOL_DESC = (
     "Find where a named symbol (function, class, method, struct, etc.) is "
     "DEFINED, across the repos you have access to. Answers questions like "
@@ -804,6 +826,20 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
             {"repo_id": repo_id, "path": path, "max_depth": max_depth},
             lambda: impact_of_impl(db_path, identity, repo_id, path,
                                    max_depth=max_depth),
+        )
+
+    @server.tool(name="code_contracts", description=_CODE_CONTRACTS_DESC)
+    async def code_contracts(source: str, branch: str | None = None, *,
+                             ctx: Context) -> list[dict]:
+        identity = _identity(ctx)
+        # Audited like every other private-code query. The argument is source
+        # text rather than a name, so the audit row records its length instead
+        # of the text itself -- a whole file in the audit log is a second copy
+        # of the code, in a table kept for far longer.
+        return await _with_audit(
+            db_path, "code_contracts", identity,
+            {"source_chars": len(source or ""), "branch": branch},
+            lambda: code_contracts_impl(db_path, identity, source, branch=branch),
         )
 
     @server.tool(name="find_symbol", description=_FIND_SYMBOL_DESC)
