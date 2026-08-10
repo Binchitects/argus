@@ -914,3 +914,79 @@ also the common one.
 The one regression is worth naming: on an MSVC question the model had right,
 retrieval displaced it. Same mechanism as everywhere else in this document,
 still not fully solved by the relevance filter.
+
+---
+
+# The contracts tools, measured -- and the diagnosis they were built on is wrong
+
+`docs_contracts` and `code_contracts` were built from one observation: asked to
+review a real minifilter, the model asserted an IRQL it had invented and built
+seven findings on it. The reasoning was that `docs_verify` catches exactly that
+claim but is invoked least when the error is most confident, so the facts
+should arrive *before* the review instead.
+
+Tested across five real driver files (2,152 lines), three arms, temperature 0:
+
+| arm | wrong IRQL claims | asserted | error rate |
+|---|---|---|---|
+| A closed book | 2 | 2 | **100%** |
+| B tools offered, model chooses | 4 | 4 | **100%** |
+| C contract sheet injected | 8 | 16 | **50%** |
+
+Two results, and the second is the important one.
+
+## Offering a tool does nothing. Eight tasks, zero calls.
+
+Arm B had native function calling, the server's instructions in the system
+message, and a `docs_contracts` description reading "use FIRST on any code
+task". It called nothing, on all five files, as it called nothing on the three
+review tasks before them.
+
+That is now measured enough times to state plainly: **an agent that must
+decide to check will not.** Anything the packs are to contribute has to be put
+in front of the model, not offered to it.
+
+## The facts do not help when they ARE in front of it
+
+Arm C had the correct contract for every API in the file, in the prompt, and
+still got eight claims wrong:
+
+```
+FltRegisterFilter:            said PASSIVE_LEVEL, documented <= APC_LEVEL
+ExInitializeLookasideListEx:  said PASSIVE_LEVEL, documented <= DISPATCH_LEVEL
+KeGetCurrentIrql:             said PASSIVE_LEVEL, documented Any level
+```
+
+The error rate halves, 100% to 50%, which is real. But the absolute count
+*rises*, because the sheet emboldens the model to assert four times as many
+facts, and half of those are wrong anyway.
+
+**So the diagnosis behind these tools was wrong.** The model was not asserting
+PASSIVE_LEVEL because it could not recall the documented value. It asserts
+PASSIVE_LEVEL because that is the prior for anything shaped like
+initialisation, and a correct value three lines above in the prompt does not
+interrupt the completion. Retrieval cannot fix a prior.
+
+In fairness to the model, "PASSIVE_LEVEL" where the documentation says
+`<= APC_LEVEL` is an over-restriction rather than an inversion -- PASSIVE_LEVEL
+is inside the permitted range. It is still wrong as a contract claim, and it is
+exactly the error that flags correct code as buggy.
+
+## What this changes
+
+`docs_contracts` and `code_contracts` stay: halving an error rate is worth
+having, they cost one call, and the retrieval they do is correct. But they are
+not the anti-hallucination mechanism this document previously implied.
+
+What the numbers actually support:
+
+* **Injection over invitation** -- for every tool, not just these.
+* **Do not let a model state a contract in prose.** The reliable path is the
+  one already measured at 84%: ask a direct question, take the documented
+  string, and put THAT in the output. The moment the model paraphrases a
+  contract into a review sentence, its prior competes with the fact and
+  sometimes wins.
+* **A checkable claim is worth more than a hedge.** Arm C asserted 16 facts to
+  arm A's 2. Half were wrong, but all 16 were falsifiable against the packs in
+  milliseconds -- which is how this table exists at all. A reviewer that says
+  "check the IRQL here" is never wrong and never useful.
