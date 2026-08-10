@@ -7,6 +7,7 @@ adapter here is what makes it buildable.
 from .base import ApiSymbol, Doc, Source
 from .composite import ScriptingDocs, Win32WithSamples, WdkWithSamples
 from .code_samples import AlgorithmsCpp, WindowsClassicSamples, WindowsDriverSamples
+from .debugger_docs import DebuggerDocs
 from .microsoft_docs import CppDocs, WdkDdi, Win32Api
 from .system_design import SystemDesignPrimer
 from .python_docs import PythonDocs
@@ -33,6 +34,10 @@ SOURCES: dict[str, type] = {
     "win32-samples": WindowsClassicSamples,
     "algorithms": AlgorithmsCpp,
     "system-design": SystemDesignPrimer,
+    # WinDbg command reference AND the debugging how-to articles: a question
+    # about a crash rarely arrives already sorted into "which command" and
+    # "how do I get a dump".
+    "debugger": DebuggerDocs,
     # PowerShell + cmd + Unix tools in one pack: a scripting question
     # does not arrive already sorted by shell.
     "scripting": ScriptingDocs,
@@ -42,5 +47,6 @@ __all__ = [
     "ApiSymbol", "Doc", "Source", "PythonDocs", "ReactDocs",
     "CppDocs", "Win32Api", "WdkDdi", "WindowsDriverSamples",
     "WindowsClassicSamples", "AlgorithmsCpp", "SystemDesignPrimer",
-    "Win32WithSamples", "WdkWithSamples", "ScriptingDocs", "SOURCES",
+    "Win32WithSamples", "WdkWithSamples", "ScriptingDocs", "DebuggerDocs",
+    "SOURCES",
 ]

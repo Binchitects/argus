@@ -33,7 +33,13 @@ from .base import ApiSymbol, Doc
 _FRONT_MATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
 _SCALAR = re.compile(r"^([A-Za-z_][\w.\-]*)\s*:\s*(.*)$")
 _JSON_LIST = re.compile(r'"([^"]+)"')
-_BLOCK_ITEM = re.compile(r'^\s+-\s+(.*)$')
+#: A block-sequence item. The leading indent is OPTIONAL: YAML allows a
+#: sequence to sit at its key's own indentation, and the debugger docset uses
+#: exactly that -- `api_name:` followed by `- analyze` at column 0. Requiring
+#: indent here parsed every indented repo correctly and silently dropped the
+#: whole list on the unindented ones, which surfaces as a name that never
+#: resolves rather than as an error.
+_BLOCK_ITEM = re.compile(r'^[ \t]*-\s+(.*)$')
 #: The fenced block under "## Syntax" -- the declaration, not prose about it.
 _SYNTAX = re.compile(
     r"^##\s+Syntax\s*$.*?^```(?:\w+)?\s*$(.*?)^```", re.MULTILINE | re.DOTALL)
