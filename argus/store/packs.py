@@ -165,8 +165,57 @@ def lookup_symbol(
             }))
 
     results.sort(key=lambda row: _authority(row, name))
+    if len(results) > 1:
+        results.sort(key=lambda row: (_authority(row, name)[:2],
+                                      -_namespace_breadth(packs, row)))
     return results[:limit]
 
+
+
+#: How many symbols each (pack, namespace) documents. Computed once per pack
+#: and cached: it is a single GROUP BY over a table already indexed by name,
+#: and lookup_symbol runs on every agent call.
+_BREADTH_CACHE: dict[tuple[str, str], int] = {}
+
+
+def _namespace_breadth(packs: Sequence[Pack], row: dict[str, Any]) -> int:
+    """How many symbols the defining header documents, as a proxy for canonical.
+
+    Microsoft documents the same macro under every header that happens to pull
+    it in. `RtlZeroMemory` has five pages -- scsi.h, smclib.h, minitape.h,
+    ntddstor.h and wdm.h -- all identical, and the ranking before this picked
+    whichever had the shortest path, which is arbitrary. On a real minifilter
+    it returned `Header: minitape.h` for a call in a file with no tape drive
+    anywhere near it: exact, correctly attributed, and useless.
+
+    Breadth is the signal that separates them without a hand-written list of
+    "important" headers. wdm.h documents thousands of routines because it is
+    the general kernel header; minitape.h documents a handful because it is
+    for tape miniports. The header that documents more is the one a reader
+    means, and this generalises to corpora nobody here has seen -- a Python
+    pack would rank `os` above a niche module for the same reason.
+    """
+    source = str(row.get("source", ""))
+    namespace = str(row.get("namespace", ""))
+    if not namespace:
+        return 0
+    key = (source, namespace)
+    if key in _BREADTH_CACHE:
+        return _BREADTH_CACHE[key]
+
+    total = 0
+    for pack in packs:
+        if pack.name != source:
+            continue
+        try:
+            rows = _query(pack, "SELECT COUNT(*) AS n FROM api_symbols "
+                                "WHERE namespace = ?", (namespace,))
+            total = int(rows[0]["n"]) if rows else 0
+        except PackQueryError:
+            total = 0
+        break
+    _BREADTH_CACHE[key] = total
+    return total
 
 
 def _authority(row: dict[str, Any], name: str) -> tuple:

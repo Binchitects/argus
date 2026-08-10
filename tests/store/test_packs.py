@@ -683,3 +683,58 @@ def test_api_contracts_returns_the_facts_a_reviewer_would_otherwise_recall(tmp_p
         assert "InsertHeadList" not in by_name
     finally:
         packs.close_packs(opened)
+
+
+def test_a_name_documented_under_many_headers_resolves_to_the_general_one(tmp_path):
+    """Microsoft documents the same macro under every header that pulls it in.
+    RtlZeroMemory has six pages in the WDK corpus -- wdm.h, storport.h,
+    ntddstor.h, minitape.h, scsi.h, smclib.h -- all identical. Ranking by path
+    length picked whichever sorted shortest, so a minifilter with no tape drive
+    near it was told `Header: minitape.h`: exact, attributed, and useless.
+
+    Breadth separates them without a hand-written list of important headers:
+    the general header documents thousands of routines, the niche one a
+    handful. Measured on the real pack, wdm 2292 against minitape 196.
+    """
+    from argus.packs import format as pack_format
+    path = tmp_path / "b.arguspack"
+    conn = pack_format.create_pack(path)
+    comp = zstandard.ZstdCompressor()
+
+    def add(name, ns, path_):
+        cur = conn.execute(
+            "INSERT INTO docs (path, title, url, lang, content, content_len) "
+            "VALUES (?, ?, ?, 'md', ?, 0)",
+            (path_, name, f"https://x/{path_}", comp.compress(b"b")))
+        conn.execute(
+            "INSERT INTO api_symbols (name, kind, namespace, doc_id, anchor, signature) "
+            "VALUES (?, 'function', ?, ?, '', ?)",
+            (name, ns, cur.lastrowid, f"Header: {ns}.h"))
+
+    # The niche header's page has the SHORTER path, so the old ordering picked
+    # it. Only breadth can overrule that.
+    # Same nf-<header>-<name> convention as the real corpus, so the
+    # "page named after the symbol" rule ties and cannot mask the tiebreak
+    # under test. Shorter path, so the old length ordering picked it.
+    add("RtlZeroMemory", "tp", "ddi/tp/nf-tp-rtlzeromemory.md")
+    add("RtlZeroMemory", "wdm", "ddi/wdm/nf-wdm-rtlzeromemory.md")
+    for i in range(30):
+        add(f"KeOther{i}", "wdm", f"ddi/wdm/other{i}.md")
+    add("TapeOnly", "tp", "ddi/tp/nf-tp-tapeonly.md")
+
+    pack_format.write_meta(
+        conn, source_name="b", source_repo="r", source_branch="b",
+        source_commit="c", license="MIT", license_url="u", attribution="a",
+        embedding_model=EMBED_MODEL, embedding_dim=EMBED_DIM, builder_version=1,
+        pack_version="1.0", doc_count=33, chunk_count=0, symbol_count=33,
+        unresolved_symbol_count=0)
+    conn.commit(); conn.close()
+
+    packs._BREADTH_CACHE.clear()
+    opened = packs.open_packs([path])
+    try:
+        rows = packs.lookup_symbol(opened, "RtlZeroMemory")
+        assert rows[0]["namespace"] == "wdm", [r["namespace"] for r in rows]
+    finally:
+        packs.close_packs(opened)
+        packs._BREADTH_CACHE.clear()
