@@ -55,12 +55,31 @@ the API and state its documented requirement explicitly.
 ```
 """
 
-#: "ExAllocateFromLookasideListEx ... PASSIVE_LEVEL" -- an asserted IRQL for a
-#: named API, which is exactly the claim shape that produced seven false
-#: findings and exactly what the packs can adjudicate.
+#: A CONTRACT claim: the review asserts what IRQL an API requires.
+#:
+#: The first version accepted any API within 120 characters of an IRQL token,
+#: and over-counted badly. Driver code is full of
+#: `NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL)`, so a review correctly
+#: describing that assertion scored as a false claim about
+#: KeGetCurrentIrql's own contract -- a statement about a CALL SITE, not about
+#: a requirement. It accounted for at least 3 of one arm's 10 "errors".
+#:
+#: A contract verb between the two is what separates them: "must be called at",
+#: "requires", "is callable at". A bare mention no longer counts.
 CLAIM_RE = re.compile(
     r"\b((?:Flt|Io|Ke|Ex|Rtl|Ob|Ps|Mm|Zw|Nt|Fs)[A-Z][A-Za-z0-9]{3,})\b"
-    r"[^.\n]{0,120}?\b(PASSIVE_LEVEL|APC_LEVEL|DISPATCH_LEVEL)\b")
+    r"[^.\n]{0,80}?"
+    r"\b(?:must (?:be )?(?:only )?(?:be )?call\w*|requires?|required|callable|"
+    r"can only be called|may only be called|is documented|documented as|"
+    r"runs? at|executes? at|IRQL(?: requirement)?(?: is)?)\b"
+    r"[^.\n]{0,60}?\b(PASSIVE_LEVEL|APC_LEVEL|DISPATCH_LEVEL)\b")
+
+#: KeGetCurrentIrql READS the IRQL; a review naming it beside a level is
+#: almost always describing an assertion in the code rather than claiming a
+#: requirement of the routine. Its documented contract is "Any level", so any
+#: level named near it scores wrong under a naive rule.
+_NOT_A_CONTRACT_SUBJECT = frozenset({"KeGetCurrentIrql", "KeRaiseIrql",
+                                     "KeLowerIrql"})
 
 SCHEMAS = [
     {"type": "function", "function": {"name": "docs_lookup",
@@ -106,6 +125,8 @@ async def wrong_claims(review: str) -> tuple[int, int, list[str]]:
         asserted = wrong = 0
         detail = []
         for api, level in CLAIM_RE.findall(review or ""):
+            if api in _NOT_A_CONTRACT_SUBJECT:
+                continue
             hits = packs_store.lookup_symbol(opened, api, limit=1)
             if not hits:
                 continue
@@ -171,9 +192,28 @@ async def main() -> None:
                "content": f"Documented contracts for every API in this file:\n"
                           f"{lines}\n\n{prompt}"}], None).get("content", "")
 
+    print("=== D: contracts injected + quote verbatim ===", flush=True)
+    # The failure arm C exposed: the model paraphrases a documented contract
+    # into a review sentence, and its prior ("initialisation routine ->
+    # PASSIVE_LEVEL") competes with the fact and wins about half the time.
+    # This forbids the paraphrase. Quoting is a copy; restating is a
+    # completion, and only one of the two can be wrong.
+    quote_rule = (
+        "RULE: whenever you state an IRQL, header or library requirement, "
+        "COPY the exact string from the contract list verbatim, in backticks, "
+        "and name the API it belongs to. Never restate a requirement in your "
+        "own words and never infer one from what the routine appears to do. "
+        "If an API is not in the list, say its requirement is not documented "
+        "here rather than supplying one.\n\n")
+    d_text = chat([{"role": "user",
+                    "content": f"Documented contracts for every API in this "
+                               f"file:\n{lines}\n\n{quote_rule}{prompt}"}],
+                  None).get("content", "")
+
     print("\n=== asserted IRQL facts that the packs CONTRADICT ===")
     for label, text in (("A closed book", a), ("B tools offered", b),
-                        ("C contracts injected", c)):
+                        ("C contracts injected", c),
+                        ("D contracts + quote", d_text)):
         asserted, wrong, detail = await wrong_claims(text)
         print(f"  {label:22} {wrong} wrong of {asserted} asserted")
         for d in detail[:3]:
@@ -181,4 +221,8 @@ async def main() -> None:
     print(f"\n  arm B tool calls: {calls or '(none)'}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    # Guarded so the grader can be imported and unit-tested without the whole
+    # run firing on import -- which is how a sanity check of CLAIM_RE turned
+    # into an IndexError on sys.argv.
+    asyncio.run(main())

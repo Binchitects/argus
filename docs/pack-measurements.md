@@ -917,18 +917,81 @@ still not fully solved by the relevance filter.
 
 ---
 
-# The contracts tools, measured -- and the diagnosis they were built on is wrong
+# The contracts tools, measured -- and the fix that works
 
 `docs_contracts` and `code_contracts` were built from one observation: asked to
-review a real minifilter, the model asserted an IRQL it had invented and built
-seven findings on it. The reasoning was that `docs_verify` catches exactly that
-claim but is invoked least when the error is most confident, so the facts
-should arrive *before* the review instead.
+review a real minifilter, the model asserted an IRQL it had invented. The
+reasoning was that `docs_verify` catches exactly that claim but is invoked
+least when the error is most confident, so the facts should arrive *before* the
+review instead.
 
-Tested across five real driver files (2,152 lines), three arms, temperature 0:
+Five real driver files (2,152 lines), four arms, temperature 0. Every claim of
+the form "API *requires* IRQL" is extracted and adjudicated against the packs,
+so what is counted is objective.
 
-| arm | wrong IRQL claims | asserted | error rate |
+| arm | wrong | asserted | error rate |
 |---|---|---|---|
+| A closed book | 1 | 1 | **100%** |
+| B tools offered, model chooses | 1 | 1 | **100%** |
+| C contract sheet injected | 4 | 12 | **33%** |
+| **D sheet injected + quote verbatim** | **0** | **18** | **0%** |
+
+## Supplying the facts halves the error rate. Forbidding the paraphrase removes it.
+
+Arm C had the correct contract for every API in the prompt and still got a
+third of its claims wrong -- `FltRegisterFilter` asserted as PASSIVE_LEVEL
+against a documented `<= APC_LEVEL`, with `<= APC_LEVEL` sitting a few lines
+above in the same prompt.
+
+Arm D adds one rule: copy the documented string verbatim, name the API it
+belongs to, never restate it in your own words, and if an API is absent say so
+rather than supplying a requirement. Eighteen contract claims, none wrong.
+
+The mechanism is that **quoting is a copy and restating is a completion.**
+Paraphrasing re-enters generation, where a prior -- "initialisation routine
+means PASSIVE_LEVEL" -- competes with the fact and wins about a third of the
+time. Copying gives it nowhere to compete.
+
+Arm D is also the *most* assertive arm, 18 claims against arm A's 1, so it did
+not earn its score by hedging. That was the failure mode to watch for: a
+reviewer that says "check the IRQL here" is never wrong and never useful.
+
+This rule now ships in `SERVER_INSTRUCTIONS`, so every MCP client receives it
+at connect time.
+
+## Offering a tool still does nothing
+
+Arm B had native function calling, the server's instructions, and a
+`docs_contracts` description reading "use FIRST on any code task". It called
+nothing, on all five files, as it called nothing on the three review tasks
+before them. Eight tasks, zero calls.
+
+**An agent that must decide to check will not.** Anything the packs contribute
+has to be put in front of the model, not offered to it.
+
+## The grader was wrong first, and it inverted the conclusion
+
+An earlier version of this section reported arm D at 10 wrong of 31 and
+concluded "retrieval cannot fix a prior". That was the measurement, not the
+model.
+
+The claim extractor accepted any API within 120 characters of an IRQL token.
+Driver code is full of `NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL)`, so a
+review *correctly* describing that assertion scored as a false claim about
+`KeGetCurrentIrql`'s own contract -- a statement about a call site, not a
+requirement.
+
+Requiring a contract verb between the API and the level ("must be called at",
+"requires", "is callable at"), and excluding the routines that read or change
+IRQL as subjects, took arm D from 10 wrong to **0**. The conclusion reversed
+completely.
+
+Two things worth keeping from that: a harness that cannot be imported cannot
+be unit-tested -- this one ran `asyncio.run(main())` at import, so checking the
+regex fired the whole twenty-minute evaluation -- and a grader that has never
+been shown a case it should reject is not a grader.
+
+---|---|---|---|
 | A closed book | 2 | 2 | **100%** |
 | B tools offered, model chooses | 4 | 4 | **100%** |
 | C contract sheet injected | 8 | 16 | **50%** |

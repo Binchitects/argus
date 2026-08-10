@@ -268,8 +268,21 @@ turns on one of those, check it here before answering rather than after.
   the documentation contradicts, so it cannot overwrite something you had
   right.
 
-Use retrieved documentation to correct yourself, not to replace what you
-already know: where these tools are silent, your own answer stands."""
+When you state an API's requirement -- an IRQL, a header, a library, an error
+code -- COPY the documented string verbatim and name the API it belongs to.
+Do not restate it in your own words and do not infer one from what a routine
+appears to do. If these tools are silent on an API, say its requirement is not
+documented rather than supplying one.
+
+That rule is the single largest measured effect here. Across five real driver
+files, contract claims made from memory were wrong 100% of the time, and
+claims made with the documented facts present but paraphrased were wrong 33%
+of the time. Quoted verbatim, 18 claims were wrong 0 times. Paraphrasing
+re-enters generation, where a prior like "initialisation routine means
+PASSIVE_LEVEL" competes with the fact and often wins; copying does not.
+
+Otherwise use retrieved documentation to correct yourself, not to replace what
+you already know: where these tools are silent, your own answer stands."""
 
 
 class _ArgusFastMCP(FastMCP):

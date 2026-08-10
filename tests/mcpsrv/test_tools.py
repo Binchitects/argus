@@ -698,3 +698,26 @@ def test_the_example_client_uses_the_server_instructions_and_native_calling():
     # A client that drops a tool error mid-task ends the task; handing it back
     # lets the model pick another tool.
     assert "tool error" in source
+
+
+def test_server_instructions_demand_verbatim_quoting():
+    """The single largest measured effect in this project. Across five real
+    driver files, contract claims made from memory were wrong 100% of the
+    time; made with the documented facts present but paraphrased, 33%; quoted
+    verbatim, 18 claims were wrong 0 times.
+
+    Paraphrasing re-enters generation, where a prior like "initialisation
+    routine means PASSIVE_LEVEL" competes with the fact and often wins.
+    Copying does not. A client that drops this text loses the effect, so it
+    must survive edits to the surrounding prose."""
+    from argus.mcpsrv import server
+    # Whitespace-normalised: the instructions are hard-wrapped prose, so a
+    # phrase this test looks for can straddle a newline. Matching the raw
+    # string failed on "not\ndocumented" -- a test that breaks when someone
+    # rewraps a paragraph is testing the line breaks, not the rule.
+    text = " ".join(server.SERVER_INSTRUCTIONS.lower().split())
+    assert "verbatim" in text
+    assert "do not restate" in text or "not restate" in text
+    # The escape hatch matters as much: forbidding paraphrase without it just
+    # pushes the model to invent contracts for APIs the tools do not cover.
+    assert "not documented" in text
