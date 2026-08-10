@@ -63,7 +63,15 @@ def fetch_source(source: Source, dest: Path) -> str:
     through the GitLab-shaped mirroring in ``argus.mirror`` -- that machinery
     exists for token injection and ACL, neither of which applies here.
     """
-    dest = Path(dest)
+    # Resolved because the clone below runs with ``cwd=dest.parent``: git
+    # would interpret a RELATIVE dest against that cwd and clone into
+    # ``dest.parent / dest``. With `--work-dir deploy/work/sources/algorithms`
+    # the checkout landed at
+    # ``deploy/work/sources/deploy/work/sources/algorithms`` -- a correct
+    # clone at a path nothing looks in, so the build then reported the
+    # work-dir "is not a git checkout". Absolute paths were never affected,
+    # which is why every earlier build was fine.
+    dest = Path(dest).resolve()
     if (dest / ".git").is_dir():
         _git(dest, "fetch", "--depth", "1", "origin", source.branch)
         _git(dest, "checkout", "--force", "FETCH_HEAD")

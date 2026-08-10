@@ -412,3 +412,55 @@ def test_rebuilding_over_a_good_pack_replaces_it(tmp_path):
     leftover = [p for p in tmp_path.iterdir() if p.name != ".embcache.db"]
     assert leftover == [out], leftover
     assert not list(tmp_path.glob("*.building")), "a temp pack survived"
+
+
+class _FakeSource:
+    """Enough of a Source for fetch_source; no adapter behaviour is exercised."""
+
+    repo_url = "https://example.invalid/repo.git"
+    branch = "main"
+
+
+def test_fetch_source_clones_into_the_given_dir_not_a_nested_copy(
+    tmp_path, monkeypatch
+):
+    """A RELATIVE work-dir must not clone into ``dest.parent / dest``.
+
+    The clone runs with ``cwd=dest.parent``, so git resolves a relative target
+    against that cwd. A work-dir of ``sources/algorithms`` therefore produced
+    ``sources/sources/algorithms``: a correct checkout at a path the builder
+    never looks in, so the build failed with "is not a git checkout" while the
+    clone had plainly succeeded. Absolute work-dirs were never affected, which
+    is how this survived every real build.
+    """
+    calls: list[tuple[Path, tuple[str, ...]]] = []
+    monkeypatch.setattr(build, "_git", lambda cwd, *a: calls.append((Path(cwd), a)))
+    monkeypatch.setattr(build, "resolve_commit", lambda d: "a" * 40)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "sources").mkdir()
+
+    build.fetch_source(_FakeSource(), Path("sources/algorithms"))
+
+    cwd, args = calls[0]
+    assert args[0] == "clone"
+    # Resolve the target the way git itself would -- against the clone's cwd.
+    # An absolute target is unaffected by the join; a relative one doubles.
+    landed = (cwd / Path(args[-1])).resolve()
+    assert landed == (tmp_path / "sources" / "algorithms").resolve(), (
+        f"clone would land at {landed}"
+    )
+
+
+def test_fetch_source_updates_an_existing_checkout_in_place(tmp_path, monkeypatch):
+    """An existing checkout is fetched and reset, never re-cloned."""
+    calls: list[tuple[Path, tuple[str, ...]]] = []
+    monkeypatch.setattr(build, "_git", lambda cwd, *a: calls.append((Path(cwd), a)))
+    monkeypatch.setattr(build, "resolve_commit", lambda d: "b" * 40)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "sources" / "algorithms" / ".git").mkdir(parents=True)
+
+    build.fetch_source(_FakeSource(), Path("sources/algorithms"))
+
+    assert [a[0] for _, a in calls] == ["fetch", "checkout"]
+    for cwd, _ in calls:
+        assert cwd == (tmp_path / "sources" / "algorithms").resolve()
