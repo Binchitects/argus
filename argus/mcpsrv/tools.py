@@ -432,6 +432,15 @@ async def docs_find_impl(packs_dir: Path | str, description: str,
     )
 
 
+async def docs_contracts_impl(packs_dir: Path | str, source: str,
+                              limit: int = 40) -> list[dict]:
+    """Documented contracts for every API a source file names."""
+    return await run_packs(
+        packs_dir,
+        lambda opened: packs_store.api_contracts(opened, source, limit=limit),
+    )
+
+
 async def docs_verify_impl(packs_dir: Path | str, text: str,
                            limit: int = 40) -> list[dict]:
     """Check a draft against the packs, returning only what it gets wrong."""
@@ -529,6 +538,20 @@ _DOCS_FIND_DESC = (
     "stores per symbol, so it returns commands rather than pages. Measured: "
     "on description-shaped questions it answers 29 of 30 correctly, where the "
     "best prompt strategy over page search reached 18."
+)
+
+
+_DOCS_CONTRACTS_DESC = (
+    "Paste a source file and get the documented header, library, DLL and IRQL "
+    "of every API it calls -- in ONE call, before you review or modify it. "
+    "Use this FIRST on any code-reading task. It is not a judgement and not a "
+    "search: it is the contract sheet for what the code actually invokes, so "
+    "you never have to recall an IRQL or a .lib from memory. Measured: asked "
+    "to review a real minifilter without it, a model produced seven findings, "
+    "every one resting on a single remembered claim that "
+    "ExAllocateFromLookasideListEx requires PASSIVE_LEVEL. It is documented "
+    "<= DISPATCH_LEVEL. Seven wrong bug reports from one unchecked fact, and "
+    "this call returns that fact in the first line of its output."
 )
 
 
@@ -743,6 +766,11 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
     async def docs_find(description: str, lang: str | None = None) -> list[dict]:
         # Public documentation: no identity, no allowlist, no audit row.
         return await docs_find_impl(packs_dir, description, lang=lang)
+
+    @server.tool(name="docs_contracts", description=_DOCS_CONTRACTS_DESC)
+    async def docs_contracts(source: str) -> list[dict]:
+        # Public documentation: no identity, no allowlist, no audit row.
+        return await docs_contracts_impl(packs_dir, source)
 
     @server.tool(name="docs_verify", description=_DOCS_VERIFY_DESC)
     async def docs_verify(text: str) -> list[dict]:

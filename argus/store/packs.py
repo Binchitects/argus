@@ -670,6 +670,66 @@ def search_symbols(packs: Sequence[Pack], query: str, lang: str | None = None,
     return [row for _, row in scored[:limit]]
 
 
+#: Identifiers worth looking up in a source file: CamelCase API names with a
+#: subsystem prefix, and PowerShell-style Verb-Noun cmdlets. Deliberately not
+#: every capitalised word -- a struct field or a local named `Status` is noise.
+_SOURCE_API_RE = re.compile(
+    r"\b(?:[A-Z][a-z0-9]+){2,}[A-Za-z0-9_]*\b"
+    r"|\b[A-Z][a-z]+-[A-Z][a-z]+\b"
+)
+
+#: Called constantly, documented nowhere useful, and they crowd out the APIs a
+#: reviewer actually needs the contract for.
+_CONTRACT_NOISE = frozenset({
+    "ContainingRecord", "InitializeListHead", "InsertHeadList", "RemoveEntryList",
+    "RemoveHeadList", "IsListEmpty", "InsertTailList", "ListEntry",
+    "InterlockedIncrement", "InterlockedDecrement", "InterlockedExchange",
+})
+
+
+def api_contracts(packs: Sequence[Pack], source: str,
+                  limit: int = 40) -> list[dict[str, Any]]:
+    """Every documented API named in a source file, with its real contract.
+
+    The measured problem this solves. Asked to review a real minifilter, the
+    model produced seven findings, all resting on one remembered claim --
+    that ExAllocateFromLookasideListEx requires PASSIVE_LEVEL. It is
+    documented `<= DISPATCH_LEVEL`. Seven bug reports from one unchecked fact.
+
+    `docs_verify` catches exactly that claim, and would have caught all seven.
+    It was never called: the model had no reason to doubt itself, which is the
+    one thing a confident model never spontaneously does. A tool that must be
+    invoked *because you suspect an error* is invoked least when the error is
+    most confident.
+
+    So this inverts it. One call, before reviewing, returns the header,
+    library, DLL and IRQL of every API the file mentions -- facts rather than
+    a judgement, obtained without the model having to suspect anything. It is
+    the reviewer's own first step, which is reading the contracts of what the
+    code calls.
+
+    Ordered by how often each name appears, so a file's central APIs lead
+    rather than whatever sorts first.
+    """
+    counts: dict[str, int] = {}
+    for name in _SOURCE_API_RE.findall(source or ""):
+        if len(name) < 6 or name in _CONTRACT_NOISE:
+            continue
+        counts[name] = counts.get(name, 0) + 1
+
+    out: list[dict[str, Any]] = []
+    for name in sorted(counts, key=lambda n: (-counts[n], n)):
+        hits = lookup_symbol(packs, name, limit=1)
+        if not hits:
+            continue
+        row = dict(hits[0])
+        row["mentions"] = counts[name]
+        out.append(row)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def select_packs(packs: Sequence[Pack], lang: str | None) -> list[Pack]:
     """Filter packs by source.
 

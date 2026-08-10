@@ -622,3 +622,64 @@ def test_a_query_of_only_stopwords_returns_nothing(tmp_path):
         assert packs.search_symbols(opened, "the of and to in") == []
     finally:
         packs.close_packs(opened)
+
+
+def test_api_contracts_returns_the_facts_a_reviewer_would_otherwise_recall(tmp_path):
+    """The measured failure this exists for: reviewing a real minifilter, the
+    model produced seven findings, all resting on one remembered claim that
+    ExAllocateFromLookasideListEx requires PASSIVE_LEVEL. It is documented
+    <= DISPATCH_LEVEL.
+
+    docs_verify catches that claim and would have caught all seven -- it was
+    never called, because a confident model has no reason to suspect itself.
+    This inverts it: the facts arrive before the review, without the model
+    having to doubt anything first.
+    """
+    from argus.packs import format as pack_format
+    path = tmp_path / "k.arguspack"
+    conn = pack_format.create_pack(path)
+    comp = zstandard.ZstdCompressor()
+    # InsertHeadList IS documented, so without the noise filter it would be
+    # returned -- the filter has to be what excludes it, not its absence.
+    for name, sig in (
+            ("ExAllocateFromLookasideListEx", "Header: wdm.h; IRQL: <= DISPATCH_LEVEL"),
+            ("FltAcquirePushLockShared", "Header: fltkernel.h; IRQL: <= APC_LEVEL"),
+            ("InsertHeadList", "Header: wdm.h; IRQL: Any level")):
+        cur = conn.execute(
+            "INSERT INTO docs (path, title, url, lang, content, content_len) "
+            "VALUES (?, ?, ?, 'md', ?, 0)",
+            (f"{name}.md", name, f"https://x/{name}", comp.compress(b"b")))
+        conn.execute(
+            "INSERT INTO api_symbols (name, kind, namespace, doc_id, anchor, signature) "
+            "VALUES (?, 'function', 'wdm', ?, '', ?)", (name, cur.lastrowid, sig))
+    pack_format.write_meta(
+        conn, source_name="k", source_repo="r", source_branch="b", source_commit="c",
+        license="MIT", license_url="u", attribution="a", embedding_model=EMBED_MODEL,
+        embedding_dim=EMBED_DIM, builder_version=1, pack_version="1.0",
+        doc_count=2, chunk_count=0, symbol_count=2, unresolved_symbol_count=0)
+    conn.commit(); conn.close()
+
+    # FltAcquirePushLockShared is mentioned MORE but sorts alphabetically
+    # LATER, so only mention-count ordering can put it first. Alphabetical
+    # order would give the same answer if the counts matched.
+    source = """
+    FltAcquirePushLockShared(&a->Lock);
+    FltAcquirePushLockShared(&b->Lock);
+    FltAcquirePushLockShared(&c->Lock);
+    ent = ExAllocateFromLookasideListEx(&gAv.EntryLookaside);
+    InsertHeadList(head, &ent->HashLink);
+    """
+    opened = packs.open_packs([path])
+    try:
+        rows = packs.api_contracts(opened, source)
+        by_name = {r["name"]: r for r in rows}
+        assert "ExAllocateFromLookasideListEx" in by_name
+        assert "DISPATCH_LEVEL" in by_name["ExAllocateFromLookasideListEx"]["signature"]
+        # Ordered by how often the file calls it, so a file's central APIs lead.
+        assert rows[0]["name"] == "FltAcquirePushLockShared"
+        assert rows[0]["mentions"] == 3
+        # List macros are called constantly and documented nowhere useful; they
+        # would crowd out the APIs whose contract actually matters.
+        assert "InsertHeadList" not in by_name
+    finally:
+        packs.close_packs(opened)
