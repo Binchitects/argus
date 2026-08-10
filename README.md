@@ -154,7 +154,7 @@ Argus ships in phases, each ending somewhere genuinely usable.
 | **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | ✅ **Complete** |
 | **4 — Semantic layer** | Selective embeddings over private code, `semantic_search` | Planned |
 
-**559 tests**, passing locally, 0 skipped.
+**673 tests**, passing locally, 0 skipped.
 
 Health indicators, how they are measured, and the charts behind them are in [`docs/kpis.md`](docs/kpis.md) — every figure measured, none estimated.
 
@@ -380,11 +380,36 @@ Suffix matching gets *better* with scale, not worse. `which_repo` stayed flat
 only because an indexed `basename` column replaced a full scan; before that,
 the p95 was 15.5 ms and rising linearly.
 
+### Getting the tools in front of the model
+
+A server the client never asks is worth exactly zero, and that failure is
+quiet. Wiring Argus into Hermes, the tools registered correctly and the model
+still answered "I was unable to locate any documentation" -- because the client
+waits a bounded time for MCP discovery, then snapshots its tool list once.
+
+| phase | time |
+|---|---|
+| Argus answering `initialize` + `tools/list` + `resources/list` + `prompts/list` | **27 ms** |
+| client building its HTTP client and importing the MCP SDK | ~1,040 ms |
+| total discovery, warm / cold | 1.07 s / **2.89 s** |
+| client's wait before snapshotting | **0.75 s** |
+
+Argus is 27 ms of a budget it loses by 320 ms. No server-side tuning wins
+that; an infinitely fast server still loses. The lesson generalises past this
+one client: **measure the handshake from the client's side**, because the
+server's own latency can be a rounding error in what decides whether it gets
+used at all.
+
+Worth stating plainly: a client that reports a server as `configured` has told
+you it parsed the config, not that the model can call anything.
+[docs/deployment.md](docs/deployment.md) has the diagnosis, a one-liner that
+checks whether the tools reached the snapshot, and the fix.
+
 ### Engineering
 
 | | |
 |---|---|
-| tests | **657 passing** |
+| tests | **673 passing** |
 | hollow tests found by targeted revert | **9** |
 | cross-repo edge precision, hand-checked | 13 / 25 -> after fixes, 0 fabricated at weight > 8 |
 

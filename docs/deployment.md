@@ -177,6 +177,67 @@ python deploy/agent_client_example.py https://argus.your-domain/mcp <PAT> \
 It prints each tool call to stderr. If you see `-> docs_lookup(...)` and then
 `Advapi32.lib`, the whole chain works.
 
+### If Hermes lists the server as configured but never calls its tools
+
+The symptom is specific: Hermes shows `argus (http) - configured`, no error
+appears anywhere, and the model answers questions about documented APIs with
+"I was unable to locate any documentation for X". No `docs_*` tool is offered.
+
+This is a startup race inside Hermes, not an Argus fault. Hermes discovers MCP
+tools on a background thread, then waits a bounded time before the agent
+snapshots its tool list **once** and never re-reads it. Discovery that lands
+after the snapshot is invisible for the whole session.
+
+Measured on a healthy local server:
+
+| phase | time |
+|---|---|
+| Argus answering `initialize` + `tools/list` + `resources/list` + `prompts/list` | **27 ms** |
+| building the HTTP client, importing the MCP SDK (client side) | ~1040 ms |
+| **total `discover_mcp_tools()`, warm** | **1.07 s** |
+| **total, cold process** | **2.89 s** |
+| Hermes's wait before snapshotting | **0.75 s** |
+
+Argus is 27 ms of that budget, so no server-side tuning can win the race; an
+infinitely fast server still loses. Two things make the failure silent:
+
+- the discovery thread's exceptions are swallowed into a `debug` log, and
+- the automatic late-refresh net lives in `tui_gateway/server.py` and gates on
+  `tui_gateway`'s own discovery thread. The desktop app starts from
+  `hermes_cli.main dashboard`, which owns a *different* thread in
+  `hermes_cli/mcp_startup.py`. The net reads a thread that was never started,
+  sees `None`, and concludes discovery already finished -- which is exactly
+  what it should conclude in the healthy case, so nothing is logged.
+
+**Immediate workaround, nothing patched:** run `/reload-mcp` in Hermes. It
+performs the same rebuild and the tools appear for that session. Manual, per
+session.
+
+**Durable fix:** raise the wait in `hermes_cli/mcp_startup.py` so it covers a
+cold start. 5 s leaves real headroom over the measured 2.89 s; 1.5 s does not.
+The cost is bounded -- the thread runs once per process and joining a finished
+thread returns immediately, so an unreachable server delays one agent build by
+at most that much, once, and a server that is not configured at all costs
+nothing.
+
+Verify the fix without guessing, in a fresh process:
+
+```bash
+python -c "import logging; from hermes_cli.mcp_startup import \
+start_background_mcp_discovery as s, wait_for_mcp_discovery as w; \
+s(logger=logging.getLogger('v'), thread_name='dashboard-mcp-discovery'); w(); \
+from model_tools import get_tool_definitions as g; \
+print(sorted(n for d in g(quiet_mode=True) \
+for n in [d['function']['name']] if 'argus' in n))"
+```
+
+An empty list means the race is still lost. A list containing
+`mcp_argus_docs_lookup` means the agent will see the tools.
+
+This patch is applied to a vendored install and **will be overwritten when
+Hermes updates.** Re-check it after every upgrade; the `/reload-mcp`
+workaround always works in the meantime.
+
 ---
 
 ## 7. Verify it is actually helping
