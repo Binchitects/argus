@@ -139,6 +139,16 @@ Eleven are built and measured, every one reporting **0 unresolved symbols**:
 
 Zero unresolved symbols is the check worth watching: a symbol whose page is missing still installs, still lists, and simply never resolves. The failure is invisible until somebody looks something up.
 
+**All eleven answer correctly through the real agent.** One question per pack, driven through the actual `hermes -z` CLI — MCP discovery, tool registration, the server's instructions, native function calling, the model — and graded by substring match against a ground-truth token taken from the pack itself, so the verdict does not depend on reading the prose:
+
+| | | | |
+|---|---|---|---|
+| `win32` → `advapi32.lib` | `wdk` → `dispatch_level` | `cpp` → `/std:c++20` | `cppreference` → `amortized` |
+| `debugger` → `.reload` | `scripting` → `/mir` | `python` → `discard` | `react` → `pair` |
+| `sqlite` → `vacuum` | `algorithms` → `sort` | `system-design` → `content delivery` | **11 / 11** |
+
+Latency is the model, not the index: 65 s to 886 s per question on CPU-only inference with 46 tools in the prompt, while retrieval itself is milliseconds. The same `win32` question took 900 s cold and **78.8 s** warm — an 11× swing that is model load, not search. Reproduce with [`evals/run_hermes_packs.py`](evals/run_hermes_packs.py).
+
 Three properties make them worth the format:
 
 **Lookups are exact, not approximate.** Symbols come from the upstream project's own index — Sphinx's `objects.inv` for Python, react.dev's pinned MDX anchors — so `docs_lookup("os.path.join")` resolves to the definition, not to whichever paragraph mentions the name.

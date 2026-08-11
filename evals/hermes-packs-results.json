@@ -1,0 +1,68 @@
+[
+  {
+    "pack": "algorithms",
+    "verdict": "PASS",
+    "seconds": 214.4,
+    "matched": "sort"
+  },
+  {
+    "pack": "cpp",
+    "verdict": "PASS",
+    "seconds": 788.1,
+    "matched": "/std:c++20"
+  },
+  {
+    "pack": "cppreference",
+    "verdict": "PASS",
+    "seconds": 151.3,
+    "matched": "amortized"
+  },
+  {
+    "pack": "debugger",
+    "verdict": "PASS",
+    "seconds": 632.2,
+    "matched": ".reload"
+  },
+  {
+    "pack": "python",
+    "verdict": "PASS",
+    "seconds": 504.4,
+    "matched": "discard"
+  },
+  {
+    "pack": "react",
+    "verdict": "PASS",
+    "seconds": 832.5,
+    "matched": "pair"
+  },
+  {
+    "pack": "scripting",
+    "verdict": "PASS",
+    "seconds": 190.8,
+    "matched": "/mir"
+  },
+  {
+    "pack": "sqlite",
+    "verdict": "PASS",
+    "seconds": 65.1,
+    "matched": "vacuum"
+  },
+  {
+    "pack": "system-design",
+    "verdict": "PASS",
+    "seconds": 310.6,
+    "matched": "content delivery"
+  },
+  {
+    "pack": "wdk",
+    "verdict": "PASS",
+    "seconds": 886.3,
+    "matched": "dispatch_level"
+  },
+  {
+    "pack": "win32",
+    "verdict": "PASS",
+    "seconds": 78.8,
+    "matched": "advapi32.lib"
+  }
+]

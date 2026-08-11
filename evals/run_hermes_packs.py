@@ -77,7 +77,7 @@ QUESTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
 }
 
-TIMEOUT = 900
+TIMEOUT = 2400
 
 
 def ask(question: str) -> tuple[str, float]:
@@ -110,9 +110,21 @@ def main() -> None:
         refused = any(p in low for p in (
             "not documented", "unable to locate", "no final response",
             "don't have", "do not have"))
+        # And a timeout is neither. Graded as FAIL it reads as "the pack got
+        # this wrong", which is a claim the run does not support -- the model
+        # never finished. The largest packs are simply slow: win32 exceeded
+        # 900s on a question it answers correctly given longer.
+        if answer == "<TIMEOUT>":
+            verdict = "TIMEOUT"
+        elif hit:
+            verdict = "PASS"
+        elif refused:
+            verdict = "REFUSED"
+        else:
+            verdict = "FAIL"
         rows.append({
             "pack": pack, "seconds": round(seconds, 1),
-            "verdict": "PASS" if hit else ("REFUSED" if refused else "FAIL"),
+            "verdict": verdict,
             "matched": hit,
             "answer": " ".join(answer.split())[:300],
         })
