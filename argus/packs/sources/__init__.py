@@ -8,6 +8,7 @@ from .base import ApiSymbol, Doc, Source
 from .composite import ScriptingDocs, Win32WithSamples, WdkWithSamples
 from .code_samples import AlgorithmsCpp, WindowsClassicSamples, WindowsDriverSamples
 from .debugger_docs import DebuggerDocs
+from .html_docs import CppReference, SqliteDocs
 from .microsoft_docs import CppDocs, WdkDdi, Win32Api
 from .system_design import SystemDesignPrimer
 from .python_docs import PythonDocs
@@ -38,6 +39,10 @@ SOURCES: dict[str, type] = {
     # about a crash rarely arrives already sorted into "which command" and
     # "how do I get a dump".
     "debugger": DebuggerDocs,
+    # Published as release archives rather than repositories, so both
+    # arrive through the archive fetch path.
+    "sqlite": SqliteDocs,
+    "cppreference": CppReference,
     # PowerShell + cmd + Unix tools in one pack: a scripting question
     # does not arrive already sorted by shell.
     "scripting": ScriptingDocs,
@@ -48,5 +53,6 @@ __all__ = [
     "CppDocs", "Win32Api", "WdkDdi", "WindowsDriverSamples",
     "WindowsClassicSamples", "AlgorithmsCpp", "SystemDesignPrimer",
     "Win32WithSamples", "WdkWithSamples", "ScriptingDocs", "DebuggerDocs",
+    "SqliteDocs", "CppReference",
     "SOURCES",
 ]
