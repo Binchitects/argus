@@ -22,7 +22,11 @@ one; ``fetch_source`` is separate, and the CLI calls it first.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
+import tarfile
+import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -63,6 +67,11 @@ def fetch_source(source: Source, dest: Path) -> str:
     through the GitLab-shaped mirroring in ``argus.mirror`` -- that machinery
     exists for token injection and ACL, neither of which applies here.
     """
+    # A source published as a release artifact rather than a repository takes
+    # the archive path; there is no clone to make and no commit to resolve.
+    if getattr(source, "archive_url", ""):
+        return fetch_archive(source, dest)
+
     # Resolved because the clone below runs with ``cwd=dest.parent``: git
     # would interpret a RELATIVE dest against that cwd and clone into
     # ``dest.parent / dest``. With `--work-dir deploy/work/sources/algorithms`
@@ -84,6 +93,123 @@ def fetch_source(source: Source, dest: Path) -> str:
     return resolve_commit(dest) or ""
 
 
+#: Written into an extracted archive so a rebuild can state provenance without
+#: downloading again. A git checkout answers that question with `git rev-parse`;
+#: an unpacked tarball has nowhere else to keep it.
+ARCHIVE_STAMP = ".argus-archive"
+
+#: Read in chunks: a documentation archive can be hundreds of MB, and hashing
+#: it by slurping the whole thing into memory would be the largest allocation
+#: in the builder.
+_HASH_CHUNK = 1 << 20
+
+
+def _safe_members(names: Sequence[str], kind: str) -> None:
+    """Refuse an archive that would write outside its destination.
+
+    Archive formats let a member name any path, including ``../..`` and
+    absolute roots, so extracting an untrusted archive can overwrite files
+    anywhere the process can write. The packs are built from public
+    documentation, which is exactly the kind of input that is easy to
+    substitute upstream, so this is checked rather than trusted.
+    """
+    for name in names:
+        posix = name.replace("\\", "/")
+        if posix.startswith("/") or posix.startswith("../") or "/../" in posix:
+            raise BuildError(
+                f"refusing to extract {kind} member {name!r}: escapes the "
+                f"destination directory"
+            )
+        if len(posix) > 1 and posix[1] == ":":
+            raise BuildError(
+                f"refusing to extract {kind} member {name!r}: absolute path"
+            )
+
+
+def fetch_archive(source: Source, dest: Path) -> str:
+    """Download and unpack ``source``'s archive into ``dest``.
+
+    The fetch model for documentation that is published as a release artifact
+    rather than a repository. cppreference ships rendered HTML that way -- its
+    git repo holds the build tooling, not the pages -- and SQLite has no docs
+    repository on GitHub at all.
+
+    Provenance is the archive's sha256 rather than a commit. That is what a
+    reader can actually verify: re-download, re-hash, compare. A source may
+    also declare ``archive_sha256``, in which case a mismatch fails the build
+    rather than silently packaging something else.
+    """
+    dest = Path(dest).resolve()
+    url = getattr(source, "archive_url", "")
+    if not url:
+        raise BuildError(f"source {source.name!r} declares no archive_url")
+
+    dest.mkdir(parents=True, exist_ok=True)
+    archive = dest / f".download{_archive_suffix(url)}"
+    try:
+        with urllib.request.urlopen(url, timeout=600) as response, \
+                open(archive, "wb") as handle:
+            digest = hashlib.sha256()
+            while True:
+                chunk = response.read(_HASH_CHUNK)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                handle.write(chunk)
+    except BuildError:
+        raise
+    except Exception as exc:
+        raise BuildError(f"could not download {url}: {exc}") from exc
+
+    actual = digest.hexdigest()
+    expected = getattr(source, "archive_sha256", "") or ""
+    if expected and expected.lower() != actual:
+        archive.unlink(missing_ok=True)
+        raise BuildError(
+            f"archive digest mismatch for {source.name!r}: expected "
+            f"{expected.lower()}, got {actual}"
+        )
+
+    try:
+        if zipfile.is_zipfile(archive):
+            with zipfile.ZipFile(archive) as zf:
+                _safe_members(zf.namelist(), "zip")
+                zf.extractall(dest)
+        else:
+            with tarfile.open(archive) as tf:
+                _safe_members(tf.getnames(), "tar")
+                for member in tf.getmembers():
+                    # Symlinks can point outside the tree even when the member
+                    # name itself is clean, so they are dropped rather than
+                    # validated -- no documentation corpus needs them.
+                    if member.issym() or member.islnk():
+                        continue
+                    # filter="data" is a second, independent check: it rejects
+                    # traversal, absolute paths and special files inside
+                    # tarfile itself. Kept alongside _safe_members rather than
+                    # instead of it -- one covers zip, which has no such
+                    # filter, and both must agree before anything is written.
+                    tf.extract(member, dest, filter="data")
+    except BuildError:
+        raise
+    except Exception as exc:
+        raise BuildError(f"could not unpack {url}: {exc}") from exc
+    finally:
+        archive.unlink(missing_ok=True)
+
+    stamp = f"sha256:{actual}"
+    (dest / ARCHIVE_STAMP).write_text(stamp + "\n", encoding="utf-8")
+    return stamp
+
+
+def _archive_suffix(url: str) -> str:
+    lowered = url.lower().split("?", 1)[0]
+    for suffix in (".tar.gz", ".tgz", ".tar.xz", ".tar.bz2", ".tar", ".zip"):
+        if lowered.endswith(suffix):
+            return suffix
+    return ".bin"
+
+
 def _resolve_source_commit(source: Source, work_dir: Path) -> str | None:
     """The commit(s) this pack is built from.
 
@@ -98,6 +224,17 @@ def _resolve_source_commit(source: Source, work_dir: Path) -> str | None:
     provenance string that silently omits one of the corpora it shipped is
     worse than admitting the build cannot state where it came from.
     """
+    # An unpacked archive is not a checkout, so `git rev-parse` finds nothing
+    # and the build would refuse to start. The stamp written at fetch time
+    # carries the digest, which lets a rebuild -- the common case, since the
+    # embedding cache makes those cheap -- state provenance without
+    # re-downloading hundreds of MB.
+    stamp = Path(work_dir) / ARCHIVE_STAMP
+    if stamp.is_file():
+        recorded = stamp.read_text(encoding="utf-8").strip()
+        if recorded:
+            return recorded
+
     parts = getattr(source, "part_checkouts", None)
     if parts is None:
         return resolve_commit(work_dir)

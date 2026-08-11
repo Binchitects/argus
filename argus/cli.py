@@ -595,7 +595,9 @@ def _pack_build(args) -> int:
     work_dir = Path(args.work_dir)
     commit = None
     if args.fetch:
-        print(f"fetching {source.repo_url} ({source.branch}) into {work_dir} ...")
+        archive = getattr(source, "archive_url", "")
+        origin = archive or f"{source.repo_url} ({source.branch})"
+        print(f"fetching {origin} into {work_dir} ...")
         commit = fetch_source(source, work_dir)
 
     print(f"building {source.name} pack from {work_dir} ...")
