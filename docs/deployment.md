@@ -177,6 +177,54 @@ python deploy/agent_client_example.py https://argus.your-domain/mcp <PAT> \
 It prints each tool call to stderr. If you see `-> docs_lookup(...)` and then
 `Advapi32.lib`, the whole chain works.
 
+### If the agent answers with one word, or nothing at all
+
+Symptom: the client reports "no final response was produced", or the model
+emits a single word. It looks like a refusal or a broken model. It is neither.
+
+Ollama **silently clamps `num_ctx` to what fits memory** and reports no error.
+Measured on a 63.7 GB machine with `qwen3.6`:
+
+| | |
+|---|---|
+| model advertises (`qwen35moe.context_length`) | 262,144 |
+| client requests (`options.num_ctx`) | 262,144 |
+| **actually served** (`usage.total_tokens`) | **32,768** |
+
+The client then sizes its prompt against the advertised figure -- an 81,850
+character system prompt plus 46 tool schemas, about 36k tokens -- which
+overflows the real window. Ollama truncates the prompt to 32,767 and **one
+token** remains to generate. `finish_reason` comes back `length`, so the
+client retries with a larger `max_tokens` (8192 -> 16384 -> 24576), raising a
+limit that was never the binding constraint. Every retry fails identically.
+
+Nothing in this chain errors. The only field that exposes it is
+`usage.total_tokens`, and it lands on a suspicious power of two.
+
+Fix by making the server actually serve the context:
+
+```bash
+OLLAMA_CONTEXT_LENGTH=131072 ollama serve
+```
+
+On Windows, persist it so a restart does not silently revert:
+
+```powershell
+[Environment]::SetEnvironmentVariable('OLLAMA_CONTEXT_LENGTH','131072','User')
+```
+
+Persisted variables reach only processes started *after* the environment is
+refreshed -- a new login, or a newly launched shell. An already-running Ollama
+keeps the old value, which is exactly how this reappears after a reboot that
+"changed nothing".
+
+Confirm the fix from the client side, not the server's: ask any question and
+check that `usage.total_tokens` is no longer pinned to a round power of two.
+
+Hermes additionally refuses to start against a window below **64,000** tokens,
+which is a useful oracle -- a served 32,768 is half its structural minimum, so
+the model is unusable with tools and no client-side setting can rescue it.
+
 ### If Hermes lists the server as configured but never calls its tools
 
 The symptom is specific: Hermes shows `argus (http) - configured`, no error
