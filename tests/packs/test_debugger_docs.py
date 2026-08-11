@@ -154,3 +154,45 @@ class TestIteration:
     def test_missing_checkout_yields_nothing_rather_than_raising(self, tmp_path):
         assert list(DebuggerDocs().iter_docs(tmp_path / "absent")) == []
         assert list(DebuggerDocs().iter_symbols(tmp_path / "absent")) == []
+
+
+def _collision_fixture(root: Path) -> Path:
+    """Two pages: the real `dt` command, and `!dt` whose alias would shadow it."""
+    cmds = root / "windows-driver-docs-pr" / "debuggercmds"
+    cmds.mkdir(parents=True)
+    (cmds / "dt--display-type-.md").write_text(
+        "---\ntitle: dt (Display Type)\ndescription: Displays a variable.\n"
+        "topic_type:\n- apiref\napi_name:\n- dt\n- NA\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+    (cmds / "-dt.md").write_text(
+        '---\ntitle: "!dt (WinDbg)"\ndescription: Displays a CSR thread.\n'
+        "topic_type:\n- apiref\napi_name:\n- dt\n- NA\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+class TestAliasCollisions:
+    def test_an_alias_never_shadows_another_pages_command(self, tmp_path):
+        """`!dt` carries the bare alias `dt`, which is a different command.
+
+        `dt` cannot invoke `!dt`, so the alias is a spelling that does not
+        exist. Left in, docs_lookup("dt") returns both and the one you asked
+        for is no longer distinguishable from the one you cannot type.
+        """
+        symbols = list(DebuggerDocs().iter_symbols(_collision_fixture(tmp_path)))
+        dt = [s for s in symbols if s.name == "dt"]
+        assert len(dt) == 1, [s.doc_path for s in dt]
+        assert dt[0].doc_path.endswith("dt--display-type-")
+        assert dt[0].signature == "Displays a variable."
+
+    def test_the_page_still_keeps_its_own_command(self, tmp_path):
+        """Suppressing the alias must not suppress `!dt` itself."""
+        names = {s.name for s in DebuggerDocs().iter_symbols(_collision_fixture(tmp_path))}
+        assert "!dt" in names and "dt" in names
+
+    def test_a_non_colliding_alias_survives(self, tmp_path):
+        """The 567 aliases that add a genuinely new spelling are unaffected."""
+        names = {s.name for s in DebuggerDocs().iter_symbols(_fixture(tmp_path))}
+        assert {"!analyze", "analyze"} <= names

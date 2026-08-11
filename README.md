@@ -121,12 +121,21 @@ argus pack list
 argus pack info python          # licence and attribution, in full
 ```
 
-Two are built and measured:
+Nine are built and measured, every one reporting **0 unresolved symbols**:
 
 | | Documents | Chunks | Symbols | Size |
 |---|---|---|---|---|
-| Python 3.13 | 516 | 13,164 | 18,027 | 28.5 MB |
-| React (react.dev) | 222 | 4,755 | 125 | 9.1 MB |
+| `win32` — Windows SDK + samples | 71,663 | 530,559 | 87,297 | 786.2 MB |
+| `wdk` — driver DDI + samples | 28,176 | 245,727 | 38,041 | 358.6 MB |
+| `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,305 | 174.7 MB |
+| `scripting` — PowerShell, cmd, Unix | 9,302 | 46,027 | 9,302 | 70.2 MB |
+| `python` — 3.13 | 516 | 13,164 | 18,027 | 28.5 MB |
+| `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 24.8 MB |
+| `react` — react.dev | 222 | 4,755 | 125 | 9.1 MB |
+| `algorithms` — TheAlgorithms/C++ | 371 | 2,001 | 370 | 4.3 MB |
+| `system-design` — the Primer | 9 | 442 | 8 | 1.3 MB |
+
+Zero unresolved symbols is the check worth watching: a symbol whose page is missing still installs, still lists, and simply never resolves. The failure is invisible until somebody looks something up.
 
 Three properties make them worth the format:
 
@@ -154,7 +163,7 @@ Argus ships in phases, each ending somewhere genuinely usable.
 | **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | ✅ **Complete** |
 | **4 — Semantic layer** | Selective embeddings over private code, `semantic_search` | Planned |
 
-**673 tests**, passing locally, 0 skipped.
+**696 tests**, passing locally, 0 skipped.
 
 Health indicators, how they are measured, and the charts behind them are in [`docs/kpis.md`](docs/kpis.md) — every figure measured, none estimated.
 
@@ -409,13 +418,23 @@ checks whether the tools reached the snapshot, and the fix.
 
 | | |
 |---|---|
-| tests | **673 passing** |
+| tests | **696 passing** |
 | hollow tests found by targeted revert | **9** |
+| bugs whose failure mode was a plausible success | **3** (see below) |
 | cross-repo edge precision, hand-checked | 13 / 25 -> after fixes, 0 fabricated at weight > 8 |
 
 A *hollow test* passes while the behaviour it names is broken. Each was caught
 by breaking the code deliberately and confirming the test noticed. A suite
 without that step has the same hollow tests and no number.
+
+The three worst bugs found here shared one signature: **they produced a
+plausible success rather than an error.** A client logged "registered 19
+tools" and the agent never saw them. A clone succeeded and the build blamed
+the path it had just written. A YAML parser returned a dict and silently
+omitted a key — which would have shipped a pack with zero symbols that built,
+installed and listed without complaint. None is caught by "does it crash" or
+"does it return something"; each needs a check on the *content* of the
+success.
 
 Full detail: [docs/pack-measurements.md](docs/pack-measurements.md),
 [docs/index-measurements.md](docs/index-measurements.md),

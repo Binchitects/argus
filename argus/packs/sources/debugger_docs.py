@@ -148,24 +148,38 @@ class DebuggerDocs:
                     body=f"{description}\n\n{body}" if description else body,
                 )
 
+    def _reference_pages(self, content: Path):
+        """Command reference pages, with their titles already resolved.
+
+        Only pages Microsoft marks `topic_type: [apiref]`. The docset also
+        holds index and landing pages whose titles are ordinary prose, and
+        taking the first token of "Debugger Commands" would index `Debugger`
+        as a command. Using the upstream marker beats guessing from titles.
+        """
+        for path in sorted(content.rglob("*.md")):
+            if not path.is_file() or path.name.startswith("TOC"):
+                continue
+            meta, _ = parse_front_matter(
+                path.read_text(encoding="utf-8", errors="replace"))
+            topics = meta.get("topic_type")
+            if not isinstance(topics, list) or "apiref" not in topics:
+                continue
+            yield path, meta, command_names(meta.get("title", ""))
+
     def iter_symbols(self, root: Path) -> Iterator[ApiSymbol]:
         content = Path(root) / self.subtree / COMMANDS_DIR
         if not content.is_dir():
             return
-        for path in sorted(content.rglob("*.md")):
-            if not path.is_file() or path.name.startswith("TOC"):
-                continue
-            raw = path.read_text(encoding="utf-8", errors="replace")
-            meta, body = parse_front_matter(raw)
-            # Only reference pages document a command. The docset also holds
-            # index and landing pages whose titles are ordinary prose, and
-            # taking the first token of "Debugger Commands" would index
-            # `Debugger` as a command. Microsoft marks the real ones --
-            # `topic_type: [apiref]`, on 869 of the 977 pages -- so this is
-            # the upstream distinction rather than a guess about titles.
-            topics = meta.get("topic_type")
-            if not isinstance(topics, list) or "apiref" not in topics:
-                continue
+        pages = list(self._reference_pages(content))
+        # Every command the docset documents. An alias is only safe if it is
+        # not some OTHER page's real command: `!dt` carries the bare alias
+        # `dt`, which is a different, very common command, and `dt` cannot
+        # invoke `!dt`. Left in, the alias makes docs_lookup("dt") ambiguous
+        # between the command you asked for and one you cannot type that way.
+        # Measured on the corpus: 3 such aliases -- dt, dpa, version -- out
+        # of 586, so this drops almost nothing and removes real ambiguity.
+        commands = {name for _, _, names in pages for name in names}
+        for path, meta, names in pages:
             relative = path.relative_to(content).as_posix()
             # Without the suffix, matching how the builder normalises doc
             # paths when it links a symbol to its page.
@@ -173,9 +187,11 @@ class DebuggerDocs:
             # The one-line description is what `docs_find` searches, so a
             # command is reachable by what it does and not only by its name.
             description = str(meta.get("description") or "")
+            own = set(names)
+            aliases = [a for a in alias_names(meta)
+                       if a in own or a not in commands]
             seen: set[str] = set()
-            for symbol in (*command_names(meta.get("title", "")),
-                           *alias_names(meta)):
+            for symbol in (*names, *aliases):
                 if symbol in seen:
                     continue
                 seen.add(symbol)

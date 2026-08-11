@@ -213,11 +213,12 @@ cold pack with an empty embedding cache.
 |---|---|---|---|---|---|---|
 | `system-design` | 9 | 442 | 8 | 1.3 MB | < 1 min | 2.94 |
 | `algorithms` | 371 | 2,001 | 370 | 4.3 MB | < 1 min | 2.15 |
+| `debugger` (composite) | 2,138 | 14,259 | 1,511 | 24.8 MB | ~4 min | 1.74 |
 | `scripting` (composite) | 9,302 | 46,027 | 9,302 | 70.1 MB | 13 min | 1.52 |
 | `cpp` | 9,746 | 123,212 | 37,305 | 174.7 MB | 36 min | 1.42 |
 | `wdk` (composite) | 28,176 | 245,727 | 38,041 | 358.6 MB | **74 min** | 1.46 |
 | `win32` (composite) | 71,663 | 530,559 | 87,297 | 786.2 MB | **162 min** | 1.48 |
-| **total** | **128,567** | **947,968** | **172,323** | **1.40 GB** | **~4h 45m** | |
+| **total** | **121,405** | **962,227** | **173,834** | **1.43 GB** | **~4h 49m** | |
 
 Every pack reports **0 unresolved symbols**.
 
@@ -1053,3 +1054,78 @@ What the numbers actually support:
   arm A's 2. Half were wrong, but all 16 were falsifiable against the packs in
   milliseconds -- which is how this table exists at all. A reviewer that says
   "check the IRQL here" is never wrong and never useful.
+
+---
+
+# The debugger pack, and three ways a build lies
+
+`debugger` covers WinDbg and the Debugging Tools for Windows: the command
+reference (`debuggercmds`, 977 pages) and the how-to material (`debugger`,
+1,161 pages) in one pack. 2,138 documents, 14,259 chunks, 1,511 symbols, 0
+unresolved, 24.8 MB.
+
+It is recorded separately because building it surfaced three failures that
+all produced a *plausible success* rather than an error, which is the class
+of bug that survives a test suite.
+
+## `api_name` looks like an inventory and is not one
+
+869 of the 977 command pages carry `api_name`. It is two different things:
+
+| title | `api_name` | |
+|---|---|---|
+| `!analyze (WinDbg)` | `analyze` | clean name, `!` dropped |
+| `!pcitree (WinDbg)` | `pcitree` | clean name, `!` dropped |
+| `.abandon (Abandon Process)` | `.abandon (Abandon Process)` | title copy |
+| `tct (Trace to Next Call...)` | `tct (Trace to Next Call...)` | title copy |
+
+Building on it alone yields an inventory half of which is prose. The sibling
+docset is worse: there `api_name` copies the title on *every* page, so
+`Activating a Debugging Client` would be indexed as an API name.
+
+Titles are consistent, so the command comes from the title; the bare
+`api_name` is kept only as an alias when it is a single token. `docs_lookup`
+is exact-match and never fuzzy, so carrying both spellings is what makes
+`!analyze` and `analyze` both land.
+
+## A YAML indent that would have shipped an empty inventory
+
+`_BLOCK_ITEM` required leading whitespace. YAML permits a block sequence at
+its key's own indentation and this docset uses exactly that -- `api_name:`
+then `- analyze` at column 0. Every previously-built repo indents, so the bug
+was invisible.
+
+The damage was not limited to aliases. `topic_type` is a block list too, so
+the `apiref` gate below rejected every page: the pack would have shipped
+**zero symbols** while building, installing and listing without complaint.
+
+## An alias that shadows a real command
+
+`!dt` carries the bare alias `dt` -- which is a different, very common
+command, and `dt` cannot invoke `!dt`. Left in, `docs_lookup("dt")` returns
+both and the one you asked for is no longer distinguishable from the one you
+cannot type that way.
+
+Measured across the corpus: **3 such aliases** (`dt`, `dpa`, `version`) out of
+586, against 567 that add a genuinely new spelling. Suppressing an alias that
+names *another page's* command drops 3 and keeps 567.
+
+| | symbols |
+|---|---|
+| before the collision guard | 1,514 |
+| after | **1,511** |
+
+## Verified end to end
+
+Through the reference client -- native function calling, Argus's instructions,
+`qwen3.6:35b`, the same path Hermes uses:
+
+> **Q.** In WinDbg, which command displays the contents of a structure at an
+> address, and what is the command to reload symbols?
+>
+> **A.** `dt` (Display Type) ... `.reload`, or `.reload /f` to force.
+
+It called `docs_lookup({"name": "dt"})` and received the Display Type page --
+the disambiguation the collision guard buys. Adding this ninth pack left the
+earlier `FltRegisterFilter` answer unchanged (`<= APC_LEVEL`, `FltMgr.lib`),
+so the new corpus does not interfere with the existing ones.
