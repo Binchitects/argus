@@ -584,6 +584,42 @@ def _describe(pack) -> str:
             f"{size_mb:>8.1f} MB  {pack.license}{flag}")
 
 
+def _embed(cfg: Config, limit: int | None) -> int:
+    """Embed public symbols that have no current vector.
+
+    Incremental: a rerun after indexing new code only does the new work, and
+    an interrupted run resumes where it stopped. Reports stale rows rather
+    than silently re-embedding them -- a model change invalidates every vector
+    and rebuilding a large corpus is hours of CPU, which should be a decision.
+    """
+    from . import embed as embed_module
+    from . import semantic
+    from .store.db import open_db
+
+    conn = open_db(cfg.index.db_path)
+    try:
+        stale = semantic.stale_count(conn)
+        if stale:
+            print(f"{stale:,} vectors were built with a different embedding "
+                  f"model or dimension and are NOT usable. Delete them to "
+                  f"rebuild: DELETE FROM symbol_embeddings WHERE model <> "
+                  f"'{embed_module.EMBED_MODEL}';")
+
+        def progress(done: int, total: int) -> None:
+            print(f"  embedded {done:,} of {total:,}", flush=True)
+
+        written = semantic.build_symbol_embeddings(
+            conn, limit=limit, progress=progress)
+        print(f"embedded {written:,} symbols" if written
+              else "nothing to embed; every public symbol already has a vector")
+        return 0
+    except EmbeddingUnavailable as exc:
+        print(f"embedding unavailable: {exc}", file=sys.stderr)
+        return EXIT_PACK
+    finally:
+        conn.close()
+
+
 def _pack_build(args) -> int:
     source_cls = SOURCES.get(args.source)
     if source_cls is None:
@@ -729,6 +765,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="argus")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    p_embed = sub.add_parser(
+        "embed",
+        help="Build semantic vectors over your own public symbols")
+    p_embed.add_argument("--config", required=True, type=Path)
+    p_embed.add_argument(
+        "--limit", type=int, default=None,
+        help="Embed at most this many symbols, then stop. For a first "
+             "run on a large corpus, to see the rate before committing "
+             "to hours.")
+
     p_index = sub.add_parser("index", help="Mirror and index repositories")
     p_index.add_argument("--config", required=True, type=Path)
     p_index.add_argument("--repo", help="Index only this path_with_namespace")
@@ -866,6 +912,8 @@ def main(argv: list[str] | None = None) -> int:
                     args.allow_partial_enumeration, args.interval)
             return _index(cfg, args.repo, args.reset_retries,
                           allow_partial=args.allow_partial_enumeration)
+        if args.command == "embed":
+            return _embed(cfg, args.limit)
         if args.command == "serve":
             return _serve(cfg, args.host, args.port, args.allowed_hosts)
         if args.command == "flush-acl":

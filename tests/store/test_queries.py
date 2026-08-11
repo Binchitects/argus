@@ -23,6 +23,18 @@ def _public_query_functions():
     ]
 
 
+def _basis_vector(repo_id: int, dim: int) -> list[float]:
+    """A vector unique to one repo, orthogonal to every other repo's.
+
+    Orthogonal on purpose: it makes "the nearest neighbour came from
+    the wrong repo" impossible to produce by accident, so a result
+    from another repo can only mean the allowlist was not applied.
+    """
+    vector = [0.0] * dim
+    vector[repo_id % dim] = 1.0
+    return vector
+
+
 def _minimal_args_for(name, conn, target_repo_id):
     """The extra keyword args each query needs to return something for
     ``target_repo_id``, beyond ``allowed_repo_ids`` and ``conn``.
@@ -104,6 +116,42 @@ def _minimal_args_for(name, conn, target_repo_id):
         # collision strategy as find_symbol), so switching the allowlist
         # switches which repo's row comes back.
         return {"description": "SharedName"}
+    if name == "semantic_search":
+        # The fixture has no vectors, so this branch builds them -- otherwise
+        # the query returns [] for every allowlist and the test would pass
+        # vacuously while asserting nothing.
+        #
+        # Each repo's symbols get a DISTINCT basis vector, so the nearest
+        # neighbour of repo A's vector is always a repo A symbol. Querying
+        # with the target's vector therefore returns that repo's symbol when
+        # the allowlist includes it, and -- if the filter were skipped -- the
+        # *other* repo's symbols would be reachable with the other vector.
+        # The allowlist is the only thing that can decide the result.
+        from argus import semantic
+        from argus.embed import EMBED_DIM
+        from argus.packs.quantize import to_bits, to_int8
+
+        semantic.ensure_vec_tables(conn)
+        for symbol_id, repo_id in conn.execute(
+                "SELECT id, repo_id FROM symbols").fetchall():
+            vector = _basis_vector(repo_id, EMBED_DIM)
+            conn.execute(
+                "INSERT OR REPLACE INTO symbol_embeddings"
+                " (symbol_id, repo_id, embed_text, model, dim)"
+                " VALUES (?, ?, ?, 'test', ?)",
+                (symbol_id, repo_id, f"symbol {symbol_id}", EMBED_DIM))
+            conn.execute("DELETE FROM vec_symbols_bin WHERE symbol_id = ?",
+                         (symbol_id,))
+            conn.execute("DELETE FROM vec_symbols_i8 WHERE symbol_id = ?",
+                         (symbol_id,))
+            conn.execute(
+                "INSERT INTO vec_symbols_bin (symbol_id, embedding)"
+                " VALUES (?, vec_bit(?))", (symbol_id, to_bits(vector)))
+            conn.execute(
+                "INSERT INTO vec_symbols_i8 (symbol_id, embedding)"
+                " VALUES (?, vec_int8(?))", (symbol_id, to_int8(vector)))
+        conn.commit()
+        return {"query_vec": _basis_vector(target_repo_id, EMBED_DIM)}
     if name == "scope_to_branch":
         # No extra arguments: branch=None means "each project's default
         # branch", and the two fixture repos are both on their default. The

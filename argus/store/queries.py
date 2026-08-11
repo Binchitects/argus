@@ -24,6 +24,11 @@ class QueryError(Exception):
     """
 
 
+# Reused rather than reimplemented: the private semantic index stores its
+# vectors in exactly the pack layout, so it must score them identically.
+from ..packs.quantize import rescore, to_bits
+
+
 def _placeholders(allowed_repo_ids: Sequence[int]) -> tuple[str, list[int]]:
     """Validate the allowlist and render it as SQL placeholders.
 
@@ -961,3 +966,92 @@ def _branches_available(allowed_repo_ids: Sequence[int],
                 f"  FROM repos WHERE id IN ({marks})", chunk):
             seen[row["branch"]] = max(seen.get(row["branch"], 0), row["is_default"])
     return sorted(seen, key=lambda b: (-seen[b], b))
+
+
+#: How many nearest neighbours the coarse binary pass retrieves before the
+#: ACL filter and the int8 rescore. Generous on purpose: the filter runs
+#: AFTER the scan (see semantic_search), so a developer with access to a
+#: small slice of the corpus needs headroom or their results thin out.
+SEMANTIC_COARSE = 600
+
+
+def semantic_search(allowed_repo_ids, conn, query_vec, limit: int = 10,
+                    coarse: int = SEMANTIC_COARSE) -> list[dict]:
+    """Find symbols by MEANING, restricted to repos the caller may see.
+
+    Two passes, matching the pack search this reuses the storage layout from:
+    a binary-quantised scan for candidates, then an int8 rescore against the
+    float query. The coarse pass is 96 bytes per symbol against 3072 for
+    float32, which is the difference between a scan that fits in cache and one
+    that does not.
+
+    **The ACL filter runs after the vector scan, not inside it.** ``vec0``
+    KNN cannot join, so candidates are retrieved globally and then restricted
+    here, in SQL, before anything is returned. Two consequences worth stating
+    rather than discovering:
+
+    - Nothing from a repo the caller cannot see is ever returned, and no
+      score, count or identifier from one is either. What the caller receives
+      is indistinguishable from a corpus containing only their repos.
+    - A caller whose allowlist is a small fraction of the corpus can get fewer
+      than ``limit`` results even when more exist for them, because the coarse
+      pass spent its budget on symbols they may not see. That is a recall
+      limit, not a correctness one, and ``coarse`` is the dial.
+
+    The alternative -- filtering inside the scan -- would need the repo id as
+    a vec0 metadata column, which is a schema change to make on evidence that
+    the recall actually bites, not on the suspicion that it might.
+    """
+    _, ids = _placeholders(allowed_repo_ids)
+    if not ids:
+        return []
+
+    candidates = conn.execute(
+        "SELECT symbol_id FROM vec_symbols_bin"
+        " WHERE embedding MATCH vec_bit(?) AND k = ?",
+        (to_bits(query_vec), max(int(coarse), 1)),
+    ).fetchall()
+    if not candidates:
+        return []
+
+    symbol_ids = [row[0] for row in candidates]
+    allowed: list[tuple[int, bytes]] = []
+    for chunk in _chunks(symbol_ids, 0):
+        marks = ",".join("?" for _ in chunk)
+        repo_marks = ",".join("?" for _ in ids)
+        allowed.extend(
+            (row["symbol_id"], row["embedding"])
+            for row in conn.execute(
+                f"SELECT v.symbol_id AS symbol_id, v.embedding AS embedding"
+                f"  FROM vec_symbols_i8 v"
+                f"  JOIN symbol_embeddings e ON e.symbol_id = v.symbol_id"
+                f" WHERE v.symbol_id IN ({marks})"
+                f"   AND e.repo_id IN ({repo_marks})",
+                list(chunk) + list(ids),
+            )
+        )
+    if not allowed:
+        return []
+
+    ranked = rescore(query_vec, allowed)[:max(int(limit), 1)]
+    by_id = {symbol_id: score for symbol_id, score in ranked}
+    if not by_id:
+        return []
+
+    marks = ",".join("?" for _ in by_id)
+    repo_marks = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT s.id AS symbol_id, s.repo_id, r.path_with_namespace,"
+        f"       f.path, s.name, s.kind, s.signature, s.scope,"
+        f"       s.line, s.end_line, s.is_public"
+        f"  FROM symbols s"
+        f"  JOIN files f ON f.id = s.file_id"
+        f"  JOIN repos r ON r.id = s.repo_id"
+        f" WHERE s.id IN ({marks}) AND s.repo_id IN ({repo_marks})",
+        list(by_id) + list(ids),
+    ).fetchall()
+
+    out = [dict(row) | {"score": round(by_id[row["symbol_id"]], 6)}
+           for row in rows]
+    out.sort(key=lambda r: -r["score"])
+    return out

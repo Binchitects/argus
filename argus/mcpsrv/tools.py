@@ -286,6 +286,23 @@ async def code_contracts_impl(db_path: Path | str, identity: acl.Identity,
     return await run_readonly(db_path, _run)
 
 
+async def semantic_search_impl(db_path, identity, query: str,
+                               branch=None, limit: int = 10) -> list[dict]:
+    """Embed the query, then search this organisation's own symbol vectors."""
+    from .. import embed as embed_module
+
+    text = (query or "").strip()
+    if not text:
+        return []
+    [vector] = embed_module.embed_batch([text])
+    rows = await run_readonly(
+        db_path,
+        lambda conn: queries.semantic_search(_scoped(conn, identity, branch),
+                                             conn, vector, limit=limit),
+    )
+    return [dict(row) for row in rows]
+
+
 async def find_symbol_impl(db_path: Path | str, identity: acl.Identity, name: str,
                             kind: str | None = None,
                             branch: str | None = None) -> list[dict]:
@@ -697,6 +714,21 @@ _CODE_CONTRACTS_DESC = (
 )
 
 
+_SEMANTIC_SEARCH_DESC = (
+    "Find code in THIS ORGANISATION'S repositories by what it DOES, when you "
+    "do not know the name. This is the tool for 'where do we handle retry "
+    "backoff for uploads' or 'what parses the frame header' -- questions with "
+    "no identifier in them, which find_symbol cannot answer and search_code "
+    "answers only if you guess the exact words the source happens to use. "
+    "Matching is on meaning, over the signature, kind, scope and path of every "
+    "PUBLIC symbol -- never function bodies, which embed to generic control "
+    "flow and bury real answers under near-duplicates. Results carry a `score` "
+    "(1.0 is identical), the defining file and line, and the repo. Scoped to "
+    "the repositories you may see. An empty result means nothing matched well "
+    "enough, not that the code does not exist -- fall back to search_code with "
+    "a distinctive term, and to find_symbol when you learn the name."
+)
+
 _FIND_SYMBOL_DESC = (
     "Find where a named symbol (function, class, method, struct, etc.) is "
     "DEFINED, across the repos you have access to. Answers questions like "
@@ -870,6 +902,18 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
             db_path, "code_contracts", identity,
             {"source_chars": len(source or ""), "branch": branch},
             lambda: code_contracts_impl(db_path, identity, source, branch=branch),
+        )
+
+    @server.tool(name="semantic_search",
+                 description=_SEMANTIC_SEARCH_DESC)
+    async def semantic_search(query: str, branch: str | None = None,
+                              limit: int = 10, *, ctx: Context) -> list[dict]:
+        identity = _identity(ctx)
+        return await _with_audit(
+            db_path, "semantic_search", identity,
+            {"query": query, "branch": branch, "limit": limit},
+            lambda: semantic_search_impl(db_path, identity, query,
+                                         branch=branch, limit=limit),
         )
 
     @server.tool(name="find_symbol", description=_FIND_SYMBOL_DESC)

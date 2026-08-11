@@ -95,6 +95,7 @@ Tools are named after the *questions developers ask*, not after retrieval mechan
 | `which_repo` | *"Which repo do I change for X?"* — from a description, a symbol, a stack trace, or a diff |
 | `repo_map` | Which repos a given repo depends on, and which depend on it, from resolved `#include` edges |
 | `impact_of` | *"What breaks if I change this file?"* — every file that includes it, transitively, with depth |
+| `semantic_search` | *"Where do we handle retry backoff for uploads?"* — by meaning, when the question contains no identifier |
 
 **Shipped — public documentation, no access control (there is nothing to gate):**
 
@@ -103,7 +104,9 @@ Tools are named after the *questions developers ask*, not after retrieval mechan
 | `docs_lookup` | Exact API name → the page and anchor that *define* it |
 | `docs_search` | Conceptual questions against Python and React docs |
 
-**Planned:** `semantic_search` (embeddings over your own code).
+Every phase is now shipped. `semantic_search` embeds the signature, kind, scope and path of each **public** symbol — never function bodies, which embed to generic control flow and bury real answers under near-duplicates. That is ~70–90k vectors where bodies would be ~600k. Build them with `argus embed --config …`; it is incremental, so a rerun after indexing new code only does the new work, and an interrupted run resumes.
+
+Its ACL filter runs *after* the vector scan, because `vec0` KNN cannot join. Nothing from a repo you cannot see is ever returned — not a row, a score, or an id — so the result is indistinguishable from a corpus containing only your repos. The tradeoff is recall, not correctness: a caller whose allowlist is a small slice of the corpus can get fewer hits than exist for them, and `SEMANTIC_COARSE` is the dial.
 
 `index_status` looks like a throwaway and isn't: it's what stops an agent confidently answering from a three-week-stale index. It can say *"this repo was last indexed 4 hours ago"* instead of silently guessing.
 
@@ -173,9 +176,9 @@ Argus ships in phases, each ending somewhere genuinely usable.
 | **2 — Multi-user retrieval** | ACL module, HTTP MCP server, 5 code tools, container, TLS | ✅ **Complete** |
 | **5 — Knowledge packs** | Portable public documentation packs, 2 doc tools, `argus pack` CLI | ✅ **Complete** |
 | **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | ✅ **Complete** |
-| **4 — Semantic layer** | Selective embeddings over private code, `semantic_search` | Planned |
+| **4 — Semantic layer** | Selective embeddings over private code, `semantic_search` | ✅ **Complete** |
 
-**730 tests**, passing locally, 0 skipped.
+**741 tests**, passing locally, 0 skipped.
 
 Health indicators, how they are measured, and the charts behind them are in [`docs/kpis.md`](docs/kpis.md) — every figure measured, none estimated.
 
@@ -430,7 +433,7 @@ checks whether the tools reached the snapshot, and the fix.
 
 | | |
 |---|---|
-| tests | **730 passing** |
+| tests | **741 passing** |
 | hollow tests found by targeted revert | **9** |
 | bugs whose failure mode was a plausible success | **3** (see below) |
 | cross-repo edge precision, hand-checked | 13 / 25 -> after fixes, 0 fabricated at weight > 8 |

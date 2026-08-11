@@ -504,8 +504,15 @@ def test_tools_list_descriptions_are_load_bearing(two_repo_cfg):
     assert set(by_name) == {
         "find_symbol", "find_references", "search_code", "get_file", "index_status",
         "docs_lookup", "docs_search", "docs_get", "docs_verify", "docs_find", "docs_contracts", "code_contracts",
-        "repo_map", "which_repo", "impact_of",
+        "repo_map", "which_repo", "impact_of", "semantic_search",
     }
+    # The distinction the model has to make: semantic_search is for questions
+    # with no identifier in them. A description that does not say so leaves it
+    # competing with search_code, which answers the same question only when
+    # you guess the source's exact words.
+    assert "does" in by_name["semantic_search"].lower()
+    assert "do not know the name" in by_name["semantic_search"].lower()
+    assert "never function bodies" in by_name["semantic_search"].lower()
     assert "name-based" in by_name["find_references"].lower() or \
         "name" in by_name["find_references"].lower() and "not" in by_name["find_references"].lower()
     assert "macro" in by_name["find_references"].lower()
