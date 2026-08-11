@@ -214,11 +214,27 @@ cold pack with an empty embedding cache.
 | `system-design` | 9 | 442 | 8 | 1.3 MB | < 1 min | 2.94 |
 | `algorithms` | 371 | 2,001 | 370 | 4.3 MB | < 1 min | 2.15 |
 | `debugger` (composite) | 2,138 | 14,259 | 1,511 | 24.8 MB | ~4 min | 1.74 |
+| `sqlite` (archive) | 837 | 8,987 | 36 | 18.3 MB | ~3 min | 2.04 |
 | `scripting` (composite) | 9,302 | 46,027 | 9,302 | 70.1 MB | 13 min | 1.52 |
+| `cppreference` (archive) | 6,640 | 68,891 | 5,406 | 124.9 MB | ~21 min | 1.81 |
 | `cpp` | 9,746 | 123,212 | 37,305 | 174.7 MB | 36 min | 1.42 |
 | `wdk` (composite) | 28,176 | 245,727 | 38,041 | 358.6 MB | **74 min** | 1.46 |
 | `win32` (composite) | 71,663 | 530,559 | 87,297 | 786.2 MB | **162 min** | 1.48 |
-| **total** | **121,405** | **962,227** | **173,834** | **1.43 GB** | **~4h 49m** | |
+| **total** | **128,882** | **1,040,105** | **179,276** | **1.57 GB** | **~5h 13m** | |
+
+The two marked *(archive)* arrive through `fetch_archive` rather than a git
+clone: SQLite has no docs repository on GitHub at all, and cppreference's
+repo holds the build tooling rather than the rendered pages. Their provenance
+is the archive's sha256 instead of a commit, which is the thing a reader can
+actually verify -- re-download, re-hash, compare.
+
+The symbol counts differ by an order of magnitude for a reason worth stating.
+cppreference generates one entity per page, so paths *are* an inventory:
+`cpp/container/vector/push_back.html` is exactly `std::vector::push_back`,
+giving 5,406 exact-lookup names. SQLite documents every pragma on one combined
+page, so only the 36 per-statement `lang_*` pages earn a symbol -- a lookup
+whose anchor lands in the middle of a 1,000-line page is worse than no lookup.
+Its other 801 documents remain fully reachable through `docs_search`.
 
 Every pack reports **0 unresolved symbols**.
 
