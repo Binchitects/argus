@@ -427,10 +427,40 @@ async def which_repo_impl(db_path: Path | str, identity: acl.Identity,
 
 async def docs_lookup_impl(packs_dir: Path | str, name: str,
                            lang: str | None = None, limit: int = 20) -> list[dict]:
-    return await run_packs(
-        packs_dir,
-        lambda opened: packs_store.lookup_symbol(opened, name, lang=lang, limit=limit),
-    )
+    """Exact lookup, retrying without ``lang`` when the filter is what missed.
+
+    A caller guesses the source name, and a wrong guess returns nothing:
+    `CryptAcquireContextW` is present under `win32`, but `lang="windows"` --
+    a plausible guess -- yields an empty list. That is worse than unhelpful
+    here, because the server's own instructions tell the model that silence
+    means the fact is undocumented and it must not supply one from memory. So
+    a bad filter guess is laundered into a confident "not documented", and the
+    better the model follows instructions the more convincing the wrong answer.
+
+    The retry is safe in the direction that matters. Matching is exact and
+    case-insensitive, so widening the search cannot pull in a different API --
+    it can only find the same name in a pack the caller failed to guess. Hits
+    found this way carry ``lang_filter_ignored`` so the caller can see that
+    its filter was wrong rather than silently believing it was honoured.
+    """
+    def _lookup(opened):
+        hits = packs_store.lookup_symbol(opened, name, lang=lang, limit=limit)
+        if hits or not lang:
+            return hits
+        # Narrowing to a source that EXISTS is a deliberate scope, and an
+        # empty result there is the honest answer -- `useState` really is not
+        # in the Python pack. Only a filter naming no installed source at all
+        # is a guess rather than a scope, and widening that cannot mislead:
+        # matching is exact, so it finds the same name in a pack the caller
+        # failed to name, never a different API.
+        if lang.lower() in {(pack.name or "").lower() for pack in opened}:
+            return hits
+        widened = packs_store.lookup_symbol(opened, name, lang=None, limit=limit)
+        for hit in widened:
+            hit["lang_filter_ignored"] = lang
+        return widened
+
+    return await run_packs(packs_dir, _lookup)
 
 
 async def docs_find_impl(packs_dir: Path | str, description: str,

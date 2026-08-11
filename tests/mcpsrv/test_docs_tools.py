@@ -270,3 +270,33 @@ def test_the_registered_docs_tools_declare_no_context_parameter(packs_dir, tmp_p
     for name in ("docs_lookup", "docs_search"):
         schema = listed[name].parameters
         assert "ctx" not in schema.get("properties", {}), name
+
+
+@pytest.mark.anyio
+async def test_docs_lookup_ignores_a_lang_that_names_no_installed_source(packs_dir):
+    """A guessed source name must not launder into "not documented".
+
+    Measured against the real estate: `CryptAcquireContextW` is present under
+    `win32`, but a model guessing `lang="windows"` got an empty list and --
+    following the server's own instruction that silence means no authority --
+    reported the API as undocumented. The filter was wrong, not the corpus.
+
+    Matching is exact, so widening can only find the same name in a pack the
+    caller failed to name.
+    """
+    rows = await tools.docs_lookup_impl(packs_dir, "os.path.join", lang="windows")
+    assert rows, "a nonexistent source filter must not suppress an exact hit"
+    assert rows[0]["source"] == "python"
+    assert rows[0]["lang_filter_ignored"] == "windows"
+
+
+@pytest.mark.anyio
+async def test_docs_lookup_still_honours_narrowing_to_a_real_source(packs_dir):
+    """Scoping to an INSTALLED source stays exact -- empty is the true answer.
+
+    This is the half the widening must not break: `useState` genuinely is not
+    in the Python pack, and saying so is correct rather than a miss.
+    """
+    assert await tools.docs_lookup_impl(packs_dir, "useState", lang="python") == []
+    hits = await tools.docs_lookup_impl(packs_dir, "useState", lang="react")
+    assert hits and "lang_filter_ignored" not in hits[0]
