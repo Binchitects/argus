@@ -149,17 +149,34 @@ def fetch_archive(source: Source, dest: Path) -> str:
     try:
         with urllib.request.urlopen(url, timeout=600) as response, \
                 open(archive, "wb") as handle:
+            declared = response.headers.get("Content-Length")
             digest = hashlib.sha256()
+            received = 0
             while True:
                 chunk = response.read(_HASH_CHUNK)
                 if not chunk:
                     break
                 digest.update(chunk)
+                received += len(chunk)
                 handle.write(chunk)
     except BuildError:
         raise
     except Exception as exc:
         raise BuildError(f"could not download {url}: {exc}") from exc
+
+    # A short read is not an error to urllib: the stream simply ends, and
+    # everything downstream then reports the wrong problem -- observed here
+    # against an intercepting proxy that truncated an 11.8 MB archive at
+    # 720,896 bytes, after which the unpack blamed the archive format. Verify
+    # the length the server promised, so a cut transfer fails as a cut
+    # transfer.
+    if declared and declared.isdigit() and received != int(declared):
+        archive.unlink(missing_ok=True)
+        raise BuildError(
+            f"truncated download of {url}: got {received:,} bytes of "
+            f"{int(declared):,}. A proxy or network interruption cut the "
+            f"transfer; the archive was not unpacked."
+        )
 
     actual = digest.hexdigest()
     expected = getattr(source, "archive_sha256", "") or ""

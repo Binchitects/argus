@@ -34,6 +34,10 @@ class ArchiveSource:
 def _serve(monkeypatch, payload: bytes):
     """Point urlopen at bytes, so the test covers our code and not the net."""
     class _Response(io.BytesIO):
+        # Content-Length is optional in HTTP and absent here on purpose: the
+        # length check must not fail a server that declines to declare one.
+        headers: dict[str, str] = {}
+
         def __enter__(self):
             return self
 
@@ -191,3 +195,55 @@ class TestDispatch:
     def test_a_source_without_an_archive_url_is_rejected_clearly(self, tmp_path):
         with pytest.raises(build.BuildError, match="declares no archive_url"):
             build.fetch_archive(ArchiveSource(archive_url=""), tmp_path / "w")
+
+
+class TestTruncation:
+    """A short read is not an error to urllib -- the stream just ends."""
+
+    def _serve_short(self, monkeypatch, payload, declared):
+        class _Response(io.BytesIO):
+            headers = {"Content-Length": str(declared)}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.close()
+                return False
+
+        monkeypatch.setattr(
+            build.urllib.request, "urlopen",
+            lambda url, timeout=None: _Response(payload),
+        )
+
+    def test_a_truncated_download_fails_as_a_truncated_download(
+        self, tmp_path, monkeypatch
+    ):
+        """Observed for real: a proxy cut an 11.8 MB archive at 720,896 bytes.
+
+        Without this the bytes are accepted, the unpack fails, and the error
+        blames the archive format -- pointing the reader at the wrong problem
+        entirely.
+        """
+        payload = _zip_bytes({"a.html": "x"})
+        self._serve_short(monkeypatch, payload, len(payload) + 5_000_000)
+
+        with pytest.raises(build.BuildError, match="truncated download"):
+            build.fetch_archive(ArchiveSource(), tmp_path / "work")
+
+        assert not list((tmp_path / "work").glob(".download*"))
+        assert not (tmp_path / "work" / "a.html").exists()
+
+    def test_a_complete_download_passes_the_length_check(self, tmp_path, monkeypatch):
+        payload = _zip_bytes({"a.html": "x"})
+        self._serve_short(monkeypatch, payload, len(payload))
+
+        assert build.fetch_archive(ArchiveSource(), tmp_path / "work")
+        assert (tmp_path / "work" / "a.html").is_file()
+
+    def test_a_server_that_declares_no_length_is_still_accepted(
+        self, tmp_path, monkeypatch
+    ):
+        """Content-Length is optional; absence must not fail the build."""
+        _serve(monkeypatch, _zip_bytes({"a.html": "x"}))
+        assert build.fetch_archive(ArchiveSource(), tmp_path / "work")
