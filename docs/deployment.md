@@ -92,7 +92,10 @@ heat and buys nothing.
 |---|---|---|---|
 | system-design | 9 | 1.3 MB | < 1 min |
 | algorithms | 371 | 4.3 MB | < 1 min |
+| sqlite | 837 | 18 MB | ~3 min |
+| debugger | 2,138 | 25 MB | ~4 min |
 | scripting | 9,302 | 70 MB | 13 min |
+| cppreference | 6,640 | 125 MB | ~21 min |
 | cpp | 9,746 | 175 MB | 36 min |
 | wdk | 28,176 | 359 MB | 74 min |
 | win32 | 71,663 | 786 MB | 162 min |
@@ -112,6 +115,43 @@ argus pack install packs/win32-1.0.pack --packs-dir /var/lib/argus/packs
 Install the packs matching your work. Measured: they help most where the model
 is ignorant (`win32` 9/30 -> 30/30) and not at all where it is fluent
 (`cpp` standard library 26/30 -> 25/30).
+
+### Packs built from an archive rather than a repository
+
+`sqlite` and `cppreference` are fetched differently, and it matters when a
+build fails. SQLite has no documentation repository on GitHub at all, and
+cppreference's repo holds the build tooling rather than the rendered pages --
+both publish a release archive instead. `--fetch` downloads and unpacks it,
+and records provenance as the archive's **sha256** rather than a commit.
+
+```bash
+argus pack build --source sqlite \
+    --work-dir work/sources/sqlite-doc --out packs/sqlite.arguspack \
+    --version 3.53.4 --fetch
+```
+
+**Behind an intercepting proxy, set `NO_PROXY` first.** Measured here: a proxy
+truncated an 11.8 MB archive at 720,896 bytes. The download reports success --
+urllib does not treat a short read as an error -- so the failure surfaces
+later as a corrupt archive. The builder now checks the received length against
+`Content-Length` and refuses a short transfer, naming both numbers:
+
+```bash
+NO_PROXY="sqlite.org,github.com,objects.githubusercontent.com" \
+    argus pack build --source cppreference --fetch ...
+```
+
+GitHub release assets redirect to a CDN host, so `objects.githubusercontent.com`
+has to be in that list or the redirected leg is still intercepted.
+
+Two limits worth knowing before you rely on these:
+
+- **`argus pack update` cannot refresh them.** It assumes a git remote. Rebuild
+  with `--fetch` against a newer `archive_url` instead.
+- **The URL is version-pinned in the adapter.** SQLite's archive path carries
+  its release number, so a new SQLite release needs the adapter's `archive_url`
+  bumped -- it will not drift forward on its own, which is deliberate: a pack
+  whose contents changed silently is worse than one that is visibly stale.
 
 ---
 
