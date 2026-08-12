@@ -404,6 +404,23 @@ Suffix matching gets *better* with scale, not worse. `which_repo` stayed flat
 only because an indexed `basename` column replaced a full scan; before that,
 the p95 was 15.5 ms and rising linearly.
 
+### Does scale fix it, or does retrieval?
+
+Ten task families — test development, code review, performance, coding style, SDK, WDK, win32, scripting, security review, code safety — one question each, graded by substring match on 17 fact tokens **verified against the packs before any model runs**.
+
+| model | closed book | with Argus | tool calls |
+|---|---|---|---|
+| `qwen3.6:27b` (dense, 27.8B) | 5 / 10 | **10 / 10** | 26 |
+| `qwen3.6:35b` (MoE, 36.0B) | 5 / 10 | **9 / 10** | 19 |
+
+**Both models failed the same five tasks closed book** — not similar scores, the same five, task for task. An 8-billion-parameter gap and a different architecture moved nothing. Both handled amortized complexity and MSVC flag syntax; both missed driver IRQLs and the documented header for `CreateFileW` (`fileapi.h`, not the `windows.h` memory reaches for). These are recall failures on facts too specialised to sit in either model's weights, and capacity is not the missing ingredient.
+
+The one remaining failure says the rest. `35b` failed `security-review` with **zero tool calls in 2.2 seconds**, answering `wcscpy_s` / `<string.h>` / `ucrt.lib` from memory — a real function, and a user-mode answer to a question about *kernel* code. The 27b made 5 calls on the same task and got it right. A tool the model must decide to call will sometimes not be called, and the wrong answer arrives fast and confident.
+
+Latency inverts, which is worth noting: 35b's median fell from 5.5 s to **2.4 s** *with* retrieval. A looked-up fact is shorter to produce than a reasoned-out one.
+
+Three harness defects were found and fixed before these numbers were trusted — a 401 that read as 0/10, a `forbid` rule that fired on a correct answer, and a re-grade that manufactured a failure from a truncated record. All three are written up in [`docs/pack-measurements.md`](docs/pack-measurements.md), because each would have published as a finding.
+
 ### Getting the tools in front of the model
 
 A server the client never asks is worth exactly zero, and that failure is

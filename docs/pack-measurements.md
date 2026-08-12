@@ -1145,3 +1145,91 @@ It called `docs_lookup({"name": "dt"})` and received the Display Type page --
 the disambiguation the collision guard buys. Adding this ninth pack left the
 earlier `FltRegisterFilter` answer unchanged (`<= APC_LEVEL`, `FltMgr.lib`),
 so the new corpus does not interfere with the existing ones.
+
+---
+
+# Two models, two arms, ten task families
+
+Does Argus close the gap, and does model size close it instead? Ten task
+families -- test development, code review, performance, coding style, SDK,
+WDK, win32, scripting, security review, code safety -- one question each, run
+against `qwen3.6:27b` (dense, 27.8B) and `qwen3.6:35b` (MoE, 36.0B), closed
+book and then with Argus over native function calling.
+
+The two models differ in **architecture as well as size**, so a gap between
+them is not a clean parameter-count result and is not reported as one.
+
+| model | arm | pass | tool calls | median |
+|---|---|---|---|---|
+| `qwen3.6:27b` | closed book | 5 / 10 | 0 | 17.1 s |
+| `qwen3.6:27b` | **with Argus** | **10 / 10** | 26 | 22.2 s |
+| `qwen3.6:35b` | closed book | 5 / 10 | 0 | 5.5 s |
+| `qwen3.6:35b` | **with Argus** | **9 / 10** | 19 | 2.4 s |
+
+## Scale did not help; retrieval did
+
+**Both models scored 5/10 closed book, failing the same five tasks.** Not
+similar scores -- the same five, task for task:
+
+| | closed book | with Argus |
+|---|---|---|
+| coding-style, performance, scripting, sdk-support, code-safety | both PASS | both PASS |
+| test-development (`dispatch_level`) | both FAIL | both PASS |
+| code-review (`apc_level`) | both FAIL | both PASS |
+| wdk-support (`apc_level`) | both FAIL | both PASS |
+| win32-support (`fileapi.h`) | both FAIL | both PASS |
+| security-review (`ntstrsafe.*`) | both FAIL | 27b PASS, 35b FAIL |
+
+An 8-billion-parameter difference and a different architecture moved nothing.
+Both models handled amortized complexity and MSVC flag syntax; both missed
+driver IRQLs and the documented header for `CreateFileW` -- which is
+`fileapi.h`, not the `windows.h` that memory reaches for. These are recall
+failures on facts too specialised to be well represented in either model's
+weights, and capacity is not the missing ingredient.
+
+## The one remaining failure is the familiar one
+
+`qwen3.6:35b` failed `security-review` with **zero tool calls, in 2.2
+seconds**. Asked what replaces `wcscpy` in KERNEL code, it answered
+`wcscpy_s` / `<string.h>` / `ucrt.lib` from memory. That is a real function
+and a user-mode answer to a kernel question; the documented replacement lives
+in `ntstrsafe.h` / `Ntstrsafe.lib`. The 27b model made 5 calls on the same
+task and got it right.
+
+This is the finding that keeps recurring here: **a tool the model must decide
+to call will sometimes not be called**, and when that happens the wrong answer
+arrives fast and confident. The larger model was more willing to trust itself,
+which on this task cost it the point.
+
+Latency inverts with retrieval, and the direction is worth noting: 35b's
+median fell from 5.5 s to 2.4 s *with* tools. A looked-up fact is shorter to
+produce than a reasoned-out one.
+
+## The answer key is verified before any model runs
+
+`verify_answer_key()` checks all 17 expected tokens against the packs and
+refuses to start if one is missing. An answer key written from memory would
+score a model wrong for being right -- the exact failure this project exists
+to measure. It earned itself immediately: `/std:c++20` raised an FTS5 syntax
+error rather than silently reporting "not found", which would have read as a
+gap in the corpus and sent someone editing a correct key.
+
+Three defects in the harness were found and fixed before these numbers were
+trusted, all of which would have published as findings:
+
+- **401 read as 0/10.** The first full run scored both models 0/10 with zero
+  tool calls. Every row held `<ERROR: unhandled errors in a TaskGroup>`, which
+  unwrapped to `401 Unauthorized`: the ACL cache had aged 9.6 h past its
+  window and Argus correctly denied. Nothing about the models.
+- **A `forbid` rule that fired on a correct answer.** `passive_level` was
+  forbidden on the lookaside task, but the documented contract is
+  `<= DISPATCH_LEVEL`, which *includes* PASSIVE_LEVEL, so a fully correct
+  answer names both. Removed: the wrong answer is PASSIVE_LEVEL *instead of*
+  DISPATCH_LEVEL, which the `expect` check already catches.
+- **A re-grade that manufactured a failure.** Re-scoring stored answers
+  flipped a real 35b PASS to FAIL, because that record was exactly 1500
+  characters -- the storage cap -- and `wdm.h` sat past the cutoff. The
+  run-time grade against the full text was right. Cap raised to 8000.
+
+Reproduce with [`evals/run_model_bench.py`](../evals/run_model_bench.py);
+results in [`evals/model-bench-results.json`](../evals/model-bench-results.json).
