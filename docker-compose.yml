@@ -116,6 +116,20 @@ services:
     # `caddy`, which terminates TLS in front of it. Publishing 7700 directly
     # would put the developer's GitLab PAT (sent as a bearer token on every
     # call — see hermes's `--auth header`) on the wire in plaintext.
+    # Without this, Compose reports a server that has crashed its HTTP loop as
+    # "running", and Caddy keeps routing to it -- the failure reaches
+    # developers as an agent that mysteriously stops finding anything, rather
+    # than as a container that is visibly down.
+    #
+    # `start_period` is generous because the first request opens every
+    # installed knowledge pack, and the estate can be over a gigabyte.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7700/healthz', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     security_opt:
       - no-new-privileges:true
     deploy:

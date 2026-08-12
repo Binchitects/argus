@@ -1,132 +1,106 @@
 # Argus
 
-**A private, self-hosted code index that lets a local LLM answer questions across all your repositories at once — without any code leaving your network.**
+**Your local LLM already knows how to code. It does not know your codebase, and it invents API facts with total confidence. Argus fixes both — on your own hardware, with nothing leaving your network.**
 
-Argus mirrors every repository from your self-hosted GitLab, extracts a symbol and dependency graph from them, and serves access-controlled code retrieval to [Hermes Agent](https://github.com/NousResearch/hermes-agent) over MCP. Each developer sees exactly the repos GitLab says they can see — no second permissions system to maintain.
-
-Built for a specific, awkward situation: **millions of lines of C/C++ spread across many repositories that together build one product**, where the question developers actually need answered is *"which repo do I change for this, and what breaks if I do?"*
+Argus is a self-hosted code index and documentation server for [Hermes Agent](https://github.com/NousResearch/hermes-agent) + [Ollama](https://ollama.com). It mirrors every repository from your GitLab, extracts a symbol and dependency graph, serves eleven documentation packs, and enforces each developer's real GitLab permissions in SQL.
 
 ---
 
-## Why not just use RAG?
+## The measurement that matters
 
-The obvious approach — chunk every file, embed everything, throw it in a vector database — performs badly on large C/C++ codebases, and it fails in a way that's easy to miss until you've already built it.
-
-Header files are enormous, repetitive, and semantically near-identical to one another. Embedding them floods the vector space with near-duplicates that crowd out real answers. Meanwhile the questions developers actually ask — *where is `Parse` defined*, *who calls this*, *what breaks if I change this struct* — are **exact lookups**, and embeddings answer those worse than a symbol table does. Ask a pure-RAG system about `Init()` in a codebase with forty of them and it will confidently return the wrong one.
-
-Argus inverts the usual priority:
-
-| Layer | Answers | Cost |
-|---|---|---|
-| **Symbol graph** (ctags + `#include` edges) | Exact definitions, references, cross-repo ownership | Cheap, updates in seconds |
-| **Lexical** (SQLite FTS5 + ripgrep) | Exact strings and regex over millions of lines | Cheap, instant |
-| **Semantic** (embeddings) | Vague conceptual queries only | Expensive — applied *selectively* |
-
-Embeddings are the garnish, not the meal. They're computed for **public symbol signatures, file summaries, and docs** — never function bodies. A C++ function body embeds mostly to "generic C++ control flow"; its *signature plus doc comment plus path* is what carries the intent someone is searching for. That's ~70–90k vectors instead of ~600k, and a full rebuild in under an hour instead of overnight.
-
-And in C/C++, the `#include` graph **is** the cross-repo dependency graph. Recovering it needs no build system, no `compile_commands.json`, and no compiler — just parsing. That's what lets Argus answer "which repo owns this?" across an entire product.
-
----
-
-## Architecture
+Ten task families — test development, code review, performance, coding style, SDK, WDK, win32, scripting, security review, code safety — one question each, graded by substring match on facts verified against the corpus before any model ran.
 
 ```mermaid
-flowchart LR
-    subgraph GL["Self-hosted GitLab"]
-        R1[(repo A)]
-        R2[(repo B)]
-        R3[(repo C)]
-    end
-
-    subgraph HOST["Index host — one Linux box"]
-        MIR["mirror<br/><i>bare clones + worktrees</i>"]
-        PAR["parse<br/><i>ctags · includes</i>"]
-        STO[("store<br/><i>SQLite · FTS5</i>")]
-        ACL["acl<br/><i>PAT → repo allowlist</i>"]
-        MCP["mcpsrv<br/><i>HTTP MCP</i>"]
-        OLL["Ollama<br/><i>qwen3.6:35b</i>"]
-    end
-
-    subgraph DEV["Developer workstation"]
-        HER["Hermes Agent"]
-        WT["local checkout"]
-    end
-
-    GL -->|service token<br/>reads every repo| MIR
-    MIR --> PAR --> STO
-    STO --> MCP
-    ACL --> MCP
-    MCP -->|TLS, per-dev token| HER
-    OLL -->|inference| HER
-    HER -->|reads & edits| WT
-    HER -.->|developer PAT| ACL
-    ACL -.->|membership check| GL
+xychart-beta
+    title "Correct answers out of 10"
+    x-axis ["qwen3.6:27b alone", "27b + Argus", "qwen3.6:35b alone", "35b + Argus"]
+    y-axis "Tasks correct" 0 --> 10
+    bar [5, 10, 5, 9]
 ```
 
-**Two tokens, and their separation is the entire security model.** A privileged *service token* mirrors every repository, so the index is deliberately complete. Each developer's *own* GitLab token is exchanged at query time for their project membership, and every query is filtered to that allowlist **in SQL, before results leave the process** — never by asking the model nicely.
+| model | alone | with Argus | change |
+|---|---|---|---|
+| `qwen3.6:27b` (dense, 27.8B) | 5 / 10 | **10 / 10** | **+100%** |
+| `qwen3.6:35b` (MoE, 36.0B) | 5 / 10 | **9 / 10** | **+80%** |
 
-That distinction matters more than it looks. Telling an LLM "only answer about repos X and Y" is not access control; it's a suggestion, and a comment inside indexed source can override it. Revoke someone in GitLab and their index access dies with the cache TTL.
+**Both models failed the same five tasks alone** — not similar scores, the *same five*, task for task. An 8-billion-parameter gap and a different architecture changed nothing.
 
-The enforcement is structural, not conventional:
+Both handled amortized complexity and MSVC flag syntax fine. Both missed driver IRQLs and the documented header for `CreateFileW` — which is `fileapi.h`, not the `windows.h` that memory reaches for. Those are **recall** failures on facts too specialised to sit in any local model's weights.
 
-```python
-# Every public function in store/queries.py — no exceptions.
-def find_symbol(allowed_repo_ids, conn, name, kind=None, limit=50): ...
-#              ^^^^^^^^^^^^^^^^^ first positional, no default
-```
+> **Scale does not fix this. Retrieval does.**
 
-A reflection test walks the module and fails on any function that doesn't take it first with no default. It fails on code that doesn't exist yet — which is the point. Security bugs of this class almost never come from someone deliberately bypassing a check; they come from a new code path six months later that simply never called it. Encoding the requirement in the signature turns a runtime vulnerability into an import-time error.
+And it gets *faster*: `35b`'s median response fell from **5.5 s to 2.4 s** with retrieval enabled. A looked-up fact is shorter to produce than a reasoned-out one.
 
 ---
 
-## What Hermes sees
+## Quick start
 
-Tools are named after the *questions developers ask*, not after retrieval mechanisms. A 35B local model picks the right tool far more reliably when the name matches the intent — tool design is prompt engineering for smaller models.
+```bash
+git clone https://github.com/aliGhadyani/hermes-argus && cd hermes-argus
+cp .env.example .env && $EDITOR .env      # GitLab URL + service token
+./deploy/bootstrap.sh                      # build, start, index, verify
+```
 
-**Shipped — your private code, access-controlled:**
+Then prove it works before you tell anyone about it:
+
+```bash
+python deploy/smoke_test.py --url https://argus.example/mcp --token <developer-PAT>
+```
+
+```
+  [PASS] healthz                         3.0 ms  HTTP 200
+  [PASS] auth rejects bad token        489.7 ms  denied
+  [PASS] mcp handshake                 160.9 ms  protocol 2025-11-25
+  [PASS] server instructions                     1803 chars
+  [PASS] tools registered               11.0 ms  16 tools
+  [PASS] packs answer                 1340.2 ms  FltRegisterFilter -> APC_LEVEL
+  [PASS] private index               10764.5 ms  12 repo(s) visible to this token
+
+  7/7 checks passed
+```
+
+Full walkthrough: **[docs/production.md](docs/production.md)**.
+
+---
+
+## What your agent gets
+
+**Your private code**, access-controlled per developer:
 
 | Tool | Answers |
 |---|---|
 | `find_symbol` | Exact definitions across every repo |
-| `find_references` | Every mention, product-wide, including cross-repo |
-| `search_code` | Fast lexical search over millions of lines |
-| `get_file` | Access-checked content fetch |
-| `index_status` | Per-repo freshness, so the agent can qualify stale answers |
+| `find_references` | Every mention, product-wide, cross-repo |
+| `search_code` | Lexical search over millions of lines |
+| `semantic_search` | *"Where do we handle retry backoff for uploads?"* — when the question has no identifier in it |
 | `which_repo` | *"Which repo do I change for X?"* — from a description, a symbol, a stack trace, or a diff |
-| `repo_map` | Which repos a given repo depends on, and which depend on it, from resolved `#include` edges |
-| `impact_of` | *"What breaks if I change this file?"* — every file that includes it, transitively, with depth |
-| `semantic_search` | *"Where do we handle retry backoff for uploads?"* — by meaning, when the question contains no identifier |
+| `repo_map` · `impact_of` | *"What breaks if I change this?"* — from resolved `#include` edges |
+| `code_contracts` | Every in-house symbol a file references, with its definition |
+| `get_file` · `index_status` | Access-checked fetch; per-repo freshness |
 
-**Shipped — public documentation, no access control (there is nothing to gate):**
+**Public documentation**, no access control because there is nothing to gate:
 
 | Tool | Answers |
 |---|---|
-| `docs_lookup` | Exact API name → the page and anchor that *define* it |
-| `docs_search` | Conceptual questions against Python and React docs |
-
-Every phase is now shipped. `semantic_search` embeds the signature, kind, scope and path of each **public** symbol — never function bodies, which embed to generic control flow and bury real answers under near-duplicates. That is ~70–90k vectors where bodies would be ~600k. Build them with `argus embed --config …`; it is incremental, so a rerun after indexing new code only does the new work, and an interrupted run resumes.
-
-Its ACL filter runs *after* the vector scan, because `vec0` KNN cannot join. Nothing from a repo you cannot see is ever returned — not a row, a score, or an id — so the result is indistinguishable from a corpus containing only your repos. The tradeoff is recall, not correctness: a caller whose allowlist is a small slice of the corpus can get fewer hits than exist for them, and `SEMANTIC_COARSE` is the dial.
-
-`index_status` looks like a throwaway and isn't: it's what stops an agent confidently answering from a three-week-stale index. It can say *"this repo was last indexed 4 hours ago"* instead of silently guessing.
+| `docs_lookup` | Exact API name → the page that *defines* it |
+| `docs_find` | *"Which cmdlet writes objects to CSV?"* — by description |
+| `docs_search` · `docs_get` | Concepts, then the whole page |
+| `docs_contracts` | Paste a file → header, library, DLL and IRQL of every API it calls |
+| `docs_verify` | Check a draft you already wrote; reports only contradictions |
 
 ---
 
-## Knowledge packs
+## Eleven knowledge packs, 1.57 GB, zero unresolved symbols
 
-Your developers don't only ask about your code. They ask what `useState` returns and how `os.path.join` treats an absolute segment — and answering that from a model's memory is how you get confident, outdated, unciteable answers.
-
-A **knowledge pack** is one SQLite file holding a public documentation corpus: prose, API symbols, and embeddings. Build it once, share it, and nobody else has to regenerate it.
-
-```bash
-argus pack install https://example.org/python-3.13.arguspack --sha256 <digest>
-argus pack list
-argus pack info python          # licence and attribution, in full
+```mermaid
+xychart-beta
+    title "Documented symbols per pack (thousands)"
+    x-axis ["win32", "wdk", "cpp", "python", "scripting", "cppreference", "debugger"]
+    y-axis "Symbols (k)" 0 --> 90
+    bar [87.3, 38.0, 37.3, 18.0, 9.3, 5.4, 1.5]
 ```
 
-Eleven are built and measured, every one reporting **0 unresolved symbols**:
-
-| | Documents | Chunks | Symbols | Size |
+| pack | Documents | Chunks | Symbols | Size |
 |---|---|---|---|---|
 | `win32` — Windows SDK + samples | 71,663 | 530,559 | 87,297 | 786.2 MB |
 | `wdk` — driver DDI + samples | 28,176 | 245,727 | 38,041 | 358.6 MB |
@@ -139,260 +113,95 @@ Eleven are built and measured, every one reporting **0 unresolved symbols**:
 | `react` — react.dev | 222 | 4,755 | 125 | 9.1 MB |
 | `algorithms` — TheAlgorithms/C++ | 371 | 2,001 | 370 | 4.3 MB |
 | `system-design` — the Primer | 9 | 442 | 8 | 1.3 MB |
+| **total** | **128,882** | **1,040,105** | **179,276** | **1.57 GB** |
 
-Zero unresolved symbols is the check worth watching: a symbol whose page is missing still installs, still lists, and simply never resolves. The failure is invisible until somebody looks something up.
+A pack is **one SQLite file** — prose, API symbols and embeddings. Build once, publish, install everywhere:
 
-**All eleven answer correctly through the real agent.** One question per pack, driven through the actual `hermes -z` CLI — MCP discovery, tool registration, the server's instructions, native function calling, the model — and graded by substring match against a ground-truth token taken from the pack itself, so the verdict does not depend on reading the prose:
+```bash
+argus pack install https://your-host/wdk.arguspack --sha256 <digest>
+```
 
-| | | | |
-|---|---|---|---|
-| `win32` → `advapi32.lib` | `wdk` → `dispatch_level` | `cpp` → `/std:c++20` | `cppreference` → `amortized` |
-| `debugger` → `.reload` | `scripting` → `/mir` | `python` → `discard` | `react` → `pair` |
-| `sqlite` → `vacuum` | `algorithms` → `sort` | `system-design` → `content delivery` | **11 / 11** |
-
-Latency is the model, not the index: 65 s to 886 s per question on CPU-only inference with 46 tools in the prompt, while retrieval itself is milliseconds. The same `win32` question took 900 s cold and **78.8 s** warm — an 11× swing that is model load, not search. Reproduce with [`evals/run_hermes_packs.py`](evals/run_hermes_packs.py).
-
-Three properties make them worth the format:
-
-**Lookups are exact, not approximate.** Symbols come from the upstream project's own index — Sphinx's `objects.inv` for Python, react.dev's pinned MDX anchors — so `docs_lookup("os.path.join")` resolves to the definition, not to whichever paragraph mentions the name.
-
-**Every result is attributable.** `source`, `url`, `license` and `attribution` ride along on every hit, and the tool descriptions tell the model to cite them. `argus pack info` prints the licence in full — that output is how you meet the redistribution obligation.
-
-**They're small enough to move.** Embeddings are stored binary-quantized (96 bytes/chunk) for a coarse pass, with int8 (768 bytes) for rescoring. float32 would be 3072. At a million chunks that's the difference between a 96 MB scan and a 3 GB one.
-
-Measured recall@10 against an exact float32 baseline: **0.946**. Full numbers, including the misses, in [`docs/pack-measurements.md`](docs/pack-measurements.md). Usage in [`docs/knowledge-packs.md`](docs/knowledge-packs.md).
-
-Packs are a *separate corpus*. Nothing in the pack query path can reach the private index — that's asserted structurally by a test, not left to convention.
+A digest mismatch is refused and leaves **zero files behind**. All eleven answer correctly through the real `hermes -z` CLI — the whole chain, not a reimplementation.
 
 ---
 
-## Status
+## Why not just embed everything?
 
-Argus ships in phases, each ending somewhere genuinely usable.
+The obvious approach — chunk every file, embed it all, throw it in a vector DB — fails on large C/C++ codebases in a way that is easy to miss until you have already built it.
 
-| Phase | Scope | State |
+Headers are enormous, repetitive, and semantically near-identical. Embedding them floods the space with near-duplicates that crowd out real answers. Meanwhile the questions developers actually ask — *where is `Parse` defined*, *who calls this*, *what breaks if I change this struct* — are **exact lookups**, which a symbol table answers better than any embedding. Ask a pure-RAG system about `Init()` in a codebase with forty of them and it will confidently return the wrong one.
+
+Argus inverts the priority:
+
+| Layer | Answers | Cost |
 |---|---|---|
-| **1 — Indexer** | Mirroring, change detection, symbol + include extraction, SQLite store, access-gated queries, CLI | ✅ **Complete** |
-| **2 — Multi-user retrieval** | ACL module, HTTP MCP server, 5 code tools, container, TLS | ✅ **Complete** |
-| **5 — Knowledge packs** | Portable public documentation packs, 2 doc tools, `argus pack` CLI | ✅ **Complete** |
-| **3 — Cross-repo intelligence** | Include resolution, `repo_map`, `which_repo` | ✅ **Complete** |
-| **4 — Semantic layer** | Selective embeddings over private code, `semantic_search` | ✅ **Complete** |
+| **Symbol graph** (ctags + `#include`) | Exact definitions, references, ownership | Cheap, seconds |
+| **Lexical** (FTS5) | Exact strings over millions of lines | Cheap, instant |
+| **Semantic** (embeddings) | Vague conceptual queries only | Expensive — applied *selectively* |
 
-**741 tests**, passing locally, 0 skipped.
+Embeddings cover **public symbol signatures, scope and path — never function bodies.** A C++ body embeds mostly to "generic control flow"; its signature plus its path is what carries intent. That is ~70–90k vectors instead of ~600k.
 
-Health indicators, how they are measured, and the charts behind them are in [`docs/kpis.md`](docs/kpis.md) — every figure measured, none estimated.
-
-Phase 2 delivered most of the value — exact symbol lookup across the whole product, with real GitLab-derived permissions, before a single embedding existed. Phase 5 then added a second, entirely separate corpus: public documentation, which needs no access control and can be shared as a file.
-
-Phase 4 is deliberately last. It is the most expensive to build, the most likely to need iteration, and phases 1–3 stand on their own without it.
+And in C/C++ the `#include` graph **is** the cross-repo dependency graph — recoverable with no build system, no `compile_commands.json`, and no compiler.
 
 ---
 
-## Getting started
+## Architecture
 
-### Requirements
-
-- Python 3.11+
-- git
-- [Universal Ctags](https://github.com/universal-ctags/ctags) — **not** Exuberant Ctags, which has no JSON output
-  - Linux: `sudo apt install universal-ctags`
-  - Windows: `winget install UniversalCtags.Ctags`
-- A GitLab personal access token with `read_api` and `read_repository`
-- [Ollama](https://ollama.com) with `nomic-embed-text` pulled — only for `docs_search` and for *building* packs. Everything else, including `docs_lookup`, works without it.
-
-Argus refuses to start if ctags is missing or is the wrong implementation. Without that check you'd get a complete-looking index with no symbol layer at all — and no error to tell you.
-
-Expect the embedder, not the index, to dominate `docs_search` latency: measured 2,254 ms to embed a query on CPU Ollama against 89 ms for the search itself.
-
-### Install
-
-Docker is the recommended path, because it pins ctags — see below for why that matters.
-
-```bash
-docker compose build
+```mermaid
+flowchart LR
+    subgraph GL["Self-hosted GitLab"]
+        R1[(repos)]
+    end
+    subgraph HOST["Index host — one Linux box"]
+        MIR["mirror"] --> PAR["parse<br/><i>ctags · includes</i>"] --> STO[("SQLite<br/>FTS5 · sqlite-vec")]
+        STO --> MCP["MCP server"]
+        ACL["acl<br/><i>PAT → repo allowlist</i>"] --> MCP
+        PK[("11 knowledge packs")] --> MCP
+    end
+    subgraph DEV["Developer workstation"]
+        HER["Hermes Agent"]
+        OLL["Ollama<br/><i>qwen3.6 27b / 35b</i>"]
+    end
+    GL -->|service token<br/>reads every repo| MIR
+    MCP -->|TLS · per-dev token| HER
+    OLL -->|inference| HER
+    HER -.->|developer PAT| ACL
+    ACL -.->|membership check| GL
 ```
 
-Or natively:
+**Two tokens, and their separation is the entire security model.** A privileged *service token* mirrors every repository, so the index is complete. Each developer's *own* token is exchanged at query time for their project membership, and every query is filtered to that allowlist **in SQL, before results leave the process** — never by asking the model nicely.
 
-```bash
-pip install -e ".[dev]"
+Telling an LLM "only answer about repos X and Y" is not access control; it is a suggestion, and a comment inside indexed source can override it.
+
+The enforcement is structural:
+
+```python
+# Every public function in store/queries.py — no exceptions.
+def find_symbol(allowed_repo_ids, conn, name, kind=None, limit=50): ...
+#              ^^^^^^^^^^^^^^^^^ first positional, no default
 ```
 
-### Configure
-
-```bash
-cp config.example.yaml config.yaml
-```
-
-Set the token in the environment — it's read in preference to the file, so it never has to live in YAML:
-
-```bash
-export ARGUS_GITLAB_TOKEN=glpat-xxxxxxxxxxxx
-```
-
-```yaml
-gitlab:
-  url: https://gitlab.internal
-
-index:
-  data_dir: /var/lib/argus
-  db_path: /var/lib/argus/index.db
-  max_file_bytes: 1048576
-  repo_time_budget_seconds: 600
-  exclude_dirs: [third_party, vendor, node_modules, build, out, x64, Debug, Release]
-
-# Optional. Defaults to <data_dir>/packs.
-packs:
-  dir: /var/lib/argus/packs
-```
-
-### Run
-
-```bash
-argus index --config config.yaml
-```
-
-Index a single repository:
-
-```bash
-argus index --config config.yaml --repo group/one-repo
-```
-
-Check per-repo freshness:
-
-```bash
-argus status --config config.yaml
-```
-
-The first index takes hours on a large estate. After that, runs are incremental: Argus diffs the last-indexed commit against the new head and touches only what changed.
-
-### Running in Docker
-
-```bash
-export ARGUS_GITLAB_TOKEN=glpat-xxxxxxxxxxxx
-```
-
-```bash
-docker compose run --rm indexer index --config /etc/argus/config.yaml
-```
-
-```bash
-docker compose run --rm indexer status --config /etc/argus/config.yaml
-```
-
-The indexer is a batch job, not a daemon, so nothing starts on its own — `docker compose up` would be the wrong gesture. Mirrors, worktrees and the index live in the `argus-data` volume; your `config.yaml` is mounted read-only. Set `index.data_dir` and `index.db_path` to `/var/lib/argus` in that file.
-
-**Why the image pins ctags.** Argus depends on universal-ctags behaviour that varies by version: the C/C++ `prototype` kind ships *disabled by default* (without `--kinds-c=+p` the index silently loses most of a C/C++ public API), and C++ anonymous namespaces surface as generated identifiers like `__anond398a7c10111` rather than the literal `"anonymous"`. A host with a different ctags changes what gets indexed and what counts as a public symbol, with no error.
-
-The Dockerfile's `test` stage runs the **entire test suite against the pinned toolchain during the build**, so a ctags that behaves differently fails the build instead of producing an image that indexes incorrectly and reports success. The image currently pins Universal Ctags 5.9.0 (Debian bookworm) and all 127 tests pass against it.
+A reflection test walks the module and fails on any function that does not take it first with no default. **It fails on code that does not exist yet** — which is the point. Security bugs of this class come from a new code path six months later that simply never called the check. Encoding it in the signature turns a runtime vulnerability into an import-time error.
 
 ---
-
-## Design notes
-
-A few decisions that aren't obvious from the code:
-
-**Storage is one SQLite file.** At 2–5 developers there's no justification for operating Qdrant or Postgres. One file gives atomic writes, trivial backup, and zero daemon management. Regex search shells out to ripgrep against the worktrees rather than maintaining a trigram index — faster than anything worth building, and one less subsystem to keep consistent.
-
-**`last_indexed_sha` advances only after a repo's entire changed set commits.** That single rule is the whole crash-recovery story: a run that dies partway replays the same diff next time, and every write is idempotent. It's also why a ctags failure blocks the advance — marking files "indexed" with zero symbols would lose them permanently, since they'd never appear in a future diff.
-
-**Tool error text is prompt text.** When something breaks, the string returned goes straight into an LLM's context and determines what it does next. `"Argus unavailable — fall back to ripgrep in the local checkout and say the answer is repo-local only"` produces a far better outcome than a 503. You're programming the fallback path in English.
-
-**Renames are delete + add.** Rename tracking buys nothing for an index that stores per-path rows.
-
-**Every path-producing git command passes `-z`.** Without it git applies `core.quotePath` and returns non-ASCII paths C-escaped and quoted, so `файл.c` gets indexed as the literal `"\321\204\320\260..."`. This cost a real bug before it was caught.
-
----
-
-## Development
-
-```bash
-pytest -v
-```
-
-The suite uses **no network and no mocks of the tools under test** — it builds real git repositories in temp directories, runs the real ctags binary, and exercises real SQLite. Tests that mock the thing they're testing prove nothing.
-
-The design spec and the full implementation plan live in [`docs/superpowers/`](docs/superpowers/), including the reasoning behind each architectural choice and the mid-flight corrections where implementation proved the plan wrong.
-
----
-
-## License
-
-See [LICENSE](LICENSE).
 
 ## Measured
 
-Every number here was measured on one machine (Windows 11, CPU-only Ollama,
-`nomic-embed-text`), not estimated. Where a figure is inconclusive it says so.
+Everything here is measured on real corpora, not estimated. Full detail in [docs/pack-measurements.md](docs/pack-measurements.md), [docs/index-measurements.md](docs/index-measurements.md), [docs/kpis.md](docs/kpis.md).
 
-### Does retrieval improve an agent?
+### Latency
 
-160 questions against **qwen3.6:35b**, closed book versus with pack retrieval.
-Question *and* answer are extracted from the pack pages, so ground truth is
-what Microsoft and tldr publish rather than what the test author remembered.
-
-| pack | closed book | with packs | |
-|---|---|---|---|
-| `win32` | 9 / 30 | **30 / 30** | +21 |
-| `wdk` | 9 / 30 | **25 / 30** | +16 |
-| `scripting` | 2 / 30 | **21 / 30** | +19 |
-| `cpp` (MSVC diagnostics) | 3 / 40 | **40 / 40** | +37 |
-| `cpp` (standard library) | 26 / 30 | 25 / 30 | -1 |
-| **total** | **49 / 160 (31%)** | **141 / 160 (88%)** | **+92** |
-
-**94 answers fixed, 3 broken.** The `cpp` standard-library row is the control
-and behaves like one: the model already knows which header declares
-`std::vector::push_back`, so retrieval adds nothing there. The packs earn
-their disk where the model is ignorant, not where it is fluent.
-
-**Retrieval must be wired correctly or the same packs make answers worse.**
-Eight strategies were measured. Every one that constrained the model to the
-reference destroyed answers it already had: "use ONLY the reference" took
-win32 from 5/5 to 1/5, and "do not rely on memory" took cpp from 26/30 to
-13/30. Reference material must add, never gate.
-
-| strategy | score |
+| | |
 |---|---|
-| closed book | 46 / 120 |
-| verify-after only | 60 / 120 |
-| hybrid, routed on model confidence | 78 / 120 |
-| extract-only framing | 84-95 / 120 |
-| **retrieve, answer, verify** | **101 / 120** |
+| `docs_lookup` | **2.1 ms** median |
+| `which_repo` p95 (10,212 files) | **1.92 ms** |
+| `docs_search`, 17.9k chunks | **88.6 ms** |
+| `docs_search`, 364.8k chunks | **460 ms** |
+| **query embedding (CPU Ollama)** | **2,254 ms** |
 
-Use all five documentation tools, each for a different failure: `docs_lookup`
-when you know the name, `docs_find` when you know only the behaviour,
-`docs_search` to locate a page, `docs_get` to read it whole, `docs_verify` to
-check a draft afterwards. And never route on the model's confidence -- it is
-uncorrelated with its knowledge, which is the whole reason the packs exist.
+5.2× cost for 20.4× the corpus — sublinear. **The embedder sets the latency users feel, not the index.** A GPU is the single biggest improvement available.
 
-### What the packs cost
-
-| pack | documents | chunks | symbols | size | build |
-|---|---|---|---|---|---|
-| `system-design` | 9 | 442 | 8 | 1.3 MB | < 1 min |
-| `algorithms` | 371 | 2,001 | 370 | 4.3 MB | < 1 min |
-| `scripting` | 9,302 | 46,027 | 9,302 | 70.1 MB | 13 min |
-| `cpp` | 9,746 | 123,212 | 37,305 | 174.7 MB | 36 min |
-| `wdk` | 28,176 | 245,727 | 38,041 | 358.6 MB | 74 min |
-| `win32` | 71,663 | 530,559 | 87,297 | 786.2 MB | 162 min |
-| **total** | **128,567** | **947,968** | **172,323** | **1.4 GB** | **~5 h** |
-
-Every pack reports **0 unresolved symbols**. Build time is almost entirely
-embedding, at a steady ~55 chunks/sec, so `minutes = chunks / 55 / 60`. An
-interrupted build resumes from a cache rather than starting over -- the wdk
-rebuild took 3 minutes instead of 74, reusing 239,155 embeddings.
-
-### Retrieval performance
-
-| corpus | search, excluding query embedding |
-|---|---|
-| 17,919 chunks | 88.6 ms |
-| 364,800 chunks | **460 ms** |
-
-5.2x cost for 20.4x the corpus -- sublinear. Query embedding dominates what a
-user feels at ~2,500 ms on CPU; that is hardware, not code.
-
-### Index performance
+### Scale
 
 | | 1,026 files | 10,212 files |
 |---|---|---|
@@ -400,74 +209,45 @@ user feels at ~2,500 ms on CPU; that is hardware, not code.
 | ambiguous include rate | 1.28% | **0.09%** |
 | MB per 1k files | 28.4 | 21.9 |
 
-Suffix matching gets *better* with scale, not worse. `which_repo` stayed flat
-only because an indexed `basename` column replaced a full scan; before that,
-the p95 was 15.5 ms and rising linearly.
-
-### Does scale fix it, or does retrieval?
-
-Ten task families — test development, code review, performance, coding style, SDK, WDK, win32, scripting, security review, code safety — one question each, graded by substring match on 17 fact tokens **verified against the packs before any model runs**.
-
-| model | closed book | with Argus | tool calls |
-|---|---|---|---|
-| `qwen3.6:27b` (dense, 27.8B) | 5 / 10 | **10 / 10** | 26 |
-| `qwen3.6:35b` (MoE, 36.0B) | 5 / 10 | **9 / 10** | 19 |
-
-**Both models failed the same five tasks closed book** — not similar scores, the same five, task for task. An 8-billion-parameter gap and a different architecture moved nothing. Both handled amortized complexity and MSVC flag syntax; both missed driver IRQLs and the documented header for `CreateFileW` (`fileapi.h`, not the `windows.h` memory reaches for). These are recall failures on facts too specialised to sit in either model's weights, and capacity is not the missing ingredient.
-
-The one remaining failure says the rest. `35b` failed `security-review` with **zero tool calls in 2.2 seconds**, answering `wcscpy_s` / `<string.h>` / `ucrt.lib` from memory — a real function, and a user-mode answer to a question about *kernel* code. The 27b made 5 calls on the same task and got it right. A tool the model must decide to call will sometimes not be called, and the wrong answer arrives fast and confident.
-
-Latency inverts, which is worth noting: 35b's median fell from 5.5 s to **2.4 s** *with* retrieval. A looked-up fact is shorter to produce than a reasoned-out one.
-
-Three harness defects were found and fixed before these numbers were trusted — a 401 that read as 0/10, a `forbid` rule that fired on a correct answer, and a re-grade that manufactured a failure from a truncated record. All three are written up in [`docs/pack-measurements.md`](docs/pack-measurements.md), because each would have published as a finding.
-
-### Getting the tools in front of the model
-
-A server the client never asks is worth exactly zero, and that failure is
-quiet. Wiring Argus into Hermes, the tools registered correctly and the model
-still answered "I was unable to locate any documentation" -- because the client
-waits a bounded time for MCP discovery, then snapshots its tool list once.
-
-| phase | time |
-|---|---|
-| Argus answering `initialize` + `tools/list` + `resources/list` + `prompts/list` | **27 ms** |
-| client building its HTTP client and importing the MCP SDK | ~1,040 ms |
-| total discovery, warm / cold | 1.07 s / **2.89 s** |
-| client's wait before snapshotting | **0.75 s** |
-
-Argus is 27 ms of a budget it loses by 320 ms. No server-side tuning wins
-that; an infinitely fast server still loses. The lesson generalises past this
-one client: **measure the handshake from the client's side**, because the
-server's own latency can be a rounding error in what decides whether it gets
-used at all.
-
-Worth stating plainly: a client that reports a server as `configured` has told
-you it parsed the config, not that the model can call anything.
-[docs/deployment.md](docs/deployment.md) has the diagnosis, a one-liner that
-checks whether the tools reached the snapshot, and the fix.
+Suffix matching gets *better* with scale. `which_repo` stayed flat only because an indexed `basename` column replaced a full scan — before that, p95 was 15.5 ms and rising linearly.
 
 ### Engineering
 
 | | |
 |---|---|
-| tests | **741 passing** |
+| tests | **741 passing**, 0 skipped |
 | hollow tests found by targeted revert | **9** |
-| bugs whose failure mode was a plausible success | **3** (see below) |
-| cross-repo edge precision, hand-checked | 13 / 25 -> after fixes, 0 fabricated at weight > 8 |
+| bugs whose failure mode was a *plausible success* | **6** |
 
-A *hollow test* passes while the behaviour it names is broken. Each was caught
-by breaking the code deliberately and confirming the test noticed. A suite
-without that step has the same hollow tests and no number.
+A *hollow test* passes while the behaviour it names is broken. Each was caught by breaking the code deliberately and confirming the test noticed.
 
-The three worst bugs found here shared one signature: **they produced a
-plausible success rather than an error.** A client logged "registered 19
-tools" and the agent never saw them. A clone succeeded and the build blamed
-the path it had just written. A YAML parser returned a dict and silently
-omitted a key — which would have shipped a pack with zero symbols that built,
-installed and listed without complaint. None is caught by "does it crash" or
-"does it return something"; each needs a check on the *content* of the
-success.
+The six worst bugs shared one signature: **they produced a plausible success rather than an error.** A client logged "registered 19 tools" and the agent never saw them. A clone succeeded and the build blamed the path it had just written. A YAML parser returned a dict and silently omitted a key — which would have shipped a pack with zero symbols that built, installed and listed without complaint. None is caught by "does it crash"; each needs a check on the *content* of the success.
 
-Full detail: [docs/pack-measurements.md](docs/pack-measurements.md),
-[docs/index-measurements.md](docs/index-measurements.md),
-[docs/kpis.md](docs/kpis.md), [evals/](evals/).
+That discipline extends to the benchmarks. The model comparison above found **three defects in its own harness** before its numbers were trusted — a 401 that read as 0/10, a grading rule that fired on a correct answer, and a re-grade that manufactured a failure from a truncated record. All three are written up rather than quietly fixed, because each would have published as a finding.
+
+---
+
+## Status
+
+| Phase | | |
+|---|---|---|
+| 1 — Indexer | ctags, includes, SQLite | ✅ |
+| 2 — MCP server | ACL, 8 private tools | ✅ |
+| 3 — Cross-repo | include resolution, `repo_map`, `which_repo` | ✅ |
+| 4 — Semantic layer | selective embeddings, `semantic_search` | ✅ |
+| 5 — Knowledge packs | 11 packs, 6 doc tools, `argus pack` | ✅ |
+
+**741 tests**, passing locally, 0 skipped.
+
+- **[docs/production.md](docs/production.md)** — deploy, verify, operate
+- **[docs/deployment.md](docs/deployment.md)** — wiring Hermes, and the failure modes
+- **[docs/knowledge-packs.md](docs/knowledge-packs.md)** — building and publishing packs
+- **[evals/](evals/)** — every benchmark in this README, reproducible
+
+---
+
+## Licence
+
+Argus is **GPL v3** — see [LICENSE](LICENSE).
+
+Knowledge packs carry their own upstream licences, which are *not* GPL and vary per pack: CC-BY-4.0 for the Microsoft documentation, CC-BY-SA-3.0 for cppreference, PSF-2.0 for Python, MIT for the algorithms corpus, public domain for SQLite. `argus pack info <name>` prints each in full, and that output is how you meet the redistribution obligation.
