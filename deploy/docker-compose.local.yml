@@ -1,0 +1,58 @@
+# Local manual-testing overlay.
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.local.yml up -d server
+#
+# Three deliberate differences from the production compose, each of which
+# would be wrong in production:
+#
+#  1. The server port is PUBLISHED to the host. Production keeps it unpublished
+#     and reachable only through Caddy, because a developer's GitLab PAT rides
+#     on every request as a bearer token and 7700 is plain HTTP. Publishing it
+#     on loopback is fine for testing on this machine and nowhere else.
+#
+#  2. The index and packs are BIND-MOUNTED from the host instead of living in
+#     a named volume, so this reuses the index and the 1.57 GB pack estate that
+#     already exist here rather than re-indexing and re-embedding for hours.
+#     The packs are read-only. The index is NOT: the server writes audit rows
+#     and ACL cache entries to it on every request, so mounting it :ro would
+#     fail every authenticated call.
+#
+#  3. Caddy is not started. There is no certificate to terminate for
+#     127.0.0.1, and adding one would test Caddy rather than Argus.
+services:
+  server:
+    ports:
+      # Loopback-bound explicitly. "8099:7700" would bind 0.0.0.0 and expose
+      # an unauthenticated-to-the-network path to every repository index on
+      # this machine to anything that can reach this host.
+      - "127.0.0.1:8099:7700"
+    volumes:
+      - ./config.yaml:/etc/argus/config.yaml:ro
+      - ./deploy/test-gitlab/work/index.db:/var/lib/argus/index.db:rw
+      - ./packs:/var/lib/argus/packs:ro
+    environment:
+      ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:?set ARGUS_GITLAB_TOKEN in .env}
+    # The container must reach the GitLab running on this host. Docker Desktop
+    # provides host.docker.internal; this mapping makes the same name work on
+    # a plain Linux daemon too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - serve
+      - --config
+      - /etc/argus/config.yaml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "7700"
+      # The production image pins --allowed-host to argus.internal. A request
+      # arriving as 127.0.0.1 would be rejected by Host-header validation, so
+      # the local names are allowed here instead.
+      - --allowed-host
+      - 127.0.0.1
+      - --allowed-host
+      - 127.0.0.1:*
+      - --allowed-host
+      - localhost
+      - --allowed-host
+      - localhost:*
