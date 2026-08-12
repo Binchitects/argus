@@ -35,3 +35,11 @@ docs/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Real GitLab tokens and a multi-GB scratch tree. Neither belongs in an image
+# layer, and a layer keeps its contents even when a later step deletes them.
+# The Dockerfile copies deploy/agent_client_example.py explicitly rather than
+# the directory, so this is defence in depth rather than the only guard.
+deploy/test-gitlab/seeded.json
+deploy/test-gitlab/work/
+packs/

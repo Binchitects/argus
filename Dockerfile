@@ -52,6 +52,17 @@ COPY argus/ ./argus/
 RUN pip install -e ".[dev]"
 
 COPY tests/ ./tests/
+
+# ONE file, not `COPY deploy/`. A test asserts properties of the reference
+# client, so the file must be present or that test fails with a bare
+# FileNotFoundError -- which is exactly how this was found, as a build that
+# passed 740 tests on the host and failed one only inside the image.
+#
+# Copying the whole directory would also pull deploy/test-gitlab/seeded.json,
+# which holds real GitLab tokens, into an image layer. Layers persist even if
+# a later step deletes the file, so this stays a single explicit file.
+COPY deploy/agent_client_example.py ./deploy/
+
 RUN python -m pytest -q
 
 # ------------------------------------------------------------- runtime ------

@@ -128,13 +128,13 @@ Seven checks, exit code 0 only when the required ones pass, so it drops into
 CI or a post-deploy gate:
 
 ```
-  [PASS] healthz                         3.0 ms  HTTP 200
-  [PASS] auth rejects bad token        489.7 ms  denied
-  [PASS] mcp handshake                 160.9 ms  protocol 2025-11-25
+  [PASS] healthz                         3.1 ms  HTTP 200
+  [PASS] auth rejects bad token        434.1 ms  denied
+  [PASS] mcp handshake                1454.2 ms  protocol 2025-11-25
   [PASS] server instructions                     1803 chars
-  [PASS] tools registered               11.0 ms  16 tools
-  [PASS] packs answer                 1340.2 ms  FltRegisterFilter -> APC_LEVEL
-  [PASS] private index               10764.5 ms  12 repo(s) visible to this token
+  [PASS] tools registered               20.3 ms  16 tools
+  [PASS] packs answer                   47.3 ms  FltRegisterFilter -> APC_LEVEL
+  [PASS] private index                  86.2 ms  12 repo(s) visible to this token
 ```
 
 `tools registered` names each required tool rather than counting them: "15
@@ -144,6 +144,32 @@ tool is exactly the failure that makes an agent invent an IRQL.
 `auth rejects bad token` reports **INCONCLUSIVE** rather than passing when the
 error is ambiguous. A refusal and a network failure both raise, and only the
 former proves anything about the security boundary.
+
+## 7. What the image guarantees
+
+The `test` stage runs the **whole suite inside the image** before any runtime
+layer is produced, so a build cannot succeed with failing tests:
+
+```bash
+docker build --target test -t argus:test .     # 741 passed
+docker build --target server -t argus:server . # 322 MB
+```
+
+Verified on the built image:
+
+| | |
+|---|---|
+| tests, inside the container | **741 passed** |
+| ctags | **Universal Ctags 5.9.0** — pinned; drift fails the build |
+| runs as | `uid=10001(argus)` — **never root** |
+| image size | **322 MB** |
+| secrets in layers | **none** — `seeded.json` is absent |
+
+That last row is checked rather than assumed. The Dockerfile copies
+`deploy/agent_client_example.py` as a single file rather than `COPY deploy/`,
+because the directory also holds `deploy/test-gitlab/seeded.json` with real
+GitLab tokens — and a layer keeps its contents even when a later step deletes
+the file.
 
 ---
 

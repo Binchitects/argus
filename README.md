@@ -48,13 +48,13 @@ python deploy/smoke_test.py --url https://argus.example/mcp --token <developer-P
 ```
 
 ```
-  [PASS] healthz                         3.0 ms  HTTP 200
-  [PASS] auth rejects bad token        489.7 ms  denied
-  [PASS] mcp handshake                 160.9 ms  protocol 2025-11-25
+  [PASS] healthz                         3.1 ms  HTTP 200
+  [PASS] auth rejects bad token        434.1 ms  denied
+  [PASS] mcp handshake                1454.2 ms  protocol 2025-11-25
   [PASS] server instructions                     1803 chars
-  [PASS] tools registered               11.0 ms  16 tools
-  [PASS] packs answer                 1340.2 ms  FltRegisterFilter -> APC_LEVEL
-  [PASS] private index               10764.5 ms  12 repo(s) visible to this token
+  [PASS] tools registered               20.3 ms  16 tools
+  [PASS] packs answer                   47.3 ms  FltRegisterFilter -> APC_LEVEL
+  [PASS] private index                  86.2 ms  12 repo(s) visible to this token
 
   7/7 checks passed
 ```

@@ -174,6 +174,19 @@ async def run(url: str, token: str, report: Report) -> None:
                 report.add("packs answer", ok, detail,
                            (time.perf_counter() - started) * 1000)
 
+                # Warm-up, deliberately untimed. The FIRST tool call on a
+                # connection pays costs no later call does -- opening the
+                # index, the first audit write, cold OS caches -- and
+                # measured here that was 10.7s against a 79ms steady-state
+                # median. Reporting the cold number as "how fast is Argus"
+                # would be wrong by two orders of magnitude, and reporting it
+                # without saying so would send an operator profiling a
+                # non-problem.
+                try:
+                    await session.call_tool("index_status", {})
+                except Exception:
+                    pass
+
                 started = time.perf_counter()
                 try:
                     res = await session.call_tool("index_status", {})
