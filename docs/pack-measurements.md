@@ -1233,3 +1233,77 @@ trusted, all of which would have published as findings:
 
 Reproduce with [`evals/run_model_bench.py`](../evals/run_model_bench.py);
 results in [`evals/model-bench-results.json`](../evals/model-bench-results.json).
+
+---
+
+# Phase 4 on real code: 76,636 vectors
+
+`semantic_search` shipped with unit tests and no evidence on a real corpus.
+This is that evidence. The index holds 286,785 symbols across postgres,
+openssl, git, curl, redis and freetype; 76,636 are public with a signature and
+therefore embeddable.
+
+| | |
+|---|---|
+| symbols indexed | 286,785 |
+| embeddable (public, signed) | **76,636** |
+| vectors built | 76,636 bin + 76,636 int8, **0 stale** |
+| index growth | 224.3 MB -> 305.2 MB |
+
+76,636 lands inside the "~70-90k vectors instead of ~600k" the design
+predicted from embedding signatures rather than bodies, which is the first
+confirmation that estimate was not wishful.
+
+## Retrieval, hand-checked
+
+Six description-shaped questions -- no identifier in any of them, which is
+exactly the shape `find_symbol` cannot answer and `search_code` answers only
+if you guess the source's words.
+
+| question | top hit | |
+|---|---|---|
+| compute a SHA-256 hash of a buffer | `sha256_final` (redis `src/sha256.c`) | partial |
+| parse a URL into scheme host and path | `OSSL_parse_url` | **exact** |
+| acquire a lightweight lock on a shared memory buffer | `LockBufferForCleanup` | partial |
+| expire keys that have passed their time to live | `expireSlaveKeys` (`src/expire.c`) | partial |
+| render a glyph outline into a bitmap | `FT_Glyph_To_Bitmap` | **exact** |
+| verify a certificate chain against trusted roots | `ssl_verify_cert_chain` | **exact** |
+
+**3 exact, 3 partial, 0 wrong. Every question landed in the right file.**
+
+The three partials share one shape, and it is the same limitation the code
+packs showed: **the index matches vocabulary, not role.** Asked to expire
+keys past their TTL it returned `expireSlaveKeys` from `src/expire.c` rather
+than `activeExpireCycle` from the same file -- both are expiry functions whose
+signature and path say "expire", and nothing in the embedded text says which
+one is the main loop and which is the replica path. Same for
+`LockBufferForCleanup` against `LWLockAcquire`, and `sha256_final` against a
+one-shot hash.
+
+That is worth stating plainly rather than tuning away on six questions: this
+tool reliably answers "which file handles X", and answers "which exact
+function" about half the time. Landing in the right file is most of the value
+when the alternative is grepping a 2,400-file repository, but it is not the
+same claim as an exact lookup, and `find_symbol` remains the tool for that.
+
+## Latency
+
+| stage | |
+|---|---|
+| query embedding | **2,260 ms** median |
+| vector search over 76,636 symbols | **310 ms** median |
+
+The split is the same one the packs showed and the same conclusion follows:
+**the embedder sets the latency a user feels, not the index.** Search over
+76,636 private symbols costs 310 ms; producing the query vector costs 7x that
+on CPU-only Ollama. A GPU or a smaller embedding model is the lever, and it is
+hardware rather than code.
+
+## Not yet measured
+
+The ACL post-filter recall limit. `vec0` KNN cannot join, so candidates are
+retrieved globally and then restricted, which means a caller whose allowlist
+is a small slice of the corpus can receive fewer hits than exist for them.
+Every query above ran with all 12 repositories visible. How narrow an
+allowlist has to be before this bites is documented in `semantic_search`'s
+docstring as a known cost and remains unobserved.

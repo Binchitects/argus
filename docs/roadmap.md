@@ -12,7 +12,7 @@ earlier than one sorted by "what would be nice".
 
 | proven | unproven |
 |---|---|
-| 11 packs, 0 unresolved symbols, 11/11 answered through the real agent | `semantic_search` had never run on real data |
+| 11 packs, 0 unresolved symbols, 11/11 answered through the real agent | ~~`semantic_search` never run on real data~~ — **done: 76,636 vectors, 3 exact / 3 partial / 0 wrong** |
 | 5/10 → 10/10 (`qwen3.6:27b`), 5/10 → 9/10 (`qwen3.6:35b`) | pack freshness — archives have no update path |
 | Container healthy, 7/7 acceptance, 741 tests | recall under a narrow ACL allowlist |
 | ACL enforced structurally and audited | anything beyond a single machine |
@@ -45,7 +45,19 @@ Success is 35b reaching 10/10 without losing a task it currently passes.
 roughly doubles it, and that cost lands on every question including the ones
 that never needed checking.
 
-### 2.2 Prove Phase 4 on real data
+### 2.2 Prove Phase 4 on real data — DONE
+
+76,636 vectors built over postgres, openssl, git, curl, redis and freetype.
+Hand-checked on six description-shaped questions: **3 exact, 3 partial,
+0 wrong, and every question landed in the right file.** The three partials
+share one shape — the index matches vocabulary, not role, so "expire keys
+past their TTL" returned `expireSlaveKeys` rather than `activeExpireCycle`
+from the same file. Full write-up in `pack-measurements.md`.
+
+What remains open from this item is the recall limit below, which every
+query above avoided by running with all 12 repositories visible.
+
+### The original plan for 2.2
 
 `semantic_search` shipped with unit tests and **zero evidence on a real
 corpus**: the index holds 286,785 symbols, 76,636 of them embeddable, and
