@@ -372,11 +372,35 @@ def _backup(cfg: Config, out_dir: Path, config_path: Path | None = None) -> int:
     finally:
         conn.close()
 
+    # The audit log lives in a sidecar (see store.db.audit_db_path), so a
+    # backup of the index alone would silently omit the one table a reindex
+    # cannot reconstruct -- and would still pass every check below, because
+    # the index carries its own now-unused `audit` table from migration 007.
+    from .store.db import audit_db_path
+
+    audit_src = audit_db_path(cfg.index.db_path)
+    audit_out = out_dir / audit_src.name
+    audit_rows = 0
+    if audit_src.exists():
+        audit_conn = sqlite3.connect(audit_src)
+        try:
+            audit_out.unlink(missing_ok=True)
+            audit_conn.execute("VACUUM INTO ?", (str(audit_out),))
+        except sqlite3.Error as exc:
+            print(f"audit backup failed: {exc}", file=sys.stderr)
+            return 4
+        finally:
+            audit_conn.close()
+        verify = sqlite3.connect(audit_out)
+        try:
+            audit_rows = verify.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
+        finally:
+            verify.close()
+
     # A backup nobody has verified is a hope, not a backup.
     check = sqlite3.connect(index_out)
     try:
         status = check.execute("PRAGMA integrity_check").fetchone()[0]
-        audit_rows = check.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
         repo_rows = check.execute("SELECT COUNT(*) FROM repos").fetchone()[0]
     finally:
         check.close()

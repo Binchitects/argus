@@ -16,7 +16,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from .. import acl
 from ..config import Config
 from ..store import writes
-from ..store.db import connect, migrate
+from ..store.db import connect, connect_audit, migrate
 from .errors import unauthorized
 from .tools import register_tools
 
@@ -183,7 +183,9 @@ class BearerAuthMiddleware:
         control, so the two never overlap on the same connection -- but each
         keeps its own independent open/use/close cycle regardless.
         """
-        conn = connect(self.cfg.index.db_path)
+        # Sidecar, matching the tool-call path: a denial at the gate must not
+        # queue behind an indexing run either.
+        conn = connect_audit(self.cfg.index.db_path)
         try:
             writes.record_audit(
                 conn, ts=int(time.time()), user_id=None, username=None,

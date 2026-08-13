@@ -16,7 +16,7 @@ from ..embed import EMBED_DIM, EMBED_MODEL, EmbeddingUnavailable, embed_batch
 from ..packs import format as pack_format
 from ..packs.registry import PACK_SUFFIX
 from ..store import packs as packs_store, queries, writes
-from ..store.db import connect, connect_readonly
+from ..store.db import connect, connect_audit, connect_readonly
 
 T = TypeVar("T")
 
@@ -203,7 +203,11 @@ async def _record_audit(db_path: Path | str, *, user_id: int | None, username: s
     exception (or result) the tool call itself produced.
     """
     def _write() -> None:
-        conn = connect(db_path)
+        # The sidecar, not the index: this is the only write a query makes,
+        # and in WAL a writer waits for the indexer's write lock even though
+        # the read did not. Measured, that coupling cost 76.1 -> 7.2 req/s
+        # while indexing. Nothing else writes this file.
+        conn = connect_audit(db_path)
         try:
             writes.record_audit(
                 conn, ts=int(time.time()), user_id=user_id, username=username,

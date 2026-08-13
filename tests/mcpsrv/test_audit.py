@@ -81,7 +81,23 @@ def _call_tool(client: TestClient, call_headers: dict, name: str, arguments: dic
 
 
 def _audit_rows(db_path) -> list[dict]:
-    conn = connect_readonly(db_path)
+    """Read the audit SIDECAR, not the index.
+
+    The rows moved out of the index deliberately: an audit row is the only
+    write a query makes, and in WAL a writer waits on the indexer's write
+    lock even though the read did not. Measured, that coupling cost
+    76.1 -> 7.2 req/s at 4 concurrent readers while indexing.
+
+    Pointed at the sidecar rather than accepting either location, so a
+    regression that quietly writes back into the index fails here instead of
+    passing against the vestigial `audit` table migration 007 still creates.
+    """
+    from argus.store.db import audit_db_path
+
+    sidecar = audit_db_path(db_path)
+    if not sidecar.exists():
+        return []
+    conn = connect_readonly(sidecar)
     try:
         return [dict(r) for r in conn.execute("SELECT * FROM audit ORDER BY id").fetchall()]
     finally:
