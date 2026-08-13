@@ -41,5 +41,28 @@ Measured findings, not advice:
 
 A skill is guidance the model chooses to open, not a hook that fires on its
 behalf. It improves *when* and *how* the agent reaches for Argus; it cannot
-compel a model that decides not to look. The measured lever for that is
-forced verify-after in the agent loop — see `docs/roadmap.md`, milestone 2.1.
+compel a model that decides not to look.
+
+**That limit is measured, not assumed.** Same question, same Hermes, skill
+installed, through `hermes -z`:
+
+| model | looked it up | answer |
+|---|---|---|
+| `qwen3.6:27b` | yes, cited the MS URL | `RtlStringCchCopyW` / `ntstrsafe.h` / `Ntstrsafe.lib` — correct |
+| `qwen3.6:35b` | **no tool calls, no citation** | `wcscpy_s` / `<wchar.h>` / `ucrtbase.lib` — a user-mode answer to a kernel question |
+
+The first run looked like a success and was not evidence: Hermes now defaults
+to 27b, which already passed this task before the skill existed, so two
+variables had changed at once. The decisive test was the model that *failed*
+it, and it failed the same way.
+
+By then 35b had been given every offer this project can make — native
+function-calling tool schemas, Argus's 1,803-character instructions in its
+system prompt, and this skill, whose first line is *"check before stating any
+of these, every time, regardless of how certain it feels"*. It read past all
+three and answered from memory in seconds.
+
+So the skill helps a model that already checks reach for the right tool. It
+does not create the impulse. The only measured lever for that is removing the
+choice: forced verify-after took 35b from 9/10 to **10/10** on this exact
+task — see `docs/roadmap.md`, milestone 2.1.
