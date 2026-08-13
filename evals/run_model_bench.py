@@ -26,6 +26,7 @@ reaches for when it is working from memory.
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
@@ -281,7 +282,95 @@ async def with_argus(model: str, task: dict) -> tuple[str, int]:
             return chat(model, messages, None).get("content", ""), calls
 
 
+def report(rows: list[dict]) -> None:
+    """Compare every model in ``rows``, closed book against with-Argus.
+
+    Prints the per-arm score, the delta Argus is responsible for, and the
+    per-task grid -- because the aggregate hides the finding that matters
+    most. Two models scoring 5/10 look interchangeable until you see they
+    failed the SAME five tasks, which says the gap is knowledge rather than
+    capability and that scale will not close it.
+    """
+    models = sorted({r["model"] for r in rows})
+    tasks = sorted({r["task"] for r in rows})
+    if not models:
+        print("  no results yet")
+        return
+
+    def score(model: str, arm: str) -> tuple[int, int, int]:
+        sub = [r for r in rows if r["model"] == model and r["arm"] == arm]
+        return (sum(1 for r in sub if r["verdict"] == "PASS"), len(sub),
+                sum(r.get("tool_calls", 0) for r in sub))
+
+    print(f"\n  {'model':22} {'closed book':>12} {'with argus':>12} "
+          f"{'delta':>7} {'calls':>7}")
+    for model in models:
+        cb_ok, cb_n, _ = score(model, "closed-book")
+        wa_ok, wa_n, calls = score(model, "with-argus")
+        cb = f"{cb_ok}/{cb_n}" if cb_n else "-"
+        wa = f"{wa_ok}/{wa_n}" if wa_n else "-"
+        delta = f"{wa_ok - cb_ok:+d}" if (cb_n and wa_n) else "-"
+        print(f"  {model:22} {cb:>12} {wa:>12} {delta:>7} {calls:>7}")
+
+    print(f"\n  {'task':20}", end="")
+    for model in models:
+        print(f" {model[-12:]:>14}", end="")
+    print()
+    for task in tasks:
+        print(f"  {task:20}", end="")
+        for model in models:
+            cb = next((r["verdict"] for r in rows if r["model"] == model
+                       and r["arm"] == "closed-book" and r["task"] == task), "-")
+            wa = next((r["verdict"] for r in rows if r["model"] == model
+                       and r["arm"] == "with-argus" and r["task"] == task), "-")
+            print(f" {cb[:4]:>6}->{wa[:4]:<7}", end="")
+        print()
+
+    # A pass earned without a single tool call is a pass from memory. On this
+    # bench that is exactly how the one with-argus failure happened, so it is
+    # surfaced rather than left inside the aggregate.
+    never = [r for r in rows
+             if r["arm"] == "with-argus" and not r.get("tool_calls")]
+    if never:
+        print(f"\n  answered WITHOUT calling a tool ({len(never)}):")
+        for r in never:
+            print(f"    {r['model']:20} {r['task']:20} {r['verdict']}")
+
+
 async def main() -> None:
+    # Declared before the defaults below read them: Python requires `global`
+    # to precede every use of the name in the function, including a read.
+    global OLLAMA, ARGUS_URL, ARGUS_TOKEN, PACKS, OUT
+
+    ap = argparse.ArgumentParser(
+        description="Compare any Ollama models, alone and with Argus.",
+        epilog="example: python evals/run_model_bench.py "
+               "--models qwen3.6:35b,gpt-oss:20b --token $ARGUS_TOKEN")
+    ap.add_argument("--models", default=",".join(MODELS),
+                    help="comma-separated Ollama model tags to compare")
+    ap.add_argument("--arms", default="closed-book,with-argus",
+                    help="closed-book, with-argus, or both (comma-separated)")
+    ap.add_argument("--url", default=ARGUS_URL, help="Argus MCP endpoint")
+    ap.add_argument("--token", default=ARGUS_TOKEN, help="bearer token")
+    ap.add_argument("--ollama", default=OLLAMA, help="Ollama base URL")
+    ap.add_argument("--packs", default=PACKS,
+                    help="pack directory, for verifying the answer key")
+    ap.add_argument("--out", default=str(OUT), help="results JSON path")
+    ap.add_argument("--append", action="store_true",
+                    help="keep rows for models/arms not being re-run")
+    ap.add_argument("--report", action="store_true",
+                    help="print the comparison for an existing results file "
+                         "and exit, running no models")
+    args = ap.parse_args()
+
+    OLLAMA, ARGUS_URL, ARGUS_TOKEN = args.ollama.rstrip("/"), args.url, args.token
+    PACKS, OUT = args.packs, pathlib.Path(args.out)
+    models = [m.strip() for m in args.models.split(",") if m.strip()]
+
+    if args.report:
+        report(json.loads(OUT.read_text(encoding="utf-8")))
+        return
+
     problems = verify_answer_key()
     if problems:
         print("ANSWER KEY REJECTED -- refusing to grade models against it:")
@@ -291,13 +380,16 @@ async def main() -> None:
     print(f"answer key verified against the packs: "
           f"{sum(len(t['expect']) for t in TASKS)} tokens, all present\n")
 
-    # Arms are selectable because the ACL cache backing the test scaffold has
-    # a one-hour stale-grace window, and the full with-argus matrix can exceed
+    # Arms are selectable because the ACL cache backing a test scaffold has a
+    # one-hour stale-grace window, and the full with-argus matrix can exceed
     # it. Running a batch that fits the window beats discovering that the last
     # few rows are 401s wearing a FAIL badge.
-    wanted = os.environ.get("BENCH_ARMS", "closed-book,with-argus").split(",")
+    wanted = [a.strip() for a in args.arms.split(",") if a.strip()]
+    if "both" in wanted:
+        wanted = ["closed-book", "with-argus"]
     existing = json.loads(OUT.read_text(encoding="utf-8")) if (
-        OUT.exists() and os.environ.get("BENCH_APPEND")) else []
+        OUT.exists() and args.append) else []
+    MODELS[:] = models
     rows = [r for r in existing
             if not (r["model"] in MODELS and r["arm"] in wanted)]
 
@@ -329,14 +421,8 @@ async def main() -> None:
                       + (f"  missing={detail}" if detail else ""), flush=True)
                 OUT.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
-    print("\n##### AGGREGATE\n")
-    print(f"  {'model':14} {'arm':12} {'pass':>5} {'of':>4}  {'tool calls':>10}")
-    for model in MODELS:
-        for arm in ("closed-book", "with-argus"):
-            sub = [r for r in rows if r["model"] == model and r["arm"] == arm]
-            ok = sum(1 for r in sub if r["verdict"] == "PASS")
-            print(f"  {model:14} {arm:12} {ok:5} {len(sub):4}  "
-                  f"{sum(r['tool_calls'] for r in sub):10}")
+    print("\n##### COMPARISON")
+    report(rows)
     print(f"\n  results: {OUT}")
 
 
