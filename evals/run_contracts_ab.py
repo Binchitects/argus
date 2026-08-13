@@ -39,7 +39,7 @@ from argus.store import packs as packs_store
 
 OLLAMA_CHAT = os.environ.get(
     "OLLAMA_URL", "http://localhost:11434").rstrip("/") + "/api/chat"
-MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:35b")
+MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:27b")
 PACKS = os.environ.get("ARGUS_PACKS", "deploy/test-gitlab/work/packs")
 MAX_TURNS = 8
 MAX_SOURCE = 12_000

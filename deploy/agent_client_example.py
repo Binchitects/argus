@@ -41,7 +41,19 @@ from mcp.client.streamable_http import streamablehttp_client
 # Overridable: the model does not always live on the default port, and a
 # hardcoded endpoint fails as a bare 404 that reads like a broken MCP server.
 OLLAMA_CHAT = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/") + "/api/chat"
-MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:35b")
+#: The reference model, chosen on measured behaviour rather than size.
+#:
+#: `qwen3.6:27b` (dense) is smaller than `qwen3.6:35b` (MoE) and scores the
+#: same closed book -- 5/10, failing the identical five tasks. The difference
+#: appears only once tools exist: 27b made 26 tool calls to 35b's 19, and won
+#: the one task that separated them by checking rather than answering from
+#: memory. 35b answered that one in 2.2s with zero tool calls, confidently
+#: and wrongly.
+#:
+#: For an agent, willingness to verify is the trait worth selecting for. The
+#: margin is one task out of ten, so this is "checks more reliably", not
+#: "much better at everything".
+MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:27b")
 MAX_TURNS = 8
 
 

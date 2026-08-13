@@ -25,6 +25,8 @@ xychart-beta
 
 **Both models failed the same five tasks alone** — not similar scores, the *same five*, task for task. An 8-billion-parameter gap and a different architecture changed nothing.
 
+`qwen3.6:27b` is the reference model here, chosen on behaviour rather than size. It is the *smaller* of the two, scores identically closed book, and pulls ahead only once tools exist: **26 tool calls to 35b's 19**, winning the one task that separated them by checking instead of recalling. 35b answered that one in 2.2 s with **zero tool calls** — confidently, and wrongly. For an agent, willingness to verify is worth more than parameter count. The margin is one task in ten, so the honest claim is "checks more reliably", not "better at everything".
+
 Both handled amortized complexity and MSVC flag syntax fine. Both missed driver IRQLs and the documented header for `CreateFileW` — which is `fileapi.h`, not the `windows.h` that memory reaches for. Those are **recall** failures on facts too specialised to sit in any local model's weights.
 
 > **Scale does not fix this. Retrieval does.**

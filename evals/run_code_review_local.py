@@ -34,7 +34,7 @@ from mcp.client.streamable_http import streamablehttp_client
 
 OLLAMA_CHAT = os.environ.get(
     "OLLAMA_URL", "http://localhost:11434").rstrip("/") + "/api/chat"
-MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:35b")
+MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:27b")
 MAX_TURNS = 10
 MAX_SOURCE = 14_000
 

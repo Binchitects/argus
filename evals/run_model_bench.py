@@ -337,6 +337,60 @@ def report(rows: list[dict]) -> None:
             print(f"    {r['model']:20} {r['task']:20} {r['verdict']}")
 
 
+async def verify_after(model: str, task: dict) -> tuple[str, int]:
+    """Answer closed book, then check the draft against the docs and revise.
+
+    The arm that exists because "offer the model tools" is not the same as
+    "the model uses them". Measured: `qwen3.6:35b` answered a kernel question
+    in 2.2 s with zero tool calls, confidently and wrongly, while the same
+    tools sat unused in its schema list.
+
+    Verification is not optional here. The model drafts without tools, then
+    `docs_verify` runs on that draft whether the model wanted it or not, and
+    only what the documentation CONTRADICTS is fed back.
+
+    The order is the whole point, and it is measured rather than assumed.
+    Putting retrieved context in FRONT of a model took Win32 accuracy from
+    5/5 to 1/5 -- retrieved text displaces knowledge the model already had.
+    Verifying afterwards cannot do that: it speaks only where documentation
+    disagrees, so a draft that was already right is left alone.
+    """
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    draft = chat(model, [{"role": "user", "content": task["prompt"]}], None)
+    text = draft.get("content", "") or ""
+    if not text.strip():
+        return text, 0
+
+    async with streamablehttp_client(
+            ARGUS_URL, headers={"Authorization": f"Bearer {ARGUS_TOKEN}"}
+    ) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("docs_verify", {"text": text})
+            findings = "".join(
+                getattr(c, "text", "") for c in (result.content or []))
+
+    # Silence means the packs found nothing to contradict, and the draft
+    # stands. Re-prompting anyway would invite the model to "improve" an
+    # answer nothing disagreed with, which is how a correct answer becomes a
+    # different one.
+    if not findings.strip() or findings.strip() in ("[]", "{}"):
+        return text, 1
+
+    revise = (
+        "You wrote this answer:\n\n" + text + "\n\n"
+        "The documentation was then checked against it. Below is what it "
+        "says, verbatim. Where it CONTRADICTS your answer, correct your "
+        "answer and quote the documented string. Where it is silent, keep "
+        "what you wrote -- silence is not disagreement.\n\n"
+        + findings[:6000]
+    )
+    final = chat(model, [{"role": "user", "content": revise}], None)
+    return final.get("content", "") or text, 1
+
+
 async def main() -> None:
     # Declared before the defaults below read them: Python requires `global`
     # to precede every use of the name in the function, including a read.
@@ -394,7 +448,8 @@ async def main() -> None:
             if not (r["model"] in MODELS and r["arm"] in wanted)]
 
     for model in MODELS:
-        for arm, runner in (("closed-book", None), ("with-argus", with_argus)):
+        for arm, runner in (("closed-book", None), ("with-argus", with_argus),
+                            ("verify-after", verify_after)):
             if arm not in wanted:
                 continue
             for task in TASKS:
