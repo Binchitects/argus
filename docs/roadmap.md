@@ -1,159 +1,106 @@
-# Argus roadmap
+# Roadmap after v1.0
 
-Phases 1, 2, 3 and 5 have shipped: a private code index with GitLab-derived
-access control, nine MCP tools, a cross-repo dependency graph, and portable
-public documentation packs. 529 tests pass locally and in the container.
+Ordered by **evidence status**, not by feature appeal. The first milestone
+holds the only failure the bench still catches and the only shipped feature
+with no real-world evidence. Everything later is a known cost rather than a
+known defect.
 
-Everything below is ordered by one principle: **measure before building.**
-Several decisions on this list have been deferred twice because guessing at
-them would have been cheaper than measuring, and wrong.
+A roadmap sorted by "what do we not yet know is true" finds real problems
+earlier than one sorted by "what would be nice".
+
+## Where v1.0 actually stands
+
+| proven | unproven |
+|---|---|
+| 11 packs, 0 unresolved symbols, 11/11 answered through the real agent | `semantic_search` had never run on real data |
+| 5/10 → 10/10 (`qwen3.6:27b`), 5/10 → 9/10 (`qwen3.6:35b`) | pack freshness — archives have no update path |
+| Container healthy, 7/7 acceptance, 741 tests | recall under a narrow ACL allowlist |
+| ACL enforced structurally and audited | anything beyond a single machine |
 
 ---
 
-## Step 0 — The real indexing run
+## Milestone 2 — the agent that decided not to check
 
-**Nothing else on this roadmap should start first.** Every remaining decision
-of consequence is gated on numbers this project does not have.
+### 2.1 Forced verify-after
 
-### What it unblocks
+**The one measured failure left, and the expensive kind.** `qwen3.6:35b`
+failed `security-review` with **zero tool calls in 2.2 seconds**, answering
+`wcscpy_s` / `<string.h>` / `ucrt.lib` from memory — a real function, and a
+user-mode answer to a question about kernel code. `qwen3.6:27b` made 5 calls
+on the same task and got it right. Every other failure mode this project had
+is closed; this one is not, and it produces *confident* wrong answers.
 
-| Question | Currently | Decided by |
+The shape to try: let the model draft, then run `docs_verify` on the draft
+automatically and feed back only what the documentation contradicts.
+
+There is already evidence this is the right direction rather than a guess.
+Verify-after cannot displace knowledge the model already had, because it only
+speaks where documentation disagrees. Retrieval-*first* demonstrably can:
+putting pack context in front of a model before it answered took Win32
+accuracy from 5/5 to **1/5**.
+
+**Measure:** forced-verify vs model-choice, same 10-task bench, both models.
+Success is 35b reaching 10/10 without losing a task it currently passes.
+**Risk:** latency. 35b's median is 2.4 s with tools; a mandatory second pass
+roughly doubles it, and that cost lands on every question including the ones
+that never needed checking.
+
+### 2.2 Prove Phase 4 on real data
+
+`semantic_search` shipped with unit tests and **zero evidence on a real
+corpus**: the index holds 286,785 symbols, 76,636 of them embeddable, and
+0 vectors existed. That is the weakest thing in v1.0 — a feature whose only
+evidence is a fixture with two orthogonal vectors.
+
+At the measured 55 vectors/sec that is roughly 23 minutes of CPU embedding.
+
+**Measure afterwards:** hand-checked recall on questions with a knowable
+answer, and `SEMANTIC_COARSE` tuned against the real ACL-post-filter
+behaviour rather than against the reasoning in its docstring. The
+post-filter recall limit is documented but has never been observed: a caller
+whose allowlist is a small slice of the corpus can get fewer hits than exist
+for them, and nobody has measured how small "small" has to be before it
+bites.
+
+---
+
+## Milestone 3 — operations
+
+| item | why | today |
 |---|---|---|
-| Postgres or stay on SQLite? | Deferred twice | Index size, write contention, query latency at real scale |
-| `_LEXICAL_SMOOTHING = 10`, `_FLOOR_RATIO = 0.35` | Defensible guesses | `which_repo` accuracy on real questions |
-| Is selective embedding (Phase 4) affordable? | Estimated 70–90k vectors | Actual public-symbol count |
-| Does `which_repo` work? | Passes tests on fixtures | Hand-checked answers on real tasks |
-| Incremental indexing fast enough for a webhook? | Untested at scale | Per-repo pass duration |
+| Incremental pack rebuild | a docs refresh costs **162 min** for `win32` | full re-embed only |
+| `pack update` for archive sources | assumes a git remote | broken by design |
+| Webhook-driven indexing | freshness is interval-polled | `index_status` exists to *admit* staleness |
+| Metrics endpoint | audit rows exist, no operational view | KPIs are CLI-only |
 
-### Before you trust a single number
-
-**Verify the service token sees your private projects.** `argus/gitlab.py`
-enumerates with `membership=false`, which for a **non-admin** token returns
-only *public* projects. Measured on the test instance: an admin token saw 3 of
-3 private projects; a non-admin token saw 1 of 3.
-
-If the token is not an admin, the index will silently cover a fraction of your
-repositories and every measurement below will be confidently wrong. This has
-been an open question since Phase 1 and has never been checked against a real
-instance.
-
-```bash
-# Expect this count to match what you actually have.
-curl -s -H "PRIVATE-TOKEN: $ARGUS_GITLAB_TOKEN" \
-  "$GITLAB_URL/api/v4/projects?membership=false&simple=true&per_page=100" \
-  | python -c "import json,sys; print(len(json.load(sys.stdin)))"
-```
-
-### The run
-
-```bash
-export ARGUS_GITLAB_TOKEN=<service token>
-export ARGUS_GIT_ASKPASS_TOKEN=$ARGUS_GITLAB_TOKEN
-time argus index --config /etc/argus/config.yaml
-argus status --config /etc/argus/config.yaml
-```
-
-### Record
-
-- Repo count, total files, total symbols, index file size on disk
-- Wall-clock for a cold full pass, and for a warm no-change pass
-- The resolution summary the run prints: resolved / external / **ambiguous** /
-  not found. A high ambiguous share means many repos ship headers with the
-  same basename, and `which_repo` will be correspondingly weaker — that is a
-  property of your `-I` layout, not something tool tuning fixes.
-- Cross-repo edge count
-
-### Then hand-check `which_repo`
-
-Ten real questions your developers have actually asked, one per input shape at
-minimum: a prose task, a symbol name, a stack trace, a diff under review.
-Record the top answer and whether it was right. **Write down the misses** —
-the point of this exercise is the failures, not a score.
-
-Deliverable: `docs/index-measurements.md`, in the shape of
-`docs/pack-measurements.md`, which records its misses too.
+Incremental rebuild is the most valuable of these. The embedding cache
+already makes a rebuild nearly free when chunks are unchanged — a `debugger`
+rebuild reported `14,259 reused, 0 computed` and finished in seconds — so
+the missing piece is detecting which upstream documents changed, not the
+embedding economics.
 
 ---
 
-## Then, in order
+## Milestone 4 — reach
 
-### A. Tune retrieval from the measurements *(small, immediately valuable)*
+**Upstream the three Hermes patches.** They live in a vendored install, and
+a Hermes update silently reverts all three — including the
+instructions-forwarding that is what made the tools work at all. The symptom
+returns with no error anywhere. This is the single largest durability risk in
+the deployment, and `/reload-mcp` is only a per-session workaround.
 
-`_LEXICAL_SMOOTHING` and `_FLOOR_RATIO` are currently reasoned defaults with
-their reasoning documented at the constant. Set them from the hand-checked
-results. If `which_repo`'s misses share a cause — as Phase 5's did, where a
-page discussing an API outranked the page defining it — fix the cause rather
-than the constant.
+**GPU embedding.** Query embedding is **2,254 ms median** on CPU-only Ollama,
+roughly 25× the entire search. It is the latency a user actually feels, and
+it is hardware rather than code.
 
-### B. Scale and operations *(depends on Step 0)*
-
-The Postgres question, answered with numbers rather than intuition. Also:
-parallel or incremental indexing if a cold pass is too slow, the GitLab
-webhook trigger the design specifies but never built, backup/restore, and
-metrics an operator can alert on.
-
-**Do not start this before Step 0.** Postgres is a large, mostly irreversible
-change, and the only honest input is a real index.
-
-### C. Identity and governance *(independent — can run in parallel)*
-
-What a security review will ask for: SSO/OIDC instead of per-developer GitLab
-PATs, audit export and retention, and an air-gapped install path. Nothing here
-is blocked by measurements.
-
-### D. Phase 4 — semantic search over private code *(depends on Step 0)*
-
-Deliberately last among the retrieval work, and the decision is already
-recorded: it extends the knowledge-pack pipeline — `packs/quantize.py`,
-`argus/embed.py`, the measured two-stage search — rather than forking a second
-embedding stack. Phase 5's binary + int8 quantization turns the original
-spec's ~270 MB of float32 vectors into ~8.6 MB coarse plus ~69 MB rescore.
-
-The measurement that matters: query embedding costs **2,254 ms on CPU Ollama**
-against 89 ms for a whole pack search. The embedder, not the index, sets the
-latency users feel. On CPU-only hardware, semantic search is a batch luxury,
-not an interactive feature.
-
-### E. Pack ecosystem *(independent)*
-
-MDN, .NET, Win32 and Linux packs on the format already proven, plus a signed
-public registry and `argus pack update` against it. This is the direct
-continuation of the original "huge knowledge base, shareable" ask, and the
-format has survived contact with two real corpora.
-
-### F. Developer surface *(independent)*
-
-IDE integration, a CLI for humans rather than agents, a search UI. Worth doing
-only once Step 0 confirms the answers are good enough to want direct access to.
+**More packs**, now that both fetch paths exist — a git clone and a release
+archive cover essentially every documentation corpus worth having.
 
 ---
 
-## Done since this roadmap was written
+## Deliberately not next
 
-- **Enumeration guard.** `argus index` now refuses when the service token
-  cannot see every repository, naming the numbers. The silent-partial-index
-  risk this document opens with is now impossible to miss.
-- **Scheduled refresh.** `argus index --interval` plus a `refresher` compose
-  service, under the existing `indexer` profile.
-- **Backup and restore.** `argus backup`, documented in
-  `docs/backup-and-restore.md`, verified by restore drill.
-
-## Known follow-ups, carried
-
-- **`mcp` 2.0 is released**; this project pins `>=1.9,<2.0`. The upgrade
-  renames `FastMCP` → `MCPServer`, which breaks `create_app`, and requires
-  re-verifying the DNS-rebinding allowlist behaviour — the defect that once
-  returned 421 on every proxied call while `/healthz` stayed green. A
-  deliberate task, not a version bump.
-- **`which_repo`'s prose path is the weakest**, by design: three of the four
-  input shapes never needed embeddings, so it ships useful without them.
-  Phase 4 improves prose and nothing else.
-- **Phase 5's retrieval quality was 6 good, 2 partial, 2 wrong** on ten
-  hand-checked questions. Both misses shared a cause: a page discussing an API
-  outranked the page defining it. `docs_lookup` was fixed for exactly this;
-  `docs_search` was left alone deliberately, because tuning ranking after
-  seeing ten questions is how you fit to ten questions.
-- **A Phase 2-era `git stash` is still in the stash list.** It was applied by
-  accident during Phase 3 and left conflict markers in `argus/mcpsrv/server.py`;
-  the working tree was restored from HEAD and nothing committed was lost. The
-  stash itself is untouched and worth a look before it is dropped.
+Multi-tenant, HA, or a hosted service. Nothing measured points there, and the
+current design — one SQLite file, one box, ACL resolved per request against
+GitLab — is the reason it is simple enough to be correct. Distributed state
+would cost that, and buy something nobody has asked for.
