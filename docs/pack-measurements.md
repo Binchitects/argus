@@ -1307,3 +1307,69 @@ is a small slice of the corpus can receive fewer hits than exist for them.
 Every query above ran with all 12 repositories visible. How narrow an
 allowlist has to be before this bites is documented in `semantic_search`'s
 docstring as a known cost and remains unobserved.
+
+---
+
+# Milestone 2.1: does forcing the check help?
+
+The failure this arm was built for: `qwen3.6:35b` answered a kernel-safety
+question in 2.2 s with **zero tool calls**, confidently and wrongly, while the
+tools sat unused in its schema list. Offering a tool is not the same as the
+model using one.
+
+`verify-after` removes the choice. The model drafts closed book, `docs_verify`
+runs on that draft whether it wanted it or not, and only what the
+documentation CONTRADICTS is fed back. Silence leaves the draft untouched --
+re-prompting on silence invites a correct answer to become a different one.
+
+| model | closed book | with Argus | verify-after |
+|---|---|---|---|
+| `qwen3.6:27b` | 5/10 @ 16.8 s | **10/10** @ 17.7 s | 9/10 @ 29.1 s |
+| `qwen3.6:35b` | 5/10 @ 5.2 s | 9/10 @ 2.3 s | **10/10** @ 13.3 s |
+
+**The target failure is fixed.** 35b passes `security-review` under forced
+verification, and every row records `calls=1` -- the check happened on every
+task, which is the property the arm exists to guarantee.
+
+## Neither arm dominates, and that is the finding
+
+Verify-after gained 35b its missing task and cost 27b one -- the same
+`security-review`, which 27b had passed with-argus using 5 tool calls.
+
+The mechanism explains both directions. Verify-after guarantees exactly ONE
+check, of a finished draft. With-argus allows MANY targeted lookups, but only
+if the model chooses to make them. So verify-after rescues a model that will
+not look, and under-serves one that would have looked repeatedly: `docs_verify`
+speaks only where the packs contradict, so a draft wrong in a way the
+documentation does not directly deny survives.
+
+They fix different failures. That argues for combining them -- offer the tools
+AND verify the result -- rather than choosing, which is the next thing to
+measure rather than assume.
+
+## Cost
+
+Forced verification is not free: 35b's median goes 2.3 s -> 13.3 s, because
+every question now pays a verification round trip including the six it already
+answered correctly from memory. Against a model that answers wrong in 2.2 s,
+that is a good trade. Against 27b, which already checks, it buys nothing and
+costs 11 s.
+
+## Three arms, and three bogus tables before them
+
+The first verify-after run reported 16 of 20 rows as FAIL and 35b at 0/10.
+Every one was `<ERROR: unhandled errors in a TaskGroup>`: the Argus server had
+died mid-run. Read at face value it was a dramatic, entirely fictional result.
+
+That was the third infrastructure failure to wear a FAIL badge on this bench --
+a 401 from an aged ACL cache, a timeout constant, and now a dead server. The
+tell each time was a pattern too clean to be real: contiguous failures from one
+point onward, `calls=0` on all of them, and a model failing tasks it had
+already passed. Models do not fail in blocks.
+
+Fixed as a class rather than a symptom. `anyio` wraps every transport failure
+in a TaskGroup whose `str()` is "unhandled errors in a TaskGroup (1
+sub-exception)", which says nothing; the harness now unwraps to the real
+exception, records **ERROR** as a verdict distinct from FAIL, and excludes
+those rows from the denominator. A shrunken denominator is visible. A silent
+FAIL is not.

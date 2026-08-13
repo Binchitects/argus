@@ -204,6 +204,13 @@ def grade(task: dict, answer: str) -> tuple[str, list[str]]:
     low = (answer or "").lower()
     if not low.strip():
         return "EMPTY", []
+    # An infrastructure failure is not a wrong answer. Graded as FAIL it
+    # becomes a claim about the model -- and this has now produced a
+    # plausible-looking table three times: a 401 from an aged ACL cache, a
+    # timeout constant, and a server that died mid-run. ERROR is excluded
+    # from the score rather than counted against anyone.
+    if low.startswith("<error:"):
+        return "ERROR", []
     missing = [t for t in task["expect"] if t.lower() not in low]
     hit_forbidden = [t for t in task["forbid"] if t.lower() in low]
     if missing:
@@ -299,6 +306,10 @@ def report(rows: list[dict]) -> None:
 
     def score(model: str, arm: str) -> tuple[int, int, int]:
         sub = [r for r in rows if r["model"] == model and r["arm"] == arm]
+        # ERROR rows are removed from the denominator: scoring 4/10 when six
+        # calls never reached the server states something the run cannot
+        # support. A shrunken denominator is visible; a silent FAIL is not.
+        sub = [r for r in sub if r["verdict"] != "ERROR"]
         return (sum(1 for r in sub if r["verdict"] == "PASS"), len(sub),
                 sum(r.get("tool_calls", 0) for r in sub))
 
@@ -459,8 +470,15 @@ async def main() -> None:
                         answer, calls = closed_book(model, task)
                     else:
                         answer, calls = await runner(model, task)
-                except Exception as exc:
-                    answer, calls = f"<ERROR: {exc}>", 0
+                except BaseException as exc:
+                    # Unwrapped, because anyio wraps every transport failure
+                    # in a TaskGroup whose str() is "unhandled errors in a
+                    # TaskGroup (1 sub-exception)" -- which says nothing. A
+                    # dead server, an expired token and a real model failure
+                    # all arrive looking identical.
+                    subs = getattr(exc, "exceptions", None)
+                    inner = subs[0] if subs else exc
+                    answer, calls = f"<ERROR: {type(inner).__name__}: {inner}>", 0
                 verdict, detail = grade(task, answer)
                 elapsed = round(time.time() - started, 1)
                 # Stored generously: grading happens here on the FULL answer,
