@@ -54,8 +54,10 @@ share one shape — the index matches vocabulary, not role, so "expire keys
 past their TTL" returned `expireSlaveKeys` rather than `activeExpireCycle`
 from the same file. Full write-up in `pack-measurements.md`.
 
-What remains open from this item is the recall limit below, which every
-query above avoided by running with all 12 repositories visible.
+The recall limit below is now measured too, and does not bite: starvation
+turns on topical alignment rather than allowlist size, and where it starves
+the missing results score ~0.55 -- noise the smaller budget was right to
+exclude. Milestone 2 is closed.
 
 ### The original plan for 2.2
 

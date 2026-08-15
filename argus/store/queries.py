@@ -994,9 +994,21 @@ def semantic_search(allowed_repo_ids, conn, query_vec, limit: int = 10,
       score, count or identifier from one is either. What the caller receives
       is indistinguishable from a corpus containing only their repos.
     - A caller whose allowlist is a small fraction of the corpus can get fewer
-      than ``limit`` results even when more exist for them, because the coarse
-      pass spent its budget on symbols they may not see. That is a recall
-      limit, not a correctness one, and ``coarse`` is the dial.
+      than ``limit`` results, because the coarse pass spent its budget on
+      symbols they may not see. **Measured, and it is benign.**
+
+      Starvation turns on topical alignment, not allowlist size. `libpng` is
+      0.9% of the corpus and returned a full 10 of 10 for an image-decoding
+      question at the default budget; the same 0.9% returned 0 for "vacuum
+      dead tuples from a database table". Relevant vectors rank high
+      *globally*, so they survive the coarse pass however small their repo is.
+
+      Where it does starve, the missing results are noise. Raising ``coarse``
+      600 -> 4000 rescued five zlib hits for that database question, every one
+      scoring ~0.55 (`_tr_flush_bits`, `bi_flush`, a `Dispose` method). Ask
+      zlib something zlib knows and the default budget returns 0.72-0.74. So
+      the starved case is one where fewer results is the correct answer, and
+      turning the dial up buys noise at more expense.
 
     The alternative -- filtering inside the scan -- would need the repo id as
     a vec0 metadata column, which is a schema change to make on evidence that

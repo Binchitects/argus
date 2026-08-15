@@ -1373,3 +1373,81 @@ sub-exception)", which says nothing; the harness now unwraps to the real
 exception, records **ERROR** as a verdict distinct from FAIL, and excludes
 those rows from the denominator. A shrunken denominator is visible. A silent
 FAIL is not.
+
+---
+
+# The ACL recall limit, finally observed
+
+`semantic_search` filters by allowlist AFTER the vector scan, because `vec0`
+KNN cannot join. That was documented from the start as a known cost -- a
+caller seeing a small slice of the corpus could lose hits to a globally-spent
+budget -- and never once observed. Every measurement so far ran with all 12
+repositories visible.
+
+Measured now, and the documented worry is the wrong shape.
+
+## It turns on topical alignment, not allowlist size
+
+Query: *"read and decode a compressed image file header"*, `limit=10`,
+default `coarse=600`.
+
+| allowlist | share of corpus | hits |
+|---|---|---|
+| `postgres` | 33.9% | 10/10 |
+| `openssl` | 22.8% | 10/10 |
+| `redis` | 14.1% | 10/10 |
+| `curl` | 5.6% | 10/10 |
+| `zlib` | 1.2% | 10/10 |
+| **`libpng`** | **0.9%** | **10/10** |
+
+No starvation anywhere, including a repo holding 693 of 76,636 vectors.
+Relevant vectors rank high *globally*, so they survive a global budget however
+small their repository is.
+
+Starvation appears only when the allowlist has nothing to do with the query:
+
+| query aligned with | restricted to | coarse=600 | coarse=4000 |
+|---|---|---|---|
+| postgres | `libpng` (0.9%) | **0/10** | 1/10 |
+| postgres | `zlib` (1.2%) | 1/10 | 10/10 |
+| openssl | `libpng` (0.9%) | 1/10 | 10/10 |
+| libpng | `postgres` (33.9%) | 10/10 | 10/10 |
+
+## And where it starves, the missing results are noise
+
+The obvious reading of that table is "raise `coarse` and recover recall". The
+scores say otherwise.
+
+Restricting *"vacuum dead tuples from a database table"* to zlib:
+
+| | hits | scores |
+|---|---|---|
+| `coarse=600` | 1 | 0.543 |
+| `coarse=4000` | 5 | 0.546 - 0.579 |
+
+The five rescued hits are `_tr_flush_bits`, `_tr_flush_block`, `bi_flush` and
+a `Dispose` method -- zlib's least-distant vectors for a question zlib cannot
+answer. Contrast a question it can:
+
+| | hits | scores |
+|---|---|---|
+| *"inflate a deflate compressed stream"*, `coarse=600` | 5 | **0.720 - 0.738** |
+
+`inflateCopy`, `inflateSync`, `inflateInit_`. No starvation, at the default
+budget, in a repo that is 1.2% of the corpus.
+
+**So the starved case is one where fewer results is the correct answer.**
+A ~0.55 score means "nothing here matches"; ~0.72 and up means a real hit.
+Turning the dial up converts an honest empty result into four irrelevant ones.
+
+## What this closes
+
+The two fixes this "known cost" would have justified -- raising
+`SEMANTIC_COARSE`, or adding `repo_id` as a `vec0` metadata column so the
+filter runs inside the scan -- would both buy noise at more expense. Neither
+is worth doing, and now there is a measurement saying so rather than an
+assumption either way.
+
+Milestone 2 is closed: 2.1 measured forced verify-after and found its
+boundary, 2.2 built 76,636 vectors and hand-checked them, and the one
+property left unobserved turns out not to bite.
