@@ -44,6 +44,21 @@ class IndexUnavailable(Exception):
     """
 
 
+#: The single Identity a stdio server serves, resolved once at startup.
+#:
+#: stdio is inherently one client per process -- the transport is this
+#: process's own stdin and stdout -- so one identity for its lifetime is the
+#: honest model, not a shortcut. HTTP keeps resolving per request, because
+#: there it really is many callers on one server.
+_stdio_identity: acl.Identity | None = None
+
+
+def set_stdio_identity(identity: acl.Identity | None) -> None:
+    """Install the identity a stdio server answers as. HTTP never uses this."""
+    global _stdio_identity
+    _stdio_identity = identity
+
+
 def _identity(ctx: Context) -> acl.Identity:
     """Read the caller's resolved Identity out of the request BearerAuthMiddleware attached.
 
@@ -61,7 +76,23 @@ def _identity(ctx: Context) -> acl.Identity:
     than falling through to an internals-leaking
     `AttributeError: 'NoneType' object has no attribute 'state'`.
     """
-    request = ctx.request_context.request
+    request = getattr(ctx.request_context, "request", None)
+
+    # stdio has no request to carry state on. The token arrives once, in the
+    # environment, and is resolved to an Identity before the server starts --
+    # so the ACL is enforced identically, just established earlier.
+    #
+    # Reached ONLY when there is no request object at all. An HTTP request
+    # that somehow arrives without an identity attached still raises below:
+    # that means the middleware did not run, which is a bug that must fail
+    # closed rather than silently borrow whoever launched the process.
+    if request is None:
+        if _stdio_identity is not None:
+            return _stdio_identity
+        raise LookupError(
+            "No authenticated identity is available; refusing to proceed."
+        )
+
     identity = getattr(request, "state", None) and getattr(request.state, "identity", None)
     if identity is None:
         raise LookupError(

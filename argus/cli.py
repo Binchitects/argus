@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -545,6 +546,48 @@ def _serve(cfg: Config, host: str, port: int, allowed_hosts: list[str] | None) -
     return 0
 
 
+def _serve_stdio(cfg: Config) -> int:
+    """Serve MCP over stdin/stdout, for clients that speak only stdio.
+
+    The protocol is identical -- the same tools, the same ACL, the same audit
+    rows. What differs is where identity comes from. HTTP resolves a bearer
+    token per request because one server answers many developers; stdio is one
+    client per process by construction, so the token arrives once in
+    ``ARGUS_TOKEN`` and is resolved to an Identity before the first request.
+
+    Resolved BEFORE serving, deliberately. A bad token fails here, on stderr,
+    where the person configuring the client will see it -- rather than as a
+    tool error inside an agent's transcript, which is where a missing
+    credential is hardest to recognise for what it is.
+
+    stdout belongs to the protocol: anything printed there corrupts the JSON-RPC
+    stream, so every message this function emits goes to stderr.
+    """
+    from .acl import AclDenied, resolve
+    from .mcpsrv.tools import set_stdio_identity
+
+    token = os.environ.get("ARGUS_TOKEN", "").strip()
+    if not token:
+        print("ARGUS_TOKEN is not set. stdio has no request headers, so the "
+              "credential must come from the environment.", file=sys.stderr)
+        return 2
+
+    conn = open_db(cfg.index.db_path)
+    try:
+        identity = resolve(conn, cfg.gitlab, token)
+    except AclDenied as exc:
+        print(f"credential rejected: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+
+    print(f"argus stdio: {identity.username} "
+          f"({len(identity.allowed_repo_ids)} repos)", file=sys.stderr)
+    set_stdio_identity(identity)
+    create_app(cfg).run(transport="stdio")
+    return 0
+
+
 def _flush_acl(cfg: Config, user: str | None) -> int:
     """Delete cached ACL resolutions so a GitLab revocation takes effect now.
 
@@ -841,6 +884,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p_serve = sub.add_parser("serve", help="Run the MCP retrieval server")
     p_serve.add_argument("--config", required=True, type=Path)
+    p_serve.add_argument(
+        "--stdio", action="store_true",
+        help="Serve MCP over stdin/stdout instead of HTTP, for clients "
+             "that speak only stdio. Credential comes from ARGUS_TOKEN.")
     p_serve.add_argument("--host", default=DEFAULT_SERVE_HOST,
                          help=f"Bind address (default: {DEFAULT_SERVE_HOST})")
     p_serve.add_argument("--port", type=int, default=DEFAULT_SERVE_PORT,
@@ -939,6 +986,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "embed":
             return _embed(cfg, args.limit)
         if args.command == "serve":
+            if getattr(args, "stdio", False):
+                return _serve_stdio(cfg)
             return _serve(cfg, args.host, args.port, args.allowed_hosts)
         if args.command == "flush-acl":
             return _flush_acl(cfg, args.user)

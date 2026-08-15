@@ -728,3 +728,54 @@ def test_server_instructions_demand_verbatim_quoting():
     # The escape hatch matters as much: forbidding paraphrase without it just
     # pushes the model to invent contracts for APIs the tools do not cover.
     assert "not documented" in text
+
+
+class TestStdioIdentity:
+    """The stdio fallback must not weaken the HTTP path.
+
+    `_identity` fails closed by design: no identity means refuse. stdio has no
+    request to carry one, so a pre-resolved identity is consulted -- but ONLY
+    when there is no request at all. An HTTP request arriving without an
+    identity means the auth middleware did not run, which is a bug that must
+    still refuse rather than silently borrow whoever launched the process.
+    """
+
+    def _ctx(self, request):
+        from types import SimpleNamespace
+        return SimpleNamespace(request_context=SimpleNamespace(request=request))
+
+    def test_stdio_identity_is_used_when_there_is_no_request(self):
+        from argus import acl
+        from argus.mcpsrv import tools as t
+
+        want = acl.Identity(user_id=7, username="dev", allowed_repo_ids=[1, 2])
+        t.set_stdio_identity(want)
+        try:
+            assert t._identity(self._ctx(None)) is want
+        finally:
+            t.set_stdio_identity(None)
+
+    def test_no_request_and_no_stdio_identity_refuses(self):
+        from argus.mcpsrv import tools as t
+
+        t.set_stdio_identity(None)
+        with pytest.raises(LookupError):
+            t._identity(self._ctx(None))
+
+    def test_an_http_request_without_identity_still_refuses(self):
+        """The regression that would matter: a stdio identity installed in the
+        same process must never satisfy an HTTP request whose middleware
+        failed to attach one."""
+        from types import SimpleNamespace
+
+        from argus import acl
+        from argus.mcpsrv import tools as t
+
+        t.set_stdio_identity(
+            acl.Identity(user_id=7, username="dev", allowed_repo_ids=[1, 2]))
+        try:
+            request = SimpleNamespace(state=SimpleNamespace(identity=None))
+            with pytest.raises(LookupError):
+                t._identity(self._ctx(request))
+        finally:
+            t.set_stdio_identity(None)
