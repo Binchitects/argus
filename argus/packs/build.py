@@ -23,6 +23,8 @@ one; ``fetch_source`` is separate, and the CLI calls it first.
 from __future__ import annotations
 
 import hashlib
+import shutil
+import sqlite3
 import subprocess
 import tarfile
 import urllib.request
@@ -309,6 +311,7 @@ def build_pack(
     source: Source, *, work_dir: Path, out_path: Path, version: str,
     embed_fn: EmbedFn | None = None, source_commit: str | None = None,
     cache_path: Path | str | None = None, use_cache: bool = True,
+    incremental: bool = True,
 ) -> Path:
     """Build a pack for ``source`` from the checkout at ``work_dir``."""
     work_dir = Path(work_dir)
@@ -344,12 +347,28 @@ def build_pack(
     elif cache_path is None:
         cache_path = out_path.parent / ".embcache.db"
 
+    # Incremental when a usable previous pack is already at the destination.
+    # Automatic rather than a flag: a rebuild that skips unchanged documents
+    # and one that rewrites them produce the same pack, so there is nothing
+    # for an operator to decide. `_existing_shas` returns empty for anything
+    # missing, corrupt, or predating content_sha, and each of those falls back
+    # to a full build.
+    reusable = bool(_existing_shas(out_path)) if incremental else False
+
     try:
         with EmbeddingCache(cache_path) as cache:
-            _write_pack(
-                source, work_dir, temp_path, embed_fn,
-                version=version, commit=commit, cache=cache,
-            )
+            if reusable:
+                kept, rebuilt, removed = _write_pack_incremental(
+                    source, work_dir, temp_path, out_path, embed_fn,
+                    version=version, commit=commit, cache=cache,
+                )
+                print(f"  incremental: {kept} unchanged, {rebuilt} rebuilt, "
+                      f"{removed} removed")
+            else:
+                _write_pack(
+                    source, work_dir, temp_path, embed_fn,
+                    version=version, commit=commit, cache=cache,
+                )
             if cache.enabled and (cache.hits or cache.misses):
                 print(f"  embeddings: {cache.hits} reused, "
                       f"{cache.misses} computed")
@@ -431,13 +450,29 @@ def _chunks_for(doc: Doc) -> list[Chunk]:
     return chunk_markdown(body)
 
 
+def doc_sha(doc: Doc) -> str:
+    """Identity of a document for change detection.
+
+    Covers everything a rebuild would regenerate from: the body drives chunks
+    and vectors, and title/url/lang land in the row itself. A title fix with
+    an unchanged body still has to rewrite the row, so it has to change the
+    hash.
+    """
+    digest = hashlib.sha256()
+    for part in (doc.path, doc.title or "", doc.url or "", doc.lang or "",
+                 doc.body):
+        digest.update(part.encode("utf-8"))
+        digest.update(b"\x00")
+    return digest.hexdigest()
+
+
 def _insert_doc(conn, doc: Doc, compressor) -> int:
     payload = doc.body.encode("utf-8")
     cursor = conn.execute(
-        "INSERT INTO docs (path, title, url, lang, content, content_len) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO docs (path, title, url, lang, content, content_len, "
+        "content_sha) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (doc.path, doc.title, doc.url, doc.lang,
-         compressor.compress(payload), len(payload)),
+         compressor.compress(payload), len(payload), doc_sha(doc)),
     )
     doc_id = cursor.lastrowid
     # docs_fts is contentless: the terms live in the index and the text is
@@ -532,8 +567,202 @@ def _insert_symbols(
     return written, skipped
 
 
+def _insert_symbols_for(
+    conn, source: Source, work_dir: Path, doc_ids: dict[str, int],
+    changed: set[str],
+) -> int:
+    """Insert symbols belonging only to documents that were rebuilt.
+
+    ``_drop_doc`` already removed the symbols of every document that changed
+    or vanished, so the survivors are exactly the ones whose pages are
+    untouched. Re-inserting those too would duplicate every symbol in the pack
+    on each rebuild -- ``api_symbols`` has no unique constraint to catch it,
+    so `docs_lookup` would simply start returning the same page twice, then
+    three times.
+
+    Matching is on ``_doc_key`` because ``changed`` holds source paths while a
+    symbol names the published document; the two differ by suffix.
+    """
+    changed_keys = {_doc_key(path) for path in changed}
+    written = 0
+    for symbol in source.iter_symbols(work_dir):
+        key = _doc_key(symbol.doc_path)
+        if key not in changed_keys:
+            continue
+        doc_id = doc_ids.get(key)
+        if doc_id is None:
+            continue
+        conn.execute(
+            "INSERT INTO api_symbols (name, kind, namespace, doc_id, anchor, "
+            "signature) VALUES (?, ?, ?, ?, ?, ?)",
+            (symbol.name, symbol.kind, symbol.namespace, doc_id,
+             symbol.anchor, symbol.signature),
+        )
+        written += 1
+    return written
+
+
 def _doc_key(path: str) -> str:
     for suffix in _DOC_SUFFIXES:
         if path.endswith(suffix):
             return path[: -len(suffix)]
     return path
+
+
+def _existing_shas(path: Path) -> dict[str, tuple[int, str]]:
+    """``{doc path: (doc_id, content_sha)}`` from a pack already on disk.
+
+    Returns empty for anything that is not a usable pack -- absent, corrupt,
+    or built before ``content_sha`` existed. Every one of those degrades to a
+    full rebuild, which is correct but slow, rather than to a partial pack,
+    which would be fast and wrong.
+    """
+    if not Path(path).is_file():
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return {}
+    try:
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(docs)")}
+        if "content_sha" not in columns:
+            return {}
+        return {
+            row[0]: (row[1], row[2])
+            for row in conn.execute(
+                "SELECT path, id, content_sha FROM docs WHERE content_sha IS NOT NULL")
+        }
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+
+
+def _drop_doc(conn, doc_id: int) -> None:
+    """Remove a document and everything derived from it.
+
+    Four dependents, and three of them have no foreign key to do it for us:
+
+    - ``chunks`` cascades by hand (the FK is declarative only; SQLite needs
+      ``PRAGMA foreign_keys`` and even then would RESTRICT, not cascade).
+    - ``vec_bin`` / ``vec_i8`` are vec0 virtual tables keyed by chunk id with
+      no relationship to docs at all, so their rows must be deleted before the
+      chunk ids they reference are gone and unfindable.
+    - ``docs_fts`` is contentless (``content=''``), so a plain DELETE cannot
+      remove its terms. FTS5 requires the original column values back, via the
+      'delete' command, or the index keeps terms pointing at a rowid that no
+      longer exists -- and a later search returns a hit whose document cannot
+      be read.
+    """
+    chunk_ids = [r[0] for r in conn.execute(
+        "SELECT id FROM chunks WHERE doc_id = ?", (doc_id,))]
+    for table in ("vec_bin", "vec_i8"):
+        for chunk_id in chunk_ids:
+            conn.execute(f"DELETE FROM {table} WHERE chunk_id = ?", (chunk_id,))
+    conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
+    conn.execute("DELETE FROM api_symbols WHERE doc_id = ?", (doc_id,))
+
+    row = conn.execute(
+        "SELECT title, content FROM docs WHERE id = ?", (doc_id,)).fetchone()
+    if row is not None:
+        body = zstandard.ZstdDecompressor().decompress(row[1]).decode(
+            "utf-8", errors="replace")
+        conn.execute(
+            "INSERT INTO docs_fts (docs_fts, rowid, title, body) "
+            "VALUES ('delete', ?, ?, ?)", (doc_id, row[0], body))
+    conn.execute("DELETE FROM docs WHERE id = ?", (doc_id,))
+
+
+def _write_pack_incremental(
+    source: Source, work_dir: Path, temp_path: Path, previous: Path,
+    embed_fn: EmbedFn, *, version: str, commit: str,
+    cache: EmbeddingCache | None = None,
+) -> tuple[int, int, int]:
+    """Rebuild ``previous`` in place at ``temp_path``, touching only what moved.
+
+    Returns ``(kept, rebuilt, removed)`` document counts.
+
+    The pack file is COPIED rather than rebuilt row by row. Copying 786 MB is
+    seconds of sequential I/O; re-inserting 530,559 chunks is 44 minutes, and
+    the copy also keeps every id stable, so nothing has to be remapped and
+    unchanged rows are never touched at all.
+
+    Embedding is not what this saves -- the embedding cache already made that
+    free. What it saves is everything else done per chunk regardless: parsing,
+    chunking, zstd compression, cache lookups, and the FTS and vector inserts.
+    """
+    shutil.copy2(previous, temp_path)
+    known = _existing_shas(temp_path)
+    compressor = zstandard.ZstdCompressor(level=_ZSTD_LEVEL)
+    conn = pack_format.open_pack_writable(temp_path)
+    try:
+        seen: set[str] = set()
+        changed: set[str] = set()
+        doc_ids: dict[str, int] = {}
+        pending: list[tuple[int, str]] = []
+        kept = rebuilt = 0
+
+        for doc in source.iter_docs(work_dir):
+            seen.add(doc.path)
+            entry = known.get(doc.path)
+            if entry is not None and entry[1] == doc_sha(doc):
+                doc_ids[_doc_key(doc.path)] = entry[0]
+                kept += 1
+                continue
+
+            if entry is not None:
+                _drop_doc(conn, entry[0])
+            doc_id = _insert_doc(conn, doc, compressor)
+            doc_ids[_doc_key(doc.path)] = doc_id
+            changed.add(doc.path)
+            rebuilt += 1
+            for chunk in _chunks_for(doc):
+                chunk_id = _insert_chunk(conn, doc_id, chunk, compressor)
+                pending.append((chunk_id, embed_text(chunk)))
+                if len(pending) >= EMBED_FLUSH:
+                    _flush_embeddings(conn, pending, embed_fn, cache)
+                    pending.clear()
+        _flush_embeddings(conn, pending, embed_fn, cache)
+
+        # Upstream deletions. Without this a pack keeps answering with pages
+        # that no longer exist, which is worse than not having them: the
+        # answer is confident, cited, and gone from the real documentation.
+        removed = 0
+        for path, (doc_id, _sha) in known.items():
+            if path not in seen:
+                _drop_doc(conn, doc_id)
+                removed += 1
+
+        # Symbols belong to documents, and _drop_doc already removed those of
+        # every document that changed or vanished. Re-inserting only the
+        # changed documents' symbols keeps the rest untouched.
+        _insert_symbols_for(conn, source, work_dir, doc_ids, changed)
+
+        chunk_total = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
+        symbol_total = conn.execute(
+            "SELECT count(*) FROM api_symbols").fetchone()[0]
+        pack_format.write_meta(
+            conn,
+            source_name=source.name,
+            source_repo=source.repo_url,
+            source_branch=source.branch,
+            source_commit=commit,
+            license=source.license,
+            license_url=source.license_url,
+            attribution=source.attribution,
+            embedding_model=embed_module.EMBED_MODEL,
+            embedding_dim=embed_module.EMBED_DIM,
+            builder_version=BUILDER_VERSION,
+            pack_version=version,
+            doc_count=len(doc_ids),
+            # Counted from the tables, not tallied while inserting: an
+            # incremental run only sees what it rebuilt, so a running total
+            # would report the delta and label it the whole pack.
+            chunk_count=chunk_total,
+            symbol_count=symbol_total,
+            unresolved_symbol_count=0,
+        )
+        conn.commit()
+        return kept, rebuilt, removed
+    finally:
+        conn.close()

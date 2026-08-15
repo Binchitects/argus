@@ -9,6 +9,7 @@ establish that.
 from __future__ import annotations
 
 import dataclasses
+import shutil
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -367,12 +368,56 @@ def test_a_failed_rebuild_does_not_destroy_the_existing_pack(tmp_path):
     def exploding(texts):
         raise RuntimeError("ollama went away")
 
+    # incremental=False on purpose. Rebuilding the same source incrementally
+    # keeps every document, so the embedder is never called and the failure
+    # this test is about cannot occur -- it would pass without exercising
+    # anything. The property still has to hold on the full-build path, which
+    # is what create_pack's unlink makes dangerous.
     with pytest.raises(RuntimeError):
         build.build_pack(
             ReactDocs(), work_dir=FIXTURES / "react", out_path=out,
-            version="2.0.0", embed_fn=exploding, source_commit=COMMIT, use_cache=False,
+            version="2.0.0", embed_fn=exploding, source_commit=COMMIT,
+            use_cache=False, incremental=False,
         )
 
+    assert out.exists(), "the previously-good pack was destroyed"
+    assert out.read_bytes() == before
+
+
+def test_a_failed_incremental_rebuild_does_not_destroy_the_existing_pack(tmp_path):
+    """The same guarantee on the incremental path, which reaches it differently.
+
+    A full build writes a fresh temp file; an incremental one COPIES the live
+    pack to that temp path first. If the copy were edited in place instead, a
+    failure part-way would leave the only good pack half-rewritten -- so this
+    pins that the original is still byte-identical after a failure that
+    happens mid-rebuild.
+    """
+    out = build_react(tmp_path)
+    before = out.read_bytes()
+
+    calls = {"n": 0}
+
+    def exploding(texts):
+        calls["n"] += 1
+        raise RuntimeError("ollama went away")
+
+    # A changed document, so the incremental path has real work to do and
+    # actually reaches the embedder.
+    changed = tmp_path / "react-changed"
+    shutil.copytree(FIXTURES / "react", changed)
+    target = next(changed.rglob("*.md"), None) or next(changed.rglob("*.mdx"))
+    target.write_text(target.read_text(encoding="utf-8") + "\n\nAdded.\n",
+                      encoding="utf-8")
+
+    with pytest.raises(RuntimeError):
+        build.build_pack(
+            ReactDocs(), work_dir=changed, out_path=out,
+            version="2.0.0", embed_fn=exploding, source_commit=COMMIT,
+            use_cache=False,
+        )
+
+    assert calls["n"] > 0, "the incremental path never reached the embedder"
     assert out.exists(), "the previously-good pack was destroyed"
     assert out.read_bytes() == before
 

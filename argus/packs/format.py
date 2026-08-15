@@ -43,7 +43,17 @@ CREATE TABLE docs (
   url TEXT,
   lang TEXT,
   content BLOB NOT NULL,
-  content_len INTEGER NOT NULL
+  content_len INTEGER NOT NULL,
+  -- sha256 of the uncompressed body, so a rebuild can tell which documents
+  -- actually changed. Measured: a warm win32 rebuild costs 43.6 min with a
+  -- fully-warm embedding cache, because re-parsing, re-chunking, compressing
+  -- and re-inserting 530,559 chunks happens regardless of whether a single
+  -- byte upstream moved. This column is what lets that work be skipped.
+  --
+  -- Nullable: a pack built before this existed has no hashes, and every
+  -- document in it reads as changed, which degrades to the old full rebuild
+  -- rather than to a wrong answer.
+  content_sha TEXT
 );
 
 CREATE TABLE chunks (
@@ -213,3 +223,21 @@ def require_compatible(meta: dict, *, model: str, dim: int) -> None:
             f"this instance's pack format version {PACK_SCHEMA_VERSION} -- "
             f"the pack must be rebuilt"
         )
+
+
+def open_pack_writable(path: Path | str) -> sqlite3.Connection:
+    """Open an existing pack for modification, with sqlite-vec loaded.
+
+    The counterpart to ``open_pack`` for the incremental rebuild path, which
+    edits a copy of a previous pack rather than creating a new one. Not
+    ``immutable=1`` -- that is what ``open_pack`` promises readers, and this
+    connection exists precisely to mutate the file.
+
+    The vec0 extension is loaded here because ``vec_bin``/``vec_i8`` are
+    virtual tables: without it, even a DELETE against them fails with
+    "no such module: vec0", and a rebuild would silently keep the vectors of
+    documents it had just removed.
+    """
+    conn = sqlite3.connect(Path(path))
+    _load_vec_extension(conn)
+    return conn
