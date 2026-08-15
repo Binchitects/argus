@@ -1565,3 +1565,62 @@ which is faster and wrong -- a touched file with identical content would
 rebuild, and a restored-from-backup file with older mtime would not. The
 current design pays parse cost to be certain, and the certainty is worth more
 than the seconds on any corpus small enough for this to matter.
+
+## win32: the fourth corpus, and the model across 60x
+
+`win32` could not be measured end to end. Doing so needs a pack carrying
+`content_sha`, which only a full rebuild produces, and the embedding cache has
+fallen to 100.8 MB from the ~0.8 GB recorded above -- it no longer holds
+win32's 530,559 vectors, so that rebuild would re-embed from scratch at about
+2.7 hours.
+
+Measured by decomposition instead. For an unchanged corpus the incremental
+path copies the pack, then parses and hashes every document, and skips
+chunking, compression, cache lookups and the FTS and vector inserts entirely:
+
+| component | |
+|---|---|
+| parse + hash 65,906 documents (137 MB of text) | **12.8 s** (0.19 ms/doc) |
+| copy the 786 MB pack | 3.6 s |
+| **incremental floor** | **~16.4 s** |
+
+Against a 162-minute cold build, roughly **590x**. Stated as a floor rather
+than a measurement: it omits symbol iteration and per-document bookkeeping, so
+the real figure is somewhat higher -- bounded well under a minute, not tens of
+minutes.
+
+The prediction was 30-40 s. The measurement is 16.4, wrong in the optimistic
+direction this time, because sdk-api's markdown parses at 0.19 ms/doc against
+`debugger`'s 0.5: these are small uniform reference stubs, not long articles.
+
+| corpus | format | ms/doc |
+|---|---|---|
+| `win32` (sdk-api) | markdown stubs | **0.19** |
+| `debugger` | markdown + frontmatter | 0.5 |
+| `sqlite` | HTML | 3.8 |
+| `cppreference` | HTML | 11.3 |
+
+Format dominates and document size modulates within format, across a 60x
+spread. None of it is explained by chunk counts, which is what the original
+prediction was built on.
+
+## Two things about composites that cost an hour
+
+**`--fetch` cannot fetch a composite.** `fetch_source` clones one repository;
+a composite needs each part cloned beneath `--work-dir` by hand.
+
+**The part directories must be named for their repositories** --
+`sdk-api` and `Windows-classic-samples`, not `api` and `samples`. The error
+names the path it wanted, which is the only reason this was quick to fix.
+
+**And on Windows, `core.longpaths` is not optional for sdk-api.** Three clone
+attempts failed with `early EOF` and `unexpected disconnect while reading
+sideband packet`, which reads like a network fault and is not one: the repo
+contains filenames such as
+`nf-d2d1_3-id2d1devicecontext4-drawtext(constwchar_uint32_idwritetextformat...`
+well past the 260-character limit. `git config core.longpaths true` followed
+by `git checkout -- .` completed the checkout that had already downloaded.
+
+The diagnostic that found it was not a better transfer strategy. It was
+`git reset` to rebuild the index and ask *which files are missing*, rather
+than continuing to ask why the transfer stopped.
