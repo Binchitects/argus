@@ -2,7 +2,7 @@
 
 **Your local LLM already knows how to code. It does not know your codebase, and it invents API facts with total confidence. Argus fixes both — on your own hardware, with nothing leaving your network.**
 
-Argus is a self-hosted code index and documentation server for [Hermes Agent](https://github.com/NousResearch/hermes-agent) + [Ollama](https://ollama.com). It mirrors every repository from your GitLab, extracts a symbol and dependency graph, serves eleven documentation packs, and enforces each developer's real GitLab permissions in SQL.
+Argus is a self-hosted code index and documentation server for [Hermes Agent](https://github.com/NousResearch/hermes-agent) + [Ollama](https://ollama.com). It mirrors every repository from your GitLab, extracts a symbol and dependency graph, serves twelve documentation packs, and enforces each developer's real GitLab permissions in SQL.
 
 ---
 
@@ -92,14 +92,14 @@ Full walkthrough: **[docs/production.md](docs/production.md)**.
 
 ---
 
-## Eleven knowledge packs, 1.57 GB, zero unresolved symbols
+## Twelve knowledge packs, 1.80 GB, zero unresolved symbols
 
 ```mermaid
 xychart-beta
     title "Documented symbols per pack (thousands)"
-    x-axis ["win32", "wdk", "cpp", "python", "scripting", "cppreference", "debugger"]
-    y-axis "Symbols (k)" 0 --> 90
-    bar [87.3, 38.0, 37.3, 18.0, 9.3, 5.4, 1.5]
+    x-axis ["dotnet", "win32", "wdk", "cpp", "python", "scripting", "cppreference"]
+    y-axis "Symbols (k)" 0 --> 220
+    bar [215.3, 87.3, 38.0, 37.3, 18.0, 9.3, 5.4]
 ```
 
 | pack | Documents | Chunks | Symbols | Size |
@@ -116,7 +116,7 @@ xychart-beta
 | `react` — react.dev | 222 | 4,755 | 125 | 9.1 MB |
 | `algorithms` — TheAlgorithms/C++ | 371 | 2,001 | 370 | 4.3 MB |
 | `system-design` — the Primer | 9 | 442 | 8 | 1.3 MB |
-| **total** | **128,882** | **1,040,105** | **179,276** | **1.57 GB** |
+| **total** | **139,895** | **1,180,766** | **394,545** | **1.80 GB** |
 
 A pack is **one SQLite file** — prose, API symbols and embeddings. Build once, publish, install everywhere:
 
@@ -124,7 +124,7 @@ A pack is **one SQLite file** — prose, API symbols and embeddings. Build once,
 argus pack install https://your-host/wdk.arguspack --sha256 <digest>
 ```
 
-A digest mismatch is refused and leaves **zero files behind**. All eleven answer correctly through the real `hermes -z` CLI — the whole chain, not a reimplementation.
+A digest mismatch is refused and leaves **zero files behind**. All twelve answer correctly through the real `hermes -z` CLI — the whole chain, not a reimplementation.
 
 ---
 
