@@ -108,6 +108,7 @@ xychart-beta
 | `wdk` — driver DDI + samples | 28,176 | 245,727 | 38,041 | 358.6 MB |
 | `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,305 | 174.7 MB |
 | `cppreference` — C++ standard library | 6,640 | 68,891 | 5,406 | 124.9 MB |
+| `dotnet` — .NET BCL + MS NuGet packages | 11,013 | 140,661 | **215,269** | 236.4 MB |
 | `scripting` — PowerShell, cmd, Unix | 9,302 | 46,027 | 9,302 | 70.2 MB |
 | `python` — 3.13 | 516 | 13,164 | 18,027 | 28.5 MB |
 | `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 24.8 MB |

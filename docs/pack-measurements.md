@@ -1624,3 +1624,78 @@ by `git checkout -- .` completed the checkout that had already downloaded.
 The diagnostic that found it was not a better transfer strategy. It was
 `git reset` to rebuild the index and ask *which files are missing*, rather
 than continuing to ask why the transfer stopped.
+
+---
+
+# The .NET pack: an inventory that is declared, not inferred
+
+`dotnet/dotnet-api-docs` publishes ECMAXML -- one XML file per type, 11,644 of
+them across 825 namespaces -- covering the base class library and the
+Microsoft-published NuGet packages that ship with it.
+
+| | |
+|---|---|
+| documents | 11,013 |
+| chunks | 140,661 |
+| symbols | **215,269** (0 unresolved) |
+| size | 236.4 MB |
+| commit | `ddc57802` |
+
+**152,475 unique symbols from 11,013 documents -- 13.8 per document.** React
+yielded 125 from 222 (0.6), because its symbols had to be *inferred* from
+heading shapes and anything ambiguous was discarded. ECMAXML *declares* its
+inventory: every type carries a `DocId` (`T:System.String`) and every member
+its own signature, so nothing is guessed. This is now the largest symbol table
+in the estate, ahead of `win32`'s 87,297, from a corpus a sixth the size.
+
+Lookups verified against the pack: `System.String`, `String.Split`,
+`JsonSerializer.Serialize`, `List`, `Task.Run`, `StringBuilder` all resolve
+with their documented summaries.
+
+## Three bugs, and what each one took to find
+
+**A namespace DIRECTORY matched `*.xml`.** Windows glob is case-insensitive,
+so `Microsoft.Extensions.Configuration.Xml` was opened as a file and raised
+`PermissionError` -- which reads like a filesystem fault rather than a pattern
+matching the wrong kind of thing. Found by the first dry run.
+
+**Every method cross-reference was mangled.** `<see cref=
+"M:System.String.Concat(System.String,System.String)" />` rendered as
+`String)` instead of `Concat`, because stripping the `M:` prefix and taking
+the last dot-segment lands inside the parameter list. The dry run could not
+see this: it counted 11,013 documents and 215,269 symbols, all correct, and
+counts say nothing about whether the text is any good. A fixture with one
+method cref found it in seconds.
+
+**The pack built with zero usable symbols.** `symbols 0 (unresolved 215269)`.
+`iter_symbols` emitted `doc_path` with `.xml` stripped, but the builder's
+`_DOC_SUFFIXES` covers `.html/.rst/.mdx/.md` and *not* `.xml` -- so symbols
+keyed `System/String` were matched against documents keyed
+`System/String.xml`, and nothing joined.
+
+That third one is the failure this project keeps circling. The pack built,
+installed, listed, and served `docs_search` correctly, while returning nothing
+for every `docs_lookup` -- indistinguishable from "that API is not
+documented". Three layers of checking missed it: the dry run counted symbols
+*before* the join, the unit tests exercised the adapter in isolation, and only
+`_insert_symbols` performs the join. The `unresolved` counter in the build
+output caught it, and that counter exists because someone learned this lesson
+already.
+
+**An incremental rebuild could not have repaired it.** Incremental re-inserts
+symbols only for documents whose content changed, and the fix changed no
+content -- so the 11,013 unchanged documents would have kept their zero
+symbols. Content-hash rebuilds fix what changed, not what was wrong.
+
+## A limitation worth stating
+
+`docs_find` searches `api_symbols.signature`, which for this adapter is the
+type or member summary. .NET summaries frequently omit the obvious vocabulary:
+`JsonSerializer.Serialize` is documented as "Converts the provided value into
+a String", where the words "JSON" and "serialize" appear nowhere. Asked to
+find "serialize an object to JSON text", the search returns Python's
+`json.JSONDecoder` instead.
+
+Exact lookup is unaffected -- `JsonSerializer.Serialize` resolves precisely by
+name. This is a description-search weakness specific to how Microsoft writes
+summaries, recorded rather than tuned away on one query.

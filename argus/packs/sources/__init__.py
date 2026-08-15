@@ -8,6 +8,7 @@ from .base import ApiSymbol, Doc, Source
 from .composite import ScriptingDocs, Win32WithSamples, WdkWithSamples
 from .code_samples import AlgorithmsCpp, WindowsClassicSamples, WindowsDriverSamples
 from .debugger_docs import DebuggerDocs
+from .dotnet_docs import DotnetApiDocs
 from .html_docs import CppReference, SqliteDocs
 from .microsoft_docs import CppDocs, WdkDdi, Win32Api
 from .system_design import SystemDesignPrimer
@@ -43,6 +44,10 @@ SOURCES: dict[str, type] = {
     # arrive through the archive fetch path.
     "sqlite": SqliteDocs,
     "cppreference": CppReference,
+    # The BCL and the Microsoft-published NuGet packages that ship
+    # with it, from ECMAXML -- the only corpus here with an explicit
+    # per-member inventory rather than one inferred from headings.
+    "dotnet": DotnetApiDocs,
     # PowerShell + cmd + Unix tools in one pack: a scripting question
     # does not arrive already sorted by shell.
     "scripting": ScriptingDocs,
@@ -53,6 +58,6 @@ __all__ = [
     "CppDocs", "Win32Api", "WdkDdi", "WindowsDriverSamples",
     "WindowsClassicSamples", "AlgorithmsCpp", "SystemDesignPrimer",
     "Win32WithSamples", "WdkWithSamples", "ScriptingDocs", "DebuggerDocs",
-    "SqliteDocs", "CppReference",
+    "SqliteDocs", "CppReference", "DotnetApiDocs",
     "SOURCES",
 ]
