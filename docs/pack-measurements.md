@@ -1451,3 +1451,65 @@ assumption either way.
 Milestone 2 is closed: 2.1 measured forced verify-after and found its
 boundary, 2.2 built 76,636 vectors and hand-checked them, and the one
 property left unobserved turns out not to bite.
+
+---
+
+# What a pack refresh actually costs
+
+The roadmap said a `win32` refresh costs 162 minutes and used that to justify
+building incremental rebuild. That number is the **cold** build, and the
+embedding cache already existed, so the premise needed checking before writing
+change-detection nobody needs.
+
+Measured: rebuild each pack from an unchanged source, cache warm.
+
+| pack | chunks | warm rebuild | chunks/sec |
+|---|---|---|---|
+| `system-design` | 442 | 2.7 s | 167 |
+| `algorithms` | 2,001 | 6.2 s | 322 |
+| `sqlite` | 8,987 | 28.0 s | 321 |
+| `cppreference` | 68,891 | **340 s** | **203** |
+
+**The rate is not flat.** Small packs pay a fixed overhead that dominates;
+large ones lose about 37% of the mid-range rate. Predicting `cppreference`
+from the 320 chunks/sec of the two packs below it gave 215 s against 340 s
+actual -- so the extrapolation below uses the measured large-pack rate, not
+the peak.
+
+| pack | chunks | cold | warm (est. 203 c/s) | speedup |
+|---|---|---|---|---|
+| `cpp` | 123,212 | 36 min | 10.1 min | 3.6x |
+| `wdk` | 245,727 | 74 min | 20.2 min | 3.7x |
+| `win32` | 530,559 | **162 min** | **43.6 min** | 3.7x |
+| total | 899,498 | 272 min | **73.9 min** | 3.7x |
+
+## Both halves of the roadmap's claim were wrong
+
+**162 minutes was never the refresh cost.** The embedding cache already turns
+it into ~44, without anyone building anything. Quoting the cold figure
+overstated the problem by 3.7x.
+
+**But "nearly free" was also wrong.** A `debugger` rebuild reporting
+`14,259 reused, 0 computed` in seconds made the cache look total; at 530,559
+chunks the same mechanism still costs 44 minutes. The cache eliminates
+embedding, and embedding was not the only cost.
+
+## Where the remaining time goes
+
+Not embedding -- every vector was a cache hit. What is left is work done once
+per chunk regardless: re-parsing 71,663 documents, re-chunking to 530,559
+pieces, 530,559 lookups against a 100.8 MB cache, and writing a 786 MB pack
+with its FTS index and vector tables.
+
+All of it to produce a file identical to the one already on disk.
+
+## So incremental rebuild is still worth building, for a smaller reason
+
+The target is no longer "162 minutes to 5". It is **44 minutes to seconds when
+upstream changed 50 documents out of 71,663** -- which is what a documentation
+refresh actually looks like.
+
+That needs a per-document content hash stored in the pack and compared against
+the source, so unchanged documents keep their existing chunks, symbols and
+vectors instead of being rebuilt into the same bytes. The saving comes from
+skipping documents, not from skipping embedding, which the cache already does.

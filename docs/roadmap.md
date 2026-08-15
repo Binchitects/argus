@@ -82,16 +82,30 @@ bites.
 
 | item | why | today |
 |---|---|---|
-| Incremental pack rebuild | a docs refresh costs **162 min** for `win32` | full re-embed only |
+| Incremental pack rebuild | **measured**: a warm refresh of `win32` costs **43.6 min**, not the 162 min quoted — that was the *cold* build. Still 44 min to produce a byte-identical file. | the cache skips embedding; nothing skips unchanged documents |
 | `pack update` for archive sources | assumes a git remote | broken by design |
 | Webhook-driven indexing | freshness is interval-polled | `index_status` exists to *admit* staleness |
 | Metrics endpoint | audit rows exist, no operational view | KPIs are CLI-only |
 
-Incremental rebuild is the most valuable of these. The embedding cache
-already makes a rebuild nearly free when chunks are unchanged — a `debugger`
-rebuild reported `14,259 reused, 0 computed` and finished in seconds — so
-the missing piece is detecting which upstream documents changed, not the
-embedding economics.
+Incremental rebuild is still the most valuable of these, but for a smaller
+reason than this section originally claimed — and the correction goes both
+ways.
+
+**162 minutes was never the refresh cost.** The embedding cache already turns
+it into ~44, with nothing built. Quoting the cold figure overstated the
+problem by 3.7×.
+
+**But "nearly free" was wrong too.** A `debugger` rebuild reporting
+`14,259 reused, 0 computed` in seconds made the cache look total; at 530,559
+chunks the same mechanism still costs 44 minutes — re-parsing 71,663
+documents, re-chunking, half a million cache lookups, and writing a 786 MB
+pack, all to produce the file already on disk.
+
+So the target is **44 minutes → seconds when upstream changed 50 documents
+out of 71,663**, which is what a docs refresh actually looks like. That needs
+a per-document content hash in the pack, compared against the source, so
+unchanged documents keep their existing chunks, symbols and vectors. The
+saving comes from skipping *documents* — skipping embedding is already done.
 
 ---
 
