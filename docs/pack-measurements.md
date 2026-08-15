@@ -1513,3 +1513,55 @@ That needs a per-document content hash stored in the pack and compared against
 the source, so unchanged documents keep their existing chunks, symbols and
 vectors instead of being rebuilt into the same bytes. The saving comes from
 skipping documents, not from skipping embedding, which the cache already does.
+
+---
+
+# Incremental rebuild, measured
+
+Three packs, each rebuilt twice against an unchanged source: once fully (with
+a genuinely warm embedding cache) and once incrementally.
+
+| pack | format | docs | chunks | full | incremental | speedup |
+|---|---|---|---|---|---|---|
+| `sqlite` | HTML | 837 | 8,987 | 4.8 s | 3.2 s | **1.5x** |
+| `cppreference` | HTML | 6,640 | 68,891 | 285.1 s | 75.2 s | **3.8x** |
+| `debugger` | markdown | 2,138 | 14,259 | 26.2 s | 1.1 s | **23.6x** |
+
+## The prediction was wrong, and the real driver is parsing
+
+The commit that added this predicted the win would scale with
+**chunks per document**. It does not. `sqlite` has the *most* chunks per
+document (10.7) and the *least* speedup; `debugger` has the fewest (6.7) and
+the most.
+
+The actual driver is how expensive the adapter's parsing is, because
+**incremental still parses every document in order to hash it.** What it skips
+is chunking, zstd compression, cache lookups, and the FTS and vector inserts.
+So the incremental time is essentially pure parse cost:
+
+| pack | format | incremental ÷ document |
+|---|---|---|
+| `debugger` | markdown + YAML frontmatter | **0.5 ms** |
+| `sqlite` | HTML | 3.8 ms |
+| `cppreference` | HTML | 11.3 ms |
+
+HTML through `HTMLParser` costs 8-20x more per document than markdown, and
+that cost survives every rebuild. The model is
+
+    speedup ~= total work / parse work
+
+which says nothing about chunk counts and predicts all three measurements.
+
+## What that means per pack
+
+A markdown corpus gets most of the benefit: `debugger` went from 26 s to 1.1 s
+because nearly all of its cost was chunk work that is now skipped. An HTML
+corpus is floored by its parser: `cppreference` cannot go below ~75 s no
+matter how little changed, because parsing 6,640 HTML pages is the price of
+knowing which ones moved.
+
+Removing that floor would mean trusting file mtime or size instead of content,
+which is faster and wrong -- a touched file with identical content would
+rebuild, and a restored-from-backup file with older mtime would not. The
+current design pays parse cost to be certain, and the certainty is worth more
+than the seconds on any corpus small enough for this to matter.
