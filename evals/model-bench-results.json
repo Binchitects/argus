@@ -626,5 +626,217 @@
     "tool_calls": 1,
     "seconds": 17.7,
     "answer": "Based on the provided documentation check, there are **no contradictions** regarding the core facts of your answer. The documentation confirms both the IRQL requirement and the header file exactly as you stated.\n\nHowever, the documentation includes a specific qualifier for the IRQL: **\"(see Remarks section)\"**. While your answer correctly identified the IRQL limit (`<= DISPATCH_LEVEL`), it did not explicitly quote or reference this caveat from the official text. Additionally, the documentation confirms the library is `NtosKrnl.lib`, which was marked as \"unstated\" in your original response (though you didn't claim to know it, so silence is acceptable per the prompt's rules).\n\nHere is the corrected and refined answer, incorporating the exact documented strings:\n\n### Corrected Answer\n\n**No, calling `ExAllocatePool2` from a DPC is technically allowed by IRQL but strongly discouraged in practice.**\n\n#### Documented IRQL Requirement\nAccording to Microsoft\u2019s official documentation for [`ExAllocatePool2`](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-exallocatepool2):\n\n> **IRQL:** `<= DISPATCH_LEVEL (see Remarks section)`\n\nThis confirms that the function is **IRQL-safe** at `DISPATCH_LEVEL` (the level at which DPCs run). However, the reference to the \"Remarks section\" implies important caveats not fully captured by the IRQL line alone.\n\n#### Header and Library\n- **Header:** `<wdm.h>`\n- **Library:** `NtosKrnl.lib`\n\n#### Practical Safety Analysis\nWhile the documentation permits calling `ExAllocatePool2` at `DISPATCH_LEVEL`, it is **not advisable** in a DPC context for the following reasons (derived from general driver development guidelines and the implications of the \"Remarks section\"):\n\n1.  **Blocking Risks:** Pool allocations can potentially block if memory must be paged in or if non-paged pool limits are exhausted. Blocking at `DISPATCH_LEVEL` is illegal and causes system crashes (BugCheck).\n2.  **Performance Impact:** Allocating memory in a DPC can delay other DPCs and interrupt processing, leading to latency issues.\n3.  **Best Practice:** Microsoft recommends performing pool allocations at `PASSIVE_LEVEL` whenever possible. If allocation is necessary in a DPC, ensure it is guaranteed not to block (e.g., using pre-allocated pools or non-blocking allocation flags if available).\n\n### Conclusion\n- **IRQL Requirement:** `<= DISPATCH_LEVEL (see Remarks section)` \u2014 **Technically allowed** at `DISPATCH_LEVEL`.\n- **Header:** `<wdm.h>`\n- **Library:** `NtosKrnl.lib`\n- **Safety Verdict:** **IRQL-safe per documentation**, but **practically unsafe/discouraged** due to potential blocking and performance issues. Avoid in DPCs unless absolutely necessary and guaranteed non-blocking."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "test-development",
+    "verdict": "ERROR",
+    "missing": [],
+    "tool_calls": 0,
+    "seconds": 304.6,
+    "answer": "<ERROR: HTTPError: HTTP Error 500: Internal Server Error>"
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "code-review",
+    "verdict": "FAIL",
+    "missing": [
+      "apc_level"
+    ],
+    "tool_calls": 0,
+    "seconds": 251.2,
+    "answer": "No, this call is **not legal**.\n\n### Why it is illegal\n`FltSendMessage` is a synchronous communication function that may block or wait for a response from the user-mode driver. According to the Microsoft documentation, it **cannot be called at IRQLs higher than `PASSIVE_LEVEL`**.\n\nSince a DPC (Deferred Procedure Call) runs at **`DISPATCH_LEVEL`**, calling `FltSendMessage` inside `OnDpc` violates the IRQL requirement and will likely result in a bug check (BSOD) or undefined behavior.\n\n### Documented IRQL Requirement\nFrom the Microsoft documentation for [`FltSendMessage`](https://learn.microsoft.com/en-us/windows/win32/api/fltlib/nf-fltlib-fltsendmessage):\n\n> **IRQL**: `PASSIVE_LEVEL`\n\n### Correct Approach\nIf you need to send a message to user mode from a DPC, you must defer the call to a context that runs at `PASSIVE_LEVEL`. Common patterns include:\n\n1. **Queue the message** to a work item (`IoQueueWorkItem`) that runs at `PASSIVE_LEVEL`.\n2. **Use a dedicated thread** that waits on an event or queue, and signal it from the DPC.\n3. **Use `FltRegisterFilter` with a callback** that runs at `PASSIVE_LEVEL` (e.g., in a pre/post-operation callback if applicable, though most file system callbacks run at `PASSIVE_LEVEL` only for certain operations).\n\n### Example Fix (using a work item)\n```c\nVOID OnDpc(PKDPC Dpc)\n{\n    // Defer to PASSIVE_LEVEL\n    IoQueueWorkItem(\n        gWorkItem,\n        DelayedWorkQueue,  // Runs at PASSIVE_LEVEL\n        NULL\n    );\n}\n\nVOID WorkItemCallback(PWORK_ITEM WorkItem, PVOID Context, PVOID SystemWorkItemContext)\n{\n    // Now safe to call FltSendMessage\n    FltSendMessage(gFilter, &gPort, &msg, sizeof(msg), NULL, NULL, NULL);\n}\n```\n\n### Key Takeaway\n- **DPCs run at `DISPATCH_LEVEL`**.\n- **`FltSendMessage` requires `PASSIVE_LEVEL`**.\n- **Never call blocking or user-mode communication functions from a DPC.**"
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "performance",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 0,
+    "seconds": 22.3,
+    "answer": "### Documented Complexity\n\nAccording to the C++ standard (e.g., C++17/20/23), `std::vector::push_back` has the following complexity:\n\n- **Amortized constant time**: $O(1)$\n- **Worst-case constant time**: $O(1)$ for the insertion itself, but **amortized** over a sequence of insertions, the total cost is linear.\n\nHowever, the key nuance is that **individual calls** to `push_back` may trigger a **reallocation** (copy/move of all existing elements to a new, larger buffer) when the current capacity is exceeded. This reallocation is **not** $O(1)$ in the worst case for that specific call\u2014it is $O(n)$, where $n$ is the current size. But because reallocations happen less and less frequently (typically doubling capacity), the **amortized** cost over $N$ insertions is $O(1)$ per insertion, leading to $O(N)$ total time.\n\nSo, the **documented complexity** of `push_back` is:\n> **Amortized constant time** ($O(1)$ amortized).\n\n### The Single Call That Removes Repeated Reallocation Cost\n\nThe single call that eliminates the repeated reallocation cost is:\n\n```cpp\nvec.reserve(1000000);\n```\n\n### Explanation\n\n- `std::vector::reserve(n)` allocates memory for at least `n` elements **upfront**.\n- After calling `reserve(1000000)`, the vector\u2019s **capacity** is at least 1,000,000.\n- Subsequent `push_back` calls (up to 1,000,000) will **not** trigger reallocation, because the capacity is sufficient.\n- This turns the total cost of 1,000,000 `push_back` calls from **amortized $O(N)$ with hidden reallocation overhead** into **strictly $O(N)$ with no reallocations**, improving cache performance and eliminating the cost of copying/moving elements during growth.\n\n### Summary\n\n| Aspect | Detail |\n|--------|--------|\n| **Documented complexity of `push_back`** | Amortized $O(1)$ |\n| **Call to eliminate reallocation cost** | `vec.reserve(1000000);` |\n| **Effect** | Pre-allocates memory for 1M elements, ensuring no reallocations during the 1M `push_back` calls. |"
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "coding-style",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 0,
+    "seconds": 6.9,
+    "answer": "For the Microsoft Visual C++ (MSVC) compiler, the specific command-line options are:\n\n1. **C++20 Standard**: `/std:c++20`\n2. **Warning Level 4**: `/W4`\n\n### Example Usage\n```bash\ncl /std:c++20 /W4 main.cpp\n```\n\n### Notes:\n- `/std:c++20` tells the compiler to use the C++20 standard. (You can also use `/std:c++latest` to get the latest supported standard, which may include C++23 features depending on the compiler version.)\n- `/W4` enables warning level 4, which is more verbose than the default level 3 and includes additional warnings about potential issues."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "sdk-support",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 0,
+    "seconds": 14.3,
+    "answer": "To call `CryptAcquireContextW`, you need the following:\n\n### **Header File**\n- **`<wincrypt.h>`**\n\nThis header declares the function prototype for `CryptAcquireContextW` (as well as the ANSI version `CryptAcquireContextA` and the generic `CryptAcquireContext` macro).\n\n### **Import Library**\n- **`advapi32.lib`**\n\nYou must link against `advapi32.lib` to resolve the symbol at link time.\n\n---\n\n### **Example Usage (C/C++)**\n\n```c\n#include <windows.h>\n#include <wincrypt.h>\n\n#pragma comment(lib, \"advapi32.lib\")  // Optional: auto-link if using MSVC\n\nint main() {\n    HCRYPTPROV hProv = 0;\n    if (!CryptAcquireContextW(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {\n        // Handle error\n        return 1;\n    }\n\n    // Use hProv...\n\n    CryptReleaseContext(hProv, 0);\n    return 0;\n}\n```\n\n### **Notes**\n- `CryptAcquireContextW` is the wide-character (Unicode) version. The ANSI version is `CryptAcquireContextA`.\n- The generic `CryptAcquireContext` macro resolves to either the `A` or `W` version depending on whether `UNICODE` is defined.\n- `advapi32.lib` is part of the Windows SDK and is available on all modern Windows systems.\n- If you are using CMake, add `advapi32` to your `target_link_libraries`."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "wdk-support",
+    "verdict": "FAIL",
+    "missing": [
+      "apc_level"
+    ],
+    "tool_calls": 0,
+    "seconds": 15.8,
+    "answer": "`IoCreateDevice` is callable at **PASSIVE_LEVEL** (IRQL 0).\n\nIt is declared in the header **`wdm.h`** (which is typically included via `ntddk.h` or `wdf.h` depending on the driver model, but the fundamental declaration resides in `wdm.h`).\n\n### Key Details:\n- **IRQL Requirement**: `PASSIVE_LEVEL` only. This is because `IoCreateDevice` may allocate memory and perform operations that are not allowed at higher IRQLs (such as DISPATCH_LEVEL or above).\n- **Header**: `wdm.h`\n- **Link Library**: `ntoskrnl.lib` (for kernel-mode drivers)\n\n### Example Usage Context:\n```c\n#include <ntddk.h> // Which includes wdm.h\n\nNTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)\n{\n    PDEVICE_OBJECT DeviceObject;\n    NTSTATUS status;\n\n    // Must be called at PASSIVE_LEVEL\n    status = IoCreateDevice(\n        DriverObject,\n        0,\n        &DeviceObject,\n        FILE_DEVICE_UNKNOWN,\n        FILE_DEVICE_SECURE_OPEN,\n        FALSE,\n        &DeviceObject\n    );\n\n    if (!NT_SUCCESS(status))\n    {\n        return status;\n    }\n\n    // ... rest of driver initialization ...\n\n    return STATUS_SUCCESS;\n}\n```\n\n### Note:\nIf you are using the **WDF (Windows Driver Frameworks)** model, you would typically use `WdfDeviceCreate` instead, which abstracts away the direct call to `IoCreateDevice`. However, for **WDM (Windows Driver Model)** drivers, `IoCreateDevice` is the standard function."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "win32-support",
+    "verdict": "FAIL",
+    "missing": [
+      "fileapi.h"
+    ],
+    "tool_calls": 0,
+    "seconds": 10.7,
+    "answer": "`CreateFileW` is declared in the **`windows.h`** header.\n\nYou must link against the **`kernel32.lib`** import library.\n\n### Details:\n- **Header**: `#include <windows.h>`\n- **Library**: `kernel32.lib` (This is typically linked automatically by the Windows SDK, but if you need to specify it explicitly, use `#pragma comment(lib, \"kernel32.lib\")` or add it to your linker settings.)\n\n### Example:\n```cpp\n#include <windows.h>\n\nint main() {\n    HANDLE hFile = CreateFileW(\n        L\"C:\\\\example.txt\",\n        GENERIC_READ,\n        FILE_SHARE_READ,\n        NULL,\n        OPEN_EXISTING,\n        FILE_ATTRIBUTE_NORMAL,\n        NULL\n    );\n\n    if (hFile == INVALID_HANDLE_VALUE) {\n        return GetLastError();\n    }\n\n    CloseHandle(hFile);\n    return 0;\n}\n```\n\n> **Note**: `CreateFileW` is the wide-character (Unicode) version of `CreateFile`. The ANSI version is `CreateFileA`. The generic `CreateFile` macro maps to one of these based on the `UNICODE`/`_UNICODE` preprocessor definitions."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "scripting",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 0,
+    "seconds": 10.4,
+    "answer": "The option you are looking for is **`/MIR`** (short for **Mirror**).\n\n### Explanation:\n- **`/MIR`** is equivalent to using **`/E`** (copy subdirectories, including empty ones) + **`/PURGE`** (delete files and directories at the destination that no longer exist at the source).\n- It ensures the destination directory tree is an exact mirror of the source.\n\n### Example:\n```cmd\nrobocopy C:\\Source D:\\Destination /MIR\n```\n\n### \u26a0\ufe0f Warning:\n- **`/MIR` is destructive**: It will **delete** any files or folders in the destination that are not present in the source.\n- Use with caution, especially if the source path is incorrect or incomplete.\n\n### Related Options:\n- **`/E`**: Copies all subdirectories, including empty ones (but does **not** delete extra files at destination).\n- **`/PURGE`**: Deletes destination files/dirs not found in source (must be used with `/E` or `/MIR`).\n- **`/MIR`** = `/E` + `/PURGE`"
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "security-review",
+    "verdict": "FAIL",
+    "missing": [
+      "ntstrsafe.h",
+      "ntstrsafe.lib"
+    ],
+    "tool_calls": 0,
+    "seconds": 14.1,
+    "answer": "The documented safe-string replacement routine for `wcscpy` is **`wcscpy_s`**.\n\nIt requires:\n- **Header**: `<string.h>` (or `<wchar.h>` in some implementations, but `<string.h>` is the standard C11 header for secure string functions)\n- **Library**: The standard C library (`libc`), specifically the secure string functions extension. On Windows, it is part of the CRT (C Runtime Library) and requires linking with the standard C library. On POSIX systems, it may require linking with `-lstdc++` or specific secure string libraries depending on the implementation, but typically it is part of the standard C library when `_SECURE_SCL` or similar secure extensions are enabled.\n\nHowever, note that `wcscpy_s` is **not part of the ISO C standard**. It is a **Microsoft-specific extension** (part of the Secure CRT functions) and is available in:\n- **Windows**: Header `<string.h>`, library `libc` (standard C runtime)\n- **Other platforms**: Not universally available; POSIX systems do not mandate it.\n\nFor portable code, the recommended approach is to use `wcsncpy` with careful bounds checking, or use `wcscat_s`/`wcscpy_s` only on platforms that support them (primarily Windows).\n\n**Final Answer**:\n- **Routine**: `wcscpy_s`\n- **Header**: `<string.h>`\n- **Library**: Standard C library (CRT on Windows)"
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "closed-book",
+    "task": "code-safety",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 0,
+    "seconds": 27.0,
+    "answer": "**Yes, `ExAllocatePool2` is safe to call from a DPC (Deferred Procedure Call), which runs at `DISPATCH_LEVEL`.**\n\n### Documented IRQL Requirement\nAccording to the Microsoft Windows Driver Kit (WDK) documentation, `ExAllocatePool2` can be called at any IRQL **up to and including** `DISPATCH_LEVEL`.\n\n> **IRQL:** `PASSIVE_LEVEL` through `DISPATCH_LEVEL`\n\nThis means it is explicitly permitted at `DISPATCH_LEVEL`, which is the IRQL at which DPCs execute.\n\n### Header Declaration\nThe function is declared in the following header file:\n\n```c\n#include <ntddk.h>\n```\n\nMore specifically, it is defined in:\n```c\n#include <wdm.h>\n```\nor\n```c\n#include <ntddk.h>\n```\n(Both `wdm.h` and `ntddk.h` are standard kernel-mode driver headers; `ntddk.h` is the primary include for kernel drivers.)\n\n### Important Notes\n1. **Pool Tag**: You must provide a valid pool tag (a 4-character ASCII string) as the first parameter.\n2. **Pool Type**: Use `NonPagedPool` or `NonPagedPoolCacheAligned` for memory that must be accessible at `DISPATCH_LEVEL`. Do **not** use `PagedPool` if you intend to access the memory at `DISPATCH_LEVEL` or above, as paged memory can be paged out and is only accessible at `PASSIVE_LEVEL`.\n3. **Failure Handling**: Always check the return value. If it returns `NULL`, the allocation failed, and you must handle the error appropriately (e.g., by returning an error status or freeing any previously allocated resources).\n4. **Deprecated Alternative**: `ExAllocatePool` (the older function) is deprecated in favor of `ExAllocatePool2`, which provides better control over pool allocation (e.g., specifying cache alignment, non-paged pool, etc.).\n\n### Example Usage in a DPC\n```c\nVOID MyDpcRoutine(\n    _In_ PDRIVER_OBJECT DriverObject,\n    _In_ PDEVICE_OBJECT DeviceObject,\n    _In_ PDPHASE_ROUTINE DpcRoutine,\n    _In_ PVOID Context\n)\n{\n    // Safe to call at DISPATCH_LEVEL\n    PVOID buffer = ExAllocatePool2(\n        PoolTypeNonPaged,       // Must be non-paged for DISPATCH_LEVEL access\n        1024,                   // Size\n        'MyTa'                  // Pool tag (4 chars)\n    );\n\n    if (buffer == NULL)\n    {\n        // Handle allocation failure\n        return;\n    }\n\n    // Use buffer...\n\n    // Free when done (also safe at DISPATCH_LEVEL)\n    ExFreePool2(buffer);\n}\n```\n\nIn summary, `ExAllocatePool2` is explicitly designed to be callable at `DISPATCH_LEVEL`, making it safe for use in DPCs."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "test-development",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 6,
+    "seconds": 98.9,
+    "answer": "The documented IRQL requirement for **ExInitializeLookasideListEx** is:\n\n> **IRQL: <= DISPATCH_LEVEL (see Remarks section)**\n\nSo your test harness must call it at IRQL \u2264 DISPATCH_LEVEL (i.e., PASSIVE_LEVEL, APC_LEVEL, or DISPATCH_LEVEL).\n\nNote: The documentation references a \"Remarks section\" for additional detail, but the full Remarks text was not retrievable from the indexed page. The header-level requirement stated verbatim above is the binding constraint."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "code-review",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 2,
+    "seconds": 47.8,
+    "answer": "**No \u2014 this call is not legal.**\n\nThe documented requirement for `FltSendMessage` (from the WDK reference, `fltkernel.h` / `FltMgr.lib` / `Fltmgr.sys`) is:\n\n> **IRQL: <= APC_LEVEL**\n\nA DPC runs at **DISPATCH_LEVEL**, which is higher than APC_LEVEL. Calling `FltSendMessage` from `OnDpc` therefore violates its documented IRQL constraint.\n\nThis is not just a theoretical concern \u2014 the documentation's Remarks section confirms the mechanism: if the user-mode application has not already called `FilterGetMessage`, \"FltMgr puts the minifilter into a wait state\" until the message is delivered or the timeout expires. A thread cannot enter a wait state at DISPATCH_LEVEL, so this call would either fail or crash (bug check) depending on the situation.\n\n**Fix:** defer the send to a context that runs at APC_LEVEL or below \u2014 e.g., queue the message and send it from a work item (`ExQueueWorkItem`), a worker thread, or a PASSIVE_LEVEL callback.\n\nSource: WDK DDI reference, *FltSendMessage function (fltkernel.h)* \u2014 https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/fltkernel/nf-fltkernel-fltsendmessage"
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "performance",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 6,
+    "seconds": 98.3,
+    "answer": "**Documented complexity:** The Microsoft `vector` class documentation states that \"Vectors allow constant time insertions and deletions at the end of the sequence.\" The `back_insert_iterator` documentation further confirms that `vector` satisfies the requirement that it is \"possible to insert elements at the end of the sequence in amortized constant time.\" So `push_back` is **amortized constant time**.\n\n**The single call that removes the repeated reallocation cost:** `reserve`. The documentation for `vector::reserve` states:\n\n> \"Reserves a minimum length of storage for a vector object, allocating space if necessary.\"\n\nAnd the STL/CLR variant's Remarks add:\n\n> \"The member function ensures that `capacity()` henceforth returns at least *count*. You use it to ensure that the container need not reallocate storage for the controlled sequence until it has grown to the specified size.\"\n\nSo calling `v.reserve(1'000'000)` before the loop guarantees that no reallocation occurs during the million `push_back` calls, turning each one into a true constant-time append with no copy/move of existing elements."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "coding-style",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 8,
+    "seconds": 153.5,
+    "answer": "Both are documented in the MSVC reference:\n\n- **C++20 standard:** `/std:c++20` \u2014 from the `/std` (Specify Language Standard Version) page: \"Enables C++20 standard-specific features and behavior. Enables the standard conformance mode provided by `/permissive-` unless explicitly overridden with `/permissive`.\" (https://learn.microsoft.com/en-us/cpp/build/reference/std-specify-language-standard-version)\n\n- **Warning level 4:** `/W4` \u2014 from the warning-level page: \"/W4 displays level 1, level 2, and level 3 warnings, and all level 4 (informational) warnings that aren't off by default. We recommend that you use this option to provide lint-like warnings.\" (https://learn.microsoft.com/en-us/cpp/build/reference/compiler-option-warning-level)\n\nSo a typical command line would be `cl /std:c++20 /W4 ...`. Note the distinction: `/W4` sets the overall level, while lowercase `/w4<code>` (e.g. `/w44100`) sets the level of a single specific warning."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "sdk-support",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 1,
+    "seconds": 30.6,
+    "answer": "Per the Windows SDK API reference for `CryptAcquireContextW`:\n\n- **Header:** `wincrypt.h`\n- **Import library:** `Advapi32.lib`\n- (It resolves to `Advapi32.dll` at runtime.)\n\nSource: [CryptAcquireContextW function (wincrypt.h)](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptacquirecontextw) \u2014 Windows SDK API reference, CC-BY-4.0."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "wdk-support",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 1,
+    "seconds": 30.6,
+    "answer": "According to the WDK documentation (Windows Driver Kit DDI reference, CC-BY-4.0):\n\n- **IRQL:** `<= APC_LEVEL`\n- **Header:** `wdm.h`\n\nFull documented signature line: `Header: wdm.h; Library: NtosKrnl.lib; DLL: NtosKrnl.exe; IRQL: <= APC_LEVEL`\n\nSource: [IoCreateDevice function (wdm.h)](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-iocreatedevice)"
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "win32-support",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 1,
+    "seconds": 30.2,
+    "answer": "Per the Windows SDK API reference (win32 pack, `CreateFileW function (fileapi.h)`):\n\n- **Header:** `fileapi.h`\n- **Import library:** `Kernel32.lib`\n- (DLL: `Kernel32.dll`)\n\nSource: https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew (Windows SDK API reference, CC-BY-4.0 AND MIT)."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "scripting",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 2,
+    "seconds": 54.4,
+    "answer": "The option is **`/MIR`**.\n\nPer the robocopy reference (Windows Commands reference, Microsoft):\n\n> **/mir** \u2014 \"Mirrors a directory tree (equivalent to **/e** plus **/purge**).\"\n\nAnd the two components it combines:\n\n> **/e** \u2014 \"Copies subdirectories. This option automatically includes empty directories.\"\n> **/purge** \u2014 \"Deletes destination files and directories that no longer exist in the source.\"\n\nSo:\n\n```cmd\nrobocopy <source> <destination> /MIR\n```\n\ncopies the full tree (including empty directories) and deletes anything at the destination that no longer exists at the source.\n\nOne caution worth knowing: `/MIR` is destructive at the destination \u2014 if you point it at the wrong folder, it will delete files there. If you only need the delete behavior without the \"include empty directories\" part, `/E /PURGE` gives you the same effect with the pieces spelled out.\n\nSource: [Robocopy \u2014 Windows Commands reference](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy) (Microsoft, CC BY 4.0)."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "security-review",
+    "verdict": "FAIL",
+    "missing": [
+      "ntstrsafe.h",
+      "ntstrsafe.lib"
+    ],
+    "tool_calls": 4,
+    "seconds": 65.5,
+    "answer": "The documented kernel-mode replacement is **`RtlCopyUnicodeString`** (WDK DDI reference, `RtlCopyUnicodeString function (wdm.h)`):\n\n- **Header:** `wdm.h`\n- **Library:** `NtosKrnl.lib`\n- **DLL:** `NtosKrnl.exe` (kernel mode); `Ntdll.dll` (user mode)\n- **IRQL:** \"Any level (see Remarks section)\" \u2014 with the remark that \"The DestinationString and SourceString buffers must be resident if the caller is running at IRQL >= DISPATCH_LEVEL.\"\n\nUsage notes from the same page:\n\n- It copies into a `UNICODE_STRING` destination, bounded by the destination's `MaximumLength`: \"The number of bytes copied from the source string is either the source string length \u2026 or the maximum length of the destination string \u2026 whichever is smaller.\"\n- \"The caller must properly initialize all members of the structure pointed to by DestinationString before calling RtlCopyUnicodeString. Failure to initialize the Length or the MaximumLength member before calling this routine can cause a buffer overrun.\"\n- If `SourceString` is `NULL`, it sets the destination's `Length` to zero.\n\nSo the pattern is: build a `UNICODE_STRING` for your fixed buffer (e.g. via `RtlInitUnicodeString`, which sets `MaximumLength` to the buffer size), then call `RtlCopyUnicodeString(&dest, &src)` \u2014 the copy is clamped to the buffer, which is the safety `wcscpy` lacks.\n\nSource: WDK DDI reference, https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-rtlcopyunicodestring (CC-BY-4.0 AND MS-PL)."
+  },
+  {
+    "model": "qwen3.8:27b",
+    "arm": "with-argus",
+    "task": "code-safety",
+    "verdict": "PASS",
+    "missing": [],
+    "tool_calls": 2,
+    "seconds": 43.7,
+    "answer": "Yes \u2014 **ExAllocatePool2 is safe to call from a DPC running at DISPATCH_LEVEL.**\n\n**Documented IRQL requirement** (verbatim from the WDK reference):\n\n> IRQL: `<= DISPATCH_LEVEL` (see Remarks section)\n\nSince a DPC runs at DISPATCH_LEVEL, which satisfies `<= DISPATCH_LEVEL`, the call is permitted.\n\n**Header that declares it** (verbatim):\n\n> Header: `wdm.h`\n\nOther documented facts for completeness:\n- Library: `NtosKrnl.lib`\n- DLL: `NtosKrnl.exe`\n\n**Source:** Windows Driver Kit DDI reference, \"ExAllocatePool2\" \u2014 https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-exallocatepool2 (CC-BY-4.0 / MS-PL).\n\nOne caveat worth noting: the documentation's Remarks section does not add any further IRQL restriction beyond the `<= DISPATCH_LEVEL` requirement, so nothing in the documented contract prevents a DPC from calling it."
   }
 ]

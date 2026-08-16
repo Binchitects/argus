@@ -13,21 +13,22 @@ Ten task families — test development, code review, performance, coding style, 
 ```mermaid
 xychart-beta
     title "Correct answers out of 10"
-    x-axis ["qwen3.6:27b alone", "27b + Argus", "qwen3.6:35b alone", "35b + Argus"]
+    x-axis ["3.6:27b", "3.6:27b +A", "3.6:35b", "3.6:35b +A", "3.8:27b", "3.8:27b +A"]
     y-axis "Tasks correct" 0 --> 10
-    bar [5, 10, 5, 9]
+    bar [5, 10, 5, 9, 5, 9]
 ```
 
 | model | alone | with Argus | change |
 |---|---|---|---|
 | `qwen3.6:27b` (dense, 27.8B) | 5 / 10 | **10 / 10** | **+100%** |
 | `qwen3.6:35b` (MoE, 36.0B) | 5 / 10 | **9 / 10** | **+80%** |
+| `qwen3.8:27b` (dense, 27.3B) | 5 / 9 | **9 / 10** | **+80%** |
 
-**Both models failed the same five tasks alone** — not similar scores, the *same five*, task for task. An 8-billion-parameter gap and a different architecture changed nothing.
+**All three models failed the same five tasks alone** — not similar scores, the *same five*, task for task. An 8-billion-parameter gap, a different architecture, and a newer generation all changed nothing. Full three-way breakdown in [docs/model-comparison.md](docs/model-comparison.md).
 
-`qwen3.6:27b` is the reference model here, chosen on behaviour rather than size. It is the *smaller* of the two, scores identically closed book, and pulls ahead only once tools exist: **26 tool calls to 35b's 19**, winning the one task that separated them by checking instead of recalling. 35b answered that one in 2.2 s with **zero tool calls** — confidently, and wrongly. For an agent, willingness to verify is worth more than parameter count. The margin is one task in ten, so the honest claim is "checks more reliably", not "better at everything".
+`qwen3.6:27b` is the reference model here, chosen on behaviour rather than size. It is the *smallest* of the three, scores identically closed book, and pulls ahead only once tools exist: **26 tool calls to 35b's 19**, winning the one task that separated them by checking instead of recalling. 35b answered that one in 2.2 s with **zero tool calls** — confidently, and wrongly. For an agent, willingness to verify is worth more than parameter count. The margin is one task in ten, so the honest claim is "checks more reliably", not "better at everything".
 
-Both handled amortized complexity and MSVC flag syntax fine. Both missed driver IRQLs and the documented header for `CreateFileW` — which is `fileapi.h`, not the `windows.h` that memory reaches for. Those are **recall** failures on facts too specialised to sit in any local model's weights.
+All three handled amortized complexity and MSVC flag syntax fine. All three missed driver IRQLs and the documented header for `CreateFileW` — which is `fileapi.h`, not the `windows.h` that memory reaches for. Those are **recall** failures on facts too specialised to sit in any local model's weights.
 
 > **Scale does not fix this. Retrieval does.**
 
