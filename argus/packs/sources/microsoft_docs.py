@@ -240,11 +240,31 @@ def _prepend_requirements(meta: dict, description: str, body: str) -> str:
 
 
 def _requirement_line(meta: dict) -> str:
-    """"Header: winuser.h; Library: User32.lib; DLL: User32.dll"."""
+    """"Header: winuser.h; Library: User32.lib" plus what the API actually does.
+
+    The contract comes FIRST and keeps its semicolon separators, because
+    `docs_contracts` splits this field on ";" to pull out the IRQL and the
+    library -- putting prose ahead of it would change what that parse sees.
+    The description is appended after a " -- " marker, which the contract
+    parser never treats as a field boundary.
+
+    The description is here because `docs_find` searches this field and
+    nothing else. Measured: with the contract alone, win32 and wdk contributed
+    roughly 125,000 symbols whose entire searchable text was
+    "Header: wdm.h; Library: NtosKrnl.lib; IRQL: <= DISPATCH_LEVEL". Asked to
+    "allocate memory from the kernel pool", `docs_find` could not reach
+    `ExAllocatePool2`, because the word "allocate" appeared nowhere in what
+    was searched. Ranking cannot fix an absent word, and the whole 25-question
+    set scored 4% top-1 largely on this.
+    """
     wanted = (("Header", "req.header"), ("Library", "req.lib"),
               ("DLL", "req.dll"), ("IRQL", "req.irql"))
-    return "; ".join(f"{label}: {meta[key]}" for label, key in wanted
-                     if str(meta.get(key) or "").strip())
+    contract = "; ".join(f"{label}: {meta[key]}" for label, key in wanted
+                         if str(meta.get(key) or "").strip())
+    description = " ".join(str(meta.get("description") or "").split())
+    if not description:
+        return contract
+    return f"{contract} -- {description}" if contract else description
 
 
 def _aliases(meta: dict) -> list[str]:

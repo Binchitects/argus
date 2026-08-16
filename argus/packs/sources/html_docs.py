@@ -124,6 +124,32 @@ def html_to_text(source: str) -> tuple[str, str]:
     return " ".join(parser.title.split()), parser.text()
 
 
+def _description_after_chrome(body: str, words: int = 30) -> str:
+    """The first real prose on the page, skipping the site's own navigation.
+
+    `docs_find` searches `api_symbols.signature`, so whatever lands here is
+    the only text by which a symbol can be found by description. Taking the
+    first words of the body put sqlite.org's page header there instead:
+    every SQL statement in the pack was described as "Small. Fast. Reliable.
+    Choose any three. Home Menu About Documentation Download License" -- the
+    same string for all of them, matching nothing anyone would ask.
+
+    The nav sits before the first heading and contains none, so content is
+    taken from the first ATX heading onward. Heading lines themselves are
+    skipped: they are section labels ("Syntax", "Overview"), not descriptions.
+    Falls back to the raw head if the page has no headings at all, which is
+    no worse than what it replaces.
+    """
+    lines = body.splitlines()
+    start = next((i for i, line in enumerate(lines)
+                  if line.startswith("#")), None)
+    if start is None:
+        return " ".join(body.split()[:words])
+    prose = [line for line in lines[start:] if line.strip()
+             and not line.startswith("#")]
+    return " ".join(" ".join(prose).split()[:words])
+
+
 def _first_heading(body: str) -> str:
     for line in body.splitlines():
         if line.startswith("#"):
@@ -207,7 +233,7 @@ class SqliteDocs:
             yield ApiSymbol(
                 name=statement, kind="statement", namespace="sql",
                 doc_path=relative, anchor="",
-                signature=" ".join(body.split()[:30]),
+                signature=_description_after_chrome(body),
             )
 
 

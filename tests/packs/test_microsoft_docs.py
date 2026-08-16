@@ -172,3 +172,58 @@ def test_the_spin_lock_page_resolves_end_to_end(tmp_path):
     syms = {s.name: s for s in WdkDdi().iter_symbols(tmp_path)}
     assert "KeAcquireSpinLock" in syms
     assert "DISPATCH_LEVEL" in syms["KeAcquireSpinLock"].signature
+
+
+class TestSignatureCarriesDescription:
+    """`docs_find` searches api_symbols.signature and nothing else.
+
+    With the contract alone, win32 and wdk contributed ~125,000 symbols whose
+    entire searchable text was "Header: wdm.h; Library: NtosKrnl.lib; IRQL:
+    <= DISPATCH_LEVEL". Asked to "allocate memory from the kernel pool",
+    docs_find could not reach ExAllocatePool2 -- the word "allocate" was not
+    in the searched text. Ranking cannot fix an absent word; the 25-question
+    set scored 4% top-1 largely on this.
+    """
+
+    def test_the_description_is_appended_to_the_contract(self):
+        from argus.packs.sources.microsoft_docs import _requirement_line
+
+        line = _requirement_line({
+            "req.header": "wdm.h",
+            "req.lib": "NtosKrnl.lib",
+            "req.irql": "<= DISPATCH_LEVEL",
+            "description": "Allocates pool memory of the specified type.",
+        })
+
+        assert "Header: wdm.h" in line
+        assert "allocates pool memory" in line.lower(), (
+            "the words a description search needs are missing")
+
+    def test_the_contract_stays_first_and_semicolon_separated(self):
+        """`docs_contracts` splits this field on ';' to pull out the IRQL and
+        library. Prose in front of that would change what the parse sees, so
+        the description goes after a ' -- ' marker instead."""
+        from argus.packs.sources.microsoft_docs import _requirement_line
+
+        line = _requirement_line({
+            "req.header": "wdm.h", "req.irql": "<= APC_LEVEL",
+            "description": "Creates a device object; returns status.",
+        })
+
+        contract = line.split(" -- ", 1)[0]
+        fields = [p.strip() for p in contract.split(";")]
+        assert fields[0] == "Header: wdm.h"
+        assert any(f.startswith("IRQL:") for f in fields)
+        assert "device object" not in contract, "prose leaked into the contract"
+
+    def test_a_page_without_a_description_is_unchanged(self):
+        from argus.packs.sources.microsoft_docs import _requirement_line
+
+        line = _requirement_line({"req.header": "wdm.h", "req.lib": "x.lib"})
+        assert line == "Header: wdm.h; Library: x.lib"
+        assert " -- " not in line
+
+    def test_a_page_with_only_a_description_still_yields_one(self):
+        from argus.packs.sources.microsoft_docs import _requirement_line
+
+        assert _requirement_line({"description": "Does a thing."}) == "Does a thing."
