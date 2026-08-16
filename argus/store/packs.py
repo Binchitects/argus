@@ -689,37 +689,67 @@ def search_symbols(packs: Sequence[Pack], query: str, lang: str | None = None,
     # normalisation more wrong.
     candidates: list[tuple[Pack, Any]] = []
     for pack in select_packs(packs, lang):
-        where = " OR ".join("lower(s.signature) LIKE ?" for _ in terms)
+        clause = "lower(s.signature) LIKE ? OR lower(s.name) LIKE ?"
+        where = " OR ".join(clause for _ in terms)
+        params: list[str] = []
+        for term in terms:
+            params.extend((f"%{term}%", f"%{term}%"))
         rows = _query(pack, f"""
             SELECT s.name, s.kind, s.namespace, s.anchor, s.signature,
                    d.title, d.url, d.path
             FROM api_symbols s JOIN docs d ON d.id = s.doc_id
             WHERE s.signature != '' AND ({where})
-        """, tuple(f"%{t}%" for t in terms))
+        """, tuple(params))
         candidates.extend((pack, row) for row in rows)
 
     if not candidates:
         return []
 
-    # How many symbols in the WHOLE corpus mention each term, so a word that
-    # appears everywhere cannot outweigh a distinctive one -- and so the same
-    # word is worth the same everywhere.
-    frequency = {t: 0 for t in terms}
+    # Frequencies are counted separately for the two fields and across the
+    # WHOLE corpus. Separately, because a word can be common in names and rare
+    # in prose or the reverse -- "string" names thousands of symbols and
+    # describes few. Corpus-wide, because these scores are ranked across packs:
+    # counting per pack made the same word worth more inside a small pack, so
+    # `unicodedata.mirrored` outranked robocopy for "mirror a directory tree".
+    name_frequency = {t: 0 for t in terms}
+    text_frequency = {t: 0 for t in terms}
     for _pack, row in candidates:
-        low = str(row["signature"]).lower()
+        name_low = str(row["name"]).lower()
+        text_low = str(row["signature"]).lower()
         for t in terms:
-            if t in low:
-                frequency[t] += 1
+            if t in name_low:
+                name_frequency[t] += 1
+            if t in text_low:
+                text_frequency[t] += 1
 
     scored: list[tuple[float, dict[str, Any]]] = []
     for pack, row in candidates:
-        low = str(row["signature"]).lower()
+        name_low = str(row["name"]).lower()
+        text_low = str(row["signature"]).lower()
         score = 0.0
+        matched_terms = 0
         for t in terms:
-            if t in low:
-                score += 1.0 / (1.0 + frequency[t] / 50.0)
+            best = 0.0
+            if t in text_low:
+                best = 1.0 / (1.0 + text_frequency[t] / 50.0)
+            if t in name_low:
+                # A name match is stronger evidence than a prose match: a
+                # symbol CALLED JsonSerializer is more likely to be the answer
+                # to "serialize JSON" than one merely describing it. But it is
+                # also far noisier -- matching names alone surfaced
+                # PFND3DWDDM2_0DDI_VIDEOPROCESSORSETSTREAMMIRROR for "mirror"
+                # -- so the same rarity weighting applies, computed over names.
+                best = max(best, _NAME_WEIGHT / (1.0 + name_frequency[t] / 50.0))
+            if best:
+                score += best
+                matched_terms += 1
         if not score:
             continue
+        # Covering more of the question beats matching one word strongly. A
+        # symbol hitting three of four asked-for words is answering the
+        # question; one hitting a single rare word is a coincidence with a
+        # good score.
+        score *= 1.0 + _COVERAGE_BONUS * (matched_terms - 1)
         scored.append((score, _attributed(pack, {
             "name": row["name"],
             "kind": row["kind"],
@@ -733,7 +763,49 @@ def search_symbols(packs: Sequence[Pack], query: str, lang: str | None = None,
         })))
 
     scored.sort(key=lambda pair: -pair[0])
-    return [row for _, row in scored[:limit]]
+    return _capped(scored, limit)
+
+
+#: A name match is worth this much of a description match at equal rarity.
+#: Above 1.0 because the name is the stronger signal, and only modestly so
+#: because it is the noisier one.
+_NAME_WEIGHT = 1.4
+
+#: Multiplier per additional distinct query term matched.
+_COVERAGE_BONUS = 0.35
+
+#: Most results one pack may occupy in a single answer.
+#:
+#: Necessary because the corpus is not balanced and never will be: `dotnet`
+#: alone holds 215,269 of 394,545 symbols, so without a cap a .NET-flavoured
+#: reading of any query fills every slot and the answer from a 36-symbol pack
+#: is unreachable however well it scores. The cap costs nothing when a pack
+#: genuinely owns the question -- the top hits are still its own -- and it is
+#: what lets `robocopy` appear at all against 215k competitors.
+_PACK_CAP = 3
+
+
+def _capped(scored: list[tuple[float, dict[str, Any]]],
+            limit: int) -> list[dict[str, Any]]:
+    """Take the best `limit` results, allowing at most `_PACK_CAP` per pack.
+
+    Overflow is kept in order and appended only if the capped pass cannot fill
+    `limit`, so a query that genuinely has answers in one pack alone still
+    returns a full result set rather than being punished for it.
+    """
+    taken: list[dict[str, Any]] = []
+    overflow: list[dict[str, Any]] = []
+    per_pack: dict[str, int] = {}
+    for _score, row in scored:
+        source = str(row.get("source", ""))
+        if per_pack.get(source, 0) < _PACK_CAP:
+            per_pack[source] = per_pack.get(source, 0) + 1
+            taken.append(row)
+        else:
+            overflow.append(row)
+        if len(taken) >= limit:
+            return taken[:limit]
+    return (taken + overflow)[:limit]
 
 
 #: Identifiers worth looking up in a source file: CamelCase API names with a
