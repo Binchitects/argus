@@ -769,7 +769,7 @@ def search_symbols(packs: Sequence[Pack], query: str, lang: str | None = None,
 #: A name match is worth this much of a description match at equal rarity.
 #: Above 1.0 because the name is the stronger signal, and only modestly so
 #: because it is the noisier one.
-_NAME_WEIGHT = 1.4
+_NAME_WEIGHT = 0.0
 
 #: Multiplier per additional distinct query term matched.
 _COVERAGE_BONUS = 0.35
