@@ -12,11 +12,23 @@ import pytest
 from argus.store import packs as packs_store
 
 
-def test_name_weight_exceeds_description_weight():
-    """A symbol CALLED JsonSerializer answers "serialize JSON" better than one
-    merely describing it -- but only modestly, because names are noisier."""
-    assert packs_store._NAME_WEIGHT > 1.0
-    assert packs_store._NAME_WEIGHT < 2.0
+def test_names_do_not_outweigh_descriptions():
+    """The reverse of what this test originally asserted, and the reversal was
+    measured rather than reasoned.
+
+    It used to require ``_NAME_WEIGHT > 1.0``, on the argument that a symbol
+    CALLED JsonSerializer answers "serialize JSON" better than one merely
+    describing it. On the 25-question set that scored **0% top-1**: .NET
+    identifiers are long English phrases -- DataFormats.CommaSeparatedValue,
+    Process.GetProcesses, FormattedText.WidthIncludingTrailingWhitespace --
+    so weighting names above prose inverts the premise of a tool whose job is
+    answering "which API does X" from a description. At 0.0 the same corpus
+    scores 4% top-1 and 16% top-3.
+
+    Pinned as an upper bound rather than an equality, so raising it to
+    experiment is possible but exceeding a description match is not.
+    """
+    assert packs_store._NAME_WEIGHT < 1.0
 
 
 def test_a_single_pack_cannot_occupy_every_slot():
