@@ -674,7 +674,20 @@ def search_symbols(packs: Sequence[Pack], query: str, lang: str | None = None,
     if not terms:
         return []
 
-    scored: list[tuple[float, dict[str, Any]]] = []
+    # Collected across every pack BEFORE scoring, because the scores are
+    # compared across packs and term frequency is what sets their scale.
+    #
+    # Measured: with frequency counted per pack, "mirror a directory tree"
+    # returned `unicodedata.mirrored` ahead of robocopy -- not because it is a
+    # better answer, but because "mirror" is rare inside the small Python pack
+    # and common inside win32, so the same word was worth several times more
+    # there. A symbol's rank depended on which pack it happened to live in,
+    # and small packs systematically outranked large ones.
+    #
+    # This is why the measured 29/30 on description questions decayed as packs
+    # were added: nothing re-measured it, and each new pack made the
+    # normalisation more wrong.
+    candidates: list[tuple[Pack, Any]] = []
     for pack in select_packs(packs, lang):
         where = " OR ".join("lower(s.signature) LIKE ?" for _ in terms)
         rows = _query(pack, f"""
@@ -683,37 +696,41 @@ def search_symbols(packs: Sequence[Pack], query: str, lang: str | None = None,
             FROM api_symbols s JOIN docs d ON d.id = s.doc_id
             WHERE s.signature != '' AND ({where})
         """, tuple(f"%{t}%" for t in terms))
-        if not rows:
+        candidates.extend((pack, row) for row in rows)
+
+    if not candidates:
+        return []
+
+    # How many symbols in the WHOLE corpus mention each term, so a word that
+    # appears everywhere cannot outweigh a distinctive one -- and so the same
+    # word is worth the same everywhere.
+    frequency = {t: 0 for t in terms}
+    for _pack, row in candidates:
+        low = str(row["signature"]).lower()
+        for t in terms:
+            if t in low:
+                frequency[t] += 1
+
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for pack, row in candidates:
+        low = str(row["signature"]).lower()
+        score = 0.0
+        for t in terms:
+            if t in low:
+                score += 1.0 / (1.0 + frequency[t] / 50.0)
+        if not score:
             continue
-
-        # How many symbols in THIS pack mention each term, so a word that
-        # appears everywhere cannot outweigh a distinctive one.
-        frequency = {t: 0 for t in terms}
-        for row in rows:
-            low = str(row["signature"]).lower()
-            for t in terms:
-                if t in low:
-                    frequency[t] += 1
-
-        for row in rows:
-            low = str(row["signature"]).lower()
-            score = 0.0
-            for t in terms:
-                if t in low:
-                    score += 1.0 / (1.0 + frequency[t] / 50.0)
-            if not score:
-                continue
-            scored.append((score, _attributed(pack, {
-                "name": row["name"],
-                "kind": row["kind"],
-                "namespace": row["namespace"],
-                "signature": row["signature"],
-                "title": row["title"],
-                "doc_path": row["path"],
-                "anchor": row["anchor"],
-                "url": _anchored(row["url"], row["anchor"]),
-                "score": round(score, 4),
-            })))
+        scored.append((score, _attributed(pack, {
+            "name": row["name"],
+            "kind": row["kind"],
+            "namespace": row["namespace"],
+            "signature": row["signature"],
+            "title": row["title"],
+            "doc_path": row["path"],
+            "anchor": row["anchor"],
+            "url": _anchored(row["url"], row["anchor"]),
+            "score": round(score, 4),
+        })))
 
     scored.sort(key=lambda pair: -pair[0])
     return [row for _, row in scored[:limit]]
