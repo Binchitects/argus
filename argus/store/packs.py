@@ -928,3 +928,113 @@ def _excerpt(blob: bytes | None, query: str, width: int = 320) -> str:
         return text[:width].strip()
     start = max(0, position - width // 3)
     return text[start:start + width].strip()
+
+
+#: How much a semantic hit contributes relative to a lexical one.
+#:
+#: Lexical scores are normalised to 0..1 (fraction of query terms matched,
+#: rarity-weighted) and cosine is already 0..1, so this is a straight blend.
+_SEMANTIC_WEIGHT = 1.0
+
+
+def search_symbols_hybrid(
+    packs: Sequence[Pack], query: str, query_vec: Sequence[float] | None = None,
+    lang: str | None = None, limit: int = 10, coarse: int = DEFAULT_COARSE,
+) -> list[dict[str, Any]]:
+    """`search_symbols`, plus the symbols on semantically-matching pages.
+
+    The gap this closes, measured on the 25-question set: **term coverage
+    between a question and its correct answer's description is 41/116 = 35%**.
+    Asked to "mirror a directory tree", robocopy's description says "copies
+    file data from one location to another" -- zero of five question words
+    appear in it. Twelve of twenty-five answers contain one word or none.
+
+    So the ceiling on any purely lexical scorer is low regardless of how it
+    weights terms, which is what three rounds of ranking work kept running
+    into. Documentation does not use the asker's vocabulary; that is the
+    problem embeddings exist for.
+
+    No new vectors are needed. Every pack already carries chunk embeddings for
+    `search_docs`, and a chunk knows its document, and a document has symbols.
+    Matching the query against chunks and walking back to their symbols reuses
+    what is already built -- no format change, no rebuild.
+
+    Costs a query embedding (~2.2 s on CPU), which is 300x the lexical path's
+    7 ms. `query_vec=None` runs lexical-only, so a caller that cannot afford
+    the embedder keeps the old behaviour exactly.
+    """
+    lexical = search_symbols(packs, query, lang=lang, limit=limit * 3)
+    best: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+
+    def _keep(row: dict[str, Any], score: float) -> None:
+        key = (str(row.get("source", "")), str(row.get("name", "")))
+        if key not in best or score > best[key][0]:
+            row = dict(row)
+            row["score"] = round(score, 4)
+            best[key] = (score, row)
+
+    top_lexical = max((float(r.get("score") or 0.0) for r in lexical), default=0.0)
+    for row in lexical:
+        # Normalised against this query's own best, so a lexical score and a
+        # cosine are on the same scale before they are added.
+        raw = float(row.get("score") or 0.0)
+        _keep(row, raw / top_lexical if top_lexical else 0.0)
+
+    if query_vec is not None:
+        for pack in select_packs(packs, lang):
+            try:
+                pack_format.require_compatible(
+                    pack.meta, model=EMBED_MODEL, dim=EMBED_DIM)
+            except pack_format.PackMismatch:
+                # A pack built with another embedder still contributes its
+                # lexical hits; only its vectors are unusable.
+                continue
+            for chunk_id, score in _semantic_chunks(pack, query_vec, limit, coarse):
+                for row in _symbols_for_chunk(pack, chunk_id):
+                    _keep(row, _SEMANTIC_WEIGHT * score)
+
+    ranked = sorted(best.values(), key=lambda pair: -pair[0])
+    return [row for _, row in ranked[:limit]]
+
+
+def _semantic_chunks(pack: Pack, query_vec: Sequence[float], limit: int,
+                     coarse: int) -> list[tuple[int, float]]:
+    """Top chunks in one pack, by the same two-pass scan `search_docs` uses."""
+    candidates = [
+        row["chunk_id"] for row in _query(pack, """
+            SELECT chunk_id FROM vec_bin
+            WHERE embedding MATCH vec_bit(?) AND k = ?
+        """, (to_bits(query_vec), coarse))
+    ]
+    if not candidates:
+        return []
+    placeholders = ",".join("?" * len(candidates))
+    vectors = _query(pack, f"""
+        SELECT chunk_id, embedding FROM vec_i8 WHERE chunk_id IN ({placeholders})
+    """, tuple(candidates))
+    return rescore(query_vec, [(r["chunk_id"], r["embedding"]) for r in vectors])[:limit]
+
+
+def _symbols_for_chunk(pack: Pack, chunk_id: int) -> list[dict[str, Any]]:
+    """Symbols documented by the page a chunk belongs to.
+
+    A page usually documents one entity, so this is normally one row. Where a
+    page documents many -- SQLite's pragma list, a cppreference overview --
+    every symbol on it is returned and the merge keeps whichever the ranking
+    prefers, rather than guessing which one the chunk was about.
+    """
+    rows = _query(pack, """
+        SELECT s.name, s.kind, s.namespace, s.anchor, s.signature,
+               d.title, d.url, d.path
+        FROM chunks c
+        JOIN api_symbols s ON s.doc_id = c.doc_id
+        JOIN docs d ON d.id = c.doc_id
+        WHERE c.id = ?
+        LIMIT 8
+    """, (chunk_id,))
+    return [_attributed(pack, {
+        "name": row["name"], "kind": row["kind"], "namespace": row["namespace"],
+        "signature": row["signature"], "title": row["title"],
+        "doc_path": row["path"], "anchor": row["anchor"],
+        "url": _anchored(row["url"], row["anchor"]),
+    }) for row in rows]
