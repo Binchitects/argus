@@ -1699,3 +1699,55 @@ find "serialize an object to JSON text", the search returns Python's
 Exact lookup is unaffected -- `JsonSerializer.Serialize` resolves precisely by
 name. This is a description-search weakness specific to how Microsoft writes
 summaries, recorded rather than tuned away on one query.
+
+---
+
+# docs_find: the fix was data, not ranking
+
+Lexical `docs_find` on the 25-question set, changing one thing at a time:
+
+| | top-1 | top-3 | top-10 |
+|---|---|---|---|
+| original baseline | 4% | 4% | 8% |
+| wdk rebuilt, name weight 0 | 4% | 16% | 16% |
+| **win32 + wdk + sqlite rebuilt, 3 packs disabled** | **8%** | **24%** | **24%** |
+
+Against the original: top-1 2x, top-3 6x, top-10 3x. **None of it came from
+ranking work.** All of it came from putting text where `docs_find` looks.
+
+Three rounds of scorer tuning preceded this and produced nothing, because
+65% of the correct answers were not reachable at any weighting -- their
+searchable field held a contract, a nav bar, or nothing at all.
+
+## What each pack was storing
+
+| pack | was | now |
+|---|---|---|
+| `win32`, `wdk` | `Header: wdm.h; Library: NtosKrnl.lib; IRQL: ...` | contract + `--` + description |
+| `sqlite` | `Small. Fast. Reliable. Choose any three. Home Menu ...` | the statement's own syntax and prose |
+| `cpp` | *(empty)* | page description — **not yet rebuilt** |
+| `python` | *(empty for 50%)* | page title fallback — **not yet rebuilt** |
+
+## Predictions, committed before the rebuild
+
+All three held:
+
+    CreateFileW           gains a description   "...Kernel32.dll -- Creates or"
+    CryptAcquireContextW  gains a description   "...Advapi32.dll -- Used to ac"
+    dt                    does NOT move         still empty
+
+`dt` is the useful negative. Some debugger command pages carry no
+description at all, so those symbols are unreachable by lexical *or*
+semantic ranking -- no scorer can rank a row with no text. A third adapter
+bug, distinct from the contract-only and page-chrome ones.
+
+## What is left
+
+`cpp` (37,305 symbols, 100% empty) and `python` (18,027, 50% empty) are
+fixed in code and not rebuilt, so roughly 46,000 symbols remain invisible.
+More than half the remaining gap is named and waiting on two clones rather
+than on any further tuning.
+
+The hybrid measurement above (48% top-10 with per-query normalisation, 36%
+with absolute) predates these rebuilds and is not comparable to this table.
+It should be re-run once `cpp` and `python` land.
