@@ -381,11 +381,25 @@ class CppDocs:
             if not isinstance(keywords, list):
                 continue
             doc_path = path.relative_to(content).as_posix()[: -len(".md")]
-            # No signature. A cpp-docs page lists many f1_keywords and has at
-            # most one Syntax block, so attaching it to each would state that
-            # every compiler error on an ARM assembler page has the syntax of
-            # the first one -- measured, A2196 and A2202 both came back
-            # showing A2193's example line.
+            # No SIGNATURE, for a reason that still holds: a cpp-docs page
+            # lists many f1_keywords and has at most one Syntax block, so
+            # attaching it to each would state that every compiler error on an
+            # ARM assembler page has the syntax of the first one -- measured,
+            # A2196 and A2202 both came back showing A2193's example line.
+            #
+            # The page DESCRIPTION is different in kind, and leaving it out
+            # cost more than the syntax block ever would have. A description
+            # is a statement about the page, so it is equally true of every
+            # symbol documented on it, where a syntax block is a claim about
+            # one entity. Measured: with this empty, all 37,305 cpp symbols
+            # were invisible to docs_find, which searches this field and
+            # skips rows where it is blank -- the pack took zero result slots
+            # across a 25-question set while occupying 174.7 MB.
+            #
+            # It is page-level rather than per-symbol, so it will not
+            # distinguish two errors documented together. That is a weaker
+            # claim than the name implies and a far better one than silence.
+            description = " ".join(str(meta.get("description") or "").split())
             seen: set[str] = set()
             for entry in keywords:
                 header, _, qualified = entry.partition("/")
@@ -401,5 +415,5 @@ class CppDocs:
                     namespace=header if qualified else self.name,
                     doc_path=doc_path,
                     anchor="",
-                    signature="",
+                    signature=description,
                 )

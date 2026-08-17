@@ -154,6 +154,19 @@ def _strip_markup(text: str) -> str:
     return strip_rst_inline(text)
 
 
+def _page_key(path: str) -> str:
+    """Match an inventory URI to a source file.
+
+    The inventory names the PUBLISHED page (library/os.path.html) while
+    iter_docs names the source (library/os.path.rst), so neither matches
+    the other until both lose their suffix.
+    """
+    for suffix in (".html", ".rst", ".txt"):
+        if path.endswith(suffix):
+            return path[: -len(suffix)]
+    return path
+
+
 def extract_signatures(body: str) -> dict[str, str]:
     """Map fully-qualified name -> signature from reST object directives.
 
@@ -245,8 +258,26 @@ class PythonDocs:
         entries = parse_objects_inv(self._find_inventory(root).read_bytes())
 
         signatures: dict[str, str] = {}
+        # Page titles, as a fallback for the half of the inventory the markup
+        # declares no signature for.
+        #
+        # Measured: 50% of the Python pack's 18,027 symbols had an empty
+        # signature, and docs_find skips rows where that field is blank -- so
+        # roughly 9,000 symbols were unfindable by description. The inventory
+        # lists far more names than the reST source writes `.. function::`
+        # directives for, and there is nothing per-symbol to recover for the
+        # remainder.
+        #
+        # A Python page title carries real description, which is why this is
+        # worth using rather than leaving blank: "os.path -- Common pathname
+        # manipulations" answers "join path segments" far better than silence
+        # does. It is page-level, so every symbol on a page shares it; that is
+        # a weaker claim than a per-symbol summary and a much stronger one
+        # than none.
+        titles: dict[str, str] = {}
         for doc in self.iter_docs(root):
             signatures.update(extract_signatures(doc.body))
+            titles[_page_key(doc.path)] = doc.title
 
         for entry in entries:
             doc_path, sep, anchor = entry.uri.partition("#")
@@ -262,7 +293,8 @@ class PythonDocs:
                 namespace=entry.domain,
                 doc_path=doc_path,
                 anchor=anchor,
-                signature=signatures.get(entry.name, ""),
+                signature=(signatures.get(entry.name)
+                           or titles.get(_page_key(doc_path), "")),
             )
 
     def _find_inventory(self, root: Path) -> Path:
