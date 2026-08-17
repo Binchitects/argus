@@ -973,12 +973,23 @@ def search_symbols_hybrid(
             row["score"] = round(score, 4)
             best[key] = (score, row)
 
-    top_lexical = max((float(r.get("score") or 0.0) for r in lexical), default=0.0)
+    # Normalised against the THEORETICAL maximum -- one full-weight match per
+    # query term -- rather than against this query's own best result.
+    #
+    # Measured: dividing by the observed best pinned top-1 at 4% while top-10
+    # reached 48%. Whatever ranked first lexically became exactly 1.0 however
+    # poor it was, so a semantic hit at cosine 0.7 could never overtake it.
+    # The blend was only ever choosing between semantic results *below* the
+    # lexical leader, which is why recall tripled and precision did not move.
+    #
+    # Against a fixed ceiling, a symbol matching one word of five scores 0.2
+    # and loses to a strong semantic match, which is the intended behaviour:
+    # documentation shares only 35% of its question's vocabulary, so a weak
+    # lexical hit is weak evidence and should rank like it.
+    term_count = max(len(query_terms_for_symbols(query)), 1)
     for row in lexical:
-        # Normalised against this query's own best, so a lexical score and a
-        # cosine are on the same scale before they are added.
         raw = float(row.get("score") or 0.0)
-        _keep(row, raw / top_lexical if top_lexical else 0.0)
+        _keep(row, min(raw / term_count, 1.0))
 
     if query_vec is not None:
         for pack in select_packs(packs, lang):
