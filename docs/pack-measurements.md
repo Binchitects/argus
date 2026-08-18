@@ -1751,3 +1751,82 @@ than on any further tuning.
 The hybrid measurement above (48% top-10 with per-query normalisation, 36%
 with absolute) predates these rebuilds and is not comparable to this table.
 It should be re-run once `cpp` and `python` land.
+
+## cpp and python rebuilt: the 46,000 symbols arrived and the score did not
+
+Both sources cloned and both packs rebuilt full (not incremental -- see
+below). The data changed exactly as predicted:
+
+| pack | before | after |
+|---|---|---|
+| `cpp` | 37,305 symbols, 100% empty description | 37,325 symbols, **0% empty** |
+| `python` | 18,027 symbols, 50% empty | 18,778 symbols, **0% empty** |
+
+Both verified by querying the built pack rather than by trusting the build
+summary, which reports counts that look identical either way.
+
+The 25-question set, measured after each swap:
+
+| configuration | top-1 | top-3 | top-10 |
+|---|---|---|---|
+| baseline (win32+wdk+sqlite rebuilt) | 8% | 24% | 24% |
+| `cpp` rebuilt | 8% | 24% | 24% |
+| `cpp` + `python` rebuilt | 8% | **20%** | 24% |
+
+### Why cpp could not move it
+
+The question set contains **zero cpp questions**. Its 37,325 symbols could
+only ever have shown up here by displacing correct answers elsewhere. They
+did not, which is the entire finding: making 37,000 previously invisible
+symbols searchable cost nothing. The benefit is real and this set cannot
+see it.
+
+### Why python moved it the wrong way
+
+top-3 lost one question, and it was not a python one. `Import-Csv`
+(scripting) fell from rank 3 to rank 6, displaced by `DataFormats.
+CommaSeparatedValue` (dotnet). Neither of those packs changed.
+
+`search_symbols` computes term frequency **globally across packs**. Filling
+in 9,000 blank python signatures shifted the global document frequencies,
+which shifted the inverse document frequency of terms like "csv", which
+re-ranked results in packs that were never touched. The packs are not
+independent: improving one perturbs ranking in all the others.
+
+This is a normalisation bug, not a data one, and it means a single-pack A/B
+can be misattributed. The rebuilt pack was kept -- 0% empty beats 50% empty,
+and the answer is per-pack document frequency, not withholding better data.
+
+### Two traps in the rebuild itself
+
+**The incremental path would have silently produced nothing.**
+`_write_pack_incremental` re-inserts symbols only for documents whose
+`content_sha` changed. The fix here changes how signatures are *computed*,
+not what the documents say, so seeding the build from the existing pack
+keeps every old empty-description symbol and reports a healthy symbol count
+regardless. Both rebuilds had to be full builds.
+
+**Git Bash `/tmp` and Python `/tmp` are different directories.** Bash
+resolves it to `C:\Users\...\AppData\Local\Temp`; Python resolves the same
+string against the current drive, giving `E:\tmp`. The warm embedding cache
+was staged in one and the build read the other, so cpp ran fully cold:
+`0 reused, 123212 computed`, 37m04s. Absolute paths only.
+
+Python reused 11 of 13,751 embeddings even with the cache correctly placed
+-- 3.13 to 3.14 shifted nearly every chunk boundary, so a warm cache is
+worth little across a version bump.
+
+### Version matching, measured rather than assumed
+
+`objects.inv` is a build artifact absent from any checkout, and it must
+match the branch or every anchor is silently wrong. The published inventory
+declares its own version in its header (`# Version: 3.14`), so the branch
+was chosen from the file rather than guessed. Linkage, measured both ways:
+
+| checkout | inventory entries resolving to a page present |
+|---|---|
+| `main` (3.15-dev) | 18,764 / 18,778 (99.9%) |
+| `3.14` | 18,778 / 18,778 (**100%**) |
+
+The pack is built from `3.14`, matching both the inventory and the
+`docs.python.org/3/` URLs it publishes.
