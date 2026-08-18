@@ -213,6 +213,37 @@ async def test_an_unreachable_embedder_falls_back_to_labelled_lexical(packs_dir,
         assert "less precise" in row["note"]
 
 
+@pytest.mark.anyio
+async def test_docs_find_degrades_to_labelled_lexical_without_an_embedder(
+        packs_dir, monkeypatch):
+    """docs_find is hybrid, so a dead embedder must cost precision, not the
+    tool. Measured lexical-vs-hybrid on the 25-question set: top-1 8% vs 16%,
+    top-10 24% vs 36% -- so these results really are the worse half, and
+    saying so is the difference between a degraded answer and a wrong one."""
+    def dead(texts):
+        raise embed_module.EmbeddingUnavailable("connection refused")
+
+    monkeypatch.setattr(tools, "embed_batch", dead)
+    rows = await tools.docs_find_impl(packs_dir, "add a state variable to a component", limit=5)
+
+    assert rows, "a dead embedder must not empty the result"
+    for row in rows:
+        assert row["retrieval"] == "lexical"
+        assert "vocabulary" in row["note"], (
+            "the note should say why a miss here is weak evidence")
+
+
+@pytest.mark.anyio
+async def test_docs_find_is_not_labelled_when_the_embedder_answers(
+        packs_dir, stub_embedder):
+    """The label means 'degraded'. Attaching it to a healthy hybrid search
+    would train the caller to discount results that are the good ones."""
+    rows = await tools.docs_find_impl(packs_dir, "add a state variable to a component", limit=5)
+
+    assert rows
+    assert all("retrieval" not in row for row in rows)
+
+
 # --- the threadpool invariant ---------------------------------------------------
 
 

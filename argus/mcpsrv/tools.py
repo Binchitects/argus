@@ -517,12 +517,45 @@ async def docs_lookup_impl(packs_dir: Path | str, name: str,
 
 async def docs_find_impl(packs_dir: Path | str, description: str,
                          lang: str | None = None, limit: int = 10) -> list[dict]:
-    """Find an API by its documented behaviour rather than its name."""
-    return await run_packs(
-        packs_dir,
-        lambda opened: packs_store.search_symbols(opened, description,
-                                                  lang=lang, limit=limit),
-    )
+    """Find an API by its documented behaviour rather than its name.
+
+    Hybrid rather than purely lexical, because the corpus will not answer a
+    lexical query. Measured over the 25-question set: term overlap between a
+    question and its correct answer's description is 35%, and twelve of the
+    twenty-five answers share one word with the question or none. That is a
+    ceiling on any term scorer regardless of how it weights, which is what
+    three rounds of ranking work kept hitting.
+
+    Measured on the same set and the same packs, lexical -> hybrid:
+    top-1 8% -> 16%, top-3 20% -> 32%, top-10 24% -> 36%.
+
+    The embedding happens inside `fn`, so it shares the one threadpool hop
+    `run_packs` documents rather than blocking the event loop. If the embedder
+    is unreachable, `query_vec=None` degrades this to the lexical ranking --
+    labelled, following `docs_search_impl`, because hits that are quietly
+    worse than usual are the kind of thing a caller should be told about.
+    """
+    def _find(opened: list) -> list[dict]:
+        try:
+            query_vec = embed_batch([description])[0]
+        except EmbeddingUnavailable as exc:
+            log.warning("embedder unavailable, docs_find degraded to "
+                        "lexical: %s", exc)
+            rows = packs_store.search_symbols_hybrid(
+                opened, description, None, lang=lang, limit=limit)
+            for row in rows:
+                row["retrieval"] = "lexical"
+                row["note"] = (
+                    "Semantic matching was unavailable, so these are keyword "
+                    "matches over symbol descriptions. Documentation rarely "
+                    "uses the asker's vocabulary, so a miss here is weaker "
+                    "evidence than usual that the API does not exist."
+                )
+            return rows
+        return packs_store.search_symbols_hybrid(
+            opened, description, query_vec, lang=lang, limit=limit)
+
+    return await run_packs(packs_dir, _find)
 
 
 async def docs_contracts_impl(packs_dir: Path | str, source: str,

@@ -82,6 +82,10 @@ def main() -> None:
     ap.add_argument("--packs", default=PACKS)
     ap.add_argument("--detail", action="store_true", help="show every miss")
     ap.add_argument("--limit", type=int, default=10)
+    ap.add_argument("--arm", choices=("lexical", "hybrid", "both"),
+                    default="lexical",
+                    help="hybrid adds symbols from semantically-matching "
+                         "pages; it needs the embedder running")
     args = ap.parse_args()
 
     from argus.store import packs as packs_store
@@ -97,33 +101,54 @@ def main() -> None:
             sys.exit(1)
         print(f"question set verified: {len(QUESTIONS)} answers all present\n")
 
-        at1 = at3 = at10 = 0
-        misses = []
-        for question, expected, pack in QUESTIONS:
-            rows = packs_store.search_symbols(opened, question, limit=args.limit)
-            names = [str(r["name"]) for r in rows]
-            rank = next((i for i, n in enumerate(names)
-                         if expected.lower() in n.lower()), None)
-            if rank is None:
-                misses.append((question, expected, pack, names[:3]))
-            else:
-                at10 += 1
-                at3 += rank < 3
-                at1 += rank < 1
-                if rank > 0:
-                    misses.append((question, expected, pack,
-                                   names[:3] + [f"<rank {rank + 1}>"]))
+        arms = ("lexical", "hybrid") if args.arm == "both" else (args.arm,)
+        vectors = {}
+        if "hybrid" in arms:
+            # Embedded in one batch so the embedder is not what is being
+            # measured, and through embed_batch rather than the model directly
+            # so a question gets the same L2 normalisation the pack's chunks
+            # were built with. Comparing an unnormalised query against
+            # normalised chunks would score every pack slightly wrong in a way
+            # no assertion here would catch.
+            from argus.embed import embed_batch
+            questions = [q for q, _e, _p in QUESTIONS]
+            vectors = dict(zip(questions, embed_batch(questions)))
 
-        total = len(QUESTIONS)
-        print(f"  top-1  {at1:3}/{total}  {at1 / total:5.0%}")
-        print(f"  top-3  {at3:3}/{total}  {at3 / total:5.0%}")
-        print(f"  top-10 {at10:3}/{total}  {at10 / total:5.0%}")
+        for arm in arms:
+            at1 = at3 = at10 = 0
+            misses = []
+            for question, expected, pack in QUESTIONS:
+                if arm == "hybrid":
+                    rows = packs_store.search_symbols_hybrid(
+                        opened, question, vectors[question], limit=args.limit)
+                else:
+                    rows = packs_store.search_symbols(
+                        opened, question, limit=args.limit)
+                names = [str(r["name"]) for r in rows]
+                rank = next((i for i, n in enumerate(names)
+                             if expected.lower() in n.lower()), None)
+                if rank is None:
+                    misses.append((question, expected, pack, names[:3]))
+                else:
+                    at10 += 1
+                    at3 += rank < 3
+                    at1 += rank < 1
+                    if rank > 0:
+                        misses.append((question, expected, pack,
+                                       names[:3] + [f"<rank {rank + 1}>"]))
 
-        if args.detail and misses:
-            print(f"\n  not top-1 ({len(misses)}):")
-            for question, expected, pack, got in misses:
-                print(f"    [{pack}] {question}")
-                print(f"       want {expected}  got {got}")
+            total = len(QUESTIONS)
+            print(f"  [{arm}]")
+            print(f"  top-1  {at1:3}/{total}  {at1 / total:5.0%}")
+            print(f"  top-3  {at3:3}/{total}  {at3 / total:5.0%}")
+            print(f"  top-10 {at10:3}/{total}  {at10 / total:5.0%}")
+
+            if args.detail and misses:
+                print(f"\n  not top-1 ({len(misses)}):")
+                for question, expected, pack, got in misses:
+                    print(f"    [{pack}] {question}")
+                    print(f"       want {expected}  got {got}")
+            print()
     finally:
         packs_store.close_packs(opened)
 
