@@ -76,6 +76,39 @@ def test_the_signature_is_the_requirements_not_a_code_example(tmp_path):
     assert "winuser.h" in sym.signature and "User32.lib" in sym.signature
 
 
+APISET_INDEX_PAGE = """---
+UID: NA:windows.foundation
+title: Windows.Foundation.h header
+---
+
+# Windows.Foundation.h header
+
+## -description
+
+This header is used by Windows Runtime C++ reference.
+"""
+
+
+def test_a_page_with_no_requirements_falls_back_to_its_prose(tmp_path):
+    """An apiset index page declares no header, no library and no description,
+    so the requirement line was empty -- and docs_find skips blank signatures,
+    which left 14 win32 symbols in the pack and unreachable. Their prose is
+    right there under `## -description`."""
+    _write(tmp_path, "sdk-api-src/content/windows.foundation/index.md",
+           APISET_INDEX_PAGE)
+    sym = next(iter(Win32Api().iter_symbols(tmp_path)))
+    assert sym.signature == (
+        "This header is used by Windows Runtime C++ reference.")
+
+
+def test_the_requirements_still_win_over_the_prose(tmp_path):
+    """Ordering matters: the contract is what a lookup needs, and the body is
+    only there for pages that have no contract at all."""
+    _write(tmp_path, "sdk-api-src/content/winuser/nf-winuser-messagebox.md", SDK_PAGE)
+    sym = next(s for s in Win32Api().iter_symbols(tmp_path) if s.name == "MessageBox")
+    assert sym.signature.startswith("Header:")
+
+
 def test_requirements_survive_into_the_indexed_body(tmp_path):
     """Which header to include and which .lib to link are the most asked-for
     facts about a Win32 entity, and they live only in front matter -- a

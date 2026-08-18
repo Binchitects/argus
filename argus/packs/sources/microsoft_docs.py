@@ -212,7 +212,14 @@ class _MicrosoftApiRef:
             # The requirements are what a developer actually needs from a
             # lookup ("which header, which .lib, callable at what IRQL"), and
             # unlike a prototype they are really present.
-            signature = _requirement_line(meta)
+            # The body is the fallback, not the primary: frontmatter carries
+            # the requirements a lookup needs, and those come first. But an
+            # apiset index page (windows.foundation/index.md) declares no
+            # header, no library and no description, so it produced a blank
+            # signature -- and docs_find skips those, leaving 14 win32 symbols
+            # in the pack and unreachable. Their prose is right there under
+            # "## -description".
+            signature = _requirement_line(meta) or _page_lede(body)
             seen = {symbol}
             yield ApiSymbol(name=symbol, kind=kind, namespace=module,
                             doc_path=doc_path, anchor="", signature=signature)

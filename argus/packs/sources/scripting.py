@@ -33,6 +33,14 @@ _TLDR_SUMMARY = re.compile(r"^>\s*(.+?)\s*$", re.MULTILINE)
 #: front matter, so without this the extractor fell through to the first
 #: blockquote -- which is usually an admonition, not a description.
 _SYNOPSIS = re.compile(r"^##\s+SYNOPSIS\s*$\s*\n+(.+?)\s*$", re.MULTILINE)
+
+#: Module landing pages carry no SYNOPSIS -- they document a module rather
+#: than a cmdlet, and head their prose with `## Description` instead.
+#: Measured: 28 of the scripting pack's symbols reached neither this nor the
+#: tldr blockquote and shipped with a blank signature, which `docs_find`
+#: skips. They are the pages that answer "which module has Get-Process".
+_DESCRIPTION_SECTION = re.compile(
+    r"^##\s+Description\s*$\s*\n+(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 #: `[!NOTE]`, `[!WARNING]`, `[!CAUTION]` -- a blockquote that is markup rather
 #: than prose.
 _ADMONITION = re.compile(r"^\[!\w+\]")
@@ -108,6 +116,10 @@ class _CommandDocs:
             synopsis = _SYNOPSIS.search(body)
             if synopsis:
                 summary = synopsis.group(1).strip()
+        if not summary:
+            section = _DESCRIPTION_SECTION.search(body)
+            if section:
+                summary = section.group(1).strip()
         if not summary:
             for quoted in _TLDR_SUMMARY.finditer(body):
                 candidate = quoted.group(1).strip()

@@ -81,6 +81,44 @@ def test_reference_and_worked_example_both_answer_one_name(tmp_path):
     assert {s.kind for s in syms} == {"command", "example"}
 
 
+MODULE_PAGE = (
+    "---\ntitle: Microsoft.PowerShell.Management\n"
+    "Module Name: Microsoft.PowerShell.Management\n---\n\n"
+    "# Microsoft.PowerShell.Management Module\n\n"
+    "## Description\n\n"
+    "Contains cmdlets that help you manage Windows in PowerShell.\n\n"
+    "## Cmdlets\n\n### [Add-Content](Add-Content.md)\nAppends content.\n"
+)
+
+
+def test_a_module_landing_page_is_described_by_its_description_section(tmp_path):
+    """Module pages document a module rather than a cmdlet, so they carry no
+    SYNOPSIS and headed their prose with `## Description` instead. Measured:
+    28 of the pack's symbols reached no fallback at all and shipped with a
+    blank signature, which docs_find skips -- so "which module has
+    Get-Process" could not be answered by the pages that exist to answer it."""
+    _tree(tmp_path)
+    _w(tmp_path, "PowerShell-Docs/reference/7.5/Microsoft.PowerShell.Management/"
+                 "Microsoft.PowerShell.Management.md", MODULE_PAGE)
+    module = next(s for s in ScriptingDocs().iter_symbols(tmp_path)
+                  if s.name == "Microsoft.PowerShell.Management")
+    assert module.signature == (
+        "Contains cmdlets that help you manage Windows in PowerShell.")
+
+
+def test_the_synopsis_still_wins_over_a_description_section(tmp_path):
+    """Ordering matters: a cmdlet page with both must keep its SYNOPSIS, which
+    is the one-line summary, not the longer prose further down."""
+    _tree(tmp_path)
+    _w(tmp_path, "PowerShell-Docs/reference/7.5/Mgmt/Get-Thing.md",
+       "---\ntitle: Get-Thing\n---\n\n# Get-Thing\n\n"
+       "## SYNOPSIS\n\nGets a thing.\n\n"
+       "## Description\n\nA much longer explanation of getting things.\n")
+    thing = next(s for s in ScriptingDocs().iter_symbols(tmp_path)
+                 if s.name == "Get-Thing")
+    assert thing.signature == "Gets a thing."
+
+
 def test_every_scripting_symbol_resolves_to_a_page(tmp_path):
     _tree(tmp_path)
     src = ScriptingDocs()
