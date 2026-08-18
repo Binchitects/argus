@@ -62,6 +62,18 @@ QUESTIONS: list[tuple[str, str, str]] = [
     # -- cppreference ---------------------------------------------------
     ("append an element to the end of a vector", "std::vector::push_back", "cppreference"),
     ("reserve vector capacity ahead of time", "std::vector::reserve", "cppreference"),
+    # -- cpp (MSVC: CRT, MFC, ATL) --------------------------------------
+    # The pack held 37,325 symbols and had no question, so nothing measured
+    # whether it answered anything -- it could only ever have shown up here by
+    # displacing another pack's answer. Each expected answer below was read
+    # out of the corpus, not recalled, and the questions deliberately avoid
+    # the page's own wording: _countof's lede says "statically allocated
+    # array", so the question asks for a "fixed-size array".
+    ("count the items in a fixed-size array at compile time", "_countof", "cpp"),
+    ("smart pointer that releases a COM interface automatically", "CComPtr", "cpp"),
+    ("MFC class letting one thread at a time use a resource", "CCriticalSection", "cpp"),
+    ("the class an MFC program derives its application object from", "CWinApp", "cpp"),
+    ("allocate memory on the stack rather than the heap", "_alloca", "cpp"),
 ]
 
 
@@ -86,6 +98,11 @@ def main() -> None:
                     default="lexical",
                     help="hybrid adds symbols from semantically-matching "
                          "pages; it needs the embedder running")
+    ap.add_argument("--pack", action="append", metavar="NAME",
+                    help="score only questions whose answer lives in NAME "
+                         "(repeatable). Adding questions changes the "
+                         "denominator, so this is how a figure stays "
+                         "comparable to one recorded earlier")
     args = ap.parse_args()
 
     from argus.store import packs as packs_store
@@ -101,6 +118,18 @@ def main() -> None:
             sys.exit(1)
         print(f"question set verified: {len(QUESTIONS)} answers all present\n")
 
+        # Verification always covers the whole set -- a filter selects what is
+        # SCORED, never what is checked for existence, so narrowing can never
+        # hide a question whose answer has fallen out of the packs.
+        selected = [q for q in QUESTIONS
+                    if not args.pack or q[2] in set(args.pack)]
+        if not selected:
+            print(f"no questions for {args.pack}")
+            sys.exit(1)
+        if args.pack:
+            print(f"scoring {len(selected)} of {len(QUESTIONS)} "
+                  f"({', '.join(sorted(set(args.pack)))} only)\n")
+
         arms = ("lexical", "hybrid") if args.arm == "both" else (args.arm,)
         vectors = {}
         if "hybrid" in arms:
@@ -111,13 +140,13 @@ def main() -> None:
             # normalised chunks would score every pack slightly wrong in a way
             # no assertion here would catch.
             from argus.embed import embed_batch
-            questions = [q for q, _e, _p in QUESTIONS]
+            questions = [q for q, _e, _p in selected]
             vectors = dict(zip(questions, embed_batch(questions)))
 
         for arm in arms:
             at1 = at3 = at10 = 0
             misses = []
-            for question, expected, pack in QUESTIONS:
+            for question, expected, pack in selected:
                 if arm == "hybrid":
                     rows = packs_store.search_symbols_hybrid(
                         opened, question, vectors[question], limit=args.limit)
@@ -137,7 +166,7 @@ def main() -> None:
                         misses.append((question, expected, pack,
                                        names[:3] + [f"<rank {rank + 1}>"]))
 
-            total = len(QUESTIONS)
+            total = len(selected)
             print(f"  [{arm}]")
             print(f"  top-1  {at1:3}/{total}  {at1 / total:5.0%}")
             print(f"  top-3  {at3:3}/{total}  {at3 / total:5.0%}")

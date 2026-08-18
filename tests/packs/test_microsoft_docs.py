@@ -229,6 +229,65 @@ class TestSignatureCarriesDescription:
         assert _requirement_line({"description": "Does a thing."}) == "Does a thing."
 
 
+class TestPageLede:
+    """cpp-docs frontmatter descriptions are title echoes, so the symbol
+    description comes from the page body instead.
+
+    Measured over the built pack before this: 56% of cpp symbols carried two
+    words or fewer, 42% were literally "<Name> Class", and `_countof`'s entire
+    searchable text was "_countof Macro". After: 2.3% at two words or fewer.
+    """
+
+    def test_the_first_prose_line_is_taken(self):
+        from argus.packs.sources.microsoft_docs import _page_lede
+
+        body = ("# `_countof` Macro\n\n"
+                "Computes the number of elements in a statically allocated "
+                "array.\n\n## Syntax\n")
+        assert _page_lede(body).startswith("Computes the number of elements")
+
+    def test_chrome_is_skipped(self):
+        """A Learn page can open with a moniker range, an include, or a note
+        callout. Taking the first non-blank line would index the chrome."""
+        from argus.packs.sources.microsoft_docs import _page_lede
+
+        body = ("# CWinApp Class\n\n"
+                "::: moniker range=\">=msvc-160\"\n"
+                "> [!NOTE]\n"
+                "> This applies to MFC.\n\n"
+                "```cpp\nclass CWinApp;\n```\n\n"
+                "The base class from which you derive a Windows application "
+                "object.\n")
+        assert _page_lede(body).startswith("The base class from which")
+
+    def test_a_bold_opening_is_prose_not_a_bullet(self):
+        """`**text**` starts with an asterisk but is a sentence. Matching the
+        list marker without requiring its trailing space would drop it."""
+        from argus.packs.sources.microsoft_docs import _page_lede
+
+        body = "# CStringT\n\n**`CStringT`** stores character strings.\n"
+        assert "stores character strings" in _page_lede(body)
+
+    def test_a_bulleted_line_is_not_taken_as_the_lede(self):
+        from argus.packs.sources.microsoft_docs import _page_lede
+
+        body = "# Options\n\n- /std:c++20\n- /std:c++17\n\nSets the standard.\n"
+        assert _page_lede(body) == "Sets the standard."
+
+    def test_a_page_of_pure_chrome_yields_nothing(self):
+        """Empty, so the caller falls back to the frontmatter description
+        rather than this inventing text for a page that has none."""
+        from argus.packs.sources.microsoft_docs import _page_lede
+
+        assert _page_lede("# Title\n\n```cpp\nint x;\n```\n") == ""
+
+    def test_the_lede_is_bounded(self):
+        from argus.packs.sources.microsoft_docs import _page_lede
+
+        body = "# T\n\n" + " ".join(f"w{i}" for i in range(200)) + "\n"
+        assert len(_page_lede(body, words=30).split()) == 30
+
+
 class TestDescriptionBoilerplate:
     """Microsoft frontmatter descriptions mostly open with "Learn more about".
 

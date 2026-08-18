@@ -262,6 +262,53 @@ def _clean_description(meta: dict) -> str:
     return _LEARN_MORE.sub("", description).strip() or description
 
 
+#: A list item, not prose. Matched with a trailing space so that `**bold**`
+#: opening a real sentence is not mistaken for a bullet.
+_LIST_ITEM = re.compile(r"^\s*([-*+]|\d+\.)\s")
+
+#: Chrome a Learn page opens with: headings, code fences, moniker ranges and
+#: includes, note callouts, tables, raw HTML, and horizontal rules.
+_CHROME_PREFIXES = ("#", "```", ":::", ">", "|", "[!", "<", "---", "===")
+
+
+def _page_lede(body: str, words: int = 30) -> str:
+    """The first sentence of real prose on the page.
+
+    cpp-docs frontmatter descriptions are title echoes, unlike win32's, which
+    are genuine prose. Measured over the built pack: 56% of symbols carried a
+    description of two words or fewer and 42% were literally "<Name> Class".
+    `_countof`'s entire searchable text was "_countof Macro", so "number of
+    elements in a fixed-size array" could not reach it at any weighting --
+    the symbol was visible and still unfindable.
+
+    The page says it properly one line under the H1: "Computes the number of
+    elements in a statically allocated array." This takes that.
+
+    Page-level, so every symbol on the page shares it. That is exactly the
+    claim the description already made, and a far stronger one than a title
+    echo. Returns "" when a page is nothing but chrome, leaving the caller to
+    fall back rather than inventing text.
+    """
+    fenced = False
+    for line in body.splitlines():
+        text = line.strip()
+        # Fence state is tracked rather than prefix-matched, because a line
+        # INSIDE a fence has no marker of its own. Without this, a page whose
+        # only content is a Syntax block returns its first code line, and
+        # every f1_keyword on the page gets it -- which is the borrowed-syntax
+        # failure that left this field empty to begin with: A2196 and A2202
+        # both came back showing A2193's example line.
+        if text.startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced or not text:
+            continue
+        if text.startswith(_CHROME_PREFIXES) or _LIST_ITEM.match(text):
+            continue
+        return " ".join(text.split()[:words])
+    return ""
+
+
 def _requirement_line(meta: dict) -> str:
     """"Header: winuser.h; Library: User32.lib" plus what the API actually does.
 
@@ -422,7 +469,11 @@ class CppDocs:
             # It is page-level rather than per-symbol, so it will not
             # distinguish two errors documented together. That is a weaker
             # claim than the name implies and a far better one than silence.
-            description = _clean_description(meta)
+            # The lede first, the frontmatter description only as a fallback.
+            # That order is the opposite of win32's for a reason measured per
+            # corpus: win32 frontmatter carries real prose ("Creates or opens
+            # a file"), cpp-docs frontmatter carries the title again.
+            description = _page_lede(body) or _clean_description(meta)
             seen: set[str] = set()
             for entry in keywords:
                 header, _, qualified = entry.partition("/")
