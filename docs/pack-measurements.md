@@ -1743,14 +1743,15 @@ bug, distinct from the contract-only and page-chrome ones.
 
 ## What is left
 
-`cpp` (37,305 symbols, 100% empty) and `python` (18,027, 50% empty) are
-fixed in code and not rebuilt, so roughly 46,000 symbols remain invisible.
-More than half the remaining gap is named and waiting on two clones rather
-than on any further tuning.
+`cpp` (37,305 symbols, 100% empty) and `python` (18,027, 50% empty) were
+fixed in code and not rebuilt, leaving roughly 46,000 symbols invisible.
+Both have since been cloned and rebuilt -- see the section below, which
+supersedes this paragraph. The symbols arrived; the score did not move,
+for reasons that turned out to be worth more than the score.
 
 The hybrid measurement above (48% top-10 with per-query normalisation, 36%
-with absolute) predates these rebuilds and is not comparable to this table.
-It should be re-run once `cpp` and `python` land.
+with absolute) predates those rebuilds and is not comparable to this table.
+It still needs re-running now that both packs have landed.
 
 ## cpp and python rebuilt: the 46,000 symbols arrived and the score did not
 
