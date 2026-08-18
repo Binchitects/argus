@@ -165,14 +165,79 @@ def test_non_ascii_in_the_inventory_decodes_as_utf8(source):
 
 
 def test_signatures_come_from_the_rest_directives(symbols):
-    assert _by_name(symbols, "os.path.join").signature == "join(path, *paths)"
+    # The call signature leads; the summary after " -- " is asserted by
+    # TestSummaries. Split so this test keeps testing what it is named for.
+    signature = _by_name(symbols, "os.path.join").signature
+    assert signature.split(" -- ")[0] == "join(path, *paths)"
 
 
 def test_method_signatures_resolve_through_their_class(symbols):
     """py:method is the largest domain in the inventory. A method nested under
     a class directive must resolve to json.JSONDecoder.decode, not
     json.decode -- which is what tracking only the module would give."""
-    assert _by_name(symbols, "json.JSONDecoder.decode").signature == "decode(s)"
+    signature = _by_name(symbols, "json.JSONDecoder.decode").signature
+    assert signature.split(" -- ")[0] == "decode(s)"
+
+
+class TestSummaries:
+    """The call signature is not something a description search can match.
+
+    Measured over the built pack: 11,633 of 18,778 symbols (62%) carried two
+    words or fewer -- a bare signature like "join(path, /, *paths)", or a page
+    title for the half of the inventory the reST declares no directive for.
+    The prose under the directive is the description, and it is per-symbol.
+    """
+
+    def test_the_prose_under_the_directive_is_captured(self):
+        body = (".. module:: os.path\n\n"
+                ".. function:: join(path, *paths)\n\n"
+                "   Join one or more path segments intelligently.\n")
+        summaries = python_docs.extract_summaries(body)
+        assert summaries["os.path.join"] == (
+            "Join one or more path segments intelligently.")
+
+    def test_a_stacked_signature_is_not_mistaken_for_prose(self):
+        """reST stacks alternate signatures directly under the first with no
+        blank line. Taking the next non-empty line would return another
+        signature for every multi-signature object in the corpus."""
+        body = (".. module:: m\n\n"
+                ".. function:: open(file)\n"
+                "              open(file, mode)\n\n"
+                "   Open a file and return a stream.\n")
+        assert python_docs.extract_summaries(body)["m.open"] == (
+            "Open a file and return a stream.")
+
+    def test_field_lists_and_nested_directives_are_skipped(self):
+        body = (".. module:: m\n\n"
+                ".. function:: f(x)\n\n"
+                "   :param x: the input\n"
+                "   .. versionadded:: 3.9\n\n"
+                "   Does the thing.\n")
+        assert python_docs.extract_summaries(body)["m.f"] == "Does the thing."
+
+    def test_an_undocumented_object_borrows_nothing(self):
+        """A directive with no body must yield "", not the next object's
+        sentence -- that would attribute one symbol's behaviour to another."""
+        body = (".. module:: m\n\n"
+                ".. function:: undocumented(x)\n\n"
+                ".. function:: documented(y)\n\n"
+                "   Only this one has prose.\n")
+        summaries = python_docs.extract_summaries(body)
+        assert "m.undocumented" not in summaries
+        assert summaries["m.documented"] == "Only this one has prose."
+
+    def test_both_halves_are_kept_when_both_exist(self):
+        from argus.packs.sources.python_docs import _describe
+
+        assert _describe("join(path)", "Join segments.", "os.path") == (
+            "join(path) -- Join segments.")
+
+    def test_the_title_is_the_last_resort_not_the_first(self):
+        from argus.packs.sources.python_docs import _describe
+
+        assert _describe(None, "Join segments.", "os.path") == "Join segments."
+        assert _describe(None, None, "os.path") == "os.path"
+        assert _describe("join(path)", None, "os.path") == "join(path)"
 
 
 def test_symbols_absent_from_the_rest_have_an_empty_signature(symbols):
@@ -182,9 +247,8 @@ def test_symbols_absent_from_the_rest_have_an_empty_signature(symbols):
 
 
 def test_exception_directive_at_module_level_is_not_captured_by_the_class(symbols):
-    assert _by_name(symbols, "json.JSONDecodeError").signature == (
-        "JSONDecodeError(msg, doc, pos)"
-    )
+    signature = _by_name(symbols, "json.JSONDecodeError").signature
+    assert signature.split(" -- ")[0] == "JSONDecodeError(msg, doc, pos)"
 
 
 # --- malformed inventories fail loudly ----------------------------------------

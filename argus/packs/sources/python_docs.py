@@ -180,12 +180,46 @@ def extract_signatures(body: str) -> dict[str, str]:
     under ``.. class:: JSONDecoder`` would resolve to ``json.decode`` -- wrong
     for the largest domain in the inventory (3,043 ``py:method`` entries).
     """
-    signatures: dict[str, str] = {}
+    return {name: argument for name, argument, _summary in _iter_objects(body)}
+
+
+def extract_summaries(body: str) -> dict[str, str]:
+    """Map fully-qualified name -> the first sentence documenting it.
+
+    The signature alone is not something a description search can match.
+    `os.path.join`'s was "join(path, /, *paths)" -- one token, no words, so
+    "join path segments into a single path" had nothing to match on. Measured
+    over the built pack, 11,633 of 18,778 python symbols (62%) carried a
+    description of two words or fewer: a bare call signature, or, for the half
+    with no directive at all, the page title.
+
+    The prose sits directly under the directive, which is where this reads it:
+    "Join one or more path segments intelligently."
+
+    Per-symbol, unlike the cpp and win32 fallbacks, because reST documents
+    each object separately -- so this is a stronger claim than either, not a
+    weaker one.
+    """
+    return {name: summary for name, _argument, summary in _iter_objects(body)
+            if summary}
+
+
+def _iter_objects(body: str) -> Iterator[tuple[str, str, str]]:
+    """Yield ``(qualified_name, signature, summary)`` per object directive.
+
+    One walk rather than two, because the name qualification is the subtle
+    part -- module context, and class context tracked by indentation so that
+    ``.. method:: decode(s)`` under ``.. class:: JSONDecoder`` resolves to
+    ``json.JSONDecoder.decode`` rather than ``json.decode``. Two copies of
+    that would drift, and the symptom would be a symbol whose signature and
+    summary were taken from different objects.
+    """
+    lines = body.splitlines()
     module = ""
     class_name = ""
     class_indent = -1
 
-    for line in body.splitlines():
+    for index, line in enumerate(lines):
         match = _DIRECTIVE_RE.match(line)
         if match is None:
             continue
@@ -212,8 +246,61 @@ def extract_signatures(body: str) -> dict[str, str]:
             class_name, class_indent = "", -1
             full = _qualify(module, local)
 
-        signatures[full] = argument.strip()
-    return signatures
+        yield full, argument.strip(), _summary_after(lines, index + 1, depth)
+
+
+def _summary_after(lines: list[str], start: int, depth: int, words: int = 30) -> str:
+    """The first prose sentence of a directive's body.
+
+    Scanning begins after the first blank line, which is what separates the
+    directive head from its body. That is not cosmetic: reST stacks alternate
+    signatures directly beneath the first with no blank line between them, so
+    taking the next non-empty line would return ``join(a, b)`` -- another
+    signature -- for every multi-signature object in the corpus.
+
+    Field lists (``:param x:``) and nested directives (``.. versionadded::``)
+    are skipped; they document the object but are not a description of it. A
+    line at or left of the directive's own indentation ends the body, so an
+    object documented with nothing at all yields "" rather than borrowing the
+    next object's first sentence.
+    """
+    index = start
+    while index < len(lines) and lines[index].strip():
+        index += 1
+
+    while index < len(lines):
+        raw = lines[index]
+        text = raw.strip()
+        index += 1
+        if not text:
+            continue
+        if len(raw) - len(raw.lstrip()) <= depth:
+            return ""
+        if text.startswith((":", "..")):
+            continue
+        return " ".join(_strip_markup(text).split()[:words])
+    return ""
+
+
+def _describe(signature: str | None, summary: str | None, title: str) -> str:
+    """What a symbol is searched and shown by, best evidence first.
+
+    Both halves are kept when both exist, separated the way `_requirement_line`
+    separates win32's contract from its prose: the call signature is what a
+    reader wants to see, the sentence is what a description search can match,
+    and choosing one would lose the other. `os.path.join` becomes
+    "join(path, /, *paths) -- Join one or more path segments intelligently."
+
+    The page title remains the last resort, for inventory entries the reST
+    declares no directive for. It is weak -- a two-word echo like "os.path" --
+    but `docs_find` skips rows whose signature is blank, so a weak description
+    is still the difference between a symbol being findable and invisible.
+    """
+    signature = (signature or "").strip()
+    summary = (summary or "").strip()
+    if signature and summary:
+        return f"{signature} -- {summary}"
+    return signature or summary or title
 
 
 def _qualify(module: str, local: str) -> str:
@@ -265,6 +352,7 @@ class PythonDocs:
     def iter_symbols(self, root: Path) -> Iterator[ApiSymbol]:
         entries = parse_objects_inv(self._find_inventory(root).read_bytes())
 
+        summaries: dict[str, str] = {}
         signatures: dict[str, str] = {}
         # Page titles, as a fallback for the half of the inventory the markup
         # declares no signature for.
@@ -285,6 +373,7 @@ class PythonDocs:
         titles: dict[str, str] = {}
         for doc in self.iter_docs(root):
             signatures.update(extract_signatures(doc.body))
+            summaries.update(extract_summaries(doc.body))
             titles[_page_key(doc.path)] = doc.title
 
         for entry in entries:
@@ -301,8 +390,11 @@ class PythonDocs:
                 namespace=entry.domain,
                 doc_path=doc_path,
                 anchor=anchor,
-                signature=(signatures.get(entry.name)
-                           or titles.get(_page_key(doc_path), "")),
+                signature=_describe(
+                    signatures.get(entry.name),
+                    summaries.get(entry.name),
+                    titles.get(_page_key(doc_path), ""),
+                ),
             )
 
     def _find_inventory(self, root: Path) -> Path:

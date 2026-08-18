@@ -163,7 +163,9 @@ def test_lookup_symbol_resolves_to_an_anchored_url(both):
     assert row["source"] == "python"
     assert row["url"] == "https://docs.python.org/3/library/os.path.html#os.path.join"
     assert row["kind"] == "function"
-    assert row["signature"] == "join(path, *paths)"
+    # The call signature leads, followed by the summary after " -- "; this
+    # test is about the anchored URL, so it pins only the signature half.
+    assert row["signature"].split(" -- ")[0] == "join(path, *paths)"
 
 
 def test_lookup_symbol_finds_a_react_hook(both):
