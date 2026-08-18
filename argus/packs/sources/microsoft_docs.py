@@ -239,6 +239,29 @@ def _prepend_requirements(meta: dict, description: str, body: str) -> str:
     return "\n\n".join(parts)
 
 
+#: Microsoft's frontmatter descriptions overwhelmingly open with this SEO
+#: boilerplate: 30,379 of cpp's 37,325 symbols (81%).
+_LEARN_MORE = re.compile(r"^learn more about\s*:?\s*", re.IGNORECASE)
+
+
+def _clean_description(meta: dict) -> str:
+    """The page description, without the phrase four fifths of them start with.
+
+    `docs_find` shows this field truncated, so a prefix carried by 81% of the
+    corpus spends the first characters of nearly every result saying nothing.
+    It is not merely redundant: a term that common has almost no inverse
+    document frequency, so it costs display budget and returns no ranking
+    signal for it.
+
+    Removed only when something survives it. A description that is nothing but
+    the boilerplate keeps it, because `docs_find` skips rows whose signature is
+    blank -- trading a weak description for an invisible symbol would undo the
+    entire reason this field is populated.
+    """
+    description = " ".join(str(meta.get("description") or "").split())
+    return _LEARN_MORE.sub("", description).strip() or description
+
+
 def _requirement_line(meta: dict) -> str:
     """"Header: winuser.h; Library: User32.lib" plus what the API actually does.
 
@@ -261,7 +284,7 @@ def _requirement_line(meta: dict) -> str:
               ("DLL", "req.dll"), ("IRQL", "req.irql"))
     contract = "; ".join(f"{label}: {meta[key]}" for label, key in wanted
                          if str(meta.get(key) or "").strip())
-    description = " ".join(str(meta.get("description") or "").split())
+    description = _clean_description(meta)
     if not description:
         return contract
     return f"{contract} -- {description}" if contract else description
@@ -399,7 +422,7 @@ class CppDocs:
             # It is page-level rather than per-symbol, so it will not
             # distinguish two errors documented together. That is a weaker
             # claim than the name implies and a far better one than silence.
-            description = " ".join(str(meta.get("description") or "").split())
+            description = _clean_description(meta)
             seen: set[str] = set()
             for entry in keywords:
                 header, _, qualified = entry.partition("/")

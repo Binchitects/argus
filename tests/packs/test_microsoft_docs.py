@@ -227,3 +227,50 @@ class TestSignatureCarriesDescription:
         from argus.packs.sources.microsoft_docs import _requirement_line
 
         assert _requirement_line({"description": "Does a thing."}) == "Does a thing."
+
+
+class TestDescriptionBoilerplate:
+    """Microsoft frontmatter descriptions mostly open with "Learn more about".
+
+    Measured on the cpp corpus: 30,379 of 37,325 symbols (81%). `docs_find`
+    truncates this field for display, so the prefix spends the first
+    characters of four out of five results saying nothing, and a term that
+    common carries no ranking weight to pay for the space.
+    """
+
+    def test_the_boilerplate_prefix_is_dropped(self):
+        from argus.packs.sources.microsoft_docs import _clean_description
+
+        assert _clean_description(
+            {"description": "Learn more about: CWinApp Class"}) == "CWinApp Class"
+
+    def test_a_description_that_is_only_boilerplate_is_kept(self):
+        """docs_find skips rows with a blank signature, so stripping a
+        description down to nothing would turn a weak symbol into an
+        invisible one -- the exact failure this field was populated to fix."""
+        from argus.packs.sources.microsoft_docs import _clean_description
+
+        assert _clean_description(
+            {"description": "Learn more about"}) == "Learn more about"
+
+    def test_ordinary_prose_is_untouched(self):
+        from argus.packs.sources.microsoft_docs import _clean_description
+
+        text = "Creates or opens a file or I/O device."
+        assert _clean_description({"description": text}) == text
+
+    def test_a_missing_description_stays_empty(self):
+        from argus.packs.sources.microsoft_docs import _clean_description
+
+        assert _clean_description({}) == ""
+
+    def test_the_contract_line_strips_it_too(self):
+        """Both symbol paths read the same frontmatter field, so a fix applied
+        to one and not the other would leave win32 and wdk carrying it."""
+        from argus.packs.sources.microsoft_docs import _requirement_line
+
+        line = _requirement_line({
+            "req.header": "wdm.h",
+            "description": "Learn more about: the ExAllocatePool2 routine",
+        })
+        assert line == "Header: wdm.h -- the ExAllocatePool2 routine"
