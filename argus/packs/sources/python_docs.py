@@ -228,7 +228,15 @@ class PythonDocs:
 
     name: str = "python"
     repo_url: str = "https://github.com/python/cpython"
-    branch: str = "main"
+    #: A release branch, not main, because the pack is only as correct as
+    #: its inventory: objects.inv is a build artifact fetched separately
+    #: from docs.python.org, and it must describe the same tree. Measured
+    #: against the published 3.14 inventory, a 3.14 checkout resolves all
+    #: 18,778 anchored entries; main resolves 18,764, the other 14 naming
+    #: pages 3.15 has since renamed. Those are not merely absent -- a
+    #: symbol whose page is missing gets no title fallback either, so it
+    #: lands in the pack with a blank signature and docs_find skips it.
+    branch: str = "3.14"
     subtree: str = "Doc"
     license: str = "PSF-2.0"
     license_url: str = "https://docs.python.org/3/license.html"

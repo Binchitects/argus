@@ -264,3 +264,23 @@ def test_the_sample_inventory_exercises_the_anchorless_skip():
     entries = python_docs.parse_objects_inv(SAMPLE_INVENTORY.read_bytes())
     anchorless = [e for e in entries if "#" not in e.uri]
     assert len(anchorless) > 100, f"only {len(anchorless)} anchorless entries"
+
+
+def test_the_branch_is_a_release_branch_not_main():
+    """The checkout and objects.inv must describe the same tree.
+
+    The inventory is a build artifact fetched from docs.python.org rather than
+    cloned, so nothing makes the two agree automatically. Measured against the
+    published 3.14 inventory: a 3.14 checkout resolves all 18,778 anchored
+    entries, main resolves 18,764. A symbol whose page is missing gets no
+    title fallback, so it ships with a blank signature and docs_find skips it
+    -- the pack would build clean and report a healthy symbol count either way.
+
+    Pinned because `--fetch` clones whatever this field names, so a well-meant
+    bump to main would silently reintroduce that.
+    """
+    assert python_docs.PythonDocs().branch != "main", (
+        "main is a development branch; the published inventory describes a "
+        "release, and a mismatch costs symbols rather than failing the build")
+    assert python_docs.PythonDocs().branch[0].isdigit(), (
+        "expected a version branch such as 3.14")
