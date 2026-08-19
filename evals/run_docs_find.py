@@ -62,6 +62,24 @@ QUESTIONS: list[tuple[str, str, str]] = [
     # -- cppreference ---------------------------------------------------
     ("append an element to the end of a vector", "std::vector::push_back", "cppreference"),
     ("reserve vector capacity ahead of time", "std::vector::reserve", "cppreference"),
+    # -- python C API ---------------------------------------------------
+    # Labelled apart from the py-domain questions above though both live in
+    # the python pack: the two were read by different code paths and, until
+    # the c: domain was matched at all, only one of them had descriptions.
+    # Scoring them together would average a fixed corpus with an unfixed one.
+    ("convert the arguments passed to a C extension function into local variables",
+     "PyArg_ParseTuple", "python-capi"),
+    ("raise an exception from C code with a message", "PyErr_SetString", "python-capi"),
+    ("check whether an error has been raised in C code", "PyErr_Occurred", "python-capi"),
+    ("build a string object from a null-terminated C string", "PyUnicode_FromString",
+     "python-capi"),
+    # Not "call a callable with a tuple of arguments" -- that describes
+    # PyObject_Call exactly as well as PyObject_CallObject, and a question
+    # with two correct answers measures nothing. The C-string key is what
+    # distinguishes this one from PyDict_SetItem.
+    ("store a value in a dictionary under a C string key", "PyDict_SetItemString",
+     "python-capi"),
+    ("create the module object for a C extension", "PyModule_Create", "python-capi"),
     # -- cpp (MSVC: CRT, MFC, ATL) --------------------------------------
     # The pack held 37,325 symbols and had no question, so nothing measured
     # whether it answered anything -- it could only ever have shown up here by
