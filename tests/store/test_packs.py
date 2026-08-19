@@ -809,3 +809,56 @@ def test_a_symbol_the_chunk_never_names_is_still_eligible(tmp_path):
         assert len(rows) > 1, "unnamed symbols must remain eligible, not be cut"
     finally:
         packs.close_packs(opened)
+
+
+def test_one_chunk_cannot_fill_the_whole_result(tmp_path):
+    """Every symbol a chunk yields carries that chunk's score exactly, so
+    without a cap the best chunk takes every slot it can fill.
+
+    Measured on "raise an exception from C code with a message": ten chunks
+    were retrieved and two appeared in the result -- one took eight slots, the
+    next took two, and the chunk documenting the answer, ranked third, placed
+    nothing. Retrieval had already found the right chunk; the merge spent the
+    result set on the chunk above it.
+    """
+    from argus.store import packs as ps
+
+    ranked = []
+    origin = {}
+    score = 1.0
+    # Five chunks of eight, as a real query produces: the capped pass can fill
+    # the result set from other chunks, so the cap is not relaxed.
+    for chunk in range(1, 6):
+        for i in range(8):
+            key = ("p", f"c{chunk}s{i}")
+            ranked.append((key, (score, {"source": "p", "name": key[1]})))
+            origin[key] = chunk
+            score -= 0.001
+    out = ps._chunk_capped(ranked, origin, 10)
+
+    from collections import Counter
+    per_chunk = Counter(origin[("p", r["name"])] for r in out)
+    assert max(per_chunk.values()) <= ps._CHUNK_CAP, (
+        f"a chunk took {max(per_chunk.values())} slots, cap is {ps._CHUNK_CAP}")
+    assert len(per_chunk) >= 4, (
+        "the point is breadth: the answer's chunk ranked third and placed "
+        "nothing while the chunk above it took eight slots")
+    assert len(out) == 10
+
+
+def test_a_single_chunk_answer_still_fills_the_result(tmp_path):
+    """The cap must not punish a question one chunk genuinely answers: the
+    overflow pass appends the rest in order rather than returning three rows."""
+    from argus.store import packs as ps
+
+    ranked = []
+    origin = {}
+    for i in range(10):
+        key = ("p", f"S{i}")
+        ranked.append((key, (1.0 - i * 0.01, {"source": "p", "name": f"S{i}"})))
+        origin[key] = 1
+    out = ps._chunk_capped(ranked, origin, 10)
+
+    assert len(out) == 10
+    assert [r["name"] for r in out[:3]] == ["S0", "S1", "S2"], (
+        "the capped pass keeps the best rows first")

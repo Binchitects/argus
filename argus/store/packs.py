@@ -966,12 +966,16 @@ def search_symbols_hybrid(
     lexical = search_symbols(packs, query, lang=lang, limit=limit * 3)
     best: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 
-    def _keep(row: dict[str, Any], score: float) -> None:
+    origin: dict[tuple[str, str], int | None] = {}
+
+    def _keep(row: dict[str, Any], score: float,
+              chunk_id: int | None = None) -> None:
         key = (str(row.get("source", "")), str(row.get("name", "")))
         if key not in best or score > best[key][0]:
             row = dict(row)
             row["score"] = round(score, 4)
             best[key] = (score, row)
+            origin[key] = chunk_id
 
     # Normalised against the THEORETICAL maximum -- one full-weight match per
     # query term -- rather than against this query's own best result.
@@ -1010,10 +1014,58 @@ def search_symbols_hybrid(
                     # terms already decide WHICH symbols the chunk yields, and
                     # applying them a second time to the score only let a
                     # keyword-ish match outrank a better page.
-                    _keep(row, _SEMANTIC_WEIGHT * score)
+                    _keep(row, _SEMANTIC_WEIGHT * score, chunk_id)
 
-    ranked = sorted(best.values(), key=lambda pair: -pair[0])
-    return [row for _, row in ranked[:limit]]
+    ranked = sorted(best.items(), key=lambda item: -item[1][0])
+    return _chunk_capped(ranked, origin, limit)
+
+
+#: How many symbols one chunk may contribute to the final ranking.
+#:
+#: Every symbol a chunk yields carries that chunk's score exactly, so without
+#: a cap the best chunk takes every slot it can fill. Measured on "raise an
+#: exception from C code with a message": ten chunks were retrieved and two
+#: appeared in the result -- one took eight slots, the next took two, and
+#: PyErr_SetString's chunk, ranked third at 0.7133, never placed a symbol.
+#: The retrieval had already found the right chunk; the merge spent the whole
+#: result set on the chunk above it.
+_CHUNK_CAP = 3
+
+
+def _chunk_capped(
+    ranked: list[tuple[tuple[str, str], tuple[float, dict[str, Any]]]],
+    origin: dict[tuple[str, str], int | None],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Take the best `limit`, allowing at most `_CHUNK_CAP` per source chunk.
+
+    Follows `_capped`: overflow keeps its order and is appended only if the
+    capped pass cannot fill `limit`, so a question genuinely answered by one
+    chunk still returns a full result set rather than being punished for it.
+
+    Lexical rows have no chunk and are never capped -- they were ranked by
+    their own text rather than a shared page score, so they cannot flood one.
+    """
+    taken: list[dict[str, Any]] = []
+    overflow: list[dict[str, Any]] = []
+    # No pack cap here, though the lexical arm has one and the imbalance it
+    # exists for is real. It was applied and measured: top-10 fell from 16/36
+    # to 14/36 and the C API questions it was aimed at did not move at all.
+    # Capping a pack that is genuinely answering only promotes a weaker pack's
+    # guess, and semantic scores are already comparable across packs -- the
+    # lexical arm needs its cap because its term-frequency scale is not.
+    per_chunk: dict[int, int] = {}
+    for key, (_score, row) in ranked:
+        chunk_id = origin.get(key)
+        if chunk_id is None or per_chunk.get(chunk_id, 0) < _CHUNK_CAP:
+            if chunk_id is not None:
+                per_chunk[chunk_id] = per_chunk.get(chunk_id, 0) + 1
+            taken.append(row)
+        else:
+            overflow.append(row)
+        if len(taken) >= limit:
+            return taken[:limit]
+    return (taken + overflow)[:limit]
 
 
 def _semantic_chunks(pack: Pack, query_vec: Sequence[float], limit: int,
