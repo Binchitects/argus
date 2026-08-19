@@ -986,7 +986,8 @@ def search_symbols_hybrid(
     # and loses to a strong semantic match, which is the intended behaviour:
     # documentation shares only 35% of its question's vocabulary, so a weak
     # lexical hit is weak evidence and should rank like it.
-    term_count = max(len(query_terms_for_symbols(query)), 1)
+    terms = query_terms_for_symbols(query)
+    term_count = max(len(terms), 1)
     for row in lexical:
         raw = float(row.get("score") or 0.0)
         _keep(row, min(raw / term_count, 1.0))
@@ -1001,7 +1002,14 @@ def search_symbols_hybrid(
                 # lexical hits; only its vectors are unusable.
                 continue
             for chunk_id, score in _semantic_chunks(pack, query_vec, limit, coarse):
-                for row in _symbols_for_chunk(pack, chunk_id):
+                for row in _symbols_for_chunk(pack, chunk_id, terms):
+                    # Deliberately NOT modulated by how well the symbol itself
+                    # matches the question. That was built and measured: at a
+                    # 5% ceiling it moved top-10 from 14/36 to 16/36 and took
+                    # top-1 from 5 to 4 and top-3 from 10 to 9. The question
+                    # terms already decide WHICH symbols the chunk yields, and
+                    # applying them a second time to the score only let a
+                    # keyword-ish match outrank a better page.
                     _keep(row, _SEMANTIC_WEIGHT * score)
 
     ranked = sorted(best.values(), key=lambda pair: -pair[0])
@@ -1026,23 +1034,63 @@ def _semantic_chunks(pack: Pack, query_vec: Sequence[float], limit: int,
     return rescore(query_vec, [(r["chunk_id"], r["embedding"]) for r in vectors])[:limit]
 
 
-def _symbols_for_chunk(pack: Pack, chunk_id: int) -> list[dict[str, Any]]:
-    """Symbols documented by the page a chunk belongs to.
+def _chunk_text(pack: Pack, chunk_id: int) -> str:
+    rows = _query(pack, "SELECT text FROM chunks WHERE id = ?", (chunk_id,))
+    return _decompress(rows[0]["text"]) if rows else ""
 
-    A page usually documents one entity, so this is normally one row. Where a
-    page documents many -- SQLite's pragma list, a cppreference overview --
-    every symbol on it is returned and the merge keeps whichever the ranking
-    prefers, rather than guessing which one the chunk was about.
+
+def _symbols_for_chunk(pack: Pack, chunk_id: int,
+                       terms: Sequence[str] = ()) -> list[dict[str, Any]]:
+    """Symbols the matching chunk actually names, not its whole page.
+
+    "A page usually documents one entity" holds for win32 and wdk, where a
+    page is one function, and it is how this went unnoticed. It is false where
+    it matters: 63% of python pages and 57% of dotnet pages carry more than
+    eight symbols, the medians being 16 and 10.
+
+    The page join plus `LIMIT 8` with no ORDER BY therefore returned an
+    arbitrary eight rows in rowid order. Measured on "raise an exception from
+    C code with a message": the C API exception page holds 369 symbols, the
+    cut returned PyErr_BadArgument, PyErr_BadInternalCall, PyErr_CheckSignals,
+    PyErr_Clear, PyErr_Display and three of PyErr_Display's own parameters,
+    and PyErr_SetString sat at position 131 -- unreachable at any weighting,
+    because the semantic hit was right about the page and the cut discarded
+    the part that was right.
+
+    A chunk names what it documents, so `instr` over the chunk's own text is
+    what narrows it: on that chunk the 369 became 4. It also drops the
+    parameter entries for free -- the text contains "PyErr_SetString(PyObject
+    *type, const char *message)", never the literal "PyErr_SetString.message"
+    -- so a function stops competing with its own arguments for slots.
+
+    Falls back to the page when the chunk names nothing, which is prose
+    between declarations: a semantic hit there is still evidence about the
+    page, and returning nothing would discard it.
     """
-    rows = _query(pack, """
+    # An ORDER BY, not a WHERE. Filtering to what the chunk names was measured
+    # and was worse: top-1 fell from 6/36 to 5/36, because a name need not
+    # appear in the prose that documents it. MessageBoxA is documented by a
+    # page that says "MessageBox" throughout, so the alias a developer
+    # actually pasted was excluded by its own documentation. Ranking keeps
+    # both -- the named symbols first, the rest still eligible.
+    # Second key is the question's own terms, not name length. Length was
+    # tried and is actively wrong: it prefers the longest sibling, so
+    # CreateFileTransactedW outranks CreateFileW for "open or create a file".
+    text = _chunk_text(pack, chunk_id)
+    hits = " + ".join(
+        ["(instr(lower(s.name) || ' ' || lower(s.signature), ?) > 0)"]
+        * len(terms)) or "0"
+    rows = _query(pack, f"""
         SELECT s.name, s.kind, s.namespace, s.anchor, s.signature,
                d.title, d.url, d.path
         FROM chunks c
         JOIN api_symbols s ON s.doc_id = c.doc_id
         JOIN docs d ON d.id = c.doc_id
         WHERE c.id = ?
+        ORDER BY (s.name != '' AND instr(?, s.name) > 0) DESC,
+                 ({hits}) DESC, s.name
         LIMIT 8
-    """, (chunk_id,))
+    """, (chunk_id, text, *terms))
     return [_attributed(pack, {
         "name": row["name"], "kind": row["kind"], "namespace": row["namespace"],
         "signature": row["signature"], "title": row["title"],

@@ -740,3 +740,72 @@ def test_a_name_documented_under_many_headers_resolves_to_the_general_one(tmp_pa
     finally:
         packs.close_packs(opened)
         packs._BREADTH_CACHE.clear()
+
+
+def _crowded_page_pack(tmp_path):
+    """One page documenting many symbols, like the C API exception page.
+
+    That page carries 369 symbols. `_symbols_for_chunk` joined on the page and
+    applied `LIMIT 8` with no ORDER BY, so it returned eight rows in rowid
+    order and the answer sat at position 131 -- unreachable however the merge
+    scored it.
+    """
+    from argus.packs import format as pack_format
+    path = tmp_path / "crowded.arguspack"
+    conn = pack_format.create_pack(path)
+    comp = zstandard.ZstdCompressor()
+    cur = conn.execute(
+        "INSERT INTO docs (path, title, url, lang, content, content_len) "
+        "VALUES ('e.md', 'Exception Handling', 'https://x/e', 'md', ?, 0)",
+        (comp.compress(b"body"),))
+    doc_id = cur.lastrowid
+    # Alphabetically ahead of the answer, so rowid order buries it.
+    names = [f"PyErr_Aaa{i:03d}" for i in range(40)] + ["PyErr_SetString"]
+    for name in names:
+        conn.execute(
+            "INSERT INTO api_symbols (name, kind, namespace, doc_id, anchor, "
+            "signature) VALUES (?, 'function', 'c', ?, '', ?)",
+            (name, doc_id, f"void {name}(void)"))
+    conn.execute(
+        "INSERT INTO chunks (doc_id, heading_path, anchor, start_line, text) "
+        "VALUES (?, 'Exception Handling', 'exc', 1, ?)",
+        (doc_id, comp.compress(
+            b"PyErr_SetString sets the error indicator with a message.")))
+    pack_format.write_meta(
+        conn, source_name="crowded", source_repo="r", source_branch="b",
+        source_commit="c", license="MIT", license_url="u", attribution="a",
+        embedding_model=EMBED_MODEL, embedding_dim=EMBED_DIM, builder_version=1,
+        pack_version="1.0", doc_count=1, chunk_count=1,
+        symbol_count=len(names), unresolved_symbol_count=0)
+    conn.commit(); conn.close()
+    return path
+
+
+def test_a_crowded_page_yields_the_symbol_its_chunk_names(tmp_path):
+    """The chunk says which of a page's symbols it documents; the page does
+    not. Without that, a 369-symbol page returns whichever eight rows were
+    inserted first."""
+    opened = packs.open_packs([_crowded_page_pack(tmp_path)])
+    try:
+        chunk_id = opened[0].conn.execute("SELECT id FROM chunks").fetchone()[0]
+        rows = packs._symbols_for_chunk(opened[0], chunk_id, ("message",))
+        names = [r["name"] for r in rows]
+        assert "PyErr_SetString" in names, (
+            "the symbol the chunk actually names must survive the LIMIT")
+        assert names[0] == "PyErr_SetString", (
+            "and it must lead the symbols the chunk does not mention")
+    finally:
+        packs.close_packs(opened)
+
+
+def test_a_symbol_the_chunk_never_names_is_still_eligible(tmp_path):
+    """Ranking, not filtering. A page's prose says "MessageBox" while the
+    symbol a developer pasted is MessageBoxA, so excluding what the chunk does
+    not name would drop the alias -- measured, that cost top-1 6/36 -> 5/36."""
+    opened = packs.open_packs([_crowded_page_pack(tmp_path)])
+    try:
+        chunk_id = opened[0].conn.execute("SELECT id FROM chunks").fetchone()[0]
+        rows = packs._symbols_for_chunk(opened[0], chunk_id, ("message",))
+        assert len(rows) > 1, "unnamed symbols must remain eligible, not be cut"
+    finally:
+        packs.close_packs(opened)
