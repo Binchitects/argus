@@ -348,11 +348,20 @@ def build_pack(
         cache_path = out_path.parent / ".embcache.db"
 
     # Incremental when a usable previous pack is already at the destination.
-    # Automatic rather than a flag: a rebuild that skips unchanged documents
-    # and one that rewrites them produce the same pack, so there is nothing
-    # for an operator to decide. `_existing_shas` returns empty for anything
-    # missing, corrupt, or predating content_sha, and each of those falls back
-    # to a full build.
+    # Automatic rather than a flag: for a SOURCE change the two produce the
+    # same pack, so there is nothing for an operator to decide.
+    # `_existing_shas` returns empty for anything missing, corrupt, or
+    # predating content_sha, and each of those falls back to a full build.
+    #
+    # They do NOT produce the same pack when the ADAPTER changes. content_sha
+    # covers the document, so an adapter that derives symbols differently
+    # leaves every unchanged document's symbols exactly as they were --
+    # `_insert_symbols_for` re-emits only the changed ones. Measured the hard
+    # way: a cpp rebuild after teaching the adapter to read page ledes would
+    # have kept the old title-echo descriptions for all but the handful of
+    # pages upstream had touched, reported a healthy symbol count, and shipped
+    # the fix applied to nothing. Delete the destination to force a full build
+    # after changing an adapter.
     reusable = bool(_existing_shas(out_path)) if incremental else False
 
     try:

@@ -57,7 +57,9 @@ from the same file. Full write-up in `pack-measurements.md`.
 The recall limit below is now measured too, and does not bite: starvation
 turns on topical alignment rather than allowlist size, and where it starves
 the missing results score ~0.55 -- noise the smaller budget was right to
-exclude. Milestone 2 is closed.
+exclude. **2.2 is closed; 2.1 is not** — an earlier edit here said "Milestone
+2 is closed", which was true of this sub-item and not of the milestone.
+Forced verify-after remains the one measured failure with no fix attempted.
 
 ### The original plan for 2.2
 
@@ -78,16 +80,52 @@ bites.
 
 ---
 
+## Milestone 2.5 — docs_find recall, and who is responsible for it
+
+Not in the original plan, and it earned a place by measurement. `docs_find`
+answers **44% of 36 description-shaped questions at top-10 unscoped, 58%
+scoped**. The gap between those two numbers is larger than every ranking
+change made to the tool put together, and closing it is not a ranking
+problem: the tool cannot know which source to search, because that is what
+the caller knows and the server does not.
+
+Measured through the real agent: Hermes passes `lang` on **5 of 8 calls**.
+The remaining third is where the scoped figure leaks away.
+
+| item | status |
+|---|---|
+| Adapter description quality | **done** — every pack at 0 blank descriptions; cpp two-word descriptions 56% → 2.2%, python 62% → 16.3% |
+| `docs_find` serves the hybrid arm | **done** — it was implemented, documented, and had no callers |
+| Chunk-precise symbol selection, per-chunk cap | **done** — a 369-symbol page returned an arbitrary 8 |
+| Tool description names the installed sources | **done** — `scripting` for a PowerShell question is only knowable from that list |
+| Wrong `lang` widens instead of returning nothing | **done** — hit on the first day by a `csharp` guess |
+| **Raise `lang` adoption above 62%** | **open** — the largest remaining lever, and it lives in Hermes rather than here |
+
+The open item is a prompting problem, not a retrieval one, which is why it
+sits at the end of this milestone rather than inside the server.
+
+---
+
 ## Milestone 3 — operations
 
 | item | why | today |
 |---|---|---|
-| Incremental pack rebuild | **measured**: a warm refresh of `win32` costs **43.6 min**, not the 162 min quoted — that was the *cold* build. Still 44 min to produce a byte-identical file. | the cache skips embedding; nothing skips unchanged documents |
+| Incremental pack rebuild — **DONE** | was 44 min to reproduce a byte-identical file | `content_sha` per document; automatic when a usable pack sits at the destination. Measured: wdk 205,848 chunks in **26 s**, win32 478,762 in **74 s** |
 | `pack update` for archive sources | assumes a git remote | broken by design |
 | Webhook-driven indexing | freshness is interval-polled | `index_status` exists to *admit* staleness |
 | Metrics endpoint | audit rows exist, no operational view | KPIs are CLI-only |
 
-Incremental rebuild is still the most valuable of these, but for a smaller
+**Incremental rebuild landed, and carries one trap worth knowing.**
+`content_sha` covers the DOCUMENT, so an adapter that derives symbols
+differently leaves every unchanged document's symbols exactly as they were.
+A cpp rebuild after teaching the adapter to read page ledes would have kept
+the old title-echo descriptions, reported a healthy symbol count, and shipped
+the fix applied to nothing. Delete the destination to force a full build
+after changing an adapter; a source refresh is unaffected.
+
+The rest of this section is kept for the correction it records.
+
+Incremental rebuild was the most valuable of these, but for a smaller
 reason than this section originally claimed — and the correction goes both
 ways.
 
@@ -111,11 +149,18 @@ saving comes from skipping *documents* — skipping embedding is already done.
 
 ## Milestone 4 — reach
 
-**Upstream the three Hermes patches.** They live in a vendored install, and
-a Hermes update silently reverts all three — including the
-instructions-forwarding that is what made the tools work at all. The symptom
-returns with no error anywhere. This is the single largest durability risk in
-the deployment, and `/reload-mcp` is only a per-session workaround.
+**Upstream the vendored Hermes patches.** They live in a vendored install, and
+a Hermes update silently reverts them — including the instructions-forwarding
+that is what made the tools work at all. The symptom returns with no error
+anywhere. This is the single largest durability risk in the deployment, and
+`/reload-mcp` is only a per-session workaround.
+
+**Hermes caches MCP tool schemas, and a stale cache is silent.** Found while
+testing `lang` scoping end to end: `cache/mcp_schema_cache.json` still held
+the previous `docs_find` description, so the model was choosing tools from
+text the server no longer served. Clearing it is a required step after any
+description change. Nothing warns; the tool simply behaves as it did before
+the change, which reads as the change not working.
 
 **GPU embedding.** Query embedding is **2,254 ms median** on CPU-only Ollama,
 roughly 25× the entire search. It is the latency a user actually feels, and
