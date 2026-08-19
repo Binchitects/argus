@@ -233,6 +233,53 @@ async def test_docs_find_degrades_to_labelled_lexical_without_an_embedder(
             "the note should say why a miss here is weak evidence")
 
 
+class TestDocsFindLangScoping:
+    """Scoping to the right source is worth more than every ranking change
+    made to this tool put together: over 36 questions it lifts top-1 from 14%
+    to 25% and top-10 from 44% to 58%. That only helps if the model is told
+    the filter exists, told which values are valid, and can guess wrong
+    without being punished for it.
+    """
+
+    def test_the_description_names_the_installed_sources(self, packs_dir):
+        """`lang` matches an exact source name, and the names are a property
+        of the deployment. Telling a model to pass one without saying which
+        exist leaves it guessing."""
+        desc = tools._docs_find_desc(packs_dir)
+        assert "python" in desc and "react" in desc
+        assert "lang" in desc
+
+    def test_the_description_survives_an_unreadable_packs_dir(self, tmp_path):
+        """A broken or empty pack directory must not stop the server starting;
+        the tool still works, it just cannot advertise the source list."""
+        assert tools._docs_find_desc(tmp_path / "nope") == tools._DOCS_FIND_DESC
+
+    @pytest.mark.anyio
+    async def test_a_lang_naming_no_installed_source_is_ignored_not_obeyed(
+            self, packs_dir, stub_embedder):
+        """The trap docs_lookup documents, and worse here: this is a fuzzy
+        search, so an empty result reads as "no such API" rather than "your
+        filter was wrong". A guess must degrade, not lie."""
+        rows = await tools.docs_find_impl(
+            packs_dir, "add a state variable to a component", lang="windows")
+
+        assert rows, "a bad guess must not be laundered into 'not documented'"
+        assert all(r["lang_filter_ignored"] == "windows" for r in rows), (
+            "silently widening would be its own lie")
+
+    @pytest.mark.anyio
+    async def test_a_real_source_narrows_and_is_not_widened(
+            self, packs_dir, stub_embedder):
+        """Narrowing to a source that EXISTS is a deliberate scope, so an
+        empty result there is the honest answer rather than a bad guess."""
+        rows = await tools.docs_find_impl(
+            packs_dir, "add a state variable to a component", lang="react")
+
+        assert rows
+        assert all(r["source"] == "react" for r in rows)
+        assert all("lang_filter_ignored" not in r for r in rows)
+
+
 @pytest.mark.anyio
 async def test_docs_find_is_not_labelled_when_the_embedder_answers(
         packs_dir, stub_embedder):

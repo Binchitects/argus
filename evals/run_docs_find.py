@@ -95,6 +95,10 @@ QUESTIONS: list[tuple[str, str, str]] = [
 ]
 
 
+#: Question group -> installed source name, where they differ.
+LANG_FOR_GROUP = {"python-capi": "python"}
+
+
 def verify(opened) -> list[str]:
     """Every expected answer must exist, or the score measures the corpus."""
     from argus.store import packs as packs_store
@@ -116,6 +120,12 @@ def main() -> None:
                     default="lexical",
                     help="hybrid adds symbols from semantically-matching "
                          "pages; it needs the embedder running")
+    ap.add_argument("--scoped", action="store_true",
+                    help="pass each question's own source as lang, measuring "
+                         "the ceiling if the caller always scoped correctly. "
+                         "The tool cannot do this for itself -- it is what "
+                         "the model chooses -- so this measures what telling "
+                         "the model to scope is worth")
     ap.add_argument("--pack", action="append", metavar="NAME",
                     help="score only questions whose answer lives in NAME "
                          "(repeatable). Adding questions changes the "
@@ -165,12 +175,17 @@ def main() -> None:
             at1 = at3 = at10 = 0
             misses = []
             for question, expected, pack in selected:
+                # The label is the question GROUP; python-capi's answers live
+                # in the python pack, so the group is mapped to a source name
+                # rather than passed through.
+                lang = LANG_FOR_GROUP.get(pack, pack) if args.scoped else None
                 if arm == "hybrid":
                     rows = packs_store.search_symbols_hybrid(
-                        opened, question, vectors[question], limit=args.limit)
+                        opened, question, vectors[question], lang=lang,
+                        limit=args.limit)
                 else:
                     rows = packs_store.search_symbols(
-                        opened, question, limit=args.limit)
+                        opened, question, lang=lang, limit=args.limit)
                 names = [str(r["name"]) for r in rows]
                 rank = next((i for i, n in enumerate(names)
                              if expected.lower() in n.lower()), None)

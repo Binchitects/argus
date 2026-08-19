@@ -515,6 +515,18 @@ async def docs_lookup_impl(packs_dir: Path | str, name: str,
     return await run_packs(packs_dir, _lookup)
 
 
+def _flag_widened(rows: list[dict], ignored: str | None) -> list[dict]:
+    """Mark results that were found only by dropping the caller's filter.
+
+    Silent widening would be its own lie: the caller asked for one source and
+    got another, and nothing in the result would say so.
+    """
+    if ignored:
+        for row in rows:
+            row["lang_filter_ignored"] = ignored
+    return rows
+
+
 async def docs_find_impl(packs_dir: Path | str, description: str,
                          lang: str | None = None, limit: int = 10) -> list[dict]:
     """Find an API by its documented behaviour rather than its name.
@@ -536,13 +548,28 @@ async def docs_find_impl(packs_dir: Path | str, description: str,
     worse than usual are the kind of thing a caller should be told about.
     """
     def _find(opened: list) -> list[dict]:
+        # A `lang` naming no installed pack yields NOTHING, because
+        # select_packs matches exactly. That is the same trap docs_lookup
+        # documents, and worse here: this is a fuzzy search, so an empty
+        # result is entirely plausible and reads as "no such API" rather than
+        # "your filter was wrong". Encouraging the model to scope its search
+        # is only safe if a wrong guess degrades instead of lying.
+        #
+        # Narrowing to a source that EXISTS stays a deliberate scope: asking
+        # the python pack for a Win32 API should return nothing, and it does.
+        scoped = lang
+        widened_from = None
+        if lang and lang.strip().lower() not in {
+                str(getattr(p, "name", "") or "").lower() for p in opened}:
+            scoped, widened_from = None, lang
+
         try:
             query_vec = embed_batch([description])[0]
         except EmbeddingUnavailable as exc:
             log.warning("embedder unavailable, docs_find degraded to "
                         "lexical: %s", exc)
             rows = packs_store.search_symbols_hybrid(
-                opened, description, None, lang=lang, limit=limit)
+                opened, description, None, lang=scoped, limit=limit)
             for row in rows:
                 row["retrieval"] = "lexical"
                 row["note"] = (
@@ -551,9 +578,10 @@ async def docs_find_impl(packs_dir: Path | str, description: str,
                     "uses the asker's vocabulary, so a miss here is weaker "
                     "evidence than usual that the API does not exist."
                 )
-            return rows
-        return packs_store.search_symbols_hybrid(
-            opened, description, query_vec, lang=lang, limit=limit)
+            return _flag_widened(rows, widened_from)
+        rows = packs_store.search_symbols_hybrid(
+            opened, description, query_vec, lang=scoped, limit=limit)
+        return _flag_widened(rows, widened_from)
 
     return await run_packs(packs_dir, _find)
 
@@ -661,10 +689,43 @@ _DOCS_FIND_DESC = (
     "'which cmdlet writes objects to a CSV file'. docs_lookup needs the name "
     "and cannot help here; docs_search ranks whole pages and buries the "
     "command among them. This searches the one-line description each pack "
-    "stores per symbol, so it returns commands rather than pages. Measured: "
-    "on description-shaped questions it answers 29 of 30 correctly, where the "
-    "best prompt strategy over page search reached 18."
+    "stores per symbol, so it returns commands rather than pages. "
+    "PASS lang WHENEVER YOU KNOW THE ECOSYSTEM. The corpus is unbalanced -- "
+    "one source holds over half of all symbols -- so a large source can fill "
+    "every result slot with its own reading of your question while the source "
+    "that documents the answer places nothing. Measured over 36 questions, "
+    "naming the source lifts top-1 from 14% to 25% and top-10 from 44% to "
+    "58%: a larger gain than every ranking change made to this tool put "
+    "together. A wrong guess is safe -- a lang naming no installed source is "
+    "ignored rather than returning nothing, and the results say so. "
+    "Omit lang only when the question genuinely spans sources."
 )
+
+
+def _docs_find_desc(packs_dir: Path | str) -> str:
+    """`_DOCS_FIND_DESC` plus the sources actually installed here.
+
+    Telling a model to pass `lang` is useless if nothing tells it which values
+    exist -- the filter matches an exact source name, and the names are a
+    property of this deployment rather than of the tool. Without the list the
+    model must guess, and a guess is precisely what the widening in
+    `docs_find_impl` exists to survive.
+    """
+    try:
+        paths = sorted(Path(packs_dir).glob(f"*{PACK_SUFFIX}"))
+        opened = packs_store.open_packs(paths)
+    except Exception:  # pragma: no cover - a broken pack must not stop startup
+        log.warning("could not read pack names for the docs_find description",
+                    exc_info=True)
+        return _DOCS_FIND_DESC
+    try:
+        names = sorted({str(p.name) for p in opened if p.name})
+    finally:
+        packs_store.close_packs(opened)
+    if not names:
+        return _DOCS_FIND_DESC
+    return (f"{_DOCS_FIND_DESC} Installed sources, and the only accepted "
+            f"values for lang: {', '.join(names)}.")
 
 
 _DOCS_CONTRACTS_DESC = (
@@ -914,7 +975,7 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
     db_path = cfg.index.db_path
     packs_dir = cfg.packs_dir
 
-    @server.tool(name="docs_find", description=_DOCS_FIND_DESC)
+    @server.tool(name="docs_find", description=_docs_find_desc(packs_dir))
     async def docs_find(description: str, lang: str | None = None) -> list[dict]:
         # Public documentation: no identity, no allowlist, no audit row.
         return await docs_find_impl(packs_dir, description, lang=lang)
