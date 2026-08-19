@@ -1831,3 +1831,65 @@ was chosen from the file rather than guessed. Linkage, measured both ways:
 
 The pack is built from `3.14`, matching both the inventory and the
 `docs.python.org/3/` URLs it publishes.
+
+# Scoping: the largest single gain, and whether the model takes it
+
+Every ranking change made to `docs_find` moved top-10 by a few points.
+Naming the source moves it by fourteen. Measured over the 36-question set,
+hybrid arm:
+
+| | top-1 | top-3 | top-10 |
+|---|---|---|---|
+| unscoped | 14% | 28% | 44% |
+| scoped (`--scoped`) | **25%** | **42%** | **58%** |
+
+The corpus is unbalanced and always will be: `dotnet` alone holds 215,269 of
+394,545 symbols. Asked to "store a value in a dictionary under a C string
+key", all ten results came from `dotnet` and the python pack documenting the
+answer placed nothing. Scoping removes the competition rather than
+out-ranking it.
+
+`--scoped` passes each question's own source, so this ceiling stays
+auditable instead of living in a docstring. It is a ceiling, not a score:
+the tool cannot scope for itself, because which source to search is what the
+caller knows and the server does not.
+
+## Whether the model actually does it
+
+Measured end to end through Hermes against the real packs, recording the
+arguments every `docs_find` call arrived with.
+
+**5 of 8 calls passed `lang` (62%)**: `python` twice, `scripting`, `win32`,
+and `csharp`.
+
+`scripting` is the result that shows the mechanism working. A PowerShell
+question maps to a pack called `scripting`, which is not guessable from the
+question -- it is knowable only from the installed-source list the
+description now carries. Listing the packs was the half of the change least
+expected to matter.
+
+`csharp` is not an installed source; the list says `dotnet`. That guess hit
+the widening path on the first day of use and returned real results instead
+of the empty list an exact filter produces. Without it the question would
+have returned nothing and been reported as undocumented -- the "bad filter
+guess laundered into a confident wrong answer" that `docs_lookup` documents.
+The safety net was not precautionary; it was load-bearing immediately.
+
+The misses share a shape: asked for a kernel-mode routine, the model
+searched `cpp`/`wdk`/`win32` unscoped, then retried with more specific
+wording rather than narrowing the source. Refining the query is its fallback
+when unsure, not scoping.
+
+**Caveats.** Eight calls from five prompts, and the prompts named the tool,
+which biases toward using it though not obviously toward passing `lang`. At
+62% adoption the effective retrieval sits between the 44% unscoped and 58%
+scoped figures rather than at either.
+
+**A trap worth recording.** Hermes caches MCP schemas. Its cache held the
+previous description, so the first run measured a tool the model could not
+have known about; clearing the cache is a required step of this test, and
+without it the result reads as a clean negative.
+
+The probe harness is deliberately not in this repo: it stubs identity
+resolution to run without GitLab, and a script that disables auth is a
+hazard in a repository whatever its intent.
