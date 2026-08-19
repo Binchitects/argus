@@ -50,14 +50,23 @@ _INVENTORY_CANDIDATES = (
 _UNDERLINE_RE = re.compile(r"^([=\-~^\"'`#*+:.,_])\1{2,}\s*$")
 
 
+#: The domain is captured, not skipped, because the two name entities
+#: differently. `c:` was previously unmatched altogether, so every C API
+#: symbol fell back to its page title: measured, 770 c:function and 176
+#: c:macro entries were described as "Code Objects" or "List Objects" while
+#: the prose sat one line under the directive ("Return a new list of length
+#: *len* on success, or NULL on failure").
 _DIRECTIVE_RE = re.compile(
-    r"^(\s*)\.\.\s+(?:py:)?"
+    r"^(\s*)\.\.\s+(?:(py|c):)?"
     r"(module|currentmodule|function|method|class|exception|data|attribute|"
-    r"decorator|classmethod|staticmethod)::\s*(.+?)\s*$"
+    r"decorator|classmethod|staticmethod|macro|type|var|member|struct|union|"
+    r"enum|enumerator)::\s*(.+?)\s*$"
 )
 _OBJECT_DIRECTIVES = frozenset({
     "function", "method", "class", "exception", "data", "attribute",
     "decorator", "classmethod", "staticmethod",
+    # C domain.
+    "macro", "type", "var", "member", "struct", "union", "enum", "enumerator",
 })
 
 
@@ -223,13 +232,27 @@ def _iter_objects(body: str) -> Iterator[tuple[str, str, str]]:
         match = _DIRECTIVE_RE.match(line)
         if match is None:
             continue
-        indent, directive, argument = match.groups()
+        indent, domain, directive, argument = match.groups()
         depth = len(indent)
 
         if directive in ("module", "currentmodule"):
             module, class_name, class_indent = argument.strip(), "", -1
             continue
         if directive not in _OBJECT_DIRECTIVES:
+            continue
+
+        if domain == "c":
+            # C names are flat and the declaration leads with a return type,
+            # so neither the py qualification nor splitting on "(" applies:
+            # `PyObject* PyList_New(Py_ssize_t len)` would yield the name
+            # "PyObject* PyList_New", matching no inventory entry at all.
+            # The C domain also leaves the enclosing py module and class
+            # context untouched -- a c:function on a page that declared a
+            # module is not a member of it.
+            name = _c_name(argument)
+            if name:
+                yield name, argument.strip(), _summary_after(
+                    lines, index + 1, depth)
             continue
 
         local = argument.split("(", 1)[0].strip()
@@ -247,6 +270,20 @@ def _iter_objects(body: str) -> Iterator[tuple[str, str, str]]:
             full = _qualify(module, local)
 
         yield full, argument.strip(), _summary_after(lines, index + 1, depth)
+
+
+def _c_name(argument: str) -> str:
+    """``PyObject* PyList_New(Py_ssize_t len)`` -> ``PyList_New``.
+
+    The name is the last token before the parameter list, with any pointer
+    stars dropped -- CPython writes both ``PyObject* PyList_New`` and
+    ``PyObject *PyList_New``, so the star can attach to either side.
+    Declarations without a parameter list (``.. c:macro:: CO_COROUTINE``,
+    ``.. c:type:: PyListObject``) are the same rule with nothing to strip.
+    """
+    head = argument.split("(", 1)[0].replace("*", " ")
+    tokens = head.split()
+    return tokens[-1] if tokens else ""
 
 
 def _summary_after(lines: list[str], start: int, depth: int, words: int = 30) -> str:

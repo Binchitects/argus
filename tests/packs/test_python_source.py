@@ -348,3 +348,74 @@ def test_the_branch_is_a_release_branch_not_main():
         "release, and a mismatch costs symbols rather than failing the build")
     assert python_docs.PythonDocs().branch[0].isdigit(), (
         "expected a version branch such as 3.14")
+
+
+class TestCDomain:
+    """The C API is a separate reST domain, and it went entirely unmatched.
+
+    Measured before this: 770 c:function and 176 c:macro symbols fell back to
+    their page title, so PyList_New was described as "List Objects" while
+    "Return a new list of length *len* on success" sat one line beneath the
+    directive.
+    """
+
+    def test_a_c_function_is_named_without_its_return_type(self):
+        body = (
+            ".. c:function:: PyObject* PyList_New(Py_ssize_t len)\n"
+            "\n"
+            "   Return a new list of length *len* on success, or NULL.\n"
+        )
+        summaries = python_docs.extract_summaries(body)
+        assert "PyList_New" in summaries, "the c: domain must be matched"
+        assert summaries["PyList_New"].startswith("Return a new list")
+
+    def test_a_star_bound_to_the_name_is_still_stripped(self):
+        """CPython writes both `PyObject* PyList_New` and `PyObject
+        *PyList_New`, so the star attaches to either side and neither spelling
+        may leak into the name -- an inventory lookup would match neither."""
+        body = (
+            ".. c:function:: PyObject *PyList_Append(PyObject *list)\n"
+            "\n"
+            "   Append the object item at the end of list.\n"
+        )
+        assert "PyList_Append" in python_docs.extract_summaries(body)
+
+    def test_a_c_macro_needs_no_parameter_list(self):
+        body = (
+            ".. c:macro:: CO_COROUTINE\n"
+            "\n"
+            "   The code object is a coroutine.\n"
+        )
+        summaries = python_docs.extract_summaries(body)
+        assert summaries["CO_COROUTINE"].startswith("The code object")
+
+    def test_a_c_symbol_is_not_qualified_by_an_enclosing_module(self):
+        """C names are flat. A c:function on a page that declared a module is
+        not a member of it, and qualifying it would match no inventory
+        entry."""
+        body = (
+            ".. module:: sys\n"
+            "\n"
+            ".. c:function:: int PySys_SetObject(const char *name)\n"
+            "\n"
+            "   Set name in the sys module.\n"
+        )
+        summaries = python_docs.extract_summaries(body)
+        assert "PySys_SetObject" in summaries
+        assert "sys.PySys_SetObject" not in summaries
+
+    def test_the_python_domain_still_qualifies_by_class(self):
+        """The C branch must not have disturbed py-domain qualification."""
+        body = (
+            ".. module:: json\n"
+            "\n"
+            ".. class:: JSONDecoder\n"
+            "\n"
+            "   Simple JSON decoder.\n"
+            "\n"
+            "   .. method:: decode(s)\n"
+            "\n"
+            "      Return the Python representation of s.\n"
+        )
+        summaries = python_docs.extract_summaries(body)
+        assert "json.JSONDecoder.decode" in summaries
