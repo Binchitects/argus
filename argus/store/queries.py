@@ -601,16 +601,27 @@ def which_repo(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
         if score <= 0:
             continue
         why = hits[:5] or [f"lexical match on {lexical.get(repo_id, 0):.0f} file(s)"]
-        scored.append({
+        # The RAW score is kept alongside the clamped one, because they answer
+        # different questions. `confidence` is clamped to 1.0 so a caller can
+        # read it as "how sure", and that clamp is right for display -- but
+        # sorting on it discards every distinction above 1.0.
+        #
+        # Measured across 47 repositories: "compress a byte stream with a
+        # dictionary" scored lz4, zlib and zstd at exactly 1.000, and the
+        # alphabetical tie-break handed the answer to lz4. Three plausible
+        # repos separated by real evidence became one arbitrary pick. With six
+        # repositories a tie at the ceiling is rare; with forty-seven it is
+        # the common case, which is why this survived the smaller corpus.
+        scored.append((score, {
             "repo_id": repo_id,
             "path_with_namespace": _repo_name(conn, repo_id),
             "confidence": round(min(score, 1.0), 3),
             "shape": shape,
             "why": why,
-        })
+        }))
 
-    scored.sort(key=lambda r: (-r["confidence"], r["path_with_namespace"]))
-    return scored[:limit]
+    scored.sort(key=lambda pair: (-pair[0], pair[1]["path_with_namespace"]))
+    return [row for _score, row in scored[:limit]]
 
 
 def _escape_like(value: str) -> str:

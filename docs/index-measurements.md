@@ -403,3 +403,81 @@ remaining false edges have weight 1.
 same mistake as tuning a retrieval constant against ten questions. It needs
 its own measurement across a different corpus, not another entry bolted on to
 the one that produced it.
+
+# The 47-repo estate: what only shows up at scale
+
+Every corpus before this one held at most six repositories. Two defects were
+invisible there and are the normal case here.
+
+## The corpus
+
+| | |
+|---|---|
+| repositories | 47 |
+| files indexed | 55,603 |
+| symbols | 1,491,167 |
+| wall time | 37.8 min |
+| slowest repo | 228 s (cmake, 15,214 files) |
+| failures, timeouts, symbol failures | **0** |
+| includes | 160,650 resolved, 53,968 external, 2,596 ambiguous, 9,744 not found |
+| cross-repo edges | 242 |
+
+Indexing itself scaled without incident. Nothing timed out against the 3600 s
+budget; the worst repository used 228 s of it.
+
+## A symbol name stops being unique
+
+| | |
+|---|---|
+| distinct symbol names | 733,481 |
+| names in more than one repo | **59,465 (8.1%)** |
+| most-shared name | `main`, in **43 of 47 repos** |
+
+`data`, `end`, `name` and `next` each span 42. Any tool that returns "the"
+definition of a name is choosing, and at six repositories it was mostly
+choosing correctly by accident.
+
+## Defect 1: the confidence clamp destroyed the ranking
+
+`which_repo` scored candidates, then sorted on
+`round(min(score, 1.0), 3)` -- the value clamped for display. Every score
+above 1.0 therefore compared equal, and the tie-break was the repository's
+name, alphabetically.
+
+Asked to "compress a byte stream with a dictionary", lz4, zlib and zstd all
+scored exactly `1.000`. lz4 won because `l` sorts before `z`. Three plausible
+repositories, separated by real evidence, collapsed into one arbitrary pick.
+
+Fixed by ranking on the raw score and keeping the clamp for display only.
+zstd moved from third to second, which is the proof the raw scores differed
+all along. **It did not change the score: 5/10 before, 5/10 after.** Correct
+ordering was not the thing standing between the question and its answer.
+
+## Defect 2: common English words are identifiers everywhere
+
+The remaining five failures share one shape, and it is worse than a ranking
+bug. Asked to "store key-value pairs in memory with expiry", the winners were
+abseil-cpp (a function named `key`), bullet3 (a member named `store`) and
+freetype (`store`, `memory`). redis did not place at all.
+
+`which_repo`'s lexical evidence matches query words against identifiers. At
+1.5M symbols, "store", "key", "memory", "data" and "next" are identifiers in
+nearly every repository, so they carry no discriminating power while still
+scoring. The larger the estate, the more repositories match on words that
+mean nothing -- the score rises with corpus size rather than with relevance.
+
+This is the same shape as the pack-side finding that global term frequency
+must down-weight common words, and the fix is likely the same: weight an
+identifier match by how many repositories contain that identifier. Not
+attempted here; recorded with the corpus that makes it measurable.
+
+## Two operational notes
+
+`llvm-project` is absent. At ~2 GB even shallow, its clone failed with
+`unexpected eof` on ten consecutive attempts, and `http.postBuffer` and
+`http.lowSpeedLimit` tuning did not help. An estate of 47 measures collision
+and routing exactly as well.
+
+The seeder used to stop at the first clone failure, so php-src -- large, and
+failing the same way -- prevented six small repositories listed after it from
+being attempted at all. Failures are now collected and reported at the end.

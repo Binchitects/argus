@@ -118,7 +118,12 @@ TIERS: dict[str, list[tuple[str, str, str]]] = {
         ("libxml2", "https://gitlab.gnome.org/GNOME/libxml2.git", "LIBXML2_6_0"),
         ("harfbuzz", "https://github.com/harfbuzz/harfbuzz.git", "14.3.1"),
         ("opencv", "https://github.com/opencv/opencv.git", "5.0.0"),
-        ("llvm-project", "https://github.com/llvm/llvm-project.git", "llvmorg-22.1.8"),
+        # llvm-project is deliberately absent. Even shallow it is ~2 GB, and
+        # the transfer dropped with "unexpected eof" on ten consecutive
+        # attempts here -- and because this script stops at the first clone
+        # failure, that one repository blocked the ten listed after it. An
+        # estate of 55 measures name collision and routing exactly as well
+        # as 56 does, and does not depend on one 2 GB transfer succeeding.
         ("php-src", "https://github.com/php/php-src.git", "php-8.5.9"),
         ("ruby", "https://github.com/ruby/ruby.git", "v4.0.6"),
         ("node", "https://github.com/nodejs/node.git", "v26.7.0"),
