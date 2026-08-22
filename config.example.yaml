@@ -1,8 +1,35 @@
 gitlab:
   url: https://gitlab.internal
+
+  # How Argus signs in. Two modes; "token" is the default and is what you
+  # want unless your GitLab does not issue access tokens.
+  #
+  #   auth: token     -- an access token, sent as PRIVATE-TOKEN
+  #   auth: password  -- a username and password, exchanged at /oauth/token
+  #                      for an OAuth token, then sent as Authorization: Bearer
+  #
+  # Leave it unset and Argus infers: a username means password mode.
+  auth: token
+
+  # --- auth: token ---------------------------------------------------------
   # Prefer the ARGUS_GITLAB_TOKEN environment variable over this field.
   # Requires read_api + read_repository scopes.
   token: ""
+
+  # --- auth: password ------------------------------------------------------
+  # username: svc-argus
+  #
+  # There is deliberately NO password field here. Argus reads it from
+  # ARGUS_GITLAB_PASSWORD and refuses to start if `password` appears in this
+  # file -- config files get committed, copied into images and pasted into
+  # issues, and unlike a token a password is reusable everywhere else the
+  # account signs in.
+  #
+  # Password sign-in cannot satisfy two-factor authentication; GitLab refuses
+  # the grant outright for such accounts. Use auth: token there.
+  #
+  # Prefer a token in general: it is scopeable to read_api + read_repository,
+  # revocable on its own, and cannot be used to sign in to anything else.
 
 index:
   data_dir: /var/lib/argus

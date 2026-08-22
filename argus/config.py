@@ -18,8 +18,61 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class GitLabConfig:
+    """How Argus authenticates to GitLab.
+
+    Two modes, because the two credentials are not interchangeable at the
+    protocol level:
+
+    * ``token`` -- a personal, project or group access token, sent as
+      ``PRIVATE-TOKEN``. The original mode, and still the default.
+    * ``password`` -- a username and password exchanged for an OAuth token at
+      ``/oauth/token``, then sent as ``Authorization: Bearer``.
+
+    The header differs per mode, so a caller cannot simply swap the value in:
+    GitLab rejects an OAuth token presented as ``PRIVATE-TOKEN``. `credential`
+    returns both the value and the header that carries it, which is why
+    nothing outside this module builds those headers by hand any more.
+
+    Git cloning needs no such distinction. `mirror` answers git's askpass
+    prompt with the username ``oauth2`` and the credential as the password,
+    which GitLab accepts for access tokens and OAuth tokens alike.
+    """
+
     url: str
-    token: str
+    token: str = ""
+    #: "token" or "password". Inferred when unset: a username makes it
+    #: password mode, so an operator who configures a username and no `auth`
+    #: gets what they plainly meant rather than an error.
+    auth: str = ""
+    username: str = ""
+    #: Never read from the config file -- see `Config.load`. Held in memory
+    #: for the life of the process because the OAuth token it buys expires,
+    #: and a re-exchange is the only way to recover without a restart.
+    password: str = ""
+
+    def __post_init__(self) -> None:
+        mode = (self.auth or ("password" if self.username else "token")).lower()
+        if mode not in ("token", "password"):
+            raise ConfigError(
+                f"gitlab.auth must be 'token' or 'password', not {self.auth!r}")
+        object.__setattr__(self, "auth", mode)
+        if mode == "token" and not self.token:
+            raise ConfigError("gitlab.token is required when gitlab.auth is 'token'")
+        if mode == "password" and not (self.username and self.password):
+            raise ConfigError(
+                "gitlab.auth is 'password', so gitlab.username and a password "
+                "are both required (set the password in ARGUS_GITLAB_PASSWORD)")
+
+    def redacted(self) -> str:
+        """A description safe to log or put in an error.
+
+        Exists so that no caller has to decide, each time, which fields of
+        this object are safe to print. Neither the token nor the password
+        appears, in any mode.
+        """
+        if self.auth == "password":
+            return f"{self.url} as {self.username} (password)"
+        return f"{self.url} (access token)"
 
 
 @dataclass(frozen=True)
@@ -84,10 +137,30 @@ class Config:
         if not url:
             raise ConfigError("gitlab.url is required")
 
-        token = os.environ.get("ARGUS_GITLAB_TOKEN") or gl.get("token")
-        if not token:
+        token = os.environ.get("ARGUS_GITLAB_TOKEN") or gl.get("token") or ""
+        username = os.environ.get("ARGUS_GITLAB_USERNAME") or gl.get("username") or ""
+        auth = (os.environ.get("ARGUS_GITLAB_AUTH") or gl.get("auth") or "").lower()
+
+        # The password is read from the environment ONLY, never from the
+        # config file, and there is no `gl.get("password")` fallback on
+        # purpose. A token in a config file is bad; a password is worse --
+        # it is reusable across every system the person signs in to, and
+        # config files get committed, copied into images, and pasted into
+        # issues. A key named in the file is refused outright rather than
+        # ignored, because silently disregarding a password someone believed
+        # they had configured would leave them authenticating as nobody and
+        # wondering why.
+        if "password" in gl:
             raise ConfigError(
-                "gitlab.token is required (set it in config or ARGUS_GITLAB_TOKEN)"
+                "gitlab.password must not appear in the config file. Set "
+                "ARGUS_GITLAB_PASSWORD in the environment instead."
+            )
+        password = os.environ.get("ARGUS_GITLAB_PASSWORD") or ""
+
+        if not (token or username or password):
+            raise ConfigError(
+                "no GitLab credential: set gitlab.token (or ARGUS_GITLAB_TOKEN), "
+                "or gitlab.username with ARGUS_GITLAB_PASSWORD"
             )
 
         for key in ("data_dir", "db_path"):
@@ -101,7 +174,8 @@ class Config:
             raise ConfigError(f"index config value is not an integer: {exc}") from exc
 
         return Config(
-            gitlab=GitLabConfig(url=url.rstrip("/"), token=token),
+            gitlab=GitLabConfig(url=url.rstrip("/"), token=token, auth=auth,
+                                username=username, password=password),
             index=IndexConfig(
                 data_dir=Path(ix["data_dir"]),
                 db_path=Path(ix["db_path"]),

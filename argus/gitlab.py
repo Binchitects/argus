@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from . import credentials
 from .config import GitLabConfig
 
 PER_PAGE = 100
@@ -36,7 +37,7 @@ def list_projects(cfg: GitLabConfig, *,
                     "membership": "false", "simple": "true",
                     "archived": "false", "per_page": PER_PAGE, "page": page,
                 },
-                headers={"PRIVATE-TOKEN": cfg.token},
+                headers=credentials.headers(cfg, client=client),
             )
             if response.status_code != 200:
                 raise GitLabError(
@@ -117,7 +118,7 @@ def enumeration_health(cfg: GitLabConfig, *,
     """Probe whether `list_projects` can see the whole estate."""
     owns_client = client is None
     client = client or httpx.Client(timeout=30.0)
-    headers = {"PRIVATE-TOKEN": cfg.token}
+    headers = credentials.headers(cfg, client=client)
     try:
         user = client.get(f"{cfg.url}/api/v4/user", headers=headers)
         if user.status_code != 200:

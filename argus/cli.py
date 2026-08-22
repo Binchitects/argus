@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import credentials
 from .config import Config, ConfigError
 from .embed import EmbeddingUnavailable
 from .gitlab import GitLabError, enumeration_health, list_projects
@@ -215,9 +216,13 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
         # mirror already carries every ref (ensure_mirror fetches
         # "+refs/heads/*"), so indexing four branches costs one fetch.
         try:
+            # Not cfg.gitlab.token: in password mode there is no token in the
+            # config, and the credential is the OAuth token bought with the
+            # password. `git_password` returns whichever mode is configured,
+            # and git accepts both against the `oauth2` username.
             mirror_dir = ensure_mirror(cfg.index, project,
                                        clone_url=project.http_url,
-                                       token=cfg.gitlab.token)
+                                       token=credentials.git_password(cfg.gitlab))
             branches = select_branches(list_branches(mirror_dir),
                                        cfg.index.branches,
                                        project.default_branch)
