@@ -72,6 +72,64 @@ TIERS: dict[str, list[tuple[str, str, str]]] = {
         ("postgres", "https://github.com/postgres/postgres.git", "REL_17_2"),
         ("ffmpeg", "https://github.com/FFmpeg/FFmpeg.git", "n7.1"),
     ],
+    # An estate rather than a sample: 46 more projects, so the index is asked
+    # the question a real deployment asks -- can it enumerate, mirror, index
+    # and then ANSWER across dozens of repositories at once, where a symbol
+    # name is no longer unique and `whichrepo` has to earn its place.
+    #
+    # Every tag here was read from the remote with `git ls-remote --tags`
+    # rather than recalled. The first attempt sorted tags by "digits found
+    # anywhere" and pinned sqlite to `bug-2026-08-12T09_26_04Z` and zstd to
+    # `fuzz-corpora2` -- both real tags, neither a release, and a corpus
+    # pinned to a fuzzing corpus measures nothing anyone means.
+    "estate": [
+("sqlite", "https://github.com/sqlite/sqlite.git", "version-3.53.4"),
+        ("nginx", "https://github.com/nginx/nginx.git", "release-1.31.4"),
+        ("vim", "https://github.com/vim/vim.git", "v9.2.0995"),
+        ("tmux", "https://github.com/tmux/tmux.git", "3.7c"),
+        ("zstd", "https://github.com/facebook/zstd.git", "v1.5.7"),
+        ("lz4", "https://github.com/lz4/lz4.git", "v1.10.0"),
+        ("protobuf", "https://github.com/protocolbuffers/protobuf.git", "v36.0"),
+        ("grpc", "https://github.com/grpc/grpc.git", "v1.83.0"),
+        ("leveldb", "https://github.com/google/leveldb.git", "1.23"),
+        ("rocksdb", "https://github.com/facebook/rocksdb.git", "v11.8.1"),
+        ("libuv", "https://github.com/libuv/libuv.git", "v1.52.1"),
+        ("libgit2", "https://github.com/libgit2/libgit2.git", "v1.9.7"),
+        ("jq", "https://github.com/jqlang/jq.git", "jq-1.8.2"),
+        ("htop", "https://github.com/htop-dev/htop.git", "3.5.3"),
+        ("cmake", "https://github.com/Kitware/CMake.git", "v4.4.2"),
+        ("busybox", "https://github.com/mirror/busybox.git", "1_36_1"),
+        ("openssh", "https://github.com/openssh/openssh-portable.git", "V_2_1_0"),
+        ("imagemagick", "https://github.com/ImageMagick/ImageMagick.git", "7.0.7.7"),
+        ("sdl", "https://github.com/libsdl-org/SDL.git", "release-3.4.14"),
+        ("glfw", "https://github.com/glfw/glfw.git", "3.5.1"),
+        ("assimp", "https://github.com/assimp/assimp.git", "v6.0.5"),
+        ("bullet3", "https://github.com/bulletphysics/bullet3.git", "3.25"),
+        ("box2d", "https://github.com/erincatto/box2d.git", "v3.1.1"),
+        ("spdlog", "https://github.com/gabime/spdlog.git", "v1.17.0"),
+        ("fmt", "https://github.com/fmtlib/fmt.git", "12.2.0"),
+        ("catch2", "https://github.com/catchorg/Catch2.git", "v3.15.3"),
+        ("googletest", "https://github.com/google/googletest.git", "v1.18.0"),
+        ("abseil-cpp", "https://github.com/abseil/abseil-cpp.git", "20260817.0"),
+        ("snappy", "https://github.com/google/snappy.git", "1.2.2"),
+        ("brotli", "https://github.com/google/brotli.git", "v1.2.0"),
+        ("pcre2", "https://github.com/PCRE2Project/pcre2.git", "pcre2-10.47"),
+        ("expat", "https://github.com/libexpat/libexpat.git", "R_2_8_3"),
+        ("libxml2", "https://gitlab.gnome.org/GNOME/libxml2.git", "LIBXML2_6_0"),
+        ("harfbuzz", "https://github.com/harfbuzz/harfbuzz.git", "14.3.1"),
+        ("opencv", "https://github.com/opencv/opencv.git", "5.0.0"),
+        ("llvm-project", "https://github.com/llvm/llvm-project.git", "llvmorg-22.1.8"),
+        ("php-src", "https://github.com/php/php-src.git", "php-8.5.9"),
+        ("ruby", "https://github.com/ruby/ruby.git", "v4.0.6"),
+        ("node", "https://github.com/nodejs/node.git", "v26.7.0"),
+        ("mruby", "https://github.com/mruby/mruby.git", "4.0.0"),
+        ("lua", "https://github.com/lua/lua.git", "v5.5.1"),
+        ("wolfssl", "https://github.com/wolfSSL/wolfssl.git", "v5.2.1"),
+        ("mbedtls", "https://github.com/Mbed-TLS/mbedtls.git", "v4.2.0"),
+        ("libsodium", "https://github.com/jedisct1/libsodium.git", "1.0.22"),
+        ("czmq", "https://github.com/zeromq/libzmq.git", "v4.3.5"),
+        ("duckdb", "https://github.com/duckdb/duckdb.git", "v1.5.5"),
+    ],
 }
 
 
