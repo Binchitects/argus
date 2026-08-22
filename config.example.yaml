@@ -25,8 +25,20 @@ gitlab:
   # issues, and unlike a token a password is reusable everywhere else the
   # account signs in.
   #
-  # Password sign-in cannot satisfy two-factor authentication; GitLab refuses
-  # the grant outright for such accounts. Use auth: token there.
+  # CHECK YOUR GITLAB VERSION FIRST. Recent GitLab has removed the password
+  # grant this mode depends on: verified against 19.2.1, which answers
+  # `unsupported_grant_type` to every password sign-in. There is no headless
+  # replacement -- deploy tokens are a username/password pair but cannot
+  # enumerate projects, and the authorization-code flow needs a browser. On
+  # such a server, auth: token is the only option that works.
+  #
+  # Password sign-in also cannot satisfy two-factor authentication; GitLab
+  # refuses the grant outright for such accounts.
+  #
+  # Check with:
+  #   curl -s -X POST <url>/oauth/token -d grant_type=password -d username=<user> -d password=<pw>
+  #
+  # An "unsupported_grant_type" reply means this mode cannot work there.
   #
   # Prefer a token in general: it is scopeable to read_api + read_repository,
   # revocable on its own, and cannot be used to sign in to anything else.

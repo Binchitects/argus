@@ -193,3 +193,22 @@ def test_redacted_never_names_the_secret():
     assert "s3cret" not in password_cfg().redacted()
     assert "glpat-xxx" not in token_cfg().redacted()
     assert "dev" in password_cfg().redacted()
+
+
+def test_a_server_without_the_password_grant_says_to_use_a_token():
+    """Verified against a real GitLab 19.2.1, which is where this was found:
+    the resource-owner password grant has been removed, and no headless
+    username/password path replaces it. The operator cannot fix this by
+    correcting the password, so the error must not read like a bad one."""
+    def handler(request):
+        return httpx.Response(400, json={
+            "error": "unsupported_grant_type",
+            "error_description": "The authorization grant type is not "
+                                 "supported by the authorization server.",
+        })
+
+    with pytest.raises(credentials.CredentialError) as caught:
+        credentials.headers(password_cfg(), client=stub(handler))
+    message = str(caught.value)
+    assert "access token" in message, "must name the supported alternative"
+    assert "ARGUS_GITLAB_TOKEN" in message, "must say where to put it"

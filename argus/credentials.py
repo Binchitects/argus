@@ -73,11 +73,30 @@ def _exchange(cfg: GitLabConfig, client: httpx.Client) -> str:
 
     if resp.status_code in (400, 401):
         detail = ""
+        code = ""
         try:
             body = resp.json()
-            detail = str(body.get("error_description") or body.get("error") or "")
+            code = str(body.get("error") or "")
+            detail = str(body.get("error_description") or code or "")
         except ValueError:
             detail = ""
+        if code == "unsupported_grant_type" or "grant type" in detail.lower():
+            # Measured against a real GitLab 19.2.1: the resource-owner
+            # password grant is gone, and there is no headless replacement.
+            # Deploy tokens are a username/password pair but cannot enumerate
+            # projects, and the authorization-code flow needs a browser. So
+            # this is not a misconfiguration the operator can correct by
+            # adjusting the password -- the server will never accept one.
+            raise CredentialError(
+                f"{cfg.url} does not support password sign-in for the API: it "
+                f"answered 'unsupported_grant_type'. Recent GitLab removed the "
+                f"password grant, and no headless username/password path "
+                f"replaces it -- deploy tokens cannot enumerate projects and "
+                f"the authorization-code flow needs a browser. Create a "
+                f"personal, group or project access token with read_api and "
+                f"read_repository, then set gitlab.auth=token with "
+                f"ARGUS_GITLAB_TOKEN."
+            )
         if "2fa" in detail.lower() or "two-factor" in detail.lower():
             raise CredentialError(
                 f"GitLab refused the password sign-in for {cfg.redacted()} "
