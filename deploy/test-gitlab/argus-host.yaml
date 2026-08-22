@@ -1,0 +1,40 @@
+# Host-side Argus config for indexing the throwaway GitLab.
+#
+# Distinct from the repository's `config.yaml`, which names paths INSIDE the
+# container and is useless on a host. This one runs Argus directly on the
+# machine: `python -m argus --config deploy/test-gitlab/argus-host.yaml index`.
+#
+# The token is NOT here. Export it from seeded.json instead, so a real token
+# never lands in a file that gets copied or pasted:
+#
+#   export ARGUS_GITLAB_TOKEN=$(python -c "import json;print(json.load(open('deploy/test-gitlab/seeded.json'))['admin_token'])")
+#
+# Data lives on E: deliberately. Mirrors, worktrees and the index together
+# run to tens of gigabytes across 56 repositories, and C: is where Docker
+# already keeps GitLab's own volumes.
+
+gitlab:
+  url: http://localhost:8929
+  auth: token
+
+index:
+  data_dir: E:/argus-estate
+  db_path: E:/argus-estate/index.db
+  max_file_bytes: 1048576
+  # Generous: llvm-project and opencv are far larger than anything the
+  # default 600s was measured against, and a repo that times out is recorded
+  # as partially indexed rather than failed -- which is the harder state to
+  # notice.
+  repo_time_budget_seconds: 3600
+  exclude_dirs:
+    - third_party
+    - vendor
+    - node_modules
+    - build
+    - out
+    - x64
+    - Debug
+    - Release
+
+packs:
+  dir: E:/Projects/CodeAssistant/packs
