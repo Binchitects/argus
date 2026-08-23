@@ -68,6 +68,24 @@ RUN python -m pytest -q
 # ------------------------------------------------------------- runtime ------
 FROM base AS runtime
 
+# Provenance, so a running container can say what it is. `pyproject.toml` is
+# inside the image but `docker inspect` cannot read it, and the question asked
+# of a deployed container is always "which build is this" -- answering it by
+# exec'ing in and grepping is the wrong shape.
+#
+# ARGUS_REVISION is passed by the release build; it is the git commit, which
+# is the only identifier that stays exact when a version is built twice.
+ARG ARGUS_VERSION=1.1.0
+ARG ARGUS_REVISION=unknown
+LABEL org.opencontainers.image.title="argus" \
+      org.opencontainers.image.description="Self-hosted code index and documentation MCP server" \
+      org.opencontainers.image.version="${ARGUS_VERSION}" \
+      org.opencontainers.image.revision="${ARGUS_REVISION}" \
+      org.opencontainers.image.source="https://github.com/aliGhadyani/hermes-argus" \
+      org.opencontainers.image.licenses="MIT"
+ENV ARGUS_VERSION="${ARGUS_VERSION}" \
+    ARGUS_REVISION="${ARGUS_REVISION}"
+
 # Fixed UID/GID so a bind-mounted data directory can be chowned predictably on
 # the host. Override at build time if it collides with an existing account.
 ARG ARGUS_UID=10001
