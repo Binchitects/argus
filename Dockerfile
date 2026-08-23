@@ -63,7 +63,17 @@ COPY tests/ ./tests/
 # a later step deletes the file, so this stays a single explicit file.
 COPY deploy/agent_client_example.py ./deploy/
 
-RUN python -m pytest -q
+RUN python -m pytest -q \
+ && { echo "suite: passed"; \
+      echo "ctags: $(ctags --version | head -1)"; \
+      echo "built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"; } > /app/.build-verified
+
+# The receipt above exists to be COPYed into `runtime`. That copy is what puts
+# this stage in the build graph: BuildKit builds only what the target depends
+# on, and nothing depended on `test`, so `--target server` skipped the suite
+# entirely and the whole toolchain-drift guard above never fired. Found on the
+# 1.1.0 release build -- zero pytest lines in the log, and the image shipped
+# anyway. Deleting that COPY silently restores the hole.
 
 # ------------------------------------------------------------- runtime ------
 FROM base AS runtime
@@ -96,6 +106,16 @@ RUN groupadd --gid "${ARGUS_GID}" argus \
 COPY pyproject.toml README.md ./
 COPY argus/ ./argus/
 RUN pip install .
+
+# NOT decorative, and not safe to drop. This is the only edge from `runtime`
+# to `test`, and it is what makes the suite run for every image built from
+# here -- `server` included. Without it BuildKit prunes `test` from the graph
+# and the pinned-ctags guard protects nothing.
+#
+# The file is three lines. `docker run --entrypoint cat argus:TAG
+# /usr/share/argus/build-verified` says which ctags the suite passed against,
+# which is the question the pin exists to answer.
+COPY --from=test /app/.build-verified /usr/share/argus/build-verified
 
 # The indexer runs git against bind-mounted repositories whose owner UID will
 # not match the container user. Without this, git refuses with "detected
