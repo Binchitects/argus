@@ -218,8 +218,8 @@ four times this — about 49 GB at 192K, impossible on any single consumer card.
 
 | | VRAM | Weights | Left for KV | Realistic context |
 |---|---|---|---|---|
-| **RTX 3090** | 24 GB | 20.0 GB AWQ | ~2 GB | **32K** |
-| RTX 4090 | 24 GB | 21.0 GB AWQ | ~2 GB | 32–64K |
+| **RTX 3090** | 24 GB | 20.0 GB AWQ | 1.8 GiB | **24K** (measured) |
+| RTX 4090 | 24 GB | 21.0 GB AWQ | ~1.8 GiB | 24K |
 | **RTX 5090** | 32 GB | 18.8 GB NVFP4 | ~10 GB | **256K** (192K with MTP) |
 | **RTX PRO 6000** | 96 GB | 30.9 GB FP8 | ~57 GB | **256K**, the cap is the model |
 | **H200** | 141 GB | 55.6 GB bf16 | ~74 GB | **256K**, the cap is the model |
@@ -242,8 +242,27 @@ negligible quality impact and is the difference between 32K and 16K on a 3090.
 ./scripts/get-models.sh --gpu 5090 --model 3.8 --context 262144 --apply
 ```
 
-Defaults are 32768 (3090), 65536 (4090), 262144 (5090, or 196608 with
-`--mtp`), and 262144 on the PRO 6000 and H200. If vLLM fails at
+Defaults are 24576 (3090 and 4090), 262144 (5090, or 196608 with `--mtp`), and
+262144 on the PRO 6000 and H200.
+
+**The 24 GB figure is measured, not derived.** On a 3090 running vLLM 0.27.1
+the naive arithmetic says 32K fits; it does not:
+
+| Attempt | Result |
+|---|---|
+| `ctx 32768 @ util 0.92` | refused — needs 1.15 GiB KV, 0.90 GiB available |
+| `util 0.95` | refused — wants 22.8 GiB, only 22.75 GiB free |
+| `ctx 24576 @ util 0.93 + --enforce-eager` | **boots** — 1.8 GiB KV, 46,565 tokens, 1.95x |
+
+Two things the arithmetic misses. Qwen3.x-27B is **multimodal**
+(`language_model_only: false`), so vLLM also loads an unquantised vision tower;
+and CUDA graph capture costs roughly a GiB, which is why `--enforce-eager` is
+load-bearing on a 24 GB card rather than the WSL2 workaround it is elsewhere.
+It costs throughput — ~12 tok/s instead of ~19.
+
+Also note `--gpu-memory-utilization` is a fraction of **total** VRAM, not free
+VRAM. A desktop session holding ~1.1 GiB caps the usable value near 0.94, so
+0.93 is the safe ceiling on a card that also drives a display. If vLLM fails at
 startup with *"No available memory for the cache blocks"*, the context is too
 large for what the weights left behind — lower it.
 

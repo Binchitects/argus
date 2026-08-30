@@ -138,7 +138,7 @@ case "$MODEL" in 3.6|3.8) ;; *) die "--model must be 3.6 or 3.8" ;; esac
 # ---------------------------------------------------------------------------
 # Select the checkpoint. Compute capability decides the format.
 # ---------------------------------------------------------------------------
-QUANT=""; REPO=""; SIZE=""; CTX=""; EXTRA=""
+QUANT=""; REPO=""; SIZE=""; CTX=""; EXTRA=""; UTIL="0.92"; SEQS=64
 case "$GPU" in
   3090)
     QUANT="awq"
@@ -151,19 +151,48 @@ case "$GPU" in
       if [[ $MTP -eq 1 ]]; then REPO="shawnw3i/Qwen3.8-27B-AWQ-MTP"; SIZE="19.5"
       else REPO="cyankiwi/Qwen3.8-27B-AWQ-INT4"; SIZE="21.0"; fi
     fi
-    # KV maths for this architecture: 16 of 64 layers are full-attention
-    # (the rest are linear-attention with constant state), 4 kv heads,
-    # head_dim 256 -> 32 KB/token at fp8. 24 GB minus ~20 GB of weights
-    # leaves ~2 GB of cache, so ~32K is the honest ceiling here.
-    CTX=32768
-    EXTRA="--quantization awq --kv-cache-dtype fp8"
+    # KV maths for this architecture: 16 of 64 layers are full-attention (the
+    # rest are linear-attention with constant state), 4 kv heads, head_dim 256
+    # -> 32 KB/token at fp8. That arithmetic alone suggests 32K fits. It does
+    # not, and these numbers are measured on a 24 GB 3090 with vLLM 0.27.1
+    # rather than derived:
+    #
+    #   ctx 32768 @ util 0.92  -> REFUSED. Needs 1.15 GiB of KV, 0.90 GiB was
+    #                             available. vLLM reported 23520 as the real
+    #                             ceiling.
+    #   util 0.95              -> REFUSED. 0.95 x 24 = 22.8 GiB desired, only
+    #                             22.75 GiB free: the Windows desktop holds
+    #                             ~1.1 GiB. gpu-memory-utilization is a
+    #                             fraction of TOTAL VRAM, so whatever drives
+    #                             the display must be subtracted first.
+    #   ctx 24576 @ util 0.93 + --enforce-eager
+    #                          -> boots. 1.8 GiB KV, 46,565 tokens, 1.95x
+    #                             concurrency at full length.
+    #
+    # Two things make the naive sum optimistic. Qwen3.x-27B is multimodal
+    # (language_model_only: false), so vLLM also loads an unquantised vision
+    # tower; and CUDA graph capture costs roughly a GiB this card cannot
+    # spare. --enforce-eager is therefore load-bearing here, not the WSL2
+    # workaround it is elsewhere. It costs throughput (~12 tok/s rather than
+    # ~19) - that is the trade a 24 GB card forces for a 27B.
+    CTX=24576
+    UTIL="0.93"
+    SEQS=8
+    EXTRA="--quantization awq --kv-cache-dtype fp8 --enforce-eager"
     ;;
   4090)
     QUANT="awq"
     if [[ "$MODEL" == "3.6" ]]; then REPO="cyankiwi/Qwen3.6-27B-AWQ-INT4"; SIZE="20.4"
     else REPO="cyankiwi/Qwen3.8-27B-AWQ-INT4"; SIZE="21.0"; fi
-    CTX=65536
-    EXTRA="--quantization awq --kv-cache-dtype fp8"
+    # Same 24 GB and the same ~21 GB of weights as the 3090, so the same
+    # ceiling applies - the earlier 65536 here was arithmetic that ignored the
+    # vision tower and CUDA graphs. Ada has FP8 where Ampere does not, but that
+    # buys nothing while the constraint is capacity rather than compute.
+    # Derived from the 3090 measurements above, not separately measured.
+    CTX=24576
+    UTIL="0.93"
+    SEQS=8
+    EXTRA="--quantization awq --kv-cache-dtype fp8 --enforce-eager"
     ;;
   5090)
     QUANT="nvfp4"
@@ -201,6 +230,10 @@ case "$GPU" in
       CTX=262144
       EXTRA="--kv-cache-dtype fp8 --enable-prefix-caching"
     fi
+    # The KV pool holds 257K-335K tokens depending on build, so a handful of
+    # concurrent sequences is the real capacity - 64 would only inflate
+    # activation memory.
+    SEQS=8
     # NVFP4 checkpoints carry their quantization config; vLLM reads it from the
     # checkpoint, so no --quantization flag is needed.
     ;;
@@ -215,6 +248,7 @@ case "$GPU" in
       QUANT="fp8";  REPO="Qwen/Qwen3.8-27B-FP8"; SIZE="30.9"; EXTRA="--kv-cache-dtype fp8"
     fi
     CTX=262144
+    SEQS=16
     ;;
   h200)
     # H200: 141 GB HBM3e, Hopper SM 9.0. Hopper has FP8 but NOT FP4 - NVFP4
@@ -227,6 +261,7 @@ case "$GPU" in
       QUANT="bf16"; REPO="Qwen/Qwen3.8-27B"; SIZE="55.6"; EXTRA="--kv-cache-dtype fp8"
     fi
     CTX=262144
+    SEQS=32
     ;;
   *) die "unsupported --gpu $GPU (use 3090, 4090, 5090, pro6000 or h200)" ;;
 esac
@@ -268,7 +303,17 @@ if [[ $OFFLOAD -eq 1 ]]; then
 fi
 if [[ $DRYRUN -eq 1 ]]; then
   echo
-  echo "  (--dry-run: nothing downloaded)"
+  step "vLLM settings this would apply"
+  cat <<CONF
+    VLLM_MODEL=/models/$(basename "$REPO")
+    VLLM_SERVED_MODEL_NAME=$(basename "$REPO")
+    VLLM_MAX_MODEL_LEN=$CTX
+    VLLM_GPU_MEMORY_UTILIZATION=$UTIL
+    VLLM_MAX_NUM_SEQS=$SEQS
+    VLLM_EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser hermes $EXTRA
+CONF
+  echo
+  echo "  (--dry-run: nothing downloaded, nothing written)"
   exit 0
 fi
 
@@ -408,7 +453,8 @@ cat <<CONF
     VLLM_MODEL=/models/$NAME
     VLLM_SERVED_MODEL_NAME=default
     VLLM_MAX_MODEL_LEN=$CTX
-    VLLM_GPU_MEMORY_UTILIZATION=0.92
+    VLLM_GPU_MEMORY_UTILIZATION=$UTIL
+    VLLM_MAX_NUM_SEQS=$SEQS
     VLLM_EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser hermes $EXTRA
 CONF
 
@@ -430,7 +476,8 @@ if [[ $APPLY -eq 1 ]]; then
 ' "gateway config" "$NAME"
   fi
   set_env VLLM_MAX_MODEL_LEN "$CTX"
-  set_env VLLM_GPU_MEMORY_UTILIZATION "0.92"
+  set_env VLLM_GPU_MEMORY_UTILIZATION "$UTIL"
+  set_env VLLM_MAX_NUM_SEQS "$SEQS"
   set_env VLLM_EXTRA_ARGS "--enable-auto-tool-choice --tool-call-parser hermes $EXTRA"
   echo
   ok "restart:  docker compose up -d --force-recreate vllm litellm"
