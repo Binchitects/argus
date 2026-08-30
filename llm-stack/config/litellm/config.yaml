@@ -1,0 +1,83 @@
+# ==============================================================================
+# LiteLLM gateway (compose profile: gateway)
+#
+# Why put this in front of vLLM at all?
+#   - one virtual API key per person, with spend limits and rate limits
+#   - usage attributed to a user, which vLLM alone cannot do (its metrics carry
+#     a model_name label but no user dimension)
+#   - one endpoint that can front local vLLM AND hosted providers, with fallbacks
+#
+# Reach it at https://gateway.<LLM_DOMAIN>/v1. Mint per-person keys with
+# POST /key/generate using LITELLM_MASTER_KEY.
+#
+# NOTE ON NAMES: `model_name` is what clients and the Open WebUI model picker
+# display, and `model:` must match vLLM's --served-model-name. LiteLLM does NOT
+# expand ${VAR} here, so the real checkpoint name is written out literally.
+# scripts/switch-model rewrites both when you change model.
+# ==============================================================================
+
+model_list:
+  # The local vLLM engine, published under its real name.
+  # `openai/` tells LiteLLM to speak the OpenAI protocol to an arbitrary
+  # base_url rather than to api.openai.com.
+  - model_name: Qwen2.5-7B-Instruct
+    litellm_params:
+      model: openai/Qwen2.5-7B-Instruct
+      api_base: http://vllm:8000/v1
+      api_key: os.environ/VLLM_API_KEY
+      rpm: 600
+    model_info:
+      mode: chat
+
+  # Stable alias, so scripts and SDK clients need not change when the
+  # underlying checkpoint does. Both point at the same engine.
+  - model_name: local
+    litellm_params:
+      model: openai/Qwen2.5-7B-Instruct
+      api_base: http://vllm:8000/v1
+      api_key: os.environ/VLLM_API_KEY
+
+  # --- Second warm engine (profile: multi-model) ---------------------------
+  # - model_name: ${VLLM2_SERVED_MODEL_NAME}
+  #   litellm_params:
+  #     model: openai/${VLLM2_SERVED_MODEL_NAME}
+  #     api_base: http://vllm-secondary:8000/v1
+  #     api_key: os.environ/VLLM_API_KEY
+
+  # --- Example: a hosted fallback ------------------------------------------
+  # - model_name: cloud-fallback
+  #   litellm_params:
+  #     model: anthropic/claude-sonnet-5
+  #     api_key: os.environ/ANTHROPIC_API_KEY
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
+  timeout: 600
+  # If the local engine is down or saturated, fall back rather than queue.
+  # Requires the cloud-fallback entry above.
+  # fallbacks:
+  #   - local: ["cloud-fallback"]
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  # Cache identical completions in Redis. A big win for repeated evals and for
+  # UI clients that resend the same system prompt.
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    ttl: 3600
+  # Log every request to Langfuse when the `tracing` profile is running.
+  # success_callback: ["langfuse"]
+  # failure_callback: ["langfuse"]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  # /metrics is an enterprise feature on current builds; the Prometheus job for
+  # it is commented out in config/prometheus/prometheus.yml.
+  # callbacks: ["prometheus"]

@@ -1,0 +1,42 @@
+apiVersion: 1
+
+# Fixed UIDs matter: the dashboard JSON files reference these by uid, so they
+# must not be auto-generated.
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST
+      manageAlerts: false
+      prometheusType: Prometheus
+    editable: false
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      maxLines: 1000
+      # Click a log line, jump to the matching metrics window.
+      derivedFields:
+        - name: TraceID
+          matcherRegex: "trace_id=(\\w+)"
+          url: "$${__value.raw}"
+    editable: false
+
+  - name: Alertmanager
+    type: alertmanager
+    uid: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false
+    editable: false

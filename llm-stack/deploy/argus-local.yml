@@ -1,0 +1,16 @@
+# Local overlay: reuse an Argus index and pack estate that already exist on
+# this host instead of indexing from scratch.
+#
+#   docker compose -f docker-compose.yml -f deploy/argus-local.yml up -d argus
+#
+# ARGUS_HOME must point at an Argus checkout that has been indexed at least
+# once. Without this file the stack is fully self-contained and starts with an
+# empty index — which is the right default for a drop-in deployment.
+services:
+  argus:
+    volumes:
+      - ./config/argus/config.yaml:/etc/argus/config.yaml:ro
+      # The index is NOT read-only: the server writes audit and ACL-cache rows
+      # on every authenticated request.
+      - ${ARGUS_HOME:?set ARGUS_HOME to your Argus checkout}/deploy/test-gitlab/work/index.db:/var/lib/argus/index.db:rw
+      - ${ARGUS_HOME}/packs:/var/lib/argus/packs:ro

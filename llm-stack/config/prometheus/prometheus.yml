@@ -1,0 +1,145 @@
+﻿# ==============================================================================
+# Prometheus scrape configuration for the LLMService stack.
+#
+# Targets belonging to optional compose profiles carry `tier: optional` so that
+# the TargetDown alert can ignore them when their profile is not enabled.
+# ==============================================================================
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    stack: llmservice
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+
+  # ---- Prometheus itself -----------------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          tier: core
+
+  # ---- LLM inference ---------------------------------------------------------
+  # vLLM exposes rich histograms: TTFT, time-per-output-token, e2e latency,
+  # queue depth, KV-cache utilisation and token counters.
+  - job_name: vllm
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["vllm:8000"]
+        labels:
+          tier: core
+          component: inference
+      # Second engine (profile: multi-model). Marked optional so it does not
+      # alert when that profile is off. Every vLLM series carries a model_name
+      # label, so the dashboards split the two engines apart on their own.
+      - targets: ["vllm-secondary:8000"]
+        labels:
+          tier: optional
+          component: inference
+
+  # ---- LLM gateway (profile: gateway) ---------------------------------------
+  # DISABLED on purpose. LiteLLM's /metrics is an enterprise feature and its
+  # endpoint requires the master key, so an unauthenticated scrape just logs a
+  # 401 every 15s. Re-enable together with `callbacks: ["prometheus"]` in
+  # config/litellm/config.yaml if you have a licence, and supply the key with:
+  #     authorization:
+  #       type: Bearer
+  #       credentials_file: /etc/prometheus/litellm_token
+  #
+  # - job_name: litellm
+  #   metrics_path: /metrics
+  #   static_configs:
+  #     - targets: ["litellm:4000"]
+  #       labels:
+  #         tier: optional
+  #         component: gateway
+
+  # ---- Host hardware ---------------------------------------------------------
+  # On Docker Desktop / WSL2 this reports the Linux VM, not Windows itself.
+  # For true Windows host metrics install windows_exporter and enable the job
+  # further down.
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          tier: core
+          component: host
+
+  # ---- Per-container CPU / memory / network / disk ---------------------------
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+        labels:
+          tier: core
+          component: containers
+    metric_relabel_configs:
+      # cAdvisor is extremely chatty; drop the series nothing here graphs.
+      - source_labels: [__name__]
+        regex: "container_tasks_state|container_memory_failures_total|container_blkio_device_usage_total"
+        action: drop
+
+  # ---- GPU via nvidia-smi (profile: smi) ------------------------------------
+  - job_name: nvidia-smi
+    static_configs:
+      - targets: ["nvidia-smi-exporter:9835"]
+        labels:
+          tier: optional
+          component: gpu
+
+  # ---- GPU via DCGM (profile: dcgm) -----------------------------------------
+  - job_name: dcgm
+    static_configs:
+      - targets: ["dcgm-exporter:9400"]
+        labels:
+          tier: optional
+          component: gpu
+
+  # ---- Observability plumbing ------------------------------------------------
+  - job_name: grafana
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["grafana:3000"]
+        labels:
+          tier: core
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+        labels:
+          tier: core
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+        labels:
+          tier: optional
+
+  # ---- Reverse proxy (profile: proxy) ---------------------------------------
+  # Traefik exposes request counts, latencies and status codes per router and
+  # per service - edge-level visibility that complements vLLM's engine metrics.
+  - job_name: traefik
+    static_configs:
+      - targets: ["traefik:8082"]
+        labels:
+          tier: optional
+          component: proxy
+
+  # ---- Windows host metrics (windows_exporter) -------------------------------
+  # node-exporter measures the WSL2 VM; this measures the actual machine, and is
+  # the only source of CPU temperature on Windows.
+  - job_name: windows
+    static_configs:
+      - targets: ["host.docker.internal:9182"]
+        labels:
+          tier: optional
+          component: host

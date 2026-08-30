@@ -1,0 +1,243 @@
+{
+  "uid": "gpu-hardware",
+  "title": "GPU Hardware",
+  "tags": ["llmservice", "gpu", "hardware"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "row",
+      "title": "nvidia-smi exporter (profile: smi)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "gauge",
+      "title": "GPU utilisation",
+      "description": "Fraction of time the GPU had at least one kernel resident. High utilisation with low throughput usually means memory-bound decode, which is normal for LLM inference.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_utilization_gpu_ratio", "legendFormat": "{{gpu}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 0.3 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "type": "gauge",
+      "title": "VRAM used",
+      "description": "vLLM pre-allocates gpu-memory-utilization of the card at startup, so expect this to sit high and flat.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes",
+          "legendFormat": "{{gpu}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.9 },
+              { "color": "red", "value": 0.98 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "type": "gauge",
+      "title": "Temperature",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_temperature_gpu", "legendFormat": "{{gpu}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "min": 20,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 75 },
+              { "color": "orange", "value": 83 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "type": "stat",
+      "title": "Power draw",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_power_draw_watts", "legendFormat": "{{gpu}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "watt", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "orange" } },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Utilisation over time",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_utilization_gpu_ratio", "legendFormat": "compute {{gpu}}" },
+        { "refId": "B", "expr": "nvidia_smi_utilization_memory_ratio", "legendFormat": "mem bandwidth {{gpu}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "max": 1,
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+    },
+    {
+      "type": "timeseries",
+      "title": "VRAM used / total",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_memory_used_bytes", "legendFormat": "used {{gpu}}" },
+        { "refId": "B", "expr": "nvidia_smi_memory_total_bytes", "legendFormat": "total {{gpu}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Temperature and power",
+      "description": "Watch for temperature climbing into the throttle zone while power drops — that is the card down-clocking, and it shows up as falling tokens/sec on the LLM Overview dashboard.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_temperature_gpu", "legendFormat": "temp {{gpu}}" },
+        { "refId": "B", "expr": "nvidia_smi_power_draw_watts", "legendFormat": "power {{gpu}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5, "showPoints": "never", "axisPlacement": "auto" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "temp.*" },
+            "properties": [{ "id": "unit", "value": "celsius" }]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "power.*" },
+            "properties": [
+              { "id": "unit", "value": "watt" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+    },
+    {
+      "type": "row",
+      "title": "DCGM exporter (profile: dcgm, bare-metal Linux only)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "collapsed": true,
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "DCGM: SM utilisation",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+          "targets": [
+            { "refId": "A", "expr": "DCGM_FI_DEV_GPU_UTIL", "legendFormat": "gpu {{gpu}}" }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "percent", "max": 100, "custom": { "fillOpacity": 15, "showPoints": "never" } },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+        },
+        {
+          "type": "timeseries",
+          "title": "DCGM: framebuffer used",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+          "targets": [
+            { "refId": "A", "expr": "DCGM_FI_DEV_FB_USED * 1024 * 1024", "legendFormat": "used {{gpu}}" },
+            { "refId": "B", "expr": "DCGM_FI_DEV_FB_FREE * 1024 * 1024", "legendFormat": "free {{gpu}}" }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "bytes", "custom": { "fillOpacity": 15, "showPoints": "never" } },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+        },
+        {
+          "type": "timeseries",
+          "title": "DCGM: temperature, power, SM clock",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+          "targets": [
+            { "refId": "A", "expr": "DCGM_FI_DEV_GPU_TEMP", "legendFormat": "temp {{gpu}}" },
+            { "refId": "B", "expr": "DCGM_FI_DEV_POWER_USAGE", "legendFormat": "power {{gpu}}" },
+            { "refId": "C", "expr": "DCGM_FI_DEV_SM_CLOCK", "legendFormat": "sm clock {{gpu}}" }
+          ],
+          "fieldConfig": {
+            "defaults": { "custom": { "fillOpacity": 5, "showPoints": "never" } },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+        }
+      ]
+    }
+  ]
+}

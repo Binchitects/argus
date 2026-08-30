@@ -1,0 +1,9 @@
+# Shell scripts must keep LF endings or they break inside Linux containers
+# and under Git Bash on Windows.
+*.sh   text eol=lf
+*.py   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+Makefile text eol=lf
+*.ps1  text eol=crlf

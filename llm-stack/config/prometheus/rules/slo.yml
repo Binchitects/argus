@@ -1,0 +1,63 @@
+# ==============================================================================
+# Latency SLOs — intentionally left for you to fill in.
+#
+# The rules in llm.yml alert on things that are objectively broken (engine down,
+# queue backing up, KV cache saturated). An SLO is different: it encodes what
+# *your users* consider acceptable, and nobody can pick that number for you.
+#
+# The trade-off, concretely:
+#
+#   Tight threshold (e.g. p95 TTFT > 1s)
+#     Catches degradation early. On a single consumer GPU you will get paged for
+#     ordinary batching behaviour, learn to ignore the alert, and then miss a
+#     real one.
+#
+#   Loose threshold (e.g. p95 TTFT > 15s)
+#     Almost never fires falsely, but by the time it does, users gave up
+#     minutes ago.
+#
+#   Long `for:` window (e.g. 30m)
+#     Filters out transient spikes from a single large prompt. Slow to notice a
+#     genuine regression.
+#
+# Ground your choice in measurement, not intuition — run:
+#     ./scripts/benchmark.sh --concurrency 1,2,4,8,16
+# and read the p95 TTFT column at the concurrency you actually expect. A common
+# rule of thumb is to set the threshold at roughly 2x your measured p95 at
+# expected load, so normal operation has headroom.
+#
+# Uncomment and fill in the three TODOs below, then reload Prometheus:
+#     curl -X POST http://localhost:9090/-/reload
+# ==============================================================================
+
+groups:
+
+  - name: slo
+    interval: 30s
+    rules: []
+
+      # - alert: SloTimeToFirstTokenBreached
+      #   expr: >-
+      #     histogram_quantile(0.95,
+      #       sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[10m])))
+      #     > TODO_SECONDS
+      #   for: TODO_DURATION
+      #   labels:
+      #     severity: warning
+      #     component: inference
+      #   annotations:
+      #     summary: "p95 TTFT above the SLO"
+      #     description: "TODO: what should the on-call person do about it?"
+
+      # - alert: SloEndToEndLatencyBreached
+      #   expr: >-
+      #     histogram_quantile(0.95,
+      #       sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[10m])))
+      #     > TODO_SECONDS
+      #   for: TODO_DURATION
+      #   labels:
+      #     severity: warning
+      #     component: inference
+      #   annotations:
+      #     summary: "p95 end-to-end latency above the SLO"
+      #     description: "TODO"

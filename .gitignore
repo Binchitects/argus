@@ -19,6 +19,14 @@ config.yaml
 config.local.yaml
 .env
 
+# The bundled llm-stack deployment carries its own .gitignore. The unanchored
+# `config.yaml` rule above matches at any depth, so without these exceptions it
+# silently strips two files that llm-stack's docker-compose bind-mounts, and a
+# fresh clone fails to start. Neither holds a secret: the Argus GitLab token and
+# the LiteLLM keys are both injected from the environment.
+!llm-stack/config/argus/config.yaml
+!llm-stack/config/litellm/config.yaml
+
 # Editors / OS
 .vscode/
 .idea/

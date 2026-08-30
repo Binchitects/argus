@@ -1,0 +1,17 @@
+# Container-side Argus config. Mounted read-only at /etc/argus/config.yaml.
+#
+# COMMITTED on purpose: docker-compose bind-mounts this path, so a fresh clone
+# must contain it or Argus will not start. It holds no secrets - the GitLab
+# token is injected from ARGUS_GITLAB_TOKEN in .env and never written here.
+gitlab:
+  # host.docker.internal, not localhost: inside a container `localhost` is the
+  # container itself, so the GitLab on this machine is unreachable by that name.
+  url: http://host.docker.internal:8929
+  # token comes from ARGUS_GITLAB_TOKEN in .env -- never written here.
+
+index:
+  data_dir: /var/lib/argus
+  db_path: /var/lib/argus/index.db
+
+packs:
+  dir: /var/lib/argus/packs

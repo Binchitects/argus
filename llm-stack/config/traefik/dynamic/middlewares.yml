@@ -1,0 +1,65 @@
+# Reusable middlewares, referenced by name from container labels.
+
+http:
+  middlewares:
+
+    # Guards the components that ship with no authentication of their own:
+    # Prometheus, Alertmanager, cAdvisor, Loki, the exporters, and the Traefik
+    # dashboard. Credentials live in a directory outside this watched one, so
+    # the file provider does not try to parse the htpasswd as configuration.
+    internal-auth:
+      basicAuth:
+        usersFile: /etc/traefik/auth/users.htpasswd
+        realm: LLMService internal
+        removeHeader: true
+
+    security-headers:
+      headers:
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: same-origin
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+
+    compress:
+      compress:
+        # Never compress an SSE stream — buffering would destroy the
+        # token-by-token delivery that makes streaming useful.
+        excludedContentTypes:
+          - text/event-stream
+
+    # Applied to normal browser-facing services.
+    default-chain:
+      chain:
+        middlewares:
+          - security-headers
+          - compress
+
+    # Applied to the unauthenticated internals.
+    protected-chain:
+      chain:
+        middlewares:
+          - security-headers
+          - internal-auth
+
+    # Ask Authelia about every request before it reaches the backend. Authelia
+    # answers 200 (allow) or 401/302 (send the browser to the login portal).
+    authelia:
+      forwardAuth:
+        address: 'http://authelia:9091/api/authz/forward-auth'
+        # Authelia needs the original scheme/host/URI to decide which
+        # access_control rule applies and where to redirect back to.
+        trustForwardHeader: true
+        authResponseHeaders:
+          - 'Remote-User'
+          - 'Remote-Groups'
+          - 'Remote-Email'
+          - 'Remote-Name'
+
+    # Used instead of protected-chain when the `auth` profile is enabled.
+    # Swap between them with PROTECTED_CHAIN in .env.
+    sso-chain:
+      chain:
+        middlewares:
+          - security-headers
+          - authelia
