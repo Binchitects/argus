@@ -20,9 +20,9 @@ model_list:
   # The local vLLM engine, published under its real name.
   # `openai/` tells LiteLLM to speak the OpenAI protocol to an arbitrary
   # base_url rather than to api.openai.com.
-  - model_name: Qwen2.5-7B-Instruct
+  - model_name: Qwen3.8-27B-AWQ-MTP
     litellm_params:
-      model: openai/Qwen2.5-7B-Instruct
+      model: openai/Qwen3.8-27B-AWQ-MTP
       api_base: http://vllm:8000/v1
       api_key: os.environ/VLLM_API_KEY
       rpm: 600
@@ -33,7 +33,7 @@ model_list:
   # underlying checkpoint does. Both point at the same engine.
   - model_name: local
     litellm_params:
-      model: openai/Qwen2.5-7B-Instruct
+      model: openai/Qwen3.8-27B-AWQ-MTP
       api_base: http://vllm:8000/v1
       api_key: os.environ/VLLM_API_KEY
 

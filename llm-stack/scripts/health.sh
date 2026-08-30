@@ -32,6 +32,7 @@ CHECKS=(
   "LiteLLM|http://litellm:4000/health/liveliness|gateway"
   "Authelia|http://authelia:9091/api/health|auth"
   "Langfuse|http://langfuse:3000/api/public/health|tracing"
+  "Argus|http://argus:7700/healthz|argus"
   "Traefik ping|http://traefik:8082/ping|proxy"
 )
 

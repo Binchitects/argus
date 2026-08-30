@@ -326,7 +326,11 @@ repo = sys.argv[1]
 url = "https://huggingface.co/api/models/%s/tree/main?recursive=true" % repo
 with urllib.request.urlopen(url, timeout=60) as r:
     files = json.load(r)
-keep = ('.safetensors', '.json', '.txt', '.model')
+# .jinja matters: transformers >= 4.44 moved chat templates OUT of
+# tokenizer_config.json into a standalone chat_template.jinja. Skip it and
+# the model loads fine but rejects every chat request with "default chat
+# template is no longer allowed".
+keep = ('.safetensors', '.json', '.txt', '.model', '.jinja')
 for f in files:
     p = f.get("path", "")
     if p.endswith(keep) and not p.startswith("original/"):
