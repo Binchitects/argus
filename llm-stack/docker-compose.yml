@@ -637,6 +637,11 @@ services:
       # in-cluster call to Authelia over the Docker network.
       GF_AUTH_GENERIC_OAUTH_TLS_SKIP_VERIFY_INSECURE: "true"
       # Keep the local admin login available as a break-glass account.
+      # The usage dashboards query the gateway's database directly, and
+      # provisioning expands these into the LiteLLM datasource. Without them
+      # Grafana starts fine and that one datasource silently fails to connect.
+      POSTGRES_USER: ${POSTGRES_USER:-myuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       GF_AUTH_DISABLE_LOGIN_FORM: "false"
     depends_on: [prometheus]
     labels:

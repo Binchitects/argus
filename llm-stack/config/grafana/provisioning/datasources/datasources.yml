@@ -40,3 +40,29 @@ datasources:
       implementation: prometheus
       handleGrafanaManagedAlerts: false
     editable: false
+
+  # The gateway's own database, which is where per-person token usage lives.
+  #
+  # Not Prometheus, and not by choice: LiteLLM's /metrics endpoint is an
+  # enterprise feature on current builds, which is why the `litellm` scrape
+  # job in config/prometheus/prometheus.yml is commented out. vLLM's metrics
+  # do carry token counts but have no user dimension -- they answer "how many
+  # tokens" and never "whose". The spend tables answer both, and they are the
+  # same rows the LiteLLM admin UI reads.
+  #
+  # Read-only by convention: nothing in Grafana writes here, and the
+  # dashboards only SELECT.
+  - name: LiteLLM
+    type: postgres
+    uid: litellm-db
+    access: proxy
+    url: postgres:5432
+    database: litellm
+    user: ${POSTGRES_USER}
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    editable: false
