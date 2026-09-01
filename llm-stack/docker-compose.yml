@@ -446,6 +446,17 @@ services:
       # these back at http://vllm:8000/v1 + ${VLLM_API_KEY} to bypass it.
       OPENAI_API_BASE_URL: ${WEBUI_BACKEND_URL:-http://litellm:4000/v1}
       OPENAI_API_KEY: ${WEBUI_BACKEND_KEY:-${LITELLM_MASTER_KEY}}
+      # Open WebUI talks to the gateway with ONE shared key, so without this
+      # every person's chat usage is spend against that single key: the
+      # gateway can say the web UI used $40 and not who used it. This forwards
+      # the signed-in identity as X-OpenWebUI-User-Email (and -User-Id,
+      # -User-Name, -User-Role), which config/litellm/config.yaml maps onto
+      # the internal user. It is the whole reason chat usage is attributable.
+      #
+      # It also means the gateway now receives the email address of everyone
+      # who chats. That is the point -- it cannot bill a person it cannot
+      # name -- but it is the one privacy-relevant thing this file forwards.
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
       ENABLE_OLLAMA_API: "false"
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY}
       WEBUI_NAME: LLMService

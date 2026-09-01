@@ -62,6 +62,24 @@ router_settings:
 litellm_settings:
   drop_params: true
   set_verbose: false
+
+  # ------------------------------------------------------------ spend limits
+  # A default ceiling for every internal user, so a person who is added to the
+  # roster and never given an explicit quota is still bounded. Spend is
+  # counted from BOTH surfaces once user_header_mappings is in place, so this
+  # is a per-person total rather than a per-key one.
+  #
+  # These are USD figures derived from token counts and the model's configured
+  # price. For a purely local vLLM deployment the "cost" is notional -- what it
+  # actually bounds is tokens -- but it is still the lever that stops one
+  # person consuming the whole GPU for a month, and it is what the dashboards
+  # sum. Set input_cost_per_token/output_cost_per_token on a model to make the
+  # figure mean money.
+  #
+  # 0 would block every request rather than allow unlimited, so the default is
+  # a real number. Raise per-person with scripts/sync-llm-users.py.
+  max_internal_user_budget: os.environ/LITELLM_DEFAULT_USER_BUDGET
+  internal_user_budget_duration: os.environ/LITELLM_BUDGET_DURATION
   # Cache identical completions in Redis. A big win for repeated evals and for
   # UI clients that resend the same system prompt.
   cache: true
@@ -78,6 +96,31 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/DATABASE_URL
   store_model_in_db: true
+
+  # ---------------------------------------------------------------- identity
+  # This is what makes one person's API usage and their chat usage add up to
+  # ONE number instead of two unrelated ones.
+  #
+  # The problem it solves: Open WebUI authenticates to this gateway with a
+  # SINGLE shared key (see WEBUI_BACKEND_KEY in docker-compose.yml). Without
+  # the mapping below, every chat message from every person is spend against
+  # that one key -- the gateway can tell you the web UI used $40 this month
+  # and cannot tell you who used it. Per-person API keys were attributable all
+  # along; the web UI was the hole.
+  #
+  # Open WebUI forwards the signed-in identity as headers when
+  # ENABLE_FORWARD_USER_INFO_HEADERS is set. Mapping the EMAIL header to
+  # `internal_user` makes LiteLLM's internal user id the person's email
+  # address -- and scripts/sync-llm-users.py mints each API key with
+  # `user_id: <same email>`. One identity, both surfaces.
+  #
+  # Email rather than X-OpenWebUI-User-Id deliberately: the user id is an
+  # Open WebUI database row id, which exists nowhere else. Email is what
+  # Authelia issues over OIDC, what team.yml already records, and therefore
+  # the only identifier the whole stack agrees on.
+  user_header_mappings:
+    - header_name: X-OpenWebUI-User-Email
+      litellm_user_role: internal_user
   # /metrics is an enterprise feature on current builds; the Prometheus job for
   # it is commented out in config/prometheus/prometheus.yml.
   # callbacks: ["prometheus"]

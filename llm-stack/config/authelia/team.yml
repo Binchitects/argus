@@ -37,6 +37,23 @@ users:
     email: alice@example.com
     groups:
       - users
+    # Optional per-person gateway quotas, applied by
+    # ./scripts/llm-users.sh --apply. Omit any of them to keep the stack
+    # default (LITELLM_DEFAULT_USER_BUDGET / LITELLM_BUDGET_DURATION in .env).
+    #
+    # These bound the person, not the key: spend from their API key and from
+    # their Open WebUI chats is counted against the same identity, because
+    # both resolve to this email address.
+    #
+    #   max_budget            USD of model spend before requests are refused
+    #   budget_duration       when that resets: 1mo, 30d, 24h, 60m
+    #   tpm_limit             tokens per minute
+    #   rpm_limit             requests per minute
+    #   max_parallel_requests concurrent requests -- the one that actually
+    #                         protects a single-GPU box from one heavy user
+    max_budget: 100
+    budget_duration: 1mo
+    max_parallel_requests: 4
 
   - username: bob
     displayname: Bob Example
