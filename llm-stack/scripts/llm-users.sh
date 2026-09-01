@@ -20,4 +20,15 @@ LITELLM_PORT="$(grep -E '^LITELLM_PORT=' .env | cut -d= -f2- || echo 4000)"
 export LITELLM_MASTER_KEY
 export LITELLM_URL="${LITELLM_URL:-http://localhost:${LITELLM_PORT:-4000}}"
 
-exec python3 scripts/sync-llm-users.py config/authelia/team.yml "$@"
+# PYTHON overrides the interpreter. `python3` on Windows often resolves to
+# the Microsoft Store shim, which is a different install from the one with
+# PyYAML on it -- and the resulting "needs PyYAML" is confusing when you can
+# import yaml perfectly well in the shell you just typed it in.
+PY="${PYTHON:-python3}"
+"$PY" -c "import yaml" 2>/dev/null || {
+  echo "$PY cannot import PyYAML." >&2
+  echo "  pip install pyyaml, or point PYTHON at an interpreter that has it:" >&2
+  echo "  PYTHON=/c/Python313/python.exe $0 $*" >&2
+  exit 1
+}
+exec "$PY" scripts/sync-llm-users.py config/authelia/team.yml "$@"

@@ -94,13 +94,45 @@ SELECT "user", SUM(spend) AS spend, SUM(total_tokens) AS tokens,
 
 ## What happens at the limit
 
-A person over their ceiling gets HTTP 400 with a budget message, on both the
-API and in chat. The budget resets on `budget_duration`; LiteLLM checks for
-expiries roughly every ten minutes, so a reset is not instant.
+Measured against a live gateway, not inferred.
 
-`max_parallel_requests` is the setting that actually protects a single-GPU
-box. Budgets bound a month; concurrency bounds a moment, and it is one heavy
-user's ten parallel requests that makes the box unusable for everyone else.
+**On the API path, the limit binds.** A user over their ceiling is refused
+with **HTTP 429** and a message naming them:
+
+    ExceededBudget: User=capped@example.com over budget.
+    Spend=6.8e-06, Budget=5e-06
+
+**On the web UI path, the limit does NOT bind.** The same over-budget person
+was refused through their API key and served normally through chat. This is
+the one requirement in this document that is not met, and it is worth being
+precise about why:
+
+* An internal-user budget is checked against a key **owned by that user**.
+  The web UI does not use the person's key -- it uses one shared key for
+  everyone, and identity arrives only in a header.
+* LiteLLM's mechanism for bounding a shared key by the caller named in the
+  request is the **end-user (customer) budget**, which does work: an end user
+  with a ceiling was refused with 429 on the shared key.
+* Mapping the same header to `internal_user` *and* `customer` looked like it
+  would give both. Measured: it gives neither -- attribution stopped and
+  enforcement never started, so LiteLLM appears to honour one role per
+  header.
+
+So today the configuration buys **attribution on both surfaces and
+enforcement on one**. That is a real improvement over the starting point,
+where chat usage was not attributable at all, and it is not the whole job.
+
+Closing it needs one of:
+
+* Open WebUI sending the OpenAI `user` field in the request body, which
+  LiteLLM already enforces end-user budgets against, or
+* a small proxy between Open WebUI and the gateway that swaps the shared key
+  for the caller's own virtual key, or
+* per-user upstream keys in Open WebUI, which it does not support natively.
+
+Until then, chat usage is visible and bounded only by review, and
+`max_parallel_requests` on the person's key is what protects the box from
+their API traffic. Budgets bound a month; concurrency bounds a moment.
 
 ## Limitations worth knowing
 

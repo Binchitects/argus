@@ -336,6 +336,15 @@ services:
       REDIS_PORT: "6379"
       VLLM_API_KEY: ${VLLM_API_KEY}
       STORE_MODEL_IN_DB: "True"
+      # config/litellm/config.yaml reads these through `os.environ/`. This
+      # service has no env_file, so a variable that is not named here does not
+      # exist inside the container -- and LiteLLM resolves a missing
+      # `os.environ/` reference to None rather than failing on it, so
+      # `max_internal_user_budget` became float(None) and the gateway would
+      # not start at all. A default budget that silently does not arrive is
+      # worse than one that is wrong, so both are passed explicitly.
+      LITELLM_DEFAULT_USER_BUDGET: ${LITELLM_DEFAULT_USER_BUDGET:-50}
+      LITELLM_BUDGET_DURATION: ${LITELLM_BUDGET_DURATION:-1mo}
     # One worker is ample for a small team and costs ~700 MB instead of ~3 GB.
     # Raise LITELLM_WORKERS only if the gateway itself becomes a bottleneck.
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "${LITELLM_WORKERS:-1}"]

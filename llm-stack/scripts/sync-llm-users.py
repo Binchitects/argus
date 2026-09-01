@@ -80,11 +80,31 @@ def api(path: str, payload: dict | None, master: str, base: str,
         ) from None
 
 
+#: LiteLLM rejects anything above 100 with a 422, so this is a hard ceiling
+#: rather than a tuning choice -- a single larger request is not an option.
+PAGE_SIZE = 100
+
+
 def existing_users(master: str, base: str) -> dict[str, dict]:
-    """Everyone the gateway already knows, by user_id."""
-    got = api("/user/list?page_size=500", None, master, base, method="GET")
-    rows = got.get("users", got if isinstance(got, list) else [])
-    return {str(u.get("user_id")): u for u in rows if u.get("user_id")}
+    """Everyone the gateway already knows, by user_id.
+
+    Paginated because the roster can exceed one page, and a truncated list
+    reads as "these people do not exist yet" -- which would create duplicate
+    users and hand out second keys to people who already had one.
+    """
+    found: dict[str, dict] = {}
+    for page in range(1, 51):
+        got = api(f"/user/list?page={page}&page_size={PAGE_SIZE}", None,
+                  master, base, method="GET")
+        rows = got.get("users", got if isinstance(got, list) else [])
+        if not rows:
+            break
+        for user in rows:
+            if user.get("user_id"):
+                found[str(user["user_id"])] = user
+        if len(rows) < PAGE_SIZE:
+            break
+    return found
 
 
 def roster(path: str) -> list[dict]:

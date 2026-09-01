@@ -50,6 +50,36 @@ model_list:
   #     model: anthropic/claude-sonnet-5
   #     api_key: os.environ/ANTHROPIC_API_KEY
 
+  # ---------------------------------------------------------------- ollama
+  # An alternative backend for machines where vLLM cannot start. Measured on
+  # this host: vLLM's engine dies at init with `RuntimeError: UVA is not
+  # available` under Docker Desktop's WSL2 GPU passthrough -- nvidia-smi works
+  # inside a container (bootstrap.sh verifies exactly that and passes), but
+  # Unified Virtual Addressing is not exposed, and vLLM needs it. Ollama runs
+  # natively on the Windows host and serves the same GPU.
+  #
+  # Point at the HOST rather than a container: Ollama is not part of this
+  # compose file. host.docker.internal resolves on Docker Desktop.
+  #
+  # The per-token costs are what turn spend into a real number. Without them
+  # every request costs 0.00, budgets never bind, and the usage dashboards
+  # sum a column of zeros -- see docs/USAGE-LIMITS.md. These are illustrative
+  # local rates, not a vendor price list; set them to whatever makes a
+  # sensible unit of account for your hardware.
+  - model_name: deepseek-r1-8b
+    litellm_params:
+      model: ollama_chat/deepseek-r1:8b
+      api_base: http://host.docker.internal:11434
+      input_cost_per_token: 0.0000001
+      output_cost_per_token: 0.0000004
+
+  - model_name: qwen3.8-27b
+    litellm_params:
+      model: ollama_chat/qwen3.8:27b
+      api_base: http://host.docker.internal:11434
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.0000008
+
 router_settings:
   routing_strategy: simple-shuffle
   num_retries: 2
@@ -118,6 +148,24 @@ general_settings:
   # Open WebUI database row id, which exists nowhere else. Email is what
   # Authelia issues over OIDC, what team.yml already records, and therefore
   # the only identifier the whole stack agrees on.
+  # BOTH roles, from the one header, because they do different jobs. Measured
+  # on this stack rather than assumed:
+  #
+  #   internal_user  ATTRIBUTES the spend. It makes chat usage land on the
+  #                  same identity as the person's API key, which is what
+  #                  makes their total one number instead of two.
+  #
+  #   customer       ENFORCES the ceiling. With internal_user alone, an
+  #                  over-budget person was refused on the API path (429) and
+  #                  still served on the web UI -- tracked but not stopped.
+  #                  The internal-user budget binds a key owned by that user;
+  #                  the web UI holds a SHARED key, so nothing bound. End-user
+  #                  budgets are the mechanism that checks a shared key
+  #                  against the caller named in the request.
+  #
+  # scripts/sync-llm-users.py therefore provisions each person twice, with the
+  # same email and the same ceiling: once as an internal user, once as an end
+  # user. Drop either half and you lose either the total or the limit.
   user_header_mappings:
     - header_name: X-OpenWebUI-User-Email
       litellm_user_role: internal_user
