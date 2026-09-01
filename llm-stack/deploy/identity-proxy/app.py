@@ -51,11 +51,21 @@ def _identity(request: Request) -> str:
 
 
 def _with_user(body: bytes, who: str) -> bytes:
-    """Add `user` to a JSON body, leaving anything else untouched.
+    """Set `user` on a JSON body to the identity in the trusted header.
 
-    An existing `user` is NOT overwritten: a caller that named itself meant
-    it, and silently replacing that would misattribute a request that was
-    already correct.
+    The header WINS over whatever the client put in `user`, and that is the
+    whole point rather than an oversight. Open WebUI sends its own `user`
+    value -- its internal account id -- which is not what budgets are keyed
+    on. An earlier version of this function declined to overwrite an existing
+    `user`, on the reasoning that a caller which named itself meant it. The
+    result was measured: chat was attributed correctly (the header does that)
+    and still not enforced, because the end-user budget was being checked
+    against an id that has no budget.
+
+    The header is set by Open WebUI from the signed-in session, so it is the
+    identity the gateway should bill. A client-supplied `user` is not
+    authenticated and must not be able to spend someone else's budget by
+    naming them -- so where both exist, the header is authoritative.
     """
     if not who or not body:
         return body
@@ -63,7 +73,7 @@ def _with_user(body: bytes, who: str) -> bytes:
         payload = json.loads(body)
     except (ValueError, UnicodeDecodeError):
         return body          # not JSON: a file upload, or something we do not model
-    if not isinstance(payload, dict) or payload.get("user"):
+    if not isinstance(payload, dict):
         return body
     payload["user"] = who
     return json.dumps(payload).encode()

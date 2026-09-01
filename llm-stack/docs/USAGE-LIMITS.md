@@ -131,6 +131,38 @@ end-user half and chat is attributed and unlimited.
 only. On a single-GPU box it is the setting that matters most: budgets bound
 a month, concurrency bounds a moment.
 
+## Verified through the real web UI
+
+Not simulated headers -- an account signed in to Open WebUI, chatting.
+
+| | 8B (`deepseek-r1:8b`) | 27B (`qwen3.8:27b`) |
+|---|---|---|
+| attributed to the signed-in person | yes | yes |
+| refused when over the ceiling | yes (429/400 `ExceededBudget`) | -- |
+
+Two things that will waste an afternoon if you do not know them:
+
+**Budget changes are not instant.** LiteLLM caches user records, so lowering
+a ceiling and immediately chatting still succeeds -- measured, and it looks
+exactly like enforcement being broken. The same test with the ceiling set
+*before* the person's first request refuses on the second message. When
+changing a live quota, expect a lag rather than concluding it does not work.
+
+**Open WebUI persists its connection in its own database.** The
+`OPENAI_API_BASE_URL` environment variable seeds that on first boot and is
+ignored afterwards, so an existing install keeps pointing wherever it was
+first configured -- here, at `vllm:8000`, which produced an empty model list
+and "Model not found" on every chat while the same URL worked perfectly when
+curled from inside that container. Fix it in the UI under
+**Admin → Settings → Connections**, or via the API:
+
+```bash
+curl -X POST http://open-webui:8080/openai/config/update   -H "Authorization: Bearer <an admin session token>"   -H 'Content-Type: application/json'   -d '{"ENABLE_OPENAI_API": true,
+       "OPENAI_API_BASE_URLS": ["http://identity-proxy:8080/v1"],
+       "OPENAI_API_KEYS": ["<the shared key>"],
+       "OPENAI_API_CONFIGS": {}}'
+```
+
 ## Limitations worth knowing
 
 **The dollar figures are notional for local models** unless you set
