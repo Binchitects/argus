@@ -173,6 +173,14 @@ services:
       # resuming. Plain HTTPS transfers are slower but far more tolerant of a
       # flaky link, which matters for multi-GB weight files.
       HF_HUB_DISABLE_XET: "1"
+      # The default read timeout is 10s, and a first pull of a multi-GB
+      # checkpoint over a slow link spends most of its time hitting it: the
+      # log fills with "The read operation timed out / Trying to resume
+      # download", and throughput falls as each retry restarts the HTTP
+      # request rather than the transfer. Measured here: 4.6 MB/s decaying to
+      # ~1 MB/s. A longer timeout does not make the link faster; it stops a
+      # slow-but-alive connection being abandoned and retried into the ground.
+      HF_HUB_DOWNLOAD_TIMEOUT: "${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
       # Emits per-request histograms Prometheus can scrape.
       VLLM_LOGGING_LEVEL: INFO
       # vLLM >= 0.27 defaults to GPUModelRunnerV2, which allocates Unified
@@ -273,6 +281,14 @@ services:
       # resuming. Plain HTTPS transfers are slower but far more tolerant of a
       # flaky link, which matters for multi-GB weight files.
       HF_HUB_DISABLE_XET: "1"
+      # The default read timeout is 10s, and a first pull of a multi-GB
+      # checkpoint over a slow link spends most of its time hitting it: the
+      # log fills with "The read operation timed out / Trying to resume
+      # download", and throughput falls as each retry restarts the HTTP
+      # request rather than the transfer. Measured here: 4.6 MB/s decaying to
+      # ~1 MB/s. A longer timeout does not make the link faster; it stops a
+      # slow-but-alive connection being abandoned and retried into the ground.
+      HF_HUB_DOWNLOAD_TIMEOUT: "${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
       VLLM_LOGGING_LEVEL: INFO
       VLLM_USE_V2_MODEL_RUNNER: "${VLLM_USE_V2_MODEL_RUNNER:-0}"
     command: >
