@@ -53,6 +53,15 @@ cp scripts/*.sh scripts/*.ps1 scripts/*.py "$PKG/scripts/" 2>/dev/null
 mkdir -p "$PKG/scripts/lib" && cp scripts/lib/* "$PKG/scripts/lib/" 2>/dev/null
 cp docs/*.md "$PKG/docs/" 2>/dev/null
 cp deploy/*.yml "$PKG/deploy/" 2>/dev/null
+cp deploy/*.py "$PKG/deploy/" 2>/dev/null
+# Directories under deploy/ that docker-compose BUILDS. Copying only *.yml
+# left identity-proxy out, and the compose file has `build:
+# ./deploy/identity-proxy` -- so the archive started, the gateway profile
+# failed to build, and chat usage silently went back to being unenforceable.
+# Anything compose builds has to travel with it.
+for d in identity-proxy; do
+  [[ -d "deploy/$d" ]] && cp -r "deploy/$d" "$PKG/deploy/"
+done
 touch "$PKG/models/.gitkeep"
 
 # Config: templates and provisioning only. Anything generated or secret is
@@ -140,5 +149,9 @@ say "The recipient runs:"
 say "  unzip llmservice-${VERSION}.zip && cd llmservice"
 say "  docker load < dist/argus-*.tar.gz"
 say "  ./scripts/install-requirements.sh   # or install-requirements.ps1"
-say "  ./scripts/bootstrap.sh && ./scripts/gen-auth.sh && ./scripts/up.sh"
+say "  ./scripts/setup.sh                  # or .\scripts\setup.ps1 on Windows"
+say ""
+say "  setup.sh asks for the domain, model, profiles and per-person budgets,"
+say "  then runs bootstrap, gen-auth and compose in order. --dry-run prints"
+say "  the plan and changes nothing. See docs/SETUP.md."
 echo
