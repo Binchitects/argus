@@ -10,6 +10,18 @@
 #   ./scripts/gen-certs.sh --force             # regenerate even if present
 set -euo pipefail
 
+# Git Bash rewrites an argument that looks like a path, so `-subj "/CN=..."`
+# arrives at openssl as "C:/Program Files/Git/CN=...". openssl then fails
+# with "subject name is expected to be in the format /type0=value0/...", and
+# because the openssl calls below send stderr to /dev/null under `set -e`,
+# the script dies silently having already truncated ca.crt to one byte -- so
+# the next run reports a corrupt CA rather than the real cause.
+#
+# MSYS_NO_PATHCONV turns that rewriting off. On Windows prefer
+# scripts/gen-certs.ps1, which does not go through the translation at all.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*' 
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 CERT_DIR="config/traefik/certs"

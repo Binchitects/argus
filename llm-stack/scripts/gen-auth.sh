@@ -237,8 +237,13 @@ __JWKS_PEM__
 
       # Machine-to-machine. No redirect_uris and no user: clients exchange
       # their secret directly for a short-lived access token. The special
-      # `authelia.bearer.authz` scope is what makes that token usable at the
+      # authelia.bearer.authz scope is what makes that token usable at the
       # forward-auth endpoint.
+      #
+      # No backticks around that scope name: this heredoc is unquoted, so a
+      # backticked word is run as a command. That is what printed
+      # "authelia.bearer.authz: command not found" on every run -- harmless
+      # to the output, and alarming enough to look like a broken generator.
       - client_id: 'api'
         client_name: 'LLM API (machine clients)'
         client_secret: '$A_HASH'
