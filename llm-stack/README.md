@@ -36,9 +36,28 @@ inference-only setup or the full stack.
 
 ---
 
+## Guided setup
+
+One command that asks for what it cannot safely guess, then runs everything
+else in the order it has to happen:
+
+```bash
+./scripts/setup.sh          # Linux, macOS, WSL
+.\scripts\setup.ps1         # Windows
+```
+
+`--dry-run` prints the whole plan without changing anything; `--defaults`
+accepts every default and asks nothing. It is safe to re-run: existing secrets
+are kept and every question offers the current value as its default, including
+which profiles are already enabled.
+
+Full walkthrough, and the four things it deliberately leaves to you, in
+[docs/SETUP.md](docs/SETUP.md).
+
 ## Fast deploy
 
-On a fresh Linux server with an NVIDIA GPU:
+If you would rather run the steps yourself, on a fresh Linux server with an
+NVIDIA GPU:
 
 ```bash
 git clone https://github.com/aliGhadyani/hermes-argus.git && cd hermes-argus/llm-stack
