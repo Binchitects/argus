@@ -125,6 +125,41 @@ def roster(path: str) -> list[dict]:
     return people
 
 
+def _default_budget() -> float:
+    """The stack-wide ceiling, or a conservative one if it is not set."""
+    try:
+        return float(os.environ.get("LITELLM_DEFAULT_USER_BUDGET") or 50)
+    except ValueError:
+        return 50.0
+
+
+def _end_user(email: str, quotas: dict, master: str, base: str) -> None:
+    """Mirror the person's ceiling onto their end-user record.
+
+    Only the budget carries over. tpm/rpm/parallel limits belong to a key,
+    and the chat path does not use the person's key -- copying them here
+    would look like they applied when they do not.
+    """
+    budget = {k: v for k, v in quotas.items()
+              if k in ("max_budget", "budget_duration")}
+    # Falling back to the stack default matters more here than it looks.
+    # `max_internal_user_budget` in config.yaml covers internal users with no
+    # explicit quota; end users have no such config-wide default, so a person
+    # on defaults would get an end-user record with NO ceiling -- and chat is
+    # exactly the path the end-user budget is there to bound. They would be
+    # attributed and unlimited, which is the hole this all exists to close.
+    budget.setdefault("max_budget", _default_budget())
+    budget.setdefault("budget_duration",
+                      os.environ.get("LITELLM_BUDGET_DURATION") or "1mo")
+    try:
+        api("/end_user/new", {"user_id": email, **budget}, master, base)
+    except SystemExit:
+        # Already present: update rather than fail the whole run, since the
+        # roster is reconciled repeatedly and only the first pass creates.
+        if budget:
+            api("/end_user/update", {"user_id": email, **budget}, master, base)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("team", help="path to config/authelia/team.yml")
@@ -163,6 +198,23 @@ def main() -> int:
             api("/user/new", {"user_id": email, "user_email": email,
                               "user_role": "internal_user", **quotas},
                 master, args.url)
+            # The SAME person, again, as an end user. Not redundant: the two
+            # records do different jobs, and both were measured.
+            #
+            #   internal user  attributes spend, and bounds the person's own
+            #                  API key, which LiteLLM checks against the key's
+            #                  owner.
+            #   end user       bounds chat, where every request arrives on ONE
+            #                  shared key. An internal-user budget cannot bind
+            #                  there because nobody's key was used; the
+            #                  end-user budget is checked against the caller
+            #                  named in the request body, which is what
+            #                  deploy/identity-proxy puts there.
+            #
+            # Omit this and chat is attributed and unlimited: an over-budget
+            # person keeps being served, which is exactly the hole this
+            # closes.
+            _end_user(email, quotas, master, args.url)
             key = api("/key/generate",
                       {"user_id": email, "key_alias": f"{person['username']}-api",
                        **quotas}, master, args.url)
@@ -180,9 +232,12 @@ def main() -> int:
             else:
                 api("/user/update", {"user_id": email, **quotas},
                     master, args.url)
+                _end_user(email, quotas, master, args.url)
                 print(f"{YELLOW}  UPDATED{OFF} {shown} {DIM}{quotas}{OFF}")
             updated += 1
         else:
+            if args.apply:
+                _end_user(email, quotas, master, args.url)
             print(f"{DIM}  ok     {email}{OFF}")
 
     if args.rotate:

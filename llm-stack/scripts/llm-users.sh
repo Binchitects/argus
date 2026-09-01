@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Provision gateway identities, API keys and quotas from team.yml.
 #
-# A wrapper so nobody has to export LITELLM_MASTER_KEY by hand -- a key typed
+# A wrapper so nobody has to LITELLM_DEFAULT_USER_BUDGET="$(grep -E '^LITELLM_DEFAULT_USER_BUDGET=' .env | cut -d= -f2-)"
+LITELLM_BUDGET_DURATION="$(grep -E '^LITELLM_BUDGET_DURATION=' .env | cut -d= -f2-)"
+export LITELLM_DEFAULT_USER_BUDGET LITELLM_BUDGET_DURATION
+export LITELLM_MASTER_KEY by hand -- a key typed
 # at a prompt lands in shell history, and this one is the credential that can
 # mint every other credential.
 #
@@ -17,6 +20,9 @@ cd "$(dirname "$0")/.."
 # this process's environment.
 LITELLM_MASTER_KEY="$(grep -E '^LITELLM_MASTER_KEY=' .env | cut -d= -f2-)"
 LITELLM_PORT="$(grep -E '^LITELLM_PORT=' .env | cut -d= -f2- || echo 4000)"
+LITELLM_DEFAULT_USER_BUDGET="$(grep -E '^LITELLM_DEFAULT_USER_BUDGET=' .env | cut -d= -f2-)"
+LITELLM_BUDGET_DURATION="$(grep -E '^LITELLM_BUDGET_DURATION=' .env | cut -d= -f2-)"
+export LITELLM_DEFAULT_USER_BUDGET LITELLM_BUDGET_DURATION
 export LITELLM_MASTER_KEY
 export LITELLM_URL="${LITELLM_URL:-http://localhost:${LITELLM_PORT:-4000}}"
 

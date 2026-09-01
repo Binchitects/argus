@@ -439,6 +439,35 @@ services:
   # WEB UI
   # ============================================================================
 
+  # Turns Open WebUI's forwarded identity header into the `user` field that
+  # LiteLLM enforces budgets against. Measured on this stack: the header
+  # alone attributes spend but does NOT stop an over-budget person, because
+  # an internal-user budget binds a key that user owns and the web UI uses
+  # one shared key for everyone. See deploy/identity-proxy/app.py.
+  #
+  # In the `gateway` profile because it is pointless without LiteLLM: with no
+  # gateway there is no budget to enforce.
+  identity-proxy:
+    build: ./deploy/identity-proxy
+    container_name: identity-proxy
+    profiles: ["gateway"]
+    restart: unless-stopped
+    environment:
+      UPSTREAM_URL: http://litellm:4000
+      IDENTITY_HEADER: X-OpenWebUI-User-Email
+    networks: [llm-net]
+    depends_on:
+      litellm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:8080/healthz',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
@@ -453,7 +482,7 @@ services:
       # Through LiteLLM rather than straight at vLLM: the gateway fronts EVERY
       # engine, so each warm model shows up in the WebUI model picker. Point
       # these back at http://vllm:8000/v1 + ${VLLM_API_KEY} to bypass it.
-      OPENAI_API_BASE_URL: ${WEBUI_BACKEND_URL:-http://litellm:4000/v1}
+      OPENAI_API_BASE_URL: ${WEBUI_BACKEND_URL:-http://identity-proxy:8080/v1}
       OPENAI_API_KEY: ${WEBUI_BACKEND_KEY:-${LITELLM_MASTER_KEY}}
       # Open WebUI talks to the gateway with ONE shared key, so without this
       # every person's chat usage is spend against that single key: the
