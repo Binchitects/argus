@@ -17,68 +17,65 @@
 # ==============================================================================
 
 model_list:
-  # The local vLLM engine, published under its real name.
-  # `openai/` tells LiteLLM to speak the OpenAI protocol to an arbitrary
-  # base_url rather than to api.openai.com.
-  - model_name: Qwen3.8-27B-AWQ-MTP
+  # vLLM is the single backend. One engine, one model at a time -- a 24 GB
+  # card cannot hold an 8B and a 27B at once, and vLLM claims
+  # VLLM_GPU_MEMORY_UTILIZATION of the card up front, so nothing else can
+  # load beside it. `scripts/switch-model` changes which model this is and
+  # rewrites the two entries below to match.
+  #
+  # `openai/` means "speak the OpenAI protocol to this base_url", not
+  # api.openai.com. The name after it MUST equal vLLM's --served-model-name
+  # (VLLM_SERVED_MODEL_NAME in .env) or every request 404s at the engine.
+  - model_name: qwen3-8b
     litellm_params:
-      model: openai/Qwen3.8-27B-AWQ-MTP
+      model: openai/qwen3-8b
       api_base: http://vllm:8000/v1
       api_key: os.environ/VLLM_API_KEY
       rpm: 600
+      # Without per-token prices spend is always 0.00, budgets never bind and
+      # the usage dashboards sum a column of zeros. Local rates, not a vendor
+      # price list -- set them to whatever makes a sensible unit of account.
+      input_cost_per_token: 0.0000001
+      output_cost_per_token: 0.0000004
     model_info:
       mode: chat
 
-  # Stable alias, so scripts and SDK clients need not change when the
-  # underlying checkpoint does. Both point at the same engine.
+  # Stable alias, so clients and scripts need not change when the checkpoint
+  # does. Both entries point at the same engine.
   - model_name: local
     litellm_params:
-      model: openai/Qwen3.8-27B-AWQ-MTP
+      model: openai/qwen3-8b
       api_base: http://vllm:8000/v1
       api_key: os.environ/VLLM_API_KEY
+      input_cost_per_token: 0.0000001
+      output_cost_per_token: 0.0000004
 
-  # --- Second warm engine (profile: multi-model) ---------------------------
-  # - model_name: ${VLLM2_SERVED_MODEL_NAME}
+  # --- Ollama, kept as a documented fallback -------------------------------
+  # Used while vLLM could not start (see .env VLLM_USE_V2_MODEL_RUNNER). It
+  # runs on the HOST and serves the same GPU, so it cannot run at the same
+  # time as vLLM -- whichever holds the card wins. Uncomment these ONLY with
+  # vLLM stopped, and note the `ollama_chat/` prefix keeps them out of
+  # switch-model's rewrite, which only touches `openai/` lines.
+  #
+  # - model_name: deepseek-r1-8b
   #   litellm_params:
-  #     model: openai/${VLLM2_SERVED_MODEL_NAME}
-  #     api_base: http://vllm-secondary:8000/v1
-  #     api_key: os.environ/VLLM_API_KEY
+  #     model: ollama_chat/deepseek-r1:8b
+  #     api_base: http://host.docker.internal:11434
+  #     input_cost_per_token: 0.0000001
+  #     output_cost_per_token: 0.0000004
+  #
+  # - model_name: qwen3.8-27b
+  #   litellm_params:
+  #     model: ollama_chat/qwen3.8:27b
+  #     api_base: http://host.docker.internal:11434
+  #     input_cost_per_token: 0.0000002
+  #     output_cost_per_token: 0.0000008
 
   # --- Example: a hosted fallback ------------------------------------------
   # - model_name: cloud-fallback
   #   litellm_params:
   #     model: anthropic/claude-sonnet-5
   #     api_key: os.environ/ANTHROPIC_API_KEY
-
-  # ---------------------------------------------------------------- ollama
-  # An alternative backend for machines where vLLM cannot start. Measured on
-  # this host: vLLM's engine dies at init with `RuntimeError: UVA is not
-  # available` under Docker Desktop's WSL2 GPU passthrough -- nvidia-smi works
-  # inside a container (bootstrap.sh verifies exactly that and passes), but
-  # Unified Virtual Addressing is not exposed, and vLLM needs it. Ollama runs
-  # natively on the Windows host and serves the same GPU.
-  #
-  # Point at the HOST rather than a container: Ollama is not part of this
-  # compose file. host.docker.internal resolves on Docker Desktop.
-  #
-  # The per-token costs are what turn spend into a real number. Without them
-  # every request costs 0.00, budgets never bind, and the usage dashboards
-  # sum a column of zeros -- see docs/USAGE-LIMITS.md. These are illustrative
-  # local rates, not a vendor price list; set them to whatever makes a
-  # sensible unit of account for your hardware.
-  - model_name: deepseek-r1-8b
-    litellm_params:
-      model: ollama_chat/deepseek-r1:8b
-      api_base: http://host.docker.internal:11434
-      input_cost_per_token: 0.0000001
-      output_cost_per_token: 0.0000004
-
-  - model_name: qwen3.8-27b
-    litellm_params:
-      model: ollama_chat/qwen3.8:27b
-      api_base: http://host.docker.internal:11434
-      input_cost_per_token: 0.0000002
-      output_cost_per_token: 0.0000008
 
 router_settings:
   routing_strategy: simple-shuffle
