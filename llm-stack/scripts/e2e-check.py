@@ -66,14 +66,41 @@ def spend(user_id: str) -> float:
     return float((got.get("user_info", got)).get("spend") or 0)
 
 
+def wait_for_spend(user_id: str, baseline: float, seconds: int = 180) -> float:
+    """Poll until spend rises above `baseline`, or give up.
+
+    Generous, because LiteLLM writes spend asynchronously and caches the user
+    record. A short window here does not just flake -- it mis-attributes: the
+    API call's spend arrives during the CHAT step and the two checks swap
+    verdicts, which is exactly what happened at 75s.
+    """
+    latest = baseline
+    for _ in range(max(1, seconds // 3)):
+        time.sleep(3)
+        latest = spend(user_id)
+        if latest > baseline:
+            return latest
+    return latest
+
+
 def main() -> int:
     stamp = int(time.time())
     email = f"e2e-{stamp}@example.com"
+    # Unique per run, and that is load-bearing. litellm_settings.cache is on,
+    # so an identical prompt is served from Redis at zero cost and records no
+    # spend -- the attribution checks below then fail against a stack that is
+    # working perfectly. The first run of this file passed and every rerun
+    # failed, which is exactly what a cache hit looks like from the outside.
+    prompt = f"Say hi. Request {stamp}."
     print(f"\n{DIM}  identity under test: {email}{OFF}\n", flush=True)
 
     # --- the engine ------------------------------------------------------
     try:
-        served = [m["id"] for m in call(VLLM, "/v1/models").get("data", [])]
+        # vLLM enforces its own api key (VLLM_API_KEY); without it the
+        # engine answers 401 and this reads as "not serving".
+        served = [m["id"] for m in call(
+            VLLM, "/v1/models",
+            token=os.environ.get("VLLM_API_KEY")).get("data", [])]
         record("vLLM is serving", bool(served), f"models={served}")
     except Exception as exc:
         record("vLLM is serving", False, type(exc).__name__)
@@ -107,14 +134,9 @@ def main() -> int:
     # --- API path attributes ---------------------------------------------
     before = spend(email)
     call(GW, "/chat/completions",
-         {"model": model, "messages": [{"role": "user", "content": "Say hi"}],
+         {"model": model, "messages": [{"role": "user", "content": prompt}],
           "max_tokens": 24}, token=key)
-    after = before
-    for _ in range(25):
-        time.sleep(3)
-        after = spend(email)
-        if after > before:
-            break
+    after = wait_for_spend(email, before)
     record("API usage attributed to the person", after > before,
            f"${before:.6f} -> ${after:.6f}")
 
@@ -124,14 +146,9 @@ def main() -> int:
                    {"name": "E2E", "email": email, "password": "Str0ng-E2E-Passw0rd"})["token"]
         before = spend(email)
         call(WEBUI, "/api/chat/completions",
-             {"model": model, "messages": [{"role": "user", "content": "Say hi"}],
+             {"model": model, "messages": [{"role": "user", "content": prompt}],
               "max_tokens": 24, "stream": False}, token=tok)
-        after = before
-        for _ in range(25):
-            time.sleep(3)
-            after = spend(email)
-            if after > before:
-                break
+        after = wait_for_spend(email, before)
         record("chat usage attributed to the same person", after > before,
                f"${before:.6f} -> ${after:.6f}")
 
@@ -141,7 +158,7 @@ def main() -> int:
             try:
                 call(WEBUI, "/api/chat/completions",
                      {"model": model,
-                      "messages": [{"role": "user", "content": "hi"}],
+                      "messages": [{"role": "user", "content": prompt + " again"}],
                       "max_tokens": 16, "stream": False}, token=tok)
             except urllib.error.HTTPError as exc:
                 refused = "budget" in exc.read().decode("utf-8", "replace").lower()
