@@ -163,6 +163,33 @@ curl -X POST http://open-webui:8080/openai/config/update   -H "Authorization: Be
        "OPENAI_API_CONFIGS": {}}'
 ```
 
+## Cached answers are free, and invisible
+
+`litellm_settings.cache` is on with a one-hour TTL, so an identical request is
+served from Redis. That reply costs nothing, records **no spend**, and appears
+in nobody's usage. Two people asking the same question in the same hour show
+one charge between them.
+
+That is usually what you want on a shared box — it is a large win for repeated
+evals and for UI clients that resend the same system prompt — but it does mean
+usage totals measure *what the GPU did*, not what people asked for.
+
+It also makes tests lie. `scripts/e2e-check.py` sent the same prompt every run
+and its attribution checks failed against a stack that was working perfectly:
+the first run passed, every rerun failed, which is what a cache hit looks like
+from outside. Its prompts are unique per run for that reason. If you are
+measuring usage, vary the prompt or the numbers will quietly be about the
+cache instead.
+
+## The engine serves one model
+
+vLLM claims `VLLM_GPU_MEMORY_UTILIZATION` of the card at startup, so nothing
+else can load beside it — on a 24 GB card an 8B and a 27B cannot coexist, and
+Ollama cannot run alongside. `scripts/switch-model` changes which model is
+loaded; the gateway's `model:` values must keep matching
+`--served-model-name`, or requests 404 at the engine while the gateway looks
+healthy.
+
 ## Limitations worth knowing
 
 **The dollar figures are notional for local models** unless you set

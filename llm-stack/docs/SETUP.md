@@ -95,6 +95,37 @@ the environment variable from then on, so an existing install keeps pointing
 wherever it was first configured. Fix it under **Admin → Settings →
 Connections**.
 
+## Things that look broken and are not
+
+Each of these cost real time here, and each presents as a fault somewhere
+other than its cause.
+
+**A config edit that does nothing.** `config/litellm/config.yaml` is a mount,
+not a build input, so the gateway keeps serving the old model list until
+`docker compose restart litellm`. The symptom is an empty or stale
+`/v1/models` with no error anywhere.
+
+**`docker compose restart` on Open WebUI.** It came back `Exited (127)` here.
+`docker compose up -d open-webui` recreates it cleanly; prefer that.
+
+**A model list that is empty while the backend is reachable.** Open WebUI
+stores its connection in its own database after first boot and ignores the
+environment variable from then on. Fix it under **Admin → Settings →
+Connections**, not in `.env`.
+
+**Attribution checks failing on a working stack.** Responses are cached for an
+hour, and a cached reply records no spend. Vary the prompt — see
+[USAGE-LIMITS.md](USAGE-LIMITS.md).
+
+**A download that gets slower.** Recreating the vLLM container mid-download
+abandons the partial files rather than resuming them: HuggingFace writes to a
+fresh temp name per attempt. That cost 8.6 GB here. Leave it alone and watch
+`docker compose logs -f vllm`.
+
+**Certificates that will not generate on Windows.** Git Bash rewrites
+`-subj "/CN=..."` into a path. `scripts/setup.sh` exports `MSYS_NO_PATHCONV`,
+but if you call `openssl` by hand, do the same or use the `.ps1`.
+
 ## Adding people
 
 The installer offers to provision everyone in
