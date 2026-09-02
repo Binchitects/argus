@@ -1,0 +1,14 @@
+---
+- Docs:
+    - vLLM:
+        - abbr: VL
+          href: https://docs.vllm.ai/
+    - Open WebUI:
+        - abbr: OW
+          href: https://docs.openwebui.com/
+    - PromQL:
+        - abbr: PQ
+          href: https://prometheus.io/docs/prometheus/latest/querying/basics/
+    - LogQL:
+        - abbr: LQ
+          href: https://grafana.com/docs/loki/latest/query/

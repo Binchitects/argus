@@ -1,0 +1,62 @@
+# ==============================================================================
+# Declarative team list — the source of truth for who has access.
+#
+# Run `./scripts/gen-auth.sh --sync` and users.yml is made to match this file:
+#
+#   in this file, not in users.yml   -> CREATED  (random password, printed once)
+#   in both                          -> password KEPT, groups/name/email UPDATED
+#   in users.yml, not in this file   -> REMOVED
+#
+# Safe to commit: it contains no passwords or hashes. Those live only in
+# users.yml, which is gitignored.
+#
+# Groups:
+#   admins   everything, including Prometheus, Alertmanager, Traefik dashboard
+#   users    chat (Open WebUI) and Grafana only
+#
+# To reset someone's password, delete their block, --sync, then --sync again
+# after re-adding them; or use --add-user NAME --password '...' to set it
+# explicitly.
+# ==============================================================================
+
+users:
+  # The `admins` group reaches everything, including Prometheus, Alertmanager
+  # and the exporters. `users` reaches chat and Grafana only.
+  #
+  # This is an EXAMPLE roster. Replace it with your own people and run
+  # ./scripts/gen-auth.sh --sync : users here are created, users missing from
+  # here are REMOVED, and groups/name/email are updated for those in both.
+  - username: admin
+    displayname: Administrator
+    email: admin@example.com
+    groups:
+      - admins
+
+  - username: alice
+    displayname: Alice Example
+    email: alice@example.com
+    groups:
+      - users
+    # Optional per-person gateway quotas, applied by
+    # ./scripts/llm-users.sh --apply. Omit any of them to keep the stack
+    # default (LITELLM_DEFAULT_USER_BUDGET / LITELLM_BUDGET_DURATION in .env).
+    #
+    # These bound the person, not the key: spend from their API key and from
+    # their Open WebUI chats is counted against the same identity, because
+    # both resolve to this email address.
+    #
+    #   max_budget            USD of model spend before requests are refused
+    #   budget_duration       when that resets: 1mo, 30d, 24h, 60m
+    #   tpm_limit             tokens per minute
+    #   rpm_limit             requests per minute
+    #   max_parallel_requests concurrent requests -- the one that actually
+    #                         protects a single-GPU box from one heavy user
+    max_budget: 100
+    budget_duration: 1mo
+    max_parallel_requests: 4
+
+  - username: bob
+    displayname: Bob Example
+    email: bob@example.com
+    groups:
+      - users

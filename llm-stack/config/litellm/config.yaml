@@ -1,0 +1,171 @@
+# ==============================================================================
+# LiteLLM gateway (compose profile: gateway)
+#
+# Why put this in front of vLLM at all?
+#   - one virtual API key per person, with spend limits and rate limits
+#   - usage attributed to a user, which vLLM alone cannot do (its metrics carry
+#     a model_name label but no user dimension)
+#   - one endpoint that can front local vLLM AND hosted providers, with fallbacks
+#
+# Reach it at https://gateway.<LLM_DOMAIN>/v1. Mint per-person keys with
+# POST /key/generate using LITELLM_MASTER_KEY.
+#
+# NOTE ON NAMES: `model_name` is what clients and the Open WebUI model picker
+# display, and `model:` must match vLLM's --served-model-name. LiteLLM does NOT
+# expand ${VAR} here, so the real checkpoint name is written out literally.
+# scripts/switch-model rewrites both when you change model.
+# ==============================================================================
+
+model_list:
+  # vLLM is the single backend. One engine, one model at a time -- a 24 GB
+  # card cannot hold an 8B and a 27B at once, and vLLM claims
+  # VLLM_GPU_MEMORY_UTILIZATION of the card up front, so nothing else can
+  # load beside it. `scripts/switch-model` changes which model this is and
+  # rewrites the two entries below to match.
+  #
+  # `openai/` means "speak the OpenAI protocol to this base_url", not
+  # api.openai.com. The name after it MUST equal vLLM's --served-model-name
+  # (VLLM_SERVED_MODEL_NAME in .env) or every request 404s at the engine.
+  - model_name: qwen3-8b
+    litellm_params:
+      model: openai/qwen3-8b
+      api_base: http://vllm:8000/v1
+      api_key: os.environ/VLLM_API_KEY
+      rpm: 600
+      # Without per-token prices spend is always 0.00, budgets never bind and
+      # the usage dashboards sum a column of zeros. Local rates, not a vendor
+      # price list -- set them to whatever makes a sensible unit of account.
+      input_cost_per_token: 0.0000001
+      output_cost_per_token: 0.0000004
+    model_info:
+      mode: chat
+
+  # Stable alias, so clients and scripts need not change when the checkpoint
+  # does. Both entries point at the same engine.
+  - model_name: local
+    litellm_params:
+      model: openai/qwen3-8b
+      api_base: http://vllm:8000/v1
+      api_key: os.environ/VLLM_API_KEY
+      input_cost_per_token: 0.0000001
+      output_cost_per_token: 0.0000004
+
+  # --- Ollama, kept as a documented fallback -------------------------------
+  # Used while vLLM could not start (see .env VLLM_USE_V2_MODEL_RUNNER). It
+  # runs on the HOST and serves the same GPU, so it cannot run at the same
+  # time as vLLM -- whichever holds the card wins. Uncomment these ONLY with
+  # vLLM stopped, and note the `ollama_chat/` prefix keeps them out of
+  # switch-model's rewrite, which only touches `openai/` lines.
+  #
+  # - model_name: deepseek-r1-8b
+  #   litellm_params:
+  #     model: ollama_chat/deepseek-r1:8b
+  #     api_base: http://host.docker.internal:11434
+  #     input_cost_per_token: 0.0000001
+  #     output_cost_per_token: 0.0000004
+  #
+  # - model_name: qwen3.8-27b
+  #   litellm_params:
+  #     model: ollama_chat/qwen3.8:27b
+  #     api_base: http://host.docker.internal:11434
+  #     input_cost_per_token: 0.0000002
+  #     output_cost_per_token: 0.0000008
+
+  # --- Example: a hosted fallback ------------------------------------------
+  # - model_name: cloud-fallback
+  #   litellm_params:
+  #     model: anthropic/claude-sonnet-5
+  #     api_key: os.environ/ANTHROPIC_API_KEY
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
+  timeout: 600
+  # If the local engine is down or saturated, fall back rather than queue.
+  # Requires the cloud-fallback entry above.
+  # fallbacks:
+  #   - local: ["cloud-fallback"]
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+
+  # ------------------------------------------------------------ spend limits
+  # A default ceiling for every internal user, so a person who is added to the
+  # roster and never given an explicit quota is still bounded. Spend is
+  # counted from BOTH surfaces once user_header_mappings is in place, so this
+  # is a per-person total rather than a per-key one.
+  #
+  # These are USD figures derived from token counts and the model's configured
+  # price. For a purely local vLLM deployment the "cost" is notional -- what it
+  # actually bounds is tokens -- but it is still the lever that stops one
+  # person consuming the whole GPU for a month, and it is what the dashboards
+  # sum. Set input_cost_per_token/output_cost_per_token on a model to make the
+  # figure mean money.
+  #
+  # 0 would block every request rather than allow unlimited, so the default is
+  # a real number. Raise per-person with scripts/sync-llm-users.py.
+  max_internal_user_budget: os.environ/LITELLM_DEFAULT_USER_BUDGET
+  internal_user_budget_duration: os.environ/LITELLM_BUDGET_DURATION
+  # Cache identical completions in Redis. A big win for repeated evals and for
+  # UI clients that resend the same system prompt.
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    ttl: 3600
+  # Log every request to Langfuse when the `tracing` profile is running.
+  # success_callback: ["langfuse"]
+  # failure_callback: ["langfuse"]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+
+  # ---------------------------------------------------------------- identity
+  # This is what makes one person's API usage and their chat usage add up to
+  # ONE number instead of two unrelated ones.
+  #
+  # The problem it solves: Open WebUI authenticates to this gateway with a
+  # SINGLE shared key (see WEBUI_BACKEND_KEY in docker-compose.yml). Without
+  # the mapping below, every chat message from every person is spend against
+  # that one key -- the gateway can tell you the web UI used $40 this month
+  # and cannot tell you who used it. Per-person API keys were attributable all
+  # along; the web UI was the hole.
+  #
+  # Open WebUI forwards the signed-in identity as headers when
+  # ENABLE_FORWARD_USER_INFO_HEADERS is set. Mapping the EMAIL header to
+  # `internal_user` makes LiteLLM's internal user id the person's email
+  # address -- and scripts/sync-llm-users.py mints each API key with
+  # `user_id: <same email>`. One identity, both surfaces.
+  #
+  # Email rather than X-OpenWebUI-User-Id deliberately: the user id is an
+  # Open WebUI database row id, which exists nowhere else. Email is what
+  # Authelia issues over OIDC, what team.yml already records, and therefore
+  # the only identifier the whole stack agrees on.
+  # BOTH roles, from the one header, because they do different jobs. Measured
+  # on this stack rather than assumed:
+  #
+  #   internal_user  ATTRIBUTES the spend. It makes chat usage land on the
+  #                  same identity as the person's API key, which is what
+  #                  makes their total one number instead of two.
+  #
+  #   customer       ENFORCES the ceiling. With internal_user alone, an
+  #                  over-budget person was refused on the API path (429) and
+  #                  still served on the web UI -- tracked but not stopped.
+  #                  The internal-user budget binds a key owned by that user;
+  #                  the web UI holds a SHARED key, so nothing bound. End-user
+  #                  budgets are the mechanism that checks a shared key
+  #                  against the caller named in the request.
+  #
+  # scripts/sync-llm-users.py therefore provisions each person twice, with the
+  # same email and the same ceiling: once as an internal user, once as an end
+  # user. Drop either half and you lose either the total or the limit.
+  user_header_mappings:
+    - header_name: X-OpenWebUI-User-Email
+      litellm_user_role: internal_user
+  # /metrics is an enterprise feature on current builds; the Prometheus job for
+  # it is commented out in config/prometheus/prometheus.yml.
+  # callbacks: ["prometheus"]

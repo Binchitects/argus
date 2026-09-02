@@ -1,0 +1,63 @@
+---
+# Landing page at https://llm.localhost (or http://localhost:3003 directly).
+#
+# Primary links go through Traefik, which is why they are https and use
+# hostnames. Browsers resolve any *.localhost name to 127.0.0.1 with no
+# hosts-file entry. The direct port is noted in each description as a fallback
+# for CLI tools, which do not resolve *.localhost.
+
+- Inference:
+    - vLLM API:
+        href: https://api.llm.localhost/docs
+        description: OpenAI-compatible endpoint, Swagger UI (direct :8000)
+        icon: si-openai
+    - vLLM metrics:
+        href: https://api.llm.localhost/metrics
+        description: Prometheus exposition, basic-auth protected
+        icon: si-prometheus
+    - LiteLLM gateway:
+        href: https://gateway.llm.localhost
+        description: Virtual keys, budgets, routing (profile gateway, :4000)
+        icon: si-fastapi
+
+- Interfaces:
+    - Open WebUI:
+        href: https://chat.llm.localhost
+        description: Chat interface (direct :3000)
+        icon: si-chatbot
+
+- Observability:
+    - Grafana:
+        href: https://grafana.llm.localhost
+        description: Dashboards, own login (direct :3001)
+        icon: si-grafana
+    - Prometheus:
+        href: https://metrics.llm.localhost
+        description: Metrics, targets, PromQL, basic-auth (direct :9090)
+        icon: si-prometheus
+    - Alertmanager:
+        href: https://alerts.llm.localhost
+        description: Firing and silenced alerts, basic-auth (direct :9093)
+        icon: si-prometheus
+    - Langfuse:
+        href: https://traces.llm.localhost
+        description: Prompt/response traces (profile tracing, :3002)
+        icon: si-langchain
+
+- Infrastructure:
+    - Traefik:
+        href: https://traefik.llm.localhost/dashboard/
+        description: Routers, services, TLS, basic-auth (metrics :8082)
+        icon: si-traefikproxy
+    - cAdvisor:
+        href: https://cadvisor.llm.localhost
+        description: Per-container resource usage, basic-auth (direct :8081)
+        icon: si-docker
+    - GPU exporter:
+        href: https://gpu.llm.localhost/metrics
+        description: nvidia-smi telemetry, basic-auth (direct :9835)
+        icon: si-nvidia
+    - node-exporter:
+        href: https://node.llm.localhost/metrics
+        description: Host CPU, memory, disk, network (direct :9100)
+        icon: si-linux

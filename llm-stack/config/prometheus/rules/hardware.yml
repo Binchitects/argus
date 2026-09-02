@@ -1,0 +1,146 @@
+# Hardware health: GPU, CPU, memory, disk.
+# GPU rules are written twice — once for the nvidia-smi exporter and once for
+# DCGM — so whichever exporter profile is running, the alert fires.
+
+groups:
+
+  - name: gpu
+    interval: 30s
+    rules:
+
+      - alert: GpuTemperatureHigh
+        expr: nvidia_smi_temperature_gpu > 83 or DCGM_FI_DEV_GPU_TEMP > 83
+        for: 5m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "GPU running hot ({{ $value | printf \"%.0f\" }} degC)"
+          description: >-
+            Sustained above 83 degC for 5 minutes. Most consumer cards start
+            thermal-throttling here, which shows up as falling tokens/sec.
+            Check case airflow and the fan curve.
+
+      - alert: GpuTemperatureCritical
+        expr: nvidia_smi_temperature_gpu > 90 or DCGM_FI_DEV_GPU_TEMP > 90
+        for: 2m
+        labels:
+          severity: critical
+          component: gpu
+        annotations:
+          summary: "GPU temperature critical ({{ $value | printf \"%.0f\" }} degC)"
+          description: "Hardware protection may shut down the GPU. Reduce load now."
+
+      - alert: GpuMemoryNearlyFull
+        expr: >-
+          (nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes) > 0.97
+          or (DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE)) > 0.97
+        for: 10m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "GPU memory above 97%"
+          description: >-
+            Expected while vLLM is serving — it pre-allocates
+            VLLM_GPU_MEMORY_UTILIZATION of VRAM by design. Only actionable if
+            another process is competing for the card.
+
+      # Both GPU exporters are `tier: optional` (you enable one profile or the
+      # other), so a `up{component="gpu"} == 0` test would fire for whichever
+      # one is deliberately switched off. Alert on the absence of GPU data
+      # instead: this fires only when NEITHER exporter is producing metrics,
+      # which is the condition that actually leaves you blind.
+      # Distinct from GpuTemperatureHigh: that one warns the card is hot, this
+      # one fires only when the driver is ACTUALLY cutting clocks, i.e. you are
+      # already losing tokens/sec. sw_power_cap is excluded on purpose - the
+      # power limiter engaging under load is normal, not a fault.
+      - alert: GpuThermalThrottling
+        expr: >-
+          nvidia_smi_clocks_event_reasons_hw_thermal_slowdown == 1
+          or nvidia_smi_clocks_event_reasons_sw_thermal_slowdown == 1
+        for: 2m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "GPU is thermally throttling"
+          description: >-
+            The driver is reducing clocks because of temperature, so inference
+            throughput is degraded right now. Check airflow and the fan curve;
+            see the Resources dashboard for the temperature/power/clock picture.
+
+      - alert: GpuExporterDown
+        expr: absent(nvidia_smi_utilization_gpu_ratio) and absent(DCGM_FI_DEV_GPU_UTIL)
+        for: 10m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "GPU exporter {{ $labels.job }} is not responding"
+          description: "GPU telemetry is blind. Check `docker logs nvidia-smi-exporter`."
+
+  - name: host
+    interval: 30s
+    rules:
+
+      - alert: HostMemoryPressure
+        expr: >-
+          (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.90
+        for: 10m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Host memory above 90%"
+          description: >-
+            Under Docker Desktop this measures the WSL2 VM. Raise the VM memory
+            limit in .wslconfig if this is chronic.
+
+      - alert: HostDiskFillingUp
+        # Docker Desktop exposes every host drive under several WSL views
+        # (/mnt/host/c, /parent-distro/mnt/host/c, /run/desktop/mnt/host/c ...),
+        # all sharing one `device`. Without the aggregation a single full disk
+        # raises one identical alert per view - five for drive C: here. Folding
+        # on `device` reports each physical filesystem exactly once, and is a
+        # no-op on a native Linux host where those extra views do not exist.
+        expr: >-
+          max by (instance, device) (
+            1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) > 0.85
+        for: 15m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Filesystem {{ $labels.device }} above 85% full"
+          description: >-
+            Model weights and Prometheus TSDB are the usual culprits. Check the
+            hf-cache and prometheus-data volumes.
+
+      - alert: HostDiskCritical
+        # Same per-device fold as HostDiskFillingUp above.
+        expr: >-
+          max by (instance, device) (
+            1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "Filesystem {{ $labels.device }} above 95% full"
+          description: "Prometheus will start dropping samples and Docker writes will fail."
+
+      - alert: HostCpuSaturated
+        expr: >-
+          100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 92
+        for: 15m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "CPU above 92% for 15 minutes"
+          description: >-
+            During inference the CPU should be mostly idle. Sustained load often
+            means the model fell back to CPU or the tokenizer is the bottleneck.

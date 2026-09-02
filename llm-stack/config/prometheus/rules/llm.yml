@@ -1,0 +1,106 @@
+# LLM-serving health, derived from vLLM's native Prometheus histograms.
+#
+# The three numbers that actually describe a serving system:
+#   TTFT   time to first token       - how responsive it feels
+#   TPOT   time per output token     - how fast it streams
+#   queue  requests waiting          - whether you are past capacity
+
+groups:
+
+  - name: vllm-availability
+    interval: 30s
+    rules:
+
+      - alert: VllmDown
+        expr: up{job="vllm", tier!="optional"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: inference
+        annotations:
+          summary: "vLLM is not being scraped"
+          description: >-
+            Either the container is down or still loading weights. A cold start
+            that downloads a model can legitimately take many minutes —
+            check `docker logs -f vllm`.
+
+      - alert: VllmNoModelLoaded
+        expr: absent(vllm:num_requests_running)
+        for: 15m
+        labels:
+          severity: critical
+          component: inference
+        annotations:
+          summary: "vLLM is up but exposes no engine metrics"
+          description: "The engine never finished initialising. Usually OOM or a bad --max-model-len."
+
+  - name: vllm-performance
+    interval: 30s
+    rules:
+
+      - alert: VllmQueueBacklog
+        expr: vllm:num_requests_waiting > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} requests queued at vLLM"
+          description: >-
+            Arrival rate exceeds throughput. Options, cheapest first: raise
+            VLLM_MAX_NUM_SEQS, shorten VLLM_MAX_MODEL_LEN, quantise the model,
+            or add a GPU and raise tensor-parallel-size.
+
+      - alert: VllmKvCacheSaturated
+        expr: vllm:gpu_cache_usage_perc > 0.95
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "KV cache above 95% utilisation"
+          description: >-
+            vLLM will start preempting and recomputing sequences, which shows up
+            as latency spikes. Reduce max-model-len or concurrent sequences.
+
+      - alert: VllmHighTimeToFirstToken
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "p95 time-to-first-token above 5s"
+          description: >-
+            Currently {{ $value | printf "%.2f" }}s. TTFT is dominated by
+            prefill and queueing, so pair this with the queue-depth panel to
+            tell 'too many requests' apart from 'prompts too long'.
+
+      - alert: VllmSlowTokenGeneration
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le) (rate(vllm:time_per_output_token_seconds_bucket[5m]))) > 0.20
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "p95 inter-token latency above 200ms (<5 tok/s)"
+          description: >-
+            Decode has become slow. Check for GPU thermal throttling, CPU
+            offloading, or an oversized batch.
+
+      - alert: VllmErrorRateHigh
+        expr: >-
+          sum(rate(vllm:request_success_total{finished_reason="abort"}[10m]))
+          /
+          clamp_min(sum(rate(vllm:request_success_total[10m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "Over 5% of requests aborting"
+          description: "Clients are disconnecting or the engine is rejecting work."

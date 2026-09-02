@@ -1,0 +1,20 @@
+# Publish the gateway's admin API on loopback, for provisioning.
+#
+# The stack deliberately does NOT publish litellm: it sits on llm-net and is
+# reached through Traefik, so the only way in carries TLS and Authelia. That
+# is right for serving, and it leaves no way to run scripts/llm-users.sh from
+# the host -- minting keys needs the master key against the admin API.
+#
+# Opt in only when provisioning, then stop it again:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.admin.yml up -d litellm
+#   ./scripts/llm-users.sh --apply
+#   docker compose up -d litellm      # back to unpublished
+#
+# 127.0.0.1 explicitly, not 0.0.0.0: this port answers to the master key,
+# which mints credentials for everyone. Bound to loopback it is reachable by
+# someone already on the box; bound to a wildcard it is reachable by the LAN.
+services:
+  litellm:
+    ports:
+      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"

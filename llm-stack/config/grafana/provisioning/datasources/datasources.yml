@@ -1,0 +1,68 @@
+apiVersion: 1
+
+# Fixed UIDs matter: the dashboard JSON files reference these by uid, so they
+# must not be auto-generated.
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST
+      manageAlerts: false
+      prometheusType: Prometheus
+    editable: false
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      maxLines: 1000
+      # Click a log line, jump to the matching metrics window.
+      derivedFields:
+        - name: TraceID
+          matcherRegex: "trace_id=(\\w+)"
+          url: "$${__value.raw}"
+    editable: false
+
+  - name: Alertmanager
+    type: alertmanager
+    uid: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false
+    editable: false
+
+  # The gateway's own database, which is where per-person token usage lives.
+  #
+  # Not Prometheus, and not by choice: LiteLLM's /metrics endpoint is an
+  # enterprise feature on current builds, which is why the `litellm` scrape
+  # job in config/prometheus/prometheus.yml is commented out. vLLM's metrics
+  # do carry token counts but have no user dimension -- they answer "how many
+  # tokens" and never "whose". The spend tables answer both, and they are the
+  # same rows the LiteLLM admin UI reads.
+  #
+  # Read-only by convention: nothing in Grafana writes here, and the
+  # dashboards only SELECT.
+  - name: LiteLLM
+    type: postgres
+    uid: litellm-db
+    access: proxy
+    url: postgres:5432
+    database: litellm
+    user: ${POSTGRES_USER}
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    editable: false

@@ -1,0 +1,19 @@
+---
+title: LLMService
+description: Self-hosted LLM stack
+theme: dark
+color: slate
+headerStyle: clean
+layout:
+  Inference:
+    style: row
+    columns: 3
+  Interfaces:
+    style: row
+    columns: 3
+  Observability:
+    style: row
+    columns: 4
+  Exporters:
+    style: row
+    columns: 3

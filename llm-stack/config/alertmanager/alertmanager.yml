@@ -1,0 +1,80 @@
+# ==============================================================================
+# Alertmanager routing.
+#
+# Alertmanager does NOT expand environment variables in this file, so secrets
+# go here directly (or in the *_file variants shown below). This file is
+# gitignored-adjacent: keep real webhook URLs out of version control by using
+# slack_api_url_file / auth_password_file pointing at a mounted secret.
+#
+# Out of the box everything routes to `null` — alerts are visible in the
+# Alertmanager UI (http://localhost:9093) and in Grafana, but nothing is sent.
+# Uncomment a receiver below to change that.
+# ==============================================================================
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  # Group alerts that share these labels into a single notification.
+  group_by: [alertname, severity, component]
+  # Wait this long to collect more alerts before the first notification.
+  group_wait: 30s
+  # Then at most one update per group per interval.
+  group_interval: 5m
+  # Re-send an unresolved alert this often.
+  repeat_interval: 4h
+
+  routes:
+    # Critical alerts skip the batching delay.
+    - matchers: [severity="critical"]
+      receiver: default
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Inference alerts are noisy during a cold start; give them room.
+    - matchers: [component="inference"]
+      receiver: default
+      group_wait: 2m
+
+inhibit_rules:
+  # If a target is down, don't also complain about its derived metrics.
+  - source_matchers: [alertname="VllmDown"]
+    target_matchers: [component="inference"]
+    equal: [component]
+
+  # Critical supersedes warning for the same alert on the same component.
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname, component]
+
+receivers:
+  - name: default
+
+  # --- Slack --------------------------------------------------------------
+  # - name: slack
+  #   slack_configs:
+  #     - api_url: "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+  #       channel: "#llm-alerts"
+  #       send_resolved: true
+  #       title: "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
+  #       text: >-
+  #         {{ range .Alerts }}*{{ .Annotations.summary }}*
+  #         {{ .Annotations.description }}
+  #         {{ end }}
+
+  # --- Email --------------------------------------------------------------
+  # - name: email
+  #   email_configs:
+  #     - to: "you@example.com"
+  #       from: "llmservice@example.com"
+  #       smarthost: "smtp.example.com:587"
+  #       auth_username: "you@example.com"
+  #       auth_password: "app-password"
+  #       send_resolved: true
+
+  # --- Generic webhook (ntfy, Discord bridge, PagerDuty Events v2, ...) ---
+  # - name: webhook
+  #   webhook_configs:
+  #     - url: "http://host.docker.internal:8888/alert"
+  #       send_resolved: true

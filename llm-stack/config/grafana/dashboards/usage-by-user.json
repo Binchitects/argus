@@ -1,0 +1,128 @@
+{
+  "uid": "usage-by-user",
+  "title": "Usage by person",
+  "tags": ["llm", "usage", "tokens", "budget"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-30d", "to": "now" },
+  "description": "Tokens, requests and spend per person, counted across the API and the web UI together. Sourced from the gateway's own tables rather than Prometheus: LiteLLM's /metrics is an enterprise feature, and vLLM's metrics carry no user dimension.",
+  "panels": [
+    {
+      "type": "text",
+      "title": "What these numbers are",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Both surfaces are counted here. API calls attribute through the caller's key; chat attributes through the identity Open WebUI forwards, which `identity-proxy` puts in the request. **Spend is only money if the model has `input_cost_per_token`/`output_cost_per_token` set** — otherwise it is a consistent accounting unit over tokens. Rows are written when a request completes, so the current minute lags."
+      }
+    },
+    {
+      "type": "table",
+      "title": "Per person, this period",
+      "datasource": { "type": "postgres", "uid": "litellm-db" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "tokens", "desc": true }] },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "spend" },
+            "properties": [{ "id": "unit", "value": "currencyUSD" },
+                           { "id": "decimals", "value": 4 }] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT user_id AS \"person\", SUM(prompt_tokens + completion_tokens) AS \"tokens\", SUM(prompt_tokens) AS \"prompt\", SUM(completion_tokens) AS \"completion\", SUM(api_requests) AS \"requests\", SUM(failed_requests) AS \"failed\", SUM(spend) AS \"spend\" FROM \"LiteLLM_DailyUserSpend\" WHERE date::timestamp BETWEEN $__timeFrom() AND $__timeTo() GROUP BY user_id ORDER BY \"tokens\" DESC"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens per day, by person",
+      "datasource": { "type": "postgres", "uid": "litellm-db" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 13 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 80, "lineWidth": 0 }, "unit": "short" },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date::timestamp AS \"time\", user_id AS metric, SUM(prompt_tokens + completion_tokens) AS value FROM \"LiteLLM_DailyUserSpend\" WHERE date::timestamp BETWEEN $__timeFrom() AND $__timeTo() GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens per day, by model",
+      "datasource": { "type": "postgres", "uid": "litellm-db" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 13 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 80, "lineWidth": 0 }, "unit": "short" },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date::timestamp AS \"time\", model AS metric, SUM(prompt_tokens + completion_tokens) AS value FROM \"LiteLLM_DailyUserSpend\" WHERE date::timestamp BETWEEN $__timeFrom() AND $__timeTo() GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Budget headroom -- who is close to their ceiling",
+      "datasource": { "type": "postgres", "uid": "litellm-db" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 22 },
+      "description": "Spend against ceiling for the CURRENT budget window, which is why it does not follow the dashboard time range. A person at 100% is refused until their budget resets.",
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "used %", "desc": true }] },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "used %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
+              { "id": "max", "value": 100 },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 75 },
+                  { "color": "red", "value": 95 } ] } }
+            ] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT u.user_id AS \"person\", u.spend AS \"spend\", u.max_budget AS \"ceiling\", CASE WHEN u.max_budget > 0 THEN ROUND((u.spend / u.max_budget * 100)::numeric, 1) ELSE NULL END AS \"used %\", u.budget_reset_at AS \"resets\" FROM \"LiteLLM_UserTable\" u WHERE u.max_budget IS NOT NULL ORDER BY 4 DESC NULLS LAST"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Recent requests",
+      "datasource": { "type": "postgres", "uid": "litellm-db" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 31 },
+      "description": "`user` is the internal identity (attribution); `end_user` is what the budget is checked against. On a chat request they should be the same address -- if end_user is empty, identity-proxy is not in that request's path.",
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \"startTime\" AS \"time\", COALESCE(\"user\", '-') AS \"user\", COALESCE(end_user, '-') AS \"end_user\", model, total_tokens AS \"tokens\", spend FROM \"LiteLLM_SpendLogs\" WHERE \"startTime\" BETWEEN $__timeFrom() AND $__timeTo() ORDER BY \"startTime\" DESC LIMIT 100"
+        }
+      ]
+    }
+  ]
+}

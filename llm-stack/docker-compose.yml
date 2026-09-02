@@ -1,0 +1,1014 @@
+# ==============================================================================
+# LLMService - a self-hosted LLM stack with full-stack observability.
+#
+#   inference   vLLM (OpenAI-compatible)
+#   gateway     LiteLLM (optional: routing, virtual keys, budgets)
+#   ui          Open WebUI
+#   metrics     Prometheus + Alertmanager + Grafana
+#   hardware    node-exporter, cAdvisor, nvidia-smi exporter / DCGM
+#   logs        Loki + Promtail (optional)
+#   traces      Langfuse (optional)
+#
+# Start:  docker compose up -d          (profiles come from COMPOSE_PROFILES)
+# ==============================================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-gpu: &gpu-reservation
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+networks:
+  llm-net:
+    name: llm-net
+    driver: bridge
+
+volumes:
+  argus-data:
+  hf-cache:
+  vllm-cache:
+  open-webui-data:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:
+  loki-data:
+  postgres-data:
+  redis-data:
+  clickhouse-data:
+  clickhouse-logs:
+  minio-data:
+  authelia-data:
+
+services:
+
+  # ============================================================================
+  # REVERSE PROXY (profile: proxy)
+  #
+  # Terminates TLS and routes by hostname on *.${LLM_DOMAIN}. Services that have
+  # no authentication of their own (Prometheus, Alertmanager, cAdvisor, the
+  # exporters, the Traefik dashboard) sit behind the `protected-chain`
+  # basic-auth middleware; services with their own login use `default-chain`.
+  #
+  # The direct host ports stay published so the scripts, curl and Prometheus
+  # keep working without DNS tricks — *.localhost resolves in browsers but not
+  # in most CLI tools.
+  # ============================================================================
+
+  traefik:
+    # v3.3 pins Docker API 1.24, which Engine 29 rejects (MinAPIVersion 1.40).
+    # v3.6 negotiates the API version with the daemon.
+    image: traefik:v3.6.7
+    container_name: traefik
+    profiles: [proxy]
+    restart: unless-stopped
+    networks:
+      llm-net:
+        # The OIDC token exchange is server-to-server: Grafana/Open WebUI/
+        # Langfuse call the issuer directly, not through the browser. Without
+        # this alias `auth.llm.localhost` does not resolve inside a container
+        # and every login fails at the token step. The alias points the name at
+        # Traefik, which terminates TLS with the same wildcard certificate.
+        aliases:
+          - auth.${LLM_DOMAIN:-llm.localhost}
+    ports:
+      - "${TRAEFIK_HTTP_PORT:-80}:80"
+      - "${TRAEFIK_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./config/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./config/traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./config/traefik/certs:/etc/traefik/certs:ro
+      - ./config/traefik/auth:/etc/traefik/auth:ro
+      # Read-only: Traefik only watches container events for label changes.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    labels:
+      # No routers: nothing about Traefik itself is published. It only proxies
+      # for other containers.
+      - "traefik.enable=false"
+    logging: *default-logging
+
+  # ============================================================================
+  # SINGLE SIGN-ON (profile: auth)
+  #
+  # Two roles at once:
+  #   forwardAuth  Traefik asks Authelia about each request to the services that
+  #                have no login of their own, replacing basic-auth.
+  #   OIDC         Grafana, Open WebUI and Langfuse delegate their own login
+  #                screens here, so one identity covers everything.
+  #
+  # Run scripts/gen-auth first; it creates the secrets, users.yml and clients.yml.
+  # ============================================================================
+
+  authelia:
+    image: authelia/authelia:4.39
+    container_name: authelia
+    profiles: [auth]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - ./config/authelia/configuration.yml:/config/configuration.yml:ro
+      - ./config/authelia/clients.yml:/config/clients.yml:ro
+      - ./config/authelia/users.yml:/config/users.yml:ro
+      - authelia-data:/data
+    environment:
+      # Authelia merges these two files; clients.yml is generated because OIDC
+      # client secrets have to be stored as hashes.
+      X_AUTHELIA_CONFIG: /config/configuration.yml,/config/clients.yml
+      AUTHELIA_SESSION_SECRET: ${AUTHELIA_SESSION_SECRET:?run scripts/gen-auth first}
+      AUTHELIA_STORAGE_ENCRYPTION_KEY: ${AUTHELIA_STORAGE_ENCRYPTION_KEY:?run scripts/gen-auth first}
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET: ${AUTHELIA_JWT_SECRET:?run scripts/gen-auth first}
+      AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET: ${AUTHELIA_OIDC_HMAC_SECRET:?run scripts/gen-auth first}
+    depends_on:
+      redis:
+        condition: service_healthy
+    # No healthcheck override: the image ships /app/healthcheck.sh, and there is
+    # no `authelia health` subcommand in 4.39. Overriding it made the container
+    # permanently unhealthy, which in turn made Traefik refuse to route it.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.authelia.loadbalancer.server.port=9091"
+      - "traefik.http.routers.authelia.rule=Host(`auth.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.authelia.entrypoints=websecure"
+      - "traefik.http.routers.authelia.tls=true"
+      # The portal itself must never sit behind the auth middleware.
+      - "traefik.http.routers.authelia.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # INFERENCE
+  # ============================================================================
+
+  vllm:
+    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
+    container_name: vllm
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - vllm-cache:/root/.cache/vllm
+      # Drop GGUF/safetensors here to serve a local model without HuggingFace.
+      - ./models:/models
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /root/.cache/huggingface
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+      # HuggingFace's Xet CDN is chunk-based and gives up on a reset instead of
+      # resuming. Plain HTTPS transfers are slower but far more tolerant of a
+      # flaky link, which matters for multi-GB weight files.
+      HF_HUB_DISABLE_XET: "1"
+      # The default read timeout is 10s, and a first pull of a multi-GB
+      # checkpoint over a slow link spends most of its time hitting it: the
+      # log fills with "The read operation timed out / Trying to resume
+      # download", and throughput falls as each retry restarts the HTTP
+      # request rather than the transfer. Measured here: 4.6 MB/s decaying to
+      # ~1 MB/s. A longer timeout does not make the link faster; it stops a
+      # slow-but-alive connection being abandoned and retried into the ground.
+      HF_HUB_DOWNLOAD_TIMEOUT: "${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
+      # Emits per-request histograms Prometheus can scrape.
+      VLLM_LOGGING_LEVEL: INFO
+      # vLLM >= 0.27 defaults to GPUModelRunnerV2, which allocates Unified
+      # Virtual Addressing buffers. WSL2's GPU driver does not expose UVA, so
+      # the engine dies at startup with "RuntimeError: UVA is not available".
+      # Forcing the V1 runner is the fix. On bare-metal Linux you can drop this
+      # (or set it to 1) to get the faster V2 path.
+      VLLM_USE_V2_MODEL_RUNNER: "${VLLM_USE_V2_MODEL_RUNNER:-0}"
+    # NOTE: the image entrypoint is already the OpenAI API server, so `command`
+    # holds only flags. Compose shell-splits this string, which means an empty
+    # ${VLLM_EXTRA_ARGS} contributes zero arguments instead of an empty one.
+    command: >
+      --model ${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      --served-model-name ${VLLM_SERVED_MODEL_NAME:-default}
+      --host 0.0.0.0
+      --port 8000
+      --api-key ${VLLM_API_KEY:?VLLM_API_KEY must be set in .env}
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
+      --dtype ${VLLM_DTYPE:-auto}
+      --tensor-parallel-size ${VLLM_TENSOR_PARALLEL_SIZE:-1}
+      --max-num-seqs ${VLLM_MAX_NUM_SEQS:-256}
+      --trust-remote-code
+      ${VLLM_EXTRA_ARGS:-}
+    # 64 MB (the Docker default) is too small for the tokenizer pool, but 8 GB is
+    # sized for multi-GPU NCCL. 2 GB is plenty for a single engine and this is
+    # host RAM, so the difference is real.
+    shm_size: "${VLLM_SHM_SIZE:-2gb}"
+    <<: *gpu-reservation
+    healthcheck:
+      # The image has no curl; python3 is guaranteed to be there.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      # Cold start pulls + loads weights; allow a long grace period.
+      start_period: 900s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.vllm.loadbalancer.server.port=8000"
+      - "traefik.http.routers.vllm.rule=Host(`api.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.vllm.entrypoints=websecure"
+      - "traefik.http.routers.vllm.tls=true"
+      - "traefik.http.routers.vllm.service=vllm"
+      # Credential swap: Authelia authenticates the caller, then Traefik
+      # replaces the Authorization header with vLLM's internal key before
+      # proxying. Middleware order is significant - Authelia must inspect
+      # the original header before it is overwritten.
+      - "traefik.http.middlewares.vllm-key.headers.customrequestheaders.Authorization=Bearer ${VLLM_API_KEY}"
+      - "traefik.http.routers.vllm.middlewares=${PROTECTED_CHAIN:-protected-chain@file},vllm-key@docker"
+      # /metrics carries no bearer-token check, so guard it at the edge. This
+      # does not affect Prometheus, which scrapes vllm:8000 directly on the
+      # internal network and never traverses the proxy.
+      - "traefik.http.routers.vllm-metrics.rule=Host(`api.${LLM_DOMAIN:-llm.localhost}`) && PathPrefix(`/metrics`)"
+      - "traefik.http.routers.vllm-metrics.entrypoints=websecure"
+      - "traefik.http.routers.vllm-metrics.tls=true"
+      - "traefik.http.routers.vllm-metrics.service=vllm"
+      - "traefik.http.routers.vllm-metrics.priority=100"
+      - "traefik.http.routers.vllm-metrics.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  # ============================================================================
+  # SECOND INFERENCE ENGINE (profile: multi-model)
+  #
+  # One vLLM process serves exactly one model ("vllm serve [model_tag]"), so a
+  # second warm model means a second engine. Both stay resident; LiteLLM picks
+  # between them by the `model` field of the request, so switching costs nothing
+  # at request time.
+  #
+  # THE CONSTRAINT THAT MATTERS: --gpu-memory-utilization is a fraction of the
+  # WHOLE card, and each engine pre-allocates its share up front. The two
+  # fractions must sum to less than 1.0 or the second engine will fail to start.
+  # With 24 GB, 0.45 + 0.45 leaves ~2 GB of headroom.
+  #
+  # Note --cpu-offload-gb cannot rescue you here: it is implemented with UVA,
+  # which WSL2 does not expose (the same reason VLLM_USE_V2_MODEL_RUNNER is 0).
+  # ============================================================================
+
+  vllm-secondary:
+    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
+    container_name: vllm-secondary
+    profiles: [multi-model]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      # Same caches as the primary: a shared base model is downloaded once.
+      - hf-cache:/root/.cache/huggingface
+      - vllm-cache:/root/.cache/vllm
+      - ./models:/models
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /root/.cache/huggingface
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+      # HuggingFace's Xet CDN is chunk-based and gives up on a reset instead of
+      # resuming. Plain HTTPS transfers are slower but far more tolerant of a
+      # flaky link, which matters for multi-GB weight files.
+      HF_HUB_DISABLE_XET: "1"
+      # The default read timeout is 10s, and a first pull of a multi-GB
+      # checkpoint over a slow link spends most of its time hitting it: the
+      # log fills with "The read operation timed out / Trying to resume
+      # download", and throughput falls as each retry restarts the HTTP
+      # request rather than the transfer. Measured here: 4.6 MB/s decaying to
+      # ~1 MB/s. A longer timeout does not make the link faster; it stops a
+      # slow-but-alive connection being abandoned and retried into the ground.
+      HF_HUB_DOWNLOAD_TIMEOUT: "${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
+      VLLM_LOGGING_LEVEL: INFO
+      VLLM_USE_V2_MODEL_RUNNER: "${VLLM_USE_V2_MODEL_RUNNER:-0}"
+    command: >
+      --model ${VLLM2_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+      --served-model-name ${VLLM2_SERVED_MODEL_NAME:-fast}
+      --host 0.0.0.0
+      --port 8000
+      --api-key ${VLLM_API_KEY:?VLLM_API_KEY must be set in .env}
+      --max-model-len ${VLLM2_MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization ${VLLM2_GPU_MEMORY_UTILIZATION:-0.35}
+      --dtype ${VLLM2_DTYPE:-auto}
+      --tensor-parallel-size 1
+      --max-num-seqs ${VLLM2_MAX_NUM_SEQS:-128}
+      --trust-remote-code
+      ${VLLM2_EXTRA_ARGS:-}
+    shm_size: "8gb"
+    <<: *gpu-reservation
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 900s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.vllm-secondary.loadbalancer.server.port=8000"
+      - "traefik.http.routers.vllm-secondary.rule=Host(`api2.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.vllm-secondary.entrypoints=websecure"
+      - "traefik.http.routers.vllm-secondary.tls=true"
+      - "traefik.http.routers.vllm-secondary.service=vllm-secondary"
+      - "traefik.http.routers.vllm-secondary.middlewares=default-chain@file"
+      - "traefik.http.routers.vllm2-metrics.rule=Host(`api2.${LLM_DOMAIN:-llm.localhost}`) && PathPrefix(`/metrics`)"
+      - "traefik.http.routers.vllm2-metrics.entrypoints=websecure"
+      - "traefik.http.routers.vllm2-metrics.tls=true"
+      - "traefik.http.routers.vllm2-metrics.service=vllm-secondary"
+      - "traefik.http.routers.vllm2-metrics.priority=100"
+      - "traefik.http.routers.vllm2-metrics.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  # ============================================================================
+  # GATEWAY (profile: gateway)
+  # Put LiteLLM in front of vLLM when you want virtual API keys, per-team
+  # budgets, spend tracking, fallbacks, or to mix in hosted providers.
+  # ============================================================================
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: litellm
+    profiles: [gateway]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - ./config/litellm/config.yaml:/app/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set LITELLM_SALT_KEY}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-llmservice}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      VLLM_API_KEY: ${VLLM_API_KEY}
+      STORE_MODEL_IN_DB: "True"
+      # config/litellm/config.yaml reads these through `os.environ/`. This
+      # service has no env_file, so a variable that is not named here does not
+      # exist inside the container -- and LiteLLM resolves a missing
+      # `os.environ/` reference to None rather than failing on it, so
+      # `max_internal_user_budget` became float(None) and the gateway would
+      # not start at all. A default budget that silently does not arrive is
+      # worse than one that is wrong, so both are passed explicitly.
+      LITELLM_DEFAULT_USER_BUDGET: ${LITELLM_DEFAULT_USER_BUDGET:-50}
+      LITELLM_BUDGET_DURATION: ${LITELLM_BUDGET_DURATION:-1mo}
+    # One worker is ample for a small team and costs ~700 MB instead of ~3 GB.
+    # Raise LITELLM_WORKERS only if the gateway itself becomes a bottleneck.
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "${LITELLM_WORKERS:-1}"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The litellm image ships no curl or wget, only the venv python.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/liveliness',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.litellm.loadbalancer.server.port=4000"
+      - "traefik.http.routers.litellm.rule=Host(`gateway.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.litellm.entrypoints=websecure"
+      - "traefik.http.routers.litellm.tls=true"
+      # NO Authelia and NO key injection here on purpose. LiteLLM validates its
+      # own virtual keys, so the caller's key must survive the proxy untouched -
+      # injecting the master key would attribute every request to one identity
+      # and destroy per-user usage tracking.
+      - "traefik.http.routers.litellm.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # ARGUS (profile: argus)
+  #
+  # Semi-RAG code index and documentation server. Indexes repositories from a
+  # GitLab instance, serves a symbol/dependency graph plus knowledge packs, and
+  # exposes them to an agent harness as tools.
+  #
+  # Built from E:/Projects/CodeAssistant; the image is also shipped as an
+  # offline tarball in dist/ so a target host needs no build toolchain.
+  # ============================================================================
+
+  argus:
+    image: argus:${ARGUS_VERSION:-0.1.0-rc1}
+    container_name: argus
+    profiles: [argus]
+    restart: unless-stopped
+    networks: [llm-net]
+    # Argus validates the Host header. Its own default only allows
+    # `argus.internal`, so the proxy hostname must be added explicitly or every
+    # request through Traefik is rejected before it reaches a handler.
+    command:
+      - serve
+      - --config=/etc/argus/config.yaml
+      - --host=0.0.0.0
+      - --port=7700
+      - --allowed-host=argus.${LLM_DOMAIN:-llm.localhost}
+      - --allowed-host=argus.${LLM_DOMAIN:-llm.localhost}:*
+      - --allowed-host=argus
+      - --allowed-host=argus:*
+    environment:
+      # Privileged service token: reads every repository the index covers.
+      ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:-}
+    volumes:
+      # Config travels with the repo, so a fresh host needs nothing extra.
+      - ./config/argus/config.yaml:/etc/argus/config.yaml:ro
+      # A named volume by default: drop-in deployments start with an empty
+      # index and populate it by running the indexer. To reuse an index and
+      # pack estate that already exist on the host, add the override file:
+      #   docker compose -f docker-compose.yml -f deploy/argus-local.yml up -d
+      - argus-data:/var/lib/argus
+    # GitLab runs on the host, not in this compose project.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7700/healthz', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # The first request opens every installed pack; the estate is over a GB.
+      start_period: 90s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.argus.loadbalancer.server.port=7700"
+      - "traefik.http.routers.argus.rule=Host(`argus.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.argus.entrypoints=websecure"
+      - "traefik.http.routers.argus.tls=true"
+      # No Authelia: Argus authenticates each caller with their own GitLab PAT
+      # as a bearer token, and that token must reach it untouched - the same
+      # reasoning as the LiteLLM gateway route.
+      - "traefik.http.routers.argus.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # WEB UI
+  # ============================================================================
+
+  # Turns Open WebUI's forwarded identity header into the `user` field that
+  # LiteLLM enforces budgets against. Measured on this stack: the header
+  # alone attributes spend but does NOT stop an over-budget person, because
+  # an internal-user budget binds a key that user owns and the web UI uses
+  # one shared key for everyone. See deploy/identity-proxy/app.py.
+  #
+  # In the `gateway` profile because it is pointless without LiteLLM: with no
+  # gateway there is no budget to enforce.
+  identity-proxy:
+    build: ./deploy/identity-proxy
+    container_name: identity-proxy
+    profiles: ["gateway"]
+    restart: unless-stopped
+    environment:
+      UPSTREAM_URL: http://litellm:4000
+      IDENTITY_HEADER: X-OpenWebUI-User-Email
+    networks: [llm-net]
+    depends_on:
+      litellm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:8080/healthz',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - open-webui-data:/app/backend/data
+      - ./config/traefik/certs/ca.crt:/certs/ca.crt:ro
+    environment:
+      # Through LiteLLM rather than straight at vLLM: the gateway fronts EVERY
+      # engine, so each warm model shows up in the WebUI model picker. Point
+      # these back at http://vllm:8000/v1 + ${VLLM_API_KEY} to bypass it.
+      OPENAI_API_BASE_URL: ${WEBUI_BACKEND_URL:-http://identity-proxy:8080/v1}
+      OPENAI_API_KEY: ${WEBUI_BACKEND_KEY:-${LITELLM_MASTER_KEY}}
+      # The PLURAL forms as well, and ENABLE_OPENAI_API explicitly. Recent
+      # Open WebUI builds read the list variables; with only the singular set,
+      # a fresh install came up with no connections at all -- /api/models
+      # returned [] and every chat answered "Model not found", while the same
+      # base URL and key worked perfectly when curled from inside the same
+      # container. Setting all three makes it work across versions.
+      OPENAI_API_BASE_URLS: ${WEBUI_BACKEND_URL:-http://identity-proxy:8080/v1}
+      OPENAI_API_KEYS: ${WEBUI_BACKEND_KEY:-${LITELLM_MASTER_KEY}}
+      ENABLE_OPENAI_API: "true"
+      # Open WebUI talks to the gateway with ONE shared key, so without this
+      # every person's chat usage is spend against that single key: the
+      # gateway can say the web UI used $40 and not who used it. This forwards
+      # the signed-in identity as X-OpenWebUI-User-Email (and -User-Id,
+      # -User-Name, -User-Role), which config/litellm/config.yaml maps onto
+      # the internal user. It is the whole reason chat usage is attributable.
+      #
+      # It also means the gateway now receives the email address of everyone
+      # who chats. That is the point -- it cannot bill a person it cannot
+      # name -- but it is the one privacy-relevant thing this file forwards.
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      ENABLE_OLLAMA_API: "false"
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY}
+      WEBUI_NAME: LLMService
+      # Signup stays on so Authelia provisions accounts on first OIDC login, but
+      # new accounts are NOT admins. Behind SSO, anyone able to authenticate
+      # would otherwise self-promote to administrator.
+      ENABLE_SIGNUP: "true"
+      DEFAULT_USER_ROLE: ${WEBUI_DEFAULT_ROLE:-user}
+      # Keep everything local: no telemetry, no outbound embedding downloads.
+      SCARF_NO_ANALYTICS: "true"
+      DO_NOT_TRACK: "true"
+      ANONYMIZED_TELEMETRY: "false"
+      # OIDC single sign-on through Authelia.
+      ENABLE_OAUTH_SIGNUP: "true"
+      OAUTH_MERGE_ACCOUNTS_BY_EMAIL: "true"
+      OAUTH_PROVIDER_NAME: Authelia
+      OPENID_PROVIDER_URL: https://auth.${LLM_DOMAIN:-llm.localhost}/.well-known/openid-configuration
+      OAUTH_CLIENT_ID: open-webui
+      OAUTH_CLIENT_SECRET: ${OPENWEBUI_OIDC_CLIENT_SECRET:-}
+      OAUTH_SCOPES: openid email profile groups
+      OPENID_REDIRECT_URI: https://chat.${LLM_DOMAIN:-llm.localhost}/oauth/oidc/callback
+      WEBUI_URL: https://chat.${LLM_DOMAIN:-llm.localhost}
+      # Python httpx honours SSL_CERT_FILE, so the private CA is trusted
+      # properly here rather than skipping verification.
+      SSL_CERT_FILE: /certs/ca.crt
+      REQUESTS_CA_BUNDLE: /certs/ca.crt
+    depends_on:
+      vllm:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.open-webui.loadbalancer.server.port=8080"
+      - "traefik.http.routers.open-webui.rule=Host(`chat.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.open-webui.entrypoints=websecure"
+      - "traefik.http.routers.open-webui.tls=true"
+      - "traefik.http.routers.open-webui.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # METRICS: collection, alerting, dashboards
+  # ============================================================================
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: prometheus
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - ./config/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-20GB}
+      - --web.enable-lifecycle
+      - --web.enable-admin-api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.http.routers.prometheus.rule=Host(`metrics.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls=true"
+      - "traefik.http.routers.prometheus.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: alertmanager
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - ./config/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
+      - "traefik.http.routers.alertmanager.rule=Host(`alerts.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.alertmanager.entrypoints=websecure"
+      - "traefik.http.routers.alertmanager.tls=true"
+      - "traefik.http.routers.alertmanager.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: grafana
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # Provisioning: datasources and dashboards are code, not clicks.
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_INSTALL_PLUGINS: ""
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/llm-overview.json
+      # OIDC single sign-on through Authelia. root_url must now be the proxy
+      # hostname, because Grafana builds the OAuth redirect_uri from it.
+      GF_SERVER_ROOT_URL: https://grafana.${LLM_DOMAIN:-llm.localhost}/
+      GF_AUTH_GENERIC_OAUTH_ENABLED: "${GRAFANA_OIDC_ENABLED:-true}"
+      GF_AUTH_GENERIC_OAUTH_NAME: Authelia
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: grafana
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: ${GRAFANA_OIDC_CLIENT_SECRET:-}
+      GF_AUTH_GENERIC_OAUTH_SCOPES: openid profile email groups
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: https://auth.${LLM_DOMAIN:-llm.localhost}/api/oidc/authorization
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: https://auth.${LLM_DOMAIN:-llm.localhost}/api/oidc/token
+      GF_AUTH_GENERIC_OAUTH_API_URL: https://auth.${LLM_DOMAIN:-llm.localhost}/api/oidc/userinfo
+      GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH: preferred_username
+      GF_AUTH_GENERIC_OAUTH_GROUPS_ATTRIBUTE_PATH: groups
+      GF_AUTH_GENERIC_OAUTH_NAME_ATTRIBUTE_PATH: name
+      # Authelia group -> Grafana role. Members of `admins` get full access.
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: "contains(groups[*], 'admins') && 'Admin' || 'Viewer'"
+      GF_AUTH_GENERIC_OAUTH_USE_PKCE: "true"
+      # Our CA is private, and Grafana uses the system trust store which we
+      # cannot extend without rebuilding the image. This only affects the
+      # in-cluster call to Authelia over the Docker network.
+      GF_AUTH_GENERIC_OAUTH_TLS_SKIP_VERIFY_INSECURE: "true"
+      # Keep the local admin login available as a break-glass account.
+      # The usage dashboards query the gateway's database directly, and
+      # provisioning expands these into the LiteLLM datasource. Without them
+      # Grafana starts fine and that one datasource silently fails to connect.
+      POSTGRES_USER: ${POSTGRES_USER:-myuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+    depends_on: [prometheus]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls=true"
+      # Grafana has its own login; no need for a second credential prompt.
+      - "traefik.http.routers.grafana.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # HARDWARE / CONTAINER METRICS
+  # ============================================================================
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.0
+    container_name: node-exporter
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker)($$|/)
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.node-exporter.loadbalancer.server.port=9100"
+      - "traefik.http.routers.node-exporter.rule=Host(`node.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.node-exporter.entrypoints=websecure"
+      - "traefik.http.routers.node-exporter.tls=true"
+      - "traefik.http.routers.node-exporter.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    container_name: cadvisor
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    command:
+      - --housekeeping_interval=10s
+      - --docker_only=true
+      - --store_container_labels=false
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.cadvisor.loadbalancer.server.port=8080"
+      - "traefik.http.routers.cadvisor.rule=Host(`cadvisor.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.cadvisor.entrypoints=websecure"
+      - "traefik.http.routers.cadvisor.tls=true"
+      - "traefik.http.routers.cadvisor.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  # GPU metrics via nvidia-smi. Works everywhere the driver works, including
+  # Docker Desktop on Windows/WSL2. (profile: smi)
+  nvidia-smi-exporter:
+    image: utkuozdemir/nvidia_gpu_exporter:1.3.2
+    container_name: nvidia-smi-exporter
+    profiles: [smi]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    <<: *gpu-reservation
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.nvidia-smi-exporter.loadbalancer.server.port=9835"
+      - "traefik.http.routers.nvidia-smi-exporter.rule=Host(`gpu.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.nvidia-smi-exporter.entrypoints=websecure"
+      - "traefik.http.routers.nvidia-smi-exporter.tls=true"
+      - "traefik.http.routers.nvidia-smi-exporter.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  # Richer GPU telemetry (SM occupancy, PCIe, NVLink, ECC) but requires the
+  # DCGM kernel interfaces — bare-metal Linux only, NOT WSL2. (profile: dcgm)
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
+    container_name: dcgm-exporter
+    profiles: [dcgm]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    cap_add: [SYS_ADMIN]
+    environment:
+      DCGM_EXPORTER_LISTEN: ":9400"
+      DCGM_EXPORTER_KUBERNETES: "false"
+    <<: *gpu-reservation
+    logging: *default-logging
+
+  # ============================================================================
+  # LOGS (profile: logging)
+  # ============================================================================
+
+  loki:
+    image: grafana/loki:3.4.1
+    container_name: loki
+    profiles: [logging]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - ./config/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/loki-config.yml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.loki.loadbalancer.server.port=3100"
+      - "traefik.http.routers.loki.rule=Host(`logs.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.loki.entrypoints=websecure"
+      - "traefik.http.routers.loki.tls=true"
+      - "traefik.http.routers.loki.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  promtail:
+    image: grafana/promtail:3.4.1
+    container_name: promtail
+    profiles: [logging]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - ./config/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail-config.yml
+    depends_on: [loki]
+    logging: *default-logging
+
+  # ============================================================================
+  # STATE (profiles: gateway, tracing)
+  # ============================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    profiles: [gateway, tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Creates the `litellm` and `langfuse` databases on first boot only.
+      - ./config/postgres/init:/docker-entrypoint-initdb.d:ro
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-llmservice}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-llmservice}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    profiles: [gateway, tracing, auth]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  # ============================================================================
+  # LLM TRACING (profile: tracing)
+  # Langfuse v3 records every prompt, completion, latency and token count so you
+  # can debug quality — the thing Prometheus fundamentally cannot show you.
+  # ============================================================================
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12-alpine
+    container_name: clickhouse
+    profiles: [tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_SKIP_USER_SETUP: "0"
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      # Use 127.0.0.1, not localhost: busybox wget prefers the ::1 AAAA record
+      # and ClickHouse binds IPv4 only, so "localhost" gets connection-refused.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+
+  minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    container_name: minio
+    profiles: [tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - minio-data:/data
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    entrypoint: ["sh", "-c", "mkdir -p /data/langfuse && exec minio server /data --address :9000 --console-address :9001"]
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 0"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.minio.loadbalancer.server.port=9001"
+      - "traefik.http.routers.minio.rule=Host(`s3.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.minio.entrypoints=websecure"
+      - "traefik.http.routers.minio.tls=true"
+      - "traefik.http.routers.minio.middlewares=default-chain@file"
+    logging: *default-logging
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: langfuse-worker
+    profiles: [tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://${POSTGRES_USER:-llmservice}:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+      SALT: ${LANGFUSE_SALT:?set LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?set LANGFUSE_ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      minio: { condition: service_started }
+    logging: *default-logging
+
+  langfuse:
+    image: langfuse/langfuse:3
+    container_name: langfuse
+    profiles: [tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - ./config/traefik/certs/ca.crt:/certs/ca.crt:ro
+    environment:
+      <<: *langfuse-env
+      # NextAuth derives the OAuth redirect_uri from this. It must be the proxy
+      # hostname registered in Authelia, not the direct port, or the
+      # authorization request is rejected for an invalid redirect_uri.
+      NEXTAUTH_URL: https://traces.${LLM_DOMAIN:-llm.localhost}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?set LANGFUSE_NEXTAUTH_SECRET}
+      LANGFUSE_INIT_ORG_ID: llmservice
+      LANGFUSE_INIT_ORG_NAME: LLMService
+      LANGFUSE_INIT_PROJECT_ID: local
+      LANGFUSE_INIT_PROJECT_NAME: Local
+      # OIDC single sign-on through Authelia (Langfuse calls it a custom provider).
+      AUTH_CUSTOM_CLIENT_ID: langfuse
+      AUTH_CUSTOM_CLIENT_SECRET: ${LANGFUSE_OIDC_CLIENT_SECRET:-}
+      AUTH_CUSTOM_ISSUER: https://auth.${LLM_DOMAIN:-llm.localhost}
+      AUTH_CUSTOM_NAME: Authelia
+      AUTH_CUSTOM_SCOPE: openid email profile
+      AUTH_DISABLE_USERNAME_PASSWORD: "false"
+      # Node reads this to extend its CA bundle with our private CA.
+      NODE_EXTRA_CA_CERTS: /certs/ca.crt
+    depends_on:
+      langfuse-worker: { condition: service_started }
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.langfuse.loadbalancer.server.port=3000"
+      - "traefik.http.routers.langfuse.rule=Host(`traces.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.langfuse.entrypoints=websecure"
+      - "traefik.http.routers.langfuse.tls=true"
+      - "traefik.http.routers.langfuse.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # LANDING PAGE (profile: homepage)
+  # ============================================================================
+
+  homepage:
+    image: ghcr.io/gethomepage/homepage:v0.10.9
+    container_name: homepage
+    profiles: [homepage]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - ./config/homepage:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: "*"
+      PUID: "0"
+      PGID: "0"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.homepage.loadbalancer.server.port=3000"
+      # The apex name, so https://llm.localhost lands on the index.
+      - "traefik.http.routers.homepage.rule=Host(`${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.homepage.entrypoints=websecure"
+      - "traefik.http.routers.homepage.tls=true"
+      - "traefik.http.routers.homepage.middlewares=default-chain@file"
+    logging: *default-logging
