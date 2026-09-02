@@ -96,6 +96,19 @@ done
 rm -f "$ENV_FILE.bak"
 [[ $changed -gt 0 ]] && ok "Generated $changed secret(s)" || ok "All secrets already set"
 
+step "Creating the model volumes"
+# Declared `external` in docker-compose.yml so that `docker compose down -v`
+# cannot delete them -- they hold tens of gigabytes of weights that take hours
+# to fetch. External volumes must exist before the first `up`, so create them
+# here rather than letting compose fail with "external volume not found".
+for v in llmservice_hf-cache llmservice_vllm-cache; do
+  if docker volume inspect "$v" >/dev/null 2>&1; then
+    ok "$v exists (weights preserved)"
+  else
+    docker volume create "$v" >/dev/null && ok "created $v"
+  fi
+done
+
 step "Creating directories"
 mkdir -p "$ROOT/models"
 ok "models/  (drop local weights here to serve without HuggingFace)"

@@ -34,8 +34,24 @@ networks:
 
 volumes:
   argus-data:
+
+  # EXTERNAL on purpose: these hold model weights and compiled kernels, and a
+  # compose-managed volume is removed by `docker compose down -v`. That is a
+  # multi-hour re-download over a slow link -- 16 GB for an 8B, 20 GB for a
+  # 27B AWQ -- triggered by a flag people reach for when tidying up.
+  #
+  # Declared external, compose will NEVER delete them: `down -v` skips them
+  # and says so. The cost is that they must exist before the first `up`;
+  # bootstrap.sh creates them, and the command is:
+  #
+  #     docker volume create llmservice_hf-cache
+  #     docker volume create llmservice_vllm-cache
   hf-cache:
+    external: true
+    name: llmservice_hf-cache
   vllm-cache:
+    external: true
+    name: llmservice_vllm-cache
   open-webui-data:
   prometheus-data:
   grafana-data:
