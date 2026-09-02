@@ -18,6 +18,7 @@
 #   ./scripts/get-models.sh --gpu auto --model 3.6 --apply
 # ==============================================================================
 set -uo pipefail
+UNTIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -56,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --fp8)     PREC=fp8; shift ;;
     --bf16)    PREC=bf16; shift ;;
     --apply)   APPLY=1; shift ;;
+    --until-complete) UNTIL=1; shift ;;
     --list)    LIST=1; shift ;;
     --dry-run) DRYRUN=1; shift ;;
     --context) CTX_OVERRIDE="$2"; shift 2 ;;
@@ -385,6 +387,13 @@ count=$(wc -l < "$TARGET/.filelist" 2>/dev/null || echo 0)
 [[ "$count" -gt 0 ]] || die "could not list files for $REPO"
 ok "$count file(s) to fetch"
 
+# Everything a file needs to resume is already on disk, so "continue" is just
+# "run the loop again". The inner per-file loop gives up after 5 attempts that
+# add no bytes, which is right for a dead link and wrong for a flaky one -- on
+# an unreliable connection that is a pause, not a failure. --until-complete
+# keeps re-entering the pass until every file matches the size the API
+# reported, with a short backoff so a genuinely offline link is not hammered.
+download_pass() {
 step "Downloading (resumable; re-run any time to continue)"
 TOKEN="$(grep -E '^HF_TOKEN=' .env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]')"
 while IFS=$'	' read -r path size; do
@@ -438,6 +447,35 @@ while IFS=$'	' read -r path size; do
     fi
   done
 done < "$TARGET/.filelist"
+}
+
+# Files still short of the size the API reported.
+missing_count() {
+  local n=0 path size have
+  while IFS=$'	' read -r path size; do
+    [[ -z "$path" ]] && continue
+    have=$(stat -c %s "$TARGET/$path" 2>/dev/null || echo 0)
+    [[ "$size" -gt 0 && "$have" -lt "$size" ]] && n=$((n+1))
+  done < "$TARGET/.filelist"
+  echo "$n"
+}
+
+download_pass
+if [[ $UNTIL -eq 1 ]]; then
+  pass=1
+  while :; do
+    left="$(missing_count)"
+    [[ "$left" -eq 0 ]] && { ok "all files complete after $pass pass(es)"; break; }
+    pass=$((pass+1))
+    if [[ $pass -gt 200 ]]; then
+      warn "$left file(s) still incomplete after 200 passes - giving up"
+      break
+    fi
+    warn "$left file(s) incomplete - pass $pass in 30s (Ctrl-C is safe; bytes are kept)"
+    sleep 30
+    download_pass
+  done
+fi
 
 if [[ ! -f "$TARGET/config.json" ]]; then
   die "no config.json in $TARGET - download incomplete, re-run to resume"
