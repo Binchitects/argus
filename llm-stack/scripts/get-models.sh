@@ -399,7 +399,19 @@ TOKEN="$(grep -E '^HF_TOKEN=' .env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]
 while IFS=$'	' read -r path size; do
   [[ -z "$path" ]] && continue
   local_size=$(stat -c %s "$TARGET/$path" 2>/dev/null || echo 0)
-  if [[ "$local_size" -ge "$size" && "$size" -gt 0 ]]; then
+  # OVERSIZE means corrupt, not finished. Some proxies answer a ranged
+  # request with 200 and the whole file, and curl -C - appends it to the
+  # partial already on disk -- so the file grows past its true size with
+  # duplicated bytes interleaved. Measured here: every shard of a 19.6 GB
+  # download ended 5-20% too large, and neither the first nor the last
+  # `size` bytes hashed correctly, so there was nothing to truncate back to.
+  # `-ge` treated that as complete and reported 15/15 on unusable weights.
+  if [[ "$size" -gt 0 && "$local_size" -gt "$size" ]]; then
+    warn "$path is $((local_size/1048576)) MB but should be $((size/1048576)) MB - refetching"
+    rm -f "$TARGET/$path"
+    local_size=0
+  fi
+  if [[ "$local_size" -eq "$size" && "$size" -gt 0 ]]; then
     printf '    %-46s %s
 ' "$path" "already complete"
     continue
@@ -432,7 +444,15 @@ while IFS=$'	' read -r path size; do
     before=$(stat -c %s "$TARGET/$path" 2>/dev/null || echo 0)
     docker run --rm -v "$(hostpath "$ROOT/$TARGET"):/out" curlimages/curl:8.11.1       -sSL -C - --retry 0       --connect-timeout 30 --speed-limit 10240 --speed-time 30 "${AUTH[@]}"       -o "/out/$path" "https://huggingface.co/$REPO/resolve/main/$path" && break
     after=$(stat -c %s "$TARGET/$path" 2>/dev/null || echo 0)
-    [[ "$size" -gt 0 && "$after" -ge "$size" ]] && break
+    # Caught the instant it happens, so one bad response costs one file
+    # rather than silently poisoning the whole download.
+    if [[ "$size" -gt 0 && "$after" -gt "$size" ]]; then
+      warn "  $path overshot ($((after/1048576)) > $((size/1048576)) MB) - the server ignored Range; starting it over"
+      rm -f "$TARGET/$path"
+      stall=0
+      continue
+    fi
+    [[ "$size" -gt 0 && "$after" -eq "$size" ]] && break
     if [[ "$after" -gt "$before" ]]; then
       stall=0
       printf '      resumed, now %s / %s MB
@@ -455,7 +475,7 @@ missing_count() {
   while IFS=$'	' read -r path size; do
     [[ -z "$path" ]] && continue
     have=$(stat -c %s "$TARGET/$path" 2>/dev/null || echo 0)
-    [[ "$size" -gt 0 && "$have" -lt "$size" ]] && n=$((n+1))
+    [[ "$size" -gt 0 && "$have" -ne "$size" ]] && n=$((n+1))
   done < "$TARGET/.filelist"
   echo "$n"
 }
