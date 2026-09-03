@@ -140,6 +140,21 @@ case "$MODEL" in 3.6|3.8) ;; *) die "--model must be 3.6 or 3.8" ;; esac
 # ---------------------------------------------------------------------------
 # Select the checkpoint. Compute capability decides the format.
 # ---------------------------------------------------------------------------
+# NOTE on --quantization: it is deliberately NOT passed. vLLM reads the method
+# from the checkpoint's config.json, and the repository NAME does not reliably
+# say what that is -- cyankiwi/Qwen3.8-27B-AWQ-INT4 declares
+# quant_method: compressed-tensors (format pack-quantized) despite "AWQ" in
+# its name. Passing --quantization awq there makes vLLM refuse to start:
+#   "Quantization method specified in the model config (compressed-tensors)
+#    does not match the quantization method specified in the `quantization`
+#    argument"
+# and it restart-loops, which reads as a broken model rather than a wrong flag.
+#
+# NOTE on CTX: these are upper bounds from weight size, not measured fits. The
+# engine computes the real limit after loading and says so -- on a 3090 with
+# this 27B it reported 0.87 GiB of KV cache available against 0.91 needed for
+# 24576, and estimated 23520 as the true maximum. Take that number over this
+# one when they disagree; VLLM_MAX_MODEL_LEN here ended at 20480 for margin.
 QUANT=""; REPO=""; SIZE=""; CTX=""; EXTRA=""; UTIL="0.92"; SEQS=64
 case "$GPU" in
   3090)
@@ -180,7 +195,7 @@ case "$GPU" in
     CTX=24576
     UTIL="0.93"
     SEQS=8
-    EXTRA="--quantization awq --kv-cache-dtype fp8 --enforce-eager"
+    EXTRA="--kv-cache-dtype fp8 --enforce-eager"
     ;;
   4090)
     QUANT="awq"
@@ -194,7 +209,7 @@ case "$GPU" in
     CTX=24576
     UTIL="0.93"
     SEQS=8
-    EXTRA="--quantization awq --kv-cache-dtype fp8 --enforce-eager"
+    EXTRA="--kv-cache-dtype fp8 --enforce-eager"
     ;;
   5090)
     QUANT="nvfp4"

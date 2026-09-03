@@ -26,9 +26,9 @@ model_list:
   # `openai/` means "speak the OpenAI protocol to this base_url", not
   # api.openai.com. The name after it MUST equal vLLM's --served-model-name
   # (VLLM_SERVED_MODEL_NAME in .env) or every request 404s at the engine.
-  - model_name: qwen3-8b
+  - model_name: qwen3.8-27b
     litellm_params:
-      model: openai/qwen3-8b
+      model: openai/qwen3.8-27b
       api_base: http://vllm:8000/v1
       api_key: os.environ/VLLM_API_KEY
       rpm: 600
@@ -44,7 +44,7 @@ model_list:
   # does. Both entries point at the same engine.
   - model_name: local
     litellm_params:
-      model: openai/qwen3-8b
+      model: openai/qwen3.8-27b
       api_base: http://vllm:8000/v1
       api_key: os.environ/VLLM_API_KEY
       input_cost_per_token: 0.0000001
