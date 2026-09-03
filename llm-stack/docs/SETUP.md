@@ -126,6 +126,38 @@ fresh temp name per attempt. That cost 8.6 GB here. Leave it alone and watch
 `-subj "/CN=..."` into a path. `scripts/setup.sh` exports `MSYS_NO_PATHCONV`,
 but if you call `openssl` by hand, do the same or use the `.ps1`.
 
+## When vLLM cannot give you the window you need
+
+vLLM is the default engine and the better one under load. But the context it
+can offer is bounded by what the weights leave over, and on a 24 GB card the
+27B AWQ build leaves room for about 27K tokens — short of the 64K
+[Hermes](HERMES.md) requires.
+
+The lever is the **quantisation format, not the engine settings**: the same
+model as a Q4_K_M GGUF is ~2 GB smaller and fits a 64K window on the same
+card. That path runs through Ollama on the host, with `num_ctx` requested by
+the gateway. See [HERMES.md](HERMES.md) for the measured numbers.
+
+Ollama and vLLM both claim the whole GPU, so **only one runs at a time**:
+
+```bash
+docker compose stop vllm          # before starting Ollama
+./scripts/start-ollama.sh         # NOT plain `ollama serve` -- see below
+```
+
+```powershell
+.\scripts\start-ollama.ps1        # Windows
+```
+
+Use the script rather than `ollama serve`. It sets `OLLAMA_KV_CACHE_TYPE`,
+which is server-level environment and cannot be requested per call — and the
+window the gateway asks for (114,688) only fits with a `q8_0` cache. Started
+any other way, Ollama gets an `f16` cache, accepts the same request, spills a
+quarter of the model to system RAM and crawls. It does not error.
+
+`scripts/e2e-check.py` probes vLLM first and Ollama second, and names which
+one answered — so it passes either way and tells you which engine you are on.
+
 ## Adding people
 
 The installer offers to provision everyone in

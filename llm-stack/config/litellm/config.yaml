@@ -17,65 +17,71 @@
 # ==============================================================================
 
 model_list:
-  # vLLM is the single backend. One engine, one model at a time -- a 24 GB
-  # card cannot hold an 8B and a 27B at once, and vLLM claims
-  # VLLM_GPU_MEMORY_UTILIZATION of the card up front, so nothing else can
-  # load beside it. `scripts/switch-model` changes which model this is and
-  # rewrites the two entries below to match.
+  # Ollama, not vLLM, and for one measured reason: CONTEXT.
   #
-  # `openai/` means "speak the OpenAI protocol to this base_url", not
-  # api.openai.com. The name after it MUST equal vLLM's --served-model-name
-  # (VLLM_SERVED_MODEL_NAME in .env) or every request 404s at the engine.
+  # Hermes Agent refuses to start below a 64K window. On a 24 GB card the
+  # vLLM path cannot provide it for this model -- 19.6 GB of AWQ safetensors
+  # left room for 27,534 KV tokens at 0.94 utilisation, against the 65,536
+  # needed, and no setting closes a 2.4x gap. --cpu-offload-gb freed the
+  # memory (KV rose to 152,917 tokens) but the quantized kernels then died
+  # with "Pointer argument cannot be accessed from Triton (cpu tensor?)".
+  #
+  # The same model as Q4_K_M GGUF is 17.5 GB -- about 2 GB smaller -- and
+  # that 2 GB is the whole difference: it loads FULLY on the GPU at a 64K
+  # context, 22.4 GB total. Quantisation format, not engine tuning, was the
+  # lever.
+  #
+  # The cost is real: Ollama runs on the HOST and holds the same card, so
+  # vLLM must be stopped. vLLM remains the better choice when a 22K window is
+  # enough -- it batches far better. Switch back with scripts/switch-model.
   - model_name: qwen3.8-27b
     litellm_params:
-      model: openai/qwen3.8-27b
-      api_base: http://vllm:8000/v1
-      api_key: os.environ/VLLM_API_KEY
-      rpm: 600
-      # Without per-token prices spend is always 0.00, budgets never bind and
-      # the usage dashboards sum a column of zeros. Local rates, not a vendor
-      # price list -- set them to whatever makes a sensible unit of account.
-      input_cost_per_token: 0.0000001
-      output_cost_per_token: 0.0000004
+      model: ollama_chat/qwen3.8:27b
+      api_base: http://host.docker.internal:11434
+      # Requested per call, NOT left to OLLAMA_CONTEXT_LENGTH: the server-side
+      # default depends on how Ollama happened to be launched and is lost on a
+      # reboot, which would silently drop every client to 4096 and break Hermes
+      # with a message about context rather than about configuration.
+      #
+      # 114,688 is the measured ceiling that stays entirely on a 24 GB card
+      # with a q8_0 KV cache; 122,880 already spills. It REQUIRES Ollama to
+      # have been started by scripts/start-ollama -- with an f16 cache this
+      # same number spills a quarter of the model to system RAM and crawls,
+      # without erroring. Verified by retrieving a fact from the middle of a
+      # 100,687-token prompt.
+      num_ctx: 114688
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.0000008
     model_info:
       mode: chat
 
-  # Stable alias, so clients and scripts need not change when the checkpoint
-  # does. Both entries point at the same engine.
+  # Stable alias, so clients need not change when the model does.
   - model_name: local
     litellm_params:
-      model: openai/qwen3.8-27b
-      api_base: http://vllm:8000/v1
-      api_key: os.environ/VLLM_API_KEY
-      input_cost_per_token: 0.0000001
-      output_cost_per_token: 0.0000004
+      model: ollama_chat/qwen3.8:27b
+      api_base: http://host.docker.internal:11434
+      # Requested per call, NOT left to OLLAMA_CONTEXT_LENGTH: the server-side
+      # default depends on how Ollama happened to be launched and is lost on a
+      # reboot, which would silently drop every client to 4096 and break Hermes
+      # with a message about context rather than about configuration.
+      #
+      # 114,688 is the measured ceiling that stays entirely on a 24 GB card
+      # with a q8_0 KV cache; 122,880 already spills. It REQUIRES Ollama to
+      # have been started by scripts/start-ollama -- with an f16 cache this
+      # same number spills a quarter of the model to system RAM and crawls,
+      # without erroring. Verified by retrieving a fact from the middle of a
+      # 100,687-token prompt.
+      num_ctx: 114688
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.0000008
 
-  # --- Ollama, kept as a documented fallback -------------------------------
-  # Used while vLLM could not start (see .env VLLM_USE_V2_MODEL_RUNNER). It
-  # runs on the HOST and serves the same GPU, so it cannot run at the same
-  # time as vLLM -- whichever holds the card wins. Uncomment these ONLY with
-  # vLLM stopped, and note the `ollama_chat/` prefix keeps them out of
-  # switch-model's rewrite, which only touches `openai/` lines.
-  #
-  # - model_name: deepseek-r1-8b
+  # --- vLLM, for when a 22K window is enough -------------------------------
+  # Uncomment with Ollama stopped; both want the whole GPU.
+  # - model_name: vllm-local
   #   litellm_params:
-  #     model: ollama_chat/deepseek-r1:8b
-  #     api_base: http://host.docker.internal:11434
-  #     input_cost_per_token: 0.0000001
-  #     output_cost_per_token: 0.0000004
-  #
-  # - model_name: qwen3.8-27b
-  #   litellm_params:
-  #     model: ollama_chat/qwen3.8:27b
-  #     api_base: http://host.docker.internal:11434
-  #     input_cost_per_token: 0.0000002
-  #     output_cost_per_token: 0.0000008
-
-  # --- Example: a hosted fallback ------------------------------------------
-  # - model_name: cloud-fallback
-  #   litellm_params:
-  #     model: anthropic/claude-sonnet-5
-  #     api_key: os.environ/ANTHROPIC_API_KEY
+  #     model: openai/qwen3.8-27b
+  #     api_base: http://vllm:8000/v1
+  #     api_key: os.environ/VLLM_API_KEY
 
 router_settings:
   routing_strategy: simple-shuffle

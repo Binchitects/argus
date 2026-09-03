@@ -18,6 +18,7 @@ model:
   base_url: https://gateway.llm.localhost/v1
   api_key: sk-...                 # YOUR key, from llm-users.sh
   name: local                     # or the served name, e.g. qwen3.8-27b
+  context_length: 114688          # see "How much context you can have" below
 ```
 
 **Use your own key, not `LITELLM_MASTER_KEY`.** The master key is a superuser
@@ -32,6 +33,87 @@ gateway exists for. Mint yours with:
 **Prefer `local` over the checkpoint name.** `local` is an alias that follows
 whatever the engine is serving, so `switch-model` does not strand your config
 pointing at a model that is no longer loaded.
+
+## Hermes needs 64K, and that decides the engine
+
+Hermes refuses to start on a model with a window under 64,000 tokens:
+
+```
+Model local has a context window of 24,576 tokens, which is below the
+minimum 64,000 required by Hermes Agent.
+```
+
+Two separate things have to be true, and each failed here first.
+
+**1. The engine must really serve it.** On a 24 GB card, this model under
+vLLM cannot reach 64K at all. Measured rather than assumed:
+
+| | weights | KV cache at util 0.94 |
+|---|---|---|
+| AWQ INT4 safetensors (vLLM) | 19.6 GB | **27,534 tokens** |
+| Q4_K_M GGUF (Ollama) | 17.5 GB | **65,536 tokens**, 22.4 GB total |
+
+Same model, same 4-bit precision — GGUF simply packs ~2 GB smaller, and that
+2 GB is the entire difference between a 22K window and a 64K one. No vLLM
+setting closes a 2.4x gap: `--cpu-offload-gb 4` did free the memory (KV rose
+to 152,917 tokens) but the quantized kernels then died with `Pointer argument
+cannot be accessed from Triton (cpu tensor?)`.
+
+So **the gateway fronts Ollama for this model**. Ollama runs on the *host* and
+claims the same card, so **vLLM must be stopped** — they cannot share it. vLLM
+is still the better engine when a 22K window is enough; it batches far better.
+
+The 64K is requested per call by the gateway (`num_ctx` in
+`config/litellm/config.yaml`), *not* by `OLLAMA_CONTEXT_LENGTH`. A server-side
+default depends on how Ollama happened to be launched and is lost on a reboot,
+which would silently drop every client to 4096.
+
+### How much context you can have
+
+Past 64K the limit moves again, and the lever is the **precision of the KV
+cache** rather than the weights. This model is a hybrid attention/SSM design
+(`qwen35.ssm.*`): most of its 65 layers keep a fixed-size state and only a
+minority grow a KV cache with context, which is why its context is far cheaper
+than a plain transformer of the same size.
+
+Measured on a 24 GB card, largest window that stays **entirely** on the GPU:
+
+| KV cache | max context | VRAM | notes |
+|---|---|---|---|
+| `f16` (default) | **65,536** | 22.4 GB | 131,072 spills 27% to system RAM |
+| `q8_0` | **114,688** | 22.8 GB | 122,880 already spills. Near-lossless |
+| `q4_0` | **131,072** | 21.5 GB | 4-bit KV; costs long-range recall |
+| any | 262,144 (the model's full window) | — | **does not fit** |
+
+**The stack ships `q8_0` at 114,688.** It was verified by retrieval, not by
+loading: a fact buried in the *middle* of a 100,687-token prompt was returned
+correctly. Loading proves nothing on its own — the engine will happily load a
+window it then spills.
+
+`q4_0` buys 16,384 more tokens for a measurably worse cache. Take it only if
+you need the round 128K and can accept that.
+
+Nothing reaches the model's full 262,144. That needs roughly 35 GB.
+
+**Two things silently degrade instead of failing.** Both cost time here:
+
+- Start Ollama **only** via `scripts/start-ollama`. `OLLAMA_KV_CACHE_TYPE` is
+  server-level environment, so an ordinary `ollama serve` gives an `f16` cache
+  — and the gateway still asks for 114,688. Nothing errors; a quarter of the
+  model moves to system RAM and generation crawls.
+- Ollama **truncates** a prompt longer than the window rather than refusing it.
+  A 245K-token test document came back with `prompt_eval_count` of 57,346 and
+  the model correctly reporting it could not find the fact — which looks
+  exactly like a retrieval failure. Assert `prompt_eval_count` in any
+  long-context test.
+
+**2. Hermes must be told.** The gateway reports no `max_input_tokens` for
+locally-served models, so Hermes falls back to a built-in default of 24,576
+and refuses. `model.context_length: 114688` is the documented override.
+
+Set it only when it is **true**. Declaring 64K while the engine served 22.5K
+made every prompt fail with `Context length exceeded (22 tokens)` — a message
+that points at the prompt rather than at the lie in the config.
 
 ## Argus
 
@@ -60,6 +142,20 @@ NO_PROXY=localhost,127.0.0.1,::1,.local,llm.localhost,.llm.localhost
 **Name resolution.** `*.localhost` resolves in browsers but **not** in curl,
 SDK clients, or Hermes. Run `./scripts/setup-hosts.sh` once on the client
 machine.
+
+**Ollama does not restart itself.** It is a host process
+(started by `scripts/start-ollama`), not a Windows service, and has no entry under
+`HKCU:\...\CurrentVersion\Run` on this machine — so after a reboot the
+gateway advertises models that nothing is serving, and every request fails at
+the engine rather than at the gateway. Start it before the stack, or add it to
+your login items.
+
+**Killing Ollama leaks its runners.** `Stop-Process -Force` on `ollama.exe`
+does not reap the `llama-server.exe` children, and each orphan keeps a whole
+copy of the model in VRAM. Three of them pinned this card at 24.1 GB of
+24.6 GB, and the only visible symptom was benchmark numbers that made no
+sense — a 128K window spilling *more* than a 256K one. `start-ollama.ps1`
+reaps them; by hand, kill `llama-server` too.
 
 **Hermes caches MCP schemas.** After changing anything about a tool server,
 clear it or you are testing the previous description:
