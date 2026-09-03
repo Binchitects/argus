@@ -109,11 +109,26 @@ def main() -> int:
     # --- the gateway advertises it ---------------------------------------
     gw_models = [m["id"] for m in call(GW, "/v1/models", token=MASTER).get("data", [])]
     record("gateway advertises models", bool(gw_models), f"{gw_models}")
-    # The name clients use must resolve to something the engine actually has,
-    # or every request 404s at the engine with a healthy-looking gateway.
-    record("gateway names match the engine",
-           any(m in gw_models for m in ("local", *served)),
-           f"engine={served}")
+    # Every advertised name is EXERCISED, not just matched against the
+    # engine's list. An alias like `local` passes a name comparison while
+    # mapping to a checkpoint the engine does not serve, so the gateway looks
+    # healthy and every real request 404s behind it. That is not theoretical:
+    # a crash mid-`--force-recreate` left the engine on the old model while
+    # the gateway advertised the new one, and this check passed anyway
+    # because `local` was present in both.
+    unusable = []
+    for name in gw_models:
+        try:
+            call(GW, "/chat/completions",
+                 {"model": name,
+                  "messages": [{"role": "user", "content": f"ping {stamp}"}],
+                  "max_tokens": 1}, token=MASTER)
+        except urllib.error.HTTPError as exc:
+            unusable.append(f"{name}:{exc.code}")
+        except Exception as exc:
+            unusable.append(f"{name}:{type(exc).__name__}")
+    record("every advertised name actually answers", not unusable,
+           f"engine={served}" if not unusable else f"unusable={unusable}")
 
     # --- provision one person, both records ------------------------------
     for path, body in (

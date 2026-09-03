@@ -159,8 +159,8 @@ mcp_servers:
     url: https://argus.llm.localhost/mcp
 ```
 
-See [MODELS.md](MODELS.md) for pointing the same client at the inference
-gateway.
+See [HERMES.md](HERMES.md) for the whole client setup -- model and
+Argus together -- and [MODELS.md](MODELS.md) for the gateway itself.
 
 **On Windows, check your proxy exclusions.** If `HTTP_PROXY`/`HTTPS_PROXY` are
 set, `NO_PROXY` must include the stack's domain or the client tries to reach
