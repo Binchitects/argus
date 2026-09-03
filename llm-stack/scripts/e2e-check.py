@@ -27,7 +27,17 @@ import urllib.request
 
 GW = os.environ.get("GATEWAY_URL", "http://litellm:4000")
 WEBUI = os.environ.get("WEBUI_URL", "http://open-webui:8080")
-VLLM = os.environ.get("VLLM_URL", "http://vllm:8000")
+# The engine is whichever one is actually serving. vLLM runs as a compose
+# service; Ollama runs on the HOST and is reached through the Docker gateway.
+# Naming only vLLM here made this check engine-specific when its intent --
+# "something is really serving the models the gateway advertises" -- is not.
+ENGINES = [
+    ("vLLM", os.environ.get("VLLM_URL", "http://vllm:8000") + "/v1/models",
+     os.environ.get("VLLM_API_KEY")),
+    ("Ollama", os.environ.get("OLLAMA_URL",
+                              "http://host.docker.internal:11434") + "/v1/models",
+     None),
+]
 ARGUS = os.environ.get("ARGUS_URL", "http://argus:7700")
 MASTER = os.environ["MK"]
 
@@ -95,16 +105,22 @@ def main() -> int:
     print(f"\n{DIM}  identity under test: {email}{OFF}\n", flush=True)
 
     # --- the engine ------------------------------------------------------
-    try:
-        # vLLM enforces its own api key (VLLM_API_KEY); without it the
-        # engine answers 401 and this reads as "not serving".
-        served = [m["id"] for m in call(
-            VLLM, "/v1/models",
-            token=os.environ.get("VLLM_API_KEY")).get("data", [])]
-        record("vLLM is serving", bool(served), f"models={served}")
-    except Exception as exc:
-        record("vLLM is serving", False, type(exc).__name__)
-        served = []
+    # vLLM enforces its own api key (VLLM_API_KEY); without it the engine
+    # answers 401 and this reads as "not serving".
+    served, engine, why = [], None, []
+    for name, url, token in ENGINES:
+        try:
+            served = [m["id"] for m in
+                      call(url, "", token=token, timeout=30).get("data", [])]
+        except Exception as exc:
+            why.append(f"{name}:{type(exc).__name__}")
+            continue
+        if served:
+            engine = name
+            break
+        why.append(f"{name}:no-models")
+    record("an engine is serving", bool(served),
+           f"{engine} models={served}" if engine else " ".join(why))
 
     # --- the gateway advertises it ---------------------------------------
     gw_models = [m["id"] for m in call(GW, "/v1/models", token=MASTER).get("data", [])]
