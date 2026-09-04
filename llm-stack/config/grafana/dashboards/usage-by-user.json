@@ -1,128 +1,695 @@
 {
   "uid": "usage-by-user",
   "title": "Usage by person",
-  "tags": ["llm", "usage", "tokens", "budget"],
-  "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
-  "refresh": "1m",
-  "time": { "from": "now-30d", "to": "now" },
-  "description": "Tokens, requests and spend per person, counted across the API and the web UI together. Sourced from the gateway's own tables rather than Prometheus: LiteLLM's /metrics is an enterprise feature, and vLLM's metrics carry no user dimension.",
+  "editable": true,
+  "refresh": "5m",
+  "tags": [
+    "llmservice",
+    "usage",
+    "billing",
+    "attribution"
+  ],
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
   "panels": [
     {
       "type": "text",
-      "title": "What these numbers are",
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "title": "How a key maps to a person",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      },
       "options": {
         "mode": "markdown",
-        "content": "Both surfaces are counted here. API calls attribute through the caller's key; chat attributes through the identity Open WebUI forwards, which `identity-proxy` puts in the request. **Spend is only money if the model has `input_cost_per_token`/`output_cost_per_token` set** — otherwise it is a consistent accounting unit over tokens. Rows are written when a request completes, so the current minute lags."
+        "content": "### Keys and people are the same picture here\n\nLiteLLM stores a **key** and a **person** as separate things, joined by the key's `user_id`. The spend log only ever holds the **hashed** key, which is why the two look unrelated in the raw tables. Every panel below resolves them:\n\n```\nperson = spendlog.user\n      -> metadata.user_api_key_user_id\n      -> VerificationToken.user_id   (the key's owner)\n      -> spendlog.end_user\n```\n\n`metadata` comes first deliberately: LiteLLM copies the key's alias and owner into each spend row, so attribution **survives the key being deleted** \u2014 a plain join loses those rows.\n\n**`(master key)` means attributed to nobody.** `LITELLM_MASTER_KEY` is a superuser credential with no owner and no budget, so its usage cannot be billed to a person and no ceiling binds it. Anything in that row is usage you cannot account for \u2014 give those callers their own key with `scripts/llm-users.sh --apply`."
+      }
+    },
+    {
+      "type": "stat",
+      "title": "People active",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select count(distinct coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)')) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Requests",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 4,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select count(*) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Tokens",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 8,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select coalesce(sum(s.total_tokens),0) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Spend",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select round(coalesce(sum(s.spend),0)::numeric,4) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 4
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Attributed",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "Share of requests that resolve to a real person. Anything short of 100% is usage nobody is accountable for.",
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select round(100.0*count(*) filter (where coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') <> '(unattributed)' and coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') <> 'default_user_id')/nullif(count(*),0),1) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Master-key requests",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "Unowned and unbounded. Should be zero in steady state.",
+      "gridPos": {
+        "x": 20,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select count(*) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
       }
     },
     {
       "type": "table",
-      "title": "Per person, this period",
-      "datasource": { "type": "postgres", "uid": "litellm-db" },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
-      "options": { "showHeader": true, "sortBy": [{ "displayName": "tokens", "desc": true }] },
-      "fieldConfig": {
-        "defaults": { "custom": { "align": "auto" } },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "spend" },
-            "properties": [{ "id": "unit", "value": "currencyUSD" },
-                           { "id": "decimals", "value": 4 }] }
-        ]
+      "title": "Per person \u2014 every surface combined",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "One row per person, API and web UI summed. This is the number to bill, quota or argue about.",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 9
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT user_id AS \"person\", SUM(prompt_tokens + completion_tokens) AS \"tokens\", SUM(prompt_tokens) AS \"prompt\", SUM(completion_tokens) AS \"completion\", SUM(api_requests) AS \"requests\", SUM(failed_requests) AS \"failed\", SUM(spend) AS \"spend\" FROM \"LiteLLM_DailyUserSpend\" WHERE date::timestamp BETWEEN $__timeFrom() AND $__timeTo() GROUP BY user_id ORDER BY \"tokens\" DESC"
+          "rawSql": "select coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", count(*) as \"Requests\", coalesce(sum(s.prompt_tokens),0) as \"Prompt\", coalesce(sum(s.completion_tokens),0) as \"Completion\", coalesce(sum(s.total_tokens),0) as \"Tokens\", round(coalesce(sum(s.spend),0)::numeric,4) as \"Spend\", count(distinct coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)')) as \"Keys used\", string_agg(distinct case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') like 'open-webui%' then 'Web UI' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end, ', ') as \"Surfaces\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") group by 1 order by 5 desc nulls last"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "table",
+      "title": "Which key belongs to whom",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "The key inventory. LiteLLM shows only a masked key_name -- the full key is shown once at creation and never stored in the clear.",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select coalesce(v.key_alias, '(no alias)') as \"Key alias\", coalesce(v.user_id, '(unowned)') as \"Owner\", coalesce(v.key_name, '') as \"Key (masked)\", round(coalesce(v.spend,0)::numeric,4) as \"Spend\", coalesce(v.max_budget, 0) as \"Budget\", v.\"created_at\" as \"Created\" from \"LiteLLM_VerificationToken\" v order by v.spend desc nulls last"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "type": "timeseries",
       "title": "Tokens per day, by person",
-      "datasource": { "type": "postgres", "uid": "litellm-db" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 13 },
-      "fieldConfig": {
-        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 80, "lineWidth": 0 }, "unit": "short" },
-        "overrides": []
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 12,
+        "h": 8
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date::timestamp AS \"time\", user_id AS metric, SUM(prompt_tokens + completion_tokens) AS value FROM \"LiteLLM_DailyUserSpend\" WHERE date::timestamp BETWEEN $__timeFrom() AND $__timeTo() GROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "select $__timeGroupAlias(s.\"startTime\", 1d), coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as metric, coalesce(sum(s.total_tokens),0) as tokens from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") group by 1,2 order by 1"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     },
     {
       "type": "timeseries",
-      "title": "Tokens per day, by model",
-      "datasource": { "type": "postgres", "uid": "litellm-db" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 13 },
-      "fieldConfig": {
-        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 80, "lineWidth": 0 }, "unit": "short" },
-        "overrides": []
+      "title": "Tokens per day, by surface",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "API keys, the web UI's shared key, and anything still riding the master key -- side by side.",
+      "gridPos": {
+        "x": 12,
+        "y": 21,
+        "w": 12,
+        "h": 8
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date::timestamp AS \"time\", model AS metric, SUM(prompt_tokens + completion_tokens) AS value FROM \"LiteLLM_DailyUserSpend\" WHERE date::timestamp BETWEEN $__timeFrom() AND $__timeTo() GROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "select $__timeGroupAlias(s.\"startTime\", 1d), case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') like 'open-webui%' then 'Web UI' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end as metric, coalesce(sum(s.total_tokens),0) as tokens from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") group by 1,2 order by 1"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     },
     {
       "type": "table",
-      "title": "Budget headroom -- who is close to their ceiling",
-      "datasource": { "type": "postgres", "uid": "litellm-db" },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 22 },
-      "description": "Spend against ceiling for the CURRENT budget window, which is why it does not follow the dashboard time range. A person at 100% is refused until their budget resets.",
-      "options": { "showHeader": true, "sortBy": [{ "displayName": "used %", "desc": true }] },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "used %" },
-            "properties": [
-              { "id": "unit", "value": "percent" },
-              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
-              { "id": "max", "value": 100 },
-              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 75 },
-                  { "color": "red", "value": 95 } ] } }
-            ] }
-        ]
+      "title": "Budget headroom",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "Internal-user ceilings. A person at 100% is refused on BOTH the API and the chat path -- see docs/USAGE-LIMITS.md.",
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 12,
+        "h": 9
       },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT u.user_id AS \"person\", u.spend AS \"spend\", u.max_budget AS \"ceiling\", CASE WHEN u.max_budget > 0 THEN ROUND((u.spend / u.max_budget * 100)::numeric, 1) ELSE NULL END AS \"used %\", u.budget_reset_at AS \"resets\" FROM \"LiteLLM_UserTable\" u WHERE u.max_budget IS NOT NULL ORDER BY 4 DESC NULLS LAST"
+          "rawSql": "select u.user_id as \"Person\", coalesce(u.user_email,'') as \"Email\", round(coalesce(u.spend,0)::numeric,4) as \"Spend\", u.max_budget as \"Budget\", case when u.max_budget is null or u.max_budget = 0 then null else round((100.0*coalesce(u.spend,0)/u.max_budget)::numeric,1) end as \"Used %\" from \"LiteLLM_UserTable\" u where u.user_id not like 'e2e-%' order by 5 desc nulls last"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "type": "table",
-      "title": "Recent requests",
-      "datasource": { "type": "postgres", "uid": "litellm-db" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 31 },
-      "description": "`user` is the internal identity (attribution); `end_user` is what the budget is checked against. On a chat request they should be the same address -- if end_user is empty, identity-proxy is not in that request's path.",
-      "options": { "showHeader": true },
+      "title": "Unattributed usage \u2014 fix these",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "Requests that resolve to nobody. Almost always the master key in a client config -- replace it with a per-person key.",
+      "gridPos": {
+        "x": 12,
+        "y": 29,
+        "w": 12,
+        "h": 9
+      },
       "targets": [
         {
           "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT \"startTime\" AS \"time\", COALESCE(\"user\", '-') AS \"user\", COALESCE(end_user, '-') AS \"end_user\", model, total_tokens AS \"tokens\", spend FROM \"LiteLLM_SpendLogs\" WHERE \"startTime\" BETWEEN $__timeFrom() AND $__timeTo() ORDER BY \"startTime\" DESC LIMIT 100"
+          "rawSql": "select coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') as \"Key\", coalesce(nullif(s.\"user\",''),'(none)') as \"user field\", coalesce(nullif(s.end_user,''),'(none)') as \"end_user\", count(*) as \"Requests\", coalesce(sum(s.total_tokens),0) as \"Tokens\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and (coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') = '(unattributed)' or coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') = 'default_user_id') group by 1,2,3 order by 5 desc"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent requests, resolved",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "The raw rows with the person and key resolved. If a total above looks wrong, it is wrong here first.",
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select s.\"startTime\" as \"Time\", coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') as \"Key\", case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') like 'open-webui%' then 'Web UI' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end as \"Surface\", s.model as \"Model\", s.prompt_tokens as \"Prompt\", s.completion_tokens as \"Completion\", round(coalesce(s.spend,0)::numeric,6) as \"Spend\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") order by s.\"startTime\" desc limit 200"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
     }
   ]
 }
