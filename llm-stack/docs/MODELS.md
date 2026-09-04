@@ -229,9 +229,40 @@ Above 32 GB the question stops being *"what context fits?"* and becomes
 has room for roughly seven full-length sequences at once and the H200 nine,
 before batching becomes the limit.
 
-**192K does not fit on a 3090.** It needs 6.4 GB of KV cache and roughly 2 GB is
-available after the weights — no setting closes a 4.4 GB gap. Long context on
-24 GB means a smaller model.
+**192K does not fit on a 3090 *under vLLM*.** It needs 6.4 GB of KV cache and
+roughly 2 GB is available after the weights — no setting closes a 4.4 GB gap.
+
+It does not, however, mean long context on 24 GB needs a smaller model. It
+means a different **build** and a different engine.
+
+### 24 GB, long context: the GGUF route
+
+Every figure above assumes AWQ/NVFP4 safetensors served by vLLM. The same 27B
+as a **Q4_K_M GGUF is 17.5 GB rather than 19.6** — same 4-bit precision, ~2 GB
+tighter packing — and Ollama can additionally quantise the **KV cache itself**,
+which vLLM's `--kv-cache-dtype fp8` only halves.
+
+Measured on a 24 GB card, largest window staying **entirely** on the GPU:
+
+| KV cache | max context | VRAM | note |
+|---|---|---|---|
+| `f16` | 65,536 | 22.4 GB | 131,072 spills 27% to system RAM |
+| `q8_0` | 114,688 | 22.8 GB | 122,880 already spills |
+| **`q4_0`** | **131,072** | **21.9 GB** | the shipped default, ~2.6 GB spare |
+| `q4_0` + `num_gpu` | **262,144** — the model's full window | 24.2 GB | ~370 MiB spare |
+
+So a 24 GB card reaches the model's **entire 256K window**, five times what the
+vLLM path manages. The costs are real and worth stating plainly:
+
+* Ollama runs on the **host** and claims the same GPU, so vLLM must be stopped.
+* vLLM batches far better. For serving several people at a 22K window it
+  remains the right engine; this route is for one long context.
+* Verified by **retrieval**, not by loading — the engine will happily load a
+  window it then spills. Two facts at 25% and 75% depth of a 201,397-token
+  prompt both came back correctly.
+
+See [HERMES.md](HERMES.md) for the setup and the two failure modes that
+degrade silently instead of erroring.
 
 `--kv-cache-dtype fp8` is set by default on every preset: it halves KV cost for
 negligible quality impact and is the difference between 32K and 16K on a 3090.

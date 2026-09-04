@@ -146,6 +146,22 @@ def main() -> int:
     record("every advertised name actually answers", not unusable,
            f"engine={served}" if not unusable else f"unusable={unusable}")
 
+    # --- the gateway ADVERTISES its context window -----------------------
+    # Regression guard. While max_input_tokens was null here, every client had
+    # to probe the window itself -- and clients cache what they probe. Hermes
+    # cached 24,576 from the vLLM era, then refused to start against a 131,072
+    # engine while quoting a number no live component had. Advertising the
+    # window makes that unrepresentable; this keeps it advertised.
+    try:
+        info = call(GW, "/model/info", token=MASTER).get("data", [])
+        windows = {m.get("model_name"): (m.get("model_info") or {}).get("max_input_tokens")
+                   for m in info}
+        missing = [n for n, w in windows.items() if not w]
+        record("gateway advertises a context window", bool(windows) and not missing,
+               f"{windows}" if not missing else f"null for {missing}")
+    except Exception as exc:
+        record("gateway advertises a context window", False, type(exc).__name__)
+
     # --- provision one person, both records ------------------------------
     for path, body in (
         ("/user/new", {"user_id": email, "user_email": email,

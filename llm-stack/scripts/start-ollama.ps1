@@ -1,12 +1,12 @@
 # Start Ollama with the settings this stack's context window depends on.
 # See start-ollama.sh for the measured reasoning; the short version is that
 # OLLAMA_KV_CACHE_TYPE is server-level environment, so starting Ollama any
-# other way silently drops the usable window from 114,688 to 65,536 and
+# other way silently drops the usable window from 131,072 to 65,536 and
 # spills the remainder to system RAM instead of failing.
 [CmdletBinding()]
 param(
-    [string]$KvCacheType = 'q8_0',
-    [int]$ContextLength  = 114688
+    [string]$KvCacheType = 'q4_0',
+    [int]$ContextLength  = 131072
 )
 $ErrorActionPreference = 'Stop'
 
