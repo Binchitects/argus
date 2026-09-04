@@ -163,6 +163,53 @@ Argus resolves every request's identity against GitLab, so the token is a
 GitLab PAT with `read_api` — **your own**, not the indexing service token.
 What you can see through Argus is exactly what you can see in GitLab.
 
+## When the agent runs for an hour and lands nothing
+
+The worst failure in this stack so far, because nothing errored — the agent
+just never finished. Symptoms: work partly appears on disk, the same step is
+attempted again and again, each turn slower than the last.
+
+The cause was in the gateway logs, not Hermes':
+
+```
+Failed to parse tool call arguments for tool 'search_files'
+Error: Extra data: line 1 column 73 (char 72)
+Arguments: {"pattern": "*.c", ...}{"pattern": "*.inf", ...}
+```
+
+Two tool calls, concatenated into one arguments string. LiteLLM cannot parse
+it, so it **drops the call**. Hermes sees no result and retries — re-prefilling
+the entire conversation every time.
+
+It is a **streaming** bug, and only on LiteLLM's `ollama_chat` path. Measured
+with the same prompt and model, varying only `stream`:
+
+| route | tool calls | parse |
+|---|---|---|
+| `ollama_chat`, non-streaming | 2 | ✅ |
+| `ollama_chat`, **streaming** | 1, concatenated | ❌ |
+| Ollama `/v1`, streaming | 2, indices `[0,1]` | ✅ |
+
+LiteLLM emits every parallel tool call under the same `index`, so the client
+glues their arguments together. `parallel_tool_calls: false` and
+`tool_choice: required` do **not** help — the model still emits two.
+
+**The fix is the route.** `config/litellm/config.yaml` uses
+`openai/qwen3.8:27b` against Ollama's own OpenAI-compatible endpoint
+(`:11434/v1`), bypassing the `ollama_chat` transform. `e2e-check.py` asserts
+streaming tool-call arguments still parse.
+
+The cost of that route: `/v1` does not accept Ollama's native `num_ctx`, so
+the window comes from `OLLAMA_CONTEXT_LENGTH` at launch — another reason to
+start Ollama only through `scripts/start-ollama`. The e2e check compares the
+served window against the advertised one, so a mismatch is loud.
+
+**A second, unrelated time sink worth knowing.** Feeding a preprocessed C file
+to the model will not work: a `.i` from the Windows SDK runs to ~1.8 MB, about
+450K tokens, well past a 131K window. Ollama **truncates** rather than
+refusing, so the model silently receives a fragment and appears to have missed
+things it was "given". Give it the `.c` and specific headers instead.
+
 ## Three things that will waste your time
 
 **Proxy exclusions.** If `HTTP_PROXY`/`HTTPS_PROXY` are set, `NO_PROXY` must
