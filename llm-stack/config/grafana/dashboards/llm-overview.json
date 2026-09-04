@@ -1,417 +1,1119 @@
 {
   "uid": "llm-overview",
-  "title": "LLM Overview (vLLM)",
-  "tags": ["llmservice", "vllm", "inference"],
-  "timezone": "browser",
+  "title": "LLM Overview",
   "schemaVersion": 39,
   "version": 1,
   "editable": true,
-  "refresh": "10s",
-  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "1m",
+  "tags": [
+    "llmservice",
+    "inference",
+    "gateway"
+  ],
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
   "templating": {
-    "list": [
-      {
-        "name": "model",
-        "label": "Model",
-        "type": "query",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(vllm:num_requests_running, model_name)",
-        "refresh": 2,
-        "includeAll": true,
-        "multi": true,
-        "current": { "text": "All", "value": "$__all" }
-      }
-    ]
+    "list": []
+  },
+  "annotations": {
+    "list": []
   },
   "panels": [
     {
-      "type": "row",
-      "title": "Right now",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
-      "collapsed": false,
-      "panels": []
+      "type": "text",
+      "title": "What this shows",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Read from the **gateway's own spend log** (`LiteLLM_SpendLogs` in Postgres), not from the inference engine. That is deliberate: this stack runs vLLM *or* Ollama depending on whether throughput or context matters more, and an engine-specific dashboard goes blank the moment you switch. vLLM's Prometheus metrics also carry no user dimension \u2014 they answer *how many tokens*, never *whose*.\n\nEvery request through `gateway.<domain>` lands here, from the API and the web UI alike. GPU panels come from the `nvidia-smi` exporter, which reports whichever engine holds the card.\n\nvLLM-native panels are in the collapsed row at the bottom. They light up when vLLM is the running engine and stay empty otherwise \u2014 that is expected, not a fault."
+      }
     },
     {
       "type": "stat",
-      "title": "Requests running",
-      "description": "Sequences currently being decoded by the engine.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "title": "Requests",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(vllm:num_requests_running{model_name=~\"$model\"})",
-          "legendFormat": "running"
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"Requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "text", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "text",
+                "value": null
+              }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "graphMode": "area",
-        "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
       }
     },
     {
       "type": "stat",
-      "title": "Requests queued",
-      "description": "Waiting for a scheduler slot. Sustained non-zero means you are past capacity.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "title": "Total tokens",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(vllm:num_requests_waiting{model_name=~\"$model\"})",
-          "legendFormat": "waiting"
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(sum(total_tokens),0) AS \"Tokens\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "red", "value": 20 }
+              {
+                "color": "text",
+                "value": null
+              }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "graphMode": "area",
-        "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
       }
     },
     {
-      "type": "gauge",
-      "title": "KV cache used",
-      "description": "Fraction of the paged-attention block pool in use. Above ~95% vLLM starts preempting sequences.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "type": "stat",
+      "title": "Median latency",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "max(vllm:gpu_cache_usage_perc{model_name=~\"$model\"})",
-          "legendFormat": "kv cache"
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms),0) AS \"p50\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND request_duration_ms IS NOT NULL"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1,
+          "unit": "ms",
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.85 },
-              { "color": "red", "value": 0.95 }
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "p95 latency",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY request_duration_ms),0) AS \"p95\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND request_duration_ms IS NOT NULL"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Cache hit rate",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(100.0*count(*) FILTER (WHERE cache_hit = 'True')/NULLIF(count(*),0),0) AS \"Cache\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Failures",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) FILTER (WHERE status IS NOT NULL AND status <> 'success') AS \"Failures\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
             ]
           }
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
-    },
-    {
-      "type": "stat",
-      "title": "Output tokens/sec",
-      "description": "Generation throughput averaged over 5 minutes.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum(rate(vllm:generation_tokens_total{model_name=~\"$model\"}[5m]))",
-          "legendFormat": "tok/s"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": { "unit": "short", "decimals": 1, "color": { "mode": "fixed", "fixedColor": "blue" } },
-        "overrides": []
-      },
       "options": {
-        "graphMode": "area",
-        "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
       }
     },
     {
-      "type": "stat",
-      "title": "p95 TTFT",
-      "description": "Time to first token — what a user perceives as responsiveness.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "type": "timeseries",
+      "title": "Requests over time, by model",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "Every request the gateway served, whichever engine answered it.",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
-          "legendFormat": "p95"
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), model AS metric, count(*) AS \"requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1, 2 ORDER BY 1"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
-          "decimals": 2,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 2 },
-              { "color": "red", "value": 5 }
-            ]
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
           }
         },
         "overrides": []
       },
       "options": {
-        "graphMode": "area",
-        "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
-    },
-    {
-      "type": "stat",
-      "title": "Requests/min",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "60 * sum(rate(vllm:request_success_total{model_name=~\"$model\"}[5m]))",
-          "legendFormat": "req/min"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": { "unit": "short", "decimals": 1, "color": { "mode": "fixed", "fixedColor": "purple" } },
-        "overrides": []
-      },
-      "options": {
-        "graphMode": "area",
-        "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-      }
-    },
-    {
-      "type": "row",
-      "title": "Latency",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
-      "collapsed": false,
-      "panels": []
-    },
-    {
-      "type": "timeseries",
-      "title": "Time to first token (TTFT)",
-      "description": "Dominated by prefill compute plus queue wait. Compare with queue depth below to tell the two apart.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 7 },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
-          "legendFormat": "p50"
-        },
-        {
-          "refId": "B",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
-          "legendFormat": "p95"
-        },
-        {
-          "refId": "C",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
-          "legendFormat": "p99"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
-        },
-        "overrides": []
-      },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
-    },
-    {
-      "type": "timeseries",
-      "title": "Time per output token (TPOT)",
-      "description": "Inter-token latency during decode. 1/TPOT is the per-stream tokens/sec a user sees.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 7 },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_per_output_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
-          "legendFormat": "p50"
-        },
-        {
-          "refId": "B",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_per_output_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
-          "legendFormat": "p95"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
-        },
-        "overrides": []
-      },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
-    },
-    {
-      "type": "timeseries",
-      "title": "End-to-end request latency",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 7 },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=~\"$model\"}[5m])))",
-          "legendFormat": "p50"
-        },
-        {
-          "refId": "B",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=~\"$model\"}[5m])))",
-          "legendFormat": "p95"
-        },
-        {
-          "refId": "C",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=~\"$model\"}[5m])))",
-          "legendFormat": "p99"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
-        },
-        "overrides": []
-      },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
-    },
-    {
-      "type": "row",
-      "title": "Throughput and load",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
-      "collapsed": false,
-      "panels": []
     },
     {
       "type": "timeseries",
       "title": "Token throughput",
-      "description": "Prefill (prompt) tokens are processed in large parallel batches; generation tokens are produced one step at a time, so the prompt line is normally much higher.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "Prompt tokens dominate long-context work; completion tokens are what the GPU actually generates.",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(vllm:prompt_tokens_total{model_name=~\"$model\"}[5m]))",
-          "legendFormat": "prompt tok/s"
-        },
-        {
-          "refId": "B",
-          "expr": "sum(rate(vllm:generation_tokens_total{model_name=~\"$model\"}[5m]))",
-          "legendFormat": "generation tok/s"
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), COALESCE(sum(prompt_tokens),0) AS \"prompt\", COALESCE(sum(completion_tokens),0) AS \"completion\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" }
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     },
     {
       "type": "timeseries",
-      "title": "Scheduler: running vs waiting",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "title": "Latency percentiles",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "End-to-end, as the CLIENT experienced it -- queueing and gateway overhead included.",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(vllm:num_requests_running{model_name=~\"$model\"})",
-          "legendFormat": "running"
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms) AS \"p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY request_duration_ms) AS \"p95\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND request_duration_ms IS NOT NULL GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Time to first token",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "Prefill. On a 128K window this dominates: ~164s measured for a 114K-token prompt.",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (\"completionStartTime\" - \"startTime\"))*1000) AS \"p50 TTFT\", percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (\"completionStartTime\" - \"startTime\"))*1000) AS \"p95 TTFT\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND \"completionStartTime\" IS NOT NULL GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "GPU utilisation",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "From nvidia-smi, so it reports whichever engine holds the card.",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nvidia_smi_utilization_gpu_ratio * 100",
+          "legendFormat": "GPU"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "VRAM used",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Weights plus KV cache. A window that spills to system RAM shows here as a total that stops growing while generation slows.",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nvidia_smi_memory_used_bytes",
+          "legendFormat": "used"
         },
         {
           "refId": "B",
-          "expr": "sum(vllm:num_requests_waiting{model_name=~\"$model\"})",
-          "legendFormat": "waiting"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nvidia_smi_memory_total_bytes",
+          "legendFormat": "total"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 25, "stacking": { "mode": "normal" }, "showPoints": "never" }
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     },
     {
-      "type": "timeseries",
-      "title": "Completions by finish reason",
-      "description": "`length` means the model hit max_tokens; a rising share often means clients need a bigger budget.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "type": "table",
+      "title": "By model",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 9
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (finished_reason) (rate(vllm:request_success_total{model_name=~\"$model\"}[5m]))",
-          "legendFormat": "{{finished_reason}}"
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT model AS \"Model\", count(*) AS \"Requests\", COALESCE(sum(prompt_tokens),0) AS \"Prompt tokens\", COALESCE(sum(completion_tokens),0) AS \"Completion tokens\", round(COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms),0)::numeric,0) AS \"p50 ms\", round(COALESCE(sum(spend),0)::numeric,4) AS \"Spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY 2 DESC"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1, "stacking": { "mode": "normal" }, "showPoints": "never" }
+          "custom": {
+            "align": "auto"
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+      "options": {
+        "showHeader": true
+      }
     },
     {
-      "type": "timeseries",
-      "title": "Tokens per request (mean)",
-      "description": "Sum/count of the histogram gives the running mean prompt and generation length.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "type": "table",
+      "title": "Recent requests",
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-db"
+      },
+      "description": "The raw rows. If a number above looks wrong, it is wrong here first.",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 9
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(vllm:request_prompt_tokens_sum{model_name=~\"$model\"}[5m])) / clamp_min(sum(rate(vllm:request_prompt_tokens_count{model_name=~\"$model\"}[5m])), 0.001)",
-          "legendFormat": "prompt tokens"
-        },
-        {
-          "refId": "B",
-          "expr": "sum(rate(vllm:request_generation_tokens_sum{model_name=~\"$model\"}[5m])) / clamp_min(sum(rate(vllm:request_generation_tokens_count{model_name=~\"$model\"}[5m])), 0.001)",
-          "legendFormat": "generation tokens"
+          "datasource": {
+            "type": "postgres",
+            "uid": "litellm-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \"startTime\" AS \"Time\", \"user\" AS \"User\", model AS \"Model\", prompt_tokens AS \"Prompt\", completion_tokens AS \"Completion\", request_duration_ms AS \"ms\", cache_hit AS \"Cached\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") ORDER BY \"startTime\" DESC LIMIT 100"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" }
+          "custom": {
+            "align": "auto"
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "row",
+      "title": "vLLM-native (empty unless vLLM is the running engine)",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Requests running",
+          "description": "Sequences currently being decoded by the engine.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 42,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(vllm:num_requests_running{model_name=~\"$model\"})",
+              "legendFormat": "running"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Requests queued",
+          "description": "Waiting for a scheduler slot. Sustained non-zero means you are past capacity.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 42,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(vllm:num_requests_waiting{model_name=~\"$model\"})",
+              "legendFormat": "waiting"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 5
+                  },
+                  {
+                    "color": "red",
+                    "value": 20
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          }
+        },
+        {
+          "type": "gauge",
+          "title": "KV cache used",
+          "description": "Fraction of the paged-attention block pool in use. Above ~95% vLLM starts preempting sequences.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 49,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(vllm:gpu_cache_usage_perc{model_name=~\"$model\"})",
+              "legendFormat": "kv cache"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.85
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.95
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Output tokens/sec",
+          "description": "Generation throughput averaged over 5 minutes.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 49,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(vllm:generation_tokens_total{model_name=~\"$model\"}[5m]))",
+              "legendFormat": "tok/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 1,
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "blue"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Time to first token (TTFT)",
+          "description": "Dominated by prefill compute plus queue wait. Compare with queue depth below to tell the two apart.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 56,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
+              "legendFormat": "p50"
+            },
+            {
+              "refId": "B",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
+              "legendFormat": "p95"
+            },
+            {
+              "refId": "C",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
+              "legendFormat": "p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Scheduler: running vs waiting",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 56,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(vllm:num_requests_running{model_name=~\"$model\"})",
+              "legendFormat": "running"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(vllm:num_requests_waiting{model_name=~\"$model\"})",
+              "legendFormat": "waiting"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 25,
+                "stacking": {
+                  "mode": "normal"
+                },
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            }
+          }
+        }
+      ]
     }
   ]
 }

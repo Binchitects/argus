@@ -153,7 +153,7 @@ capability, and getting it wrong means vLLM refuses to start.
 | **Ollama** *(host, alternative)* | The other engine, for when **context** matters more than throughput. GGUF weights pack ~2 GB tighter and its KV cache can itself be quantised, which is what gets a 27B to a 128K–256K window on a 24 GB card where vLLM tops out near 24K. Runs on the host and claims the same GPU, so exactly one of the two runs at a time — start it with `scripts/start-ollama`. See [docs/MODELS.md](docs/MODELS.md#24-gb-long-context-the-gguf-route). |
 | **Open WebUI** | Chat interface. Multi-user, conversation history, document upload. |
 | **Prometheus** | Metrics store. Scrapes every component, evaluates 21 alert rules. |
-| **Grafana** | Dashboards. Six provisioned from JSON — no clicking. |
+| **Grafana** | Dashboards. Seven provisioned from JSON — no clicking. **LLM Overview** and **Usage by person** read the gateway's spend log in Postgres rather than the engine, so they keep working when you switch between vLLM and Ollama. |
 | **Alertmanager** | Groups, deduplicates and routes firing alerts. |
 | **node-exporter** | Host CPU, memory, disk, network. |
 | **cAdvisor** | Per-container resource usage. |
