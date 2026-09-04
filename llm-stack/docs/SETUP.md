@@ -122,6 +122,32 @@ abandons the partial files rather than resuming them: HuggingFace writes to a
 fresh temp name per attempt. That cost 8.6 GB here. Leave it alone and watch
 `docker compose logs -f vllm`.
 
+**Grafana rejecting the password that is in `.env`.** Grafana writes the admin
+password into its own database on **first boot** and ignores
+`GF_SECURITY_ADMIN_PASSWORD` from then on, exactly like Open WebUI and its
+connection settings. Editing `.env` afterwards changes nothing and the login
+keeps failing. Reset it to whatever `.env` says:
+
+```bash
+grep -E '^GRAFANA_ADMIN_PASSWORD=' .env | cut -d= -f2-   | docker compose exec -T grafana grafana-cli admin reset-admin-password --password-from-stdin
+```
+
+Pipe it rather than passing it as an argument -- argv is visible in the
+container's process list. The login name is `GRAFANA_ADMIN_USER`, not `admin`.
+
+**`.env` losing to your shell.** Docker Compose gives **shell environment
+variables precedence over `.env`**. Measured here: `.env` said
+`POSTGRES_USER=llmservice` while the stack ran as `myuser`, because `myuser`
+was exported in the user's machine environment. Postgres had been initialised
+under that name and only honours `POSTGRES_USER` on first init, so everything
+worked -- until the day that variable is cleared, when Compose falls back to a
+role the database does not have and LiteLLM and Grafana lose the database
+together. Check what is really in force before trusting `.env`:
+
+```bash
+docker compose config | grep POSTGRES_USER
+```
+
 **Certificates that will not generate on Windows.** Git Bash rewrites
 `-subj "/CN=..."` into a path. `scripts/setup.sh` exports `MSYS_NO_PATHCONV`,
 but if you call `openssl` by hand, do the same or use the `.ps1`.
