@@ -36,29 +36,31 @@ model_list:
   # enough -- it batches far better. Switch back with scripts/switch-model.
   - model_name: qwen3.8-27b
     litellm_params:
-      model: ollama_chat/qwen3.8:27b
-      api_base: http://host.docker.internal:11434
-      # Requested per call, NOT left to OLLAMA_CONTEXT_LENGTH: the server-side
-      # default depends on how Ollama happened to be launched and is lost on a
-      # reboot, which would silently drop every client to 4096 and break Hermes
-      # with a message about context rather than about configuration.
+      # openai/ against Ollama's OWN OpenAI-compatible endpoint, NOT
+      # ollama_chat/. This is not a style preference -- it is a correctness fix.
       #
-      # 131,072 with a q4_0 KV cache. Measured ceilings on a 24 GB card,
-      # largest window staying ENTIRELY on the GPU:
-      #     f16 -> 65,536      q8_0 -> 114,688      q4_0 -> 262,144
-      # The model's full 262,144 does fit and was verified by retrieval
-      # (two facts at 25% and 75% depth of a 201,397-token prompt), but it
-      # leaves only ~370 MiB spare -- one browser away from an OOM. 131,072
-      # loads fully on its own, with about 3 GB of headroom.
+      # LiteLLM's ollama_chat STREAMING transform emits every parallel tool
+      # call under the same index, so a client concatenates their arguments
+      # into one unparseable string:
       #
-      # REQUIRES Ollama started by scripts/start-ollama: OLLAMA_KV_CACHE_TYPE
-      # is server-level, and with an f16 cache this same request spills a
-      # quarter of the model to system RAM and crawls without erroring.
+      #   {"pattern": "*.c", ...}{"pattern": "*.inf", ...}
+      #   -> Failed to parse tool call arguments: Extra data: line 1 column 73
       #
-      # Deliberately no num_gpu here. Forcing every layer onto the card
-      # removes Ollama's graceful spill, turning a memory shortfall into a
-      # hard OOM. At this length the estimator fits it unaided.
-      num_ctx: 131072
+      # LiteLLM then DROPS the call. An agent retries the same step forever and
+      # lands nothing, while each retry re-prefills the whole conversation.
+      # Measured: same prompt, same model, only `stream` differing --
+      #   non-streaming    -> 2 tool calls, both parse
+      #   ollama_chat + stream -> 1 call, concatenated, unparseable
+      #   ollama /v1  + stream -> 2 calls, indices [0,1], both parse
+      # parallel_tool_calls:false and tool_choice:required do NOT help.
+      #
+      # CONSEQUENCE: /v1 does not accept Ollama's native num_ctx, so the window
+      # comes from OLLAMA_CONTEXT_LENGTH, set by scripts/start-ollama. Start
+      # Ollama any other way and you silently get 4096. e2e-check asserts the
+      # served window, so that failure is loud rather than silent.
+      model: openai/qwen3.8:27b
+      api_base: http://host.docker.internal:11434/v1
+      api_key: ollama
       input_cost_per_token: 0.0000002
       output_cost_per_token: 0.0000008
     model_info:
@@ -76,29 +78,31 @@ model_list:
   # Stable alias, so clients need not change when the model does.
   - model_name: local
     litellm_params:
-      model: ollama_chat/qwen3.8:27b
-      api_base: http://host.docker.internal:11434
-      # Requested per call, NOT left to OLLAMA_CONTEXT_LENGTH: the server-side
-      # default depends on how Ollama happened to be launched and is lost on a
-      # reboot, which would silently drop every client to 4096 and break Hermes
-      # with a message about context rather than about configuration.
+      # openai/ against Ollama's OWN OpenAI-compatible endpoint, NOT
+      # ollama_chat/. This is not a style preference -- it is a correctness fix.
       #
-      # 131,072 with a q4_0 KV cache. Measured ceilings on a 24 GB card,
-      # largest window staying ENTIRELY on the GPU:
-      #     f16 -> 65,536      q8_0 -> 114,688      q4_0 -> 262,144
-      # The model's full 262,144 does fit and was verified by retrieval
-      # (two facts at 25% and 75% depth of a 201,397-token prompt), but it
-      # leaves only ~370 MiB spare -- one browser away from an OOM. 131,072
-      # loads fully on its own, with about 3 GB of headroom.
+      # LiteLLM's ollama_chat STREAMING transform emits every parallel tool
+      # call under the same index, so a client concatenates their arguments
+      # into one unparseable string:
       #
-      # REQUIRES Ollama started by scripts/start-ollama: OLLAMA_KV_CACHE_TYPE
-      # is server-level, and with an f16 cache this same request spills a
-      # quarter of the model to system RAM and crawls without erroring.
+      #   {"pattern": "*.c", ...}{"pattern": "*.inf", ...}
+      #   -> Failed to parse tool call arguments: Extra data: line 1 column 73
       #
-      # Deliberately no num_gpu here. Forcing every layer onto the card
-      # removes Ollama's graceful spill, turning a memory shortfall into a
-      # hard OOM. At this length the estimator fits it unaided.
-      num_ctx: 131072
+      # LiteLLM then DROPS the call. An agent retries the same step forever and
+      # lands nothing, while each retry re-prefills the whole conversation.
+      # Measured: same prompt, same model, only `stream` differing --
+      #   non-streaming    -> 2 tool calls, both parse
+      #   ollama_chat + stream -> 1 call, concatenated, unparseable
+      #   ollama /v1  + stream -> 2 calls, indices [0,1], both parse
+      # parallel_tool_calls:false and tool_choice:required do NOT help.
+      #
+      # CONSEQUENCE: /v1 does not accept Ollama's native num_ctx, so the window
+      # comes from OLLAMA_CONTEXT_LENGTH, set by scripts/start-ollama. Start
+      # Ollama any other way and you silently get 4096. e2e-check asserts the
+      # served window, so that failure is loud rather than silent.
+      model: openai/qwen3.8:27b
+      api_base: http://host.docker.internal:11434/v1
+      api_key: ollama
       input_cost_per_token: 0.0000002
       output_cost_per_token: 0.0000008
     model_info:

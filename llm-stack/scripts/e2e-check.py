@@ -132,6 +132,8 @@ def main() -> int:
     # a crash mid-`--force-recreate` left the engine on the old model while
     # the gateway advertised the new one, and this check passed anyway
     # because `local` was present in both.
+    model_for_tools = "local" if "local" in gw_models else (
+        gw_models[0] if gw_models else "local")
     unusable = []
     for name in gw_models:
         try:
@@ -161,6 +163,77 @@ def main() -> int:
                f"{windows}" if not missing else f"null for {missing}")
     except Exception as exc:
         record("gateway advertises a context window", False, type(exc).__name__)
+
+    # --- STREAMING tool calls survive the round trip ---------------------
+    # The failure this catches cost an hour of agent time and left nothing on
+    # disk. LiteLLM's ollama_chat streaming transform emitted every parallel
+    # tool call under the SAME index, so a client concatenated their arguments
+    # into one unparseable string and LiteLLM dropped the call:
+    #
+    #   {"pattern": "*.c", ...}{"pattern": "*.inf", ...}
+    #   -> Failed to parse tool call arguments: Extra data: line 1 column 73
+    #
+    # The agent retried forever, re-prefilling the whole conversation each
+    # time. Nothing errored loudly; it just never finished. Routing through
+    # Ollama's own /v1 fixed it. This asserts it stays fixed.
+    try:
+        tools = [{"type": "function", "function": {
+            "name": "search_files", "description": "Search for files by glob pattern.",
+            "parameters": {"type": "object", "properties": {
+                "pattern": {"type": "string"}, "path": {"type": "string"}},
+                "required": ["pattern", "path"]}}}]
+        payload = {"model": model_for_tools, "tools": tools, "stream": True,
+                   "max_tokens": 400, "messages": [{"role": "user", "content":
+                       f"Find all .c files AND all .inf files in /tmp/{stamp}. "
+                       "Use search_files. Issue both searches now."}]}
+        req = urllib.request.Request(
+            GW + "/v1/chat/completions", method="POST",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {MASTER}"})
+        slots: dict[int, str] = {}
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                body = line[5:].strip()
+                if body == "[DONE]":
+                    break
+                delta = json.loads(body)["choices"][0].get("delta", {})
+                for tc in delta.get("tool_calls") or []:
+                    i = tc.get("index", 0)
+                    fn = tc.get("function") or {}
+                    slots[i] = slots.get(i, "") + (fn.get("arguments") or "")
+        bad = []
+        for i, args in slots.items():
+            try:
+                json.loads(args)
+            except ValueError as exc:
+                bad.append(f"slot {i}: {exc}")
+        record("streaming tool-call arguments parse", bool(slots) and not bad,
+               f"{len(slots)} call(s), indices={sorted(slots)}" if not bad
+               else "; ".join(bad))
+    except Exception as exc:
+        record("streaming tool-call arguments parse", False, type(exc).__name__)
+
+    # --- the engine SERVES the window the gateway advertises --------------
+    # Ollama's /v1 endpoint does not accept num_ctx, so the window comes from
+    # OLLAMA_CONTEXT_LENGTH at launch. Started any other way, the engine
+    # quietly serves 4096 while the gateway still advertises the full window,
+    # and long prompts are TRUNCATED rather than refused -- which reads as the
+    # model failing to find things it was given.
+    if engine == "Ollama":
+        try:
+            ps = call(os.environ.get("OLLAMA_URL",
+                                     "http://host.docker.internal:11434") + "/api/ps",
+                      "", timeout=30).get("models", [])
+            served = max((m.get("context_length") or 0) for m in ps) if ps else 0
+            want = max((w for w in windows.values() if w), default=0)
+            record("engine serves the advertised window", served >= want,
+                   f"engine={served:,} advertised={want:,}")
+        except Exception as exc:
+            record("engine serves the advertised window", False, type(exc).__name__)
 
     # --- provision one person, both records ------------------------------
     for path, body in (
@@ -222,6 +295,22 @@ def main() -> int:
         record("argus reachable", bool(health), str(health)[:40])
     except Exception:
         print(f"  [{YELLOW}SKIP{OFF}] argus not running", flush=True)
+
+    # --- put the stack back the way we found it --------------------------
+    # This check provisions a throwaway person, a key and an end-user record,
+    # and every run used to leave all three behind. They accumulate in the
+    # dashboards as fake people, and the deliberately tiny end-user budget
+    # keeps throwing ExceededBudget in the gateway logs long after the run,
+    # which reads like a real fault. Clean up regardless of pass or fail.
+    for path, body in (
+        ("/key/delete", {"key_aliases": [f"e2e-{stamp}"]}),
+        ("/end_user/delete", {"user_ids": [email]}),
+        ("/user/delete", {"user_ids": [email]}),
+    ):
+        try:
+            call(GW, path, body, token=MASTER, timeout=30)
+        except Exception:
+            pass  # best effort: a failed teardown must not fail the suite
 
     passed = sum(1 for _n, ok, _d in results if ok)
     print(f"\n  {passed}/{len(results)} checks passed\n", flush=True)
