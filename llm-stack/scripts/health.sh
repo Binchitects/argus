@@ -20,7 +20,6 @@ failures=0
 
 # name | internal url | required-profile ("" = always on)
 CHECKS=(
-  "vLLM|http://vllm:8000/health|"
   "Open WebUI|http://open-webui:8080/health|"
   "Prometheus|http://prometheus:9090/-/healthy|"
   "Alertmanager|http://alertmanager:9093/-/healthy|"
@@ -42,6 +41,25 @@ printf '  %s\n' "--------------------------------------------------------------"
 
 # One helper container on the stack network probes everything internally.
 probe() { docker run --rm --network llm-net curlimages/curl:8.11.1 -s -o /dev/null -w '%{http_code}' -m 8 "$1" 2>/dev/null || echo 000; }
+
+# The engine is whichever one is serving, and only one can be: vLLM as a
+# compose service, or Ollama on the HOST via the docker gateway. Naming only
+# vLLM here reported a perfectly healthy Ollama-backed stack as DOWN.
+engine_ok=0
+for pair in "vLLM|http://vllm:8000/health"             "Ollama|http://host.docker.internal:11434/api/tags"; do
+  ename="${pair%%|*}"; eurl="${pair#*|}"
+  ecode="$(probe "$eurl")"
+  case "$ecode" in
+    2*|3*) printf '  %-20s %sOK%s       HTTP %s (engine)
+' "$ename" "$c_green" "$c_off" "$ecode"
+           engine_ok=1; break ;;
+  esac
+done
+if [ "$engine_ok" -eq 0 ]; then
+  failures=$((failures + 1))
+  printf '  %-20s %sDOWN%s     neither vLLM nor Ollama answered
+' "engine" "$c_red" "$c_off"
+fi
 
 for entry in "${CHECKS[@]}"; do
   name="${entry%%|*}"; rest="${entry#*|}"; url="${rest%%|*}"; profile="${rest#*|}"

@@ -43,17 +43,35 @@ model_list:
       # reboot, which would silently drop every client to 4096 and break Hermes
       # with a message about context rather than about configuration.
       #
-      # 114,688 is the measured ceiling that stays entirely on a 24 GB card
-      # with a q8_0 KV cache; 122,880 already spills. It REQUIRES Ollama to
-      # have been started by scripts/start-ollama -- with an f16 cache this
-      # same number spills a quarter of the model to system RAM and crawls,
-      # without erroring. Verified by retrieving a fact from the middle of a
-      # 100,687-token prompt.
-      num_ctx: 114688
+      # 131,072 with a q4_0 KV cache. Measured ceilings on a 24 GB card,
+      # largest window staying ENTIRELY on the GPU:
+      #     f16 -> 65,536      q8_0 -> 114,688      q4_0 -> 262,144
+      # The model's full 262,144 does fit and was verified by retrieval
+      # (two facts at 25% and 75% depth of a 201,397-token prompt), but it
+      # leaves only ~370 MiB spare -- one browser away from an OOM. 131,072
+      # loads fully on its own, with about 3 GB of headroom.
+      #
+      # REQUIRES Ollama started by scripts/start-ollama: OLLAMA_KV_CACHE_TYPE
+      # is server-level, and with an f16 cache this same request spills a
+      # quarter of the model to system RAM and crawls without erroring.
+      #
+      # Deliberately no num_gpu here. Forcing every layer onto the card
+      # removes Ollama's graceful spill, turning a memory shortfall into a
+      # hard OOM. At this length the estimator fits it unaided.
+      num_ctx: 131072
       input_cost_per_token: 0.0000002
       output_cost_per_token: 0.0000008
     model_info:
       mode: chat
+      # ADVERTISE the window. Without these, /model/info returns null for
+      # max_input_tokens and every client has to guess -- and clients CACHE
+      # the guess. Hermes wrote 24,576 to its context_length_cache.yaml back
+      # when vLLM really did serve that, then kept refusing on a 131,072
+      # engine because nothing ever invalidated the entry. Reporting the
+      # truth here is what stops that happening again, for every client.
+      max_input_tokens: 131072
+      max_output_tokens: 32768
+      max_tokens: 131072
 
   # Stable alias, so clients need not change when the model does.
   - model_name: local
@@ -65,15 +83,35 @@ model_list:
       # reboot, which would silently drop every client to 4096 and break Hermes
       # with a message about context rather than about configuration.
       #
-      # 114,688 is the measured ceiling that stays entirely on a 24 GB card
-      # with a q8_0 KV cache; 122,880 already spills. It REQUIRES Ollama to
-      # have been started by scripts/start-ollama -- with an f16 cache this
-      # same number spills a quarter of the model to system RAM and crawls,
-      # without erroring. Verified by retrieving a fact from the middle of a
-      # 100,687-token prompt.
-      num_ctx: 114688
+      # 131,072 with a q4_0 KV cache. Measured ceilings on a 24 GB card,
+      # largest window staying ENTIRELY on the GPU:
+      #     f16 -> 65,536      q8_0 -> 114,688      q4_0 -> 262,144
+      # The model's full 262,144 does fit and was verified by retrieval
+      # (two facts at 25% and 75% depth of a 201,397-token prompt), but it
+      # leaves only ~370 MiB spare -- one browser away from an OOM. 131,072
+      # loads fully on its own, with about 3 GB of headroom.
+      #
+      # REQUIRES Ollama started by scripts/start-ollama: OLLAMA_KV_CACHE_TYPE
+      # is server-level, and with an f16 cache this same request spills a
+      # quarter of the model to system RAM and crawls without erroring.
+      #
+      # Deliberately no num_gpu here. Forcing every layer onto the card
+      # removes Ollama's graceful spill, turning a memory shortfall into a
+      # hard OOM. At this length the estimator fits it unaided.
+      num_ctx: 131072
       input_cost_per_token: 0.0000002
       output_cost_per_token: 0.0000008
+    model_info:
+      mode: chat
+      # ADVERTISE the window. Without these, /model/info returns null for
+      # max_input_tokens and every client has to guess -- and clients CACHE
+      # the guess. Hermes wrote 24,576 to its context_length_cache.yaml back
+      # when vLLM really did serve that, then kept refusing on a 131,072
+      # engine because nothing ever invalidated the entry. Reporting the
+      # truth here is what stops that happening again, for every client.
+      max_input_tokens: 131072
+      max_output_tokens: 32768
+      max_tokens: 131072
 
   # --- vLLM, for when a 22K window is enough -------------------------------
   # Uncomment with Ollama stopped; both want the whole GPU.

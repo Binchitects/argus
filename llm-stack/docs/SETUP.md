@@ -151,7 +151,7 @@ docker compose stop vllm          # before starting Ollama
 
 Use the script rather than `ollama serve`. It sets `OLLAMA_KV_CACHE_TYPE`,
 which is server-level environment and cannot be requested per call — and the
-window the gateway asks for (114,688) only fits with a `q8_0` cache. Started
+window the gateway asks for (131,072) only fits with a `q4_0` cache. Started
 any other way, Ollama gets an `f16` cache, accepts the same request, spills a
 quarter of the model to system RAM and crawls. It does not error.
 
