@@ -92,6 +92,54 @@ SELECT "user", SUM(spend) AS spend, SUM(total_tokens) AS tokens,
  ORDER BY spend DESC;
 ```
 
+## Which key belongs to whom
+
+A recurring confusion, because LiteLLM models them as separate entities: a
+**key** is a credential, a **person** is an identity, and one person may hold
+several keys. `LiteLLM_SpendLogs` stores only the **hashed** key in `api_key`,
+so the two look unrelated until you join them.
+
+The link is `LiteLLM_VerificationToken.user_id`. Resolve a request to a person
+in this order — the **Usage by person** dashboard does exactly this:
+
+```sql
+coalesce(
+  nullif(s."user", ''),                    -- attributed at request time
+  s.metadata->>'user_api_key_user_id',     -- the key's owner, denormalised
+  v.user_id,                               -- the key's owner, via join
+  nullif(s.end_user, ''),                  -- the customer record
+  '(unattributed)'
+)
+```
+
+**Prefer `metadata` over the join.** LiteLLM copies the key's alias and owner
+into each spend row, so attribution **survives the key being deleted**. A plain
+join to `LiteLLM_VerificationToken` silently drops those rows — measured here,
+98 of 219 rows had no surviving key to join to, and every one of them still
+carried its owner in `metadata`.
+
+To see the inventory directly:
+
+```bash
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d litellm -c   'select key_alias, user_id, key_name, spend, max_budget from "LiteLLM_VerificationToken" order by spend desc'
+```
+
+`key_name` is masked. The full key is shown **once**, when it is created, and is
+never stored in the clear — if someone loses theirs, mint a new one rather than
+trying to recover it.
+
+### `(master key)` means attributed to nobody
+
+`LITELLM_MASTER_KEY` is a superuser credential with **no owner and no budget**.
+It does not appear in `LiteLLM_VerificationToken`, so its requests resolve to
+`default_user_id` or to nothing at all — usage that cannot be billed to a
+person and that no ceiling binds. That is the single most common reason a
+person's total looks too low.
+
+The **Unattributed usage** panel exists to surface it. Anything listed there is
+a client still configured with the master key; give it a real one with
+`./scripts/llm-users.sh --apply`.
+
 ## What happens at the limit
 
 Measured against a live gateway on both surfaces.
