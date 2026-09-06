@@ -34,33 +34,15 @@ model_list:
   # The cost is real: Ollama runs on the HOST and holds the same card, so
   # vLLM must be stopped. vLLM remains the better choice when a 22K window is
   # enough -- it batches far better. Switch back with scripts/switch-model.
-  - model_name: qwen3.8-27b
+  - model_name: qwen3.8-9b
     litellm_params:
-      # openai/ against Ollama's OWN OpenAI-compatible endpoint, NOT
-      # ollama_chat/. This is not a style preference -- it is a correctness fix.
-      #
-      # LiteLLM's ollama_chat STREAMING transform emits every parallel tool
-      # call under the same index, so a client concatenates their arguments
-      # into one unparseable string:
-      #
-      #   {"pattern": "*.c", ...}{"pattern": "*.inf", ...}
-      #   -> Failed to parse tool call arguments: Extra data: line 1 column 73
-      #
-      # LiteLLM then DROPS the call. An agent retries the same step forever and
-      # lands nothing, while each retry re-prefills the whole conversation.
-      # Measured: same prompt, same model, only `stream` differing --
-      #   non-streaming    -> 2 tool calls, both parse
-      #   ollama_chat + stream -> 1 call, concatenated, unparseable
-      #   ollama /v1  + stream -> 2 calls, indices [0,1], both parse
-      # parallel_tool_calls:false and tool_choice:required do NOT help.
-      #
-      # CONSEQUENCE: /v1 does not accept Ollama's native num_ctx, so the window
-      # comes from OLLAMA_CONTEXT_LENGTH, set by scripts/start-ollama. Start
-      # Ollama any other way and you silently get 4096. e2e-check asserts the
-      # served window, so that failure is loud rather than silent.
-      model: openai/qwen3.8:27b
-      api_base: http://host.docker.internal:11434/v1
-      api_key: ollama
+      # vLLM is the engine for this stack. `openai/` means "speak the OpenAI
+      # protocol to this base_url", not api.openai.com; the name after it MUST
+      # equal vLLM's --served-model-name (VLLM_SERVED_MODEL_NAME in .env) or
+      # every request 404s at the engine.
+      model: openai/qwen3.8-9b
+      api_base: http://vllm:8000/v1
+      api_key: os.environ/VLLM_API_KEY
       input_cost_per_token: 0.0000002
       output_cost_per_token: 0.0000008
     model_info:
@@ -71,38 +53,20 @@ model_list:
       # when vLLM really did serve that, then kept refusing on a 131,072
       # engine because nothing ever invalidated the entry. Reporting the
       # truth here is what stops that happening again, for every client.
-      max_input_tokens: 131072
-      max_output_tokens: 32768
-      max_tokens: 131072
+      max_input_tokens: 262144
+      max_output_tokens: 8192
+      max_tokens: 262144
 
   # Stable alias, so clients need not change when the model does.
   - model_name: local
     litellm_params:
-      # openai/ against Ollama's OWN OpenAI-compatible endpoint, NOT
-      # ollama_chat/. This is not a style preference -- it is a correctness fix.
-      #
-      # LiteLLM's ollama_chat STREAMING transform emits every parallel tool
-      # call under the same index, so a client concatenates their arguments
-      # into one unparseable string:
-      #
-      #   {"pattern": "*.c", ...}{"pattern": "*.inf", ...}
-      #   -> Failed to parse tool call arguments: Extra data: line 1 column 73
-      #
-      # LiteLLM then DROPS the call. An agent retries the same step forever and
-      # lands nothing, while each retry re-prefills the whole conversation.
-      # Measured: same prompt, same model, only `stream` differing --
-      #   non-streaming    -> 2 tool calls, both parse
-      #   ollama_chat + stream -> 1 call, concatenated, unparseable
-      #   ollama /v1  + stream -> 2 calls, indices [0,1], both parse
-      # parallel_tool_calls:false and tool_choice:required do NOT help.
-      #
-      # CONSEQUENCE: /v1 does not accept Ollama's native num_ctx, so the window
-      # comes from OLLAMA_CONTEXT_LENGTH, set by scripts/start-ollama. Start
-      # Ollama any other way and you silently get 4096. e2e-check asserts the
-      # served window, so that failure is loud rather than silent.
-      model: openai/qwen3.8:27b
-      api_base: http://host.docker.internal:11434/v1
-      api_key: ollama
+      # vLLM is the engine for this stack. `openai/` means "speak the OpenAI
+      # protocol to this base_url", not api.openai.com; the name after it MUST
+      # equal vLLM's --served-model-name (VLLM_SERVED_MODEL_NAME in .env) or
+      # every request 404s at the engine.
+      model: openai/qwen3.8-9b
+      api_base: http://vllm:8000/v1
+      api_key: os.environ/VLLM_API_KEY
       input_cost_per_token: 0.0000002
       output_cost_per_token: 0.0000008
     model_info:
@@ -113,15 +77,15 @@ model_list:
       # when vLLM really did serve that, then kept refusing on a 131,072
       # engine because nothing ever invalidated the entry. Reporting the
       # truth here is what stops that happening again, for every client.
-      max_input_tokens: 131072
-      max_output_tokens: 32768
-      max_tokens: 131072
+      max_input_tokens: 262144
+      max_output_tokens: 8192
+      max_tokens: 262144
 
   # --- vLLM, for when a 22K window is enough -------------------------------
   # Uncomment with Ollama stopped; both want the whole GPU.
   # - model_name: vllm-local
   #   litellm_params:
-  #     model: openai/qwen3.8-27b
+  #     model: openai/qwen3.8-9b
   #     api_base: http://vllm:8000/v1
   #     api_key: os.environ/VLLM_API_KEY
 

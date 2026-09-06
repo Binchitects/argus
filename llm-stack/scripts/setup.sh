@@ -8,6 +8,11 @@
 #
 #   ./scripts/setup.sh              interactive
 #   ./scripts/setup.sh --defaults   accept every default, ask nothing
+#   ./scripts/setup.sh --domain llm.example.com
+#   ./scripts/setup.sh --defaults --domain box.local --set VLLM_MAX_MODEL_LEN=65536
+#
+#   --domain D     set LLM_DOMAIN without being asked
+#   --set K=V      set any .env key (repeatable); applied before every question
 #   ./scripts/setup.sh --dry-run    print the plan, change nothing
 #
 # Safe to re-run. Existing secrets are kept, and every question shows the
@@ -23,12 +28,19 @@ cd "$ROOT"
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
 DEFAULTS=0; DRYRUN=0
-for arg in "$@"; do
-  case "$arg" in
-    --defaults) DEFAULTS=1 ;;
-    --dry-run)  DRYRUN=1 ;;
-    -h|--help)  sed -n '2,14p' "$0"; exit 0 ;;
-    *) echo "unknown option: $arg" >&2; exit 2 ;;
+PRESEED=()          # KEY=VALUE pairs written to .env BEFORE any question is asked
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --defaults) DEFAULTS=1; shift ;;
+    --dry-run)  DRYRUN=1; shift ;;
+    # --domain is the one people reach for most, so it gets its own flag.
+    --domain)   PRESEED+=("LLM_DOMAIN=$2"); shift 2 ;;
+    --domain=*) PRESEED+=("LLM_DOMAIN=${1#*=}"); shift ;;
+    # --set is the general form, repeatable: --set VLLM_MAX_MODEL_LEN=65536
+    --set)      PRESEED+=("$2"); shift 2 ;;
+    --set=*)    PRESEED+=("${1#*=}"); shift ;;
+    -h|--help)  sed -n '2,16p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -105,6 +117,18 @@ if [[ ! -f "$ENV_FILE" ]]; then
 else
   ok ".env exists -- current values are offered as defaults"
 fi
+
+# Values supplied on the command line are written first. `ask` treats an
+# existing .env entry as its default, so these are accepted silently under
+# --defaults and pre-filled when prompting -- which is what makes an
+# unattended, repeatable deploy possible.
+for _kv in ${PRESEED+"${PRESEED[@]}"}; do
+  [[ "$_kv" == *=* ]] || die "--set expects KEY=VALUE, got: $_kv"
+  # No note here on purpose: set_env already reports, and under --dry-run it
+  # reports "would set". Announcing "preset X" unconditionally would claim a
+  # write that --dry-run never performs.
+  set_env "${_kv%%=*}" "${_kv#*=}"
+done
 
 ask LLM_DOMAIN "Domain for the stack (services appear at *.DOMAIN)" "llm.localhost"
 DOMAIN="$(current LLM_DOMAIN)"
@@ -184,6 +208,33 @@ if [[ "$PROFILES" == *auth* ]]; then
 fi
 
 # ------------------------------------------------------------------ start ----
+# ---------------------------------------------------------------- preflight ---
+# Traefik binds the host's HTTP/HTTPS ports. If anything else already has them,
+# `docker compose up` fails with "Bind for 0.0.0.0:80 failed: port is already
+# allocated" -- a daemon-level message that names no culprit and sends people
+# looking for a fault in this stack. Measured here: an unrelated project's
+# Traefik held 80/443 and three clean deploys failed with no usable diagnosis.
+step "Checking host ports"
+_http="$(current TRAEFIK_HTTP_PORT)";  _http="${_http:-80}"
+_https="$(current TRAEFIK_HTTPS_PORT)"; _https="${_https:-443}"
+_conflict=0
+for _port in "$_http" "$_https"; do
+  # A container from another project is the common case, and the only one we
+  # can name precisely.
+  _owner="$(docker ps --format '{{.Names}}	{{.Ports}}' 2>/dev/null             | grep -E ":$_port->" | cut -f1 | grep -v '^traefik$' | head -n1 || true)"
+  if [[ -n "$_owner" ]]; then
+    warn "port $_port is already published by container '$_owner'"
+    _conflict=1
+  fi
+done
+if [[ $_conflict -eq 1 ]]; then
+  note "Either stop that container, or serve this stack on different ports:"
+  note "    ./scripts/setup.sh --set TRAEFIK_HTTP_PORT=8080 --set TRAEFIK_HTTPS_PORT=8443"
+  note "URLs then carry the port, e.g. https://chat.$DOMAIN:8443"
+  die "host port conflict -- nothing was started"
+fi
+ok "ports $_http and $_https are free"
+
 step "Starting the stack"
 if [[ $DRYRUN -eq 1 ]]; then
   note "would run: docker compose up -d"

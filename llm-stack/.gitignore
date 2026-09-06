@@ -46,3 +46,7 @@ config/authelia/users.yml
 # rebuildable with scripts/package.sh)
 .pkgstage/
 dist/
+
+# redeploy-test.sh artefacts
+.redeploy-setup*.log
+redeploy-report.txt

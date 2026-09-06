@@ -413,7 +413,7 @@ To switch manually:
 | `VLLM_EXTRA_ARGS` | Appended verbatim — quantisation, KV dtype, tool calling. |
 | `--kv-cache-dtype fp8` | In `VLLM_EXTRA_ARGS`. Halves KV cache cost; often the difference between 32K and 16K context. |
 
-⚠️ Keep `--enable-auto-tool-choice --tool-call-parser hermes`. Open WebUI sends
+⚠️ Keep `--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3`. Open WebUI sends
 `tool_choice: "auto"` on every request and vLLM returns **400** without them.
 
 ### Alerts
@@ -489,7 +489,7 @@ power draw *drops*: that is the card down-clocking.
 - *401 from HuggingFace* — gated repo; set `HF_TOKEN`.
 
 **Open WebUI shows no models / chat fails.** `VLLM_EXTRA_ARGS` must contain
-`--enable-auto-tool-choice --tool-call-parser hermes`.
+`--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3`.
 
 **Traefik returns 404 for a running service.** Traefik refuses to route
 containers whose Docker healthcheck is not passing. Check `docker compose ps`.
