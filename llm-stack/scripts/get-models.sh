@@ -327,7 +327,7 @@ if [[ $DRYRUN -eq 1 ]]; then
     VLLM_MAX_MODEL_LEN=$CTX
     VLLM_GPU_MEMORY_UTILIZATION=$UTIL
     VLLM_MAX_NUM_SEQS=$SEQS
-    VLLM_EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser hermes $EXTRA
+    VLLM_EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3 $EXTRA
 CONF
   echo
   echo "  (--dry-run: nothing downloaded, nothing written)"
@@ -528,7 +528,7 @@ cat <<CONF
     VLLM_MAX_MODEL_LEN=$CTX
     VLLM_GPU_MEMORY_UTILIZATION=$UTIL
     VLLM_MAX_NUM_SEQS=$SEQS
-    VLLM_EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser hermes $EXTRA
+    VLLM_EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3 $EXTRA
 CONF
 
 if [[ $APPLY -eq 1 ]]; then
@@ -551,13 +551,13 @@ if [[ $APPLY -eq 1 ]]; then
   set_env VLLM_MAX_MODEL_LEN "$CTX"
   set_env VLLM_GPU_MEMORY_UTILIZATION "$UTIL"
   set_env VLLM_MAX_NUM_SEQS "$SEQS"
-  set_env VLLM_EXTRA_ARGS "--enable-auto-tool-choice --tool-call-parser hermes $EXTRA"
+  set_env VLLM_EXTRA_ARGS "--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3 $EXTRA"
   echo
   ok "restart:  docker compose up -d --force-recreate vllm litellm"
 else
   echo
   echo "  Apply automatically with --apply, or:"
   echo "    ./scripts/switch-model.sh /models/$NAME --max-model-len $CTX \\"
-  echo "        --extra-args \"--enable-auto-tool-choice --tool-call-parser hermes $EXTRA\""
+  echo "        --extra-args \"--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3 $EXTRA\""
 fi
 echo

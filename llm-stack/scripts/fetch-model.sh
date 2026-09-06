@@ -67,7 +67,12 @@ echo
 
 # HF_HUB_ENABLE_HF_TRANSFER is deliberately NOT set: faster on a healthy link,
 # but far less forgiving of resets.
-docker run --rm \
+# MSYS_NO_PATHCONV: under Git Bash on Windows, MSYS rewrites the container
+# side of a -v mount ("/out") into a Windows path. The bind then points
+# somewhere else entirely -- here it created a directory literally named
+# "<target>;C" and downloaded into nothing, with no error at all. Same
+# rewrite that breaks openssl -subj in gen-certs.sh. Unset on Linux/macOS.
+MSYS_NO_PATHCONV=1 docker run --rm \
   -v "$TARGET:/out" \
   -e HF_HUB_DISABLE_TELEMETRY=1 \
   -e "HF_TOKEN=${TOKEN}" \

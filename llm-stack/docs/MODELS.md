@@ -84,7 +84,7 @@ Applied settings:
 ```
 VLLM_MAX_MODEL_LEN=32768
 VLLM_GPU_MEMORY_UTILIZATION=0.92
-VLLM_EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser hermes --quantization awq --kv-cache-dtype fp8
+VLLM_EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3 --quantization awq --kv-cache-dtype fp8
 ```
 
 ---
@@ -367,9 +367,33 @@ concurrency, compare TTFT and output tokens/sec.
 ## Keeping the tool-calling flags
 
 Open WebUI sends `tool_choice: "auto"` on every request. Without
-`--enable-auto-tool-choice --tool-call-parser hermes`, vLLM returns HTTP 400 and
-chat breaks. The script includes both in every generated `VLLM_EXTRA_ARGS`; keep
-them if you edit by hand. `hermes` is the correct parser for Qwen-family models.
+`--enable-auto-tool-choice`, vLLM returns HTTP 400 and chat breaks. The script
+includes it in every generated `VLLM_EXTRA_ARGS`; keep it if you edit by hand.
+
+**The parser must match the format the model emits, and getting it wrong fails
+SILENTLY.** This stack shipped `--tool-call-parser hermes` for a long time. The
+Qwen3.5 family does not emit Hermes-style JSON inside `<tool_call>` -- it emits
+XML:
+
+```xml
+<tool_call><function=search_files><parameter=pattern> *.c </parameter></function></tool_call>
+```
+
+The `hermes` parser never matched, so vLLM returned `tool_calls: null` and put
+that raw XML in the message **content**. No error, no warning, HTTP 200 -- tool
+calling simply never worked, and an agent driving the model would loop forever
+without a single failed request to point at.
+
+The correct pair for this family:
+
+```
+--tool-call-parser qwen3_xml   # matches <function=…><parameter=…>
+--reasoning-parser  qwen3      # otherwise <think> blocks leak into content
+```
+
+Verify after any model change rather than trusting the flag -- ask for two tool
+calls and confirm you get two, with parseable arguments. `scripts/e2e-check.py`
+asserts exactly this.
 
 ---
 
