@@ -24,6 +24,76 @@ It orchestrates rather than reimplements. `bootstrap.sh`, `gen-certs`,
 second copy of that logic inside the installer would drift from them without
 anyone noticing.
 
+## Unattended setup
+
+Every question can be answered on the command line, which is what makes a
+repeatable or scripted deploy possible:
+
+```bash
+./scripts/setup.sh --domain llm.example.com
+./scripts/setup.sh --defaults --domain box.local --set VLLM_MAX_MODEL_LEN=65536
+```
+
+| flag | |
+|---|---|
+| `--domain D` | set `LLM_DOMAIN` without being asked |
+| `--set K=V` | set any `.env` key; repeatable |
+
+Both are written to `.env` **before** any question runs, so they are accepted
+silently under `--defaults` and pre-filled when prompting.
+
+## Changing the domain
+
+`LLM_DOMAIN` reaches further than the Traefik routes. Authelia names the domain
+in its OIDC issuer, its session cookie, every access-control rule and every
+redirect URI — and those files used to carry `llm.localhost` literally. Setting
+a different domain moved the routes and left Authelia answering for a domain
+nobody was asking about: **SSO broke with nothing in any log**, because nothing
+had failed.
+
+Two files are therefore **templates**, rendered by `gen-auth.sh` with the
+domain substituted:
+
+```
+config/authelia/configuration.template.yml  ->  configuration.yml
+config/homepage/services.template.yaml      ->  services.yaml
+```
+
+Edit the `.template.` files. The rendered ones are generated and gitignored.
+`clients.yml` and `users.yml` are generated the same way and follow the domain
+automatically.
+
+**`*.localhost` does not resolve on its own.** The `llm.localhost` names work
+because `scripts/setup-hosts.sh` writes them to the hosts file. A new domain
+needs the same treatment, or real DNS.
+
+## Re-running setup
+
+`setup.sh` is safe to re-run: the CA, the OIDC signing key, `users.yml` and
+every secret already in `.env` are kept, and only the templates are re-rendered.
+
+**One thing can still bite, and it is now caught rather than suffered.**
+Authelia keeps its state in SQLite at `/data/db.sqlite3` inside the
+`authelia-data` volume, encrypted with `AUTHELIA_STORAGE_ENCRYPTION_KEY`. The
+key lives in `.env`; the database lives in a Docker volume. Delete `.env` — or
+start from a fresh checkout — while that volume survives, and `gen-auth` mints
+a **new key against the old database**. Authelia then crash-loops on every
+start, unable to decrypt, and the error names the encryption key rather than
+the volume nobody thought to remove.
+
+`setup.sh` compares the key before and after `gen-auth` and refuses to start
+Authelia against a database it cannot read:
+
+```
+!   the Authelia encryption key changed, but llmservice_authelia-data still holds a database
+    Reset it with:  docker volume rm llmservice_authelia-data
+X   refusing to start Authelia against an undecryptable database
+```
+
+That volume holds **sessions only** — never user accounts, which live in
+`config/authelia/users.yml`. Removing it logs everyone out and costs nothing
+else.
+
 ## What it asks
 
 **Domain.** Services appear at `chat.<domain>`, `gateway.<domain>` and so on.
@@ -96,6 +166,45 @@ wherever it was first configured. Fix it under **Admin → Settings →
 Connections**.
 
 ## Things that look broken and are not
+
+Each of these cost real time here, and each presents as a fault somewhere other
+than its cause.
+
+**A cached failure that looks like a broken model.** LiteLLM caches responses in
+Redis for an hour. Retry an agent task with the *same* prompt and you get the
+same reply in **3 milliseconds** — including if that reply was a bad one. Three
+identical "the model returned empty content" results here were one failure
+served three times; varying the prompt produced working answers immediately.
+Check `request_duration_ms` in `LiteLLM_SpendLogs`: single-digit values are
+cache hits, not inference.
+
+**Another project's Traefik stealing your routes.** Traefik's Docker provider
+sees *every* container on the daemon, and router names are a global namespace.
+An unrelated stack that names a router `authelia` — a very likely name —
+silently replaces yours, and logins start redirecting to that project's domain.
+Nothing errors, because nothing failed. `config/traefik/traefik.yml` now
+constrains discovery to this compose project:
+
+```yaml
+constraints: "Label(`com.docker.compose.project`,`llmservice`)"
+```
+
+`exposedByDefault: false` does **not** protect against this: the other
+container opted in for its own Traefik and yours cannot tell the difference.
+
+**A port conflict with no culprit.** `docker compose up` reports only
+`Bind for 0.0.0.0:80 failed: port is already allocated`. `setup.sh` now
+preflights and names the container holding the port, and
+`TRAEFIK_HTTP_PORT` / `TRAEFIK_HTTPS_PORT` move this stack out of the way.
+URLs then carry the port: `https://chat.<domain>:8443`.
+
+**Provisioning that cannot reach the gateway.** LiteLLM's port 4000 is exposed
+to the compose network but never published to the host, so `llm-users.sh` used
+to fail with "cannot reach the gateway at http://localhost:4000" — on the very
+first thing anyone does after setup. It now derives the public URL from
+`LLM_DOMAIN` and `TRAEFIK_HTTPS_PORT` and trusts the stack's own CA. Override
+with `LITELLM_URL` for unusual topologies.
+
 
 Each of these cost real time here, and each presents as a fault somewhere
 other than its cause.

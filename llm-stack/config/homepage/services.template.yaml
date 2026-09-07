@@ -1,5 +1,6 @@
+# TEMPLATE -- rendered to services.yaml by scripts/gen-auth.sh.
 ---
-# Landing page at https://llm.localhost (or http://localhost:3003 directly).
+# Landing page at https://${LLM_DOMAIN} (or http://localhost:3003 directly).
 #
 # Primary links go through Traefik, which is why they are https and use
 # hostnames. Browsers resolve any *.localhost name to 127.0.0.1 with no
@@ -8,56 +9,56 @@
 
 - Inference:
     - vLLM API:
-        href: https://api.llm.localhost/docs
+        href: https://api.${LLM_DOMAIN}/docs
         description: OpenAI-compatible endpoint, Swagger UI (direct :8000)
         icon: si-openai
     - vLLM metrics:
-        href: https://api.llm.localhost/metrics
+        href: https://api.${LLM_DOMAIN}/metrics
         description: Prometheus exposition, basic-auth protected
         icon: si-prometheus
     - LiteLLM gateway:
-        href: https://gateway.llm.localhost
+        href: https://gateway.${LLM_DOMAIN}
         description: Virtual keys, budgets, routing (profile gateway, :4000)
         icon: si-fastapi
 
 - Interfaces:
     - Open WebUI:
-        href: https://chat.llm.localhost
+        href: https://chat.${LLM_DOMAIN}
         description: Chat interface (direct :3000)
         icon: si-chatbot
 
 - Observability:
     - Grafana:
-        href: https://grafana.llm.localhost
+        href: https://grafana.${LLM_DOMAIN}
         description: Dashboards, own login (direct :3001)
         icon: si-grafana
     - Prometheus:
-        href: https://metrics.llm.localhost
+        href: https://metrics.${LLM_DOMAIN}
         description: Metrics, targets, PromQL, basic-auth (direct :9090)
         icon: si-prometheus
     - Alertmanager:
-        href: https://alerts.llm.localhost
+        href: https://alerts.${LLM_DOMAIN}
         description: Firing and silenced alerts, basic-auth (direct :9093)
         icon: si-prometheus
     - Langfuse:
-        href: https://traces.llm.localhost
+        href: https://traces.${LLM_DOMAIN}
         description: Prompt/response traces (profile tracing, :3002)
         icon: si-langchain
 
 - Infrastructure:
     - Traefik:
-        href: https://traefik.llm.localhost/dashboard/
+        href: https://traefik.${LLM_DOMAIN}/dashboard/
         description: Routers, services, TLS, basic-auth (metrics :8082)
         icon: si-traefikproxy
     - cAdvisor:
-        href: https://cadvisor.llm.localhost
+        href: https://cadvisor.${LLM_DOMAIN}
         description: Per-container resource usage, basic-auth (direct :8081)
         icon: si-docker
     - GPU exporter:
-        href: https://gpu.llm.localhost/metrics
+        href: https://gpu.${LLM_DOMAIN}/metrics
         description: nvidia-smi telemetry, basic-auth (direct :9835)
         icon: si-nvidia
     - node-exporter:
-        href: https://node.llm.localhost/metrics
+        href: https://node.${LLM_DOMAIN}/metrics
         description: Host CPU, memory, disk, network (direct :9100)
         icon: si-linux

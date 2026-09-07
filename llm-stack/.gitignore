@@ -50,3 +50,6 @@ dist/
 # redeploy-test.sh artefacts
 .redeploy-setup*.log
 redeploy-report.txt
+# rendered from *.template.* by gen-auth (domain substituted)
+config/authelia/configuration.yml
+config/homepage/services.yaml
