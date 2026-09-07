@@ -32,6 +32,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+import ssl
 
 try:
     import json
@@ -54,6 +55,25 @@ QUOTAS = {
 }
 
 
+
+def _ssl_ctx() -> "ssl.SSLContext | None":
+    """Trust the stack's own CA when talking to the gateway over HTTPS.
+
+    SSL_CERT_FILE is NOT enough on Windows: CPython's create_default_context()
+    calls load_default_certs(), which reads the Windows certificate store and
+    ignores that variable entirely. The stack's wildcard cert is signed by a
+    local CA that is not in the store, so verification failed with
+    "self-signed certificate in certificate chain" on exactly the machines this
+    is most likely to run on. Load the CA explicitly instead.
+    """
+    ca = os.environ.get("LITELLM_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE")
+    if not ca or not os.path.exists(ca):
+        return None            # plain HTTP, or a publicly-trusted certificate
+    ctx = ssl.create_default_context()
+    ctx.load_verify_locations(cafile=ca)
+    return ctx
+
+
 def api(path: str, payload: dict | None, master: str, base: str,
         method: str = "POST") -> dict:
     """Call the gateway. Raises with the server's own message on failure."""
@@ -64,7 +84,7 @@ def api(path: str, payload: dict | None, master: str, base: str,
         "Content-Type": "application/json",
     })
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=_ssl_ctx()) as resp:
             return json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")[:400]
