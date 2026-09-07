@@ -301,9 +301,13 @@ large for what the weights left behind — lower it.
 
 ## Qwen3.8-Flash-Next (177B MoE) — can this stack run it?
 
-Short answer: **yes on a 32 GB card with 128 GB of RAM, no on a 24 GB card
-with 64 GB, and not on any released vLLM yet.** The reasoning matters more
-than the verdict, because the usual intuitions about model size do not apply.
+Short answer: **yes, on llama.cpp — which this stack can now deploy.** Not on
+any released vLLM. The reasoning matters more than the verdict, because the
+usual intuitions about model size do not apply, and because "does it fit"
+depends entirely on which engine you ask.
+
+Select it with `scripts/setup.sh` and answer `llamacpp` at the engine prompt;
+see [SETUP.md](SETUP.md#choosing-an-inference-engine).
 
 ### Why a 177B model is even a candidate
 
@@ -324,22 +328,52 @@ That 2.66 B is the whole story. Only ten small experts fire per token, so the
 experts in system RAM and the active path on the GPU and it runs quickly on
 hardware that could never hold it densely.
 
-### It fits your deployment box and not your test box
+### The build you need depends on the engine
 
-Totals measured from `unsloth/Qwen3.8-Flash-Next-GGUF`, weights only:
+This is the correction most worth internalising: the three quantisations below
+are not interchangeable, and only one of them is small enough to be interesting.
 
-| quant | size | 24 GB + 64 GB RAM (~80 usable) | 32 GB + 128 GB RAM (~150) |
-|---|---|---|---|
-| UD-Q2_K_XL | 78.9 GB | marginal | yes |
-| UD-IQ3_XXS | 82.0 GB | no | yes |
-| UD-Q3_K_XL | 90.0 GB | no | yes |
-| **UD-IQ4_XS** | **93.7 GB** | **no** | **yes** |
-| UD-Q4_K_XL | 111.3 GB | no | yes |
+| build | size | engine that reads it | 3090 24 GB | 5090 32 GB |
+|---|---|---|---|---|
+| **GGUF UD-IQ4_XS** | **93.7 GB** | **llama.cpp** | mmap from NVMe | yes, +128 GB RAM |
+| NVFP4 | 135.2 GB | vLLM, Blackwell only | no | no |
+| W4A16 | 179.8 GB | vLLM | no | no |
 
-**A 3090 with 64 GB cannot hold a 4-bit copy**, and no offload setting changes
-that — the weights simply exceed VRAM plus RAM. Only 2-bit fits, which is
-below a sensible quality floor. Streaming from disk works and is slow enough
-not to be worth it.
+An earlier version of this document said a 5090 could serve this model and
+implied vLLM would do it. That was wrong, and the error is instructive: the
+93.7 GB figure is the **GGUF**, which vLLM cannot read for this architecture.
+The smallest vLLM-loadable build is 135.2 GB, which does not fit 32 GB + 128 GB
+either. On vLLM the answer is no on both cards.
+
+Full GGUF ladder, measured from `unsloth/Qwen3.8-Flash-Next-GGUF`, weights only:
+
+| quant | size | 32 GB + 128 GB RAM (~150 usable) |
+|---|---|---|
+| UD-Q2_K_XL | 78.9 GB | yes |
+| UD-IQ3_XXS | 82.0 GB | yes |
+| UD-Q3_K_XL | 90.0 GB | yes |
+| **UD-IQ4_XS** | **93.7 GB** | **yes** |
+| UD-Q4_K_XL | 111.3 GB | yes |
+
+### The 24 GB box: not resident, but not obviously impossible
+
+93.7 GB exceeds 24 GB of VRAM plus ~50 GB of usable RAM, so the model cannot be
+*resident* on the test box. That is not the same as "cannot run", because
+llama.cpp mmaps the GGUF rather than reading it whole: pages arrive on demand
+and the kernel evicts what is cold.
+
+Whether that is usable rather than merely possible turns on a property of this
+specific architecture. **10 of 512 experts fire per token**, so the working set
+is a small fraction of the file — but *which* ten changes every token, so the
+miss rate depends on routing locality, which is an empirical question and not
+one to answer from a spreadsheet.
+
+The disk therefore decides it. On the NVMe measured here (Samsung 990 PRO,
+5,411 MB/s sequential read) paging has a chance; on a SATA HDD it does not.
+
+**This is untested at the time of writing** — the 93.7 GB download was still in
+flight. Treat the 3090 row as *plausible, unmeasured*, and do not plan around
+it until this document says otherwise with numbers in it.
 
 ### Context is NOT the constraint here
 
@@ -370,18 +404,30 @@ Forty PRs have merged upstream and ~148 remain open, including PLE-offload and
 sparse-attention kernels, so this is actively landing rather than speculative.
 Until it appears in a release, serving it needs a nightly or a `main` build.
 
-llama.cpp already supports it — `ggml-org` publishes a GGUF and unsloth's has
-had hundreds of thousands of downloads — but this stack serves vLLM, and
-adding a second engine has its own cost (see the Ollama note in HERMES.md).
+llama.cpp already supports it, and **this stack now ships llama.cpp as a
+selectable engine** for exactly this case. `scripts/setup.sh` asks which engine
+to run; picking `llamacpp` enables the `llamacpp` compose profile and points the
+LiteLLM gateway at it. Everything above the engine — keys, budgets, per-user
+attribution, dashboards, Open WebUI — is unchanged, because the gateway reads
+its backend from `.env` rather than naming one.
+
+Exactly one engine runs at a time. Both claim the whole GPU, so enabling both
+profiles means one of them dies with a CUDA OOM that names neither.
 
 ### What to do
 
-1. **Wait for vLLM 0.29**, or pin a nightly image and accept the churn.
-2. **Deploy on the 32 GB / 128 GB box** with `UD-IQ4_XS`, `--kv-cache-dtype fp8`,
-   and experts offloaded to RAM. Budget ~94 GB weights + ~3 GB cache at 256K.
-3. **Do not size the test box for it.** Keep the 9B for 24 GB work; they are
-   different classes of machine and pretending otherwise wastes a day.
-4. Re-measure the window before promising 1M to anyone.
+1. **Use llama.cpp, not vLLM.** No released vLLM registers `Qwen4Exp`, and even
+   when one does, its smallest build is 135.2 GB. `setup.sh` -> engine
+   `llamacpp`.
+2. **Deploy on the 32 GB / 128 GB box** with `UD-IQ4_XS`. Budget ~94 GB of
+   weights plus ~3 GB of KV cache at 256K. Set `LLAMACPP_N_CPU_MOE` high enough
+   that the GPU-side footprint fits — 48 covers every layer — then lower it
+   while it still loads, since each layer moved back to the GPU is faster.
+3. **Keep the model on NVMe.** The design assumes mmap reads are cheap. On a
+   spinning disk this is not slow, it is unusable.
+4. **Keep vLLM for models that fit.** It batches far better; llama.cpp is the
+   answer to "too big", not the better engine.
+5. Re-measure the window before promising 1M to anyone.
 
 ## MTP (Multi-Token Prediction)
 

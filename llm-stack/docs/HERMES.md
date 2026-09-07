@@ -59,9 +59,19 @@ setting closes a 2.4x gap: `--cpu-offload-gb 4` did free the memory (KV rose
 to 152,917 tokens) but the quantized kernels then died with `Pointer argument
 cannot be accessed from Triton (cpu tensor?)`.
 
-So **the gateway fronts Ollama for this model**. Ollama runs on the *host* and
-claims the same card, so **vLLM must be stopped** — they cannot share it. vLLM
-is still the better engine when a 22K window is enough; it batches far better.
+> **Superseded.** Ollama is not part of this stack. The GGUF route it was
+> reached for is now served by the **llama.cpp** engine profile, which runs in a
+> container like everything else instead of on the host — see
+> [SETUP.md](SETUP.md#choosing-an-inference-engine). The measurements below are
+> kept because the *finding* still holds and is the reason a second engine
+> exists at all: at equal 4-bit precision GGUF packs smaller than AWQ
+> safetensors, and on a card with no headroom that difference is the whole
+> window. Read the `scripts/start-ollama` instructions in this section as
+> history, not as procedure.
+
+So the GGUF build is the one that fits. Whichever engine serves it claims the
+same card, so **exactly one engine runs** — they cannot share it. vLLM is still
+the better engine when a 22K window is enough; it batches far better.
 
 The 64K is requested per call by the gateway (`num_ctx` in
 `config/litellm/config.yaml`), *not* by `OLLAMA_CONTEXT_LENGTH`. A server-side

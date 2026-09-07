@@ -11,62 +11,41 @@
 # POST /key/generate using LITELLM_MASTER_KEY.
 #
 # NOTE ON NAMES: `model_name` is what clients and the Open WebUI model picker
-# display, and `model:` must match vLLM's --served-model-name. LiteLLM does NOT
-# expand ${VAR} here, so the real checkpoint name is written out literally.
-# scripts/switch-model rewrites both when you change model.
+# display. LiteLLM does NOT expand ${VAR} here -- but it DOES resolve
+# `os.environ/NAME`, which is how the engine below is selected from .env.
+# scripts/switch-model rewrites the display name when you change model.
 # ==============================================================================
 
 model_list:
-  # Ollama, not vLLM, and for one measured reason: CONTEXT.
+  # ---------------------------------------------------------------------------
+  # The engine is chosen in .env, not here.
   #
-  # Hermes Agent refuses to start below a 64K window. On a 24 GB card the
-  # vLLM path cannot provide it for this model -- 19.6 GB of AWQ safetensors
-  # left room for 27,534 KV tokens at 0.94 utilisation, against the 65,536
-  # needed, and no setting closes a 2.4x gap. --cpu-offload-gb freed the
-  # memory (KV rose to 152,917 tokens) but the quantized kernels then died
-  # with "Pointer argument cannot be accessed from Triton (cpu tensor?)".
+  # ENGINE_API_BASE / ENGINE_MODEL / ENGINE_API_KEY are set by scripts/setup.sh
+  # from the engine you picked, and docker-compose.yml defaults them to the vLLM
+  # wiring so an older .env keeps working. `os.environ/` is resolved by LiteLLM
+  # for every litellm_params key -- which is what makes ONE config file serve
+  # both vLLM and llama.cpp.
   #
-  # The same model as Q4_K_M GGUF is 17.5 GB -- about 2 GB smaller -- and
-  # that 2 GB is the whole difference: it loads FULLY on the GPU at a 64K
-  # context, 22.4 GB total. Quantisation format, not engine tuning, was the
-  # lever.
+  #   vllm      ENGINE_API_BASE=http://vllm:8000/v1
+  #   llamacpp  ENGINE_API_BASE=http://llamacpp:8080/v1
   #
-  # The cost is real: Ollama runs on the HOST and holds the same card, so
-  # vLLM must be stopped. vLLM remains the better choice when a 22K window is
-  # enough -- it batches far better. Switch back with scripts/switch-model.
-  - model_name: qwen3.8-9b
-    litellm_params:
-      # vLLM is the engine for this stack. `openai/` means "speak the OpenAI
-      # protocol to this base_url", not api.openai.com; the name after it MUST
-      # equal vLLM's --served-model-name (VLLM_SERVED_MODEL_NAME in .env) or
-      # every request 404s at the engine.
-      model: openai/qwen3.8-9b
-      api_base: http://vllm:8000/v1
-      api_key: os.environ/VLLM_API_KEY
-      input_cost_per_token: 0.0000002
-      output_cost_per_token: 0.0000008
-    model_info:
-      mode: chat
-      # ADVERTISE the window. Without these, /model/info returns null for
-      # max_input_tokens and every client has to guess -- and clients CACHE
-      # the guess. Hermes wrote 24,576 to its context_length_cache.yaml back
-      # when vLLM really did serve that, then kept refusing on a 131,072
-      # engine because nothing ever invalidated the entry. Reporting the
-      # truth here is what stops that happening again, for every client.
-      max_input_tokens: 262144
-      max_output_tokens: 8192
-      max_tokens: 262144
+  # ENGINE_MODEL carries its `openai/` prefix in .env. That prefix means "speak
+  # the OpenAI protocol to api_base" -- it is NOT api.openai.com. The part after
+  # it must equal the engine's served name (vLLM --served-model-name, llama.cpp
+  # --alias) or the engine answers 404 to everything.
+  #
+  # Both entries below are the SAME backend under two names: `local` is the
+  # stable alias clients should use, and the second is the human-readable one
+  # the Open WebUI model picker shows. scripts/switch-model rewrites the
+  # display name and the advertised window when the model changes.
+  # ---------------------------------------------------------------------------
 
-  # Stable alias, so clients need not change when the model does.
+  # Stable alias, so clients need not change when the model or engine does.
   - model_name: local
     litellm_params:
-      # vLLM is the engine for this stack. `openai/` means "speak the OpenAI
-      # protocol to this base_url", not api.openai.com; the name after it MUST
-      # equal vLLM's --served-model-name (VLLM_SERVED_MODEL_NAME in .env) or
-      # every request 404s at the engine.
-      model: openai/qwen3.8-9b
-      api_base: http://vllm:8000/v1
-      api_key: os.environ/VLLM_API_KEY
+      model: os.environ/ENGINE_MODEL
+      api_base: os.environ/ENGINE_API_BASE
+      api_key: os.environ/ENGINE_API_KEY
       input_cost_per_token: 0.0000002
       output_cost_per_token: 0.0000008
     model_info:
@@ -77,17 +56,27 @@ model_list:
       # when vLLM really did serve that, then kept refusing on a 131,072
       # engine because nothing ever invalidated the entry. Reporting the
       # truth here is what stops that happening again, for every client.
+      #
+      # These are LITERAL numbers on purpose: model_info is not part of
+      # litellm_params, and an os.environ/ value would arrive as a string
+      # where an int is expected. setup.sh and switch-model rewrite them.
       max_input_tokens: 262144
       max_output_tokens: 8192
       max_tokens: 262144
 
-  # --- vLLM, for when a 22K window is enough -------------------------------
-  # Uncomment with Ollama stopped; both want the whole GPU.
-  # - model_name: vllm-local
-  #   litellm_params:
-  #     model: openai/qwen3.8-9b
-  #     api_base: http://vllm:8000/v1
-  #     api_key: os.environ/VLLM_API_KEY
+  # Display name, shown in the Open WebUI model picker.
+  - model_name: qwen3.8-9b
+    litellm_params:
+      model: os.environ/ENGINE_MODEL
+      api_base: os.environ/ENGINE_API_BASE
+      api_key: os.environ/ENGINE_API_KEY
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.0000008
+    model_info:
+      mode: chat
+      max_input_tokens: 262144
+      max_output_tokens: 8192
+      max_tokens: 262144
 
 router_settings:
   routing_strategy: simple-shuffle
