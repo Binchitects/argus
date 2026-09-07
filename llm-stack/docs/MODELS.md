@@ -299,6 +299,90 @@ large for what the weights left behind — lower it.
 
 ---
 
+## Qwen3.8-Flash-Next (177B MoE) — can this stack run it?
+
+Short answer: **yes on a 32 GB card with 128 GB of RAM, no on a 24 GB card
+with 64 GB, and not on any released vLLM yet.** The reasoning matters more
+than the verdict, because the usual intuitions about model size do not apply.
+
+### Why a 177B model is even a candidate
+
+Read from `Qwen/Qwen3.8-Flash-Next`'s own `config.json`, not from claims:
+
+| | |
+|---|---|
+| architecture | `Qwen4ExpForConditionalGeneration` (`qwen4_exp`), multimodal |
+| layers | 48 |
+| experts | **512**, with **10 active per token** plus 1 shared |
+| total parameters | ~177 B (121 B of it in experts) |
+| **active parameters** | **2.66 B per token** |
+| attention | hybrid: **12 full-attention layers of 48**, the rest linear |
+| `max_position_embeddings` | **262,144** |
+
+That 2.66 B is the whole story. Only ten small experts fire per token, so the
+*compute* is that of a ~3 B model even though the *weights* are 177 B. Keep the
+experts in system RAM and the active path on the GPU and it runs quickly on
+hardware that could never hold it densely.
+
+### It fits your deployment box and not your test box
+
+Totals measured from `unsloth/Qwen3.8-Flash-Next-GGUF`, weights only:
+
+| quant | size | 24 GB + 64 GB RAM (~80 usable) | 32 GB + 128 GB RAM (~150) |
+|---|---|---|---|
+| UD-Q2_K_XL | 78.9 GB | marginal | yes |
+| UD-IQ3_XXS | 82.0 GB | no | yes |
+| UD-Q3_K_XL | 90.0 GB | no | yes |
+| **UD-IQ4_XS** | **93.7 GB** | **no** | **yes** |
+| UD-Q4_K_XL | 111.3 GB | no | yes |
+
+**A 3090 with 64 GB cannot hold a 4-bit copy**, and no offload setting changes
+that — the weights simply exceed VRAM plus RAM. Only 2-bit fits, which is
+below a sensible quality floor. Streaming from disk works and is slow enough
+not to be worth it.
+
+### Context is NOT the constraint here
+
+Only 12 of 48 layers keep a KV cache, with 2 KV heads at head_dim 256:
+
+| context | KV fp16 | KV fp8 |
+|---|---|---|
+| 262,144 | 6.4 GB | **3.2 GB** |
+| 1,000,000 | 24.6 GB | **12.3 GB** |
+
+A million tokens costs ~12 GB of cache — comfortable on a 32 GB card. **The
+weights are the limit, never the window.**
+
+**But this checkpoint is not a 1M model.** `max_position_embeddings` is
+**262,144** and `rope_scaling` is `null`. 256K is what it is trained and
+configured for; anything beyond needs an explicit YaRN-style extension, with
+the quality loss that implies. Do not plan on 1M without measuring it.
+
+### No released vLLM can serve it yet
+
+| where | `Qwen4Exp` registered? |
+|---|---|
+| vLLM **main** | **yes** — `vllm/models/qwen4_exp` |
+| vLLM v0.28.0 (latest release) | no |
+| vLLM v0.27.1 (this stack) | no |
+
+Forty PRs have merged upstream and ~148 remain open, including PLE-offload and
+sparse-attention kernels, so this is actively landing rather than speculative.
+Until it appears in a release, serving it needs a nightly or a `main` build.
+
+llama.cpp already supports it — `ggml-org` publishes a GGUF and unsloth's has
+had hundreds of thousands of downloads — but this stack serves vLLM, and
+adding a second engine has its own cost (see the Ollama note in HERMES.md).
+
+### What to do
+
+1. **Wait for vLLM 0.29**, or pin a nightly image and accept the churn.
+2. **Deploy on the 32 GB / 128 GB box** with `UD-IQ4_XS`, `--kv-cache-dtype fp8`,
+   and experts offloaded to RAM. Budget ~94 GB weights + ~3 GB cache at 256K.
+3. **Do not size the test box for it.** Keep the 9B for 24 GB work; they are
+   different classes of machine and pretending otherwise wastes a day.
+4. Re-measure the window before promising 1M to anyone.
+
 ## MTP (Multi-Token Prediction)
 
 MTP checkpoints ship extra draft-head weights so the model can propose several

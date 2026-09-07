@@ -173,7 +173,7 @@ had() { case ",$HAVE," in *",$1,"*) echo y ;; *) echo "$2" ;; esac; }
 ask_yn "Reverse proxy + TLS (traefik)?"             "$(had proxy y)"   && PROFILES="$PROFILES,proxy"
 ask_yn "Single sign-on (authelia)?"                 "$(had auth y)"    && PROFILES="$PROFILES,auth"
 ask_yn "GPU metrics exporter (nvidia-smi)?"         "$(had smi y)"     && PROFILES="$PROFILES,smi"
-ask_yn "Code index + documentation server (argus)?" "$(had argus n)"   && PROFILES="$PROFILES,argus"
+ask_yn "Code index + documentation server (argus)?" "$(had argus y)"   && PROFILES="$PROFILES,argus"
 ask_yn "Log aggregation (loki + promtail)?"         "$(had logging n)" && PROFILES="$PROFILES,logging"
 ask_yn "Request tracing (langfuse)?"                "$(had tracing n)" && PROFILES="$PROFILES,tracing"
 set_env COMPOSE_PROFILES "$PROFILES"
@@ -193,8 +193,22 @@ if [[ "$PROFILES" == *argus* ]]; then
   ask ARGUS_GITLAB_URL "GitLab URL Argus should use" "http://host.docker.internal:8929"
   note "The token is written to .env, which is gitignored. Needs read_api + read_repository."
   ask ARGUS_GITLAB_TOKEN "GitLab access token for Argus" ""
-  [[ -z "$(current ARGUS_GITLAB_TOKEN)" ]] && \
-    warn "no token set -- argus will start but reject every request until you add one"
+    if [[ -z "$(current ARGUS_GITLAB_TOKEN)" ]]; then
+      # argus is a DEFAULT profile now, so an unattended deploy would
+      # otherwise ship a container that EXITS at startup with
+      #   config error: no GitLab credential: set gitlab.token
+      # and is restarted forever. Every other service reports healthy and
+      # the only symptom is argus.<domain> serving Traefik's default
+      # certificate, because no router appears for a container that never
+      # stays up long enough to be discovered.
+      #
+      # Shipping nothing beats shipping something broken: drop the profile
+      # and say so. Add the token and re-run to turn it back on.
+      warn "no GitLab token -- argus would crash-loop, so it is being left OUT"
+      note "Set ARGUS_GITLAB_TOKEN in .env and re-run setup to enable it."
+      PROFILES="$(printf %s "$PROFILES" | sed -e "s/,argus//" -e "s/^argus,//" -e "s/^argus$//")"
+      set_env COMPOSE_PROFILES "${PROFILES#,}"
+    fi
 fi
 
 # ------------------------------------------------------------------ people ---
