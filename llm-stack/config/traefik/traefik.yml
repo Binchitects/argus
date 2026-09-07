@@ -65,6 +65,21 @@ providers:
     exposedByDefault: false
     network: llm-net
     watch: true
+    # Scope discovery to THIS compose project.
+    #
+    # The Docker provider sees every container on the daemon, not just this
+    # stack's. Router names are a flat global namespace, so an unrelated
+    # project that happens to name a router `authelia` -- a very likely name --
+    # silently REPLACES ours. Measured here: a `docsmanager` stack defined
+    # `traefik.http.routers.authelia.rule = Host(\`auth.127-0-0-1.nip.io\`)`,
+    # and auth.llm.localhost started redirecting to that project's domain.
+    # Login broke with no error in any log, because nothing had failed --
+    # the route simply pointed elsewhere.
+    #
+    # exposedByDefault: false does NOT protect against this: the other
+    # container opted in for its own Traefik, and ours cannot tell the
+    # difference.
+    constraints: "Label(`com.docker.compose.project`,`llmservice`)"
 
   file:
     directory: /etc/traefik/dynamic

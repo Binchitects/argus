@@ -1,3 +1,12 @@
+# TEMPLATE -- rendered to configuration.yml by scripts/gen-auth.sh.
+# ${LLM_DOMAIN} is substituted from .env. Edit THIS file, never the
+# rendered one: configuration.yml is generated and gitignored.
+#
+# Why a template at all: Authelia's session domain, OIDC issuer and
+# every access-control rule name the domain literally. With them baked
+# in, changing LLM_DOMAIN moved the Traefik routes but left Authelia
+# answering for a domain nobody was asking about -- SSO broke with no
+# error, because nothing had failed.
 # ==============================================================================
 # Authelia — single sign-on for the whole stack.
 #
@@ -45,7 +54,7 @@ log:
   format: 'text'
 
 totp:
-  issuer: 'llm.localhost'
+  issuer: '${LLM_DOMAIN}'
 
 # ------------------------------------------------------------------------------
 # Users live in a YAML file with argon2id-hashed passwords. Add people with:
@@ -78,44 +87,44 @@ access_control:
   default_policy: 'deny'
   rules:
     # The portal itself must never require auth, or login would be circular.
-    - domain: 'auth.llm.localhost'
+    - domain: 'auth.${LLM_DOMAIN}'
       policy: 'bypass'
 
     # Apps that authenticate through OIDC handle their own sessions; the
     # forwardAuth middleware is not applied to them, but an explicit bypass
     # keeps the intent obvious and survives a middleware mistake.
     - domain:
-        - 'chat.llm.localhost'
-        - 'grafana.llm.localhost'
-        - 'traces.llm.localhost'
+        - 'chat.${LLM_DOMAIN}'
+        - 'grafana.${LLM_DOMAIN}'
+        - 'traces.${LLM_DOMAIN}'
       policy: 'bypass'
 
     # The API and the gateway now authenticate against Authelia too. Machine
     # clients present an access token from the client_credentials grant; a
     # browser hitting /docs gets the normal login redirect.
     - domain:
-        - 'api.llm.localhost'
-        - 'gateway.llm.localhost'
+        - 'api.${LLM_DOMAIN}'
+        - 'gateway.${LLM_DOMAIN}'
       policy: 'one_factor'
 
     # Everything that ships with no authentication of its own.
     - domain:
-        - 'metrics.llm.localhost'
-        - 'alerts.llm.localhost'
-        - 'logs.llm.localhost'
-        - 'cadvisor.llm.localhost'
-        - 'node.llm.localhost'
-        - 'gpu.llm.localhost'
-        - 's3.llm.localhost'
+        - 'metrics.${LLM_DOMAIN}'
+        - 'alerts.${LLM_DOMAIN}'
+        - 'logs.${LLM_DOMAIN}'
+        - 'cadvisor.${LLM_DOMAIN}'
+        - 'node.${LLM_DOMAIN}'
+        - 'gpu.${LLM_DOMAIN}'
+        - 's3.${LLM_DOMAIN}'
       policy: 'one_factor'
       subject:
         - 'group:admins'
 
       # NO permissive catch-all here, deliberately. A trailing
-      #     - domain: '*.llm.localhost'
+      #     - domain: '*.${LLM_DOMAIN}'
       #       policy: 'one_factor'
       # silently defeats every subject-restricted rule above it: when a
-      # non-admin hits metrics.llm.localhost the admins rule does not MATCH
+      # non-admin hits metrics.${LLM_DOMAIN} the admins rule does not MATCH
       # (wrong group) rather than denying, so evaluation falls through and any
       # authenticated user gets in. default_policy: deny covers the rest.
 
@@ -123,11 +132,11 @@ session:
   name: 'authelia_session'
   same_site: 'lax'
   # A cookie scoped to the parent domain is what makes one login cover every
-  # *.llm.localhost hostname.
+  # *.${LLM_DOMAIN} hostname.
   cookies:
-    - domain: 'llm.localhost'
-      authelia_url: 'https://auth.llm.localhost'
-      default_redirection_url: 'https://llm.localhost'
+    - domain: '${LLM_DOMAIN}'
+      authelia_url: 'https://auth.${LLM_DOMAIN}'
+      default_redirection_url: 'https://${LLM_DOMAIN}'
       expiration: '12h'
       inactivity: '1h'
       remember_me: '1M'

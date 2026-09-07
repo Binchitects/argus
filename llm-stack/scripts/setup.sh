@@ -201,10 +201,36 @@ fi
 step "Secrets and certificates"
 run bash "$ROOT/scripts/bootstrap.sh"
 
+# Authelia keeps its state in SQLite inside the authelia-data volume, encrypted
+# with AUTHELIA_STORAGE_ENCRYPTION_KEY. The key lives in .env; the database
+# lives in a Docker volume. Delete .env (or start from a fresh checkout) while
+# that volume survives and gen-auth mints a NEW key against the OLD database --
+# Authelia then crash-loops on every start, unable to decrypt, and the message
+# names the encryption key rather than the volume nobody thought to remove.
+#
+# Detect it here rather than let it surface as a crash-loop: remember the key
+# before gen-auth runs, and compare afterwards.
+_key_before="$(current AUTHELIA_STORAGE_ENCRYPTION_KEY)"
+
 if [[ "$PROFILES" == *auth* ]]; then
   step "Single sign-on"
   note "Edit config/authelia/team.yml to add people, then re-run with --sync."
   run bash "$ROOT/scripts/gen-auth.sh"
+
+  _key_after="$(current AUTHELIA_STORAGE_ENCRYPTION_KEY)"
+  # An EMPTY key before also counts: deleting .env without removing the
+  # volume is the commonest way to reach this state.
+  if [[ $DRYRUN -eq 0 && "$_key_before" != "$_key_after" ]]; then
+    _vol="$(current COMPOSE_PROJECT_NAME)"; _vol="${_vol:-llmservice}_authelia-data"
+    if docker volume inspect "$_vol" >/dev/null 2>&1 &&        docker run --rm -v "$_vol":/d alpine:3 test -f /d/db.sqlite3 2>/dev/null; then
+      warn "the Authelia encryption key changed, but $_vol still holds a database"
+      note "Authelia cannot decrypt a database written with the previous key; it"
+      note "would crash-loop on every start. The volume holds SESSIONS only --"
+      note "never user accounts, which live in config/authelia/users.yml."
+      note "Reset it with:  docker volume rm $_vol"
+      die "refusing to start Authelia against an undecryptable database"
+    fi
+  fi
 fi
 
 # ------------------------------------------------------------------ start ----

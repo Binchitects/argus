@@ -58,6 +58,28 @@ PY
 }
 get_env() { grep -E "^$1=" .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r'; }
 
+# The domain every generated artefact must agree on. Authelia names it in the
+# OIDC issuer, the session cookie domain, every access-control rule and every
+# redirect URI. These used to be literal `$DOMAIN`, so setting LLM_DOMAIN
+# moved the Traefik routes and left Authelia answering for a domain nobody
+# asked about -- SSO broke with nothing in any log, because nothing had failed.
+DOMAIN="$(get_env LLM_DOMAIN)"; DOMAIN="${DOMAIN:-llm.localhost}"
+echo "==> Domain: $DOMAIN"
+
+# Render *.template.* with the domain substituted. envsubst is not reliably
+# present under Git Bash, and a blind envsubst would also eat the $-signs
+# inside argon2/pbkdf2 hashes -- so substitute exactly one token, in Python.
+render_template() {  # src dst
+  python - "$1" "$2" "$DOMAIN" <<'PY'
+import pathlib, sys
+src, dst, domain = sys.argv[1], sys.argv[2], sys.argv[3]
+pathlib.Path(dst).write_text(
+    pathlib.Path(src).read_text(encoding="utf-8").replace("${LLM_DOMAIN}", domain),
+    encoding="utf-8")
+PY
+}
+
+
 # --- add a user and exit ----------------------------------------------------
 # ---------------------------------------------------------------------------
 # Declarative sync: make users.yml match config/authelia/team.yml.
@@ -98,7 +120,7 @@ t += f"""
     disabled: false
     displayname: '{user}'
     password: '{h}'
-    email: '{user}@llm.localhost'
+    email: '{user}@$DOMAIN'
     groups:
 {g}
 """
@@ -138,6 +160,14 @@ else
 fi
 
 # --- admin user -------------------------------------------------------------
+echo "==> Rendering config from templates"
+render_template "$DIR/configuration.template.yml" "$DIR/configuration.yml"
+echo "    configuration.yml"
+if [[ -f config/homepage/services.template.yaml ]]; then
+  render_template config/homepage/services.template.yaml config/homepage/services.yaml
+  echo "    homepage/services.yaml"
+fi
+
 if [[ $FORCE -eq 1 || ! -f "$DIR/users.yml" ]]; then
   echo "==> Admin user"
   ADMIN_PASS="$(rand 20)"
@@ -151,7 +181,7 @@ users:
     disabled: false
     displayname: 'Administrator'
     password: '$H'
-    email: 'admin@llm.localhost'
+    email: 'admin@$DOMAIN'
     groups:
       - admins
 EOF
@@ -211,7 +241,7 @@ __JWKS_PEM__
         consent_mode: 'implicit'
         require_pkce: false
         redirect_uris:
-          - 'https://grafana.llm.localhost/login/generic_oauth'
+          - 'https://grafana.$DOMAIN/login/generic_oauth'
         scopes: ['openid', 'profile', 'groups', 'email']
         userinfo_signed_response_alg: 'none'
         token_endpoint_auth_method: 'client_secret_basic'
@@ -227,7 +257,7 @@ __JWKS_PEM__
         consent_mode: 'implicit'
         require_pkce: false
         redirect_uris:
-          - 'https://chat.llm.localhost/oauth/oidc/callback'
+          - 'https://chat.$DOMAIN/oauth/oidc/callback'
         scopes: ['openid', 'profile', 'groups', 'email']
         userinfo_signed_response_alg: 'none'
         # Open WebUI uses authlib, which sends credentials as HTTP Basic auth.
@@ -254,8 +284,8 @@ __JWKS_PEM__
         grant_types: ['client_credentials']
         scopes: ['authelia.bearer.authz']
         audience:
-          - 'https://api.llm.localhost'
-          - 'https://gateway.llm.localhost'
+          - 'https://api.$DOMAIN'
+          - 'https://gateway.$DOMAIN'
         token_endpoint_auth_method: 'client_secret_basic'
 
       - client_id: 'langfuse'
@@ -269,7 +299,7 @@ __JWKS_PEM__
         consent_mode: 'implicit'
         require_pkce: false
         redirect_uris:
-          - 'https://traces.llm.localhost/api/auth/callback/custom'
+          - 'https://traces.$DOMAIN/api/auth/callback/custom'
         scopes: ['openid', 'profile', 'email']
         userinfo_signed_response_alg: 'none'
         token_endpoint_auth_method: 'client_secret_basic'
