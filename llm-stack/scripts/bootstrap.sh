@@ -69,6 +69,7 @@ fi
 # key:byte-length:prefix
 SECRETS=(
   "VLLM_API_KEY:24:sk-local-"
+  "LLAMACPP_API_KEY:24:sk-local-"
   "GRAFANA_ADMIN_PASSWORD:12:"
   "WEBUI_SECRET_KEY:32:"
   "POSTGRES_PASSWORD:16:"

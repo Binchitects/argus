@@ -150,10 +150,10 @@ capability, and getting it wrong means vLLM refuses to start.
 | Service | What it does |
 |---|---|
 | **vLLM** | Inference engine. OpenAI-compatible API from your GPU, continuous batching, paged attention. Exports rich Prometheus histograms. Best when several people share one model. |
-| **Ollama** *(host, alternative)* | The other engine, for when **context** matters more than throughput. GGUF weights pack ~2 GB tighter and its KV cache can itself be quantised, which is what gets a 27B to a 128K–256K window on a 24 GB card where vLLM tops out near 24K. Runs on the host and claims the same GPU, so exactly one of the two runs at a time — start it with `scripts/start-ollama`. See [docs/MODELS.md](docs/MODELS.md#24-gb-long-context-the-gguf-route). |
+| **llama.cpp** *(alternative engine)* | The other engine, for models that will **not fit in VRAM**. Reads GGUF, and can keep a mixture-of-experts model's routed experts in system RAM (`--n-cpu-moe`) while attention stays on the GPU — which is what lets a 177B MoE serve from a 24 GB card. Claims the same GPU as vLLM, so exactly one of the two runs: choose at `scripts/setup.sh`. See [docs/SETUP.md](docs/SETUP.md#choosing-an-inference-engine). |
 | **Open WebUI** | Chat interface. Multi-user, conversation history, document upload. |
 | **Prometheus** | Metrics store. Scrapes every component, evaluates 21 alert rules. |
-| **Grafana** | Dashboards. Seven provisioned from JSON — no clicking. **LLM Overview** and **Usage by person** read the gateway's spend log in Postgres rather than the engine, so they keep working when you switch between vLLM and Ollama. |
+| **Grafana** | Dashboards. Seven provisioned from JSON — no clicking. **LLM Overview** and **Usage by person** read the gateway's spend log in Postgres rather than the engine, so they keep working when you switch engines. |
 | **Alertmanager** | Groups, deduplicates and routes firing alerts. |
 | **node-exporter** | Host CPU, memory, disk, network. |
 | **cAdvisor** | Per-container resource usage. |
@@ -170,6 +170,8 @@ capability, and getting it wrong means vLLM refuses to start.
 | `logging` | **Loki + Promtail** | Searchable container logs in Grafana. |
 | `tracing` | **Langfuse** | Prompt/response traces, cost per call, evaluations. |
 | `argus` | **Argus** | Code index and documentation server. Exposes 16 MCP tools to an agent: symbol lookup and cross-repo search over your GitLab repositories, plus offline documentation packs (Windows SDK/WDK, MSVC C++, PowerShell). |
+| `vllm` | **vLLM** | The inference engine. **Exactly one engine profile at a time.** |
+| `llamacpp` | **llama.cpp** | The alternative engine, for models too large for VRAM. |
 | `multi-model` | **second vLLM** | Two models warm at once. |
 | `homepage` | **Homepage** | Landing page. |
 

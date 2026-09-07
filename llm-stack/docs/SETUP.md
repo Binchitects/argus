@@ -32,12 +32,22 @@ repeatable or scripted deploy possible:
 ```bash
 ./scripts/setup.sh --domain llm.example.com
 ./scripts/setup.sh --defaults --domain box.local --set VLLM_MAX_MODEL_LEN=65536
+
+# llama.cpp instead of vLLM, fully unattended
+./scripts/setup.sh --defaults   --set LLM_ENGINE=llamacpp   --set LLAMACPP_MODEL_DIR=/d/llm-models/Qwen3.8-Flash-Next-IQ4_XS   --set LLAMACPP_MODEL_FILE=Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf   --set LLAMACPP_SERVED_MODEL_NAME=qwen3.8-flash-next   --set LLAMACPP_CONTEXT=262144
 ```
 
 | flag | |
 |---|---|
 | `--domain D` | set `LLM_DOMAIN` without being asked |
 | `--set K=V` | set any `.env` key; repeatable |
+| `--defaults` | accept every default, ask nothing |
+| `--dry-run` | print the plan, change nothing |
+| `--no-start` | write every config file but start no containers |
+
+`--no-start` is for an appliance that is configured on one machine and started
+on another: certificates, secrets and `.env` are all written, and
+`docker compose up -d` is left for the destination.
 
 Both are written to `.env` **before** any question runs, so they are accepted
 silently under `--defaults` and pre-filled when prompting.
@@ -99,10 +109,11 @@ else.
 **Domain.** Services appear at `chat.<domain>`, `gateway.<domain>` and so on.
 `llm.localhost` is fine for a single machine.
 
-**Engine.** The HuggingFace model id, the name clients will use for it,
-context length, and how much VRAM vLLM may claim. vLLM serves **one model at a
-time** and claims that fraction of the card up front, so nothing else can load
-beside it — a 24 GB card cannot hold an 8B and a 27B together.
+**Engine.** First *which* engine (see below), then that engine's settings.
+For vLLM: the HuggingFace model id, the name clients will use for it, context
+length, and how much VRAM it may claim. vLLM serves **one model at a time** and
+claims that fraction of the card up front, so nothing else can load beside it —
+a 24 GB card cannot hold an 8B and a 27B together.
 
 **Profiles.** Which parts to run: the gateway is always on because it is what
 gives each person a key and a budget. TLS, SSO, GPU metrics, the code index,
@@ -116,6 +127,64 @@ gateway.
 **Argus**, if enabled: the GitLab URL and an access token. Argus resolves
 every request's identity against GitLab, so it cannot serve without one. The
 token goes to `.env`, which is gitignored.
+
+## Choosing an inference engine
+
+Two engines ship with the stack, and **exactly one runs**. Both claim the whole
+GPU; enabling both profiles means whichever loses the race dies with a CUDA OOM
+that names neither culprit.
+
+| | vLLM | llama.cpp |
+|---|---|---|
+| profile | `vllm` | `llamacpp` |
+| weights | safetensors (fp16, AWQ, NVFP4, …) | GGUF |
+| where the weights live | VRAM, entirely | VRAM + system RAM + mmap'd file |
+| batching | much better | modest |
+| downloads for you | yes, from HuggingFace | no — point it at files you have |
+| use it when | the model fits in VRAM | it does not |
+
+**vLLM is the default and usually the right answer.** Reach for llama.cpp when
+a model will not fit — in particular a large mixture-of-experts model, where
+`--n-cpu-moe` keeps the routed experts in system RAM and leaves only attention
+and the shared expert on the GPU. That is what lets a 177B MoE serve from a
+24 GB card; see [MODELS.md](MODELS.md#qwen38-flash-next-177b-moe--can-this-stack-run-it).
+
+### What the choice changes
+
+Only the engine. Everything above it is untouched: LiteLLM still issues
+per-person keys and budgets, usage is still attributed per user, the dashboards
+and Open WebUI are unchanged.
+
+That works because `config/litellm/config.yaml` names no engine. It reads
+`ENGINE_API_BASE`, `ENGINE_MODEL` and `ENGINE_API_KEY` through LiteLLM's
+`os.environ/` indirection, and `setup.sh` writes those three from whichever
+engine you picked:
+
+| | `ENGINE_API_BASE` | `ENGINE_MODEL` |
+|---|---|---|
+| vllm | `http://vllm:8000/v1` | `openai/$VLLM_SERVED_MODEL_NAME` |
+| llamacpp | `http://llamacpp:8080/v1` | `openai/$LLAMACPP_SERVED_MODEL_NAME` |
+
+The `openai/` prefix is the **protocol**, not the vendor — it means "speak the
+OpenAI API to that base URL". Nothing is sent to api.openai.com.
+
+Leave `ENGINE_*` unset and the stack falls back to the vLLM wiring, which is
+what lets an `.env` written before llama.cpp existed keep working.
+
+### llama.cpp settings worth understanding
+
+| key | |
+|---|---|
+| `LLAMACPP_MODEL_DIR` | host directory holding the GGUFs, mounted read-only at `/gguf`. **Put it on NVMe.** |
+| `LLAMACPP_MODEL_FILE` | file name only. For a split GGUF name the **first** shard; the rest are found for you. |
+| `LLAMACPP_N_CPU_MOE` | layers whose routed experts stay in system RAM. **The flag that decides whether a large MoE fits.** Raise it if the server dies with a CUDA OOM while loading; lower it for speed once it loads. |
+| `LLAMACPP_CONTEXT` | KV cache is allocated up front from this — lower it first if startup fails. |
+| `LLAMACPP_KV_TYPE` | `q8_0` roughly halves the KV cache against `f16` for little quality cost. |
+| `LLAMACPP_PARALLEL` | request slots. Each gets `CONTEXT/PARALLEL` tokens, so raising it **shrinks** the per-request window. |
+
+llama.cpp downloads nothing. Fetch the GGUF yourself first — the multi-part
+files are large enough that a resumable transfer matters — then point
+`LLAMACPP_MODEL_DIR` at where it landed.
 
 ## What it decides for you
 

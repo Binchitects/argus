@@ -14,6 +14,8 @@
 #   --domain D     set LLM_DOMAIN without being asked
 #   --set K=V      set any .env key (repeatable); applied before every question
 #   ./scripts/setup.sh --dry-run    print the plan, change nothing
+#   ./scripts/setup.sh --no-start   write every config, start nothing
+#                                   (for an appliance configured before it ships)
 #
 # Safe to re-run. Existing secrets are kept, and every question shows the
 # current value as its default, so a second pass is a review rather than a
@@ -27,12 +29,13 @@ cd "$ROOT"
 # -subj and mangles container paths. See scripts/gen-certs.sh.
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
-DEFAULTS=0; DRYRUN=0
+DEFAULTS=0; DRYRUN=0; NOSTART=0
 PRESEED=()          # KEY=VALUE pairs written to .env BEFORE any question is asked
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --defaults) DEFAULTS=1; shift ;;
     --dry-run)  DRYRUN=1; shift ;;
+    --no-start) NOSTART=1; shift ;;
     # --domain is the one people reach for most, so it gets its own flag.
     --domain)   PRESEED+=("LLM_DOMAIN=$2"); shift 2 ;;
     --domain=*) PRESEED+=("LLM_DOMAIN=${1#*=}"); shift ;;
@@ -135,18 +138,68 @@ DOMAIN="$(current LLM_DOMAIN)"
 
 # ------------------------------------------------------------- the engine ----
 step "Inference engine"
-note "vLLM serves ONE model at a time and claims most of the GPU up front."
-note "A 24 GB card cannot hold an 8B and a 27B together."
-ask VLLM_MODEL "HuggingFace model id to serve" "Qwen/Qwen3-8B"
-ask VLLM_SERVED_MODEL_NAME "Name clients will use for it" "qwen3-8b"
-ask VLLM_MAX_MODEL_LEN "Context length" "8192"
-ask VLLM_GPU_MEMORY_UTILIZATION "Fraction of VRAM vLLM may claim" "0.90"
+note "Two engines ship with this stack, and EXACTLY ONE runs: both take the"
+note "whole GPU, so enabling both means one of them dies with a CUDA OOM."
+note ""
+note "  vllm      safetensors, much better batching. Use it whenever the whole"
+note "            model fits in VRAM -- which is the usual case."
+note "  llamacpp  GGUF, and can keep mixture-of-experts weights in system RAM."
+note "            Use it when the model does NOT fit: it is what lets a 177B"
+note "            MoE like Qwen3.8-Flash-Next serve from a 24 GB card."
+ask LLM_ENGINE "Engine to run (vllm | llamacpp)" "vllm"
+ENGINE="$(current LLM_ENGINE)"
+case "$ENGINE" in
+  vllm|llamacpp) ;;
+  # Fail here rather than later: an unrecognised value would otherwise reach
+  # COMPOSE_PROFILES, match no service, and the stack would come up with no
+  # engine at all and no error saying why.
+  *) die "LLM_ENGINE must be 'vllm' or 'llamacpp', got: '$ENGINE'" ;;
+esac
+
+if [[ "$ENGINE" == "vllm" ]]; then
+  note "vLLM serves ONE model at a time and claims most of the GPU up front."
+  note "A 24 GB card cannot hold an 8B and a 27B together."
+  ask VLLM_MODEL "HuggingFace model id to serve" "Qwen/Qwen3-8B"
+  ask VLLM_SERVED_MODEL_NAME "Name clients will use for it" "qwen3-8b"
+  ask VLLM_MAX_MODEL_LEN "Context length" "8192"
+  ask VLLM_GPU_MEMORY_UTILIZATION "Fraction of VRAM vLLM may claim" "0.90"
+else
+  note "llama.cpp reads GGUF from a directory you already have -- it does not"
+  note "download anything. Fetch the weights first, e.g. with huggingface-cli,"
+  note "then point LLAMACPP_MODEL_DIR at where they landed."
+  note "For a split GGUF give only the FIRST shard; the rest are found for you."
+  ask LLAMACPP_MODEL_DIR "Host directory holding the .gguf files (use NVMe)" "./models"
+  ask LLAMACPP_MODEL_FILE "GGUF file name inside that directory" ""
+  ask LLAMACPP_SERVED_MODEL_NAME "Name clients will use for it" "local"
+  ask LLAMACPP_CONTEXT "Context length" "32768"
+  note "n-cpu-moe keeps the routed experts of the last N layers in system RAM."
+  note "Raise it if the server dies with a CUDA OOM while loading weights;"
+  note "lower it for speed once you know it fits. 48 covers every layer of"
+  note "Qwen3.8-Flash-Next."
+  ask LLAMACPP_N_CPU_MOE "Layers whose experts stay in system RAM" "48"
+  ask LLAMACPP_KV_TYPE "KV cache type (f16 | q8_0 | q5_1 | q4_0)" "q8_0"
+
+  # A missing file is the single most likely mistake here, and the symptom
+  # otherwise is a container that restarts forever with the reason buried in
+  # its logs. Warn now; do not die, because the weights may still be
+  # downloading and setup is worth finishing anyway.
+  _dir="$(current LLAMACPP_MODEL_DIR)"; _file="$(current LLAMACPP_MODEL_FILE)"
+  if [[ -z "$_file" ]]; then
+    warn "no GGUF file set -- llama.cpp will not start until LLAMACPP_MODEL_FILE is filled in"
+  elif [[ -n "$_dir" && ! -e "$_dir/$_file" ]]; then
+    warn "not found yet: $_dir/$_file (fine if it is still downloading)"
+  else
+    ok "found $_dir/$_file"
+  fi
+fi
 
 # The V2 runner needs Unified Virtual Addressing, which WSL2's GPU driver does
 # not expose: the engine dies with "RuntimeError: UVA is not available" AFTER
 # the container has reported healthy once, which reads like a hardware fault
 # rather than a setting.
-if grep -qiE "microsoft|wsl" /proc/version 2>/dev/null || [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]]; then
+if [[ "$ENGINE" != "vllm" ]]; then
+  : # llama.cpp has no V2 runner and downloads nothing -- skip both questions.
+elif grep -qiE "microsoft|wsl" /proc/version 2>/dev/null || [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]]; then
   set_env VLLM_USE_V2_MODEL_RUNNER 0
   ok "WSL2/Windows detected -- forcing vLLM's V1 model runner (V2 needs UVA)"
 else
@@ -155,8 +208,10 @@ fi
 
 # A first pull of a multi-GB checkpoint over a slow link spends most of its
 # time hitting the 10s default and retrying, which gets slower as it goes.
-ask HF_HUB_DOWNLOAD_TIMEOUT "HuggingFace read timeout, seconds" "120"
-ask HF_TOKEN "HuggingFace token (only for gated models, blank is fine)" ""
+if [[ "$ENGINE" == "vllm" ]]; then
+  ask HF_HUB_DOWNLOAD_TIMEOUT "HuggingFace read timeout, seconds" "120"
+  ask HF_TOKEN "HuggingFace token (only for gated models, blank is fine)" ""
+fi
 
 # --------------------------------------------------------------- profiles ----
 step "What to run"
@@ -176,6 +231,12 @@ ask_yn "GPU metrics exporter (nvidia-smi)?"         "$(had smi y)"     && PROFIL
 ask_yn "Code index + documentation server (argus)?" "$(had argus y)"   && PROFILES="$PROFILES,argus"
 ask_yn "Log aggregation (loki + promtail)?"         "$(had logging n)" && PROFILES="$PROFILES,logging"
 ask_yn "Request tracing (langfuse)?"                "$(had tracing n)" && PROFILES="$PROFILES,tracing"
+
+# The engine is a profile too, and it is NOT asked about again -- it was chosen
+# above. Appending it unconditionally is also the upgrade path: an .env written
+# when vLLM was always-on has no engine profile at all, and would otherwise come
+# up with no engine and no explanation.
+PROFILES="$PROFILES,$ENGINE"
 set_env COMPOSE_PROFILES "$PROFILES"
 ok "profiles: $PROFILES"
 
@@ -215,6 +276,40 @@ fi
 step "Secrets and certificates"
 run bash "$ROOT/scripts/bootstrap.sh"
 
+# ------------------------------------------------- point the gateway at it ----
+# AFTER bootstrap, deliberately: bootstrap is what generates the engine API
+# keys, so before this line VLLM_API_KEY/LLAMACPP_API_KEY may still hold the
+# placeholder from .env.example. Deriving these earlier would copy the
+# placeholder and every gateway request would come back 401.
+#
+# LiteLLM resolves these through `os.environ/` in config/litellm/config.yaml,
+# which is why that file names no engine and needs no edit to switch.
+if [[ "$ENGINE" == "vllm" ]]; then
+  set_env ENGINE_API_BASE "http://vllm:8000/v1"
+  set_env ENGINE_MODEL    "openai/$(current VLLM_SERVED_MODEL_NAME)"
+  set_env ENGINE_API_KEY  "$(current VLLM_API_KEY)"
+  _ctx="$(current VLLM_MAX_MODEL_LEN)"
+else
+  set_env ENGINE_API_BASE "http://llamacpp:8080/v1"
+  set_env ENGINE_MODEL    "openai/$(current LLAMACPP_SERVED_MODEL_NAME)"
+  set_env ENGINE_API_KEY  "$(current LLAMACPP_API_KEY)"
+  _ctx="$(current LLAMACPP_CONTEXT)"
+fi
+ok "gateway -> $ENGINE ($(current ENGINE_MODEL) at $(current ENGINE_API_BASE))"
+
+# Advertise the REAL window. model_info is not part of litellm_params, so it
+# cannot use os.environ/ -- LiteLLM would hand a string where an int belongs.
+# Rewriting the literals is the same thing scripts/switch-model does.
+#
+# This is not cosmetic. Clients cache what /model/info reports: Hermes wrote
+# 24,576 into its context_length_cache.yaml and then kept refusing to start
+# against an engine that had long since grown, because nothing invalidated it.
+if [[ -n "${_ctx:-}" && "$_ctx" =~ ^[0-9]+$ ]] && [[ $DRYRUN -eq 0 ]]; then
+  _cfg="$ROOT/config/litellm/config.yaml"
+  sed -i -E "s/^      max_input_tokens: [0-9]+/      max_input_tokens: $_ctx/; s/^      max_tokens: [0-9]+/      max_tokens: $_ctx/" "$_cfg"
+  ok "gateway advertises a ${_ctx}-token window"
+fi
+
 # Authelia keeps its state in SQLite inside the authelia-data volume, encrypted
 # with AUTHELIA_STORAGE_ENCRYPTION_KEY. The key lives in .env; the database
 # lives in a Docker volume. Delete .env (or start from a fresh checkout) while
@@ -235,7 +330,11 @@ if [[ "$PROFILES" == *auth* ]]; then
   # An EMPTY key before also counts: deleting .env without removing the
   # volume is the commonest way to reach this state.
   if [[ $DRYRUN -eq 0 && "$_key_before" != "$_key_after" ]]; then
-    _vol="$(current COMPOSE_PROJECT_NAME)"; _vol="${_vol:-llmservice}_authelia-data"
+    # Same precedence Docker Compose itself uses: an exported
+    # COMPOSE_PROJECT_NAME overrides the one in .env. Reading only .env would
+    # make this guard inspect a volume belonging to a different project.
+    _vol="${COMPOSE_PROJECT_NAME:-$(current COMPOSE_PROJECT_NAME)}"
+    _vol="${_vol:-llmservice}_authelia-data"
     if docker volume inspect "$_vol" >/dev/null 2>&1 &&        docker run --rm -v "$_vol":/d alpine:3 test -f /d/db.sqlite3 2>/dev/null; then
       warn "the Authelia encryption key changed, but $_vol still holds a database"
       note "Authelia cannot decrypt a database written with the previous key; it"
@@ -276,14 +375,17 @@ fi
 ok "ports $_http and $_https are free"
 
 step "Starting the stack"
-if [[ $DRYRUN -eq 1 ]]; then
+if [[ $NOSTART -eq 1 ]]; then
+  note "--no-start: configuration written, nothing started"
+  note "start it later with: docker compose up -d"
+elif [[ $DRYRUN -eq 1 ]]; then
   note "would run: docker compose up -d"
 else
   docker compose up -d
 fi
 
 # --------------------------------------------------------------- provision ---
-if [[ $DRYRUN -eq 0 ]]; then
+if [[ $DRYRUN -eq 0 && $NOSTART -eq 0 ]]; then
   step "Provisioning people on the gateway"
   note "Each person in team.yml gets an API key, a ceiling, and one usage total"
   note "spanning the API and the web UI. Keys are printed once."

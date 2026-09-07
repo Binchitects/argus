@@ -171,6 +171,14 @@ services:
   vllm:
     image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
     container_name: vllm
+    # Profile-gated so that exactly one engine runs. vLLM and llama.cpp both
+    # claim the whole GPU; starting both means whichever loses the race dies
+    # with a CUDA OOM that names neither culprit.
+    #
+    # This service used to be unprofiled (always on). Existing .env files may
+    # therefore have no `vllm` in COMPOSE_PROFILES -- setup.sh migrates those
+    # rather than silently leaving the engine stopped after an upgrade.
+    profiles: [vllm]
     restart: unless-stopped
     networks: [llm-net]
     # No published ports: Traefik is the only way in. Re-add a mapping
@@ -259,6 +267,80 @@ services:
     logging: *default-logging
 
   # ============================================================================
+  # ============================================================================
+  # ALTERNATIVE INFERENCE ENGINE (profile: llamacpp)
+  #
+  # Why a second engine exists at all: vLLM cannot serve every model this stack
+  # is asked to run. Qwen3.8-Flash-Next is the case that forced it -- a 177B
+  # mixture-of-experts with only 2.66B active per token. Its vLLM-loadable
+  # builds are 135 GB (NVFP4, Blackwell-only) and 180 GB (W4A16); the GGUF is
+  # 93.7 GB. On anything short of a very large card, GGUF is the only build that
+  # fits, and llama.cpp is the only engine that reads it for this architecture.
+  #
+  # llama.cpp also offloads MoE experts to system RAM (--n-cpu-moe), which is
+  # what makes a 177B model run on a 24 GB card: only 10 of 512 experts fire per
+  # token, so the compute is that of a ~3B model even though the weights are not.
+  #
+  # It is NOT a replacement for vLLM. vLLM batches far better and is the right
+  # engine whenever the model fits. Run exactly one.
+  # ============================================================================
+  llamacpp:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG:-server-cuda}
+    container_name: llamacpp
+    profiles: [llamacpp]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      # Same bind mount as vLLM, plus wherever the big GGUFs actually live.
+      - ./models:/models
+      - ${LLAMACPP_MODEL_DIR:-./models}:/gguf:ro
+    environment:
+      LLAMA_CACHE: /models/.llama-cache
+    # The image entrypoint is llama-server, so this holds only flags.
+    #
+    # --n-cpu-moe is the flag that matters: it keeps the routed experts of the
+    # last N layers in system RAM instead of VRAM. Attention, the shared expert
+    # and the embeddings stay on the GPU. Set it high enough that the GPU-side
+    # footprint fits your card; too low and the server dies with a CUDA OOM
+    # during weight loading.
+    command: >
+      -m /gguf/${LLAMACPP_MODEL_FILE:-SET_LLAMACPP_MODEL_FILE_IN_ENV.gguf}
+      --host 0.0.0.0
+      --port 8080
+      --api-key ${LLAMACPP_API_KEY:-change-me-please}
+      --alias ${LLAMACPP_SERVED_MODEL_NAME:-local}
+      -c ${LLAMACPP_CONTEXT:-32768}
+      -ngl ${LLAMACPP_N_GPU_LAYERS:-99}
+      --n-cpu-moe ${LLAMACPP_N_CPU_MOE:-48}
+      --cache-type-k ${LLAMACPP_KV_TYPE:-q8_0}
+      --cache-type-v ${LLAMACPP_KV_TYPE:-q8_0}
+      --parallel ${LLAMACPP_PARALLEL:-1}
+      --jinja
+      ${LLAMACPP_EXTRA_ARGS:-}
+    # mmap means the GGUF is paged from disk on demand rather than read whole.
+    # With 512 experts and 10 firing per token the hot set is far smaller than
+    # the file, so this is what makes a 94 GB model usable on 48 GB of RAM --
+    # provided the file is on NVMe. On a spinning disk it is unusable.
+    shm_size: "${LLAMACPP_SHM_SIZE:-2gb}"
+    <<: *gpu-reservation
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      # A 94 GB model paging in from NVMe takes minutes on a cold cache.
+      start_period: 1800s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.llamacpp.loadbalancer.server.port=8080"
+      - "traefik.http.routers.llamacpp.rule=Host(`api.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.llamacpp.entrypoints=websecure"
+      - "traefik.http.routers.llamacpp.tls=true"
+      - "traefik.http.routers.llamacpp.service=llamacpp"
+      - "traefik.http.middlewares.llamacpp-key.headers.customrequestheaders.Authorization=Bearer ${LLAMACPP_API_KEY:-}"
+      - "traefik.http.routers.llamacpp.middlewares=${PROTECTED_CHAIN:-protected-chain@file},llamacpp-key@docker"
+    logging: *default-logging
+
   # SECOND INFERENCE ENGINE (profile: multi-model)
   #
   # One vLLM process serves exactly one model ("vllm serve [model_tag]"), so a
@@ -367,6 +449,20 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       VLLM_API_KEY: ${VLLM_API_KEY}
+      # ---- which engine the gateway talks to -------------------------------
+      # config/litellm/config.yaml reads these through `os.environ/`, so the
+      # gateway config is engine-agnostic and .env alone decides the backend.
+      #
+      # The defaults reproduce the vLLM wiring exactly, so an .env written
+      # before llama.cpp existed keeps working untouched; setup.sh writes them
+      # explicitly from here on.
+      ENGINE_API_BASE: ${ENGINE_API_BASE:-http://vllm:8000/v1}
+      # `openai/` is the PROTOCOL, not the vendor -- it means "speak the OpenAI
+      # API to api_base". The part after it must equal the engine's served
+      # model name (vLLM --served-model-name / llama.cpp --alias) or the engine
+      # answers 404 to every request.
+      ENGINE_MODEL: ${ENGINE_MODEL:-openai/${VLLM_SERVED_MODEL_NAME:-default}}
+      ENGINE_API_KEY: ${ENGINE_API_KEY:-${VLLM_API_KEY}}
       STORE_MODEL_IN_DB: "True"
       # config/litellm/config.yaml reads these through `os.environ/`. This
       # service has no env_file, so a variable that is not named here does not
@@ -563,8 +659,16 @@ services:
       SSL_CERT_FILE: /certs/ca.crt
       REQUESTS_CA_BUNDLE: /certs/ca.crt
     depends_on:
+      # required:false -- Open WebUI talks to LiteLLM, not to the engine, so it
+      # must still start when the engine is a different service (llamacpp) or
+      # when no engine profile is enabled at all. Without this, selecting the
+      # llamacpp profile makes the whole project fail to parse.
       vllm:
         condition: service_started
+        required: false
+      llamacpp:
+        condition: service_started
+        required: false
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.open-webui.loadbalancer.server.port=8080"
