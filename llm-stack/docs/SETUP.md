@@ -181,6 +181,16 @@ what lets an `.env` written before llama.cpp existed keep working.
 | `LLAMACPP_CONTEXT` | KV cache is allocated up front from this — lower it first if startup fails. |
 | `LLAMACPP_KV_TYPE` | `q8_0` roughly halves the KV cache against `f16` for little quality cost. |
 | `LLAMACPP_PARALLEL` | request slots. Each gets `CONTEXT/PARALLEL` tokens, so raising it **shrinks** the per-request window. |
+| `LLAMACPP_EXTRA_ARGS` | extra flags. **Do not put `-t <logical cpus>` here** — llama.cpp already defaults to the physical core count, and forcing all logical CPUs measured 2.5x *slower*. |
+
+### What it costs, measured
+
+A 177B MoE (`Qwen3.8-Flash-Next`, `UD-IQ4_XS`, 93.7 GB) on a 24 GB RTX 3090 with
+48 GB of RAM: **185–202 s to load, 3.4–4.3 tok/s warm**, correct output. During
+generation the CPU runs at ~800% and the GPU at 25–35% — the expert matmuls on
+the CPU set the pace, so raising `--n-cpu-moe`'s GPU share (48 -> 38, VRAM
+8.4 -> 20.5 GB) bought nothing measurable on this box. Tune it to make the model
+*fit*, then stop.
 
 llama.cpp downloads nothing. Fetch the GGUF yourself first — the multi-part
 files are large enough that a resumable transfer matters — then point

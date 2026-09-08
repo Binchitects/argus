@@ -335,7 +335,7 @@ are not interchangeable, and only one of them is small enough to be interesting.
 
 | build | size | engine that reads it | 3090 24 GB | 5090 32 GB |
 |---|---|---|---|---|
-| **GGUF UD-IQ4_XS** | **93.7 GB** | **llama.cpp** | mmap from NVMe | yes, +128 GB RAM |
+| **GGUF UD-IQ4_XS** | **93.7 GB** | **llama.cpp** | **yes, measured — 3.4-4.3 tok/s** | yes, +128 GB RAM |
 | NVFP4 | 135.2 GB | vLLM, Blackwell only | no | no |
 | W4A16 | 179.8 GB | vLLM | no | no |
 
@@ -355,7 +355,7 @@ Full GGUF ladder, measured from `unsloth/Qwen3.8-Flash-Next-GGUF`, weights only:
 | **UD-IQ4_XS** | **93.7 GB** | **yes** |
 | UD-Q4_K_XL | 111.3 GB | yes |
 
-### The 24 GB box: not resident, but not obviously impossible
+### The 24 GB box: it works
 
 93.7 GB exceeds 24 GB of VRAM plus ~50 GB of usable RAM, so the model cannot be
 *resident* on the test box. That is not the same as "cannot run", because
@@ -371,9 +371,49 @@ one to answer from a spreadsheet.
 The disk therefore decides it. On the NVMe measured here (Samsung 990 PRO,
 5,411 MB/s sequential read) paging has a chance; on a SATA HDD it does not.
 
-**This is untested at the time of writing** — the 93.7 GB download was still in
-flight. Treat the 3090 row as *plausible, unmeasured*, and do not plan around
-it until this document says otherwise with numbers in it.
+### Measured on the 3090
+
+It runs. `UD-IQ4_XS`, 24 GB RTX 3090, 48 GB of RAM available to Docker, GGUF on
+a Samsung 990 PRO reached through a Docker bind mount:
+
+| | |
+|---|---|
+| load to healthy | **185–202 s** |
+| generation, warm | **3.4 – 4.3 tok/s** |
+| first request, cold | 0.30 tok/s |
+| VRAM at `--n-cpu-moe 48` | 8.4 GB |
+| VRAM at `--n-cpu-moe 38` | 20.5 GB |
+| container RAM | 29–34 GB |
+
+Output is correct, not degraded word-salad: it answers factual questions and
+follows instructions normally.
+
+**What the bottleneck is not.** Two intuitions were wrong here, and both were
+cheap to test:
+
+- *Not the disk.* The mount reads at 321 MB/s inside a container versus
+  5,411 MB/s natively on the same NVMe — a 17x drvfs penalty, which looked
+  damning. But block reads during generation were ~5 MB for a 150-token reply.
+  The working set stays resident; it is not paging per token.
+- *Not GPU starvation.* Moving ten layers of experts onto the card
+  (`--n-cpu-moe` 48 -> 38, VRAM 8.4 -> 20.5 GB) changed throughput by nothing
+  measurable: 3.5 -> 4.3 tok/s, inside run-to-run noise.
+
+During generation the CPU sits at ~800% with the GPU at 25–35%, so the expert
+matmuls on the CPU are what set the pace.
+
+**Threads: leave them alone.** llama.cpp chose `n_threads = 10`, matching the
+container's ten *physical* cores. Forcing `-t 20` to use all twenty logical
+CPUs made it **2.5x slower** — 1.35 tok/s against 3.37. Hyperthreads contend
+for the same memory bandwidth rather than adding throughput. This is the one
+knob most likely to be tuned in the wrong direction.
+
+**What this means for the 32 GB / 128 GB box.** Do not read 3.4 tok/s as the
+deployment number. Two things change: 128 GB of RAM holds the whole 93.7 GB
+without paging, and 32 GB of VRAM takes far more experts than 24 GB can. But
+since the CPU is what limits this box, the deploy box's gain depends on its CPU
+and memory bandwidth too — measure it there rather than extrapolating from
+here.
 
 ### Context is NOT the constraint here
 
