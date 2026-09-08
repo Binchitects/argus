@@ -51,7 +51,7 @@ vLLM cannot reach 64K at all. Measured rather than assumed:
 | | weights | KV cache at util 0.94 |
 |---|---|---|
 | AWQ INT4 safetensors (vLLM) | 19.6 GB | **27,534 tokens** |
-| Q4_K_M GGUF (Ollama) | 17.5 GB | **65,536 tokens**, 22.4 GB total |
+| Q4_K_M GGUF (llama.cpp) | 17.5 GB | **65,536 tokens**, 22.4 GB total |
 
 Same model, same 4-bit precision — GGUF simply packs ~2 GB smaller, and that
 2 GB is the entire difference between a 22K window and a 64K one. No vLLM
@@ -59,23 +59,21 @@ setting closes a 2.4x gap: `--cpu-offload-gb 4` did free the memory (KV rose
 to 152,917 tokens) but the quantized kernels then died with `Pointer argument
 cannot be accessed from Triton (cpu tensor?)`.
 
-> **Superseded.** Ollama is not part of this stack. The GGUF route it was
-> reached for is now served by the **llama.cpp** engine profile, which runs in a
-> container like everything else instead of on the host — see
-> [SETUP.md](SETUP.md#choosing-an-inference-engine). The measurements below are
-> kept because the *finding* still holds and is the reason a second engine
-> exists at all: at equal 4-bit precision GGUF packs smaller than AWQ
-> safetensors, and on a card with no headroom that difference is the whole
-> window. Read the `scripts/start-ollama` instructions in this section as
-> history, not as procedure.
+> The measurements in this section were originally taken against Ollama, which
+> is **not part of this stack**. They are kept because the finding is what
+> justifies a second engine at all — at equal 4-bit precision GGUF packs
+> smaller than AWQ safetensors, and on a card with no headroom that difference
+> is the whole window. The GGUF route is now served by the **llamacpp** engine
+> profile, in a container like everything else; see
+> [SETUP.md](SETUP.md#choosing-an-inference-engine).
 
 So the GGUF build is the one that fits. Whichever engine serves it claims the
 same card, so **exactly one engine runs** — they cannot share it. vLLM is still
 the better engine when a 22K window is enough; it batches far better.
 
-The 64K is requested per call by the gateway (`num_ctx` in
-`config/litellm/config.yaml`), *not* by `OLLAMA_CONTEXT_LENGTH`. A server-side
-default depends on how Ollama happened to be launched and is lost on a reboot,
+The window is fixed at engine start (`LLAMACPP_CONTEXT`), not negotiated per
+call. A server-side default that depends on how the engine happened to be
+launched is lost on a restart,
 which would silently drop every client to 4096.
 
 ### How much context you can have
@@ -98,8 +96,9 @@ Measured on a 24 GB card, largest window that stays **entirely** on the GPU:
 **The full 262,144 does fit**, which the arithmetic alone would not tell you:
 the KV cache costs 44 MiB per 1K tokens at `q8_0`, so a full window is 22.0 GiB
 at `f16`, 11.0 at `q8_0` and 5.5 at `q4_0` — and only the last leaves room for
-17.5 GB of weights. It needs `num_gpu` to override Ollama's estimator, which
-otherwise offloads ~15% of the layers even though the total fits.
+17.5 GB of weights. It needs every layer pinned to the GPU (`-ngl 99`) to
+override an estimator that otherwise offloads ~15% of them even though the
+total fits.
 
 **It is not the default, because ~370 MiB of headroom is one browser away from
 an OOM**, and forcing `num_gpu` removes the graceful spill that would otherwise
@@ -107,8 +106,7 @@ absorb that. 131,072 loads unaided with about 2.6 GB spare. To take the full
 window anyway:
 
 ```bash
-OLLAMA_CONTEXT_LENGTH=262144 ./scripts/start-ollama.sh
-# and set num_ctx: 262144 plus num_gpu: 99 in config/litellm/config.yaml
+./scripts/setup.sh --defaults --set LLM_ENGINE=llamacpp   --set LLAMACPP_CONTEXT=262144 --set LLAMACPP_KV_TYPE=q4_0
 ```
 
 Everything here was verified **by retrieval, not by loading** — the engine will
@@ -118,11 +116,10 @@ fact in the middle of a 114,123-token prompt came back through the gateway.
 
 **Two things silently degrade instead of failing.** Both cost time here:
 
-- Start Ollama **only** via `scripts/start-ollama`. `OLLAMA_KV_CACHE_TYPE` is
-  server-level environment, so an ordinary `ollama serve` gives an `f16` cache
-  — and the gateway still asks for 131,072. Nothing errors; a quarter of the
-  model moves to system RAM and generation crawls.
-- Ollama **truncates** a prompt longer than the window rather than refusing it.
+- **KV cache type is set at engine start, not per request** (`LLAMACPP_KV_TYPE`).
+  Leave it at `f16` while asking for 131,072 and nothing errors: a quarter of
+  the model moves to system RAM and generation crawls.
+- **The engine truncates** a prompt longer than the window rather than refusing it.
   A 245K-token test document came back with `prompt_eval_count` of 57,346 and
   the model correctly reporting it could not find the fact — which looks
   exactly like a retrieval failure. Assert `prompt_eval_count` in any
@@ -191,32 +188,31 @@ Two tool calls, concatenated into one arguments string. LiteLLM cannot parse
 it, so it **drops the call**. Hermes sees no result and retries — re-prefilling
 the entire conversation every time.
 
-It is a **streaming** bug, and only on LiteLLM's `ollama_chat` path. Measured
+It was a **streaming** bug in a gateway transform, not in any engine. Measured
 with the same prompt and model, varying only `stream`:
 
 | route | tool calls | parse |
 |---|---|---|
-| `ollama_chat`, non-streaming | 2 | ✅ |
-| `ollama_chat`, **streaming** | 1, concatenated | ❌ |
-| Ollama `/v1`, streaming | 2, indices `[0,1]` | ✅ |
+| native-protocol transform, non-streaming | 2 | ✅ |
+| native-protocol transform, **streaming** | 1, concatenated | ❌ |
+| plain OpenAI `/v1`, streaming | 2, indices `[0,1]` | ✅ |
 
-LiteLLM emits every parallel tool call under the same `index`, so the client
-glues their arguments together. `parallel_tool_calls: false` and
+The transform emitted every parallel tool call under the same `index`, so the
+client glued their arguments together. `parallel_tool_calls: false` and
 `tool_choice: required` do **not** help — the model still emits two.
 
-**The fix is the route.** `config/litellm/config.yaml` uses
-`openai/qwen3.8:27b` against Ollama's own OpenAI-compatible endpoint
-(`:11434/v1`), bypassing the `ollama_chat` transform. `e2e-check.py` asserts
-streaming tool-call arguments still parse.
+**The fix is the route.** `config/litellm/config.yaml` speaks plain
+`openai/...` to the engine's own OpenAI-compatible endpoint, bypassing any
+native-protocol transform. `e2e-check.py` asserts streaming tool-call
+arguments still parse, on whichever engine is running.
 
-The cost of that route: `/v1` does not accept Ollama's native `num_ctx`, so
-the window comes from `OLLAMA_CONTEXT_LENGTH` at launch — another reason to
-start Ollama only through `scripts/start-ollama`. The e2e check compares the
-served window against the advertised one, so a mismatch is loud.
+Because the window is fixed at engine start rather than negotiated per call,
+the e2e check also compares the served window against the advertised one, so a
+mismatch is loud rather than silent.
 
 **A second, unrelated time sink worth knowing.** Feeding a preprocessed C file
 to the model will not work: a `.i` from the Windows SDK runs to ~1.8 MB, about
-450K tokens, well past a 131K window. Ollama **truncates** rather than
+450K tokens, well past a 131K window. The engine **truncates** rather than
 refusing, so the model silently receives a fragment and appears to have missed
 things it was "given". Give it the `.c` and specific headers instead.
 
@@ -234,19 +230,18 @@ NO_PROXY=localhost,127.0.0.1,::1,.local,llm.localhost,.llm.localhost
 SDK clients, or Hermes. Run `./scripts/setup-hosts.sh` once on the client
 machine.
 
-**Ollama does not restart itself.** It is a host process
-(started by `scripts/start-ollama`), not a Windows service, and has no entry under
-`HKCU:\...\CurrentVersion\Run` on this machine — so after a reboot the
-gateway advertises models that nothing is serving, and every request fails at
-the engine rather than at the gateway. Start it before the stack, or add it to
-your login items.
+**A half-dead engine looks like a hardware limit.** This was learned the hard
+way with a host-process engine: force-killing it left orphaned worker
+processes, each holding a whole copy of the model in VRAM. Three of them
+pinned the card at 24.1 GB of 24.6 GB, and the only visible symptom was
+benchmark numbers that made no sense — a 128K window apparently spilling
+*more* than a 256K one.
 
-**Killing Ollama leaks its runners.** `Stop-Process -Force` on `ollama.exe`
-does not reap the `llama-server.exe` children, and each orphan keeps a whole
-copy of the model in VRAM. Three of them pinned this card at 24.1 GB of
-24.6 GB, and the only visible symptom was benchmark numbers that made no
-sense — a 128K window spilling *more* than a 256K one. `start-ollama.ps1`
-reaps them; by hand, kill `llama-server` too.
+Running the engine as a compose service is what removes that class of failure:
+`docker compose stop` reaps the whole process tree, and `restart:
+unless-stopped` brings it back after a reboot. If measurements ever stop making
+physical sense, check `nvidia-smi` for a process nobody meant to leave running
+before believing the numbers.
 
 **Hermes needs the stack CA in its own bundle.** `SSL_CERT_FILE` and
 `REQUESTS_CA_BUNDLE` point at `~/AppData/Local/hermes/ca-bundle.pem`, which
