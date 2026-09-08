@@ -298,6 +298,19 @@ services:
       LLAMA_CACHE: /models/.llama-cache
     # The image entrypoint is llama-server, so this holds only flags.
     #
+    # ON THE --api-key DEFAULT: the placeholder is not the security boundary and
+    # must never be reached. scripts/up.sh refuses to start this engine while
+    # the key is still the placeholder, and acceptance.py fails on any
+    # `change-me` left in .env.
+    #
+    # It is a plain default rather than a required-variable marker for two
+    # reasons. Compose interpolates EVERY service before filtering by profile,
+    # so a marker here aborts `docker compose` for people who never run this
+    # engine -- including every .env written before it existed. And a presence
+    # check would not help anyway: .env.example ships the placeholder, so it is
+    # satisfied by precisely the value we are trying to reject. Checking the
+    # VALUE, where the enabled profile is known, is what actually closes it.
+    #
     # --n-cpu-moe is the flag that matters: it keeps the routed experts of the
     # last N layers in system RAM instead of VRAM. Attention, the shared expert
     # and the embeddings stay on the GPU. Set it high enough that the GPU-side
@@ -337,7 +350,7 @@ services:
       - "traefik.http.routers.llamacpp.entrypoints=websecure"
       - "traefik.http.routers.llamacpp.tls=true"
       - "traefik.http.routers.llamacpp.service=llamacpp"
-      - "traefik.http.middlewares.llamacpp-key.headers.customrequestheaders.Authorization=Bearer ${LLAMACPP_API_KEY:-}"
+      - "traefik.http.middlewares.llamacpp-key.headers.customrequestheaders.Authorization=Bearer ${LLAMACPP_API_KEY:-change-me-please}"
       - "traefik.http.routers.llamacpp.middlewares=${PROTECTED_CHAIN:-protected-chain@file},llamacpp-key@docker"
     logging: *default-logging
 
