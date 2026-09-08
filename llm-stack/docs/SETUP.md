@@ -348,29 +348,30 @@ can offer is bounded by what the weights leave over, and on a 24 GB card the
 [Hermes](HERMES.md) requires.
 
 The lever is the **quantisation format, not the engine settings**: the same
-model as a Q4_K_M GGUF is ~2 GB smaller and fits a 64K window on the same
-card. That path runs through Ollama on the host, with `num_ctx` requested by
-the gateway. See [HERMES.md](HERMES.md) for the measured numbers.
+model as a Q4_K_M GGUF is ~2 GB smaller and fits a 64K window on the same card.
+GGUF is what the **llamacpp** engine reads. See [HERMES.md](HERMES.md) for the
+measured numbers.
 
-Ollama and vLLM both claim the whole GPU, so **only one runs at a time**:
+Switch engines by re-running setup and answering `llamacpp`, or unattended:
 
 ```bash
-docker compose stop vllm          # before starting Ollama
-./scripts/start-ollama.sh         # NOT plain `ollama serve` -- see below
+./scripts/setup.sh --defaults --set LLM_ENGINE=llamacpp   --set LLAMACPP_MODEL_DIR=/path/to/gguf   --set LLAMACPP_MODEL_FILE=your-model.gguf   --set LLAMACPP_CONTEXT=65536
 ```
 
-```powershell
-.\scripts\start-ollama.ps1        # Windows
-```
+Both engines claim the whole GPU, so **only one runs at a time** — the engine
+profile is what enforces that, and `setup.sh` sets exactly one.
 
-Use the script rather than `ollama serve`. It sets `OLLAMA_KV_CACHE_TYPE`,
-which is server-level environment and cannot be requested per call — and the
-window the gateway asks for (131,072) only fits with a `q4_0` cache. Started
-any other way, Ollama gets an `f16` cache, accepts the same request, spills a
-quarter of the model to system RAM and crawls. It does not error.
+Two llama.cpp settings do the work here:
 
-`scripts/e2e-check.py` probes vLLM first and Ollama second, and names which
-one answered — so it passes either way and tells you which engine you are on.
+- `LLAMACPP_KV_TYPE=q8_0` quantises the **KV cache itself**, roughly halving it
+  against `f16`. That is the other half of how a large window fits on a small
+  card, and vLLM has no equivalent this cheap.
+- `LLAMACPP_N_CPU_MOE` keeps a mixture-of-experts model's routed experts in
+  system RAM. Irrelevant for a dense model; decisive for an MoE.
+
+`scripts/e2e-check.py` and `scripts/health.sh` probe vLLM first and llama.cpp
+second, and name which one answered — so they pass either way and tell you
+which engine you are on.
 
 ## Adding people
 

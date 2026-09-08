@@ -36,13 +36,6 @@ if ($Profiles) {
     Write-Host "Using profiles: $Profiles" -ForegroundColor Cyan
 }
 
-Write-Host '==> Pulling images' -ForegroundColor Cyan
-docker compose pull --quiet
-
-Write-Host '==> Starting services' -ForegroundColor Cyan
-docker compose up -d --remove-orphans
-if ($LASTEXITCODE -ne 0) { exit 1 }
-
 # Read published ports so the summary matches whatever the user configured.
 $envMap = @{}
 foreach ($line in (Get-Content (Join-Path $root '.env'))) {
@@ -53,31 +46,74 @@ function Port($key, $default) {
     return $default
 }
 
+function EnvVal($key) {
+    if ($envMap.ContainsKey($key)) { return $envMap[$key] }
+    return ''
+}
+
+# Which engine is enabled. Both claim the whole GPU, so exactly one runs, and
+# everything below follows the choice rather than assuming vLLM -- waiting on a
+# hardcoded 'vllm' meant a llama.cpp deploy sat out the whole timeout against a
+# container that was never going to exist.
+$activeProfiles = $env:COMPOSE_PROFILES
+if (-not $activeProfiles) { $activeProfiles = EnvVal 'COMPOSE_PROFILES' }
+$engineContainer = 'vllm'
+$engineLabel = 'vLLM'
+if (",$activeProfiles," -like '*,llamacpp,*') {
+    $engineContainer = 'llamacpp'
+    $engineLabel = 'llama.cpp'
+}
+
+# Refuse to start an engine whose API key is still the placeholder from
+# .env.example. Mirrors engine_key_guard in up.sh; the reasoning is there. In
+# short: a Compose ${VAR:?} breaks every OTHER engine's deploy, and only checks
+# that the variable EXISTS -- which the placeholder satisfies.
+foreach ($pair in @(@('vllm', 'VLLM_API_KEY'), @('llamacpp', 'LLAMACPP_API_KEY'))) {
+    if (",$activeProfiles," -notlike "*,$($pair[0]),*") { continue }
+    $v = EnvVal $pair[1]
+    if (-not $v) {
+        Write-Host "refusing to start '$($pair[0])': $($pair[1]) is empty" -ForegroundColor Red
+    } elseif ($v -like '*change-me*') {
+        Write-Host "refusing to start '$($pair[0])': $($pair[1]) is still the placeholder from .env.example" -ForegroundColor Red
+    } else {
+        continue
+    }
+    Write-Host '  run .\scriptsootstrap.ps1 (or .\scripts\setup.ps1) to generate one' -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Host '==> Pulling images' -ForegroundColor Cyan
+docker compose pull --quiet
+
+Write-Host '==> Starting services' -ForegroundColor Cyan
+docker compose up -d --remove-orphans
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+
 if (-not $NoWait) {
     Write-Host ''
-    Write-Host '==> Waiting for vLLM to finish loading the model' -ForegroundColor Cyan
+    Write-Host "==> Waiting for $engineLabel to finish loading the model" -ForegroundColor Cyan
     Write-Host '    (first run downloads weights; this is the slow part)' -ForegroundColor DarkGray
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-    $url = "http://localhost:$(Port 'VLLM_PORT' '8000')/health"
     $ready = $false
     $spin = @('|', '/', '-', '\')
     $i = 0
 
     while ((Get-Date) -lt $deadline) {
-        try {
-            $resp = Invoke-WebRequest -Uri $url -TimeoutSec 5 -UseBasicParsing
-            if ($resp.StatusCode -eq 200) { $ready = $true; break }
-        } catch {
-            # Not up yet — expected for most of this loop.
-        }
+        # No engine publishes a host port any more -- everything goes through
+        # Traefik, and the API route needs auth. Docker's own healthcheck is
+        # the authoritative signal and needs no credentials. This used to probe
+        # localhost:VLLM_PORT, which could only ever time out.
+        $health = docker inspect -f '{{.State.Health.Status}}' $engineContainer 2>$null
+        if ($health -eq 'healthy') { $ready = $true; break }
 
         # Fail fast if the container died rather than waiting out the timeout.
-        $state = docker inspect -f '{{.State.Status}}' vllm 2>$null
+        $state = docker inspect -f '{{.State.Status}}' $engineContainer 2>$null
         if ($state -eq 'exited') {
             Write-Host ''
-            Write-Host 'vLLM exited. Last 40 log lines:' -ForegroundColor Red
-            docker logs --tail 40 vllm
+            Write-Host "$engineLabel exited. Last 40 log lines:" -ForegroundColor Red
+            docker logs --tail 40 $engineContainer
             exit 1
         }
 
@@ -88,9 +124,9 @@ if (-not $NoWait) {
 
     Write-Host "`r                          `r" -NoNewline
     if ($ready) {
-        Write-Host '    vLLM is serving.' -ForegroundColor Green
+        Write-Host "    $engineLabel is serving." -ForegroundColor Green
     } else {
-        Write-Host "    Timed out after $TimeoutMinutes minutes. Check: docker logs -f vllm" -ForegroundColor Yellow
+        Write-Host "    Timed out after $TimeoutMinutes minutes. Check: docker logs -f $engineContainer" -ForegroundColor Yellow
     }
 }
 

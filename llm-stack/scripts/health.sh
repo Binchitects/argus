@@ -42,11 +42,11 @@ printf '  %s\n' "--------------------------------------------------------------"
 # One helper container on the stack network probes everything internally.
 probe() { docker run --rm --network llm-net curlimages/curl:8.11.1 -s -o /dev/null -w '%{http_code}' -m 8 "$1" 2>/dev/null || echo 000; }
 
-# The engine is whichever one is serving, and only one can be: vLLM as a
-# compose service, or Ollama on the HOST via the docker gateway. Naming only
-# vLLM here reported a perfectly healthy Ollama-backed stack as DOWN.
+# The engine is whichever one is serving, and only one can be: both are compose
+# services and both want the whole GPU. Naming only vLLM here reported a
+# perfectly healthy llama.cpp-backed stack as DOWN.
 engine_ok=0
-for pair in "vLLM|http://vllm:8000/health"             "Ollama|http://host.docker.internal:11434/api/tags"; do
+for pair in "vLLM|http://vllm:8000/health"             "llama.cpp|http://llamacpp:8080/health"; do
   ename="${pair%%|*}"; eurl="${pair#*|}"
   ecode="$(probe "$eurl")"
   case "$ecode" in
@@ -57,7 +57,7 @@ for pair in "vLLM|http://vllm:8000/health"             "Ollama|http://host.docke
 done
 if [ "$engine_ok" -eq 0 ]; then
   failures=$((failures + 1))
-  printf '  %-20s %sDOWN%s     neither vLLM nor Ollama answered
+  printf '  %-20s %sDOWN%s     neither vLLM nor llama.cpp answered
 ' "engine" "$c_red" "$c_off"
 fi
 

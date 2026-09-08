@@ -233,7 +233,7 @@ cache instead.
 
 vLLM claims `VLLM_GPU_MEMORY_UTILIZATION` of the card at startup, so nothing
 else can load beside it — on a 24 GB card an 8B and a 27B cannot coexist, and
-Ollama cannot run alongside. `scripts/switch-model` changes which model is
+the llama.cpp engine cannot run alongside either. `scripts/switch-model` changes which model is
 loaded; the gateway's `model:` values must keep matching
 `--served-model-name`, or requests 404 at the engine while the gateway looks
 healthy.

@@ -33,7 +33,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Read from the **gateway's own spend log** (`LiteLLM_SpendLogs` in Postgres), not from the inference engine. That is deliberate: this stack runs vLLM *or* Ollama depending on whether throughput or context matters more, and an engine-specific dashboard goes blank the moment you switch. vLLM's Prometheus metrics also carry no user dimension \u2014 they answer *how many tokens*, never *whose*.\n\nEvery request through `gateway.<domain>` lands here, from the API and the web UI alike. GPU panels come from the `nvidia-smi` exporter, which reports whichever engine holds the card.\n\nvLLM-native panels are in the collapsed row at the bottom. They light up when vLLM is the running engine and stay empty otherwise \u2014 that is expected, not a fault."
+        "content": "Read from the **gateway's own spend log** (`LiteLLM_SpendLogs` in Postgres), not from the inference engine. That is deliberate: this stack runs vLLM *or* llama.cpp depending on whether throughput or context matters more, and an engine-specific dashboard goes blank the moment you switch. vLLM's Prometheus metrics also carry no user dimension — they answer *how many tokens*, never *whose*.\n\nEvery request through `gateway.<domain>` lands here, from the API and the web UI alike. GPU panels come from the `nvidia-smi` exporter, which reports whichever engine holds the card.\n\nvLLM-native panels are in the collapsed row at the bottom. They light up when vLLM is the running engine and stay empty otherwise — that is expected, not a fault."
       }
     },
     {

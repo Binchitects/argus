@@ -27,16 +27,15 @@ import urllib.request
 
 GW = os.environ.get("GATEWAY_URL", "http://litellm:4000")
 WEBUI = os.environ.get("WEBUI_URL", "http://open-webui:8080")
-# The engine is whichever one is actually serving. vLLM runs as a compose
-# service; Ollama runs on the HOST and is reached through the Docker gateway.
-# Naming only vLLM here made this check engine-specific when its intent --
-# "something is really serving the models the gateway advertises" -- is not.
+# The engine is whichever one is actually serving. Both run as compose
+# services and only one of them can hold the GPU. Naming only vLLM here made
+# this check engine-specific when its intent -- "something is really serving
+# the models the gateway advertises" -- is not.
 ENGINES = [
     ("vLLM", os.environ.get("VLLM_URL", "http://vllm:8000") + "/v1/models",
      os.environ.get("VLLM_API_KEY")),
-    ("Ollama", os.environ.get("OLLAMA_URL",
-                              "http://host.docker.internal:11434") + "/v1/models",
-     None),
+    ("llama.cpp", os.environ.get("LLAMACPP_URL", "http://llamacpp:8080") + "/v1/models",
+     os.environ.get("LLAMACPP_API_KEY")),
 ]
 ARGUS = os.environ.get("ARGUS_URL", "http://argus:7700")
 MASTER = os.environ["MK"]
@@ -166,16 +165,17 @@ def main() -> int:
 
     # --- STREAMING tool calls survive the round trip ---------------------
     # The failure this catches cost an hour of agent time and left nothing on
-    # disk. LiteLLM's ollama_chat streaming transform emitted every parallel
-    # tool call under the SAME index, so a client concatenated their arguments
-    # into one unparseable string and LiteLLM dropped the call:
+    # disk. A gateway streaming transform emitted every parallel tool call
+    # under the SAME index, so a client concatenated their arguments into one
+    # unparseable string and the call was dropped:
     #
     #   {"pattern": "*.c", ...}{"pattern": "*.inf", ...}
     #   -> Failed to parse tool call arguments: Extra data: line 1 column 73
     #
     # The agent retried forever, re-prefilling the whole conversation each
-    # time. Nothing errored loudly; it just never finished. Routing through
-    # Ollama's own /v1 fixed it. This asserts it stays fixed.
+    # time. Nothing errored loudly; it just never finished. The bug was in the
+    # transform, not the engine, so this stays asserted on every backend --
+    # indices must come back DISTINCT.
     try:
         tools = [{"type": "function", "function": {
             "name": "search_files", "description": "Search for files by glob pattern.",
@@ -191,47 +191,102 @@ def main() -> int:
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json",
                      "Authorization": f"Bearer {MASTER}"})
+        def _stream_tool_calls() -> dict[int, str]:
+            """One streamed request; returns arguments accumulated per index."""
+            found: dict[int, str] = {}
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                for raw in resp:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    body = line[5:].strip()
+                    if body == "[DONE]":
+                        break
+                    delta = json.loads(body)["choices"][0].get("delta", {})
+                    for tc in delta.get("tool_calls") or []:
+                        i = tc.get("index", 0)
+                        fn = tc.get("function") or {}
+                        found[i] = found.get(i, "") + (fn.get("arguments") or "")
+            return found
+
+        # Retry ONLY an empty result. The two failure modes are different and
+        # must not be conflated:
+        #
+        #   no calls at all  -> the model declined to use the tool this time.
+        #                       That is sampling, not a defect, and it made
+        #                       this check flaky: it failed once and passed on
+        #                       an immediate re-run with no code change.
+        #   calls that do not parse -> the concatenation bug this check exists
+        #                       for. Deterministic, so retrying would only
+        #                       hide it. Reported on the first observation.
+        #
+        # If every attempt comes back empty, that IS worth failing on -- it is
+        # the signature of a wrong --tool-call-parser, where the engine returns
+        # 200 with tool_calls null and the XML left in the message content.
+        ATTEMPTS = 3
         slots: dict[int, str] = {}
-        with urllib.request.urlopen(req, timeout=600) as resp:
-            for raw in resp:
-                line = raw.decode("utf-8", "replace").strip()
-                if not line.startswith("data:"):
-                    continue
-                body = line[5:].strip()
-                if body == "[DONE]":
-                    break
-                delta = json.loads(body)["choices"][0].get("delta", {})
-                for tc in delta.get("tool_calls") or []:
-                    i = tc.get("index", 0)
-                    fn = tc.get("function") or {}
-                    slots[i] = slots.get(i, "") + (fn.get("arguments") or "")
+        for attempt in range(ATTEMPTS):
+            slots = _stream_tool_calls()
+            if slots:
+                break
+
         bad = []
         for i, args in slots.items():
             try:
                 json.loads(args)
             except ValueError as exc:
                 bad.append(f"slot {i}: {exc}")
-        record("streaming tool-call arguments parse", bool(slots) and not bad,
-               f"{len(slots)} call(s), indices={sorted(slots)}" if not bad
-               else "; ".join(bad))
+
+        if not slots:
+            detail = (f"no tool calls in {ATTEMPTS} attempts -- check "
+                      "--tool-call-parser matches what the model emits")
+        elif bad:
+            detail = "; ".join(bad)
+        else:
+            detail = f"{len(slots)} call(s), indices={sorted(slots)}"
+        record("streaming tool-call arguments parse", bool(slots) and not bad, detail)
     except Exception as exc:
         record("streaming tool-call arguments parse", False, type(exc).__name__)
 
     # --- the engine SERVES the window the gateway advertises --------------
-    # Ollama's /v1 endpoint does not accept num_ctx, so the window comes from
-    # OLLAMA_CONTEXT_LENGTH at launch. Started any other way, the engine
-    # quietly serves 4096 while the gateway still advertises the full window,
-    # and long prompts are TRUNCATED rather than refused -- which reads as the
-    # model failing to find things it was given.
-    if engine == "Ollama":
+    # An engine that silently serves less than the gateway advertises does not
+    # error: it TRUNCATES long prompts, which reads as the model failing to
+    # find things it was given rather than as a configuration fault. Worth
+    # asserting rather than trusting.
+    #
+    # llama.cpp reports its real window on /props. The exact nesting has moved
+    # between releases, so search for n_ctx rather than hardcoding a path, and
+    # SKIP on an unrecognised shape -- a probe that cannot read the answer must
+    # not report a failure it did not observe.
+    if engine == "llama.cpp":
+        def _find_n_ctx(node):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if k == "n_ctx" and isinstance(v, int):
+                        return v
+                    found = _find_n_ctx(v)
+                    if found:
+                        return found
+            elif isinstance(node, list):
+                for v in node:
+                    found = _find_n_ctx(v)
+                    if found:
+                        return found
+            return None
+
         try:
-            ps = call(os.environ.get("OLLAMA_URL",
-                                     "http://host.docker.internal:11434") + "/api/ps",
-                      "", timeout=30).get("models", [])
-            served = max((m.get("context_length") or 0) for m in ps) if ps else 0
+            props = call(os.environ.get("LLAMACPP_URL", "http://llamacpp:8080") + "/props",
+                         "", token=os.environ.get("LLAMACPP_API_KEY"), timeout=30)
+            served = _find_n_ctx(props)
             want = max((w for w in windows.values() if w), default=0)
-            record("engine serves the advertised window", served >= want,
-                   f"engine={served:,} advertised={want:,}")
+            if served is None:
+                print(f"  [{YELLOW}SKIP{OFF}] engine serves the advertised window: "
+                      f"no n_ctx in /props -- llama.cpp changed its shape", flush=True)
+            else:
+                # --parallel N divides the window between slots, so the
+                # per-request window is what must clear the advertised one.
+                record("engine serves the advertised window", served >= want,
+                       f"engine={served:,} advertised={want:,}")
         except Exception as exc:
             record("engine serves the advertised window", False, type(exc).__name__)
 
