@@ -137,6 +137,14 @@ scrape_configs:
   # ---- Windows host metrics (windows_exporter) -------------------------------
   # node-exporter measures the WSL2 VM; this measures the actual machine, and is
   # the only source of CPU temperature on Windows.
+  # CPU temperature. Works on Linux via hwmon; on Windows it needs
+  # LibreHardwareMonitor running on the host (see deploy/cpu-temp-exporter).
+  # When no sensor exists it reports cpu_temperature_available 0, so a dashboard
+  # can say "unavailable" instead of drawing a flat line from a dead sensor.
+  - job_name: cpu-temp
+    static_configs:
+      - targets: ["cpu-temp-exporter:9110"]
+
   - job_name: windows
     static_configs:
       - targets: ["host.docker.internal:9182"]

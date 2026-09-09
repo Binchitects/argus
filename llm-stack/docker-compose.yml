@@ -268,6 +268,53 @@ services:
 
   # ============================================================================
   # ============================================================================
+  # CPU TEMPERATURE (profile: smi -- alongside the other hardware exporters)
+  #
+  # Exists because neither existing exporter can report it:
+  #   node-exporter reads /sys/class/hwmon, which is EMPTY under WSL2 -- the
+  #     kernel Docker Desktop runs exposes no thermal sensors, so
+  #     node_hwmon_temp_celsius has zero series on a Windows host.
+  #   windows_exporter has no CPU core temperature collector at all. Its ACPI
+  #     `thermalzone` reading was measured at a fixed 27.85 C with all sixteen
+  #     cores saturated -- a board sensor, not the package.
+  #
+  # On LINUX this works out of the box: /sys is mounted read-only and the
+  # exporter reads coretemp/k10temp directly.
+  #
+  # On WINDOWS the container cannot see host hardware at all, so it falls back
+  # to scraping LibreHardwareMonitor on the host (LHM ships the signed kernel
+  # driver that reads Intel DTS). Without LHM it reports
+  # cpu_temperature_available 0 rather than inventing a number.
+  # ============================================================================
+  cpu-temp-exporter:
+    image: python:3.13-slim
+    container_name: cpu-temp-exporter
+    profiles: [smi]
+    restart: unless-stopped
+    networks: [llm-net]
+    command: ["python", "/app/exporter.py"]
+    volumes:
+      - ./deploy/cpu-temp-exporter:/app:ro
+      # No /sys mount: on Linux a container's own /sys already IS the host's
+      # sysfs, so the exporter reads /sys/class/hwmon directly. (An earlier
+      # version bind-mounted it to /host/sys, a path nothing reads.) Under WSL2
+      # that same /sys simply has no thermal sensors, and the exporter falls
+      # through to LibreHardwareMonitor.
+    environment:
+      LISTEN_PORT: "9110"
+      LHM_URL: ${LHM_URL:-http://host.docker.internal:8085/data.json}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:9110/metrics',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    logging: *default-logging
+
+  # ============================================================================
   # ALTERNATIVE INFERENCE ENGINE (profile: llamacpp)
   #
   # Why a second engine exists at all: vLLM cannot serve every model this stack
