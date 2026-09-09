@@ -354,6 +354,11 @@ def check_observability() -> None:
 def check_e2e() -> None:
     section("F. Serving path (e2e-check, from inside the network)")
     mk, vk = env("LITELLM_MASTER_KEY"), env("VLLM_API_KEY")
+    # The engine probe tries vLLM then llama.cpp, and llama.cpp requires a
+    # bearer token on /v1/*. Passing only VLLM_API_KEY made the llama.cpp
+    # attempt fail with a 401 that reads like "no engine is serving" -- so a
+    # perfectly healthy llama.cpp deployment failed acceptance.
+    lk = env("LLAMACPP_API_KEY")
     if not mk:
         record("e2e", "e2e-check", "SKIP", "no LITELLM_MASTER_KEY")
         return
@@ -361,7 +366,7 @@ def check_e2e() -> None:
     p = subprocess.run(
         ["docker", "run", "--rm", "--network", "llm-net",
          "--add-host=host.docker.internal:host-gateway",
-         "-e", f"MK={mk}", "-e", f"VLLM_API_KEY={vk}",
+         "-e", f"MK={mk}", "-e", f"VLLM_API_KEY={vk}", "-e", f"LLAMACPP_API_KEY={lk}",
          # docker -v needs a POSIX path. ROOT is a WindowsPath when this runs
          # under native Python, and passing E:\... silently mounts nothing --
          # e2e then produced no output and looked like a failure of the stack.
