@@ -1246,7 +1246,7 @@
     {
       "type": "stat",
       "title": "Host CPU temperature",
-      "description": "ACPI thermal zone from windows_exporter. On bare-metal Linux the hwmon panel beside it fills in instead.",
+      "description": "From the cpu-temp-exporter. Linux reads coretemp/k10temp via hwmon. Windows has no CPU temperature in node-exporter or windows_exporter (its ACPI thermal zone measured a fixed 27.85 C under full load), so it scrapes LibreHardwareMonitor on the host. cpu_temperature_available is 0 when no real sensor exists.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1260,13 +1260,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "windows_thermalzone_temperature_celsius",
-          "legendFormat": "{{name}}"
-        },
-        {
-          "refId": "B",
-          "expr": "node_hwmon_temp_celsius",
-          "legendFormat": "{{chip}} {{sensor}}"
+          "expr": "cpu_temperature_celsius",
+          "legendFormat": "{{sensor}}"
         }
       ],
       "fieldConfig": {
@@ -1302,7 +1297,8 @@
           ],
           "fields": "",
           "values": false
-        }
+        },
+        "noValue": "No CPU sensor. Linux: automatic. Windows: install LibreHardwareMonitor and enable its web server."
       }
     },
     {
@@ -1321,13 +1317,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "windows_thermalzone_temperature_celsius",
-          "legendFormat": "{{name}}"
-        },
-        {
-          "refId": "B",
-          "expr": "node_hwmon_temp_celsius",
-          "legendFormat": "{{chip}} {{sensor}}"
+          "expr": "cpu_temperature_celsius",
+          "legendFormat": "{{sensor}}"
         }
       ],
       "fieldConfig": {
@@ -1347,8 +1338,10 @@
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
-        }
-      }
+        },
+        "noValue": "No CPU sensor available on this host"
+      },
+      "description": "From the cpu-temp-exporter. Linux reads coretemp/k10temp via hwmon. Windows has no CPU temperature in node-exporter or windows_exporter (its ACPI thermal zone measured a fixed 27.85 C under full load), so it scrapes LibreHardwareMonitor on the host. cpu_temperature_available is 0 when no real sensor exists."
     },
     {
       "type": "timeseries",
