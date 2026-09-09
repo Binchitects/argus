@@ -428,10 +428,62 @@ Only 12 of 48 layers keep a KV cache, with 2 KV heads at head_dim 256:
 A million tokens costs ~12 GB of cache — comfortable on a 32 GB card. **The
 weights are the limit, never the window.**
 
-**But this checkpoint is not a 1M model.** `max_position_embeddings` is
-**262,144** and `rope_scaling` is `null`. 256K is what it is trained and
-configured for; anything beyond needs an explicit YaRN-style extension, with
-the quality loss that implies. Do not plan on 1M without measuring it.
+**This checkpoint is a 256K model, not a 1M one.** Verified twice, from the
+GGUF that actually gets served and from the upstream config:
+
+| source | key | value |
+|---|---|---|
+| GGUF metadata | `qwen4exp.context_length` | **262144** |
+| `config.json` | `text_config.max_position_embeddings` | **262144** |
+| `config.json` | `text_config.rope_scaling` | **absent** |
+| `config.json` | `text_config.layer_types` | 12 `full_attention` + 36 `linear_attention` |
+
+**Asking for more does not fail -- it silently caps.** Started with
+`-c 1048576`, llama.cpp warns and serves 256K anyway:
+
+```
+llama_context: n_ctx_seq (1048576) > n_ctx_train (262144) -- possible training context overflow
+srv load_model: the slot context (1048576) exceeds the training context of the model (262144) - capping
+srv load_model: initializing, n_slots = 1, n_ctx_slot = 262144
+```
+
+`/props` then reports `n_ctx: 262144`. A client that trusts its own `-c` value
+will believe it has 1M and be wrong, and the only sign is one warning line at
+startup. Check `/props`, not your command line.
+
+### Forcing 1M
+
+YaRN does extend it, and this was measured rather than assumed:
+
+```bash
+--rope-scaling yarn --rope-scale 4 --yarn-orig-ctx 262144 -c 1048576
+```
+
+That gives `n_ctx_slot = 1048576`, `/props` reports `1048576`, and the server
+answers. On a 24 GB 3090 with `--n-cpu-moe 48` and a `q8_0` KV cache it fit in
+23.8 GB of VRAM and 37.9 GB of RAM.
+
+**What was NOT measured is whether it retrieves anything at that length.** The
+model is trained to 256K; YaRN extrapolates past it and quality degrades in
+ways a startup log will not show. Validating it needs a retrieval test at real
+depth, and that is not runnable here -- an 11k-token prompt already takes about
+half an hour to prefill on this box, so a 1M one would take days. Treat 1M as
+*allocatable, unvalidated*.
+
+### What the window costs
+
+Only 12 of 48 layers keep a KV cache; the other 36 are linear-attention with
+state that does not grow with context. That is why the window is cheap:
+
+| KV type | 256K | 1M |
+|---|---|---|
+| f16 | 6.00 GiB | 24.00 GiB |
+| **q8_0** | **3.19 GiB** | **12.75 GiB** |
+| q4_0 | 1.69 GiB | 6.75 GiB |
+
+On a 32 GB + 128 GB box (160 GB total) none of this is the constraint:
+UD-IQ4_XS at 256K is ~97 GB all-in, and even at a forced 1M it is ~106 GB.
+**The weights are the limit, never the window.**
 
 ### No released vLLM can serve it yet
 
