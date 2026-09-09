@@ -470,6 +470,47 @@ profiles means one of them dies with a CUDA OOM that names neither.
    answer to "too big", not the better engine.
 5. Re-measure the window before promising 1M to anyone.
 
+## Is the 177B actually better? Measured
+
+`scripts/quality-bench.py` scores models on 19 questions that are graded by a
+program rather than read: code is **executed** against test cases, numbers are
+compared, formats are parsed, and factual answers match a list of accepted
+spellings fixed in advance. Same questions, same `reasoning_effort`, engine
+addressed directly so the gateway's Redis cache cannot replay an answer.
+
+| | 9B AWQ | 27B AWQ | Flash-Next 177B IQ4_XS |
+|---|---|---|---|
+| reasoning | 4/5 | 5/5 | **5/5** |
+| counting | 1/2 | 2/2 | **2/2** |
+| code (executed) | 5/5 | 5/5 | **5/5** |
+| format adherence | 2/3 | 3/3 | **3/3** |
+| factual | 3/4 | 3/4 | **4/4** |
+| **total** | **15/19** | **18/19** | **19/19** |
+| tok/s | 108.5 | 39.9 | 9.6 |
+
+Quality tracks size, and the 177B was the only one to name
+`FLT_REGISTRATION.OperationRegistration` correctly -- the 27B answered
+`FilterOperations`, the 9B did not answer at all. On a 24 GB card you pay about
+4x the latency of the 27B for that.
+
+Two things the harness had to get right before any of this meant anything:
+
+- **Bound the reasoning.** Left unbounded, Qwen3.8 spent all 1200 tokens inside
+  `<think>`, returned `content: null` with `finish_reason: length`, and every
+  such question scored as wrong. At `reasoning_effort: low` the same question
+  answered in 747 tokens. Any two models compared must get the same setting or
+  the one that thinks longer is punished for thinking.
+- **Validate the graders.** A self-test feeds every checker a known-good and a
+  known-bad answer and fails if either verdict is wrong. It earned its place
+  immediately: it caught a code question whose test cases passed a `lambda`
+  through `repr()`, which is not valid Python, so that grader had been failing
+  every model regardless of the answer.
+
+The 9B failure worth knowing about is not a wrong answer: on "5 machines take 5
+minutes to make 5 widgets", it looped through **4000 tokens without ever
+closing its reasoning block**. Failing to terminate is a different defect from
+answering incorrectly, and the bench reports it as such.
+
 ## MTP (Multi-Token Prediction)
 
 MTP checkpoints ship extra draft-head weights so the model can propose several
