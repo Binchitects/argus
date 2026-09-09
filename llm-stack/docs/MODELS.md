@@ -623,30 +623,61 @@ KL divergence still says the information loss is real (2.91 at Q2_K_XL against
 suite is sensitive enough to see it, so pick a quant on residency first: the
 largest that fits entirely in VRAM plus RAM, with room for the KV cache.
 
-### Prefill collapses long before generation does
+### Prefill: slower, but not collapsed (a correction)
 
-Measured on the 3090 while serving the 11k-token retrieval question:
+An earlier version of this section reported prefill at **6-8 tok/s** and called
+it a ~200x gap. **That was wrong.** Both figures came from *mid-progress*
+readings of a cumulative average during a cold first request -- llama.cpp
+prints a running average as it works, and reading it before `progress = 1.00`
+measures the cold start, not the throughput.
 
-| | this box | published RTX 4090 + 96 GB |
+Measured properly, all warm on one server, `--n-cpu-moe 34`, prompts varied per
+run so nothing is served from the prefix cache:
+
+| prompt | prefill | note |
 |---|---|---|
-| prefill | **6-8 tok/s** | 1,429 tok/s |
-| decode | 9-13 tok/s | ~30 tok/s |
+| 4,574 tok | **208-213 tok/s** | warm |
+| 4,616 tok | 51 tok/s | FIRST request after load |
+| 5,874 tok | 204 tok/s | |
+| 15,024 tok | 161 tok/s | |
+| 30,024 tok | 126 tok/s | |
 
-Roughly **200x** on prefill against ~3x on decode, so the gap is not a uniform
-slowdown -- prompt processing degrades far faster than generation. An
-11k-token prompt takes about half an hour to read.
+So the real shape is: a **4x cold-start penalty** on the first request, then a
+gentle decline with length -- 204 to 126 tok/s across a 5x longer prompt. The
+published RTX 4090 + 96 GB reference does ~1,429 tok/s, so this box is roughly
+**7-11x slower on prefill** against ~3x on decode. Still worse, still worth
+knowing, but not the collapse previously claimed here.
 
-The cause is not what the obvious candidates suggest. During prefill the GPU
-sat at 3%, the CPU at ~18%, and major page faults at 160/s (~0.6 MB/s) --
-nothing saturated. Decode touches 10 of 512 experts per token; a 4096-token
-prefill batch touches nearly all of them, and that path runs on the CPU for
-every layer left there by `--n-cpu-moe`. i-quants are known to be slower to
-dequantise on CPU than K-quants, which makes UD-Q4_K_XL interesting for
-**speed** rather than for quality.
+Two lessons that generalise beyond this model:
 
-The practical consequence: short-prompt generation at ~9-13 tok/s hides this
-completely. An agent that sends large prompts -- which is the Hermes workload --
-is not viable on a 24 GB card with this model, whatever the decode number says.
+- **Read the completed timing, not the running one.** Anything before
+  `progress = 1.00` is an average that still contains the cold start.
+- **Vary the prompt between runs.** An identical prompt is served from the
+  prefix cache and reports no prompt processing at all, which silently turns a
+  throughput measurement into a cache-hit measurement.
+
+### Pinning the token lookup table to CPU: measured, and it hurt here
+
+`-ot per_layer_token_embd=CPU` is widely reported to help, and a published
+RTX 5090 run credits it with freeing ~27 GB of VRAM for expert layers. On this
+box it is **6x slower**, measured like-for-like on the same prompts:
+
+| config | warm prefill |
+|---|---|
+| `--n-cpu-moe 34`, no override | **208-213 tok/s** |
+| `-ot per_layer_token_embd=CPU`, `--n-cpu-moe 28` | 33-35 tok/s |
+
+The difference is not that the trick is bad -- it is that it only pays when the
+freed VRAM can be *spent*. The 5090 report pairs it with `-ncmoe 16`, moving a
+large number of expert layers onto the card. Here the model cannot be resident
+at any setting, the freed VRAM bought a move from `--n-cpu-moe` 34 to 28 (six
+layers), and that did not come close to repaying the CPU-side cost of the
+embedding lookup it added.
+
+**Take a flag from a report only with the hardware it was measured on.** This
+one is worth trying on a 32 GB card with 128 GB of RAM, where the model is
+resident and `-ncmoe` can go far lower; it is not worth trying on a 24 GB card
+that is paging.
 
 ## MTP (Multi-Token Prediction)
 
