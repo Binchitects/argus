@@ -60,12 +60,12 @@ model_list:
       # These are LITERAL numbers on purpose: model_info is not part of
       # litellm_params, and an os.environ/ value would arrive as a string
       # where an int is expected. setup.sh and switch-model rewrite them.
-      max_input_tokens: 262144
+      max_input_tokens: 65536
       max_output_tokens: 8192
-      max_tokens: 262144
+      max_tokens: 65536
 
   # Display name, shown in the Open WebUI model picker.
-  - model_name: qwen3.8-9b
+  - model_name: qwen3.8-flash-next
     litellm_params:
       model: os.environ/ENGINE_MODEL
       api_base: os.environ/ENGINE_API_BASE
@@ -74,9 +74,9 @@ model_list:
       output_cost_per_token: 0.0000008
     model_info:
       mode: chat
-      max_input_tokens: 262144
+      max_input_tokens: 65536
       max_output_tokens: 8192
-      max_tokens: 262144
+      max_tokens: 65536
 
 router_settings:
   routing_strategy: simple-shuffle

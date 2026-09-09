@@ -89,8 +89,17 @@ for entry in "${SECRETS[@]}"; do
   current="$(grep -E "^${key}=" "$ENV_FILE" | head -n1 | cut -d= -f2- || true)"
   if [[ $FORCE -eq 1 || -z "$current" || "$current" == *change-me* || "$current" =~ ^0{16,}$ ]]; then
     value="${prefix}$(gen_secret "$bytes")"
-    # '|' as the sed delimiter: generated values are hex, never contain '|'.
-    sed -i.bak -E "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    # A key absent from .env must be APPENDED, not substituted. sed replaces
+    # existing lines only, so a missing key produced no write and no error --
+    # exactly what happens to an .env written before a new engine was added.
+    # LLAMACPP_API_KEY came out empty this way on an upgrade, and the gateway
+    # was then handed no credential at all.
+    if grep -qE "^${key}=" "$ENV_FILE"; then
+      # '|' as the sed delimiter: generated values are hex, never contain '|'.
+      sed -i.bak -E "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    else
+      echo "${key}=${value}" >> "$ENV_FILE"
+    fi
     changed=$((changed + 1))
   fi
 done
