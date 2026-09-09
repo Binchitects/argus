@@ -511,6 +511,91 @@ minutes to make 5 widgets", it looped through **4000 tokens without ever
 closing its reasoning block**. Failing to terminate is a different defect from
 answering incorrectly, and the bench reports it as such.
 
+### The harder suite saturates too
+
+`--suite hard` was built because the standard one hit its ceiling: 13 questions
+with partial credit, aimed at what quantisation actually damages -- rare exact
+identifiers, retrieval from an 11k-token document, multi-step arithmetic.
+
+| | 9B AWQ | 27B AWQ | Flash-Next IQ4_XS |
+|---|---|---|---|
+| longctx (5 needles) | 1.0/1 | **0/1 — window too small** | 1.0/1 |
+| reasoning | 2.0/3 | 3.0/3 | 3.0/3 |
+| code (fraction of cases) | 3.7/4 | 4.0/4 | 4.0/4 |
+| factual | 2.5/3 | 2.5/3 | 3.0/3 |
+| format | 2.0/2 | 2.0/2 | 2.0/2 |
+| **total** | 11.17/13 = 85.9% | 11.5/13 = 88.5% | **13/13 = 100%** |
+| tok/s | 107.9 | 41.3 | 13.5 |
+
+The 27B's zero on retrieval is not a quality failure: an 11k-token prompt does
+not fit the 4,096-token window it gets on a 24 GB card, so the request is
+refused with HTTP 400. Over the twelve questions it could attempt it scores
+95.8%. Its one real miss is the same as the 9B's -- naming `Iopb` in
+`FLT_CALLBACK_DATA`.
+
+**Flash-Next scores 100%, so this suite cannot show whether a larger quant is
+better either.** That is the useful result: at UD-IQ4_XS the model is already
+at the ceiling of what can be built and verified programmatically here, and the
+case for UD-Q4_K_XL rests on KL divergence (0.41 against Q2_K_XL's 2.91) rather
+than on any task measurement available on this hardware. Do not spend a 111 GB
+download expecting a quality difference to appear in a score.
+
+### What the model does when nothing is split
+
+A published run on a GMKtec EVO-X2 (Ryzen AI Max+ 395, Radeon 8060S, **128 GB
+unified memory**) is the cleanest control available, because there is no
+VRAM/RAM split at all -- one pool, everything resident:
+
+| quant | size | load | decode @131K ctx | peak memory |
+|---|---|---|---|---|
+| UD-IQ1_M | 74.5 GB | 20 s | 23.1 tok/s | 82 GB |
+| UD-Q2_K_XL | 78.9 GB | 20 s | 23.4 tok/s | 86 GB |
+| UD-Q3_K_XL | 90.0 GB | 30 s | 19.9 tok/s | 97 GB |
+| **UD-IQ4_XS** | 93.7 GB | 25 s | **20.4 tok/s** | 99 GB |
+
+Two things fall out of that table, and both matter more than any tuning flag:
+
+**Residency is the whole story.** The same UD-IQ4_XS that loads in 184 s and
+decodes at 9-13 tok/s here loads in 25 s and decodes at 20.4 tok/s there --
+on an *integrated* GPU. That machine is not faster than a 3090; it simply never
+pages, because 99 GB fits in 128 GB.
+
+**Quality is flat across the range.** That run reports no visible quality loss
+down to 1-bit across its task set, which agrees with the measurement above:
+UD-IQ4_XS scores 13/13 here and nothing in either suite separates it from a
+larger quant. Between them these are two independent failures to detect a
+quality difference -- weak evidence individually, harder to dismiss together.
+
+KL divergence still says the information loss is real (2.91 at Q2_K_XL against
+0.41 at Q4_K_XL). The honest reading is that the loss exists and neither task
+suite is sensitive enough to see it, so pick a quant on residency first: the
+largest that fits entirely in VRAM plus RAM, with room for the KV cache.
+
+### Prefill collapses long before generation does
+
+Measured on the 3090 while serving the 11k-token retrieval question:
+
+| | this box | published RTX 4090 + 96 GB |
+|---|---|---|
+| prefill | **6-8 tok/s** | 1,429 tok/s |
+| decode | 9-13 tok/s | ~30 tok/s |
+
+Roughly **200x** on prefill against ~3x on decode, so the gap is not a uniform
+slowdown -- prompt processing degrades far faster than generation. An
+11k-token prompt takes about half an hour to read.
+
+The cause is not what the obvious candidates suggest. During prefill the GPU
+sat at 3%, the CPU at ~18%, and major page faults at 160/s (~0.6 MB/s) --
+nothing saturated. Decode touches 10 of 512 experts per token; a 4096-token
+prefill batch touches nearly all of them, and that path runs on the CPU for
+every layer left there by `--n-cpu-moe`. i-quants are known to be slower to
+dequantise on CPU than K-quants, which makes UD-Q4_K_XL interesting for
+**speed** rather than for quality.
+
+The practical consequence: short-prompt generation at ~9-13 tok/s hides this
+completely. An agent that sends large prompts -- which is the Hermes workload --
+is not viable on a 24 GB card with this model, whatever the decode number says.
+
 ## MTP (Multi-Token Prediction)
 
 MTP checkpoints ship extra draft-head weights so the model can propose several
