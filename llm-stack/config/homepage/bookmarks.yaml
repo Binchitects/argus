@@ -3,6 +3,9 @@
     - vLLM:
         - abbr: VL
           href: https://docs.vllm.ai/
+    - llama.cpp:
+        - abbr: LC
+          href: https://github.com/ggml-org/llama.cpp/tree/master/tools/server
     - Open WebUI:
         - abbr: OW
           href: https://docs.openwebui.com/

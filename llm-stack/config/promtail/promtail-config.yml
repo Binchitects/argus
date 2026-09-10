@@ -56,6 +56,27 @@ scrape_configs:
           action: drop
           expression: ".*Avg prompt throughput.*"
 
+      # llama.cpp is the stack's other engine, and its logs were collected
+      # raw with no level label -- so the same Grafana filter that works for
+      # vLLM returned nothing on a llama.cpp deployment. Its lines look like
+      # "0.03.172.993 I srv load_model: ..." -- a timestamp, then a single
+      # letter level (D/I/W/E).
+      - match:
+          selector: '{container="llamacpp"}'
+          stages:
+            - regex:
+                expression: '^[^ ]+ +(?P<level>[DIWE]) '
+            - labels:
+                level:
+
+      # Same reasoning as the vLLM drop above: llama.cpp prints a per-slot
+      # timing line for every request, and with --metrics on the same numbers
+      # are in Prometheus far more cheaply.
+      - match:
+          selector: '{container="llamacpp"}'
+          action: drop
+          expression: ".*print_timing.*"
+
       - match:
           selector: '{container=~"prometheus|grafana|loki|promtail"}'
           stages:
