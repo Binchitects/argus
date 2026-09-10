@@ -303,7 +303,12 @@ ok "gateway -> $ENGINE ($(current ENGINE_MODEL) at $(current ENGINE_API_BASE))"
 _ptok="$ROOT/config/prometheus/secrets/llamacpp.token"
 if [[ $DRYRUN -eq 0 ]]; then
   mkdir -p "$(dirname "$_ptok")"
-  printf '%s' "$(current LLAMACPP_API_KEY)" > "$_ptok"
+  # 0700/0600, and the umask is set BEFORE the redirection so the file is never
+  # briefly world-readable between creation and chmod. This is a real API key on
+  # a machine that may have other local accounts.
+  chmod 700 "$(dirname "$_ptok")" 2>/dev/null || true
+  ( umask 077 && printf '%s' "$(current LLAMACPP_API_KEY)" > "$_ptok" )
+  chmod 600 "$_ptok" 2>/dev/null || true
   ok "prometheus can scrape the engine (token written)"
 fi
 
