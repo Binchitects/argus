@@ -7,33 +7,60 @@
 
 groups:
 
-  - name: vllm-availability
+  # Engine availability, deliberately NOT tied to one engine.
+  #
+  # This stack can serve on vLLM or on llama.cpp and exactly one of them runs,
+  # because both claim the whole GPU. The previous rules alerted on `vllm`
+  # specifically, so a perfectly healthy llama.cpp deployment fired VllmDown,
+  # VllmNoModelLoaded and TargetDown forever -- three permanent false alarms,
+  # which is worse than no alerting because it teaches people to ignore the
+  # ones that matter.
+  #
+  # What actually matters is "nothing is serving", so that is what is measured.
+  - name: engine-availability
     interval: 30s
     rules:
 
-      - alert: VllmDown
-        expr: up{job="vllm", tier!="optional"} == 0
-        for: 2m
+      - alert: EngineDown
+        # component:inference is carried by every engine scrape job, so this
+        # holds whichever engine is configured -- and keeps holding if another
+        # is added later.
+        expr: sum(up{component="inference"}) == 0
+        for: 5m
         labels:
           severity: critical
           component: inference
         annotations:
-          summary: "vLLM is not being scraped"
+          summary: "No inference engine is being scraped"
           description: >-
-            Either the container is down or still loading weights. A cold start
-            that downloads a model can legitimately take many minutes —
-            check `docker logs -f vllm`.
+            Neither vLLM nor llama.cpp answered for 5 minutes. Either the engine
+            container is down, or it is still loading weights -- a large GGUF
+            can legitimately take minutes to page in. Check
+            `docker compose ps` and `docker logs -f $(docker compose ps -q)`.
 
-      - alert: VllmNoModelLoaded
-        expr: absent(vllm:num_requests_running)
+      - alert: EngineServingNothing
+        # An engine that is scrapeable but advertises no model is a different
+        # failure from one that is down, and needs a different fix (usually OOM
+        # or a context length the card cannot fit).
+        expr: >-
+          sum(up{component="inference"}) > 0
+          and absent(vllm:num_requests_running)
+          and absent(llamacpp:n_decode_total)
         for: 15m
         labels:
-          severity: critical
+          severity: warning
           component: inference
         annotations:
-          summary: "vLLM is up but exposes no engine metrics"
-          description: "The engine never finished initialising. Usually OOM or a bad --max-model-len."
+          summary: "An engine is up but exposes no model metrics"
+          description: >-
+            The engine answered a scrape but reports no model. Usually it never
+            finished initialising -- OOM, or a context length that does not fit.
+            On llama.cpp this also appears when --metrics is not enabled, in
+            which case /metrics returns 501 and there is nothing wrong.
 
+  # These query vllm: series. On a llama.cpp deployment those series do not
+  # exist, so every expression below evaluates to no data and the rules stay
+  # silent -- correct behaviour, and the reason they need no engine guard.
   - name: vllm-performance
     interval: 30s
     rules:

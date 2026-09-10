@@ -37,7 +37,11 @@ scrape_configs:
     static_configs:
       - targets: ["vllm:8000"]
         labels:
-          tier: core
+          # tier:optional because exactly ONE engine runs. The other is
+          # deliberately stopped, and a generic TargetDown firing on it forever
+          # is how a team learns to ignore alerts. "No engine at all" is caught
+          # by the EngineDown rule instead, which is engine-agnostic.
+          tier: optional
           component: inference
       # Second engine (profile: multi-model). Marked optional so it does not
       # alert when that profile is off. Every vLLM series carries a model_name
@@ -141,6 +145,19 @@ scrape_configs:
   # LibreHardwareMonitor running on the host (see deploy/cpu-temp-exporter).
   # When no sensor exists it reports cpu_temperature_available 0, so a dashboard
   # can say "unavailable" instead of drawing a flat line from a dead sensor.
+  # llama.cpp, when it is the active engine. Needs --metrics on the server
+  # (off by default -- /metrics answers 501 without it) and a bearer token,
+  # since llama.cpp protects every path except /health.
+  - job_name: llamacpp
+    metrics_path: /metrics
+    authorization:
+      credentials_file: /etc/prometheus/secrets/llamacpp.token
+    static_configs:
+      - targets: ["llamacpp:8080"]
+        labels:
+          tier: optional
+          component: inference
+
   - job_name: cpu-temp
     static_configs:
       - targets: ["cpu-temp-exporter:9110"]

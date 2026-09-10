@@ -376,6 +376,7 @@ services:
       --cache-type-v ${LLAMACPP_KV_TYPE:-q8_0}
       --parallel ${LLAMACPP_PARALLEL:-1}
       --jinja
+      --metrics
       ${LLAMACPP_EXTRA_ARGS:-}
     # mmap means the GGUF is paged from disk on demand rather than read whole.
     # With 512 experts and 10 firing per token the hot set is far smaller than

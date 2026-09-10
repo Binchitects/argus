@@ -297,6 +297,16 @@ else
 fi
 ok "gateway -> $ENGINE ($(current ENGINE_MODEL) at $(current ENGINE_API_BASE))"
 
+# Prometheus scrapes llama.cpp's /metrics, and llama.cpp protects every path
+# except /health -- so the scrape needs a bearer token. Kept in a file rather
+# than in prometheus.yml so the key is not committed.
+_ptok="$ROOT/config/prometheus/secrets/llamacpp.token"
+if [[ $DRYRUN -eq 0 ]]; then
+  mkdir -p "$(dirname "$_ptok")"
+  printf '%s' "$(current LLAMACPP_API_KEY)" > "$_ptok"
+  ok "prometheus can scrape the engine (token written)"
+fi
+
 # Advertise the REAL window. model_info is not part of litellm_params, so it
 # cannot use os.environ/ -- LiteLLM would hand a string where an int belongs.
 # Rewriting the literals is the same thing scripts/switch-model does.
