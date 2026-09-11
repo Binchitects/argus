@@ -39,7 +39,7 @@
       "id": 2,
       "type": "stat",
       "title": "Generation",
-      "description": "Decode speed, tok/s. Ratio of two counters, so it is tokens per second of ACTUAL decoding, matching what the engine reports per request. Gaps when idle are correct.",
+      "description": "Decode speed, tok/s. Ratio of two counters, so it is tokens per second of ACTUAL decoding, matching what the engine reports per request. Gaps when idle are correct. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -57,11 +57,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(llamacpp:tokens_predicted_total[$__rate_interval]) / rate(llamacpp:tokens_predicted_seconds_total[$__rate_interval])",
+          "expr": "(rate(llamacpp:tokens_predicted_total[$__rate_interval]) / rate(llamacpp:tokens_predicted_seconds_total[$__rate_interval]) >= 0) or (llamacpp:tokens_predicted_total / llamacpp:tokens_predicted_seconds_total)",
           "legendFormat": "",
-          "range": false,
           "instant": true,
-          "refId": "D"
+          "range": false,
+          "refId": "A"
         }
       ],
       "options": {
@@ -110,7 +110,7 @@
       "id": 4,
       "type": "stat",
       "title": "Prefill",
-      "description": "Prompt-processing speed, tok/s. Declines with prompt length.",
+      "description": "Prompt-processing speed, tok/s. Declines with prompt length. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -128,11 +128,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(llamacpp:prompt_tokens_total[$__rate_interval]) / rate(llamacpp:prompt_seconds_total[$__rate_interval])",
+          "expr": "(rate(llamacpp:prompt_tokens_total[$__rate_interval]) / rate(llamacpp:prompt_seconds_total[$__rate_interval]) >= 0) or (llamacpp:prompt_tokens_total / llamacpp:prompt_seconds_total)",
           "legendFormat": "",
-          "range": false,
           "instant": true,
-          "refId": "F"
+          "range": false,
+          "refId": "A"
         }
       ],
       "options": {
@@ -203,7 +203,7 @@
           "legendFormat": "",
           "range": false,
           "instant": true,
-          "refId": "H"
+          "refId": "A"
         }
       ],
       "options": {
@@ -266,7 +266,7 @@
           "legendFormat": "",
           "range": false,
           "instant": true,
-          "refId": "J"
+          "refId": "A"
         }
       ],
       "options": {
@@ -311,7 +311,7 @@
       "id": 10,
       "type": "stat",
       "title": "Prefix cache hit",
-      "description": "Share of prompt tokens served from the prefix cache instead of being re-processed. This is what --cache-reuse and llama.cpp's slot reuse buy you. NOTE: high hit rates make a throughput benchmark meaningless -- vary prompts when measuring.",
+      "description": "Share of prompt tokens served from the prefix cache instead of being re-processed. This is what --cache-reuse and llama.cpp's slot reuse buy you. NOTE: high hit rates make a throughput benchmark meaningless -- vary prompts when measuring. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -329,8 +329,10 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(llamacpp:prompt_tokens_cached_total[$__rate_interval]) / clamp_min(rate(llamacpp:prompt_tokens_total[$__rate_interval]) + rate(llamacpp:prompt_tokens_cached_total[$__rate_interval]), 1) * 100",
+          "expr": "(rate(llamacpp:prompt_tokens_cached_total[$__rate_interval]) / (rate(llamacpp:prompt_tokens_total[$__rate_interval]) + rate(llamacpp:prompt_tokens_cached_total[$__rate_interval])) * 100 >= 0) or (llamacpp:prompt_tokens_cached_total / (llamacpp:prompt_tokens_total + llamacpp:prompt_tokens_cached_total) * 100)",
+          "legendFormat": "",
           "instant": true,
+          "range": false,
           "refId": "A"
         }
       ],
@@ -433,7 +435,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "Prefill vs generation (tok/s)",
-      "description": "The two numbers that define this deployment. Generation is CPU-bound here (experts run on CPU); prefill is GPU-assisted and falls off with prompt length.",
+      "description": "The two numbers that define this deployment. Generation is CPU-bound here (experts run on CPU); prefill is GPU-assisted and falls off with prompt length. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -451,11 +453,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(llamacpp:tokens_predicted_total[$__rate_interval]) / rate(llamacpp:tokens_predicted_seconds_total[$__rate_interval])",
+          "expr": "(rate(llamacpp:tokens_predicted_total[$__rate_interval]) / rate(llamacpp:tokens_predicted_seconds_total[$__rate_interval]) >= 0) or (llamacpp:tokens_predicted_total / llamacpp:tokens_predicted_seconds_total)",
           "legendFormat": "generation",
-          "range": true,
           "instant": false,
-          "refId": "O"
+          "range": true,
+          "refId": "A"
         },
         {
           "datasource": {
@@ -463,11 +465,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(llamacpp:prompt_tokens_total[$__rate_interval]) / rate(llamacpp:prompt_seconds_total[$__rate_interval])",
+          "expr": "(rate(llamacpp:prompt_tokens_total[$__rate_interval]) / rate(llamacpp:prompt_seconds_total[$__rate_interval]) >= 0) or (llamacpp:prompt_tokens_total / llamacpp:prompt_seconds_total)",
           "legendFormat": "prefill",
-          "range": true,
           "instant": false,
-          "refId": "P"
+          "range": true,
+          "refId": "B"
         }
       ],
       "options": {
@@ -510,8 +512,8 @@
     {
       "id": 19,
       "type": "timeseries",
-      "title": "Engine-reported averages (tok/s)",
-      "description": "llama.cpp's own running averages. Smoother but laggier than the counter ratio on the left; if the two disagree, trust the left.",
+      "title": "Token volume (per window)",
+      "description": "Tokens actually processed, from the counters. Replaces llama.cpp's own predicted_tokens_seconds / prompt_tokens_seconds gauges, which read 0 whenever nothing is in flight -- a panel that is flat zero while the engine is healthy teaches you to stop looking at it.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -529,11 +531,10 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "llamacpp:predicted_tokens_seconds",
-          "legendFormat": "generation (gauge)",
+          "refId": "A",
           "range": true,
-          "instant": false,
-          "refId": "R"
+          "expr": "increase(llamacpp:tokens_predicted_total[$__rate_interval])",
+          "legendFormat": "generated"
         },
         {
           "datasource": {
@@ -541,11 +542,21 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "llamacpp:prompt_tokens_seconds",
-          "legendFormat": "prefill (gauge)",
+          "refId": "B",
           "range": true,
-          "instant": false,
-          "refId": "S"
+          "expr": "increase(llamacpp:prompt_tokens_total[$__rate_interval])",
+          "legendFormat": "prompt (processed)"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "refId": "C",
+          "range": true,
+          "expr": "increase(llamacpp:prompt_tokens_cached_total[$__rate_interval])",
+          "legendFormat": "prompt (cache hit)"
         }
       ],
       "options": {
@@ -566,7 +577,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
+          "unit": "short",
           "color": {
             "mode": "palette-classic"
           },
@@ -589,7 +600,7 @@
       "id": 21,
       "type": "timeseries",
       "title": "Prefix cache hit rate over time",
-      "description": "Cached prompt tokens as a share of all prompt tokens.",
+      "description": "Cached prompt tokens as a share of all prompt tokens. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -607,8 +618,9 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(llamacpp:prompt_tokens_cached_total[$__rate_interval]) / clamp_min(rate(llamacpp:prompt_tokens_total[$__rate_interval]) + rate(llamacpp:prompt_tokens_cached_total[$__rate_interval]), 1) * 100",
+          "expr": "(rate(llamacpp:prompt_tokens_cached_total[$__rate_interval]) / (rate(llamacpp:prompt_tokens_total[$__rate_interval]) + rate(llamacpp:prompt_tokens_cached_total[$__rate_interval])) * 100 >= 0) or (llamacpp:prompt_tokens_cached_total / (llamacpp:prompt_tokens_total + llamacpp:prompt_tokens_cached_total) * 100)",
           "legendFormat": "cache hit %",
+          "instant": false,
           "range": true,
           "refId": "A"
         }
@@ -678,7 +690,7 @@
           "legendFormat": "processing",
           "range": true,
           "instant": false,
-          "refId": "C"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -690,7 +702,7 @@
           "legendFormat": "deferred/queued",
           "range": true,
           "instant": false,
-          "refId": "D"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -780,7 +792,7 @@
           "legendFormat": "GPU %",
           "range": true,
           "instant": false,
-          "refId": "G"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -792,7 +804,7 @@
           "legendFormat": "VRAM bandwidth %",
           "range": true,
           "instant": false,
-          "refId": "H"
+          "refId": "B"
         }
       ],
       "options": {
@@ -860,7 +872,7 @@
           "legendFormat": "used",
           "range": true,
           "instant": false,
-          "refId": "J"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -872,7 +884,7 @@
           "legendFormat": "total",
           "range": true,
           "instant": false,
-          "refId": "K"
+          "refId": "B"
         }
       ],
       "options": {
@@ -938,7 +950,7 @@
           "legendFormat": "temp C",
           "range": true,
           "instant": false,
-          "refId": "M"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -950,7 +962,7 @@
           "legendFormat": "power W",
           "range": true,
           "instant": false,
-          "refId": "N"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -962,7 +974,7 @@
           "legendFormat": "power limit W",
           "range": true,
           "instant": false,
-          "refId": "O"
+          "refId": "C"
         }
       ],
       "options": {
@@ -1028,7 +1040,7 @@
           "legendFormat": "SM clock MHz",
           "range": true,
           "instant": false,
-          "refId": "Q"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -1040,7 +1052,7 @@
           "legendFormat": "throttle: power cap",
           "range": true,
           "instant": false,
-          "refId": "R"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -1052,7 +1064,7 @@
           "legendFormat": "throttle: thermal",
           "range": true,
           "instant": false,
-          "refId": "S"
+          "refId": "C"
         }
       ],
       "options": {
@@ -1131,7 +1143,7 @@
           "legendFormat": "CPU %",
           "range": true,
           "instant": false,
-          "refId": "B"
+          "refId": "A"
         }
       ],
       "options": {
@@ -1199,7 +1211,7 @@
           "legendFormat": "core {{cpu}}",
           "range": true,
           "instant": false,
-          "refId": "D"
+          "refId": "A"
         }
       ],
       "options": {
@@ -1267,7 +1279,7 @@
           "legendFormat": "total",
           "range": true,
           "instant": false,
-          "refId": "F"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -1279,7 +1291,7 @@
           "legendFormat": "used (apps)",
           "range": true,
           "instant": false,
-          "refId": "G"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -1291,7 +1303,7 @@
           "legendFormat": "page cache",
           "range": true,
           "instant": false,
-          "refId": "H"
+          "refId": "C"
         }
       ],
       "options": {
@@ -1357,7 +1369,7 @@
           "legendFormat": "read {{device}}",
           "range": true,
           "instant": false,
-          "refId": "J"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -1369,7 +1381,7 @@
           "legendFormat": "write {{device}}",
           "range": true,
           "instant": false,
-          "refId": "K"
+          "refId": "B"
         }
       ],
       "options": {
@@ -1435,7 +1447,7 @@
           "legendFormat": "1m",
           "range": true,
           "instant": false,
-          "refId": "M"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -1447,7 +1459,7 @@
           "legendFormat": "5m",
           "range": true,
           "instant": false,
-          "refId": "N"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -1459,7 +1471,7 @@
           "legendFormat": "15m",
           "range": true,
           "instant": false,
-          "refId": "O"
+          "refId": "C"
         }
       ],
       "options": {
@@ -1525,7 +1537,7 @@
           "legendFormat": "{{sensor}}",
           "range": true,
           "instant": false,
-          "refId": "Q"
+          "refId": "A"
         }
       ],
       "options": {
@@ -1604,7 +1616,7 @@
           "legendFormat": "swap used",
           "range": true,
           "instant": false,
-          "refId": "T"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -1616,7 +1628,7 @@
           "legendFormat": "swap total",
           "range": true,
           "instant": false,
-          "refId": "A"
+          "refId": "B"
         }
       ],
       "options": {

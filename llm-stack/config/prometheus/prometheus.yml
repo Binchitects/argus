@@ -84,7 +84,11 @@ scrape_configs:
     static_configs:
       - targets: ["cadvisor:8080"]
         labels:
-          tier: core
+          # optional, not core: cadvisor moved behind its own compose profile
+          # because gcr.io is unreachable from some networks. Left as `core` it
+          # fired TargetDown critical forever on a stack that was entirely
+          # healthy -- the same false-alarm trap 53bd3ad removed for vLLM.
+          tier: optional
           component: containers
     metric_relabel_configs:
       # cAdvisor is extremely chatty; drop the series nothing here graphs.
