@@ -107,6 +107,14 @@ access_control:
         - 'gateway.${LLM_DOMAIN}'
       policy: 'one_factor'
 
+    # The admin panel. ANY signed-in person may reach it -- it shows them
+    # their own usage and a password form. The console (create people, set
+    # credit, rotate keys, reset passwords) is gated inside the app on
+    # Authelia's Remote-Groups header, not here, so that a non-admin gets a
+    # useful page rather than a 403.
+    - domain: 'admin.${LLM_DOMAIN}'
+      policy: 'one_factor'
+
     # Everything that ships with no authentication of its own.
     - domain:
         - 'metrics.${LLM_DOMAIN}'

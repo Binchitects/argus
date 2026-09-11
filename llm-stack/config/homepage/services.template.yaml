@@ -7,6 +7,12 @@
 # hosts-file entry. The direct port is noted in each description as a fallback
 # for CLI tools, which do not resolve *.localhost.
 
+- Accounts:
+    - Admin panel:
+        href: https://admin.${LLM_DOMAIN}
+        description: Your usage and password; admins also manage people, credit and API keys
+        icon: si-authelia
+
 - Inference:
     - vLLM API:
         href: https://api.${LLM_DOMAIN}/docs

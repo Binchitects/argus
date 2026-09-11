@@ -179,6 +179,68 @@ else
   ask LLAMACPP_N_CPU_MOE "Layers whose experts stay in system RAM" "48"
   ask LLAMACPP_KV_TYPE "KV cache type (f16 | q8_0 | q5_1 | q4_0)" "q8_0"
 
+  # ---- keep a floor of RAM for everything that is not the model ----------
+  #
+  # An unlimited container lets mmap'd model pages fill the page cache to the
+  # last byte. Linux reclaims them under pressure so it does not crash, but
+  # nothing is guaranteed to anyone else -- and on Windows the WSL VM growing
+  # into its ceiling is what took Docker Desktop down earlier in this stack's
+  # life (56 GB of a 63.7 GB host, against ~11 GB Windows actually needed).
+  #
+  # RAM is read from INSIDE a container on purpose. That is the number the
+  # engine can really use, and it is correct on both targets without a special
+  # case: on Linux it is the host's RAM, on Windows it is the WSL VM's ceiling
+  # from .wslconfig rather than the host's 64 or 128 GB.
+  ask LLM_MEM_RESERVE_PCT "Percent of RAM to keep free for the system" "10"
+  _pct="$(current LLM_MEM_RESERVE_PCT)"
+  if ! [[ "$_pct" =~ ^[0-9]+$ ]] || [[ "$_pct" -lt 0 || "$_pct" -gt 50 ]]; then
+    die "LLM_MEM_RESERVE_PCT must be a whole number 0-50, got: '$_pct'"
+  fi
+  _tot_mb="$(docker run --rm alpine sh -c "awk '/MemTotal/ {print int(\$2/1024)}' /proc/meminfo" 2>/dev/null || echo 0)"
+  if [[ "$_tot_mb" =~ ^[0-9]+$ ]] && [[ "$_tot_mb" -gt 0 ]]; then
+    # Other stack services (gateway, database, monitoring) need their share
+    # too, and they are not covered by the engine's own limit.
+    _others_mb=6144
+    _limit_mb=$(( _tot_mb * (100 - _pct) / 100 - _others_mb ))
+    # Whether the cap COSTS anything depends entirely on whether the model
+    # fits underneath it. Measured on a 24 GB / 50 GB box with a 93.7 GB model
+    # -- which cannot fit either way -- reserving 10% took warm decode from
+    # 8.02 to 5.46 tok/s, a 32% loss, because every GB taken from the page
+    # cache becomes disk I/O. On a box where the model DOES fit, the cap sits
+    # above the working set and costs nothing at all.
+    #
+    # So: size it, compare, and say which case this is instead of applying a
+    # number silently.
+    _model_mb=0
+    _dir="$(current LLAMACPP_MODEL_DIR)"; _file="$(current LLAMACPP_MODEL_FILE)"
+    if [[ -n "$_dir" && -n "$_file" && -d "$_dir" ]]; then
+      # Multi-part GGUF: the named shard is only the first of N.
+      _stem="${_file%-*-of-*.gguf}"
+      _model_mb=$(du -cm "$_dir/$_stem"*.gguf 2>/dev/null | tail -1 | cut -f1)
+      [[ "$_model_mb" =~ ^[0-9]+$ ]] || _model_mb=0
+    fi
+
+    if [[ $_limit_mb -lt 8192 ]]; then
+      warn "only ${_tot_mb} MB visible; leaving the engine unlimited rather than starving it"
+      set_env LLAMACPP_MEM_LIMIT "0"
+    else
+      set_env LLAMACPP_MEM_LIMIT "${_limit_mb}m"
+      ok "engine capped at ${_limit_mb} MB of ${_tot_mb} MB (${_pct}% reserved for the system)"
+      if [[ $_model_mb -gt 0 && $_model_mb -gt $_limit_mb ]]; then
+        warn "the model is ${_model_mb} MB and the cap is ${_limit_mb} MB, so it CANNOT be"
+        warn "fully cached -- expect roughly a third less throughput than uncapped."
+        warn "On Windows the WSL ceiling in .wslconfig already reserves RAM for the"
+        warn "host, so this second reservation inside the VM may be redundant:"
+        warn "set LLAMACPP_MEM_LIMIT=0 to spend it on cache instead."
+      elif [[ $_model_mb -gt 0 ]]; then
+        ok "the ${_model_mb} MB model fits under that cap -- the reserve costs nothing"
+      fi
+    fi
+  else
+    warn "could not read RAM from a container -- leaving the engine unlimited"
+    set_env LLAMACPP_MEM_LIMIT "0"
+  fi
+
   # A missing file is the single most likely mistake here, and the symptom
   # otherwise is a container that restarts forever with the reason buried in
   # its logs. Warn now; do not die, because the weights may still be
