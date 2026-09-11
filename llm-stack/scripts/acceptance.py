@@ -75,7 +75,13 @@ def sh(*args: str, timeout: int = 120) -> tuple[int, str]:
     argv = list(args)
     if argv and argv[0] == "bash":
         argv[0] = _bash()
-    p = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
+    # stdin MUST be detached. `docker compose exec -T` still attaches stdin, and
+    # a process group that reads the terminal while not in the foreground gets
+    # SIGTTIN and STOPS -- which suspends this script too, so the timeout below
+    # never fires and the run hangs forever rather than failing. Seen in the
+    # wild: a whole acceptance run sat in State:T for 18 minutes.
+    p = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
+                       timeout=timeout, stdin=subprocess.DEVNULL)
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
