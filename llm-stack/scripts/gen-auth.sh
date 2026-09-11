@@ -42,10 +42,16 @@ rand() { au crypto rand --length "${1:-64}" --charset alphanumeric | sed 's/^Ran
 arg2() { MSYS_NO_PATHCONV=1 docker run --rm "$IMG" authelia crypto hash generate argon2 --password "$1" | sed 's/^Digest: //' | tr -d '\r\n'; }
 pbk()  { MSYS_NO_PATHCONV=1 docker run --rm "$IMG" authelia crypto hash generate pbkdf2 --variant sha512 --password "$1" | sed 's/^Digest: //' | tr -d '\r\n'; }
 
+# `python` is not a command on a stock Ubuntu 26.04 (or any distro that ships
+# only python3), so every host-side call below went "command not found" and the
+# password reset failed after the hash had already been computed. llm-users.sh
+# already had this right; gen-auth.sh did not.
+PY="${PYTHON:-python3}"
+
 set_env() {  # key value
   local k="$1" v="$2"
   if grep -qE "^$k=" .env; then
-    python - "$k" "$v" <<'PY'
+    "$PY" - "$k" "$v" <<'PY'
 import sys, re, pathlib
 k, v = sys.argv[1], sys.argv[2]
 p = pathlib.Path('.env'); t = p.read_text(encoding='utf-8')
@@ -70,7 +76,7 @@ echo "==> Domain: $DOMAIN"
 # present under Git Bash, and a blind envsubst would also eat the $-signs
 # inside argon2/pbkdf2 hashes -- so substitute exactly one token, in Python.
 render_template() {  # src dst
-  python - "$1" "$2" "$DOMAIN" <<'PY'
+  "$PY" - "$1" "$2" "$DOMAIN" <<'PY'
 import pathlib, sys
 src, dst, domain = sys.argv[1], sys.argv[2], sys.argv[3]
 pathlib.Path(dst).write_text(
@@ -108,7 +114,7 @@ if [[ -n "$ADD_USER" ]]; then
   [[ -f "$DIR/users.yml" ]] || { echo "run without --add-user first" >&2; exit 1; }
   echo "==> Hashing password for $ADD_USER"
   H="$(arg2 "$ADD_PASS")"
-  python - "$ADD_USER" "$H" "$ADD_GROUPS" "$DIR/users.yml" <<'PY'
+  "$PY" - "$ADD_USER" "$H" "$ADD_GROUPS" "$DIR/users.yml" <<'PY'
 import sys, pathlib
 user, h, groups, path = sys.argv[1:5]
 p = pathlib.Path(path); t = p.read_text(encoding='utf-8').rstrip('\n')
@@ -304,7 +310,7 @@ __JWKS_PEM__
         userinfo_signed_response_alg: 'none'
         token_endpoint_auth_method: 'client_secret_basic'
 EOF
-  python - "$DIR/clients.yml" "$SECRETS/oidc.pem" <<'PYEOF'
+  "$PY" - "$DIR/clients.yml" "$SECRETS/oidc.pem" <<'PYEOF'
 import sys, pathlib
 clients, pem = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 key = pem.read_text(encoding='utf-8').strip()

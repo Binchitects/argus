@@ -403,11 +403,34 @@ cheap to test:
 During generation the CPU sits at ~800% with the GPU at 25–35%, so the expert
 matmuls on the CPU are what set the pace.
 
-**Threads: leave them alone.** llama.cpp chose `n_threads = 10`, matching the
-container's ten *physical* cores. Forcing `-t 20` to use all twenty logical
-CPUs made it **2.5x slower** — 1.35 tok/s against 3.37. Hyperthreads contend
-for the same memory bandwidth rather than adding throughput. This is the one
-knob most likely to be tuned in the wrong direction.
+**Threads: physical cores, never logical.** llama.cpp chose `n_threads = 10`,
+matching the container's ten *physical* cores. Forcing `-t 20` to use all twenty
+logical CPUs made it **2.5x slower** — 1.35 tok/s against 3.37. Hyperthreads
+contend for the same memory bandwidth rather than adding throughput. This is the
+one knob most likely to be tuned in the wrong direction.
+
+Re-measured on a different box and it replicates, larger. i7-13700K, 8 P-cores
++ 8 E-cores = **16 physical / 24 logical**, UD-IQ4_XS at 256K, warm, prompts
+varied per run:
+
+| `-t` | decode | prefill @8K | prefill @16K |
+|---|---|---|---|
+| 24 — all logical | 10.16 tok/s | 406.3 | 404.7 |
+| **16 — all physical** | **21.65 tok/s** | 388.5 | 399.8 |
+| 8 — P-cores only | 17.94 tok/s | 335.8 | 352.0 |
+
+**2.13x, and it is decode-only.** Prefill moves 1.7% across the whole range
+(406 -> 388), so the extra threads buy nothing there while halving generation.
+
+Note 16 beats 8: it is not "P-cores only". All 16 *physical* cores help; the 8
+hyperthread siblings are what hurt. Setting `-t` to the CPU count is the natural
+mistake and the expensive one — `nproc` reports 24 on this machine.
+
+Profiling explains it. During generation only **8 of 24 cores** exceed 50% at
+`-t 24`, total CPU sits at ~48%, the GPU at ~20% and NVMe reads at ~1 MB/s.
+Nothing is saturated — the signature of memory stalls, not of missing cores.
+Threads beyond the physical count add contention to a workload that is already
+waiting on memory.
 
 **What this means for the 32 GB / 128 GB box.** Do not read 3.4 tok/s as the
 deployment number. Two things change: 128 GB of RAM holds the whole 93.7 GB
@@ -656,28 +679,145 @@ Two lessons that generalise beyond this model:
   prefix cache and reports no prompt processing at all, which silently turns a
   throughput measurement into a cache-hit measurement.
 
-### Pinning the token lookup table to CPU: measured, and it hurt here
+### Pinning the n-gram table to CPU: the first test was confounded
 
-`-ot per_layer_token_embd=CPU` is widely reported to help, and a published
-RTX 5090 run credits it with freeing ~27 GB of VRAM for expert layers. On this
-box it is **6x slower**, measured like-for-like on the same prompts:
+**CORRECTION.** This section previously reported `-ot per_layer_token_embd=CPU`
+as **6x slower** here. That comparison moved two variables at once and cannot
+support the conclusion that was drawn from it:
 
 | config | warm prefill |
 |---|---|
-| `--n-cpu-moe 34`, no override | **208-213 tok/s** |
-| `-ot per_layer_token_embd=CPU`, `--n-cpu-moe 28` | 33-35 tok/s |
+| `--n-cpu-moe 34`, no override | 208-213 tok/s |
+| `-ot per_layer_token_embd=CPU`, **`--n-cpu-moe 28`** | 33-35 tok/s |
 
-The difference is not that the trick is bad -- it is that it only pays when the
-freed VRAM can be *spent*. The 5090 report pairs it with `-ncmoe 16`, moving a
-large number of expert layers onto the card. Here the model cannot be resident
-at any setting, the freed VRAM bought a move from `--n-cpu-moe` 34 to 28 (six
-layers), and that did not come close to repaying the CPU-side cost of the
-embedding lookup it added.
+The override and `--n-cpu-moe` changed together, so the regression belongs to
+neither in particular -- and the section's own text said so ("the freed VRAM
+bought a move from 34 to 28") without noticing that this invalidated the
+headline. It also measured prefill only, and the flag's supposed cost is a
+decode-side one.
 
-**Take a flag from a report only with the hardware it was measured on.** This
-one is worth trying on a 32 GB card with 128 GB of RAM, where the model is
-resident and `-ncmoe` can go far lower; it is not worth trying on a 24 GB card
-that is paging.
+Re-run as an isolation -- identical `--n-cpu-moe`, identical prompts, the flag
+the only difference:
+
+| config | decode | prefill @8K | prefill @16K |
+|---|---|---|---|
+| `-t 24`, pinned | 10.16 tok/s | 406.3 | 404.7 |
+| `-t 24`, no pin | 9.82 tok/s | 403.4 | 403.4 |
+
+**The flag is worth -3.4% on decode -- noise, and if anything negative.** Not
+6x anything.
+
+### Why it cannot matter here, from the checkpoint
+
+The reason is architectural, and reading the GGUF settles it without a
+benchmark. `per_layer_token_embd.weight` is **160 x 320,001,536 = 28.8 GB**,
+quantised IQ4_NL while the rest of the checkpoint is IQ4_XS -- **31% of a
+93.7 GB model in a single tensor**, deliberately held at higher precision.
+
+It is the n-gram table. From the metadata:
+
+```
+general.architecture                qwen4exp
+qwen4exp.ple.ngram_size             3
+qwen4exp.ple.heads_per_ngram        8
+qwen4exp.ple.layers                 [1]
+qwen4exp.embedding_length_per_layer_input   160
+```
+
+320 million rows, of which a token touches a handful -- roughly 90 bytes read
+per token out of 28.8 GB. A pure sparse lookup, and the reason the published
+guidance says to keep it in RAM and not to quantise it hard.
+
+**It cannot be placed on a 24 GB card at all.** Measured: the engine holds
+22.5 GB total on the GPU, so a 28.8 GB tensor is not there, not partially and
+not spilling. llama.cpp already keeps it CPU-side, which is why an override
+telling it to do that changes nothing.
+
+**Keep the flag regardless, as insurance rather than optimisation.** If
+`--n-cpu-moe` is ever lowered far enough to leave room, llama.cpp may attempt a
+GPU placement and die mid-load. Pinning it explicitly makes that
+unrepresentable, and costs 3% of nothing.
+
+### The full 256K window on a 24 GB card: what actually blocks it
+
+It runs, at the architectural maximum, on a 3090 — and the thing that stops it
+is none of the three you would budget for.
+
+Working configuration, measured:
+
+```
+-c 262144  --n-cpu-moe 42  -t 16  -b 2048 -ub 1024
+--cache-type-k q8_0  --cache-type-v q8_0  --flash-attn on
+--cache-reuse 256  -ot per_layer_token_embd=CPU
+VRAM 20,757 / 24,576 MiB      healthy in 10-20 s
+```
+
+**The compute buffer is the constraint, not the KV cache and not the experts.**
+The first attempt at 256K died here:
+
+```
+ggml_backend_cuda_buffer_type_alloc_buffer: allocating 15166.56 MiB: cudaMalloc failed
+graph_reserve: failed to allocate compute buffers
+```
+
+**15.2 GB for one compute buffer.** It scales with `context x ubatch`, and
+`-ub 4096` is harmless at 64K (~3.7 GB) while being fatal at 256K. Dropping to
+`-ub 1024` cuts it to 3.7 GB and the model loads with room to spare. Predicted
+20.6 GB total, measured 20.7.
+
+Budget this explicitly when raising the context window. It is invisible in every
+"weights + KV" calculation, and it is four times the size of the KV cache here.
+
+**The KV cache is cheap on this architecture, so do not reach for a 4-bit one.**
+Only 12 of 48 layers are full attention (`full_attention_interval = 4`), the
+rest linear. With `head_count_kv = 2` and 256-wide K and V:
+
+| KV type | 64K | 256K |
+|---|---|---|
+| f16 | 1.61 GB | 6.44 GB |
+| **q8_0** | **0.86 GB** | **3.42 GB** |
+| q4_0 | 0.45 GB | 1.81 GB |
+
+Going 4-bit saves 1.61 GB at 256K — about 1.3 expert layers, and this document
+already records that moving *ten* layers changed throughput by nothing
+measurable. Published KV-quantisation work puts q8_0 at +0.002-0.05 perplexity
+with zero answer flips to 41K tokens, while q4_0 is strongly model-dependent and
+its reported worst case is a **Qwen** model at 375/500 answers changed. Cheap
+headroom is not worth that; raise `--n-cpu-moe` instead.
+
+### Measured at 256K, i7-13700K + RTX 3090 + 61 GB RAM
+
+Warm medians, prompts varied per run, model on NVMe:
+
+| variant | decode | prefill @8K | prefill @16K | VRAM MiB |
+|---|---|---|---|---|
+| `-t 24`, pinned | 10.16 tok/s | 406.3 | 404.7 | 21,097 |
+| **`-t 16`, pinned** | **21.65 tok/s** | 388.5 | 399.8 | 21,126 |
+| `-t 8`, pinned | 17.94 tok/s | 335.8 | 352.0 | 21,036 |
+| `-t 24`, no pin | 9.82 tok/s | 403.4 | 403.4 | 21,040 |
+| `-t 24`, `--mlock` | *rejected: `invalid argument: --mlock`* | | | |
+
+Against the 3.4-4.3 tok/s this document records for the same quant on the same
+card, that is roughly **5x on decode at 4x the context window**. Two changes
+account for it and neither is a tuning flag: the GGUF moved from a SATA HDD to
+an NVMe, and the box has 61 GB of RAM rather than 48 GB available to Docker.
+
+**Prefill no longer decays with length.** This document previously measured
+204 -> 126 tok/s from 5.8K to 30K tokens. Here it *climbs* to a plateau —
+235 -> 406 tok/s — and holds 400+ out to 16K. The early low readings are warm-up,
+not a length effect; the first two runs share a token count and differ 235 vs 359.
+
+**It is not paging, and that is the whole story.** During generation NVMe reads
+sit at 0.2-2.4 MB/s with 53 GB in page cache. `VmRSS` is 48.8 GB against a
+93.7 GB file, so ~22 GB stays cold on disk and is never touched — almost
+certainly the rare rows of the 28.8 GB n-gram table. The model does not fit, and
+does not need to.
+
+**What limits it instead:** at `-t 24`, 8 of 24 cores exceed 50%, total CPU
+~48%, GPU ~20%. Nothing is saturated. ~1.41 GB of expert weights must be read
+per token, which at 10 tok/s is ~15 GB/s against a ~50-60 GB/s sequential
+ceiling — the gap being random access across 512 experts, of which a different
+10 fire every token.
 
 ## MTP (Multi-Token Prediction)
 
