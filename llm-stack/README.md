@@ -272,6 +272,7 @@ Everything is a hostname on :443. There are **no direct ports**.
 | URL | Service | Auth |
 |---|---|---|
 | `https://chat.llm.localhost` | Open WebUI | SSO |
+| `https://admin.llm.localhost` | Admin panel | SSO; console needs `admins` |
 | `https://grafana.llm.localhost` | Grafana | SSO |
 | `https://gateway.llm.localhost/v1` | LiteLLM API | **per-user API key** |
 | `https://api.llm.localhost/v1` | vLLM direct | Authelia token |

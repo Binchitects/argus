@@ -197,6 +197,11 @@ ROUTES = [
     ("gateway", "/v1/models", {200, 401}, ""),
     ("grafana", "/", {200, 302}, ""),
     ("auth", "/", {200, 302}, "auth"),
+    # 302 ONLY, and that narrowness is the point: this request carries no
+    # session, so Authelia must bounce it to the portal. A 200 here would mean
+    # forward-auth was bypassed and an anonymous caller reached a page that can
+    # mint API keys -- exactly the failure worth catching automatically.
+    ("admin", "/", {302}, "auth"),
     ("argus", "/healthz", {200, 401}, "argus"),
 ]
 
