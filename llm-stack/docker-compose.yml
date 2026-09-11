@@ -383,6 +383,20 @@ services:
     # the file, so this is what makes a 94 GB model usable on 48 GB of RAM --
     # provided the file is on NVMe. On a spinning disk it is unusable.
     shm_size: "${LLAMACPP_SHM_SIZE:-2gb}"
+    # A ceiling on what the engine may hold, so the machine keeps a floor.
+    #
+    # Without it this container is unlimited: mmap'd model pages fill the page
+    # cache to whatever RAM exists, which is FINE in isolation (Linux evicts
+    # file-backed pages under pressure) but leaves no guaranteed room for
+    # anything else. With a cgroup limit the kernel reclaims inside this
+    # container instead of competing with the rest of the box.
+    #
+    # Set by scripts/setup.sh from detected RAM and LLM_MEM_RESERVE_PCT. Empty
+    # means unlimited, which is the previous behaviour.
+    #
+    # Do NOT set this below the model's working set or it will thrash: the
+    # limit bounds the cache, it does not make the model smaller.
+    mem_limit: ${LLAMACPP_MEM_LIMIT:-0}
     <<: *gpu-reservation
     healthcheck:
       test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:8080/health"]

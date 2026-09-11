@@ -183,6 +183,34 @@ what lets an `.env` written before llama.cpp existed keep working.
 | `LLAMACPP_PARALLEL` | request slots. Each gets `CONTEXT/PARALLEL` tokens, so raising it **shrinks** the per-request window. |
 | `LLAMACPP_EXTRA_ARGS` | extra flags. **Do not put `-t <logical cpus>` here** — llama.cpp already defaults to the physical core count, and forcing all logical CPUs measured 2.5x *slower*. |
 
+### Keeping RAM free for the system
+
+`LLM_MEM_RESERVE_PCT` (default 10) becomes a hard `mem_limit` on the engine
+container. Whether that costs throughput depends on one thing: **does the model
+fit underneath the cap?**
+
+Measured on a 24 GB GPU with a 50 GB VM and a 93.7 GB model -- which cannot be
+fully cached at any setting:
+
+| reserve | engine cap | warm decode |
+|---|---|---|
+| none | unlimited | **8.02 tok/s** |
+| 10% | 39,025 MB | 5.46 tok/s |
+
+A **32% loss**, because every GB taken from the page cache becomes disk I/O.
+On a machine where the model *does* fit, the cap sits above the working set and
+costs nothing measurable. `setup.sh` compares the two and says which case you
+are in rather than applying a number quietly.
+
+**On Windows this is usually redundant.** The WSL ceiling in `.wslconfig`
+already reserves RAM for the host: 50 GB of a 63.7 GB machine leaves Windows
+21%, comfortably past a 10% target. A second reservation inside the VM only
+takes cache from the model. Tune `.wslconfig` there and leave
+`LLAMACPP_MEM_LIMIT=0`.
+
+**On Linux there is no VM layer**, so the container limit is the only lever and
+the right one to use.
+
 ### What it costs, measured
 
 A 177B MoE (`Qwen3.8-Flash-Next`, `UD-IQ4_XS`, 93.7 GB) on a 24 GB RTX 3090 with
