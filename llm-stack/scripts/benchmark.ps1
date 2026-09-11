@@ -36,9 +36,18 @@ if ($UseGateway) {
     $apiKey = $envMap['LITELLM_MASTER_KEY']
     $model = 'local'
 } else {
-    $baseUrl = 'http://vllm:8000'
-    $apiKey = $envMap['VLLM_API_KEY']
-    $model = $envMap['VLLM_SERVED_MODEL_NAME']
+    # Which engine is actually enabled decides the endpoint. Hardcoding vllm
+    # here meant a llama.cpp deploy benchmarked a container that does not exist
+    # and failed with a DNS error -- the same assumption up.sh already dropped.
+    if ($envMap['COMPOSE_PROFILES'] -split ',' -contains 'llamacpp') {
+        $baseUrl = 'http://llamacpp:8080'
+        $apiKey = $envMap['LLAMACPP_API_KEY']
+        $model = $envMap['LLAMACPP_SERVED_MODEL_NAME']
+    } else {
+        $baseUrl = 'http://vllm:8000'
+        $apiKey = $envMap['VLLM_API_KEY']
+        $model = $envMap['VLLM_SERVED_MODEL_NAME']
+    }
     if (-not $model) { $model = 'default' }
 }
 

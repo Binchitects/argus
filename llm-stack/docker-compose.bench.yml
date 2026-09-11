@@ -1,0 +1,15 @@
+# Benchmark-only override. Raises the memlock rlimit so `--mlock` can be tested
+# at all: the daemon default is 8 MB, and llama.cpp's mlock of the model pages
+# fails immediately against it with "failed to mlock".
+#
+# Raising the limit does NOT make --mlock viable on a box whose RAM is smaller
+# than the CPU-side weights; it only removes the rlimit as the reason it fails,
+# so what you measure is the real constraint rather than a misconfiguration.
+#
+# Use with:  docker compose -f docker-compose.yml -f docker-compose.bench.yml ...
+services:
+  llamacpp:
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1

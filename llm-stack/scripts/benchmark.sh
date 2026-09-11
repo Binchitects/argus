@@ -29,9 +29,21 @@ if [ "$GATEWAY" -eq 1 ]; then
   KEY="$(get LITELLM_MASTER_KEY)"
   MODEL="local"
 else
-  BASE="http://vllm:8000"
-  KEY="$(get VLLM_API_KEY)"
-  MODEL="$(get VLLM_SERVED_MODEL_NAME)"
+  # Which engine is actually enabled decides the endpoint. Hardcoding vllm here
+  # meant a llama.cpp deploy benchmarked a container that does not exist and
+  # failed with a DNS error -- the same assumption up.sh already had to drop.
+  case ",$(get COMPOSE_PROFILES)," in
+    *,llamacpp,*)
+      BASE="http://llamacpp:8080"
+      KEY="$(get LLAMACPP_API_KEY)"
+      MODEL="$(get LLAMACPP_SERVED_MODEL_NAME)"
+      ;;
+    *)
+      BASE="http://vllm:8000"
+      KEY="$(get VLLM_API_KEY)"
+      MODEL="$(get VLLM_SERVED_MODEL_NAME)"
+      ;;
+  esac
 fi
 MODEL="${MODEL:-default}"
 
