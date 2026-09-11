@@ -58,9 +58,9 @@ datasources:
     access: proxy
     url: postgres:5432
     database: litellm
-    user: ${POSTGRES_USER}
+    user: ${LLM_PG_USER}
     secureJsonData:
-      password: ${POSTGRES_PASSWORD}
+      password: ${LLM_PG_PASSWORD}
     jsonData:
       sslmode: disable
       postgresVersion: 1600

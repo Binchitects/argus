@@ -352,17 +352,40 @@ Pipe it rather than passing it as an argument -- argv is visible in the
 container's process list. The login name is `GRAFANA_ADMIN_USER`, not `admin`.
 
 **`.env` losing to your shell.** Docker Compose gives **shell environment
-variables precedence over `.env`**. Measured here: `.env` said
-`POSTGRES_USER=llmservice` while the stack ran as `myuser`, because `myuser`
-was exported in the user's machine environment. Postgres had been initialised
-under that name and only honours `POSTGRES_USER` on first init, so everything
+variables precedence over `.env`**, and that is not a bug you can configure
+away. Measured here: `.env` said `POSTGRES_USER=llmservice` while the stack ran
+as `myuser` on a password that was not the generated one, because an unrelated
+project had both exported machine-wide. Postgres honours `POSTGRES_USER` on
+first init only, so the volume was born under the stray name and everything
 worked -- until the day that variable is cleared, when Compose falls back to a
-role the database does not have and LiteLLM and Grafana lose the database
-together. Check what is really in force before trusting `.env`:
+role the database does not have and LiteLLM and Grafana lose it together.
+
+The stack's variables are therefore **`LLM_PG_USER` and `LLM_PG_PASSWORD`**.
+A prefix is the whole mitigation: nothing else sets those names. Check what is
+really in force before trusting `.env`:
 
 ```bash
-docker compose config | grep POSTGRES_USER
+docker compose config | grep LLM_PG_USER
 ```
+
+If you deployed before the rename, the role inside the volume still has the old
+name. Renaming the variable does not rename the role, so reconcile it:
+
+```bash
+./scripts/fix-postgres-role.sh --dry-run
+```
+
+It dumps the database first, creates the role `.env` names, moves ownership of
+`litellm` and `langfuse` onto it, and proves the new credentials authenticate
+before reporting success. Re-run with `--lock-old` afterwards to revoke login
+from the stale superuser -- that old password is not in `.env` and belongs to
+whatever set it. Then recreate the services that hold a connection string:
+
+```bash
+docker compose up -d --force-recreate litellm grafana postgres
+```
+
+A `restart` is not enough. It reuses the container's existing environment.
 
 **Certificates that will not generate on Windows.** Git Bash rewrites
 `-subj "/CN=..."` into a path. `scripts/setup.sh` exports `MSYS_NO_PATHCONV`,

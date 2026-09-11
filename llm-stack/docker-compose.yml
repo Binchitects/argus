@@ -520,7 +520,7 @@ services:
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set LITELLM_SALT_KEY}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-llmservice}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      DATABASE_URL: postgresql://${LLM_PG_USER:-llmservice}:${LLM_PG_PASSWORD}@postgres:5432/litellm
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       VLLM_API_KEY: ${VLLM_API_KEY}
@@ -922,8 +922,8 @@ services:
       # The usage dashboards query the gateway's database directly, and
       # provisioning expands these into the LiteLLM datasource. Without them
       # Grafana starts fine and that one datasource silently fails to connect.
-      POSTGRES_USER: ${POSTGRES_USER:-myuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      LLM_PG_USER: ${LLM_PG_USER:-llmservice}
+      LLM_PG_PASSWORD: ${LLM_PG_PASSWORD:?set LLM_PG_PASSWORD}
       GF_AUTH_DISABLE_LOGIN_FORM: "false"
     depends_on: [prometheus]
     labels:
@@ -1089,11 +1089,20 @@ services:
       # Creates the `litellm` and `langfuse` databases on first boot only.
       - ./config/postgres/init:/docker-entrypoint-initdb.d:ro
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-llmservice}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      # Fed from LLM_PG_*, not POSTGRES_*, and that indirection is the fix
+      # for a measured outage-in-waiting. Compose gives the SHELL environment
+      # precedence over .env, and POSTGRES_USER / POSTGRES_PASSWORD are common
+      # enough names that an unrelated project's machine-wide variables were
+      # silently winning here: .env said `llmservice` while the stack ran as
+      # `myuser`, on a password that was not the generated one. It worked only
+      # because the volume had been initialised that way -- and would have
+      # broken the day that variable was cleared. LLM_PG_* collides with
+      # nothing.
+      POSTGRES_USER: ${LLM_PG_USER:-llmservice}
+      POSTGRES_PASSWORD: ${LLM_PG_PASSWORD:?set LLM_PG_PASSWORD}
       POSTGRES_DB: postgres
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-llmservice}"]
+      test: ["CMD-SHELL", "pg_isready -U ${LLM_PG_USER:-llmservice}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -1183,7 +1192,7 @@ services:
     restart: unless-stopped
     networks: [llm-net]
     environment: &langfuse-env
-      DATABASE_URL: postgresql://${POSTGRES_USER:-llmservice}:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+      DATABASE_URL: postgresql://${LLM_PG_USER:-llmservice}:${LLM_PG_PASSWORD}@postgres:5432/langfuse
       SALT: ${LANGFUSE_SALT:?set LANGFUSE_SALT}
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?set LANGFUSE_ENCRYPTION_KEY}
       TELEMETRY_ENABLED: "false"
