@@ -671,6 +671,77 @@ services:
       start_period: 20s
     logging: *default-logging
 
+  # ============================================================================
+  # ADMIN PANEL (profile: auth -- it is meaningless without Authelia)
+  #
+  # Self-service usage for everyone, plus a console for the `admins` group:
+  # create people, set credit, revoke and reissue API keys, reset passwords.
+  #
+  # Authelia decides who is who. Traefik runs every request through
+  # forward-auth first and OVERWRITES Remote-User / Remote-Email /
+  # Remote-Groups from Authelia's answer, so a browser cannot forge them.
+  # REQUIRE_FORWARDED closes the remaining gap: another container on llm-net
+  # could reach this one directly and set those headers itself, so a request
+  # arriving without X-Forwarded-Host is refused.
+  #
+  # It holds the LiteLLM master key and writes Authelia's user database, which
+  # is why it publishes no port and is reachable only through the proxy.
+  # ============================================================================
+  admin-panel:
+    build: ./deploy/admin-panel
+    container_name: admin-panel
+    profiles: ["auth"]
+    restart: unless-stopped
+    networks: [llm-net]
+    environment:
+      LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      LITELLM_DEFAULT_USER_BUDGET: ${LITELLM_DEFAULT_USER_BUDGET:-50}
+      AUTHELIA_USERS_FILE: /authelia/users.yml
+      ADMIN_GROUP: ${ADMIN_GROUP:-admins}
+      LLM_DOMAIN: ${LLM_DOMAIN:-llm.localhost}
+      # Buttons through to the dashboards rather than a second place to build
+      # charts. Grafana already has usage-by-user and the hardware views.
+      GRAFANA_URL: https://grafana.${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}
+      AUTHELIA_URL: https://auth.${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}
+      REQUIRE_FORWARDED: "1"
+    volumes:
+      # Read-write on purpose: creating a person and resetting a password both
+      # write users.yml. Authelia is configured to watch that file, and on a
+      # Linux host it reloads by itself. ON DOCKER DESKTOP IT DOES NOT -- the
+      # file sits on a Windows bind mount and inotify events do not cross it,
+      # so a new account exists in the file and still cannot sign in until
+      # `docker compose restart authelia`. Measured; no write strategy avoids
+      # it, so the panel prints the instruction instead. See docs/ADMIN-PANEL.md.
+      # The directory also holds secrets/, which is why only this one file's
+      # directory is mounted rather than the whole config tree.
+      - ./config/authelia:/authelia
+    # NO depends_on, deliberately. `litellm` lives in the `gateway` profile and
+    # this lives in `auth`; compose rejects the WHOLE project when an enabled
+    # service depends on one whose profile is off, so `--profile auth` alone
+    # failed with "depends on undefined service litellm" and took every other
+    # service with it. The panel talks to the gateway over HTTP per request
+    # anyway, so the ordering bought nothing -- and it now renders a banner
+    # rather than a traceback when the gateway is unreachable.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:8080/healthz',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.admin-panel.loadbalancer.server.port=8080"
+      - "traefik.http.routers.admin-panel.rule=Host(`admin.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.admin-panel.entrypoints=websecure"
+      - "traefik.http.routers.admin-panel.tls=true"
+      - "traefik.http.routers.admin-panel.service=admin-panel"
+      # Always the SSO chain, never PROTECTED_CHAIN: this panel has no login of
+      # its own and no authorisation without Authelia's Remote-Groups header.
+      - "traefik.http.routers.admin-panel.middlewares=sso-chain@file"
+    logging: *default-logging
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
