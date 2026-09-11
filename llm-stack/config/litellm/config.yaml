@@ -60,9 +60,9 @@ model_list:
       # These are LITERAL numbers on purpose: model_info is not part of
       # litellm_params, and an os.environ/ value would arrive as a string
       # where an int is expected. setup.sh and switch-model rewrite them.
-      max_input_tokens: 65536
+      max_input_tokens: 262144
       max_output_tokens: 8192
-      max_tokens: 65536
+      max_tokens: 262144
 
   # Display name, shown in the Open WebUI model picker.
   - model_name: qwen3.8-flash-next
@@ -74,9 +74,9 @@ model_list:
       output_cost_per_token: 0.0000008
     model_info:
       mode: chat
-      max_input_tokens: 65536
+      max_input_tokens: 262144
       max_output_tokens: 8192
-      max_tokens: 65536
+      max_tokens: 262144
 
   # Compatibility alias. Clients that cached the previous served name -- the
   # Hermes desktop model picker among them -- would otherwise get a 404 when
@@ -91,9 +91,9 @@ model_list:
       output_cost_per_token: 0.0000008
     model_info:
       mode: chat
-      max_input_tokens: 65536
+      max_input_tokens: 262144
       max_output_tokens: 8192
-      max_tokens: 65536
+      max_tokens: 262144
 
 router_settings:
   routing_strategy: simple-shuffle
