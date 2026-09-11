@@ -968,6 +968,15 @@ services:
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.52.1
+    # OPT-IN. gcr.io answers 403 to this network (Google registries are
+    # geo-blocked here; Docker Hub and ghcr.io are fine), so pulling this
+    # aborted the whole `compose pull` and left every other image absent.
+    # The Docker Hub fallback google/cadvisor is v0.33 from 2019, which
+    # predates cgroups v2 and would report nothing on Ubuntu 26.04 --
+    # a scrape target that is up and empty is worse than one that is off.
+    # Re-enable with COMPOSE_PROFILES=...,cadvisor once a reachable,
+    # cgroups-v2-capable build is pinned.
+    profiles: [cadvisor]
     container_name: cadvisor
     restart: unless-stopped
     networks: [llm-net]
