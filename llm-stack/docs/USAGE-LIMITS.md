@@ -121,7 +121,7 @@ carried its owner in `metadata`.
 To see the inventory directly:
 
 ```bash
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d litellm -c   'select key_alias, user_id, key_name, spend, max_budget from "LiteLLM_VerificationToken" order by spend desc'
+docker compose exec -T postgres psql -U "$LLM_PG_USER" -d litellm -c   'select key_alias, user_id, key_name, spend, max_budget from "LiteLLM_VerificationToken" order by spend desc'
 ```
 
 `key_name` is masked. The full key is shown **once**, when it is created, and is
