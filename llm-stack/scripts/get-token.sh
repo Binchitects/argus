@@ -8,6 +8,11 @@
 #   ./scripts/get-token.sh                       # token for the API
 #   ./scripts/get-token.sh --audience gateway    # token for LiteLLM
 #   export TOKEN=$(./scripts/get-token.sh)
+
+# `python` is not a command on a python3-only distro (Ubuntu 26.04 ships no
+# alias), so a bare call here dies with "command not found".
+PY="${PYTHON:-python3}"
+
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,13 +35,19 @@ CA="config/traefik/certs/ca.crt"
 
 # --resolve + --ssl-no-revoke are only needed because *.localhost does not
 # resolve in CLI tools and Windows curl cannot check revocation for a private CA.
+# `resource`, not `audience`. Authelia matches an `audience` value by EXACT
+# string, so a token for 'https://api.<domain>' is refused at
+# 'https://api.<domain>/v1/models' -- every real endpoint 401s while the
+# token itself introspects as active with the right scope. `resource`
+# (RFC 8707) is the parameter with prefix semantics, so one token covers
+# the whole origin.
 RESP="$(curl -s --ssl-no-revoke \
   --resolve "auth.$DOMAIN:443:127.0.0.1" --cacert "$CA" \
   -u "api:$SECRET" \
-  -d "grant_type=client_credentials&scope=authelia.bearer.authz&audience=https://$AUD.$DOMAIN" \
+  -d "grant_type=client_credentials&scope=authelia.bearer.authz&resource=https://$AUD.$DOMAIN" \
   "https://auth.$DOMAIN/api/oidc/token")"
 
-python -c "
+"$PY" -c "
 import json, sys
 d = json.loads('''$RESP''')
 if 'access_token' not in d:

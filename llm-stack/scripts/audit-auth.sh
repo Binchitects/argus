@@ -4,6 +4,11 @@
 #
 # This catches things a config check cannot - missing email claims, wrong
 # redirect URIs, client auth method mismatches - without needing a browser.
+
+# `python` is not a command on a python3-only distro (Ubuntu 26.04 ships no
+# alias), so a bare call here dies with "command not found".
+PY="${PYTHON:-python3}"
+
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$ROOT"
 export MSYS_NO_PATHCONV=1
@@ -74,7 +79,7 @@ flow() {
   tok=$(curl -s "${RES[@]}" -u "$id:$secret" \
     -d "grant_type=authorization_code&code=$code&redirect_uri=$uri" \
     "https://auth.$DOM/api/oidc/token")
-  python - "$id" <<PY
+  "$PY" - "$id" <<PY
 import json,sys,base64
 cid=sys.argv[1]
 try: d=json.loads('''$tok''')
@@ -103,9 +108,15 @@ flow langfuse   "https://traces.$DOM/api/auth/callback/custom"    "openid email 
 echo
 echo "3. Machine client (client_credentials) + API access"
 A=$(grep -E '^API_OIDC_CLIENT_SECRET=' .env | cut -d= -f2-)
+# `resource`, not `audience`. Authelia matches an `audience` value by EXACT
+# string, so a token for 'https://api.<domain>' is refused at
+# 'https://api.<domain>/v1/models' -- every real endpoint 401s while the
+# token itself introspects as active with the right scope. `resource`
+# (RFC 8707) is the parameter with prefix semantics, so one token covers
+# the whole origin.
 TOK=$(curl -s "${RES[@]}" -u "api:$A" \
-  -d "grant_type=client_credentials&scope=authelia.bearer.authz&audience=https://api.$DOM" \
-  "https://auth.$DOM/api/oidc/token" | python -c "import json,sys; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
+  -d "grant_type=client_credentials&scope=authelia.bearer.authz&resource=https://api.$DOM" \
+  "https://auth.$DOM/api/oidc/token" | "$PY" -c "import json,sys; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
 [ -n "$TOK" ] && green OK "token issued" || red FAIL "no token"
 c=$(curl -s -o /dev/null -w '%{http_code}' "${RES[@]}" -H "Authorization: Bearer $TOK" "https://api.$DOM/v1/models")
 [ "$c" = "200" ] && green OK "api with token -> 200" || red FAIL "api with token -> $c"

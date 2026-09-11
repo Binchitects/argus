@@ -11,6 +11,11 @@
 #
 #   ./scripts/package.sh
 #   ./scripts/package.sh --out /tmp/llmservice.zip
+
+# `python` is not a command on a python3-only distro (Ubuntu 26.04 ships no
+# alias), so a bare call here dies with "command not found".
+PY="${PYTHON:-python3}"
+
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -125,7 +130,7 @@ rm -f "$OUT"
 # python's zipfile is used rather than the zip binary: it is present wherever
 # the rest of these scripts run, and it sidesteps MSYS path translation on
 # Windows, which turns an absolute output path into one zip cannot open.
-python - "${STAGE#$ROOT/}" "$OUT" <<'PYEOF'
+"$PY" - "${STAGE#$ROOT/}" "$OUT" <<'PYEOF'
 import pathlib, sys, zipfile
 stage, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 out.parent.mkdir(parents=True, exist_ok=True)
