@@ -240,7 +240,7 @@ __JWKS_PEM__
         client_name: 'Grafana'
         client_secret: '$G_HASH'
         public: false
-        authorization_policy: 'one_factor'
+        authorization_policy: 'two_factor'
         claims_policy: 'with_profile'
         # First-party apps we own: a consent screen offers the user no real
         # choice and just adds a click on every first login.
@@ -256,7 +256,7 @@ __JWKS_PEM__
         client_name: 'Open WebUI'
         client_secret: '$O_HASH'
         public: false
-        authorization_policy: 'one_factor'
+        authorization_policy: 'two_factor'
         claims_policy: 'with_profile'
         # First-party apps we own: a consent screen offers the user no real
         # choice and just adds a click on every first login.
@@ -298,7 +298,7 @@ __JWKS_PEM__
         client_name: 'Langfuse'
         client_secret: '$L_HASH'
         public: false
-        authorization_policy: 'one_factor'
+        authorization_policy: 'two_factor'
         claims_policy: 'with_profile'
         # First-party apps we own: a consent screen offers the user no real
         # choice and just adds a click on every first login.

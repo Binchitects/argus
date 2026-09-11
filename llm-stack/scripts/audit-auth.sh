@@ -53,6 +53,33 @@ done
 [ "$drift" = "1" ] && echo "  -> real logins WILL fail until those containers are recreated"
 echo
 
+# Whether a domain/client requires a second factor. The audit only ever
+# establishes a FIRST factor, so under two_factor the correct expectation
+# inverts: a 1FA session must be REFUSED. Without this the audit reports
+# hardening as breakage and everyone learns to ignore it.
+CONF="config/authelia/configuration.yml"
+domain_policy() {  # host -> one_factor|two_factor|bypass
+  tr -d '\r' < "$CONF" | awk -v h="$1.$DOM" '
+    /^ *- domain:/ {inblk=1; found=0}
+    inblk && $0 ~ h {found=1}
+    inblk && /policy:/ && found {gsub(/.*policy: .|.$/,""); print; exit}
+    /^ *$/ {inblk=0}'
+}
+client_policy() {  # client_id -> one_factor|two_factor
+  "$PY" - "$1" <<'PYEOF'
+import re, sys
+cid = sys.argv[1]
+s = open("config/authelia/clients.yml", encoding="utf-8").read().replace("\r\n", "\n")
+blocks = re.split(r"(?m)^(?=      - client_id: )", s)
+for b in blocks:
+    m = re.search(r"client_id: '([^']+)'", b)
+    if m and m.group(1) == cid:
+        pm = re.search(r"authorization_policy: '([^']+)'", b)
+        print(pm.group(1) if pm else "")
+        break
+PYEOF
+}
+
 echo "1. Login as '$USER_NAME' (first factor)"
 LOGIN=$(curl -s "${RES[@]}" -c "$JAR" -X POST \
   -H 'Content-Type: application/json' \
@@ -73,7 +100,14 @@ flow() {
     --data-urlencode "state=auditauditaudit0123" \
     "https://auth.$DOM/api/oidc/authorization")
   code=$(printf '%s' "$loc" | sed -n 's/.*[?&]code=\([^&]*\).*/\1/p')
-  if [ -z "$code" ]; then red FAIL "$id: no code (redirect was: ${loc:0:90})"; return; fi
+  if [ -z "$code" ]; then
+    if [ "$(client_policy "$id")" = "two_factor" ]; then
+      green OK "$id: no code from a 1FA session -- two_factor enforced"
+    else
+      red FAIL "$id: no code (redirect was: ${loc:0:90})"
+    fi
+    return
+  fi
 
   local tok
   tok=$(curl -s "${RES[@]}" -u "$id:$secret" \
@@ -131,11 +165,16 @@ for h in metrics alerts; do
   [ "$c" = "302" ] && green OK "$h -> 302 to portal" || red FAIL "$h -> $c"
 done
 echo
-echo "5. Same services WITH a session cookie (must pass)"
+echo "5. Same services WITH a first-factor session (policy decides expectation)"
 for pair in "metrics:/-/healthy" "alerts:/-/healthy"; do
   h=${pair%%:*}; path=${pair#*:}
   c=$(curl -s -o /dev/null -w '%{http_code}' "${RES[@]}" -b "$JAR" "https://$h.$DOM$path")
-  [ "$c" = "200" ] && green OK "$h -> 200 (session accepted)" || red FAIL "$h -> $c"
+  if [ "$(domain_policy "$h")" = "two_factor" ]; then
+    [ "$c" != "200" ] && green OK "$h -> $c (1FA refused, two_factor enforced)" \
+                      || red FAIL "$h -> 200 with only a first factor, but policy is two_factor"
+  else
+    [ "$c" = "200" ] && green OK "$h -> 200 (session accepted)" || red FAIL "$h -> $c"
+  fi
 done
 rm -f "$JAR"
 echo

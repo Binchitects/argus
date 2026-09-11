@@ -57,6 +57,36 @@ metrics:
     addServicesLabels: true
     addRoutersLabels: true
 
+# ------------------------------------------------------------------------------
+# Real certificates (production domains only).
+#
+# The shipped setup uses a private CA under config/traefik/certs, which is the
+# only option for `llm.localhost`: `.localhost` is a reserved TLD (RFC 6761) and
+# no public CA will ever issue for it, nor for any name that does not resolve
+# publicly. That is a property of the domain, not a gap in this config -- a
+# private CA is CORRECT here, and clients must trust config/traefik/certs/ca.crt.
+#
+# When this stack moves to a real domain with public DNS, uncomment the resolver
+# below, set LLM_DOMAIN, re-run scripts/gen-certs (or delete the static cert
+# entries in dynamic/tls.yml so ACME serves them), and add to each router:
+#     traefik.http.routers.<name>.tls.certresolver=letsencrypt
+#
+# httpChallenge needs :80 reachable from the internet; use dnsChallenge instead
+# if that is not the case or if you need a wildcard.
+#
+# certificatesResolvers:
+#   letsencrypt:
+#     acme:
+#       email: 'you@example.com'          # a real, monitored mailbox
+#       storage: /etc/traefik/certs/acme.json   # must be 0600
+#       # Verify against the staging CA FIRST -- the production endpoint rate
+#       # limits to 5 failures per account per hostname per hour, and a broken
+#       # challenge burns that quota fast.
+#       caServer: https://acme-staging-v02.api.letsencrypt.org/directory
+#       httpChallenge:
+#         entryPoint: web
+# ------------------------------------------------------------------------------
+
 providers:
   docker:
     endpoint: "unix:///var/run/docker.sock"

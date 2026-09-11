@@ -102,6 +102,9 @@ access_control:
     # The API and the gateway now authenticate against Authelia too. Machine
     # clients present an access token from the client_credentials grant; a
     # browser hitting /docs gets the normal login redirect.
+    # STAYS one_factor on purpose. A client_credentials token is always
+    # treated as 1FA by Authelia, so requiring two_factor here would deny
+    # every machine caller while looking like a hardening win.
     - domain:
         - 'api.${LLM_DOMAIN}'
         - 'gateway.${LLM_DOMAIN}'
@@ -112,8 +115,10 @@ access_control:
     # credit, rotate keys, reset passwords) is gated inside the app on
     # Authelia's Remote-Groups header, not here, so that a non-admin gets a
     # useful page rather than a 403.
+    # The panel mints and revokes credentials for everyone. Password-only
+    # is not an appropriate bar for that.
     - domain: 'admin.${LLM_DOMAIN}'
-      policy: 'one_factor'
+      policy: 'two_factor'
 
     # Everything that ships with no authentication of its own.
     - domain:
@@ -124,7 +129,7 @@ access_control:
         - 'node.${LLM_DOMAIN}'
         - 'gpu.${LLM_DOMAIN}'
         - 's3.${LLM_DOMAIN}'
-      policy: 'one_factor'
+      policy: 'two_factor'
       subject:
         - 'group:admins'
 
@@ -135,6 +140,19 @@ access_control:
       # non-admin hits metrics.${LLM_DOMAIN} the admins rule does not MATCH
       # (wrong group) rather than denying, so evaluation falls through and any
       # authenticated user gets in. default_policy: deny covers the rest.
+
+# ------------------------------------------------------------------------------
+# Password policy. There was none, so a one-character password was accepted on
+# the portal that fronts every service here. zxcvbn scores realistically -- it
+# rejects 'Password1!' and accepts a long passphrase -- rather than counting
+# character classes, which mostly teaches people to append '1!'.
+# ------------------------------------------------------------------------------
+password_policy:
+  zxcvbn:
+    enabled: true
+    min_score: 3
+  standard:
+    enabled: false
 
 session:
   name: 'authelia_session'
@@ -154,10 +172,13 @@ session:
     database_index: 3
 
 regulation:
-  # Throttle brute force: lock an account for 5 minutes after 3 failures.
-  max_retries: 3
-  find_time: '2m'
-  ban_time: '5m'
+  # A 5-minute ban is not a deterrent: 3 tries per 5 minutes is ~860 attempts a
+  # day, sustained, against a password-only login. A wider find_time also
+  # catches slow spraying that resets inside a 2-minute window. The ban is
+  # per-IP, so a real user who fumbles is inconvenienced, not locked out.
+  max_retries: 5
+  find_time: '10m'
+  ban_time: '12h'
 
 storage:
   local:
