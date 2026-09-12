@@ -75,17 +75,28 @@ what a filtering problem looks like.
 
 ## Measured: multi-repo, real embeddings
 
-30,463 real symbol embeddings from this repository across 200 repos with
-realistically uneven sizes (largest 2,190 symbols, median 88, smallest 42).
-Graded against exact cosine.
+The full symbol corpus of this repository -- **75,616 real embeddings**, every
+one produced through argus/embed.py's own path -- across 200 repos with
+realistically uneven sizes (largest 5,508 symbols, median 218, smallest 115).
+Graded against exact cosine in numpy.
 
 | ACL width | rows visible | ms/query | recall@20 | under-filled |
 |---|---|---|---|---|
-| 1 repo | 66 | 0.80 | 100.0% | 0/40 |
-| 5 repos | 603 | 3.86 | 100.0% | 0/40 |
-| 25 repos | 3,991 | 4.12 | 99.8% | 0/40 |
-| 100 repos | 17,020 | 7.54 | 99.0% | 0/40 |
-| 200 repos | 30,463 | 8.63 | 99.8% | 0/40 |
+| 1 repo | 181 | 1.27 | 100.0% | 0/40 |
+| 5 repos | 1,116 | 4.66 | 99.9% | 0/40 |
+| 25 repos | 14,906 | 11.70 | 98.1% | 0/40 |
+| 100 repos | 46,340 | 6.67 | 98.1% | 0/40 |
+| 200 repos | 75,616 | 7.72 | 97.8% | 0/40 |
+
+Recall falls with corpus size and the honest number is the bottom row: **97.8%
+at full scale**, not the 99.8% an earlier run on 30,463 of the same vectors
+reported. Still well above sqlite-vec's ~94.6% ceiling, and sqlite-vec cannot
+serve the narrow-ACL rows at all without under-filling.
+
+Worst-case latency is at MODERATE selectivity, not at scale -- 25 of 200 repos
+is the slowest at 11.70 ms while the whole corpus is 7.72 ms. The 500k run below
+shows the same shape, so this is a property of filtered HNSW rather than an
+artefact of one corpus. Size capacity for a mid-selectivity allowlist.
 
 **ACL leakage on a 3-repo allowlist across 40 queries: 0 rows** from repos the
 caller could not see.
