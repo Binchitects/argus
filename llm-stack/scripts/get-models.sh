@@ -457,7 +457,7 @@ while IFS=$'	' read -r path size; do
   stall=0
   while :; do
     before=$(stat -c %s "$TARGET/$path" 2>/dev/null || echo 0)
-    docker run --rm -v "$(hostpath "$ROOT/$TARGET"):/out" curlimages/curl:8.11.1       -sSL -C - --retry 0       --connect-timeout 30 --speed-limit 10240 --speed-time 30 "${AUTH[@]}"       -o "/out/$path" "https://huggingface.co/$REPO/resolve/main/$path" && break
+    docker run --rm --user "$(id -u):$(id -g)" -v "$(hostpath "$ROOT/$TARGET"):/out" curlimages/curl:8.11.1       -sSL -C - --retry 0       --connect-timeout 30 --speed-limit 10240 --speed-time 30 "${AUTH[@]}"       -o "/out/$path" "https://huggingface.co/$REPO/resolve/main/$path" && break
     after=$(stat -c %s "$TARGET/$path" 2>/dev/null || echo 0)
     # Caught the instant it happens, so one bad response costs one file
     # rather than silently poisoning the whole download.

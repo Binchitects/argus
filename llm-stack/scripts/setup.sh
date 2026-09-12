@@ -61,7 +61,11 @@ ENV_FILE="$ROOT/.env"
 # --------------------------------------------------------------- prompting --
 # Reads the current value from .env so a re-run defaults to what is already
 # configured rather than to the template.
-current() { [[ -f "$ENV_FILE" ]] && grep -E "^$1=" "$ENV_FILE" | head -n1 | cut -d= -f2- || true; }
+# tr -d '\r': a .env copied from a CRLF template yields values with a trailing
+# carriage return, and every validation below then rejects a correct answer
+# while printing it as if it were fine -- "must be a whole number 0-50, got:
+# '10'". Strip it once here rather than in each caller.
+current() { [[ -f "$ENV_FILE" ]] && grep -E "^$1=" "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d '\r' || true; }
 
 set_env() {
   local key="$1" val="$2"
@@ -371,6 +375,21 @@ if [[ $DRYRUN -eq 0 ]]; then
   chmod 700 "$(dirname "$_ptok")" 2>/dev/null || true
   ( umask 077 && printf '%s' "$(current LLAMACPP_API_KEY)" > "$_ptok" )
   chmod 600 "$_ptok" 2>/dev/null || true
+
+  # a9f87ac tightened the Prometheus token and stopped there, but it is not the
+  # only secret written here: .env holds every credential in the stack, and the
+  # Authelia files hold password and client-secret hashes. All were left 0644,
+  # i.e. readable by any account on the box.
+  for _sec in "$ENV_FILE" \
+              "$ROOT/config/authelia/users.yml" \
+              "$ROOT/config/authelia/clients.yml" \
+              "$ROOT/config/authelia/secrets/oidc.pem" \
+              "$ROOT/config/traefik/auth/users.htpasswd" \
+              "$ROOT"/config/traefik/certs/*.key; do
+    [[ -f "$_sec" ]] && chmod 600 "$_sec" 2>/dev/null || true
+  done
+  chmod 700 "$ROOT/config/traefik/certs" "$ROOT/config/prometheus/secrets" \
+            "$ROOT/config/authelia/secrets" 2>/dev/null || true
   ok "prometheus can scrape the engine (token written)"
 fi
 

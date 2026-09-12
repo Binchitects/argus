@@ -157,7 +157,12 @@ done
 if [[ $FORCE -eq 1 || ! -f "$SECRETS/oidc.pem" ]]; then
   echo "==> OIDC signing key"
   rm -f "$SECRETS/oidc.pem" "$SECRETS/oidc.pub.pem"
-  MSYS_NO_PATHCONV=1 docker run --rm -v "$ROOT/$SECRETS:/keys" "$IMG" \
+  # --user: the container is root by default, so the keypair lands root-owned
+  # 0600 and the very next step -- reading it back to inline into clients.yml --
+  # dies with PermissionError. It is invisible on a filesystem that fakes
+  # ownership (NTFS via uid=), which is why this only breaks on a real deploy.
+  MSYS_NO_PATHCONV=1 docker run --rm --user "$(id -u):$(id -g)" \
+    -v "$ROOT/$SECRETS:/keys" "$IMG" \
     authelia crypto pair rsa generate --bits 4096 --directory /keys \
       --file.private-key oidc.pem --file.public-key oidc.pub.pem >/dev/null
   echo "    $SECRETS/oidc.pem"
