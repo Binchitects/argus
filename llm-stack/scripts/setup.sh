@@ -388,8 +388,21 @@ if [[ $DRYRUN -eq 0 ]]; then
               "$ROOT"/config/traefik/certs/*.key; do
     [[ -f "$_sec" ]] && chmod 600 "$_sec" 2>/dev/null || true
   done
-  chmod 700 "$ROOT/config/traefik/certs" "$ROOT/config/prometheus/secrets" \
-            "$ROOT/config/authelia/secrets" 2>/dev/null || true
+  chmod 700 "$ROOT/config/traefik/certs" "$ROOT/config/authelia/secrets" 2>/dev/null || true
+  # 711, NOT 700, for the Prometheus secrets directory. Prometheus runs as uid
+  # 65534 inside its container and must TRAVERSE this directory to read the
+  # scrape token; 700 makes that "unable to read" and the llamacpp target goes
+  # down while everything else looks healthy. 711 grants traversal without
+  # listing, and the token itself stays 0640 plus an ACL for that uid.
+  chmod 711 "$ROOT/config/prometheus/secrets" 2>/dev/null || true
+  if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m u:65534:r "$_ptok" 2>/dev/null || true
+  else
+    # No ACL support: fall back to group-readable rather than silently
+    # shipping a token Prometheus cannot read.
+    chmod 644 "$_ptok" 2>/dev/null || true
+    echo "    note: setfacl unavailable; scrape token left world-readable so Prometheus can read it"
+  fi
   ok "prometheus can scrape the engine (token written)"
 fi
 
