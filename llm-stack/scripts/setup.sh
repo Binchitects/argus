@@ -67,6 +67,26 @@ ENV_FILE="$ROOT/.env"
 # '10'". Strip it once here rather than in each caller.
 current() { [[ -f "$ENV_FILE" ]] && grep -E "^$1=" "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d '\r' || true; }
 
+# Tighten every file that holds a secret. Defined as a function because it has
+# to run AFTER each step that writes one: gen-auth regenerates users.yml and
+# clients.yml late in the run, so a single early pass left client-secret and
+# password hashes at 0644 on a fresh install.
+harden_secrets() {
+  local _s
+  for _s in "$ENV_FILE" \
+            "$ROOT/config/authelia/users.yml" \
+            "$ROOT/config/authelia/clients.yml" \
+            "$ROOT/config/authelia/secrets/oidc.pem" \
+            "$ROOT/config/traefik/auth/users.htpasswd" \
+            "$ROOT"/config/traefik/certs/*.key; do
+    [[ -f "$_s" ]] && chmod 600 "$_s" 2>/dev/null || true
+  done
+  chmod 700 "$ROOT/config/traefik/certs" "$ROOT/config/authelia/secrets" 2>/dev/null || true
+  # 711, not 700: Prometheus runs as uid 65534 and must traverse this to read
+  # the scrape token. See the note where the token is written.
+  chmod 711 "$ROOT/config/prometheus/secrets" 2>/dev/null || true
+}
+
 set_env() {
   local key="$1" val="$2"
   [[ $DRYRUN -eq 1 ]] && { note "would set $key=$val"; return; }
@@ -380,14 +400,7 @@ if [[ $DRYRUN -eq 0 ]]; then
   # only secret written here: .env holds every credential in the stack, and the
   # Authelia files hold password and client-secret hashes. All were left 0644,
   # i.e. readable by any account on the box.
-  for _sec in "$ENV_FILE" \
-              "$ROOT/config/authelia/users.yml" \
-              "$ROOT/config/authelia/clients.yml" \
-              "$ROOT/config/authelia/secrets/oidc.pem" \
-              "$ROOT/config/traefik/auth/users.htpasswd" \
-              "$ROOT"/config/traefik/certs/*.key; do
-    [[ -f "$_sec" ]] && chmod 600 "$_sec" 2>/dev/null || true
-  done
+  harden_secrets
   chmod 700 "$ROOT/config/traefik/certs" "$ROOT/config/authelia/secrets" 2>/dev/null || true
   # 711, NOT 700, for the Prometheus secrets directory. Prometheus runs as uid
   # 65534 inside its container and must TRAVERSE this directory to read the
@@ -434,6 +447,7 @@ if [[ "$PROFILES" == *auth* ]]; then
   step "Single sign-on"
   note "Edit config/authelia/team.yml to add people, then re-run with --sync."
   run bash "$ROOT/scripts/gen-auth.sh"
+  harden_secrets   # gen-auth just rewrote users.yml and clients.yml
 
   _key_after="$(current AUTHELIA_STORAGE_ENCRYPTION_KEY)"
   # An EMPTY key before also counts: deleting .env without removing the
