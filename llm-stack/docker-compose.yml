@@ -104,10 +104,39 @@ services:
       - "${BIND_ADDRESS:-0.0.0.0}:${TRAEFIK_HTTP_PORT:-80}:80"
       - "${BIND_ADDRESS:-0.0.0.0}:${TRAEFIK_HTTPS_PORT:-443}:443"
     volumes:
-      - ./config/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - ./config/traefik/dynamic:/etc/traefik/dynamic:ro
-      - ./config/traefik/certs:/etc/traefik/certs:ro
-      - ./config/traefik/auth:/etc/traefik/auth:ro
+      # LONG SYNTAX for one reason: create_host_path: false.
+      #
+      # Short-syntax bind mounts make Docker CREATE a missing source directory,
+      # empty and root-owned. If this checkout is on a volume that is not
+      # mounted yet -- a removable disk, an automount that lost a race with
+      # dockerd at boot -- `restart: unless-stopped` then brings the stack up
+      # against empty directories: Traefik with no routes, Authelia with no
+      # users, and stub dirs left squatting on the mountpoint so the real disk
+      # cannot mount there afterwards. Observed exactly that after a reboot.
+      #
+      # With create_host_path: false the container refuses to start instead.
+      # Traefik is the only ingress, so its failure is immediately obvious,
+      # which is the whole point: a loud failure rather than a quiet wrong one.
+      - type: bind
+        source: ./config/traefik/traefik.yml
+        target: /etc/traefik/traefik.yml
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ./config/traefik/dynamic
+        target: /etc/traefik/dynamic
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ./config/traefik/certs
+        target: /etc/traefik/certs
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ./config/traefik/auth
+        target: /etc/traefik/auth
+        read_only: true
+        bind: { create_host_path: false }
       # Read-only: Traefik only watches container events for label changes.
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:

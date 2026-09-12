@@ -56,6 +56,29 @@ engine_key_guard() {  # profile_name  env_var
 engine_key_guard vllm     VLLM_API_KEY
 engine_key_guard llamacpp LLAMACPP_API_KEY
 
+# PREFLIGHT: refuse to start against a checkout that is not really there.
+#
+# If this tree lives on a volume that is not mounted, the config files below are
+# absent while the directories may still appear to exist -- Docker will have
+# created empty stubs on a previous boot. Starting here yields a Traefik with no
+# routers and an Authelia with no users, both reporting healthy.
+for _need in docker-compose.yml config/traefik/traefik.yml config/traefik/dynamic; do
+  if [[ ! -e "$_need" ]]; then
+    echo "ERROR: $_need is missing from $(pwd)." >&2
+    echo "  This checkout looks unmounted or incomplete. Nothing was started." >&2
+    echo "  If it lives on a removable volume, mount it first:" >&2
+    echo "      udisksctl mount -b /dev/disk/by-uuid/<uuid>" >&2
+    exit 1
+  fi
+done
+# A directory that exists but is empty is the signature of a Docker-created stub.
+if [[ -d config/traefik/dynamic ]] && [[ -z "$(ls -A config/traefik/dynamic 2>/dev/null)" ]]; then
+  echo "ERROR: config/traefik/dynamic exists but is EMPTY." >&2
+  echo "  That is what Docker leaves behind when it bind-mounts a path on an" >&2
+  echo "  unmounted volume. Remove the stubs and mount the real volume." >&2
+  exit 1
+fi
+
 echo "==> Pulling images"
 docker compose pull --quiet
 
