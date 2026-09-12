@@ -2,3 +2,9 @@
 # to CRLF on checkout and bash then failed with "unexpected EOF while looking
 # for matching quote" -- which silently skipped a queued pack rebuild.
 *.sh text eol=lf
+
+# The same applies to the env template: it is copied to .env, which is read
+# both by these scripts and by docker compose. As CRLF every value carries a
+# trailing carriage return, so setup.sh rejected valid answers and compose
+# would hand containers paths and keys with a stray \r on the end.
+.env.example text eol=lf
