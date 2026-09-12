@@ -66,6 +66,129 @@ Full walkthrough: **[docs/production.md](docs/production.md)**.
 
 ---
 
+## Deploying it — read this part
+
+Every item below cost someone an hour. They are in the order they bite.
+
+### Before you start
+
+| requirement | why, and what happens without it |
+|---|---|
+| **NVMe for model weights** | The engine `mmap`s the GGUF. On NVMe a 93 GB model serves at ~21 tok/s; on a 7200rpm SATA disk it is unusable, not merely slow. |
+| **`nvidia-container-toolkit`** | `docker-compose.yml` reserves `driver: nvidia`. Without it every GPU service fails with `could not select device driver`. Not in Ubuntu 26.04's repos — install from NVIDIA's. |
+| **Your user in the `docker` group** | And **log out and back in**. Group membership is fixed at login: `sudo usermod -aG docker $USER` does nothing for shells that are already open, which is a confusing 20 minutes. |
+| **A stable mount for the checkout** | See "The reboot trap" below. |
+
+### Deploy
+
+```bash
+git clone <this repo> && cd <repo>/llm-stack
+./scripts/setup.sh                  # interactive; --defaults to accept everything
+sudo ./scripts/setup-hosts.sh       # REQUIRED for curl/SDKs, see below
+./scripts/up.sh
+```
+
+### The traps
+
+**`*.localhost` resolves in browsers but not in curl.** Browsers resolve any
+`*.localhost` to 127.0.0.1 by specification; curl, Python and every SDK do not,
+and nothing but Traefik publishes a port. Run `scripts/setup-hosts.sh` or every
+command-line call fails with a DNS error that looks like the stack is down.
+
+**The reboot trap.** If the checkout lives on a removable or automounted volume,
+Docker's `restart: unless-stopped` will start the stack *before* the volume
+mounts, **create empty directories at the mountpoint**, and run against them —
+four containers dead, the rest serving nothing, everything reporting healthy.
+The stubs then block the real volume from mounting there. Traefik's config
+mounts use `create_host_path: false` so it refuses to start instead, but the
+durable fix is `/etc/fstab`:
+
+```
+UUID=<uuid>  /mnt/data  ntfs3  defaults,nofail,x-systemd.before=docker.service,uid=1000,gid=1000  0 0
+```
+
+`x-systemd.before=docker.service` is the load-bearing part.
+
+**Google's registries may be unreachable.** `gcr.io` and `registry.k8s.io`
+return 403 from some networks while Docker Hub and ghcr.io are fine. Compose
+aborts the *entire* parallel pull when one image fails, so one blocked sidecar
+leaves every other image unpulled and `up` then fails with `No such image`
+fourteen times. cadvisor is behind its own profile for this reason; enable it
+with `COMPOSE_PROFILES=...,cadvisor` only if `gcr.io` works for you.
+
+**Set `BIND_ADDRESS`.** It defaults to `0.0.0.0`, which serves the whole stack —
+chat, gateway, Grafana, admin panel — to your LAN behind a self-signed
+certificate. `BIND_ADDRESS=127.0.0.1` binds to loopback.
+
+### Tuning the engine — the three that matter
+
+**`-t` must be your PHYSICAL core count, never logical.** Measured twice on
+different machines. On a 13700K (16 physical / 24 logical):
+
+| `-t` | decode |
+|---|---|
+| 24 (all logical) | 10.16 tok/s |
+| **16 (all physical)** | **21.65 tok/s** |
+| 8 (P-cores only) | 17.94 tok/s |
+
+**2.13x**, and prefill moves 1.7% across that whole range — the extra threads buy
+nothing and halve generation. `nproc` reports 24 here, which is exactly the trap.
+Every physical core helps, including E-cores; it is the hyperthread siblings that
+hurt. `lscpu -p=CORE | sort -u | wc -l` gives the right number.
+
+**`-ub` drives a hidden VRAM cost.** Raising the context scales a CUDA compute
+buffer by `context × ubatch`, and it is invisible in any weights+KV calculation.
+At `-c 262144 -ub 4096` it asked for **15,166 MiB in one allocation** and died
+with `failed to allocate compute buffers` — on a card where the KV cache was only
+3.4 GB. `-ub 1024` cut it to 3.7 GB and the same model loaded with room spare.
+**On a startup CUDA OOM, lower `-ub` before lowering the context.**
+
+**CPU ceilings must sum UNDER your core count.** A ceiling that can be exceeded
+in aggregate is not a ceiling. `llamacpp 16 + postgres 3 + ollama 2 = 21` of 24
+(88%). An earlier set summing to 26 of 24 took the package to **94°C** twice. For
+a bulk index build, stop the engine and raise `OLLAMA_CPUS` for the duration
+rather than oversubscribing both.
+
+### Things that look broken but are not
+
+**Empty replies from the model.** Qwen3.8-Flash-Next returns its reasoning in a
+separate `reasoning_content` field. With a small `max_tokens` it spends the whole
+budget reasoning and returns `finish_reason: length` with **empty content** —
+indistinguishable from a broken model. Give it 300+ tokens.
+
+**Node clients failing TLS while curl works.** Node ships its own root bundle and
+ignores the system trust store. Set `NODE_EXTRA_CA_CERTS=<repo>/llm-stack/config/traefik/certs/ca.crt`.
+If `curl --cacert` works and your Node tool does not, this is why.
+
+**Low GPU utilisation during generation.** Expected. The experts run on CPU, so
+the card idles between attention layers.
+
+**Grafana panels empty after a permissions change.** Prometheus runs as uid
+65534 and must *traverse* `config/prometheus/secrets`. At `0700` it cannot, the
+scrape fails with `unable to read`, and every container still reports healthy.
+That directory must be `711`.
+
+**Authelia ignoring config changes.** Mount the *directory*, not individual
+files. A single-file bind mount is pinned to the inode it resolved at container
+start; `gen-auth` and the admin panel both replace these files atomically, which
+makes a new inode, and Authelia reads the old one forever. Symptom: a user
+created in the admin panel cannot log in, with a password that verifies fine.
+
+### If you enable pgvector
+
+Three settings, none optional, each of which silently degrades the index:
+
+- **`hnsw.ef_search`** defaults to 40 and `LIMIT k` does not raise it. Left alone,
+  recall pins at 61% and does not move from k=128 to k=2048.
+- **`hnsw.iterative_scan`** — without it a filtered search examines `ef_search`
+  nodes and only *then* discards what the ACL rejects.
+- **`SET`, not `SET LOCAL`** — autocommit gives every statement its own
+  transaction, so `LOCAL` expires before the query that needed it.
+
+Argus's semantic layer also needs an embedding provider. Ollama is in the compose
+file under the `embed` profile; without it there is nowhere for vectors to come
+from, whichever database stores them.
+
 ## What your agent gets
 
 **Your private code**, access-controlled per developer:
