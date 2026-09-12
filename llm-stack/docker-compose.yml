@@ -1122,7 +1122,14 @@ services:
   # ============================================================================
 
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16 is the stock postgres:16 image plus the `vector`
+    # extension, same major version and data directory layout, so this is a
+    # drop-in for postgres:16-alpine as far as existing databases are concerned.
+    # Argus stores symbol embeddings here; without the extension `CREATE
+    # EXTENSION vector` fails and the semantic index cannot be created at all.
+    # Pinned to a digest-stable tag rather than :latest so a rebuild cannot
+    # move the server major version underneath the data directory.
+    image: pgvector/pgvector:0.8.0-pg16
     container_name: postgres
     profiles: [gateway, tracing]
     restart: unless-stopped
