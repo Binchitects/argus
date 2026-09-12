@@ -381,7 +381,7 @@ def _rel_time(ts) -> str:
     return f"{int(delta // 86400)}d ago"
 
 
-def indexing_card() -> str:
+def indexing_card(is_admin: bool = False) -> str:
     """Trigger an index pass across every repo at a chosen branch, and show progress.
 
     The branch box takes globs and is additive: each project's DEFAULT branch is
@@ -390,6 +390,12 @@ def indexing_card() -> str:
     branch are indexed at their default rather than failing the run, which is
     what makes one branch name usable across an estate that does not share it.
     """
+    # ADMINS ONLY, checked here and not merely at the call site. This card
+    # lists every repository in the estate along with its indexing state, which
+    # is more than a non-admin is entitled to see even though the POST handler
+    # would refuse them. Rendering it in self_view was exactly that mistake.
+    if not is_admin:
+        return ""
     if not (ARGUS_URL and ARGUS_ADMIN_TOKEN):
         return ""
     try:
@@ -487,7 +493,6 @@ def self_view(request: Request, who: Caller) -> Response:
                                           "email": who.label}
     body = (_degraded(note)
             + f'<div class="card"><h2>Your usage</h2>{_usage_row(me)}</div>'
-            + indexing_card()
             + monitoring_card()
             + '<div class="card"><h2>Change password</h2>'
               '<form class="row" method="post" action="/password">'
@@ -534,7 +539,7 @@ def admin_view(request: Request, who: Caller) -> Response:
             + f'<div class="card"><h2>People ({len(rows)})</h2>'
             f'<table><tr><th>User</th><th>Usage / credit</th><th>API key</th>'
             f'<th>Credit</th><th>Actions</th></tr>{"".join(rows)}</table></div>'
-            + indexing_card()
+            + indexing_card(is_admin=True)
             + monitoring_card()
             + '<div class="card"><h2>Add a person</h2>'
               '<form class="row" method="post" action="/admin/create">'
