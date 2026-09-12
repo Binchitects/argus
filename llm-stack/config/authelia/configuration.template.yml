@@ -115,10 +115,8 @@ access_control:
     # credit, rotate keys, reset passwords) is gated inside the app on
     # Authelia's Remote-Groups header, not here, so that a non-admin gets a
     # useful page rather than a 403.
-    # The panel mints and revokes credentials for everyone. Password-only
-    # is not an appropriate bar for that.
     - domain: 'admin.${LLM_DOMAIN}'
-      policy: 'two_factor'
+      policy: 'one_factor'
 
     # Everything that ships with no authentication of its own.
     - domain:
@@ -129,7 +127,7 @@ access_control:
         - 'node.${LLM_DOMAIN}'
         - 'gpu.${LLM_DOMAIN}'
         - 's3.${LLM_DOMAIN}'
-      policy: 'two_factor'
+      policy: 'one_factor'
       subject:
         - 'group:admins'
 
