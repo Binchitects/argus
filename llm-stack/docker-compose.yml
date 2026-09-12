@@ -666,9 +666,16 @@ services:
       OLLAMA_NUM_PARALLEL: "1"
     # Embedding is throughput work with no latency requirement, and it ran at
     # 767% CPU unbounded -- the single biggest contributor to a 94 C package.
-    # 4 cores keeps a full index build well inside the thermal envelope; raise
-    # OLLAMA_CPUS if the box has cooling headroom to spare.
-    cpus: ${OLLAMA_CPUS:-4}
+    # THE CEILINGS MUST SUM UNDER THE CORE COUNT. llamacpp 16 + ollama 4 +
+    # postgres 6 is 26 of 24 logical CPUs -- they oversubscribe, and running an
+    # index build, an embedding pass and the engine together took the package to
+    # 92 C. 16 + 2 + 3 = 21, or 87%, leaves headroom.
+    #
+    # Serving gets the cores because it is the continuous, user-facing workload;
+    # embedding is a rare bulk pass. For a large one-off index build, stop the
+    # engine and raise OLLAMA_CPUS for the duration rather than oversubscribing
+    # both at once.
+    cpus: ${OLLAMA_CPUS:-2}
     volumes:
       - ollama-models:/root/.ollama
     healthcheck:
@@ -1185,6 +1192,11 @@ services:
   # ============================================================================
 
   postgres:
+    # A CPU ceiling here too. Building an HNSW index over 500k vectors is a
+    # parallel, sustained, floating-point workload -- unbounded it took the
+    # package to 92 C alongside the engine and the embedder. 6 of 24 logical
+    # is ample for the gateway's own query load and bounds the index builds.
+    cpus: ${POSTGRES_CPUS:-3}
     # pgvector/pgvector:pg16 is the stock postgres:16 image plus the `vector`
     # extension, same major version and data directory layout, so this is a
     # drop-in for postgres:16-alpine as far as existing databases are concerned.
