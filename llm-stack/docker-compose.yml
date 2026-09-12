@@ -172,9 +172,25 @@ services:
     restart: unless-stopped
     networks: [llm-net]
     volumes:
-      - ./config/authelia/configuration.yml:/config/configuration.yml:ro
-      - ./config/authelia/clients.yml:/config/clients.yml:ro
-      - ./config/authelia/users.yml:/config/users.yml:ro
+      # THE DIRECTORY, not three individual files.
+      #
+      # A single-file bind mount is pinned to the INODE it resolved at container
+      # start. Every writer of these files replaces them atomically -- the admin
+      # panel via os.replace, gen-auth by rendering a new file -- which produces
+      # a NEW inode, and Authelia then keeps reading the old one forever. It
+      # watches the path and sees no change because, from inside the container,
+      # nothing about its file changed.
+      #
+      # Observed: the panel's users.yml at inode 2497907 / 658 bytes while
+      # Authelia held inode 2496625 / 444 bytes. Users created in the panel
+      # could not log in, because Authelia had never seen them. The same applied
+      # to clients.yml and configuration.yml, so every gen-auth change appeared
+      # to need a container restart -- it did, and this is why.
+      #
+      # Mounting the directory makes the path resolve fresh on each open, so a
+      # replaced file is picked up. Read-only still: nothing in the container
+      # writes here.
+      - ./config/authelia:/config:ro
       - authelia-data:/data
     environment:
       # Authelia merges these two files; clients.yml is generated because OIDC
@@ -707,6 +723,10 @@ services:
     environment:
       # Without this argus/embed.py falls back to localhost:11434, which inside
       # a container is the container itself.
+      # Enables POST /admin/index. Unset -> the routes are not registered and
+      # the prefix is not exempted from bearer auth, i.e. the surface does not
+      # exist. Generate one and share it with the admin panel only.
+      ARGUS_ADMIN_TOKEN: ${ARGUS_ADMIN_TOKEN:-}
       ARGUS_OLLAMA_URL: ${ARGUS_OLLAMA_URL:-http://ollama:11434}
       ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
       ARGUS_EMBED_DIM: ${ARGUS_EMBED_DIM:-768}
@@ -804,6 +824,11 @@ services:
       AUTHELIA_USERS_FILE: /authelia/users.yml
       ADMIN_GROUP: ${ADMIN_GROUP:-admins}
       LLM_DOMAIN: ${LLM_DOMAIN:-llm.localhost}
+      # Argus's operator surface. The indexing card only renders when the token
+      # is set, because without it the endpoint does not exist on Argus's side
+      # and a button that cannot work is worse than no button.
+      ARGUS_URL: ${ARGUS_URL:-http://argus:7700}
+      ARGUS_ADMIN_TOKEN: ${ARGUS_ADMIN_TOKEN:-}
       # Buttons through to the dashboards rather than a second place to build
       # charts. Grafana already has usage-by-user and the hardware views.
       GRAFANA_URL: https://grafana.${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}
