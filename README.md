@@ -246,6 +246,7 @@ That discipline extends to the benchmarks. The model comparison above found **th
 - **[docs/production.md](docs/production.md)** — deploy, verify, operate
 - **[docs/deployment.md](docs/deployment.md)** — wiring Hermes, and the failure modes
 - **[docs/knowledge-packs.md](docs/knowledge-packs.md)** — building and publishing packs
+- **[docs/pgvector-backend.md](docs/pgvector-backend.md)** — the optional Postgres backend for symbol embeddings, and what it measures
 - **[evals/](evals/)** — every benchmark in this README, reproducible
 
 ---
