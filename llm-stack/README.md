@@ -531,10 +531,15 @@ skipped by default (large, re-downloadable); add `--include-model-cache`.
 ```
 docker-compose.yml       all services, profiles, volumes, networks
 .env.example             configuration template
-docs/AUTHENTICATION.md   SSO design, team management, troubleshooting
+docs/AUTHENTICATION.md   SSO design, team management, 2FA enrolment
 docs/LINUX.md            deploying to a Linux server
 docs/MODELS.md           GPU-matched model builds, quantisation formats
 docs/ARGUS.md            code index + documentation server, MCP tools, auth
+docs/HERMES.md           pointing the Hermes agent at this stack
+docs/QWEN-CODE.md        pointing the Qwen Code CLI at this stack
+docs/ADMIN-PANEL.md      web console for accounts, credit and API keys
+docs/USAGE-LIMITS.md     per-person budgets, rate limits, what they bound
+docs/CPU-TEMPERATURE.md  the CPU temperature exporter, Linux and Windows
 config/
   traefik/               proxy config, TLS certs, the only ingress
   authelia/              SSO policies, team.yml, users.yml, OIDC clients

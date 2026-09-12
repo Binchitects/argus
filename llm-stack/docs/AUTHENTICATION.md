@@ -122,6 +122,15 @@ print(client.chat.completions.create(
 Tokens expire. Fetch a new one rather than caching it indefinitely — that is the
 entire point of replacing a static key.
 
+The token is requested with the OAuth2 `resource` parameter, not
+`audience`. Authelia matches an `audience` value by EXACT string, so a
+token minted for `https://api.<domain>` is refused at
+`https://api.<domain>/v1/models` -- every real endpoint 401s while the
+token itself introspects as active and correctly scoped. `resource`
+(RFC 8707) has prefix semantics, so one token covers the whole origin.
+`get-token.sh` handles this; if you build the request yourself, do not
+swap the parameter back.
+
 For the gateway, ask for the matching audience:
 
 ```bash
@@ -207,15 +216,45 @@ the Linux target host.
 
 Remove a user by deleting their block from `config/authelia/users.yml`.
 
-### Requiring 2FA
+### 2FA is ON. Enrol before you need it
 
-In `config/authelia/configuration.yml`, change a rule's `policy` from
-`one_factor` to `two_factor`. Users enrol a TOTP device from the portal. Because
-no SMTP server is configured, the enrolment link is written to a file:
+This is no longer something you switch on -- `two_factor` is the shipped policy
+for the admin panel, the infra hosts (metrics, alerts, logs, cadvisor, node,
+gpu, s3) and the Grafana, Open WebUI and Langfuse clients.
+
+**A user with no TOTP device cannot reach any of them.** Enrol first:
+
+```bash
+docker exec -it authelia authelia storage user totp generate <username> --config /config/configuration.yml
+```
+
+That prints an `otpauth://` URI and a QR code to scan. It also OVERWRITES any
+existing device for that user, so do not run it on someone who is already
+enrolled unless you mean to reset them.
+
+The portal route works too -- sign in and it offers to register a device. No
+SMTP is configured, so the verification link is written to a file rather than
+emailed:
 
 ```bash
 docker exec authelia cat /data/notification.txt
 ```
+
+Check who is enrolled:
+
+```bash
+docker exec authelia authelia storage user totp export csv --config /config/configuration.yml
+```
+
+**`api.` and `gateway.` deliberately stay `one_factor`.** Authelia treats a
+`client_credentials` token as 1FA by definition, so requiring a second factor
+there denies every machine caller while looking like a hardening win. Machine
+access is bounded by the key or token instead -- see "As a machine" above.
+
+To relax a surface, change its `policy` in
+`config/authelia/configuration.template.yml` -- the TEMPLATE, not the generated
+`configuration.yml`. `gen-auth.sh` renders the template, so an edit to the
+output survives until the next run and then silently reverts.
 
 ---
 
