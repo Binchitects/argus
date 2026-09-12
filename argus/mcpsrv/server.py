@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import hmac
 import logging
+import os
+import subprocess
+import sys
+import threading
 import time
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
@@ -21,6 +27,24 @@ from .errors import unauthorized
 from .tools import register_tools
 
 HEALTHZ_PATH = "/healthz"
+
+#: Operator control surface. Gated by ARGUS_ADMIN_TOKEN, NOT by the GitLab
+#: bearer identity that guards every tool call: indexing is an estate-wide
+#: operator action, and "can read some repo" is not "may reindex everything".
+#:
+#: FAIL CLOSED. With no ARGUS_ADMIN_TOKEN set these routes are not registered at
+#: all and the prefix is not exempted from BearerAuthMiddleware, so the surface
+#: does not exist rather than existing unprotected. That is the default.
+ADMIN_PREFIX = "/admin/"
+ADMIN_TOKEN_ENV = "ARGUS_ADMIN_TOKEN"
+
+
+def _admin_token() -> str:
+    return os.environ.get(ADMIN_TOKEN_ENV, "").strip()
+
+
+def _admin_enabled() -> bool:
+    return bool(_admin_token())
 
 log = logging.getLogger(__name__)
 
@@ -210,7 +234,12 @@ class BearerAuthMiddleware:
             log.warning("failed to record audit row for a denied request", exc_info=True)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope.get("path") == HEALTHZ_PATH:
+        _path = scope.get("path") or ""
+        # The admin prefix carries its own credential (see ADMIN_PREFIX) and is
+        # exempted only while that credential is configured. Unset, the prefix
+        # is gated like everything else and the routes do not exist anyway.
+        if (scope["type"] != "http" or _path == HEALTHZ_PATH
+                or (_admin_enabled() and _path.startswith(ADMIN_PREFIX))):
             await self.app(scope, receive, send)
             return
 
@@ -370,6 +399,104 @@ def create_app(
     async def healthz(request: Request) -> Response:
         return JSONResponse({"status": "ok"})
 
+    if _admin_enabled():
+        _register_admin_routes(server, cfg)
+
     register_tools(server, cfg)
 
     return server
+
+
+#: One index run at a time. A second concurrent pass over the same SQLite index
+#: is not merely wasteful: both would write, and writers serialise, so the two
+#: would spend the run blocking each other while appearing to progress.
+_index_job: dict = {"state": "idle", "branches": [], "started": None,
+                    "finished": None, "returncode": None, "tail": []}
+_index_lock = threading.Lock()
+
+
+def _run_index(cfg_path: str, branches: list[str]) -> None:
+    """Run `argus index` as a CHILD PROCESS, never in this one.
+
+    create_app's contract is that the server never writes index data -- it
+    opens the index read-only and migrates once at startup precisely so
+    inbound traffic cannot mutate it. Indexing in-process would make that
+    false. A child gets its own connection and its own write transaction, and
+    the serve process keeps the guarantee it documents.
+    """
+    argv = [sys.executable, "-m", "argus.cli", "index", "--config", cfg_path]
+    for b in branches:
+        argv += ["--branch", b]
+    try:
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True)
+        tail: list[str] = []
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            tail.append(line.rstrip())
+            del tail[:-200]          # bounded: an estate-wide pass is chatty
+            with _index_lock:
+                _index_job["tail"] = list(tail)
+        rc = proc.wait()
+    except Exception as exc:         # noqa: BLE001
+        rc = -1
+        with _index_lock:
+            _index_job["tail"] = [f"failed to start: {exc!r}"]
+    with _index_lock:
+        _index_job.update(state="idle", finished=time.time(), returncode=rc)
+
+
+def _register_admin_routes(server, cfg) -> None:
+    cfg_path = str(getattr(cfg, "source_path", "") or
+                   os.environ.get("ARGUS_CONFIG", "/etc/argus/config.yaml"))
+
+    def _authorised(request: Request) -> bool:
+        # compare_digest, not ==: a plain comparison leaks the shared secret
+        # one byte at a time to anyone who can time the response.
+        supplied = request.headers.get("x-argus-admin-token", "")
+        return bool(supplied) and hmac.compare_digest(supplied, _admin_token())
+
+    @server.custom_route(ADMIN_PREFIX + "index", methods=["POST"])
+    async def admin_index(request: Request) -> Response:
+        if not _authorised(request):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        try:
+            body = await request.json()
+        except Exception:            # noqa: BLE001
+            body = {}
+        branches = [b for b in (body.get("branches") or []) if isinstance(b, str) and b.strip()]
+        with _index_lock:
+            if _index_job["state"] == "running":
+                return JSONResponse({"error": "an index run is already in progress",
+                                     "started": _index_job["started"]}, status_code=409)
+            _index_job.update(state="running", branches=branches,
+                              started=time.time(), finished=None,
+                              returncode=None, tail=[])
+        threading.Thread(target=_run_index, args=(cfg_path, branches),
+                         daemon=True).start()
+        return JSONResponse({"status": "started", "branches": branches})
+
+    @server.custom_route(ADMIN_PREFIX + "index/status", methods=["GET"])
+    async def admin_index_status(request: Request) -> Response:
+        if not _authorised(request):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        with _index_lock:
+            job = dict(_index_job)
+        rows = []
+        try:
+            conn = connect_readonly(cfg.index.db_path)
+            try:
+                conn.row_factory = None
+                cur = conn.execute(
+                    "SELECT path_with_namespace, branch, default_branch,"
+                    "       last_run_at, last_run_timed_out, last_run_symbols_failed"
+                    "  FROM repos ORDER BY last_run_at DESC NULLS LAST, path_with_namespace")
+                for r in cur.fetchall():
+                    rows.append({"repo": r[0], "branch": r[1], "default_branch": r[2],
+                                 "last_run_at": r[3], "timed_out": bool(r[4]),
+                                 "symbols_failed": r[5]})
+            finally:
+                conn.close()
+        except Exception as exc:     # noqa: BLE001
+            job["repos_error"] = repr(exc)[:200]
+        return JSONResponse({"job": job, "repos": rows})

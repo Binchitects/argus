@@ -67,6 +67,11 @@ MASTER = os.environ.get("LITELLM_MASTER_KEY", "")
 USERS_FILE = os.environ.get("AUTHELIA_USERS_FILE", "/authelia/users.yml")
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "admins")
 GRAFANA_URL = os.environ.get("GRAFANA_URL", "")
+#: Argus's operator control surface. Both must be set for the indexing card to
+#: appear: without the token the endpoint does not exist on Argus's side, so
+#: rendering a button that cannot work would only mislead.
+ARGUS_URL = os.environ.get("ARGUS_URL", "http://argus:7700").rstrip("/")
+ARGUS_ADMIN_TOKEN = os.environ.get("ARGUS_ADMIN_TOKEN", "")
 # Signing out is Authelia's job, not this app's: the session cookie is
 # Authelia's and clearing it anywhere else would leave the portal still
 # logged in, so the next visit would walk straight back in.
@@ -351,6 +356,102 @@ def _usage_row(row: dict) -> str:
             f'<div class="dim">{left} remaining</div>')
 
 
+def _argus(path: str, payload: dict | None = None) -> dict:
+    """Call Argus's admin surface. Short timeout: this is a button, not a batch."""
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(ARGUS_URL + path, data=data,
+                                 method="POST" if data is not None else "GET")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("X-Argus-Admin-Token", ARGUS_ADMIN_TOKEN)
+    with urllib.request.urlopen(req, timeout=10) as r:
+        body = r.read()
+    return json.loads(body) if body else {}
+
+
+def _rel_time(ts) -> str:
+    if not ts:
+        return "never"
+    delta = time.time() - float(ts)
+    if delta < 90:
+        return f"{int(delta)}s ago"
+    if delta < 5400:
+        return f"{int(delta // 60)}m ago"
+    if delta < 172800:
+        return f"{int(delta // 3600)}h ago"
+    return f"{int(delta // 86400)}d ago"
+
+
+def indexing_card() -> str:
+    """Trigger an index pass across every repo at a chosen branch, and show progress.
+
+    The branch box takes globs and is additive: each project's DEFAULT branch is
+    always indexed as well, so entering `develop` means "default plus develop
+    wherever develop exists" rather than "develop only". Repos without that
+    branch are indexed at their default rather than failing the run, which is
+    what makes one branch name usable across an estate that does not share it.
+    """
+    if not (ARGUS_URL and ARGUS_ADMIN_TOKEN):
+        return ""
+    try:
+        st = _argus("/admin/index/status")
+    except Exception as exc:                                   # noqa: BLE001
+        return (f'<div class="card"><h2>Indexing</h2>'
+                f'<div class="msg bad">Argus unreachable: {_h(repr(exc)[:120])}</div></div>')
+
+    job = st.get("job") or {}
+    repos = st.get("repos") or []
+    running = job.get("state") == "running"
+
+    if running:
+        started = _rel_time(job.get("started"))
+        tail = "\n".join(job.get("tail") or [])[-4000:]
+        status = (f'<div class="msg">Indexing <b>{_h(", ".join(job.get("branches") or []) or "default branches")}</b>'
+                  f' — started {_h(started)}. This page refreshes every 5s.</div>'
+                  f'<pre style="max-height:220px;overflow:auto;background:#111;color:#ddd;'
+                  f'padding:10px;border-radius:6px;font-size:12px">{_h(tail) or "starting…"}</pre>')
+    elif job.get("finished"):
+        rc = job.get("returncode")
+        cls = "msg" if rc == 0 else "msg bad"
+        status = (f'<div class="{cls}">Last run finished {_h(_rel_time(job.get("finished")))} '
+                  f'— exit {_h(str(rc))}</div>')
+    else:
+        status = '<p class="dim" style="margin:0 0 12px">No run has been started from here yet.</p>'
+
+    # Per-repo freshness. Argus records one row PER REF, so a project indexed at
+    # two branches legitimately appears twice; the branch column is what tells
+    # them apart.
+    body = ""
+    if repos:
+        shown = repos[:40]
+        trs = "".join(
+            '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+                _h(r.get("repo") or "?"),
+                _h(r.get("branch") or "?") + (" <span class=dim>(default)</span>"
+                                              if r.get("branch") == r.get("default_branch") else ""),
+                _h(_rel_time(r.get("last_run_at"))),
+                ('<span class="bad">timed out</span>' if r.get("timed_out")
+                 else (f'{_h(str(r.get("symbols_failed")))} failed'
+                       if r.get("symbols_failed") else "ok")))
+            for r in shown)
+        more = (f'<p class="dim">showing {len(shown)} of {len(repos)} refs</p>'
+                if len(repos) > len(shown) else "")
+        body = (f'<table><thead><tr><th>Repo</th><th>Branch</th><th>Last indexed</th>'
+                f'<th>Result</th></tr></thead><tbody>{trs}</tbody></table>{more}')
+
+    disabled = " disabled" if running else ""
+    refresh = ('<meta http-equiv="refresh" content="5">' if running else "")
+    return (f'{refresh}<div class="card"><h2>Indexing</h2>'
+            f'{status}'
+            f'<form method="post" action="/admin/index" style="margin:12px 0">'
+            f'<input name="branches" placeholder="branch or glob, e.g. develop or release/*" '
+            f'style="min-width:280px"{disabled}> '
+            f'<button class="btn" type="submit"{disabled}>Index all repos</button>'
+            f'<p class="dim" style="margin:6px 0 0">Space-separated for several. Each '
+            f'project&#39;s default branch is always included; repos without the named '
+            f'branch are indexed at their default rather than failing.</p></form>'
+            f'{body}</div>')
+
+
 def monitoring_card() -> str:
     if not GRAFANA_URL:
         return ""
@@ -386,6 +487,7 @@ def self_view(request: Request, who: Caller) -> Response:
                                           "email": who.label}
     body = (_degraded(note)
             + f'<div class="card"><h2>Your usage</h2>{_usage_row(me)}</div>'
+            + indexing_card()
             + monitoring_card()
             + '<div class="card"><h2>Change password</h2>'
               '<form class="row" method="post" action="/password">'
@@ -432,6 +534,7 @@ def admin_view(request: Request, who: Caller) -> Response:
             + f'<div class="card"><h2>People ({len(rows)})</h2>'
             f'<table><tr><th>User</th><th>Usage / credit</th><th>API key</th>'
             f'<th>Credit</th><th>Actions</th></tr>{"".join(rows)}</table></div>'
+            + indexing_card()
             + monitoring_card()
             + '<div class="card"><h2>Add a person</h2>'
               '<form class="row" method="post" action="/admin/create">'
@@ -617,6 +720,30 @@ async def admin_reset(request: Request) -> Response:
                         + (RELOAD_NOTE if WARN_RELOAD else ""))
 
 
+async def admin_index(request: Request) -> Response:
+    """Start an index pass across every repo, optionally at extra branches."""
+    who = _require_admin(request)
+    if who is None:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    if not (ARGUS_URL and ARGUS_ADMIN_TOKEN):
+        return _back(err="Indexing is not configured: ARGUS_ADMIN_TOKEN is unset.")
+    form = await request.form()
+    raw = str(form.get("branches") or "").strip()
+    # Space-separated, deduplicated, order preserved. Empty means "whatever the
+    # config already says", which is each project's default branch.
+    branches = list(dict.fromkeys(b for b in raw.split() if b))
+    try:
+        _argus("/admin/index", {"branches": branches})
+    except urllib.error.HTTPError as exc:
+        if exc.code == 409:
+            return _back(err="An index run is already in progress.")
+        return _back(err=f"Argus refused the request: HTTP {exc.code}")
+    except Exception as exc:                                   # noqa: BLE001
+        return _back(err=f"Could not reach Argus: {repr(exc)[:120]}")
+    label = ", ".join(branches) if branches else "default branches"
+    return _back(msg=f"Indexing started across all repos ({label}).")
+
+
 async def admin_budget(request: Request) -> Response:
     who = _require_admin(request)
     if who is None:
@@ -657,4 +784,5 @@ app = Starlette(routes=[
     Route("/admin/rotate", admin_rotate, methods=["POST"]),
     Route("/admin/reset", admin_reset, methods=["POST"]),
     Route("/admin/budget", admin_budget, methods=["POST"]),
+    Route("/admin/index", admin_index, methods=["POST"]),
 ])

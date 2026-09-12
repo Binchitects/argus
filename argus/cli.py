@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import os
 import shutil
@@ -865,6 +866,16 @@ def main(argv: list[str] | None = None) -> int:
               "everyone reads stale answers while index_status reports the "
               "staleness faithfully. 900 (15 minutes) is the documented "
               "default cadence. A failing pass does not stop the loop."))
+    p_index.add_argument(
+        "--branch", action="append", metavar="GLOB", default=None,
+        help=("Index this branch in every repo, overriding index.branches from "
+              "the config for this run. Repeatable, and a glob: --branch main "
+              "--branch 'release/*'. Each project's DEFAULT branch is always "
+              "indexed as well -- it is what an unqualified question is "
+              "answered from -- so this ADDS refs rather than replacing them. "
+              "A repo that has no branch matching the pattern is indexed at its "
+              "default alone rather than failing the run, which is what makes "
+              "one branch name usable across an estate that does not share it."))
     p_index.add_argument("--reset-retries", action="store_true",
                          help="Clear retry counters before indexing (manual recovery only; do not use on a schedule)")
 
@@ -982,6 +993,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "index":
+            # dataclasses.replace, not mutation: IndexConfig is frozen, and the
+            # override is per-run rather than a change to what is on disk.
+            if args.branch:
+                cfg = replace(cfg, index=replace(cfg.index,
+                                                 branches=tuple(args.branch)))
             if args.interval > 0:
                 return _index_repeatedly(
                     cfg, args.repo, args.reset_retries,
