@@ -14,6 +14,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# The pgvector backend for symbol embeddings (argus/store/pgvector.py). Optional
+# because sqlite-vec remains the default and the vast majority of deployments
+# need no Postgres at all; argus/store/pgvector.py imports psycopg lazily so its
+# absence costs nothing until ARGUS_VECTOR_BACKEND=pgvector selects it.
+pgvector = ["psycopg[binary]>=3.1"]
 
 [project.scripts]
 argus = "argus.cli:main"

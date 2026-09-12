@@ -49,7 +49,7 @@ FROM base AS test
 
 COPY pyproject.toml README.md ./
 COPY argus/ ./argus/
-RUN pip install -e ".[dev]"
+RUN pip install -e ".[dev,pgvector]"
 
 COPY tests/ ./tests/
 
@@ -105,7 +105,10 @@ RUN groupadd --gid "${ARGUS_GID}" argus \
 
 COPY pyproject.toml README.md ./
 COPY argus/ ./argus/
-RUN pip install .
+# [pgvector]: ships the optional Postgres backend so a deployment can select
+# it with ARGUS_VECTOR_BACKEND=pgvector without rebuilding. psycopg is ~10 MB
+# and imported lazily, so it costs nothing on the default sqlite-vec path.
+RUN pip install ".[pgvector]"
 
 # NOT decorative, and not safe to drop. This is the only edge from `runtime`
 # to `test`, and it is what makes the suite run for every image built from

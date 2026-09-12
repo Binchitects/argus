@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 from collections.abc import Sequence
@@ -27,6 +28,9 @@ class QueryError(Exception):
 # Reused rather than reimplemented: the private semantic index stores its
 # vectors in exactly the pack layout, so it must score them identically.
 from ..packs.quantize import rescore, to_bits
+from . import pgvector
+
+log = logging.getLogger(__name__)
 
 
 def _placeholders(allowed_repo_ids: Sequence[int]) -> tuple[str, list[int]]:
@@ -1029,6 +1033,25 @@ def semantic_search(allowed_repo_ids, conn, query_vec, limit: int = 10,
     if not ids:
         return []
 
+    # The pgvector backend resolves the coarse pass, the rerank AND the ACL in
+    # one statement and hands back the same {symbol_id: score} this function
+    # builds below, so the hydration that follows is shared. Opt-in via
+    # ARGUS_VECTOR_BACKEND=pgvector; everything below is the sqlite-vec path and
+    # remains the default.
+    #
+    # A failure here falls back rather than propagating: the semantic index is
+    # an enhancement over the lexical one, and a Postgres that is unreachable
+    # should degrade search, not break the tool call.
+    if pgvector.enabled():
+        try:
+            ranked_pg = pgvector.search(
+                pgvector.get_conn(), query_vec, ids,
+                limit=max(int(limit), 1), coarse=max(int(coarse), 1))
+            return _hydrate_semantic(conn, ids, dict(ranked_pg))
+        except Exception:
+            log.warning("pgvector search failed; falling back to sqlite-vec",
+                        exc_info=True)
+
     candidates = conn.execute(
         "SELECT symbol_id FROM vec_symbols_bin"
         " WHERE embedding MATCH vec_bit(?) AND k = ?",
@@ -1061,6 +1084,20 @@ def semantic_search(allowed_repo_ids, conn, query_vec, limit: int = 10,
     if not by_id:
         return []
 
+    return _hydrate_semantic(conn, ids, by_id)
+
+
+def _hydrate_semantic(conn, ids, by_id: dict) -> list[dict]:
+    """Turn {symbol_id: score} into full rows, re-checking the ACL in SQL.
+
+    The repo predicate is applied AGAIN here even though the ranking stage
+    already filtered by it. That is deliberate: this is the last statement
+    before data leaves the process, and it costs an indexed predicate to make
+    "a ranking bug cannot leak another repo's symbol" a property of the query
+    rather than of the caller getting it right.
+    """
+    if not by_id:
+        return []
     marks = ",".join("?" for _ in by_id)
     repo_marks = ",".join("?" for _ in ids)
     rows = conn.execute(

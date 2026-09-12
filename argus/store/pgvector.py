@@ -46,7 +46,42 @@ is the failure mode sqlite-vec cannot avoid.
 """
 from __future__ import annotations
 
+import os
+import threading
 from typing import Iterable, Sequence
+
+#: Selecting the backend. Absent or anything but "pgvector" keeps sqlite-vec,
+#: so this file is inert until someone opts in.
+_BACKEND_ENV = "ARGUS_VECTOR_BACKEND"
+_DSN_ENV = "ARGUS_PG_DSN"
+
+#: One connection per thread. psycopg connections are not thread-safe and the
+#: MCP server answers concurrently, so a shared module-level connection would
+#: interleave two queries on one socket. A pool would be better under real
+#: load; this is deliberately the smaller change, and one connection per worker
+#: thread is what the SQLite path already effectively does.
+_local = threading.local()
+
+
+def enabled() -> bool:
+    """True when the caller has opted in AND a DSN exists to opt in to."""
+    return (os.environ.get(_BACKEND_ENV, "").strip().lower() == "pgvector"
+            and bool(os.environ.get(_DSN_ENV, "").strip()))
+
+
+def get_conn():
+    """Thread-local connection. Raises if psycopg or the DSN is missing."""
+    conn = getattr(_local, "conn", None)
+    if conn is not None and not conn.closed:
+        return conn
+    import psycopg  # imported lazily: unused unless this backend is selected
+    dsn = os.environ.get(_DSN_ENV, "").strip()
+    if not dsn:
+        raise RuntimeError(f"{_DSN_ENV} is not set but {_BACKEND_ENV}=pgvector")
+    conn = psycopg.connect(dsn, autocommit=True)
+    _local.conn = conn
+    return conn
+
 
 #: Postgres caps hnsw.ef_search at 1000.
 _EF_MAX = 1000
