@@ -34,6 +34,8 @@ networks:
 
 volumes:
   argus-data:
+  ollama-models:
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_ollama-models
 
   # EXTERNAL on purpose: these hold model weights and compiled kernels, and a
   # compose-managed volume is removed by `docker compose down -v`. That is a
@@ -431,6 +433,17 @@ services:
     # Do NOT set this below the model's working set or it will thrash: the
     # limit bounds the cache, it does not make the model smaller.
     mem_limit: ${LLAMACPP_MEM_LIMIT:-0}
+    # A CEILING ON CORES, matched to -t in LLAMACPP_EXTRA_ARGS.
+    #
+    # Without it the engine and any other CPU work (embedding, indexing) can
+    # together saturate all 24 logical CPUs. Measured on this box: an embedding
+    # batch at ~8 cores alongside the engine took the package to 94 C, which is
+    # a cooling problem long before it is a throughput one.
+    #
+    # 16 is the physical core count here and the value -t is set to; going
+    # higher does not help anyway (docs/MODELS.md: hyperthreads are 2.13x
+    # SLOWER). Leaves 8 logical CPUs for everything else.
+    cpus: ${LLAMACPP_CPUS:-16}
     <<: *gpu-reservation
     healthcheck:
       test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:8080/health"]
@@ -621,6 +634,51 @@ services:
   # offline tarball in dist/ so a target host needs no build toolchain.
   # ============================================================================
 
+  # ============================================================================
+  # EMBEDDINGS (profiles: argus, embed)
+  #
+  # Argus's semantic layer calls Ollama for every vector -- argus/embed.py
+  # defaults to http://localhost:11434 -- but Ollama appeared in no compose
+  # file, no .env.example and no config.yaml. The semantic index was therefore
+  # not buildable from this stack at all, whichever database stores the result.
+  #
+  # CPU ON PURPOSE. The inference engine already holds ~20.5 GB of a 24 GB
+  # card, and nomic-embed-text is a 137M-parameter model: putting it on the GPU
+  # buys little and risks a CUDA OOM in the engine, which is the service people
+  # actually notice. Embedding is batch work where throughput matters and
+  # latency does not.
+  #
+  # Not routed through Traefik: nothing outside the compose network needs it.
+  # ============================================================================
+  ollama:
+    image: ollama/ollama:0.5.7
+    container_name: ollama
+    profiles: [argus, embed]
+    restart: unless-stopped
+    networks: [llm-net]
+    environment:
+      # One model, kept resident: the alternative is paying the load cost on
+      # every batch during a full index build.
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      # Threads inside Ollama as well as the cgroup cap below: the cap alone
+      # throttles, but the process still spawns a thread per core and thrashes.
+      OLLAMA_NUM_PARALLEL: "1"
+    # Embedding is throughput work with no latency requirement, and it ran at
+    # 767% CPU unbounded -- the single biggest contributor to a 94 C package.
+    # 4 cores keeps a full index build well inside the thermal envelope; raise
+    # OLLAMA_CPUS if the box has cooling headroom to spare.
+    cpus: ${OLLAMA_CPUS:-4}
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    logging: *default-logging
+
   argus:
     image: argus:${ARGUS_VERSION:-0.1.0-rc1}
     container_name: argus
@@ -640,6 +698,11 @@ services:
       - --allowed-host=argus
       - --allowed-host=argus:*
     environment:
+      # Without this argus/embed.py falls back to localhost:11434, which inside
+      # a container is the container itself.
+      ARGUS_OLLAMA_URL: ${ARGUS_OLLAMA_URL:-http://ollama:11434}
+      ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
+      ARGUS_EMBED_DIM: ${ARGUS_EMBED_DIM:-768}
       # Privileged service token: reads every repository the index covers.
       ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:-}
     volumes:
