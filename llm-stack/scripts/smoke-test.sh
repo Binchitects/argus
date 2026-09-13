@@ -15,7 +15,7 @@ get() { grep -E "^$1=" .env | head -n1 | cut -d= -f2- | tr -d '[:space:]'; }
 if [ "${1:-}" = "--gateway" ]; then
   BASE="http://localhost:$(get LITELLM_PORT)"
   KEY="$(get LITELLM_MASTER_KEY)"
-  MODEL="local"
+  MODEL="$(get MODEL_NAME)"
 else
   BASE="http://localhost:$(get VLLM_PORT)"
   KEY="$(get VLLM_API_KEY)"

@@ -47,7 +47,8 @@ say() { printf '  %s\n' "$1"; }
 
 # ---------------------------------------------------------------------------
 say "staging files"
-cp docker-compose.yml .env.example "$PKG/"
+cp docker-compose.yml "$PKG/"
+mkdir -p "$PKG/env-samples" && cp env-samples/*.env "$PKG/env-samples/"
 [[ -f README.md ]] && cp README.md "$PKG/"
 [[ -f Makefile ]] && cp Makefile "$PKG/"
 [[ -f .gitignore ]] && cp .gitignore "$PKG/"
@@ -70,7 +71,7 @@ done
 touch "$PKG/models/.gitkeep"
 
 # Config: templates and provisioning only. Anything generated or secret is
-# rebuilt on the target by bootstrap/gen-certs/gen-auth.
+# rebuilt on the target by the tls-init and auth-init services.
 for d in prometheus alertmanager grafana loki promtail litellm homepage postgres argus; do
   [[ -d "config/$d" ]] && cp -r "config/$d" "$PKG/config/"
 done
@@ -80,7 +81,7 @@ cp config/traefik/dynamic/*.yml "$PKG/config/traefik/dynamic/" 2>/dev/null
 touch "$PKG/config/traefik/certs/.gitkeep" "$PKG/config/traefik/auth/.gitkeep"
 
 mkdir -p "$PKG/config/authelia"
-cp config/authelia/configuration.yml "$PKG/config/authelia/" 2>/dev/null
+cp config/authelia/configuration.template.yml "$PKG/config/authelia/" 2>/dev/null
 cp config/authelia/team.yml "$PKG/config/authelia/" 2>/dev/null
 
 # ---------------------------------------------------------------------------
@@ -98,9 +99,9 @@ say "checking for secrets"
 FAIL=0
 
 while IFS= read -r f; do
-  # .env.example is the template and is meant to ship; anything else
-  # matching these names carries real material.
-  [ "${f#$PKG/}" = ".env.example" ] && continue
+  # env-samples/*.env are templates with empty SECRETS and are meant to ship;
+  # anything else matching these names carries real material.
+  case "${f#$PKG/}" in env-samples/*.env) continue ;; esac
   case "$f" in
     */.env|*/.env.*|*/users.yml|*/clients.yml|*.key|*.pem|*/api-keys.txt|*.htpasswd)
       printf '  %sWOULD SHIP SECRET FILE: %s%s\n' "$red" "${f#$PKG/}" "$off"; FAIL=1 ;;
@@ -154,9 +155,8 @@ say "The recipient runs:"
 say "  unzip llmservice-${VERSION}.zip && cd llmservice"
 say "  docker load < dist/argus-*.tar.gz"
 say "  ./scripts/install-requirements.sh   # or install-requirements.ps1"
-say "  ./scripts/setup.sh                  # or .\scripts\setup.ps1 on Windows"
+say "  cp env-samples/<model>.<gpu>.env .env   # then fill in SECRETS"
+say "  docker compose up -d"
 say ""
-say "  setup.sh asks for the domain, model, profiles and per-person budgets,"
-say "  then runs bootstrap, gen-auth and compose in order. --dry-run prints"
-say "  the plan and changes nothing. See docs/SETUP.md."
+say "  .env is the whole configuration. See README.md."
 echo

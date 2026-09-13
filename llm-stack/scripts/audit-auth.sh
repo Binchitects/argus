@@ -13,7 +13,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$ROOT"
 export MSYS_NO_PATHCONV=1
 
-CA="config/traefik/certs/ca.crt"
+CA="config/traefik/certs/tls.crt"
 DOM="$(grep -E '^LLM_DOMAIN=' .env | cut -d= -f2- | tr -d '[:space:]')"; DOM="${DOM:-llm.localhost}"
 USER_NAME="admin"
 PASS="$(grep -E '^AUTHELIA_ADMIN_PASSWORD=' .env | cut -d= -f2- | tr -d '[:space:]')"
@@ -57,9 +57,10 @@ echo
 # establishes a FIRST factor, so under two_factor the correct expectation
 # inverts: a 1FA session must be REFUSED. Without this the audit reports
 # hardening as breakage and everyone learns to ignore it.
-CONF="config/authelia/configuration.yml"
+CONF="config/authelia/configuration.template.yml"
 domain_policy() {  # host -> one_factor|two_factor|bypass
-  tr -d '\r' < "$CONF" | awk -v h="$1.$DOM" '
+  # Authelia expands {{ env "LLM_DOMAIN" }} at startup; do the same here.
+  tr -d '\r' < "$CONF" | sed "s/{{ env \"LLM_DOMAIN\" }}/$DOM/g" | awk -v h="$1.$DOM" '
     /^ *- domain:/ {inblk=1; found=0}
     inblk && $0 ~ h {found=1}
     inblk && /policy:/ && found {gsub(/.*policy: .|.$/,""); print; exit}

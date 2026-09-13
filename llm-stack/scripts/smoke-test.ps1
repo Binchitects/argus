@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Uses curl.exe rather than Invoke-RestMethod. Windows PowerShell's .NET TLS
-    stack fails against this stack's private CA and restricted cipher list
+    stack fails against this stack's self-signed certificate and restricted cipher list
     ("Could not create SSL/TLS secure channel"); curl.exe handles it with
     --cacert and ships with Windows 10+.
 
@@ -35,7 +35,7 @@ foreach ($line in (Get-Content '.env')) {
     if ($line -match '^\s*([A-Z0-9_]+)=(.*)$') { $envMap[$matches[1]] = $matches[2].Trim() }
 }
 $dom = $envMap['LLM_DOMAIN']; if (-not $dom) { $dom = 'llm.localhost' }
-$ca = Join-Path $root 'config/traefik/certs/ca.crt'
+$ca = Join-Path $root 'config/traefik/certs/tls.crt'
 
 if ($Direct) {
     $base = "https://api.$dom"
@@ -49,7 +49,7 @@ if ($Direct) {
     $model = 'local'
 }
 
-# --ssl-no-revoke: the private CA publishes no CRL or OCSP responder, and
+# --ssl-no-revoke: the self-signed certificate has no CRL or OCSP responder, and
 # schannel treats "revocation status unknown" as a hard failure.
 $common = @('--ssl-no-revoke', '--cacert', $ca, '-s')
 

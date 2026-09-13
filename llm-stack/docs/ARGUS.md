@@ -1,5 +1,10 @@
 # Argus
 
+> **Deploying:** the top-level README is authoritative. This is a reference and
+> a record of measurements; commands here that call `setup.sh`, `bootstrap`,
+> `gen-auth`, `get-models` or `switch-model` predate v1.12, where `.env` and
+> `docker compose up` replaced those scripts.
+
 Argus is a code index and documentation server. It answers questions about
 **your** repositories and about **public API documentation**, and it exposes
 both through the Model Context Protocol (MCP) so an agent can call them as

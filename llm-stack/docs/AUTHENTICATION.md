@@ -141,120 +141,47 @@ export TOKEN=$(./scripts/get-token.sh --audience gateway)
 
 ## Managing users
 
-### Declarative (recommended)
+**Use the admin panel** at `https://admin.<LLM_DOMAIN>`. Signed in as an admin you
+can add a person (a password and an API key are generated and shown once), set
+their credit, issue a new key (the old one stops working), and reset a password.
+Everyone else who signs in sees only their own usage and a password form.
 
-`config/authelia/team.yml` is the source of truth for who has access. It holds
-no passwords or hashes, so it is safe to commit and review in a pull request.
+The account list is `config/authelia/users.yml`. The `auth-init` service creates
+it on the very first start with a single `admin` account whose password is
+`AUTHELIA_ADMIN_PASSWORD`, and never touches it again; after that the panel owns
+it. Passwords are argon2id hashes; the plaintext is never written to disk.
 
-```yaml
-users:
-  - username: admin
-    displayname: Administrator
-    email: admin@llm.localhost
-    groups:
-      - admins
+Groups: `admins` reaches everything including the infrastructure endpoints
+(metrics, alerts, logs); `users` gets chat, Grafana and their own panel page.
 
-  - username: alice
-    displayname: Alice Example
-    email: alice@example.com
-    groups:
-      - users
-```
+**There is no delete button.** To remove someone, delete their block from
+`config/authelia/users.yml` (Authelia reloads it within a minute) and delete their
+gateway user and keys:
 
 ```bash
-./scripts/gen-auth.sh --sync-dry-run    # show the plan, change nothing
+curl -X POST https://gateway.<LLM_DOMAIN>/user/delete -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' -d '{"user_ids":["alice@example.com"]}'
 ```
 
-```bash
-./scripts/gen-auth.sh --sync            # make users.yml match team.yml
-```
+**On Linux** Authelia watches `users.yml` and a change is live within a minute.
+**On Docker Desktop (Windows) it is not:** inotify events do not cross its bind
+mounts, so run `docker compose restart authelia` after adding someone.
 
-Reconciliation rules:
+### Password only (`one_factor`), by decision
 
-| Situation | Action |
-|---|---|
-| In `team.yml`, not in `users.yml` | **CREATE** — random password, printed once |
-| In both | password **kept**, groups / displayname / email **updated** |
-| In `users.yml`, not in `team.yml` | **REMOVE** — access revoked |
+Every surface uses `one_factor`: username and password. Two-factor was shipped
+once and removed at the operator's request. To require TOTP again for a surface,
+change its `policy` to `two_factor` in `config/authelia/configuration.template.yml`
+and each person enrols a device from the portal (with no SMTP configured, the
+enrolment link is written to `/data/notification.txt` inside the authelia
+container).
 
-Changing someone's group is just editing their `groups:` and re-syncing; their
-password hash is preserved untouched. Offboarding is deleting their block.
-
-The sync **refuses to run if no user is left in `admins`**, since that would
-lock you out of Prometheus, Alertmanager and the Traefik dashboard.
-
-New passwords are shown exactly once and are not recoverable — hand them over
-promptly. To reset one, delete the user, sync, re-add, sync again.
-
-Groups: `admins` reaches everything including the infrastructure endpoints;
-`users` gets chat and Grafana only.
-
-### One-off
-
-```bash
-./scripts/gen-auth.sh --add-user alice --password 'their-password' --groups admins
-```
-
-Passwords are stored as argon2id hashes; the plaintext is never written to
-disk.
-
-**On Linux** Authelia watches `users.yml` and the change is live within a
-minute, with no restart.
-
-**On Windows this does not work.** inotify events do not cross Docker Desktop's
-bind mounts, so a host-side edit never reaches the watcher and the new user is
-reported as *"user not found"* indefinitely. Restart the container after any
-`--add-user` or `--sync`:
-
-```bash
-docker restart authelia
-```
-
-This is a Docker Desktop file-sharing limitation, not an Authelia setting —
-`watch: true` is already enabled in `configuration.yml` and works correctly on
-the Linux target host.
-
-Remove a user by deleting their block from `config/authelia/users.yml`.
-
-### 2FA is ON. Enrol before you need it
-
-This is no longer something you switch on -- `two_factor` is the shipped policy
-for the admin panel, the infra hosts (metrics, alerts, logs, cadvisor, node,
-gpu, s3) and the Grafana, Open WebUI and Langfuse clients.
-
-**A user with no TOTP device cannot reach any of them.** Enrol first:
-
-```bash
-docker exec -it authelia authelia storage user totp generate <username> --config /config/configuration.yml
-```
-
-That prints an `otpauth://` URI and a QR code to scan. It also OVERWRITES any
-existing device for that user, so do not run it on someone who is already
-enrolled unless you mean to reset them.
-
-The portal route works too -- sign in and it offers to register a device. No
-SMTP is configured, so the verification link is written to a file rather than
-emailed:
-
-```bash
-docker exec authelia cat /data/notification.txt
-```
-
-Check who is enrolled:
-
-```bash
-docker exec authelia authelia storage user totp export csv --config /config/configuration.yml
-```
-
-**`api.` and `gateway.` deliberately stay `one_factor`.** Authelia treats a
+**Keep `api.` and `gateway.` at `one_factor` even then.** Authelia treats a
 `client_credentials` token as 1FA by definition, so requiring a second factor
-there denies every machine caller while looking like a hardening win. Machine
-access is bounded by the key or token instead -- see "As a machine" above.
+there denies every machine caller while looking like a hardening win.
 
-To relax a surface, change its `policy` in
-`config/authelia/configuration.template.yml` -- the TEMPLATE, not the generated
-`configuration.yml`. `gen-auth.sh` renders the template, so an edit to the
-output survives until the next run and then silently reverts.
+`configuration.template.yml` is loaded by Authelia directly -- there is no
+generated `configuration.yml` any more -- so an edit takes effect on the next
+`docker compose up -d authelia`.
 
 ---
 
@@ -282,15 +209,14 @@ The trade-off is that CLI tools must resolve `*.llm.localhost` — run
 
 | Path | What it is | In git? |
 |---|---|---|
-| `config/authelia/configuration.yml` | Policies, session, access rules | yes |
-| `config/authelia/clients.yml` | OIDC clients + signing key | **no** — generated |
-| `config/authelia/users.yml` | Users and password hashes | **no** — generated |
-| `config/authelia/secrets/` | OIDC RSA private key | **no** |
-| `scripts/gen-auth.sh` | Generates all of the above | yes |
+| `config/authelia/configuration.template.yml` | Policies, session, access rules; Authelia fills in the domain | yes |
+| `config/authelia/clients.yml` | OIDC clients + signing key | **no** — rebuilt by `auth-init` on every start |
+| `config/authelia/users.yml` | Users and password hashes | **no** — created once by `auth-init`, then the panel's |
+| `config/authelia/secrets/` | OIDC RSA private key | **no** — generated once by `auth-init` |
 | `scripts/get-token.sh` | Machine-client token helper | yes |
 
-`clients.yml` and `users.yml` are gitignored because they contain the OIDC
-signing key and password hashes.
+The client secrets themselves live in `.env` (`*_OIDC_CLIENT_SECRET`); `auth-init`
+hashes them into `clients.yml`, so the apps and Authelia can never disagree.
 
 ---
 
@@ -310,7 +236,7 @@ per OIDC client; the machine client-credentials grant plus authorised and
 unauthorised API access; that forwardAuth denies anonymous requests; and that
 the same requests succeed with a session cookie.
 
-Run it after any change to `configuration.yml`, `clients.yml`, or an app's
+Run it after any change to `configuration.template.yml`, `.env` secrets, or an app's
 OAuth settings.
 
 ---
@@ -323,15 +249,10 @@ secrets, but the app containers still hold the values baked in when they were
 created. Nothing in the config looks wrong, and an audit that reads `.env` will
 happily pass while every real login fails.
 
-`scripts/gen-auth.sh` no longer rotates a secret that already exists in `.env`
-(only `--force` does), and `scripts/audit-auth.sh` step 0 compares each
-container's secret against `.env`. If it reports STALE:
-
-```bash
-docker compose up -d --force-recreate grafana open-webui langfuse
-```
-
-Any time you run `gen-auth.sh --force`, recreate those three afterwards.
+`clients.yml` is rebuilt from `.env` on every start, so the usual cause now is a
+secret changed in `.env` while an app container kept the old value.
+`scripts/audit-auth.sh` step 0 compares each container's secret against `.env`.
+If it reports STALE, `docker compose up -d` recreates the apps with the new value.
 
 **`No email found in user object` (or the app complains a claim is missing).**
 Authelia keeps `email`, `name` and `groups` in the **userinfo endpoint** by
@@ -347,8 +268,8 @@ identity_providers:
         id_token: ['email', 'email_verified', 'name', 'preferred_username', 'groups']
 ```
 
-and `claims_policy: 'with_profile'` on each client. `scripts/gen-auth.sh` does
-this for the three app clients. Verify with `./scripts/audit-auth.sh`, which
+and `claims_policy: 'with_profile'` on each client. `auth-init` does this for
+the three app clients. Verify with `./scripts/audit-auth.sh`, which
 prints the claims that actually arrive.
 
 **Login redirects to a consent screen every time.** Expected for third-party
@@ -358,7 +279,7 @@ clients, pointless for first-party apps you own. The generated clients use
 
 
 **Changing config appears to do nothing.** Authelia does **not** hot-reload
-`configuration.yml` or `clients.yml` — only `users.yml` is watched. Restart it:
+`configuration.template.yml` or `clients.yml` — only `users.yml` is watched. Restart it:
 
 ```bash
 docker compose up -d --force-recreate authelia
@@ -380,7 +301,7 @@ routed. This is intended behaviour, not a bug.
 **`invalid_client` from the token endpoint.** Either the `api` client is not
 registered in the *running* Authelia instance (restart it), or
 `API_OIDC_CLIENT_SECRET` in `.env` does not match the hash in `clients.yml`.
-Regenerate both together with `./scripts/gen-auth.sh --force`.
+`docker compose up -d authelia` reruns `auth-init`, which rebuilds the hash from `.env`.
 
 **`invalid_client` at the token exchange, after the user already logged in.**
 The login itself succeeded and Authelia issued a code; the *client* failed to
@@ -448,15 +369,12 @@ curl -o /dev/null -w '%{http_code}
 Note the consequence: setting these to the proxy hostname means the **direct
 ports no longer work for interactive login**. Use the hostnames.
 
-**Browser certificate warnings.** Trust the private CA once:
-
-```powershell
-.\scripts\gen-certs.ps1 -Trust
-```
+**Browser certificate warnings.** Expected once per browser: the certificate is
+self-signed (generated by `tls-init`). Accept it; it does not change on restart.
 
 **`curl` fails with a TLS error on Windows.** Windows `curl` uses the schannel
-backend, which refuses a private CA because it cannot check revocation. Add
-`--ssl-no-revoke --cacert config/traefik/certs/ca.crt`. Also note `*.localhost`
+backend, which cannot check revocation for a self-signed certificate. Add
+`--ssl-no-revoke --cacert config/traefik/certs/tls.crt`. Also note `*.localhost`
 does not resolve in CLI tools, hence `--resolve host:443:127.0.0.1`.
 
 ---

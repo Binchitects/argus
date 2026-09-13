@@ -131,8 +131,7 @@ def main() -> int:
     # a crash mid-`--force-recreate` left the engine on the old model while
     # the gateway advertised the new one, and this check passed anyway
     # because `local` was present in both.
-    model_for_tools = "local" if "local" in gw_models else (
-        gw_models[0] if gw_models else "local")
+    model_for_tools = gw_models[0] if gw_models else os.environ.get("MODEL_NAME", "")
     unusable = []
     for name in gw_models:
         try:
@@ -304,7 +303,7 @@ def main() -> int:
                {"user_id": email, "key_alias": f"e2e-{stamp}"}, token=MASTER)["key"]
     record("per-person key minted", bool(key))
 
-    model = "local" if "local" in gw_models else (gw_models[0] if gw_models else "local")
+    model = gw_models[0] if gw_models else os.environ.get("MODEL_NAME", "")
 
     # --- API path attributes ---------------------------------------------
     before = spend(email)

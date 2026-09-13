@@ -1,5 +1,10 @@
 # Pointing Hermes at this stack
 
+> **Deploying:** the top-level README is authoritative. This is a reference and
+> a record of measurements; commands here that call `setup.sh`, `bootstrap`,
+> `gen-auth`, `get-models` or `switch-model` predate v1.12, where `.env` and
+> `docker compose up` replaced those scripts.
+
 Two independent halves: **the model**, served by the gateway, and **Argus**,
 an MCP server for code and documentation lookup. Either works without the
 other.
@@ -30,9 +35,9 @@ gateway exists for. Mint yours with:
 ./scripts/llm-users.sh --apply       # prints each person's key once
 ```
 
-**Prefer `local` over the checkpoint name.** `local` is an alias that follows
-whatever the engine is serving, so `switch-model` does not strand your config
-pointing at a model that is no longer loaded.
+**Use the model's real name** (`MODEL_NAME` in `.env`, e.g. `Qwen3.8-Flash-Next`).
+The gateway lists that one name and nothing else; the old `local` alias is gone.
+After switching models, update the name in the client too.
 
 ## Hermes needs 64K, and that decides the engine
 
@@ -64,8 +69,8 @@ cannot be accessed from Triton (cpu tensor?)`.
 > justifies a second engine at all — at equal 4-bit precision GGUF packs
 > smaller than AWQ safetensors, and on a card with no headroom that difference
 > is the whole window. The GGUF route is now served by the **llamacpp** engine
-> profile, in a container like everything else; see
-> [SETUP.md](SETUP.md#choosing-an-inference-engine).
+> profile, in a container like everything else; see the deployment section of
+> the top-level README.
 
 So the GGUF build is the one that fits. Whichever engine serves it claims the
 same card, so **exactly one engine runs** — they cannot share it. vLLM is still
@@ -106,7 +111,8 @@ absorb that. 131,072 loads unaided with about 2.6 GB spare. To take the full
 window anyway:
 
 ```bash
-./scripts/setup.sh --defaults --set LLM_ENGINE=llamacpp   --set LLAMACPP_CONTEXT=262144 --set LLAMACPP_KV_TYPE=q4_0
+# in .env:  MODEL_CONTEXT=262144  LLAMACPP_KV_TYPE=q4_0   then:
+docker compose up -d
 ```
 
 Everything here was verified **by retrieval, not by loading** — the engine will
@@ -243,14 +249,14 @@ unless-stopped` brings it back after a reboot. If measurements ever stop making
 physical sense, check `nvidia-smi` for a process nobody meant to leave running
 before believing the numbers.
 
-**Hermes needs the stack CA in its own bundle.** `SSL_CERT_FILE` and
+**Hermes needs the stack's certificate in its own bundle.** `SSL_CERT_FILE` and
 `REQUESTS_CA_BUNDLE` point at `~/AppData/Local/hermes/ca-bundle.pem`, which
-ships ~120 public roots and knows nothing about a local CA. Without the stack's
-CA appended, every call fails as a bare **"Connection error"** that names
+ships ~120 public roots and knows nothing about a self-signed certificate. Without
+the stack's certificate appended, every call fails as a bare **"Connection error"** that names
 neither TLS nor the certificate:
 
 ```bash
-cat llm-stack/config/traefik/certs/ca.crt >> ~/AppData/Local/hermes/ca-bundle.pem
+cat llm-stack/config/traefik/certs/tls.crt >> ~/AppData/Local/hermes/ca-bundle.pem
 ```
 
 This hides behind the context check, which runs first and needs no network —

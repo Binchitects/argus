@@ -60,15 +60,16 @@ metrics:
 # ------------------------------------------------------------------------------
 # Real certificates (production domains only).
 #
-# The shipped setup uses a private CA under config/traefik/certs, which is the
-# only option for `llm.localhost`: `.localhost` is a reserved TLD (RFC 6761) and
-# no public CA will ever issue for it, nor for any name that does not resolve
-# publicly. That is a property of the domain, not a gap in this config -- a
-# private CA is CORRECT here, and clients must trust config/traefik/certs/ca.crt.
+# The shipped setup serves a self-signed certificate that the tls-init service
+# generates on first `up` (config/traefik/dynamic/tls.yml). That is the only
+# option for `llm.localhost`: `.localhost` is a reserved TLD (RFC 6761) and no
+# public CA will ever issue for it, nor for any name that does not resolve
+# publicly. Browsers warn once; API clients either trust
+# config/traefik/certs/tls.crt or skip verification.
 #
 # When this stack moves to a real domain with public DNS, uncomment the resolver
-# below, set LLM_DOMAIN, re-run scripts/gen-certs (or delete the static cert
-# entries in dynamic/tls.yml so ACME serves them), and add to each router:
+# below, set LLM_DOMAIN, delete the defaultCertificate entry in dynamic/tls.yml so
+# ACME serves the certificates, and add to each router:
 #     traefik.http.routers.<name>.tls.certresolver=letsencrypt
 #
 # httpChallenge needs :80 reachable from the internet; use dnsChallenge instead

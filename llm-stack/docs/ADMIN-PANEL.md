@@ -64,7 +64,7 @@ enough to lock the owner out of their own account.
 
 argon2id with Authelia's own parameters — `m=65536, t=3, p=4`, 32-byte hash,
 16-byte salt. Entries the panel writes are indistinguishable from ones written
-by `scripts/gen-auth.sh`.
+by the `auth-init` service.
 
 This is worth verifying if the parameters ever change, because a mismatch is
 accepted when written and rejected at login — a failure nobody notices until

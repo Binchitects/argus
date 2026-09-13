@@ -2,23 +2,20 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help bootstrap up down restart logs health smoke bench ps config pull clean backup gpu alerts
+.PHONY: help up down restart logs health smoke bench ps config pull clean backup gpu alerts
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-bootstrap: ## One-time setup: check Docker/GPU, create .env, generate secrets
-	@./scripts/bootstrap.sh
-
-up: ## Start the stack and wait for the model to load
-	@./scripts/up.sh
+up: ## Start the stack (the whole deployment: cp env-samples/<one>.env .env first)
+	@docker compose up -d
 
 down: ## Stop the stack, keeping all volumes
 	@docker compose --profile "*" down --remove-orphans
 
 restart: ## Recreate only the inference container
-	@docker compose up -d --force-recreate vllm
+	@docker compose up -d --force-recreate llamacpp
 
 logs: ## Follow logs (make logs S=vllm for one service)
 	@docker compose logs -f --tail 100 $(S)

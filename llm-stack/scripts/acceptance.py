@@ -5,7 +5,7 @@
 gateway, attribution, budgets, Argus. This runs from the HOST and covers what
 that cannot see: real TLS through Traefik, the routes a browser would use, the
 identity provider, the observability stack, and the operational promises
-(backup works, setup is re-runnable, no placeholder secrets shipped).
+(backup works, every env-sample is a complete deployment, no placeholder secrets).
 
 It calls e2e-check rather than reimplementing it -- one copy of that logic.
 
@@ -89,7 +89,7 @@ DOMAIN = env("LLM_DOMAIN", "llm.localhost")
 HTTPS_PORT = env("TRAEFIK_HTTPS_PORT", "443")
 HTTP_PORT = env("TRAEFIK_HTTP_PORT", "80")
 PROFILES = env("COMPOSE_PROFILES", "")
-CA = ROOT / "config/traefik/certs/ca.crt"
+CA = ROOT / "config/traefik/certs/tls.crt"
 SUFFIX = "" if HTTPS_PORT == "443" else f":{HTTPS_PORT}"
 
 
@@ -98,7 +98,7 @@ def url(host: str, path: str = "/") -> str:
 
 
 def ctx() -> ssl.SSLContext:
-    """Verify against the stack's OWN CA -- never disable verification, since
+    """Verify against the stack's OWN certificate -- never disable verification, since
     'does TLS actually work for a client' is one of the things under test."""
     return ssl.create_default_context(cafile=str(CA))
 
@@ -114,12 +114,12 @@ def check_config() -> None:
     section("A. Configuration hygiene")
 
     if not (ROOT / ".env").exists():
-        record("config", ".env exists", "FAIL", "run scripts/setup.sh")
+        record("config", ".env exists", "FAIL", "cp env-samples/<one>.env .env")
         return
     record("config", ".env exists", "PASS")
 
     # Shipping a placeholder secret is the difference between a demo and a
-    # deliverable. bootstrap writes real values; anything left is a bug.
+    # deliverable; anything left is a bug.
     text = (ROOT / ".env").read_text(encoding="utf-8", errors="replace")
     placeholders = [l.split("=", 1)[0] for l in text.splitlines()
                     if "change-me" in l and not l.lstrip().startswith("#")]
@@ -127,9 +127,12 @@ def check_config() -> None:
            "PASS" if not placeholders else "FAIL",
            "" if not placeholders else ", ".join(placeholders[:5]))
 
-    # The rendered files must agree with LLM_DOMAIN. A stale domain here is the
-    # failure that breaks SSO while every container still reports healthy.
-    for rel in ("config/authelia/configuration.yml", "config/homepage/services.yaml"):
+    # These files must agree with LLM_DOMAIN. A stale domain here is the failure
+    # that breaks SSO while every container still reports healthy. Authelia's
+    # two files name the domain only as {{ env "LLM_DOMAIN" }}, so ANY literal
+    # hostname in them is stale by definition.
+    for rel in ("config/authelia/configuration.template.yml", "config/authelia/clients.yml",
+                "config/homepage/services.yaml"):
         p = ROOT / rel
         if not p.exists():
             record("config", f"{Path(rel).name} rendered", "SKIP", "not present")
@@ -157,7 +160,8 @@ def check_config() -> None:
 
 # ------------------------------------------------------- B. infrastructure ---
 EXPECTED = {
-    "": ["open-webui", "prometheus", "grafana", "alertmanager", "node-exporter", "cadvisor"],
+    "": ["open-webui", "prometheus", "grafana", "alertmanager", "node-exporter", "power-limits"],
+    "cadvisor": ["cadvisor"],
     "proxy": ["traefik"],
     "gateway": ["litellm", "postgres", "redis"],
     "auth": ["authelia"],
@@ -203,11 +207,12 @@ ROUTES = [
     ("gateway", "/v1/models", {200, 401}, ""),
     ("grafana", "/", {200, 302}, ""),
     ("auth", "/", {200, 302}, "auth"),
-    # 302 ONLY, and that narrowness is the point: this request carries no
-    # session, so Authelia must bounce it to the portal. A 200 here would mean
+    # Denied, and never 200: this request carries no session. Authelia answers
+    # a browser (Accept: text/html, or curl's */*) with a 302 to the portal and
+    # a bare client like this one with 401 -- both are refusals. A 200 would mean
     # forward-auth was bypassed and an anonymous caller reached a page that can
-    # mint API keys -- exactly the failure worth catching automatically.
-    ("admin", "/", {302}, "auth"),
+    # mint API keys, which is exactly the failure worth catching automatically.
+    ("admin", "/", {302, 401}, "auth"),
     ("argus", "/healthz", {200, 401}, "argus"),
 ]
 
@@ -215,9 +220,9 @@ ROUTES = [
 def check_routes() -> None:
     section("C. TLS and routing (as a browser sees it)")
     if not CA.exists():
-        record("routes", "stack CA present", "FAIL", str(CA))
+        record("routes", "stack certificate present", "FAIL", str(CA))
         return
-    record("routes", "stack CA present", "PASS", CA.name)
+    record("routes", "stack certificate present", "PASS", CA.name)
 
     for host, path, allowed, profile in ROUTES:
         if profile and profile not in PROFILES:
@@ -404,38 +409,52 @@ def check_e2e() -> None:
 def check_operations() -> None:
     section("G. Operational promises")
 
-    # Model weights must survive a teardown, or every redeploy is an hours-long
-    # download. This is a property of the compose file, so assert it there.
-    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8", errors="replace")
-    ext = compose.count("external: true")
-    record("ops", "model caches declared external (survive `down -v`)",
-           "PASS" if ext >= 2 else "FAIL", f"{ext} external volumes")
-
     record("ops", "backup script present",
            "PASS" if (ROOT / "scripts/backup.sh").exists() else "FAIL")
 
-    # Re-running setup must be a no-op, not a reset. Dry-run is enough to prove
-    # the guards fire without mutating a live stack.
-    code, out = sh("bash", "scripts/setup.sh", "--dry-run", "--defaults",
-                   "--domain", DOMAIN, timeout=900)
-    # --dry-run deliberately does NOT execute gen-certs/gen-auth, so their
-    # "already exists" messages cannot appear here -- asserting on them made a
-    # passing stack look broken. What dry-run does prove is that the whole flow
-    # completes on an already-configured stack without hitting a guard or a
-    # die(). The guards themselves are asserted separately below.
-    failed_guard = any(l.strip().startswith("X ") for l in out.splitlines())
-    reruns_ok = code == 0 and not failed_guard
-    detail = "dry-run completes on a configured stack" if reruns_ok else (
-        f"exit {code}; " + (out.strip().splitlines() or ["no output"])[-1][:80])
-    record("ops", "setup.sh re-run is non-destructive",
-           "PASS" if reruns_ok else "FAIL", detail)
+    # `docker compose up` is the whole deployment, so .env must resolve with no
+    # required value missing -- compose names the first one it hits, this names
+    # them all.
+    code, out = sh("docker", "compose", "config", "--variables", timeout=120)
+    missing = []
+    if code == 0:
+        envvals = {l.split("=", 1)[0]: l.split("=", 1)[1] for l in
+                   (ROOT / ".env").read_text(encoding="utf-8").splitlines() if "=" in l and not l.startswith("#")}
+        for line in out.splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "true" and not envvals.get(parts[0]):
+                missing.append(parts[0])
+    record("ops", ".env sets every required variable", "PASS" if code == 0 and not missing else "FAIL",
+           ", ".join(missing[:6]) if missing else "")
 
-    # The Authelia key/volume trap must be guarded, not merely documented.
-    setup = (ROOT / "scripts/setup.sh").read_text(encoding="utf-8", errors="replace")
+    # Every shipped sample must be a complete deployment: with its SECRETS
+    # filled in, compose must resolve it and nothing else may be required.
+    samples = sorted((ROOT / "env-samples").glob("*.env"))
+    bad = []
+    for smp in samples:
+        body = smp.read_text(encoding="utf-8")
+        filled = "\n".join((l + "x" * 32) if (l.endswith("=") and l.split("=")[0] not in
+                             ("HF_TOKEN", "GPU_POWER_LIMIT_W", "CPU_POWER_LIMIT_W", "ARGUS_GITLAB_URL",
+                              "ARGUS_GITLAB_TOKEN", "LLAMACPP_ENGINE_URL", "LLAMACPP_ENGINE_SHA256",
+                              "LLAMACPP_MTP_HEAD", "LLAMACPP_MTP_ARGS")) else l
+                            for l in body.splitlines())
+        tmp = ROOT / f".acceptance-{smp.name}"
+        tmp.write_text(filled, encoding="utf-8")
+        try:
+            c, o = sh("docker", "compose", "--env-file", str(tmp), "config", "-q", timeout=120)
+        finally:
+            tmp.unlink(missing_ok=True)
+        if c != 0:
+            bad.append(f"{smp.name}: {(o.strip().splitlines() or ['?'])[-1][:70]}")
+    record("ops", f"all {len(samples)} env-samples are complete deployments",
+           "PASS" if samples and not bad else "FAIL", "; ".join(bad[:2]))
+
+    # The traps that used to need a setup script are now handled inside compose.
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8", errors="replace")
     record("ops", "Authelia key/database mismatch is guarded",
-           "PASS" if "undecryptable" in setup else "FAIL")
-    record("ops", "host port conflict is detected before start",
-           "PASS" if "already published by container" in setup else "FAIL")
+           "PASS" if "AUTHELIA_STORAGE_ENCRYPTION_KEY differs" in compose else "FAIL")
+    record("ops", "model files are verified before the engine starts",
+           "PASS" if "model-init:" in compose and "service_completed_successfully" in compose else "FAIL")
 
 
 def main() -> int:

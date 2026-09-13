@@ -98,7 +98,7 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 }
 
 # ---------------------------------------------------------------------------
-Step 'Git Bash (needed by gen-auth / get-token / audit-auth)'
+Step 'Git Bash (needed by get-token / audit-auth)'
 $gitBash = @(
     "$env:ProgramFiles\Git\bin\bash.exe",
     "${env:ProgramFiles(x86)}\Git\bin\bash.exe",

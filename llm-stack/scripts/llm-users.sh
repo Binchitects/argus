@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-[ -f .env ] || { echo "no .env here -- copy .env.example first" >&2; exit 1; }
+[ -f .env ] || { echo "no .env here -- cp env-samples/<one>.env .env first" >&2; exit 1; }
 # Only the two variables this needs, rather than sourcing the whole file:
 # .env holds every secret in the stack and most of them have no business in
 # this process's environment.
@@ -42,7 +42,7 @@ if [[ -z "${LITELLM_URL:-}" ]]; then
   else
     LITELLM_URL="https://gateway.$_dom:$_port"
   fi
-  _ca="config/traefik/certs/ca.crt"
+  _ca="config/traefik/certs/tls.crt"
   if [[ -f "$_ca" ]]; then
     # urllib (sync-llm-users.py) reads SSL_CERT_FILE; requests reads the other.
     export SSL_CERT_FILE="$PWD/$_ca" REQUESTS_CA_BUNDLE="$PWD/$_ca"

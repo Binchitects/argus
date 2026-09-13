@@ -223,7 +223,7 @@ done
 # ---------------------------------------------------------------------------
 step "Linux defaults in .env"
 if [[ ! -f .env ]]; then
-  warn ".env not present yet - run ./scripts/bootstrap.sh, then re-run this"
+  warn ".env not present yet - cp env-samples/<one>.env .env, fill in SECRETS, then re-run this"
 else
   set_env() {
     # Honour --check-only: this function is the only thing that writes .env.
@@ -250,8 +250,8 @@ else
   if [[ -n "$DOMAIN" ]]; then
     set_env LLM_DOMAIN "$DOMAIN"
     ok "LLM_DOMAIN=$DOMAIN"
-    warn "remember: certificate paths in config/traefik/dynamic/tls.yml reference"
-    warn "the domain name, and a public domain wants a real CA - see docs/LINUX.md"
+    warn "the certificate follows the domain automatically; a public domain wants"
+    warn "a real CA - see the certificatesResolvers block in config/traefik/traefik.yml"
   fi
 
   # A server is usually reached from elsewhere; loopback-only would lock you out
@@ -295,7 +295,8 @@ else
 fi
 echo
 echo "  Next:"
-echo "    ./scripts/bootstrap.sh     # .env, secrets, certificates"
+echo "    cp env-samples/<one>.env .env   # then fill in SECRETS"
+echo "    docker compose up -d"
 echo "    ./scripts/up.sh            # start the stack"
 echo
 exit $ISSUES

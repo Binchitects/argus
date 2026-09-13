@@ -1,5 +1,10 @@
 # Models: choosing a build for your GPU
 
+> **Deploying:** the top-level README is authoritative. This is a reference and
+> a record of measurements; commands here that call `setup.sh`, `bootstrap`,
+> `gen-auth`, `get-models` or `switch-model` predate v1.12, where `.env` and
+> `docker compose up` replaced those scripts.
+
 The quantisation format is decided by your card's **compute capability**, not by
 preference. Getting this wrong does not degrade gracefully — vLLM refuses to
 start.
@@ -307,8 +312,8 @@ any released vLLM. The reasoning matters more than the verdict, because the
 usual intuitions about model size do not apply, and because "does it fit"
 depends entirely on which engine you ask.
 
-Select it with `scripts/setup.sh` and answer `llamacpp` at the engine prompt;
-see [SETUP.md](SETUP.md#choosing-an-inference-engine).
+Deploy it with `env-samples/qwen3.8-flash-next.rtx3090.env` (or the RTX 5090 one):
+copy it to `.env`, fill in the secrets, `docker compose up -d`.
 
 ### Why a 177B model is even a candidate
 

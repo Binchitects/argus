@@ -1,5 +1,10 @@
 # Per-person API keys, quotas and usage accounting
 
+> **Deploying:** the top-level README is authoritative. This is a reference and
+> a record of measurements; commands here that call `setup.sh`, `bootstrap`,
+> `gen-auth`, `get-models` or `switch-model` predate v1.12, where `.env` and
+> `docker compose up` replaced those scripts.
+
 Every person gets their own API key, their own ceiling, and one usage total
 that counts their API calls **and** their chat messages together.
 
@@ -233,10 +238,9 @@ cache instead.
 
 vLLM claims `VLLM_GPU_MEMORY_UTILIZATION` of the card at startup, so nothing
 else can load beside it — on a 24 GB card an 8B and a 27B cannot coexist, and
-the llama.cpp engine cannot run alongside either. `scripts/switch-model` changes which model is
-loaded; the gateway's `model:` values must keep matching
-`--served-model-name`, or requests 404 at the engine while the gateway looks
-healthy.
+the llama.cpp engine cannot run alongside either. `MODEL_NAME` in `.env` names the one
+model; the engine, the gateway and Open WebUI all take it from there, so they cannot
+disagree. Switch models by editing `.env` and running `docker compose up -d`.
 
 ## Limitations worth knowing
 
