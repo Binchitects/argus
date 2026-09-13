@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .. import acl
+from .. import access, acl
 from ..config import Config
 from ..store import writes
 from ..store.db import connect, connect_audit, migrate
@@ -36,6 +36,14 @@ HEALTHZ_PATH = "/healthz"
 #: all and the prefix is not exempted from BearerAuthMiddleware, so the surface
 #: does not exist rather than existing unprotected. That is the default.
 ADMIN_PREFIX = "/admin/"
+#: The shared credential Open WebUI presents (see BearerAuthMiddleware._chat_client).
+CHAT_TOKEN_ENV = "ARGUS_CHAT_CLIENT_TOKEN"
+#: Who is asking, as Open WebUI forwards it (ENABLE_FORWARD_USER_INFO_HEADERS).
+CHAT_EMAIL_HEADER = "x-openwebui-user-email"
+#: Authelia's account file, to map a chat user's email to their sign-in username.
+USERS_FILE_ENV = "ARGUS_AUTHELIA_USERS_FILE"
+#: Present on anything that came through Traefik.
+_PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-host", "x-real-ip")
 ADMIN_TOKEN_ENV = "ARGUS_ADMIN_TOKEN"
 
 
@@ -171,6 +179,33 @@ class BearerAuthMiddleware:
         self.app = app
         self.cfg = cfg
         self.client = client
+        self._directory: access.MemberDirectory | None = None
+
+    # ------------------------------------------------------------------ chat
+    # Open WebUI calls Argus for whoever is signed in, but can send only one
+    # shared credential. It proves it is the chat client with CHAT_TOKEN_ENV and
+    # names the person in CHAT_EMAIL_HEADER; access is then read from GitLab
+    # membership with the service credential (argus.access) -- read-only, no
+    # admin or sudo.
+    #
+    # The email header is trusted ONLY with that token, and ONLY on a request
+    # that did not come through the reverse proxy. Open WebUI calls
+    # http://argus:7700 inside the compose network; anything arriving via
+    # Traefik carries X-Forwarded-For, so the token leaking to a browser still
+    # cannot be used to claim someone else's email.
+    def _chat_client(self, token: str) -> bool:
+        expected = os.environ.get(CHAT_TOKEN_ENV, "")
+        return bool(expected) and hmac.compare_digest(token, expected)
+
+    def _resolve_chat_person(self, email: str) -> acl.Identity:
+        if self._directory is None:
+            self._directory = access.MemberDirectory(self.cfg.gitlab, client=self.client)
+        conn = connect(self.cfg.index.db_path)
+        try:
+            return access.resolve_person(conn, self._directory, email,
+                                         users_file=os.environ.get(USERS_FILE_ENV))
+        finally:
+            conn.close()
 
     def _resolve_identity(self, token: str) -> acl.Identity:
         """Open a connection, resolve the identity, close the connection.
@@ -254,7 +289,15 @@ class BearerAuthMiddleware:
             return
 
         try:
-            identity = await run_in_threadpool(self._resolve_identity, token)
+            if self._chat_client(token):
+                headers = Headers(scope=scope)
+                if any(h in headers for h in _PROXY_HEADERS):
+                    raise acl.AclDenied("The chat-client credential is accepted only from inside "
+                                        "the stack's network, not through the proxy.")
+                identity = await run_in_threadpool(
+                    self._resolve_chat_person, headers.get(CHAT_EMAIL_HEADER, ""))
+            else:
+                identity = await run_in_threadpool(self._resolve_identity, token)
         except acl.AclDenied as exc:
             await self._audit_denied()
             await unauthorized(str(exc))(scope, receive, send)

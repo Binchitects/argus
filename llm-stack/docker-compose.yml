@@ -1145,6 +1145,13 @@ services:
       # the prefix is not exempted from bearer auth, i.e. the surface does not
       # exist. Generate one and share it with the admin panel only.
       ARGUS_ADMIN_TOKEN: ${ARGUS_ADMIN_TOKEN:-}
+      # Open WebUI's credential. With it, Argus answers for the person signed
+      # into chat -- their GitLab membership, read with the read-only service
+      # token; no admin or sudo. Empty = chat cannot use Argus.
+      ARGUS_CHAT_CLIENT_TOKEN: ${ARGUS_CHAT_CLIENT_TOKEN:-}
+      # Maps a chat user's email to their sign-in username, which must equal
+      # their GitLab username (GitLab's public email is the fallback).
+      ARGUS_AUTHELIA_USERS_FILE: /authelia/users.yml
       ARGUS_OLLAMA_URL: ${ARGUS_OLLAMA_URL:-http://ollama:11434}
       ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
       ARGUS_EMBED_DIM: ${ARGUS_EMBED_DIM:-768}
@@ -1158,6 +1165,9 @@ services:
       # pack estate that already exist on the host, add the override file:
       #   docker compose -f docker-compose.yml -f deploy/argus-local.yml up -d
       - argus-data:/var/lib/argus
+      # The directory, not the file: a single-file mount pins an inode, and the
+      # admin panel replaces users.yml atomically (see authelia).
+      - ./config/authelia:/authelia:ro
     # GitLab runs on the host, not in this compose project.
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -1303,6 +1313,19 @@ services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
+    # Argus as a tool in chat. Registered only when the argus profile is on and
+    # ARGUS_CHAT_CLIENT_TOKEN is set; otherwise chat simply has no Argus tool.
+    # Open WebUI connects inside the network (http://argus:7700) and forwards
+    # the signed-in person's email (ENABLE_FORWARD_USER_INFO_HEADERS), so Argus
+    # shows each person only the repositories their GitLab account can read.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        if [ -n "$$ARGUS_CHAT_CLIENT_TOKEN" ] && [[ ",$$COMPOSE_PROFILES," == *",argus,"* ]]; then
+          export TOOL_SERVER_CONNECTIONS='[{"type":"mcp","url":"http://argus:7700/mcp","path":"","auth_type":"bearer","key":"'"$$ARGUS_CHAT_CLIENT_TOKEN"'","config":{"enable":true},"info":{"id":"argus","name":"Argus","description":"Your organisation code (what your GitLab account can read) and SDK/WDK/C++ documentation"}}]'
+        fi
+        exec bash start.sh
     restart: unless-stopped
     networks: [llm-net]
     # No published ports: Traefik is the only way in. Re-add a mapping
@@ -1336,6 +1359,8 @@ services:
       # who chats. That is the point -- it cannot bill a person it cannot
       # name -- but it is the one privacy-relevant thing this file forwards.
       ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      ARGUS_CHAT_CLIENT_TOKEN: ${ARGUS_CHAT_CLIENT_TOKEN:-}
+      COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
       ENABLE_OLLAMA_API: "false"
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY}
       WEBUI_NAME: LLMService

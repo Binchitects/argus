@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import logging
 import time
 from collections.abc import Callable
@@ -10,7 +11,7 @@ from typing import Any, TypeVar
 from mcp.server.fastmcp import Context, FastMCP
 from starlette.concurrency import run_in_threadpool
 
-from .. import acl
+from .. import access, acl
 from ..config import Config
 from ..embed import EMBED_DIM, EMBED_MODEL, EmbeddingUnavailable, embed_batch
 from ..packs import format as pack_format
@@ -310,6 +311,63 @@ def _scoped(conn, identity, branch: str | None):
     return scoped
 
 
+class AccessNotice(LookupError):
+    """Nothing the caller may read matched, but something they may not read did.
+
+    A LookupError so run_readonly passes it through and FastMCP returns its
+    message to the agent, which relays it: "you do not have access to X; ask
+    these maintainers". Names repositories and maintainers only, never content.
+    """
+
+
+def _denied_matches(conn: Any, identity: acl.Identity, branch: str | None,
+                    run: Callable[[list[int]], list]) -> list[tuple[str, int, int]]:
+    """(path_with_namespace, gitlab_id, count) of matches in repos the caller cannot read."""
+    allowed = set(identity.allowed_repo_ids)
+    denied = [int(r["id"]) for r in conn.execute("SELECT id FROM repos").fetchall()
+              if int(r["id"]) not in allowed]
+    if not denied:
+        return []
+    scoped = queries.scope_to_branch(denied, conn, branch)
+    if not scoped:
+        return []
+    rows = run(scoped)
+    if not rows:
+        return []
+    marks = ",".join("?" for _ in scoped)
+    meta = {int(r["id"]): (r["path_with_namespace"], int(r["gitlab_id"])) for r in conn.execute(
+        f"SELECT id, path_with_namespace, gitlab_id FROM repos WHERE id IN ({marks})", scoped)}
+    by_path = {path: (path, gid) for path, gid in meta.values()}
+    counts: dict[tuple[str, int], int] = {}
+    for row in rows:
+        row = dict(row)
+        key = meta.get(row.get("repo_id")) if row.get("repo_id") is not None else \
+            by_path.get(row.get("repo") or row.get("path_with_namespace"))
+        if key is not None:
+            counts[key] = counts.get(key, 0) + 1
+    return sorted(((p, g, n) for (p, g), n in counts.items()), key=lambda t: (-t[2], t[0]))
+
+
+def _raise_if_only_denied(conn, identity, branch, notices, run) -> None:
+    """Called when the caller's own result is empty: explain a permission gap, if that is what it is."""
+    if notices is None:
+        return
+    denied = _denied_matches(conn, identity, branch, run)
+    if denied:
+        raise AccessNotice(access.no_access_message(denied, notices))
+
+
+def _raise_if_repo_denied(conn, identity, repo_id: int, notices) -> None:
+    """get_file/repo_map on a repository that exists but the caller cannot read."""
+    if notices is None or repo_id in set(identity.allowed_repo_ids):
+        return
+    row = conn.execute("SELECT path_with_namespace, gitlab_id FROM repos WHERE id = ?",
+                       (repo_id,)).fetchone()
+    if row is not None:
+        raise AccessNotice(access.no_access_message(
+            [(row["path_with_namespace"], int(row["gitlab_id"]), 1)], notices))
+
+
 async def code_contracts_impl(db_path: Path | str, identity: acl.Identity,
                               source: str, branch: str | None = None,
                               limit: int = 40) -> list[dict]:
@@ -340,18 +398,23 @@ async def semantic_search_impl(db_path, identity, query: str,
 
 async def find_symbol_impl(db_path: Path | str, identity: acl.Identity, name: str,
                             kind: str | None = None,
-                            branch: str | None = None) -> list[dict]:
-    rows = await run_readonly(
-        db_path,
-        lambda conn: queries.find_symbol(_scoped(conn, identity, branch), conn,
-                                         name, kind=kind),
-    )
+                            branch: str | None = None,
+                            notices: access.MemberDirectory | None = None) -> list[dict]:
+    def _run(conn: Any) -> list:
+        rows = queries.find_symbol(_scoped(conn, identity, branch), conn, name, kind=kind)
+        if not rows:
+            _raise_if_only_denied(conn, identity, branch, notices,
+                                  lambda ids: queries.find_symbol(ids, conn, name, kind=kind))
+        return rows
+
+    rows = await run_readonly(db_path, _run)
     return [dict(row) for row in rows]
 
 
 async def find_references_impl(db_path: Path | str, identity: acl.Identity,
                                name: str,
-                               branch: str | None = None) -> list[dict]:
+                               branch: str | None = None,
+                               notices: access.MemberDirectory | None = None) -> list[dict]:
     # queries.find_references already returns list[dict] (unlike the other
     # three, which return list[sqlite3.Row]) -- no conversion needed.
     #
@@ -369,6 +432,8 @@ async def find_references_impl(db_path: Path | str, identity: acl.Identity,
         scoped = _scoped(conn, identity, branch)
         rows = queries.find_references(scoped, conn, name)
         if not rows:
+            _raise_if_only_denied(conn, identity, branch, notices,
+                                  lambda ids: queries.find_references(ids, conn, name))
             return rows
         # Built from the branch-SCOPED ids, not the whole allowlist. Once a
         # project can be indexed at several refs it owns several repo rows
@@ -400,7 +465,8 @@ _DANGLING_REGEX_SUGGESTION = ", or use regex=True."
 
 
 async def search_code_impl(db_path: Path | str, identity: acl.Identity, query: str,
-                           branch: str | None = None) -> list[dict]:
+                           branch: str | None = None,
+                           notices: access.MemberDirectory | None = None) -> list[dict]:
     # queries.QueryError's message is otherwise already actionable prompt
     # text (see queries.py) and FastMCP's tool dispatch turns any exception
     # raised here into an isError=True CallToolResult carrying str(exc) --
@@ -408,12 +474,15 @@ async def search_code_impl(db_path: Path | str, identity: acl.Identity, query: s
     # regex=True suggestion needs to be caught and rewritten; everything else
     # about the message is left alone.
     try:
-        rows = await run_readonly(
-            db_path,
-            lambda conn: queries.search_code(_scoped(conn, identity, branch),
-                                             conn, query),
-        )
-    except UnknownBranch:
+        def _run(conn: Any) -> list:
+            rows = queries.search_code(_scoped(conn, identity, branch), conn, query)
+            if not rows:
+                _raise_if_only_denied(conn, identity, branch, notices,
+                                      lambda ids: queries.search_code(ids, conn, query))
+            return rows
+
+        rows = await run_readonly(db_path, _run)
+    except (UnknownBranch, AccessNotice):
         # A QueryError subclass, so it would otherwise be caught below and
         # rebuilt as a plain QueryError -- losing the type before the caller
         # ever sees it. Nothing here needs rewriting; the message is already
@@ -426,17 +495,20 @@ async def search_code_impl(db_path: Path | str, identity: acl.Identity, query: s
 
 
 async def get_file_impl(db_path: Path | str, identity: acl.Identity, repo_id: int,
-                         path: str) -> dict[str, Any]:
-    result = await run_readonly(
-        db_path,
-        lambda conn: queries.get_file(identity.allowed_repo_ids, conn, repo_id, path),
-    )
+                         path: str,
+                         notices: access.MemberDirectory | None = None) -> dict[str, Any]:
+    def _run(conn: Any):
+        _raise_if_repo_denied(conn, identity, repo_id, notices)
+        return queries.get_file(identity.allowed_repo_ids, conn, repo_id, path)
+
+    result = await run_readonly(db_path, _run)
     if result is None:
         # queries.get_file returns exactly None for both "no such repo_id in
-        # your allowlist" and "no such path in that repo" -- deliberately not
-        # distinguished (see queries.py), so this message must not imply
-        # which one it was; doing so would let a caller use this tool as an
-        # oracle for which repo ids exist.
+        # your allowlist" and "no such path in that repo". With access notices
+        # on (the default for a served stack), a repo that exists but is not
+        # readable was already reported above by name, with its maintainers --
+        # the operator chose telling people whom to ask over hiding that a
+        # repository exists. With notices off, this stays non-committal.
         raise LookupError(
             f"No file at repo_id={repo_id}, path={path!r}. Either that repo "
             "id is not one you have access to, or that path does not exist "
@@ -454,11 +526,13 @@ async def index_status_impl(db_path: Path | str, identity: acl.Identity) -> list
 
 
 async def repo_map_impl(db_path: Path | str, identity: acl.Identity,
-                        repo_id: int) -> dict[str, Any]:
-    return await run_readonly(
-        db_path,
-        lambda conn: queries.repo_map(identity.allowed_repo_ids, conn, repo_id),
-    )
+                        repo_id: int,
+                        notices: access.MemberDirectory | None = None) -> dict[str, Any]:
+    def _run(conn: Any):
+        _raise_if_repo_denied(conn, identity, repo_id, notices)
+        return queries.repo_map(identity.allowed_repo_ids, conn, repo_id)
+
+    return await run_readonly(db_path, _run)
 
 
 async def which_repo_impl(db_path: Path | str, identity: acl.Identity,
@@ -974,6 +1048,11 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
     """
     db_path = cfg.index.db_path
     packs_dir = cfg.packs_dir
+    # Tell people WHICH repository holds what they asked about and who maintains
+    # it, when they cannot read it. On by default; ARGUS_ACCESS_NOTICES=0 turns
+    # it off, restoring the non-committal "nothing found".
+    notices = (access.MemberDirectory(cfg.gitlab)
+               if os.environ.get("ARGUS_ACCESS_NOTICES", "1") != "0" else None)
 
     @server.tool(name="docs_find", description=_docs_find_desc(packs_dir))
     async def docs_find(description: str, lang: str | None = None) -> list[dict]:
@@ -1052,7 +1131,7 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         return await _with_audit(
             db_path, "find_symbol", identity,
             {"name": name, "kind": kind, "branch": branch},
-            lambda: find_symbol_impl(db_path, identity, name, kind=kind,
+            lambda: find_symbol_impl(db_path, identity, name, kind=kind, notices=notices,
                                      branch=branch),
         )
 
@@ -1063,7 +1142,7 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         return await _with_audit(
             db_path, "find_references", identity,
             {"name": name, "branch": branch},
-            lambda: find_references_impl(db_path, identity, name, branch=branch),
+            lambda: find_references_impl(db_path, identity, name, branch=branch, notices=notices),
         )
 
     @server.tool(name="search_code", description=_SEARCH_CODE_DESC)
@@ -1072,7 +1151,7 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         identity = _identity(ctx)
         return await _with_audit(
             db_path, "search_code", identity, {"query": query, "branch": branch},
-            lambda: search_code_impl(db_path, identity, query, branch=branch),
+            lambda: search_code_impl(db_path, identity, query, branch=branch, notices=notices),
         )
 
     @server.tool(name="get_file", description=_GET_FILE_DESC)
@@ -1080,7 +1159,7 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         identity = _identity(ctx)
         return await _with_audit(
             db_path, "get_file", identity, {"repo_id": repo_id, "path": path},
-            lambda: get_file_impl(db_path, identity, repo_id, path),
+            lambda: get_file_impl(db_path, identity, repo_id, path, notices=notices),
         )
 
     @server.tool(name="index_status", description=_INDEX_STATUS_DESC)
@@ -1096,7 +1175,7 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         identity = _identity(ctx)
         return await _with_audit(
             db_path, "repo_map", identity, {"repo_id": repo_id},
-            lambda: repo_map_impl(db_path, identity, repo_id),
+            lambda: repo_map_impl(db_path, identity, repo_id, notices=notices),
         )
 
     @server.tool(name="which_repo", description=_WHICH_REPO_DESC)

@@ -136,29 +136,58 @@ Each of these used to be a script you had to run in the right order.
 | **`nvidia-container-toolkit`** | Without it every GPU service fails with `could not select device driver`. `sudo ./scripts/install-requirements.sh` installs it and Docker. |
 | **Your user in the `docker` group** | And log out and back in: group membership is fixed at login. |
 | **A stable mount for the checkout** | See "The reboot trap" below. |
+| **For Argus: a GitLab and a read-only token** | See "Connecting tools to Argus". |
 | **RAM for a MoE model** | See "RAM" below. 64 GB works for Flash-Next; more is faster. |
 
-### Using it
+### Addresses
 
-| URL | what | sign-in |
+| address | what | sign-in |
 |---|---|---|
-| `https://chat.llm.localhost` | Open WebUI | SSO |
-| `https://admin.llm.localhost` | people, credit, API keys, model | SSO; the console needs `admins` |
+| `https://admin.llm.localhost` | people, API keys, credit, the Model card, indexing | SSO; the console needs `admins` |
+| `https://chat.llm.localhost` | Open WebUI, with Argus as a tool | SSO |
 | `https://grafana.llm.localhost` | dashboards | SSO |
-| `https://gateway.llm.localhost/v1` | OpenAI-compatible API | **the person's own API key** |
+| `https://gateway.llm.localhost/v1` | OpenAI-compatible API for tools | **the person's own API key** |
+| `https://argus.llm.localhost/mcp` | Argus MCP server (profile `argus`) | **the person's own GitLab token** |
 | `https://metrics.llm.localhost` · `alerts.` | Prometheus, Alertmanager | SSO, `admins` only |
 | `https://auth.llm.localhost` | login portal | — |
 
-**API clients** use `https://gateway.<LLM_DOMAIN>/v1`, a key from the admin panel,
-and the model's real name — `MODEL_NAME` in `.env`, e.g. `Qwen3.8-Flash-Next`. The
-gateway lists that one model and nothing else.
+Sign in as `admin` with the password from `.env`:
 
-**Qwen Code** — add a provider to `~/.qwen/settings.json`:
+```bash
+grep AUTHELIA_ADMIN_PASSWORD .env
+```
+
+Replace `llm.localhost` with your `LLM_DOMAIN`. Browsers resolve `*.localhost` by
+themselves; **curl, Python, Node and every SDK on another machine do not** — run
+`sudo ./scripts/setup-hosts.sh` there, or add the names to that machine's hosts file.
+
+### Connecting tools to the API
+
+Create the person in the admin panel; it shows their API key once. Every
+OpenAI-compatible tool needs the same four things:
+
+| setting | value |
+|---|---|
+| base URL | `https://gateway.llm.localhost/v1` |
+| API key | that person's key (never `LITELLM_MASTER_KEY`: it has no budget and bills nobody) |
+| model | `MODEL_NAME` from `.env`, e.g. `Qwen3.8-Flash-Next` |
+| certificate | trust `llm-stack/config/traefik/certs/tls.crt` |
+
+The certificate is self-signed, so each runtime needs to be told about it:
+curl `--cacert <file>`, Python `SSL_CERT_FILE=<file>`, Node
+`NODE_EXTRA_CA_CERTS=<file>`. A TLS error that looks like the stack is down is
+almost always this.
+
+```bash
+curl --cacert llm-stack/config/traefik/certs/tls.crt https://gateway.llm.localhost/v1/chat/completions -H "Authorization: Bearer sk-YOURKEY" -H 'Content-Type: application/json' -d '{"model":"Qwen3.8-Flash-Next","messages":[{"role":"user","content":"hi"}],"max_tokens":300}'
+```
+
+**Qwen Code** — `~/.qwen/settings.json` (the `mcpServers` part adds Argus, below):
 
 ```json
 {
   "env": {
-    "LOCAL_LLM_API_KEY": "sk-...your key...",
+    "LOCAL_LLM_API_KEY": "sk-YOURKEY",
     "NODE_EXTRA_CA_CERTS": "/path/to/llm-stack/config/traefik/certs/tls.crt"
   },
   "modelProviders": {
@@ -171,13 +200,83 @@ gateway lists that one model and nothing else.
         "generationConfig": { "contextWindowSize": 262144 }
       }
     ]
+  },
+  "mcpServers": {
+    "argus": {
+      "httpUrl": "https://argus.llm.localhost/mcp",
+      "headers": { "Authorization": "Bearer YOUR_GITLAB_PAT" }
+    }
   }
 }
 ```
 
-Then `qwen -m Qwen3.8-Flash-Next`. `NODE_EXTRA_CA_CERTS` is not optional: Node
-ignores the system trust store, and without it every request fails with a TLS
-error that looks like the stack is down.
+Then `qwen -m Qwen3.8-Flash-Next`.
+
+**Hermes** — see [llm-stack/docs/HERMES.md](llm-stack/docs/HERMES.md); use the model's
+real name and append `tls.crt` to Hermes's own CA bundle.
+
+**Anything else** (OpenAI SDK, IDE plugins, other agents) takes the same base URL,
+key and model.
+
+### Connecting tools to Argus
+
+Argus is an MCP server at `https://argus.llm.localhost/mcp` (compose profile
+`argus`). **Each developer authenticates with their own GitLab personal access
+token** (`read_api`) as a Bearer token, and Argus shows them only the repositories
+that token can read.
+
+```bash
+claude mcp add --transport http argus https://argus.llm.localhost/mcp --header "Authorization: Bearer YOUR_GITLAB_PAT"
+```
+
+Qwen Code: the `mcpServers` block above. Any other MCP client: the same URL and header.
+
+**To make Argus work on a deployment:**
+
+1. Add `argus` to `COMPOSE_PROFILES` in `.env`.
+2. Set `ARGUS_GITLAB_URL` and `ARGUS_GITLAB_TOKEN`. The token is **read-only**:
+   `read_api` and `read_repository`, for an account that is at least Reporter in every
+   project you want indexed. Argus never needs admin or sudo.
+3. `docker compose up -d`, then start an index run from the admin panel's
+   **Indexing** card.
+
+### Argus in Open WebUI
+
+With the `argus` profile on and `ARGUS_CHAT_CLIENT_TOKEN` set (the samples list it
+under SECRETS), Open WebUI registers Argus as a tool. In a chat, enable **Argus**
+from the tools button beside the message box.
+
+It answers **per person**, like the developer path. Open WebUI can send only one
+shared credential, so it proves it is the chat client with `ARGUS_CHAT_CLIENT_TOKEN`
+and forwards the signed-in person's email; Argus reads that person's GitLab project
+memberships with the read-only service token. Two rules follow:
+
+- **A person's chat username must equal their GitLab username.** Argus maps the
+  email to the sign-in username in Authelia, then to the GitLab account with that
+  username; GitLab's *public* email is the fallback. A read-only token cannot see
+  private emails, so there is no other way to match. Use the GitLab username when
+  you add someone in the admin panel.
+- **The chat-client token only works from inside the stack.** Open WebUI calls
+  `http://argus:7700` on the compose network; the same token arriving through
+  Traefik is refused, so a leaked token cannot claim someone else's email.
+
+### When someone has no access
+
+Argus does not answer "nothing found" when the only matches are in repositories
+the person cannot read. It says which repositories hold them and who maintains
+each, and tells them to ask a maintainer for Reporter access — for example:
+
+```
+Nothing you have access to matches this, but it does exist in 1 repository you cannot read:
+- platform/billing (3 matches) -- maintainers: @olive (Olive Owner), @max (Max Maint)
+Tell the person asking that they do not have access, and that they can ask a maintainer
+listed above to add them in GitLab with at least Reporter access. Argus picks the change
+up within 10 minutes.
+```
+
+Only repository names and maintainers are disclosed, never a path, symbol or line.
+Reading a file or repository map in an unreadable repository gives the same message.
+`ARGUS_ACCESS_NOTICES=0` on the argus service restores a plain "nothing found".
 
 ### Switching the model
 
