@@ -89,8 +89,9 @@ Pick the sample that matches your model and card:
 | `qwen3.8-27b.rtx3090.env` | Qwen3.8-27B, dense | RTX 3090 24 GB | 17.6 GB | measured here |
 | `qwen3.8-27b.rtx5090.env` | Qwen3.8-27B, dense | RTX 5090 32 GB | 17.6 GB | derived, not measured |
 
-Then fill in the secrets. This fills every empty value in the SECRETS section and
-nothing else; the two LiteLLM keys get the `sk-` prefix they require:
+Then make the secrets. No sample ships one; every empty value in the SECRETS section
+has a comment saying how to make it, and this fills them all at once (the two LiteLLM
+keys get the `sk-` prefix they require):
 
 ```bash
 awk '/^# SECRETS/{s=1} /^# PEOPLE/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' .env > .env.new && mv .env.new .env && chmod 600 .env
@@ -110,6 +111,10 @@ The first start downloads the model, checks every file against the SHA-256 that
 Hugging Face publishes, then starts the engine. Open `https://admin.llm.localhost`
 and sign in as `admin` with `AUTHELIA_ADMIN_PASSWORD` from `.env`. The browser warns
 once about the self-signed certificate; accept it.
+
+**Adding a setup** for another model or card is one file: copy the closest sample,
+edit its header and its MODEL block, and check it. Step by step, with how to choose
+each value: [llm-stack/env-samples/README.md](llm-stack/env-samples/README.md).
 
 ### What `docker compose up` does before anything serves
 
