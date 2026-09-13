@@ -66,113 +66,257 @@ Full walkthrough: **[docs/production.md](docs/production.md)**.
 
 ---
 
-## Deploying it — read this part
+## Deploying the LLM stack — read this part
 
-Every item below cost someone an hour. They are in the order they bite.
+`llm-stack/` is a complete self-hosted LLM service: a GPU inference engine, a chat
+UI, an API gateway with a key and a budget per person, single sign-on, an admin
+panel and dashboards. **The whole deployment is one `.env` file and
+`docker compose up`.** There is no setup script.
+
+### Three steps
+
+```bash
+cd llm-stack
+cp env-samples/qwen3.8-flash-next.rtx3090.env .env
+```
+
+Pick the sample that matches your model and card:
+
+| sample | model | card | first-start download | status |
+|---|---|---|---|---|
+| `qwen3.8-flash-next.rtx3090.env` | Qwen3.8-Flash-Next, 177B MoE | RTX 3090 24 GB + 64 GB RAM | 94 GB | measured here |
+| `qwen3.8-flash-next.rtx5090.env` | Qwen3.8-Flash-Next, 177B MoE | RTX 5090 32 GB + 64 GB RAM | 94 GB | derived, not measured |
+| `qwen3.8-27b.rtx3090.env` | Qwen3.8-27B, dense | RTX 3090 24 GB | 17.6 GB | measured here |
+| `qwen3.8-27b.rtx5090.env` | Qwen3.8-27B, dense | RTX 5090 32 GB | 17.6 GB | derived, not measured |
+
+Then fill in the secrets. This fills every empty value in the SECRETS section and
+nothing else; the two LiteLLM keys get the `sk-` prefix they require:
+
+```bash
+awk '/^# SECRETS/{s=1} /^# PEOPLE/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' .env > .env.new && mv .env.new .env && chmod 600 .env
+```
+
+Set `LLAMACPP_MODEL_DIR` to a directory **on NVMe** with room for the download, then:
+
+```bash
+docker compose up -d
+```
+
+```bash
+docker logs -f model-init
+```
+
+The first start downloads the model, checks every file against the SHA-256 that
+Hugging Face publishes, then starts the engine. Open `https://admin.llm.localhost`
+and sign in as `admin` with `AUTHELIA_ADMIN_PASSWORD` from `.env`. The browser warns
+once about the self-signed certificate; accept it.
+
+### What `docker compose up` does before anything serves
+
+Each of these used to be a script you had to run in the right order.
+
+| service | does, from `.env` |
+|---|---|
+| `tls-init` | generates the self-signed certificate for `LLM_DOMAIN` and `*.LLM_DOMAIN`, keeps it, regenerates it if the domain changes |
+| `auth-init` | builds Authelia's OIDC key and clients, the admin account, and Traefik's basic-auth; refuses to start Authelia against a database encrypted with another key |
+| `model-init` | downloads and verifies the model; fails with the path in the message if a file is missing |
+| `prometheus-secrets` | gives Prometheus the engine's scrape token |
+| `power-limits` | applies `GPU_POWER_LIMIT_W` and `CPU_POWER_LIMIT_W`, and re-applies them after a reboot |
 
 ### Before you start
 
 | requirement | why, and what happens without it |
 |---|---|
-| **NVMe for model weights** | The engine `mmap`s the GGUF. On NVMe a 93 GB model serves at ~21 tok/s; on a 7200rpm SATA disk it is unusable, not merely slow. |
-| **`nvidia-container-toolkit`** | `docker-compose.yml` reserves `driver: nvidia`. Without it every GPU service fails with `could not select device driver`. Not in Ubuntu 26.04's repos — install from NVIDIA's. |
-| **Your user in the `docker` group** | And **log out and back in**. Group membership is fixed at login: `sudo usermod -aG docker $USER` does nothing for shells that are already open, which is a confusing 20 minutes. |
+| **NVMe for the model** | The engine memory-maps the GGUF and pages it in on demand. On NVMe Qwen3.8-Flash-Next serves at ~20 tok/s; on a spinning disk it is unusable. |
+| **`nvidia-container-toolkit`** | Without it every GPU service fails with `could not select device driver`. `sudo ./scripts/install-requirements.sh` installs it and Docker. |
+| **Your user in the `docker` group** | And log out and back in: group membership is fixed at login. |
 | **A stable mount for the checkout** | See "The reboot trap" below. |
+| **RAM for a MoE model** | See "RAM" below. 64 GB works for Flash-Next; more is faster. |
 
-### Deploy
+### Using it
 
-```bash
-git clone <this repo> && cd <repo>/llm-stack
-./scripts/setup.sh                  # interactive; --defaults to accept everything
-sudo ./scripts/setup-hosts.sh       # REQUIRED for curl/SDKs, see below
-./scripts/up.sh
+| URL | what | sign-in |
+|---|---|---|
+| `https://chat.llm.localhost` | Open WebUI | SSO |
+| `https://admin.llm.localhost` | people, credit, API keys, model | SSO; the console needs `admins` |
+| `https://grafana.llm.localhost` | dashboards | SSO |
+| `https://gateway.llm.localhost/v1` | OpenAI-compatible API | **the person's own API key** |
+| `https://metrics.llm.localhost` · `alerts.` | Prometheus, Alertmanager | SSO, `admins` only |
+| `https://auth.llm.localhost` | login portal | — |
+
+**API clients** use `https://gateway.<LLM_DOMAIN>/v1`, a key from the admin panel,
+and the model's real name — `MODEL_NAME` in `.env`, e.g. `Qwen3.8-Flash-Next`. The
+gateway lists that one model and nothing else.
+
+**Qwen Code** — add a provider to `~/.qwen/settings.json`:
+
+```json
+{
+  "env": {
+    "LOCAL_LLM_API_KEY": "sk-...your key...",
+    "NODE_EXTRA_CA_CERTS": "/path/to/llm-stack/config/traefik/certs/tls.crt"
+  },
+  "modelProviders": {
+    "openai": [
+      {
+        "id": "Qwen3.8-Flash-Next",
+        "name": "[Local] Qwen3.8-Flash-Next",
+        "baseUrl": "https://gateway.llm.localhost/v1",
+        "envKey": "LOCAL_LLM_API_KEY",
+        "generationConfig": { "contextWindowSize": 262144 }
+      }
+    ]
+  }
+}
 ```
+
+Then `qwen -m Qwen3.8-Flash-Next`. `NODE_EXTRA_CA_CERTS` is not optional: Node
+ignores the system trust store, and without it every request fails with a TLS
+error that looks like the stack is down.
+
+### Switching the model
+
+The admin panel's **Model** card (admins only) shows what is running and, for each
+sample, the exact `.env` block to paste and the command. Every model setting sits
+between `# >>> MODEL` and `# <<< MODEL`; replace that block, keep your own
+`LLAMACPP_MODEL_DIR`, and run `docker compose up -d`. A model not yet on disk is
+downloaded first. The engine, gateway and Open WebUI all take the name from
+`MODEL_NAME`, so they cannot disagree.
+
+The panel only shows the steps. Performing them would need the Docker socket, and
+a socket in a web app is root on the host for anyone who reaches it.
+
+### Measured
+
+On one machine: i7-13700K (16 physical cores), 61 GB RAM, RTX 3090, NVMe, with the
+power limits below applied. Every number comes from a script in `llm-stack/scripts/`.
+
+**Two people at once** — Qwen3.8-Flash-Next, 400-token answers through the gateway
+(`multiuser-bench.py`, medians of 3 rounds, repeated across 4 engine restarts):
+
+| | decode | time to first token |
+|---|---|---|
+| one person | **20.2 tok/s** | 0.3 s |
+| two people, each | **12.1 tok/s** | 2.0 s |
+| two people, combined | 24.4 tok/s (1.2× one) | |
+
+Other scenarios from the same script: a third request on two slots queued 18 s and then
+ran at full speed; secrets in two concurrent prompts never crossed (0 leaks in 3 rounds);
+a repeated 14,000-token prompt answered in 0.3 s from the prefix cache, for the other
+person too.
+
+**Qwen3.8-27B on the same 3090** — 131K context in 23.8 of 24 GB VRAM. **10.3 tok/s
+with MTP** (2 drafted tokens, ~70% accepted) against 6.8 without: for a dense model on
+the GPU, MTP is a 50% win. Measured at the 150 W GPU cap, which it hits; raise
+`GPU_POWER_LIMIT_W` for a 27B deployment.
+
+**Qwen Code on a large codebase** — Qt Creator 4.11.2 (12,091 files), headless, scored
+against answers fixed beforehand with grep (`qwen-code-realworld.py`). It found the
+text editor's duplicate-selection implementation at the right line in an 8,708-line
+file (247 s), and answered a question about the 222,876-line `sqlite3.c` correctly with
+grep and ranged reads instead of reading it whole (255 s; 63,345 of 74,100 prompt
+tokens served from the prefix cache).
+
+**Power limits.** This board shipped with Intel's CPU power limits removed (4095 W).
+Under two users the CPU held 93–97 °C, and fewer threads did not help — measured at
+16, 12, 10 and 8 — because package temperature follows the hottest core, and each busy
+core runs flat out. Capping power did:
+
+| two people, 16 threads | no caps | CPU 125 W, GPU 150 W |
+|---|---|---|
+| peak CPU temperature | 95 °C | **86 °C** |
+| samples at or above 90 °C | 17% | **0%** |
+| decode, one person / each of two | 20.4 / 12.2 tok/s | 20.2 / 11.8 tok/s |
+
+**MTP does not help Qwen3.8-Flash-Next here.** Four alternating runs, same build:
+off 20.3 / 12.2 tok/s (one / each of two), on 19.9 / 11.6. Each drafted token routes to
+different experts in system RAM, so verification multiplies the slow part. Mainline
+llama.cpp has no MTP graph for this architecture anyway (ggml-org/llama.cpp#28243);
+`LLAMACPP_ENGINE_URL` can run Unsloth's build that has one, and the stock image and
+that build measured the same within noise with MTP off.
+
+### RAM
+
+The model uses **all** of it, just not as "used". The engine memory-maps the GGUF, so
+the weights sit in the page cache, which `free` reports under `buff/cache`. With
+Flash-Next on this 61 GB machine: 58 GB of page cache holds the model while
+generating. Its CPU-side weights are about 76 GB, so ~20 GB of experts are paged in
+from NVMe on demand — 28 MB/s of reads and ~480 major page faults per second while
+decoding, against 14 when idle. More physical RAM removes that; no setting can pin
+more than you have. `--mlock` or `--no-mmap` on a model larger than RAM fails to load.
 
 ### The traps
 
-**`*.localhost` resolves in browsers but not in curl.** Browsers resolve any
-`*.localhost` to 127.0.0.1 by specification; curl, Python and every SDK do not,
-and nothing but Traefik publishes a port. Run `scripts/setup-hosts.sh` or every
-command-line call fails with a DNS error that looks like the stack is down.
+**`*.localhost` resolves in browsers but not in curl, Python or any SDK.** Run
+`sudo ./scripts/setup-hosts.sh`, or every command-line call fails with a DNS error that
+looks like the stack is down.
 
 **The reboot trap.** If the checkout lives on a removable or automounted volume,
-Docker's `restart: unless-stopped` will start the stack *before* the volume
-mounts, **create empty directories at the mountpoint**, and run against them —
-four containers dead, the rest serving nothing, everything reporting healthy.
-The stubs then block the real volume from mounting there. Traefik's config
-mounts use `create_host_path: false` so it refuses to start instead, but the
-durable fix is `/etc/fstab`:
+Docker's `restart: unless-stopped` starts the stack before the volume mounts and binds
+empty directories. Mount it from `/etc/fstab` with `x-systemd.before=docker.service`:
 
 ```
 UUID=<uuid>  /mnt/data  ntfs3  defaults,nofail,x-systemd.before=docker.service,uid=1000,gid=1000  0 0
 ```
 
-`x-systemd.before=docker.service` is the load-bearing part.
+**Never change `LITELLM_SALT_KEY` or `AUTHELIA_STORAGE_ENCRYPTION_KEY` after the first
+start.** Both encrypt stored data. Authelia's key encrypts its session database, and
+`auth-init` stops it with the command to reset that volume; LiteLLM's key encrypts
+credentials it stores in its database, which become unreadable.
 
-**Google's registries may be unreachable.** `gcr.io` and `registry.k8s.io`
-return 403 from some networks while Docker Hub and ghcr.io are fine. Compose
-aborts the *entire* parallel pull when one image fails, so one blocked sidecar
-leaves every other image unpulled and `up` then fails with `No such image`
-fourteen times. cadvisor is behind its own profile for this reason; enable it
-with `COMPOSE_PROFILES=...,cadvisor` only if `gcr.io` works for you.
+**A long paste stalls the other person.** A 28,500-token paste took 97 s to process,
+and a short question sent 2 s later waited 95 s behind it: the engine processes one
+prompt at a time. Chat-sized prompts are unaffected, and agents re-sending a
+conversation hit the prefix cache (a repeated 14,000-token prompt answered in 0.3 s).
 
-**Set `BIND_ADDRESS`.** It defaults to `0.0.0.0`, which serves the whole stack —
-chat, gateway, Grafana, admin panel — to your LAN behind a self-signed
-certificate. `BIND_ADDRESS=127.0.0.1` binds to loopback.
+**`docker compose down -v` deletes vLLM's model cache.** llama.cpp models live in
+`LLAMACPP_MODEL_DIR` on the host and are never deleted.
 
-### Tuning the engine — the three that matter
+**Open WebUI settings come from `.env` only.** `ENABLE_PERSISTENT_CONFIG=false`, so
+changes made in its admin UI do not survive a restart.
 
-**`-t` must be your PHYSICAL core count, never logical.** Measured twice on
-different machines. On a 13700K (16 physical / 24 logical):
+**Set `BIND_ADDRESS`.** The samples use `127.0.0.1`. `0.0.0.0` serves everything to
+your network.
 
-| `-t` | decode |
-|---|---|
-| 24 (all logical) | 10.16 tok/s |
-| **16 (all physical)** | **21.65 tok/s** |
-| 8 (P-cores only) | 17.94 tok/s |
+**`-t` must be the physical core count, never logical.** On the 13700K (16 physical,
+24 logical): 24 threads 10.2 tok/s, **16 threads 21.7**, 8 threads 17.9. That is
+`LLAMACPP_THREADS`.
 
-**2.13x**, and prefill moves 1.7% across that whole range — the extra threads buy
-nothing and halve generation. `nproc` reports 24 here, which is exactly the trap.
-Every physical core helps, including E-cores; it is the hyperthread siblings that
-hurt. `lscpu -p=CORE | sort -u | wc -l` gives the right number.
+**On a startup CUDA OOM, lower `-ub` before the context.** The compute buffer scales
+with context × ubatch and appears in no weights-plus-KV calculation; at 256K context
+`-ub 4096` asked for 15 GB in one allocation, `-ub 1024` needed 3.7 GB.
 
-**`-ub` drives a hidden VRAM cost.** Raising the context scales a CUDA compute
-buffer by `context × ubatch`, and it is invisible in any weights+KV calculation.
-At `-c 262144 -ub 4096` it asked for **15,166 MiB in one allocation** and died
-with `failed to allocate compute buffers` — on a card where the KV cache was only
-3.4 GB. `-ub 1024` cut it to 3.7 GB and the same model loaded with room spare.
-**On a startup CUDA OOM, lower `-ub` before lowering the context.**
+**Empty replies.** These models return their reasoning in a separate
+`reasoning_content` field. With a small `max_tokens` the whole budget goes to
+reasoning and the reply is empty. Give it 300+ tokens.
 
-**CPU ceilings must sum UNDER your core count.** A ceiling that can be exceeded
-in aggregate is not a ceiling. `llamacpp 16 + postgres 3 + ollama 2 = 21` of 24
-(88%). An earlier set summing to 26 of 24 took the package to **94°C** twice. For
-a bulk index build, stop the engine and raise `OLLAMA_CPUS` for the duration
-rather than oversubscribing both.
+**Low GPU utilisation with Flash-Next.** Expected: the experts run on the CPU, and the
+card idles between attention layers.
 
-### Things that look broken but are not
+**Traefik returns 404 for a running service.** It does not route containers whose
+healthcheck is failing; `docker compose ps` shows which.
 
-**Empty replies from the model.** Qwen3.8-Flash-Next returns its reasoning in a
-separate `reasoning_content` field. With a small `max_tokens` it spends the whole
-budget reasoning and returns `finish_reason: length` with **empty content** —
-indistinguishable from a broken model. Give it 300+ tokens.
+### Checking it
 
-**Node clients failing TLS while curl works.** Node ships its own root bundle and
-ignores the system trust store. Set `NODE_EXTRA_CA_CERTS=<repo>/llm-stack/config/traefik/certs/ca.crt`.
-If `curl --cacert` works and your Node tool does not, this is why.
+```bash
+python3 scripts/acceptance.py
+```
 
-**Low GPU utilisation during generation.** Expected. The experts run on CPU, so
-the card idles between attention layers.
+```bash
+python3 scripts/functional-test.py
+```
 
-**Grafana panels empty after a permissions change.** Prometheus runs as uid
-65534 and must *traverse* `config/prometheus/secrets`. At `0700` it cannot, the
-scrape fails with `unable to read`, and every container still reports healthy.
-That directory must be `711`.
+```bash
+./scripts/domain-check.sh
+```
 
-**Authelia ignoring config changes.** Mount the *directory*, not individual
-files. A single-file bind mount is pinned to the inode it resolved at container
-start; `gen-auth` and the admin panel both replace these files atomically, which
-makes a new inode, and Authelia reads the old one forever. Symptom: a user
-created in the admin panel cannot log in, with a password that verifies fine.
+`acceptance.py` checks wiring, and that `.env` and every sample resolve completely.
+`functional-test.py` does what people do, for real: creates a person in the panel,
+signs them in, uses their key, proves a credit limit binds and a rotated key dies,
+signs into Grafana and Open WebUI with the right roles, and confirms a chat is billed
+to whoever typed it — 43 checks. `domain-check.sh` proves the running stack answers
+for `LLM_DOMAIN`. `audit-auth.sh`, `multiuser-bench.py` and `qwen-code-realworld.py`
+go deeper on login, concurrency and agent work.
 
 ### If you enable pgvector
 
@@ -188,6 +332,7 @@ Three settings, none optional, each of which silently degrades the index:
 Argus's semantic layer also needs an embedding provider. Ollama is in the compose
 file under the `embed` profile; without it there is nowhere for vectors to come
 from, whichever database stores them.
+
 
 ## What your agent gets
 

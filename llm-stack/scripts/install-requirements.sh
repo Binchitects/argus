@@ -250,8 +250,8 @@ else
   if [[ -n "$DOMAIN" ]]; then
     set_env LLM_DOMAIN "$DOMAIN"
     ok "LLM_DOMAIN=$DOMAIN"
-    warn "remember: certificate paths in config/traefik/dynamic/tls.yml reference"
-    warn "the domain name, and a public domain wants a real CA - see docs/LINUX.md"
+    warn "the certificate follows the domain automatically; a public domain wants"
+    warn "a real CA - see the certificatesResolvers block in config/traefik/traefik.yml"
   fi
 
   # A server is usually reached from elsewhere; loopback-only would lock you out

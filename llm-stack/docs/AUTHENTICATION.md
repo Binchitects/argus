@@ -141,80 +141,30 @@ export TOKEN=$(./scripts/get-token.sh --audience gateway)
 
 ## Managing users
 
-### Declarative (recommended)
+**Use the admin panel** at `https://admin.<LLM_DOMAIN>`. Signed in as an admin you
+can add a person (a password and an API key are generated and shown once), set
+their credit, issue a new key (the old one stops working), and reset a password.
+Everyone else who signs in sees only their own usage and a password form.
 
-`config/authelia/team.yml` is the source of truth for who has access. It holds
-no passwords or hashes, so it is safe to commit and review in a pull request.
+The account list is `config/authelia/users.yml`. The `auth-init` service creates
+it on the very first start with a single `admin` account whose password is
+`AUTHELIA_ADMIN_PASSWORD`, and never touches it again; after that the panel owns
+it. Passwords are argon2id hashes; the plaintext is never written to disk.
 
-```yaml
-users:
-  - username: admin
-    displayname: Administrator
-    email: admin@llm.localhost
-    groups:
-      - admins
+Groups: `admins` reaches everything including the infrastructure endpoints
+(metrics, alerts, logs); `users` gets chat, Grafana and their own panel page.
 
-  - username: alice
-    displayname: Alice Example
-    email: alice@example.com
-    groups:
-      - users
-```
+**There is no delete button.** To remove someone, delete their block from
+`config/authelia/users.yml` (Authelia reloads it within a minute) and delete their
+gateway user and keys:
 
 ```bash
-./scripts/gen-auth.sh --sync-dry-run    # show the plan, change nothing
+curl -X POST https://gateway.<LLM_DOMAIN>/user/delete -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' -d '{"user_ids":["alice@example.com"]}'
 ```
 
-```bash
-./scripts/gen-auth.sh --sync            # make users.yml match team.yml
-```
-
-Reconciliation rules:
-
-| Situation | Action |
-|---|---|
-| In `team.yml`, not in `users.yml` | **CREATE** — random password, printed once |
-| In both | password **kept**, groups / displayname / email **updated** |
-| In `users.yml`, not in `team.yml` | **REMOVE** — access revoked |
-
-Changing someone's group is just editing their `groups:` and re-syncing; their
-password hash is preserved untouched. Offboarding is deleting their block.
-
-The sync **refuses to run if no user is left in `admins`**, since that would
-lock you out of Prometheus, Alertmanager and the Traefik dashboard.
-
-New passwords are shown exactly once and are not recoverable — hand them over
-promptly. To reset one, delete the user, sync, re-add, sync again.
-
-Groups: `admins` reaches everything including the infrastructure endpoints;
-`users` gets chat and Grafana only.
-
-### One-off
-
-```bash
-./scripts/gen-auth.sh --add-user alice --password 'their-password' --groups admins
-```
-
-Passwords are stored as argon2id hashes; the plaintext is never written to
-disk.
-
-**On Linux** Authelia watches `users.yml` and the change is live within a
-minute, with no restart.
-
-**On Windows this does not work.** inotify events do not cross Docker Desktop's
-bind mounts, so a host-side edit never reaches the watcher and the new user is
-reported as *"user not found"* indefinitely. Restart the container after any
-`--add-user` or `--sync`:
-
-```bash
-docker restart authelia
-```
-
-This is a Docker Desktop file-sharing limitation, not an Authelia setting —
-`watch: true` is already enabled in `configuration.template.yml` and works correctly on
-the Linux target host.
-
-Remove a user by deleting their block from `config/authelia/users.yml`.
+**On Linux** Authelia watches `users.yml` and a change is live within a minute.
+**On Docker Desktop (Windows) it is not:** inotify events do not cross its bind
+mounts, so run `docker compose restart authelia` after adding someone.
 
 ### Password only (`one_factor`), by decision
 
@@ -259,15 +209,14 @@ The trade-off is that CLI tools must resolve `*.llm.localhost` — run
 
 | Path | What it is | In git? |
 |---|---|---|
-| `config/authelia/configuration.yml` | Policies, session, access rules | yes |
-| `config/authelia/clients.yml` | OIDC clients + signing key | **no** — generated |
-| `config/authelia/users.yml` | Users and password hashes | **no** — generated |
-| `config/authelia/secrets/` | OIDC RSA private key | **no** |
-| `scripts/gen-auth.sh` | Generates all of the above | yes |
+| `config/authelia/configuration.template.yml` | Policies, session, access rules; Authelia fills in the domain | yes |
+| `config/authelia/clients.yml` | OIDC clients + signing key | **no** — rebuilt by `auth-init` on every start |
+| `config/authelia/users.yml` | Users and password hashes | **no** — created once by `auth-init`, then the panel's |
+| `config/authelia/secrets/` | OIDC RSA private key | **no** — generated once by `auth-init` |
 | `scripts/get-token.sh` | Machine-client token helper | yes |
 
-`clients.yml` and `users.yml` are gitignored because they contain the OIDC
-signing key and password hashes.
+The client secrets themselves live in `.env` (`*_OIDC_CLIENT_SECRET`); `auth-init`
+hashes them into `clients.yml`, so the apps and Authelia can never disagree.
 
 ---
 
@@ -287,7 +236,7 @@ per OIDC client; the machine client-credentials grant plus authorised and
 unauthorised API access; that forwardAuth denies anonymous requests; and that
 the same requests succeed with a session cookie.
 
-Run it after any change to `configuration.yml`, `clients.yml`, or an app's
+Run it after any change to `configuration.template.yml`, `.env` secrets, or an app's
 OAuth settings.
 
 ---
@@ -300,15 +249,10 @@ secrets, but the app containers still hold the values baked in when they were
 created. Nothing in the config looks wrong, and an audit that reads `.env` will
 happily pass while every real login fails.
 
-`scripts/gen-auth.sh` no longer rotates a secret that already exists in `.env`
-(only `--force` does), and `scripts/audit-auth.sh` step 0 compares each
-container's secret against `.env`. If it reports STALE:
-
-```bash
-docker compose up -d --force-recreate grafana open-webui langfuse
-```
-
-Any time you run `gen-auth.sh --force`, recreate those three afterwards.
+`clients.yml` is rebuilt from `.env` on every start, so the usual cause now is a
+secret changed in `.env` while an app container kept the old value.
+`scripts/audit-auth.sh` step 0 compares each container's secret against `.env`.
+If it reports STALE, `docker compose up -d` recreates the apps with the new value.
 
 **`No email found in user object` (or the app complains a claim is missing).**
 Authelia keeps `email`, `name` and `groups` in the **userinfo endpoint** by
@@ -324,8 +268,8 @@ identity_providers:
         id_token: ['email', 'email_verified', 'name', 'preferred_username', 'groups']
 ```
 
-and `claims_policy: 'with_profile'` on each client. `scripts/gen-auth.sh` does
-this for the three app clients. Verify with `./scripts/audit-auth.sh`, which
+and `claims_policy: 'with_profile'` on each client. `auth-init` does this for
+the three app clients. Verify with `./scripts/audit-auth.sh`, which
 prints the claims that actually arrive.
 
 **Login redirects to a consent screen every time.** Expected for third-party
@@ -335,7 +279,7 @@ clients, pointless for first-party apps you own. The generated clients use
 
 
 **Changing config appears to do nothing.** Authelia does **not** hot-reload
-`configuration.yml` or `clients.yml` — only `users.yml` is watched. Restart it:
+`configuration.template.yml` or `clients.yml` — only `users.yml` is watched. Restart it:
 
 ```bash
 docker compose up -d --force-recreate authelia
@@ -357,7 +301,7 @@ routed. This is intended behaviour, not a bug.
 **`invalid_client` from the token endpoint.** Either the `api` client is not
 registered in the *running* Authelia instance (restart it), or
 `API_OIDC_CLIENT_SECRET` in `.env` does not match the hash in `clients.yml`.
-Regenerate both together with `./scripts/gen-auth.sh --force`.
+`docker compose up -d authelia` reruns `auth-init`, which rebuilds the hash from `.env`.
 
 **`invalid_client` at the token exchange, after the user already logged in.**
 The login itself succeeded and Authelia issued a code; the *client* failed to
