@@ -151,19 +151,23 @@ The `test` stage runs the **whole suite inside the image** before any runtime
 layer is produced, so a build cannot succeed with failing tests:
 
 ```bash
-docker build --target test -t argus:test .     # 741 passed
-docker build --target server -t argus:server . # 322 MB
+docker build --target test -t argus:test .     # 827 passed
+docker build --target server -t argus:server . # 493 MB
 ```
 
 Verified on the built image:
 
 | | |
 |---|---|
-| tests, inside the container | **741 passed** |
+| tests, inside the container | **827 passed** |
 | ctags | **Universal Ctags 5.9.0** — pinned; drift fails the build |
 | runs as | `uid=10001(argus)` — **never root** |
-| image size | **322 MB** |
+| image size | **493 MB** |
 | secrets in layers | **none** — `seeded.json` is absent |
+
+The image grew from 322 MB when the optional pgvector backend was added: the
+`server` stage installs `psycopg` and its binary wheel whether or not you run
+Postgres, because one image has to serve both backends.
 
 That last row is checked rather than assumed. The Dockerfile copies
 `deploy/agent_client_example.py` as a single file rather than `COPY deploy/`,

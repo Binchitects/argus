@@ -266,6 +266,8 @@ Argus inverts the priority:
 | **Lexical** (FTS5) | Exact strings over millions of lines | Cheap, instant |
 | **Semantic** (embeddings) | Vague conceptual queries only | Expensive — applied *selectively* |
 
+Queries to the lexical layer are **prose, not FTS5 expressions.** Every term is quoted as a phrase before it reaches FTS5, so `what is a mutex?` and `std::atomic_exchange` both work — a question mark and a `:` used to be syntax errors. The trade is that FTS5 operators (`AND`, `star*`, `NEAR`) are searched for as literal words. That is the right default for a tool whose caller is a language model.
+
 Embeddings cover **public symbol signatures, scope and path — never function bodies.** A C++ body embeds mostly to "generic control flow"; its signature plus its path is what carries intent. That is ~70–90k vectors instead of ~600k.
 
 And in C/C++ the `#include` graph **is** the cross-repo dependency graph — recoverable with no build system, no `compile_commands.json`, and no compiler.
@@ -364,7 +366,7 @@ That discipline extends to the benchmarks. The model comparison above found **th
 | 4 — Semantic layer | selective embeddings, `semantic_search` | ✅ |
 | 5 — Knowledge packs | 11 packs, 6 doc tools, `argus pack` | ✅ |
 
-**741 tests**, passing locally, 0 skipped.
+**827 tests**, passing locally, 0 skipped.
 
 - **[docs/production.md](docs/production.md)** — deploy, verify, operate
 - **[docs/deployment.md](docs/deployment.md)** — wiring Hermes, and the failure modes

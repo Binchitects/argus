@@ -331,10 +331,27 @@ workaround always works in the meantime.
 ## 7. Verify it is actually helping
 
 ```bash
-python evals/generate_questions.py /var/lib/argus/packs evals/mine.json 30
+python3 evals/generate_questions.py /var/lib/argus/packs evals/mine.json 30
 ARGUS_OLLAMA_URL=http://localhost:11434 \
-    python evals/run_ab.py /var/lib/argus/packs evals/mine.json
+EVAL_GEN_URL=https://llm.example.com/v1 \
+EVAL_MODEL=qwen3.8-flash-next \
+EVAL_API_KEY=<your api key> \
+    python3 evals/run_ab.py /var/lib/argus/packs evals/mine.json
 ```
+
+`EVAL_GEN_URL` is the model the questions are put to. A URL ending in `/v1` or
+`/chat/completions` is sent an OpenAI-shaped request; anything else is sent an
+Ollama `/api/generate` one, which is the default and points at
+`localhost:11435`. Point it at whatever you actually serve -- the harness used
+to hardcode Ollama, so it could not measure the stack it ships with. Add
+`EVAL_CA_BUNDLE` if your endpoint uses a private CA, and raise
+`EVAL_MAX_TOKENS` (default 600) for a model that emits reasoning in a separate
+field, or it will return empty answers that grade as wrong.
+
+`ARGUS_OLLAMA_URL` is separate and points at the *embedder*, which is what the
+retrieval arm uses. If it is unreachable the run still completes by falling
+back to lexical search, which quietly measures something weaker than what you
+deployed -- check the embedder's log for one request per question.
 
 This generates questions **from your own packs** and answers them with and
 without retrieval. Ground truth comes from the documentation rather than from

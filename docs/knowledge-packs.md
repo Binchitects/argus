@@ -121,6 +121,20 @@ These figures are from a synthetic corpus and validate the mechanism, not the
 product. Recall on real embeddings over real documentation is measured
 separately.
 
+### Lexical queries are prose, not FTS5 expressions
+
+`docs_search` quotes every term in the query as a phrase before handing it to
+FTS5, so nothing in the input is parsed as syntax. Ask `what is a mutex?` or
+search for `std::atomic_exchange` and both work; previously the first failed on
+the question mark and the second on `:`, which is FTS5's column operator, and
+both raised an error rather than returning results.
+
+The trade is that FTS5 operators are no longer honoured. `a AND b`, `star*` and
+`NEAR(...)` are searched for as literal words. That is the right default for a
+tool whose caller is a language model sending prose rather than someone who has
+read the FTS5 grammar. A query containing nothing searchable returns no results
+rather than an error.
+
 ## Exit codes
 
 | Code | Meaning |
