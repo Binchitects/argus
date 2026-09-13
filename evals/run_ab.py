@@ -12,6 +12,7 @@ not it is the conclusion.
 """
 import asyncio
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -19,8 +20,16 @@ from collections import defaultdict
 
 from argus.mcpsrv import tools
 
-GEN_URL = "http://localhost:11435/api/generate"
-MODEL = "qwen3.6:35b"
+# Engine-agnostic, the same way the monitoring had to become. This harness
+# hardcoded Ollama's /api/generate, so it could not be pointed at the stack it
+# is meant to measure -- which serves an OpenAI-compatible API. A URL ending in
+# /v1 or /chat/completions is treated as OpenAI-shaped; anything else keeps the
+# original Ollama request body.
+GEN_URL = os.environ.get("EVAL_GEN_URL", "http://localhost:11435/api/generate")
+MODEL = os.environ.get("EVAL_MODEL", "qwen3.6:35b")
+API_KEY = os.environ.get("EVAL_API_KEY", "")
+CA_BUNDLE = os.environ.get("EVAL_CA_BUNDLE", "")
+OPENAI_SHAPED = "/v1" in GEN_URL or GEN_URL.endswith("/chat/completions")
 NAME_RE = re.compile(r"\b(?:[A-Z][a-z0-9]+){2,}[A-Za-z0-9_]*\b"
                      r"|\b[A-Za-z]+_[A-Za-z0-9_]{3,}\b"
                      r"|\b[A-Z][a-z]+-[A-Z][a-z]+\b")
@@ -39,12 +48,36 @@ def ask(prompt: str) -> str:
         "model": MODEL, "prompt": prompt, "stream": False, "think": False,
         "options": {"temperature": 0, "num_predict": 120},
     }).encode()
-    req = urllib.request.Request(GEN_URL, data=body,
-                                 headers={"Content-Type": "application/json"})
+    url = GEN_URL
+    if OPENAI_SHAPED:
+        if not url.endswith("/chat/completions"):
+            url = url.rstrip("/") + "/chat/completions"
+        body = json.dumps({
+            "model": MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            # Generous on purpose: this model emits its reasoning in a separate
+            # field, and a small budget returns finish_reason "length" with an
+            # EMPTY content -- which grades as a wrong answer rather than as a
+            # truncated one.
+            "max_tokens": int(os.environ.get("EVAL_MAX_TOKENS", "600")),
+        }).encode()
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["Authorization"] = "Bearer " + API_KEY
+    req = urllib.request.Request(url, data=body, headers=headers)
+    ctx = None
+    if CA_BUNDLE:
+        import ssl
+        ctx = ssl.create_default_context(cafile=CA_BUNDLE)
     try:
-        with urllib.request.urlopen(req, timeout=600) as resp:
-            return json.load(resp).get("response", "")
-    except Exception:
+        with urllib.request.urlopen(req, timeout=900, context=ctx) as resp:
+            d = json.load(resp)
+        if OPENAI_SHAPED:
+            return (d["choices"][0]["message"].get("content") or "")
+        return d.get("response", "")
+    except Exception as exc:
+        print(f"    gen failed: {exc!r}"[:150], flush=True)
         return ""
 
 
