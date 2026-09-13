@@ -278,6 +278,36 @@ Only repository names and maintainers are disclosed, never a path, symbol or lin
 Reading a file or repository map in an unreadable repository gives the same message.
 `ARGUS_ACCESS_NOTICES=0` on the argus service restores a plain "nothing found".
 
+### Customizing
+
+Everything is a value in `.env`. Change it, then run `docker compose up -d`: compose
+recreates exactly the containers the change affects.
+
+| to change | set in `.env` | notes |
+|---|---|---|
+| **another model** (same family, other quant, other card) | the MODEL block | copy the block from the closest `env-samples/` file; how to choose each value is in [llm-stack/env-samples/README.md](llm-stack/env-samples/README.md) |
+| **a model with no sample** | a new file in `env-samples/` | same guide, "Adding a new setup"; any GGUF on Hugging Face works via `LLAMACPP_HF_REPO` + `LLAMACPP_HF_FILES` |
+| context window | `MODEL_CONTEXT` | on a CUDA out-of-memory at start, lower `-ub` in `LLAMACPP_EXTRA_ARGS` first |
+| people served at once | `LLAMACPP_PARALLEL` | keep `--kv-unified` so they share one context pool |
+| MoE layers kept in RAM | `LLAMACPP_N_CPU_MOE` | raise on out-of-memory, lower for speed |
+| multi-token prediction | `LLAMACPP_MTP_DRAFT_MAX` | `2` for dense models with an MTP layer, `0` for MoE on CPU |
+| domain | `LLM_DOMAIN` | certificate and single sign-on follow; check with `./scripts/domain-check.sh --old <previous>` |
+| reachable from the network | `BIND_ADDRESS=0.0.0.0` | default `127.0.0.1` is this machine only |
+| ports | `TRAEFIK_HTTP_PORT`, `TRAEFIK_HTTPS_PORT` | |
+| which services run | `COMPOSE_PROFILES` | `argus` code index, `tracing` Langfuse, `logging` Loki, `cadvisor`, `dcgm` |
+| GPU / CPU power cap | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | empty restores the hardware default |
+| CPU threads and ceilings | `LLAMACPP_THREADS`, `LLAMACPP_CPUS`, `OLLAMA_CPUS`, `POSTGRES_CPUS` | threads = physical cores; ceilings must sum under the core count |
+| engine RAM ceiling | `LLAMACPP_MEM_LIMIT` | e.g. `56g`; `0` = none |
+| default credit per person | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | per person in the admin panel |
+| a different llama.cpp build | `LLAMACPP_ENGINE_URL`, `LLAMACPP_ENGINE_SHA256` | a release tarball; empty = the image's own server |
+| vLLM instead of llama.cpp | `COMPOSE_PROFILES` (`vllm` instead of `llamacpp`), the `VLLM_*` values, `ENGINE_API_BASE=http://vllm:8000/v1` | exactly one engine profile at a time |
+| gated Hugging Face repos | `HF_TOKEN` | |
+
+Config files, for what `.env` does not cover: alert rules in
+`llm-stack/config/prometheus/rules/`, dashboards in `llm-stack/config/grafana/dashboards/`
+(edit the files; UI edits are overwritten), access rules in
+`llm-stack/config/authelia/configuration.template.yml`.
+
 ### Switching the model
 
 The admin panel's **Model** card (admins only) shows what is running and, for each
