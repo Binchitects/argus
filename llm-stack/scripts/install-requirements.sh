@@ -297,6 +297,5 @@ echo
 echo "  Next:"
 echo "    cp env-samples/<one>.env .env   # then fill in SECRETS"
 echo "    docker compose up -d"
-echo "    ./scripts/up.sh            # start the stack"
 echo
 exit $ISSUES

@@ -1,9 +1,5 @@
 # CPU temperature
 
-> **Deploying:** the top-level README is authoritative. This is a reference and
-> a record of measurements; commands here that call `setup.sh`, `bootstrap`,
-> `gen-auth`, `get-models` or `switch-model` predate v1.12, where `.env` and
-> `docker compose up` replaced those scripts.
 
 Works on Linux with no setup. Windows needs one host agent, because Windows
 does not expose CPU temperature to userland at all.

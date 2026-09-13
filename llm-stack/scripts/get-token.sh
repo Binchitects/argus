@@ -29,7 +29,7 @@ done
 
 DOMAIN="$(get LLM_DOMAIN)"; DOMAIN="${DOMAIN:-llm.localhost}"
 SECRET="$(get API_OIDC_CLIENT_SECRET)"
-[[ -n "$SECRET" ]] || { echo "API_OIDC_CLIENT_SECRET missing - run scripts/gen-auth.sh" >&2; exit 1; }
+[[ -n "$SECRET" ]] || { echo "API_OIDC_CLIENT_SECRET missing - set it in .env" >&2; exit 1; }
 
 CA="config/traefik/certs/tls.crt"
 

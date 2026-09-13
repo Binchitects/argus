@@ -1,9 +1,5 @@
 # Pointing Hermes at this stack
 
-> **Deploying:** the top-level README is authoritative. This is a reference and
-> a record of measurements; commands here that call `setup.sh`, `bootstrap`,
-> `gen-auth`, `get-models` or `switch-model` predate v1.12, where `.env` and
-> `docker compose up` replaced those scripts.
 
 Two independent halves: **the model**, served by the gateway, and **Argus**,
 an MCP server for code and documentation lookup. Either works without the
@@ -21,7 +17,7 @@ Hermes' config lives at:
 ```yaml
 model:
   base_url: https://gateway.llm.localhost/v1
-  api_key: sk-...                 # YOUR key, from llm-users.sh
+  api_key: sk-...                 # YOUR key, from the admin panel
   name: local                     # or the served name, e.g. qwen3.8-27b
   context_length: 131072          # see "How much context you can have" below
 ```
@@ -32,7 +28,7 @@ bounded by nothing, which quietly defeats the per-person accounting the whole
 gateway exists for. Mint yours with:
 
 ```bash
-./scripts/llm-users.sh --apply       # prints each person's key once
+# create the person in the admin panel: it shows their key once
 ```
 
 **Use the model's real name** (`MODEL_NAME` in `.env`, e.g. `Qwen3.8-Flash-Next`).

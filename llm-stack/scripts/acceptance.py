@@ -131,8 +131,7 @@ def check_config() -> None:
     # that breaks SSO while every container still reports healthy. Authelia's
     # two files name the domain only as {{ env "LLM_DOMAIN" }}, so ANY literal
     # hostname in them is stale by definition.
-    for rel in ("config/authelia/configuration.template.yml", "config/authelia/clients.yml",
-                "config/homepage/services.yaml"):
+    for rel in ("config/authelia/configuration.template.yml", "config/authelia/clients.yml"):
         p = ROOT / rel
         if not p.exists():
             record("config", f"{Path(rel).name} rendered", "SKIP", "not present")

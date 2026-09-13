@@ -1,9 +1,5 @@
 # Argus
 
-> **Deploying:** the top-level README is authoritative. This is a reference and
-> a record of measurements; commands here that call `setup.sh`, `bootstrap`,
-> `gen-auth`, `get-models` or `switch-model` predate v1.12, where `.env` and
-> `docker compose up` replaced those scripts.
 
 Argus is a code index and documentation server. It answers questions about
 **your** repositories and about **public API documentation**, and it exposes
@@ -165,7 +161,7 @@ mcp_servers:
 ```
 
 See [HERMES.md](HERMES.md) for the whole client setup -- model and
-Argus together -- and [MODELS.md](MODELS.md) for the gateway itself.
+Argus together -- and the top-level README for the gateway itself.
 
 **On Windows, check your proxy exclusions.** If `HTTP_PROXY`/`HTTPS_PROXY` are
 set, `NO_PROXY` must include the stack's domain or the client tries to reach

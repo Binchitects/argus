@@ -23,7 +23,7 @@ WHAT IT TOUCHES
   users.yml Authelia's file backend, for creating users and setting passwords.
             Hashes are argon2id with the same parameters Authelia itself uses
             (m=65536,t=3,p=4) so entries written here are indistinguishable
-            from ones written by scripts/gen-auth.sh.
+            from ones written by the auth-init service.
 
 RELOADING -- THE PART THAT BITES
 --------------------------------

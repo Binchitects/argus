@@ -2,7 +2,7 @@
 
 A pack is one SQLite file, self-describing (``pack_meta``) and
 self-verifying (``require_compatible``). See
-``docs/superpowers/specs/2026-08-02-knowledge-packs-design.md``, "The pack
+the knowledge-packs design (see git history), "The pack
 format", for the schema this module implements verbatim.
 
 Packs are a second, public corpus, entirely separate from the private index:

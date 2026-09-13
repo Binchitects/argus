@@ -65,7 +65,7 @@ if [[ $RESTORE -eq 1 ]]; then
     echo "  restored  $vol"
   done
   echo
-  echo "Done. Start with: ./scripts/up.sh"
+  echo "Done. Start with: docker compose up -d"
   exit 0
 fi
 

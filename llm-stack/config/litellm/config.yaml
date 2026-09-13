@@ -68,7 +68,7 @@ litellm_settings:
   # figure mean money.
   #
   # 0 would block every request rather than allow unlimited, so the default is
-  # a real number. Raise per-person with scripts/sync-llm-users.py.
+  # a real number. Raise per-person in the admin panel (Credit).
   max_internal_user_budget: os.environ/LITELLM_DEFAULT_USER_BUDGET
   internal_user_budget_duration: os.environ/LITELLM_BUDGET_DURATION
   # Response cache in Redis, OFF unless a request asks for it.
@@ -114,12 +114,12 @@ general_settings:
   # Open WebUI forwards the signed-in identity as headers when
   # ENABLE_FORWARD_USER_INFO_HEADERS is set. Mapping the EMAIL header to
   # `internal_user` makes LiteLLM's internal user id the person's email
-  # address -- and scripts/sync-llm-users.py mints each API key with
+  # address -- and the admin panel mints each API key with
   # `user_id: <same email>`. One identity, both surfaces.
   #
   # Email rather than X-OpenWebUI-User-Id deliberately: the user id is an
   # Open WebUI database row id, which exists nowhere else. Email is what
-  # Authelia issues over OIDC, what team.yml already records, and therefore
+  # Authelia issues over OIDC, what the admin panel already records, and therefore
   # the only identifier the whole stack agrees on.
   # BOTH roles, from the one header, because they do different jobs. Measured
   # on this stack rather than assumed:
@@ -136,7 +136,7 @@ general_settings:
   #                  budgets are the mechanism that checks a shared key
   #                  against the caller named in the request.
   #
-  # scripts/sync-llm-users.py therefore provisions each person twice, with the
+  # The admin panel therefore provisions each person twice, with the
   # same email and the same ceiling: once as an internal user, once as an end
   # user. Drop either half and you lose either the total or the limit.
   user_header_mappings:

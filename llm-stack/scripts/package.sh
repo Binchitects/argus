@@ -72,7 +72,7 @@ touch "$PKG/models/.gitkeep"
 
 # Config: templates and provisioning only. Anything generated or secret is
 # rebuilt on the target by the tls-init and auth-init services.
-for d in prometheus alertmanager grafana loki promtail litellm homepage postgres argus; do
+for d in prometheus alertmanager grafana loki promtail litellm postgres argus; do
   [[ -d "config/$d" ]] && cp -r "config/$d" "$PKG/config/"
 done
 mkdir -p "$PKG/config/traefik/dynamic" "$PKG/config/traefik/certs" "$PKG/config/traefik/auth"
@@ -82,7 +82,6 @@ touch "$PKG/config/traefik/certs/.gitkeep" "$PKG/config/traefik/auth/.gitkeep"
 
 mkdir -p "$PKG/config/authelia"
 cp config/authelia/configuration.template.yml "$PKG/config/authelia/" 2>/dev/null
-cp config/authelia/team.yml "$PKG/config/authelia/" 2>/dev/null
 
 # ---------------------------------------------------------------------------
 if [[ $INCLUDE_IMAGE -eq 1 ]]; then

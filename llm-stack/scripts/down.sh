@@ -32,7 +32,7 @@ fi
 if [[ $PURGE -eq 0 ]]; then
   docker compose --profile "*" down --remove-orphans
   echo
-  echo "Volumes preserved. Restart with: ./scripts/up.sh"
+  echo "Volumes preserved. Restart with: docker compose up -d"
   exit 0
 fi
 

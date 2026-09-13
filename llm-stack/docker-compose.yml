@@ -152,7 +152,7 @@ services:
 
   # Generates the self-signed TLS certificate Traefik serves, then exits.
   #
-  # Replaces scripts/gen-certs and its private CA. That path needed a script run
+  # Replaces a host-side certificate script and its private CA. That path needed a script run
   # before the first `up` and a CA installed into every client's trust store,
   # and each step was a place a fresh deployment went wrong.
   #
@@ -306,13 +306,11 @@ services:
   #   OIDC         Grafana, Open WebUI and Langfuse delegate their own login
   #                screens here, so one identity covers everything.
   #
-  # Run scripts/gen-auth first; it creates the secrets, users.yml and clients.yml.
   # ============================================================================
 
   # Builds everything Authelia and Traefik need from .env, then exits.
   #
-  # This is what scripts/gen-auth.sh and gen-proxy-auth used to do on the host,
-  # moved inside compose so a deployment is `docker compose up` and nothing
+  # Work that used to be a host-side setup script, moved inside compose so a deployment is `docker compose up` and nothing
   # else. Every input is a value in .env; nothing here asks a question.
   #
   #   secrets/oidc.pem  OIDC signing key          generated once, then kept
@@ -446,7 +444,7 @@ services:
       #
       # A single-file bind mount is pinned to the INODE it resolved at container
       # start. Every writer of these files replaces them atomically -- the admin
-      # panel via os.replace, gen-auth by rendering a new file -- which produces
+      # panel via os.replace, auth-init by writing a new file -- which produces
       # a NEW inode, and Authelia then keeps reading the old one forever. It
       # watches the path and sees no change because, from inside the container,
       # nothing about its file changed.
@@ -454,7 +452,7 @@ services:
       # Observed: the panel's users.yml at inode 2497907 / 658 bytes while
       # Authelia held inode 2496625 / 444 bytes. Users created in the panel
       # could not log in, because Authelia had never seen them. The same applied
-      # to clients.yml and configuration.yml, so every gen-auth change appeared
+      # to clients.yml and configuration.yml, so every regenerated file appeared
       # to need a container restart -- it did, and this is why.
       #
       # Mounting the directory makes the path resolve fresh on each open, so a
@@ -504,7 +502,7 @@ services:
     # with a CUDA OOM that names neither culprit.
     #
     # This service used to be unprofiled (always on). Existing .env files may
-    # therefore have no `vllm` in COMPOSE_PROFILES -- setup.sh migrates those
+    # therefore have no `vllm` in COMPOSE_PROFILES -- add it there
     # rather than silently leaving the engine stopped after an upgrade.
     profiles: [vllm]
     restart: unless-stopped
@@ -594,7 +592,6 @@ services:
       - "traefik.http.routers.vllm-metrics.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
     logging: *default-logging
 
-  # ============================================================================
   # ============================================================================
   # CPU TEMPERATURE (profile: smi -- alongside the other hardware exporters)
   #
@@ -790,7 +787,7 @@ services:
     # The image entrypoint is llama-server, so this holds only flags.
     #
     # ON THE --api-key DEFAULT: the placeholder is not the security boundary and
-    # must never be reached. scripts/up.sh refuses to start this engine while
+    # must never be reached. It is now a required variable, so compose refuses
     # the key is still the placeholder, and acceptance.py fails on any
     # `change-me` left in .env.
     #
@@ -798,7 +795,7 @@ services:
     # reasons. Compose interpolates EVERY service before filtering by profile,
     # so a marker here aborts `docker compose` for people who never run this
     # engine -- including every .env written before it existed. And a presence
-    # check would not help anyway: .env.example ships the placeholder, so it is
+    # check would not help anyway: a template shipping a placeholder would be
     # satisfied by precisely the value we are trying to reject. Checking the
     # VALUE, where the enabled profile is known, is what actually closes it.
     #
@@ -836,7 +833,7 @@ services:
     # anything else. With a cgroup limit the kernel reclaims inside this
     # container instead of competing with the rest of the box.
     #
-    # Set by scripts/setup.sh from detected RAM and LLM_MEM_RESERVE_PCT. Empty
+    # Set LLAMACPP_MEM_LIMIT in .env (e.g. 56g). Empty
     # means unlimited, which is the previous behaviour.
     #
     # Do NOT set this below the model's working set or it will thrash: the
@@ -850,7 +847,7 @@ services:
     # a cooling problem long before it is a throughput one.
     #
     # 16 is the physical core count here and the value -t is set to; going
-    # higher does not help anyway (docs/MODELS.md: hyperthreads are 2.13x
+    # higher does not help anyway (measured, see README: hyperthreads are 2.13x
     # SLOWER). Leaves 8 logical CPUs for everything else.
     cpus: ${LLAMACPP_CPUS:-16}
     <<: *gpu-reservation
@@ -990,7 +987,7 @@ services:
       # gateway config is engine-agnostic and .env alone decides the backend.
       #
       # The defaults reproduce the vLLM wiring exactly, so an .env written
-      # before llama.cpp existed keeps working untouched; setup.sh writes them
+      # before llama.cpp existed keeps working untouched; the samples set them
       # explicitly from here on.
       MODEL_NAME: ${MODEL_NAME:?set MODEL_NAME in .env}
       MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
@@ -1068,7 +1065,7 @@ services:
   #
   # Argus's semantic layer calls Ollama for every vector -- argus/embed.py
   # defaults to http://localhost:11434 -- but Ollama appeared in no compose
-  # file, no .env.example and no config.yaml. The semantic index was therefore
+  # file, no env template and no config.yaml. The semantic index was therefore
   # not buildable from this stack at all, whichever database stores the result.
   #
   # CPU ON PURPOSE. The inference engine already holds ~20.5 GB of a 24 GB
@@ -1928,33 +1925,4 @@ services:
       - "traefik.http.routers.langfuse.entrypoints=websecure"
       - "traefik.http.routers.langfuse.tls=true"
       - "traefik.http.routers.langfuse.middlewares=default-chain@file"
-    logging: *default-logging
-
-  # ============================================================================
-  # LANDING PAGE (profile: homepage)
-  # ============================================================================
-
-  homepage:
-    image: ghcr.io/gethomepage/homepage:v0.10.9
-    container_name: homepage
-    profiles: [homepage]
-    restart: unless-stopped
-    networks: [llm-net]
-    # No published ports: Traefik is the only way in. Re-add a mapping
-    # here only if you need to bypass the proxy for debugging.
-    volumes:
-      - ./config/homepage:/app/config
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      HOMEPAGE_ALLOWED_HOSTS: "*"
-      PUID: "0"
-      PGID: "0"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.homepage.loadbalancer.server.port=3000"
-      # The apex name, so https://llm.localhost lands on the index.
-      - "traefik.http.routers.homepage.rule=Host(`${LLM_DOMAIN:-llm.localhost}`)"
-      - "traefik.http.routers.homepage.entrypoints=websecure"
-      - "traefik.http.routers.homepage.tls=true"
-      - "traefik.http.routers.homepage.middlewares=default-chain@file"
     logging: *default-logging

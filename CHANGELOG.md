@@ -1,5 +1,21 @@
 # Changelog
 
+Each release's full notes are in its annotated tag: `git tag -n99 <version>`.
+
+- **v1.13.0** (2026-09-14) — Argus per person in Open WebUI, read-only; 'ask a maintainer' notices; all instructions in README
+- **v1.12.1** (2026-09-14) — fresh-clone deploy verified
+- **v1.12.0** (2026-09-14) — docker compose up is the whole deployment
+- **v1.11.0** (2026-09-13) — the documentation tool accepts the questions it is actually asked
+- **v1.10.0** (2026-09-13) — deployable from a clean clone
+- **v1.9.0** (2026-09-07) — argus by default, and the 177B MoE question answered
+- **v1.8.0** (2026-09-07) — acceptance-tested
+- **v1.7.0** (2026-09-07) — the domain is settable, and setup is re-runnable
+- **v1.6.0** (2026-09-06) — a clean checkout deploys unattended
+- **v1.5.0** (2026-09-04) — tool calls that survive streaming
+- **v1.4.0** (2026-09-04) — one number per person, and the key that produced it
+- **v1.3.0** (2026-09-04) — monitoring that outlives the engine
+- **v1.2.0** (2026-09-04) — long context on a 24 GB card
+
 ## 1.1.0
 
 Forty-nine commits since v1.0.0. The theme is retrieval quality: v1.0 could
