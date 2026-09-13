@@ -13,7 +13,7 @@ patterns = [
     "scripts/*.sh", "scripts/*.py",
     "config/**/*.yml", "config/**/*.yaml", "config/**/*.json",
     "config/**/*.sql", "config/**/*.htpasswd",
-    "docker-compose.yml", "Makefile", ".env", ".env.example",
+    "docker-compose.yml", "Makefile", ".env",
     ".gitattributes", ".gitignore",
 ]
 

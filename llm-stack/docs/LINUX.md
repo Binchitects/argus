@@ -101,15 +101,14 @@ sudo ./scripts/install-requirements.sh --domain llm.example.com
 
 Then decide how you want certificates.
 
-**Private CA (default).** Keeps working with any domain and needs no inbound
-internet. Every client must trust `config/traefik/certs/ca.crt`.
+**Self-signed (default).** Nothing to run: `tls-init` generates a certificate for
+the domain and `*.domain` on the first `up`, and regenerates it if `LLM_DOMAIN`
+changes. Works with any domain and needs no inbound internet. Clients skip
+verification or trust `config/traefik/certs/tls.crt`.
 
-```bash
-./scripts/gen-certs.sh --force
-```
-
-**Let's Encrypt (public domains).** Replace the static certificate block in
-`config/traefik/traefik.yml` with an ACME resolver:
+**Let's Encrypt (public domains).** Remove the `defaultCertificate` block in
+`config/traefik/dynamic/tls.yml` and add an ACME resolver to
+`config/traefik/traefik.yml`:
 
 ```yaml
 certificatesResolvers:
@@ -126,12 +125,11 @@ and delete the `redirections` block on the `web` entrypoint — the HTTP-01
 challenge needs port 80 reachable and unredirected. Requires a public DNS record
 and inbound 80/443.
 
-If you change `LLM_DOMAIN`, also update the certificate filenames in
-`config/traefik/dynamic/tls.yml` and the redirect URIs in
-`scripts/gen-auth.sh`, then regenerate:
+If you change `LLM_DOMAIN`, that is all: `docker compose up -d` regenerates the
+certificate and Authelia picks up the new domain on its own. Check it with:
 
 ```bash
-./scripts/gen-auth.sh --force && docker compose up -d --force-recreate authelia grafana open-webui langfuse
+./scripts/domain-check.sh --old <previous-domain>
 ```
 
 > Regenerating auth with `--force` rotates the OIDC client secrets, so the three

@@ -31,10 +31,10 @@ DOMAIN="$(get LLM_DOMAIN)"; DOMAIN="${DOMAIN:-llm.localhost}"
 SECRET="$(get API_OIDC_CLIENT_SECRET)"
 [[ -n "$SECRET" ]] || { echo "API_OIDC_CLIENT_SECRET missing - run scripts/gen-auth.sh" >&2; exit 1; }
 
-CA="config/traefik/certs/ca.crt"
+CA="config/traefik/certs/tls.crt"
 
 # --resolve + --ssl-no-revoke are only needed because *.localhost does not
-# resolve in CLI tools and Windows curl cannot check revocation for a private CA.
+# resolve in CLI tools and Windows curl cannot check revocation for a self-signed certificate.
 # `resource`, not `audience`. Authelia matches an `audience` value by EXACT
 # string, so a token for 'https://api.<domain>' is refused at
 # 'https://api.<domain>/v1/models' -- every real endpoint 401s while the

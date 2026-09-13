@@ -27,7 +27,7 @@ done
 if [ "$GATEWAY" -eq 1 ]; then
   BASE="http://litellm:4000"
   KEY="$(get LITELLM_MASTER_KEY)"
-  MODEL="local"
+  MODEL="$(get MODEL_NAME)"
 else
   # Which engine is actually enabled decides the endpoint. Hardcoding vllm here
   # meant a llama.cpp deploy benchmarked a container that does not exist and

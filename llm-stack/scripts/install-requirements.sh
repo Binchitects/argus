@@ -223,7 +223,7 @@ done
 # ---------------------------------------------------------------------------
 step "Linux defaults in .env"
 if [[ ! -f .env ]]; then
-  warn ".env not present yet - run ./scripts/bootstrap.sh, then re-run this"
+  warn ".env not present yet - cp env-samples/<one>.env .env, fill in SECRETS, then re-run this"
 else
   set_env() {
     # Honour --check-only: this function is the only thing that writes .env.
@@ -295,7 +295,8 @@ else
 fi
 echo
 echo "  Next:"
-echo "    ./scripts/bootstrap.sh     # .env, secrets, certificates"
+echo "    cp env-samples/<one>.env .env   # then fill in SECRETS"
+echo "    docker compose up -d"
 echo "    ./scripts/up.sh            # start the stack"
 echo
 exit $ISSUES

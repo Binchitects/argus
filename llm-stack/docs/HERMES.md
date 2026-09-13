@@ -243,14 +243,14 @@ unless-stopped` brings it back after a reboot. If measurements ever stop making
 physical sense, check `nvidia-smi` for a process nobody meant to leave running
 before believing the numbers.
 
-**Hermes needs the stack CA in its own bundle.** `SSL_CERT_FILE` and
+**Hermes needs the stack's certificate in its own bundle.** `SSL_CERT_FILE` and
 `REQUESTS_CA_BUNDLE` point at `~/AppData/Local/hermes/ca-bundle.pem`, which
-ships ~120 public roots and knows nothing about a local CA. Without the stack's
-CA appended, every call fails as a bare **"Connection error"** that names
+ships ~120 public roots and knows nothing about a self-signed certificate. Without
+the stack's certificate appended, every call fails as a bare **"Connection error"** that names
 neither TLS nor the certificate:
 
 ```bash
-cat llm-stack/config/traefik/certs/ca.crt >> ~/AppData/Local/hermes/ca-bundle.pem
+cat llm-stack/config/traefik/certs/tls.crt >> ~/AppData/Local/hermes/ca-bundle.pem
 ```
 
 This hides behind the context check, which runs first and needs no network —

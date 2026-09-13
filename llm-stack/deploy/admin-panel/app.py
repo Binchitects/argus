@@ -458,6 +458,81 @@ def indexing_card(is_admin: bool = False) -> str:
             f'{body}</div>')
 
 
+ENV_SAMPLES_DIR = os.environ.get("ENV_SAMPLES_DIR", "/env-samples")
+_BLOCK = re.compile(r"^# >>> MODEL.*?^# <<< MODEL[^\n]*$", re.M | re.S)
+
+
+def _sample(path: str) -> dict | None:
+    """Read one env-samples file: its '# SAMPLE:' header lines and MODEL block."""
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return None
+    block = _BLOCK.search(text)
+    if not block:
+        return None
+    meta = {m.group(1).strip().lower(): m.group(2).strip()
+            for m in re.finditer(r"^# (TITLE|HARDWARE|DOWNLOAD|MEASURED|STATUS): (.*)$", text, re.M)}
+    name = re.search(r"^MODEL_NAME=(.*)$", block.group(0), re.M)
+    return {"file": os.path.basename(path), "block": block.group(0), "meta": meta,
+            "model": name.group(1).strip() if name else "?"}
+
+
+def model_card() -> str:
+    """What is running, and how to switch the whole deployment to a sample.
+
+    Deliberately SHOWS the steps instead of performing them. Switching means
+    recreating the engine container, which needs the Docker socket -- and a
+    socket in a web app is root on the host for anyone who can reach it. The
+    operator chose instructions over that trade.
+    """
+    running = os.environ.get("MODEL_NAME", "")
+    ctx = os.environ.get("MODEL_CONTEXT", "")
+    mtp_n = os.environ.get("LLAMACPP_MTP_DRAFT_MAX", "0") or "0"
+    mtp = (f"{mtp_n} draft token(s)" if mtp_n != "0" else "")
+    gpu_w = os.environ.get("GPU_POWER_LIMIT_W", "")
+    cpu_w = os.environ.get("CPU_POWER_LIMIT_W", "")
+    now = (f'<p style="margin:0 0 6px"><strong>{_h(running or "not set")}</strong>'
+           f'<span class="dim"> &nbsp;{_h(os.environ.get("LLAMACPP_MODEL_FILE", ""))}</span></p>'
+           f'<p class="dim" style="margin:0 0 14px">context {_h(ctx or "?")} tokens'
+           f' &middot; MTP {"on (" + _h(mtp) + ")" if mtp else "off"}'
+           f' &middot; power limit GPU {_h(gpu_w + " W" if gpu_w else "default")},'
+           f' CPU {_h(cpu_w + " W" if cpu_w else "firmware")}</p>')
+    try:
+        files = sorted(f for f in os.listdir(ENV_SAMPLES_DIR) if f.endswith(".env"))
+    except OSError:
+        files = []
+    items = []
+    for f in files:
+        smp = _sample(os.path.join(ENV_SAMPLES_DIR, f))
+        if not smp:
+            continue
+        m = smp["meta"]
+        current = " <span class=badge>running</span>" if smp["model"] == running else ""
+        items.append(
+            f'<details style="border-top:1px solid var(--line);padding:10px 0">'
+            f'<summary style="cursor:pointer"><strong>{_h(m.get("title", smp["file"]))}</strong>{current}'
+            f'<span class="dim"> &nbsp;{_h(m.get("hardware", ""))}</span></summary>'
+            f'<div class="dim" style="margin:8px 0">{_h(m.get("download", ""))}'
+            f'{"<br>" + _h(m.get("measured")) if m.get("measured") else ""}'
+            f'{"<br>" + _h(m.get("status")) if m.get("status") else ""}</div>'
+            f'<ol class="dim" style="margin:6px 0 8px 18px;padding:0">'
+            f'<li>In <code class="key">.env</code>, replace everything from '
+            f'<code class="key"># &gt;&gt;&gt; MODEL</code> to <code class="key"># &lt;&lt;&lt; MODEL</code> '
+            f'with the block below. Keep your own <code class="key">LLAMACPP_MODEL_DIR</code> path.</li>'
+            f'<li>Run <code class="key">docker compose up -d</code> in the llm-stack directory. '
+            f'A model not on disk yet is downloaded first: <code class="key">docker logs -f model-init</code>.</li>'
+            f'<li>The model list then shows <strong>{_h(smp["model"])}</strong> and nothing else.</li></ol>'
+            f'<pre style="white-space:pre-wrap;background:#0e1116;border:1px solid var(--line);'
+            f'border-radius:7px;padding:10px;font-size:12px;overflow-x:auto">{_h(smp["block"])}</pre>'
+            f'<p class="dim" style="margin:0">Whole file: <code class="key">env-samples/{_h(smp["file"])}</code></p>'
+            f'</details>')
+    samples = "".join(items) or '<p class="dim">No env-samples mounted.</p>'
+    return (f'<div class="card"><h2>Model</h2>{now}'
+            f'<p class="dim" style="margin:0 0 4px">Switch the whole deployment to one of these:</p>'
+            f'{samples}</div>')
+
+
 def monitoring_card() -> str:
     if not GRAFANA_URL:
         return ""
@@ -539,6 +614,7 @@ def admin_view(request: Request, who: Caller) -> Response:
             + f'<div class="card"><h2>People ({len(rows)})</h2>'
             f'<table><tr><th>User</th><th>Usage / credit</th><th>API key</th>'
             f'<th>Credit</th><th>Actions</th></tr>{"".join(rows)}</table></div>'
+            + model_card()
             + indexing_card(is_admin=True)
             + monitoring_card()
             + '<div class="card"><h2>Add a person</h2>'

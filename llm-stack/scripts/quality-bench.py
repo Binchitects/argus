@@ -676,7 +676,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", help="OpenAI-compatible base URL, e.g. http://llamacpp:8080")
-    ap.add_argument("--model", default="local")
+    ap.add_argument("--model", default=os.environ.get("MODEL_NAME", ""))
     ap.add_argument("--key", default=os.environ.get("BENCH_API_KEY"))
     ap.add_argument("--label", default="model")
     ap.add_argument("--out")

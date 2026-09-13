@@ -10,38 +10,23 @@
 # Reach it at https://gateway.<LLM_DOMAIN>/v1. Mint per-person keys with
 # POST /key/generate using LITELLM_MASTER_KEY.
 #
-# NOTE ON NAMES: `model_name` is what clients and the Open WebUI model picker
-# display. LiteLLM does NOT expand ${VAR} here -- but it DOES resolve
-# `os.environ/NAME`, which is how the engine below is selected from .env.
-# scripts/switch-model rewrites the display name when you change model.
+# ONE MODEL, ONE NAME. The model list below has a single entry whose name,
+# window and output limit come from .env (MODEL_NAME, MODEL_CONTEXT,
+# MODEL_MAX_OUTPUT). LiteLLM does not expand variables in `model_name` or
+# `model_info`, so the litellm service renders ${MODEL_NAME}-style tokens in
+# this file from its environment at startup -- see its entrypoint in
+# docker-compose.yml. Changing model is an .env edit and `docker compose up -d`.
+#
+# There used to be three entries here -- `local`, the served name and a stale
+# `qwen3.8-9b` alias -- all pointing at the same engine, and every client showed
+# all three. Aliases are gone: clients see the model's real name only.
 # ==============================================================================
 
 model_list:
-  # ---------------------------------------------------------------------------
-  # The engine is chosen in .env, not here.
-  #
-  # ENGINE_API_BASE / ENGINE_MODEL / ENGINE_API_KEY are set by scripts/setup.sh
-  # from the engine you picked, and docker-compose.yml defaults them to the vLLM
-  # wiring so an older .env keeps working. `os.environ/` is resolved by LiteLLM
-  # for every litellm_params key -- which is what makes ONE config file serve
-  # both vLLM and llama.cpp.
-  #
-  #   vllm      ENGINE_API_BASE=http://vllm:8000/v1
-  #   llamacpp  ENGINE_API_BASE=http://llamacpp:8080/v1
-  #
-  # ENGINE_MODEL carries its `openai/` prefix in .env. That prefix means "speak
-  # the OpenAI protocol to api_base" -- it is NOT api.openai.com. The part after
-  # it must equal the engine's served name (vLLM --served-model-name, llama.cpp
-  # --alias) or the engine answers 404 to everything.
-  #
-  # Both entries below are the SAME backend under two names: `local` is the
-  # stable alias clients should use, and the second is the human-readable one
-  # the Open WebUI model picker shows. scripts/switch-model rewrites the
-  # display name and the advertised window when the model changes.
-  # ---------------------------------------------------------------------------
-
-  # Stable alias, so clients need not change when the model or engine does.
-  - model_name: local
+  # The engine is chosen in .env: ENGINE_API_BASE / ENGINE_API_KEY, resolved by
+  # LiteLLM through os.environ/ (llama.cpp: http://llamacpp:8080/v1, vLLM:
+  # http://vllm:8000/v1). ENGINE_MODEL is openai/<the engine's served name>.
+  - model_name: ${MODEL_NAME}
     litellm_params:
       model: os.environ/ENGINE_MODEL
       api_base: os.environ/ENGINE_API_BASE
@@ -50,50 +35,11 @@ model_list:
       output_cost_per_token: 0.0000008
     model_info:
       mode: chat
-      # ADVERTISE the window. Without these, /model/info returns null for
-      # max_input_tokens and every client has to guess -- and clients CACHE
-      # the guess. Hermes wrote 24,576 to its context_length_cache.yaml back
-      # when vLLM really did serve that, then kept refusing on a 131,072
-      # engine because nothing ever invalidated the entry. Reporting the
-      # truth here is what stops that happening again, for every client.
-      #
-      # These are LITERAL numbers on purpose: model_info is not part of
-      # litellm_params, and an os.environ/ value would arrive as a string
-      # where an int is expected. setup.sh and switch-model rewrite them.
-      max_input_tokens: 262144
-      max_output_tokens: 8192
-      max_tokens: 262144
-
-  # Display name, shown in the Open WebUI model picker.
-  - model_name: qwen3.8-flash-next
-    litellm_params:
-      model: os.environ/ENGINE_MODEL
-      api_base: os.environ/ENGINE_API_BASE
-      api_key: os.environ/ENGINE_API_KEY
-      input_cost_per_token: 0.0000002
-      output_cost_per_token: 0.0000008
-    model_info:
-      mode: chat
-      max_input_tokens: 262144
-      max_output_tokens: 8192
-      max_tokens: 262144
-
-  # Compatibility alias. Clients that cached the previous served name -- the
-  # Hermes desktop model picker among them -- would otherwise get a 404 when
-  # someone selects it. Pointing it at the same backend means a stale entry in
-  # any client's list is harmless rather than a dead option.
-  - model_name: qwen3.8-9b
-    litellm_params:
-      model: os.environ/ENGINE_MODEL
-      api_base: os.environ/ENGINE_API_BASE
-      api_key: os.environ/ENGINE_API_KEY
-      input_cost_per_token: 0.0000002
-      output_cost_per_token: 0.0000008
-    model_info:
-      mode: chat
-      max_input_tokens: 262144
-      max_output_tokens: 8192
-      max_tokens: 262144
+      # Advertise the REAL window: clients cache /model/info, and a stale
+      # number there makes them refuse prompts the engine would accept.
+      max_input_tokens: ${MODEL_CONTEXT}
+      max_output_tokens: ${MODEL_MAX_OUTPUT}
+      max_tokens: ${MODEL_CONTEXT}
 
 router_settings:
   routing_strategy: simple-shuffle
@@ -125,14 +71,26 @@ litellm_settings:
   # a real number. Raise per-person with scripts/sync-llm-users.py.
   max_internal_user_budget: os.environ/LITELLM_DEFAULT_USER_BUDGET
   internal_user_budget_duration: os.environ/LITELLM_BUDGET_DURATION
-  # Cache identical completions in Redis. A big win for repeated evals and for
-  # UI clients that resend the same system prompt.
+  # Response cache in Redis, OFF unless a request asks for it.
+  #
+  # It used to be on for every request. The cache key is the model plus the
+  # messages -- not the person, not the temperature -- so it returned a stored
+  # answer for any repeat of the same conversation for an hour: "regenerate" in
+  # Open WebUI gave back the identical reply, two people who asked the same
+  # thing got one sampled answer between them, and a benchmark's second round
+  # measured Redis instead of the model.
+  #
+  # What it was meant to speed up, a resent system prompt, is already handled a
+  # layer down: the engine's prefix cache reuses those tokens without
+  # replaying an old answer. A caller that genuinely wants replay (a fixed eval
+  # set, say) opts in per request with  "cache": {"use-cache": true}.
   cache: true
   cache_params:
     type: redis
     host: redis
     port: 6379
     ttl: 3600
+    mode: default_off
   # Log every request to Langfuse when the `tracing` profile is running.
   # success_callback: ["langfuse"]
   # failure_callback: ["langfuse"]

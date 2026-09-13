@@ -40,7 +40,7 @@ ok()   { printf '  \033[32mok\033[0m    %s\n' "$*"; }
 warn() { printf '  \033[33mwarn\033[0m  %s\n' "$*"; }
 die()  { printf '  \033[31mfail\033[0m  %s\n' "$*" >&2; exit 1; }
 
-[[ -f .env ]] || die ".env not found -- run scripts/bootstrap first."
+[[ -f .env ]] || die ".env not found -- cp env-samples/<one>.env .env first."
 
 # Read the target from .env DIRECTLY, not from the environment. Reading it from
 # the environment would defeat the point: a stray shell variable is the thing
@@ -54,8 +54,8 @@ TARGET_USER="$(sed -n 's/^LLM_PG_USER=//p' .env | tail -1 | tr -d $'\r')"
 TARGET_PASS="$(sed -n 's/^LLM_PG_PASSWORD=//p' .env | tail -1 | tr -d $'\r')"
 : "${TARGET_USER:=llmservice}"
 
-[[ -n "$TARGET_PASS" ]] || die "LLM_PG_PASSWORD is empty in .env -- run scripts/bootstrap to generate one."
-[[ "$TARGET_PASS" != "change-me-please" ]] || die "LLM_PG_PASSWORD is still the placeholder -- run scripts/bootstrap."
+[[ -n "$TARGET_PASS" ]] || die "LLM_PG_PASSWORD is empty in .env -- set one (openssl rand -hex 32)."
+[[ "$TARGET_PASS" != "change-me-please" ]] || die "LLM_PG_PASSWORD is still a placeholder -- set a real one."
 
 docker compose ps --status running --format '{{.Service}}' 2>/dev/null | grep -qx postgres \
   || die "the postgres container is not running -- start it first."

@@ -37,25 +37,25 @@ volumes:
   ollama-models:
     name: ${COMPOSE_PROJECT_NAME:-llmservice}_ollama-models
 
-  # EXTERNAL on purpose: these hold model weights and compiled kernels, and a
-  # compose-managed volume is removed by `docker compose down -v`. That is a
-  # multi-hour re-download over a slow link -- 16 GB for an 8B, 20 GB for a
-  # 27B AWQ -- triggered by a flag people reach for when tidying up.
+  # vLLM's model and compile caches. These used to be `external: true`, so that
+  # `docker compose down -v` could never delete a multi-hour download -- but an
+  # external volume must exist BEFORE the first `up`, which broke "docker
+  # compose up is the whole deployment". They are ordinary named volumes now,
+  # with fixed names so a project rename does not orphan them.
   #
-  # Declared external, compose will NEVER delete them: `down -v` skips them
-  # and says so. The cost is that they must exist before the first `up`;
-  # bootstrap.sh creates them, and the command is:
-  #
-  #     docker volume create llmservice_hf-cache
-  #     docker volume create llmservice_vllm-cache
+  # So: DO NOT run `down -v` on a vLLM deployment unless you mean to re-download
+  # the model. llama.cpp deployments are unaffected -- their GGUFs live in the
+  # host directory LLAMACPP_MODEL_DIR, which compose never deletes.
   hf-cache:
-    external: true
-    name: llmservice_hf-cache
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_hf-cache
   vllm-cache:
-    external: true
-    name: llmservice_vllm-cache
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_vllm-cache
+  llamacpp-engine:
   open-webui-data:
   prometheus-data:
+  prometheus-secrets:
+  traefik-certs:
+  power-limits-state:
   grafana-data:
   alertmanager-data:
   loki-data:
@@ -81,11 +81,143 @@ services:
   # in most CLI tools.
   # ============================================================================
 
+  # Applies GPU and CPU power limits from .env, and keeps them applied.
+  #
+  #   GPU_POWER_LIMIT_W  watts per GPU (nvidia-smi -pl). Empty = driver default.
+  #   CPU_POWER_LIMIT_W  CPU package watts, as both RAPL limits (PL1 and PL2).
+  #                      Empty = whatever the firmware set before this ran.
+  #
+  # Why a CPU cap belongs here: plenty of boards ship with Intel's limits
+  # removed (the reference box read 4095 W for both), and an LLM whose experts
+  # run on the CPU then holds the package at 93-97 C under two users. Fewer
+  # threads did NOT help -- measured at 16, 12, 10 and 8 -- because the package
+  # temperature is the hottest core's, and every busy core runs flat out. Only
+  # power bounds heat.
+  #
+  # Both limits are volatile: a reboot or driver reload resets them. So this
+  # stays running and re-applies every minute, and restart: unless-stopped
+  # brings it back after a boot. The original CPU limits are recorded on first
+  # run, so clearing CPU_POWER_LIMIT_W restores them rather than leaving the
+  # cap in place.
+  #
+  # PRIVILEGED, which is the price of writing /sys/class/powercap: treat this
+  # container as root on the host. It has no network and runs a fixed script.
+  # AMD CPUs expose no writable RAPL limit; the CPU part then logs and skips.
+  power-limits:
+    image: utkuozdemir/nvidia_gpu_exporter:1.3.2
+    container_name: power-limits
+    restart: unless-stopped
+    privileged: true
+    network_mode: none
+    environment:
+      GPU_POWER_LIMIT_W: ${GPU_POWER_LIMIT_W:-}
+      CPU_POWER_LIMIT_W: ${CPU_POWER_LIMIT_W:-}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    volumes:
+      - power-limits-state:/state
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apply() {
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            for i in $$(nvidia-smi --query-gpu=index --format=csv,noheader); do
+              cur=$$(nvidia-smi -i $$i --query-gpu=power.limit --format=csv,noheader,nounits | cut -d. -f1)
+              if [ -n "$$GPU_POWER_LIMIT_W" ]; then want=$$GPU_POWER_LIMIT_W
+              elif [ -f /state/gpu$$i.applied ]; then want=$$(nvidia-smi -i $$i --query-gpu=power.default_limit --format=csv,noheader,nounits | cut -d. -f1)
+              else want=""; fi
+              if [ -n "$$want" ] && [ "$$cur" != "$$want" ]; then
+                nvidia-smi -i $$i -pl "$$want" >/dev/null && echo "gpu$$i: power limit $$cur W -> $$want W"
+                if [ -n "$$GPU_POWER_LIMIT_W" ]; then touch /state/gpu$$i.applied; else rm -f /state/gpu$$i.applied; fi
+              fi
+            done
+          fi
+          for d in /sys/class/powercap/intel-rapl:[0-9]; do
+            [ -w "$$d/constraint_0_power_limit_uw" ] || { [ -n "$$CPU_POWER_LIMIT_W" ] && [ ! -f /state/cpu-skip ] && echo "cpu: no writable RAPL limit at $$d; skipping" && touch /state/cpu-skip; continue; }
+            name=$$(basename $$d)
+            for c in 0 1; do
+              f="$$d/constraint_$${c}_power_limit_uw"; orig="/state/$$name.c$$c.orig"
+              [ -f "$$orig" ] || cat "$$f" > "$$orig"
+              if [ -n "$$CPU_POWER_LIMIT_W" ]; then want=$$((CPU_POWER_LIMIT_W * 1000000)); else want=$$(cat "$$orig"); fi
+              if [ "$$(cat $$f)" != "$$want" ]; then
+                echo "$$want" > "$$f" && echo "cpu $$name $$(cat $$d/constraint_$${c}_name): $$(( $$(cat $$orig) / 1000000 )) W originally -> $$(( want / 1000000 )) W"
+              fi
+            done
+          done
+        }
+        echo "power-limits: GPU=$${GPU_POWER_LIMIT_W:-default} W, CPU=$${CPU_POWER_LIMIT_W:-firmware} W"
+        while true; do apply; sleep 60; done
+    <<: *gpu-reservation
+    logging: *default-logging
+
+  # Generates the self-signed TLS certificate Traefik serves, then exits.
+  #
+  # Replaces scripts/gen-certs and its private CA. That path needed a script run
+  # before the first `up` and a CA installed into every client's trust store,
+  # and each step was a place a fresh deployment went wrong.
+  #
+  # Not Traefik's built-in default certificate, deliberately: Traefik makes that
+  # one in memory and makes a NEW one on every restart, so nothing can ever trust
+  # it. Browsers would re-warn after each restart, and Open WebUI's single
+  # sign-on -- a server-side HTTPS call to auth.<domain> -- could only work with
+  # certificate verification switched off. This certificate is generated once,
+  # kept on a volume, and reused, so internal clients verify it properly.
+  #
+  # Regenerated automatically when LLM_DOMAIN changes. Covers the domain and
+  # *.domain, valid 10 years. Authelia's image is reused for its built-in
+  # generator: no extra image to pull.
+  #
+  # The public certificate is also copied to config/traefik/certs/tls.crt for
+  # host-side tools. The private key never leaves the volume.
+  tls-init:
+    image: authelia/authelia:4.39
+    container_name: tls-init
+    # One-shot: the image's own healthcheck (for the long-running server) does not apply.
+    healthcheck:
+      disable: true
+    restart: "no"
+    network_mode: none
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      LLM_DOMAIN: ${LLM_DOMAIN:-llm.localhost}
+    command:
+      - |
+        set -e
+        D=/certs
+        if [ ! -s "$$D/tls.crt" ] || [ ! -s "$$D/tls.key" ] || [ "$$(cat "$$D/domain" 2>/dev/null)" != "$$LLM_DOMAIN" ]; then
+          rm -f "$$D/public.crt" "$$D/private.pem"
+          authelia crypto certificate rsa generate --common-name "$$LLM_DOMAIN" \
+            --sans "$$LLM_DOMAIN,*.$$LLM_DOMAIN" --organization LLMService \
+            --duration 10y --directory "$$D" >/dev/null
+          mv "$$D/public.crt" "$$D/tls.crt"
+          mv "$$D/private.pem" "$$D/tls.key"
+          echo "$$LLM_DOMAIN" > "$$D/domain"
+          echo "tls-init: generated a self-signed certificate for $$LLM_DOMAIN and *.$$LLM_DOMAIN"
+        else
+          echo "tls-init: certificate for $$LLM_DOMAIN already present"
+        fi
+        # Public CAs plus ours, for containers that also talk to the internet.
+        cat /etc/ssl/certs/ca-certificates.crt "$$D/tls.crt" > "$$D/bundle.crt"
+        chmod 644 "$$D/tls.crt" "$$D/bundle.crt"
+        chmod 600 "$$D/tls.key"
+        # Owned by whoever owns the directory, so the operator can delete it.
+        if cp "$$D/tls.crt" /export/tls.crt 2>/dev/null; then
+          chmod 644 /export/tls.crt
+          chown "$$(stat -c %u:%g /export)" /export/tls.crt 2>/dev/null || true
+        fi
+    volumes:
+      - traefik-certs:/certs
+      - ./config/traefik/certs:/export
+    logging: *default-logging
+
   traefik:
     # v3.3 pins Docker API 1.24, which Engine 29 rejects (MinAPIVersion 1.40).
     # v3.6 negotiates the API version with the daemon.
     image: traefik:v3.6.7
     container_name: traefik
+    depends_on:
+      tls-init: { condition: service_completed_successfully }
     profiles: [proxy]
     restart: unless-stopped
     networks:
@@ -129,11 +261,11 @@ services:
         target: /etc/traefik/dynamic
         read_only: true
         bind: { create_host_path: false }
-      - type: bind
-        source: ./config/traefik/certs
+      # Generated by tls-init on first `up`; nothing to create or trust by hand.
+      - type: volume
+        source: traefik-certs
         target: /etc/traefik/certs
         read_only: true
-        bind: { create_host_path: false }
       - type: bind
         source: ./config/traefik/auth
         target: /etc/traefik/auth
@@ -165,6 +297,132 @@ services:
   # Run scripts/gen-auth first; it creates the secrets, users.yml and clients.yml.
   # ============================================================================
 
+  # Builds everything Authelia and Traefik need from .env, then exits.
+  #
+  # This is what scripts/gen-auth.sh and gen-proxy-auth used to do on the host,
+  # moved inside compose so a deployment is `docker compose up` and nothing
+  # else. Every input is a value in .env; nothing here asks a question.
+  #
+  #   secrets/oidc.pem  OIDC signing key          generated once, then kept
+  #   users.yml         the admin account         only if absent: the admin
+  #                                               panel owns it afterwards
+  #   clients.yml       OIDC clients              rebuilt every start from the
+  #                                               *_OIDC_CLIENT_SECRET values
+  #   users.htpasswd    Traefik basic-auth        rebuilt from PROXY_AUTH_*
+  #
+  # It also refuses to let Authelia start against a database encrypted with a
+  # different AUTHELIA_STORAGE_ENCRYPTION_KEY -- the crash-loop you get from
+  # replacing .env while the authelia-data volume survives -- and says which
+  # volume to remove instead.
+  auth-init:
+    image: authelia/authelia:4.39
+    container_name: auth-init
+    # One-shot: the image's own healthcheck (for the long-running server) does not apply.
+    healthcheck:
+      disable: true
+    profiles: [auth]
+    restart: "no"
+    network_mode: none
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-llmservice}
+      AUTHELIA_ADMIN_PASSWORD: ${AUTHELIA_ADMIN_PASSWORD:?set AUTHELIA_ADMIN_PASSWORD in .env}
+      AUTHELIA_STORAGE_ENCRYPTION_KEY: ${AUTHELIA_STORAGE_ENCRYPTION_KEY:?set AUTHELIA_STORAGE_ENCRYPTION_KEY in .env}
+      GRAFANA_OIDC_CLIENT_SECRET: ${GRAFANA_OIDC_CLIENT_SECRET:?set GRAFANA_OIDC_CLIENT_SECRET in .env}
+      OPENWEBUI_OIDC_CLIENT_SECRET: ${OPENWEBUI_OIDC_CLIENT_SECRET:?set OPENWEBUI_OIDC_CLIENT_SECRET in .env}
+      LANGFUSE_OIDC_CLIENT_SECRET: ${LANGFUSE_OIDC_CLIENT_SECRET:-unused-unless-tracing-profile}
+      API_OIDC_CLIENT_SECRET: ${API_OIDC_CLIENT_SECRET:?set API_OIDC_CLIENT_SECRET in .env}
+      PROXY_AUTH_USER: ${PROXY_AUTH_USER:-admin}
+      PROXY_AUTH_PASSWORD: ${PROXY_AUTH_PASSWORD:?set PROXY_AUTH_PASSWORD in .env}
+    volumes:
+      - ./config/authelia:/config
+      - ./config/traefik/auth:/traefik-auth
+      - authelia-data:/data
+    command:
+      - |
+        set -e
+        owner=$$(stat -c %u:%g /config)
+        hash() { authelia crypto hash generate "$$@" | sed 's/^Digest: //'; }
+
+        # A database written with another key cannot be decrypted; stop here, clearly.
+        want=$$(printf '%s' "$$AUTHELIA_STORAGE_ENCRYPTION_KEY" | sha256sum | cut -d' ' -f1)
+        if [ -f /data/db.sqlite3 ] && [ -f /data/.storage-key.sha256 ] && [ "$$(cat /data/.storage-key.sha256)" != "$$want" ]; then
+          echo "auth-init: AUTHELIA_STORAGE_ENCRYPTION_KEY differs from the key that encrypted the authelia-data volume."
+          echo "auth-init: that volume holds sessions only; accounts live in config/authelia/users.yml."
+          echo "auth-init: remove it with:  docker volume rm $${COMPOSE_PROJECT_NAME}_authelia-data"
+          exit 1
+        fi
+        printf '%s' "$$want" > /data/.storage-key.sha256
+
+        mkdir -p /config/secrets
+        if [ ! -s /config/secrets/oidc.pem ]; then
+          authelia crypto pair rsa generate --bits 4096 --directory /config/secrets \
+            --file.private-key oidc.pem --file.public-key oidc.pub.pem >/dev/null
+          echo "auth-init: generated the OIDC signing key"
+        fi
+
+        if [ ! -s /config/users.yml ]; then
+          ph=$$(hash argon2 --password "$$AUTHELIA_ADMIN_PASSWORD")
+          printf '%s\n' "# Authelia accounts. Passwords are argon2id hashes. Manage people from the admin panel." \
+            "users:" "  admin:" "    disabled: false" "    displayname: 'Administrator'" \
+            "    password: '$$ph'" "    email: 'admin@example.com'" "    groups:" "      - admins" > /config/users.yml
+          echo "auth-init: created users.yml with the admin account (password = AUTHELIA_ADMIN_PASSWORD)"
+        fi
+
+        D='{{ env "LLM_DOMAIN" }}'
+        client() {  # id name secret redirect scopes
+          echo "      - client_id: '$$1'"
+          echo "        client_name: '$$2'"
+          echo "        client_secret: '$$(hash pbkdf2 --variant sha512 --password "$$3")'"
+          echo "        public: false"
+          echo "        authorization_policy: 'one_factor'"
+          echo "        claims_policy: 'with_profile'"
+          echo "        consent_mode: 'implicit'"
+          echo "        require_pkce: false"
+          echo "        redirect_uris:"
+          echo "          - '$$4'"
+          echo "        scopes: $$5"
+          echo "        userinfo_signed_response_alg: 'none'"
+          echo "        token_endpoint_auth_method: 'client_secret_basic'"
+        }
+        {
+          echo "# GENERATED by the auth-init service from .env on every start. Do not edit."
+          echo "identity_providers:"
+          echo "  oidc:"
+          echo "    jwks:"
+          echo "      - key_id: 'main'"
+          echo "        algorithm: 'RS256'"
+          echo "        use: 'sig'"
+          echo "        key: |"
+          sed 's/^/          /' /config/secrets/oidc.pem
+          echo "    clients:"
+          client grafana Grafana "$$GRAFANA_OIDC_CLIENT_SECRET" "https://grafana.$$D/login/generic_oauth" "['openid', 'profile', 'groups', 'email']"
+          client open-webui "Open WebUI" "$$OPENWEBUI_OIDC_CLIENT_SECRET" "https://chat.$$D/oauth/oidc/callback" "['openid', 'profile', 'groups', 'email']"
+          client langfuse Langfuse "$$LANGFUSE_OIDC_CLIENT_SECRET" "https://traces.$$D/api/auth/callback/custom" "['openid', 'profile', 'email']"
+          echo "      - client_id: 'api'"
+          echo "        client_name: 'LLM API (machine clients)'"
+          echo "        client_secret: '$$(hash pbkdf2 --variant sha512 --password "$$API_OIDC_CLIENT_SECRET")'"
+          echo "        public: false"
+          echo "        authorization_policy: 'one_factor'"
+          echo "        require_pkce: false"
+          echo "        redirect_uris: []"
+          echo "        grant_types: ['client_credentials']"
+          echo "        scopes: ['authelia.bearer.authz']"
+          echo "        audience:"
+          echo "          - 'https://api.$$D'"
+          echo "          - 'https://gateway.$$D'"
+          echo "        token_endpoint_auth_method: 'client_secret_basic'"
+        } > /config/clients.yml.new
+        mv /config/clients.yml.new /config/clients.yml
+
+        printf '%s:%s\n' "$$PROXY_AUTH_USER" "$$(hash bcrypt --password "$$PROXY_AUTH_PASSWORD")" > /traefik-auth/users.htpasswd
+
+        chmod 600 /config/clients.yml /config/users.yml /config/secrets/oidc.pem /traefik-auth/users.htpasswd
+        chown -R "$$owner" /config/clients.yml /config/users.yml /config/secrets /traefik-auth/users.htpasswd 2>/dev/null || true
+        echo "auth-init: clients.yml and users.htpasswd rebuilt from .env"
+    logging: *default-logging
+
   authelia:
     image: authelia/authelia:4.39
     container_name: authelia
@@ -195,14 +453,20 @@ services:
     environment:
       # Authelia merges these two files; clients.yml is generated because OIDC
       # client secrets have to be stored as hashes.
-      X_AUTHELIA_CONFIG: /config/configuration.yml,/config/clients.yml
-      AUTHELIA_SESSION_SECRET: ${AUTHELIA_SESSION_SECRET:?run scripts/gen-auth first}
-      AUTHELIA_STORAGE_ENCRYPTION_KEY: ${AUTHELIA_STORAGE_ENCRYPTION_KEY:?run scripts/gen-auth first}
-      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET: ${AUTHELIA_JWT_SECRET:?run scripts/gen-auth first}
-      AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET: ${AUTHELIA_OIDC_HMAC_SECRET:?run scripts/gen-auth first}
+      X_AUTHELIA_CONFIG: /config/configuration.template.yml,/config/clients.yml
+      # Both files name the domain as {{ env "LLM_DOMAIN" }}; the template filter
+      # expands it at startup, so the domain lives in .env and nowhere else.
+      X_AUTHELIA_CONFIG_FILTERS: template
+      LLM_DOMAIN: ${LLM_DOMAIN:-llm.localhost}
+      AUTHELIA_SESSION_SECRET: ${AUTHELIA_SESSION_SECRET:?set AUTHELIA_SESSION_SECRET in .env}
+      AUTHELIA_STORAGE_ENCRYPTION_KEY: ${AUTHELIA_STORAGE_ENCRYPTION_KEY:?set AUTHELIA_STORAGE_ENCRYPTION_KEY in .env}
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET: ${AUTHELIA_JWT_SECRET:?set AUTHELIA_JWT_SECRET in .env}
+      AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET: ${AUTHELIA_OIDC_HMAC_SECRET:?set AUTHELIA_OIDC_HMAC_SECRET in .env}
     depends_on:
       redis:
         condition: service_healthy
+      auth-init:
+        condition: service_completed_successfully
     # No healthcheck override: the image ships /app/healthcheck.sh, and there is
     # no `authelia health` subcommand in 4.39. Overriding it made the container
     # permanently unhealthy, which in turn made Traefik refuse to route it.
@@ -273,7 +537,7 @@ services:
       --served-model-name ${VLLM_SERVED_MODEL_NAME:-default}
       --host 0.0.0.0
       --port 8000
-      --api-key ${VLLM_API_KEY:?VLLM_API_KEY must be set in .env}
+      --api-key ${VLLM_API_KEY:-${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}}
       --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
       --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
       --dtype ${VLLM_DTYPE:-auto}
@@ -305,7 +569,7 @@ services:
       # replaces the Authorization header with vLLM's internal key before
       # proxying. Middleware order is significant - Authelia must inspect
       # the original header before it is overwritten.
-      - "traefik.http.middlewares.vllm-key.headers.customrequestheaders.Authorization=Bearer ${VLLM_API_KEY}"
+      - "traefik.http.middlewares.vllm-key.headers.customrequestheaders.Authorization=Bearer ${VLLM_API_KEY:-${LLAMACPP_API_KEY}}"
       - "traefik.http.routers.vllm.middlewares=${PROTECTED_CHAIN:-protected-chain@file},vllm-key@docker"
       # /metrics carries no bearer-token check, so guard it at the edge. This
       # does not affect Prometheus, which scrapes vllm:8000 directly on the
@@ -383,6 +647,90 @@ services:
   # It is NOT a replacement for vLLM. vLLM batches far better and is the right
   # engine whenever the model fits. Run exactly one.
   # ============================================================================
+  # Puts the model (and, if configured, a replacement llama-server build) in
+  # place from .env, then exits. The engine waits for it.
+  #
+  #   LLAMACPP_HF_REPO + LLAMACPP_HF_FILES   Hugging Face repo and the files to
+  #       fetch into LLAMACPP_MODEL_DIR (space-separated paths inside the repo;
+  #       they land flat, by file name). Files already present at the published
+  #       size are skipped, downloads resume, and every LFS file is checked
+  #       against the SHA-256 Hugging Face publishes before it is used.
+  #   LLAMACPP_ENGINE_URL (+ _SHA256)        a llama.cpp release tarball to run
+  #       instead of the image's own server -- for MTP, which mainline llama.cpp
+  #       lacks for Qwen3.8 (ggml-org/llama.cpp#28243). Unpacked into the
+  #       llamacpp-engine volume; empty clears it and the stock server runs.
+  #
+  # With both empty it only verifies that LLAMACPP_MODEL_FILE (and the MTP
+  # head, if set) exist -- so a typo in a path fails HERE, with the path in the
+  # message, instead of as a crash loop in the engine.
+  #
+  # A first start of a large model is a long download (Qwen3.8-Flash-Next
+  # IQ4_XS is 94 GB). Follow it with:  docker logs -f model-init
+  model-init:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG:-server-cuda}
+    container_name: model-init
+    # One-shot: the image's own healthcheck (for the long-running server) does not apply.
+    healthcheck:
+      disable: true
+    profiles: [llamacpp]
+    restart: "no"
+    networks: [llm-net]
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    environment:
+      LLAMACPP_HF_REPO: ${LLAMACPP_HF_REPO:-}
+      LLAMACPP_HF_FILES: ${LLAMACPP_HF_FILES:-}
+      LLAMACPP_MODEL_FILE: ${LLAMACPP_MODEL_FILE:?set LLAMACPP_MODEL_FILE in .env}
+      LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
+      LLAMACPP_ENGINE_URL: ${LLAMACPP_ENGINE_URL:-}
+      LLAMACPP_ENGINE_SHA256: ${LLAMACPP_ENGINE_SHA256:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ${LLAMACPP_MODEL_DIR:?set LLAMACPP_MODEL_DIR in .env}:/gguf
+      - llamacpp-engine:/engine
+    command:
+      - |
+        set -euo pipefail
+        auth=(); [ -n "$$HF_TOKEN" ] && auth=(-H "Authorization: Bearer $$HF_TOKEN")
+        owner=$$(stat -c %u:%g /gguf)
+        for f in $$LLAMACPP_HF_FILES; do
+          name=$$(basename "$$f"); url="https://huggingface.co/$$LLAMACPP_HF_REPO/resolve/main/$$f"
+          head=$$(curl -sI "$${auth[@]}" "$$url" | tr -d '\r')
+          size=$$(printf '%s\n' "$$head" | sed -n 's/^x-linked-size: //Ip' | head -1)
+          [ -n "$$size" ] || size=$$(printf '%s\n' "$$head" | sed -n 's/^content-length: //Ip' | tail -1)
+          sha=$$(printf '%s\n' "$$head" | sed -n 's/^x-linked-etag: "\{0,1\}\([0-9a-f]\{64\}\)"\{0,1\}/\1/Ip' | head -1)
+          if [ -f "/gguf/$$name" ] && [ "$$(stat -c %s "/gguf/$$name")" = "$$size" ]; then
+            echo "model-init: have $$name"; continue
+          fi
+          [ -n "$$size" ] || { echo "model-init: $$LLAMACPP_HF_REPO/$$f not found on Hugging Face"; exit 1; }
+          echo "model-init: downloading $$name ($$((size / 1000000)) MB) from $$LLAMACPP_HF_REPO"
+          curl -fL --retry 20 --retry-delay 10 -C - "$${auth[@]}" -o "/gguf/$$name.part" "$$url"
+          if [ -n "$$sha" ]; then
+            echo "model-init: verifying $$name"
+            echo "$$sha  /gguf/$$name.part" | sha256sum -c --quiet
+          fi
+          mv "/gguf/$$name.part" "/gguf/$$name"; chown "$$owner" "/gguf/$$name" || true
+        done
+        [ -f "/gguf/$$LLAMACPP_MODEL_FILE" ] || { echo "model-init: LLAMACPP_MODEL_FILE=$$LLAMACPP_MODEL_FILE is not in LLAMACPP_MODEL_DIR (set LLAMACPP_HF_REPO/LLAMACPP_HF_FILES to download it)"; exit 1; }
+        [ -z "$$LLAMACPP_MTP_HEAD" ] || [ -f "/gguf/$$LLAMACPP_MTP_HEAD" ] || { echo "model-init: LLAMACPP_MTP_HEAD=$$LLAMACPP_MTP_HEAD is not in LLAMACPP_MODEL_DIR"; exit 1; }
+
+        if [ -n "$$LLAMACPP_ENGINE_URL" ]; then
+          if [ "$$(cat /engine/.source 2>/dev/null)" != "$$LLAMACPP_ENGINE_URL" ] || [ ! -x /engine/llama-server ]; then
+            echo "model-init: fetching engine $$LLAMACPP_ENGINE_URL"
+            curl -fL --retry 10 -o /tmp/engine.tgz "$$LLAMACPP_ENGINE_URL"
+            [ -z "$$LLAMACPP_ENGINE_SHA256" ] || echo "$$LLAMACPP_ENGINE_SHA256  /tmp/engine.tgz" | sha256sum -c --quiet
+            find /engine -mindepth 1 -delete; tar xzf /tmp/engine.tgz -C /engine
+            [ -x /engine/llama-server ] || { echo "model-init: no llama-server at the top of that tarball"; exit 1; }
+            echo "$$LLAMACPP_ENGINE_URL" > /engine/.source
+          fi
+          echo "model-init: engine $$(basename "$$LLAMACPP_ENGINE_URL")"
+        else
+          find /engine -mindepth 1 -delete 2>/dev/null || true
+          echo "model-init: engine = the image's own llama-server"
+        fi
+        echo "model-init: ready ($$LLAMACPP_MODEL_FILE$${LLAMACPP_MTP_HEAD:+, MTP head $$LLAMACPP_MTP_HEAD})"
+    logging: *default-logging
+
   llamacpp:
     image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG:-server-cuda}
     container_name: llamacpp
@@ -393,8 +741,40 @@ services:
       # Same bind mount as vLLM, plus wherever the big GGUFs actually live.
       - ./models:/models
       - ${LLAMACPP_MODEL_DIR:-./models}:/gguf:ro
+      # Filled by model-init from LLAMACPP_ENGINE_URL; empty = stock server.
+      - llamacpp-engine:/engine:ro
+    # Which llama-server runs, and MTP. Both come from .env via model-init:
+    #
+    #   LLAMACPP_ENGINE_URL  a release tarball unpacked into /engine. Empty runs
+    #       the image's own /app/llama-server. It exists for MTP: mainline has
+    #       no MTP graph for the qwen4exp architecture yet (ggml-org/llama.cpp
+    #       #28243 is open), so the stock image accepts --spec-type draft-mtp
+    #       and silently does nothing. Unsloth's CUDA 12 build carries it.
+    #   LLAMACPP_MTP_DRAFT_MAX  multi-token prediction: tokens drafted per step.
+    #       0 = off. Needs a model with an MTP layer: Qwen3.8-27B carries its own
+    #       inside the main GGUF (the stock server handles it); Qwen3.8-Flash-Next
+    #       needs a separate draft head (LLAMACPP_MTP_HEAD, a file name in
+    #       LLAMACPP_MODEL_DIR) and the Unsloth engine above.
+    #       LLAMACPP_MTP_ARGS appends flags for the draft, e.g.
+    #       --spec-draft-cpu-moe to keep a draft head's experts in system RAM.
     environment:
       LLAMA_CACHE: /models/.llama-cache
+      LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
+      LLAMACPP_MTP_DRAFT_MAX: ${LLAMACPP_MTP_DRAFT_MAX:-0}
+      LLAMACPP_MTP_ARGS: ${LLAMACPP_MTP_ARGS:-}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        bin=/app/llama-server
+        if [ -x /engine/llama-server ]; then bin=/engine/llama-server; echo "engine: $$(cat /engine/.source 2>/dev/null || echo /engine)"; fi
+        if [ "$${LLAMACPP_MTP_DRAFT_MAX:-0}" -gt 0 ]; then
+          echo "MTP: drafting $$LLAMACPP_MTP_DRAFT_MAX token(s) per step$${LLAMACPP_MTP_HEAD:+ with head /gguf/$$LLAMACPP_MTP_HEAD}"
+          [ -z "$$LLAMACPP_MTP_HEAD" ] || set -- "$$@" -md "/gguf/$$LLAMACPP_MTP_HEAD"
+          set -- "$$@" --spec-type draft-mtp --spec-draft-n-max "$$LLAMACPP_MTP_DRAFT_MAX" $$LLAMACPP_MTP_ARGS
+        fi
+        exec "$$bin" "$$@"
+      - llama-server
     # The image entrypoint is llama-server, so this holds only flags.
     #
     # ON THE --api-key DEFAULT: the placeholder is not the security boundary and
@@ -419,9 +799,10 @@ services:
       -m /gguf/${LLAMACPP_MODEL_FILE:-SET_LLAMACPP_MODEL_FILE_IN_ENV.gguf}
       --host 0.0.0.0
       --port 8080
-      --api-key ${LLAMACPP_API_KEY:-change-me-please}
-      --alias ${LLAMACPP_SERVED_MODEL_NAME:-local}
-      -c ${LLAMACPP_CONTEXT:-32768}
+      --api-key ${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}
+      --alias ${MODEL_NAME:?set MODEL_NAME in .env}
+      -c ${MODEL_CONTEXT:-32768}
+      -t ${LLAMACPP_THREADS:-8}
       -ngl ${LLAMACPP_N_GPU_LAYERS:-99}
       --n-cpu-moe ${LLAMACPP_N_CPU_MOE:-48}
       --cache-type-k ${LLAMACPP_KV_TYPE:-q8_0}
@@ -461,6 +842,9 @@ services:
     # SLOWER). Leaves 8 logical CPUs for everything else.
     cpus: ${LLAMACPP_CPUS:-16}
     <<: *gpu-reservation
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:8080/health"]
       interval: 30s
@@ -475,7 +859,7 @@ services:
       - "traefik.http.routers.llamacpp.entrypoints=websecure"
       - "traefik.http.routers.llamacpp.tls=true"
       - "traefik.http.routers.llamacpp.service=llamacpp"
-      - "traefik.http.middlewares.llamacpp-key.headers.customrequestheaders.Authorization=Bearer ${LLAMACPP_API_KEY:-change-me-please}"
+      - "traefik.http.middlewares.llamacpp-key.headers.customrequestheaders.Authorization=Bearer ${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}"
       - "traefik.http.routers.llamacpp.middlewares=${PROTECTED_CHAIN:-protected-chain@file},llamacpp-key@docker"
     logging: *default-logging
 
@@ -532,7 +916,7 @@ services:
       --served-model-name ${VLLM2_SERVED_MODEL_NAME:-fast}
       --host 0.0.0.0
       --port 8000
-      --api-key ${VLLM_API_KEY:?VLLM_API_KEY must be set in .env}
+      --api-key ${VLLM_API_KEY:-${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}}
       --max-model-len ${VLLM2_MAX_MODEL_LEN:-8192}
       --gpu-memory-utilization ${VLLM2_GPU_MEMORY_UTILIZATION:-0.35}
       --dtype ${VLLM2_DTYPE:-auto}
@@ -579,14 +963,16 @@ services:
     # No published ports: Traefik is the only way in. Re-add a mapping
     # here only if you need to bypass the proxy for debugging.
     volumes:
-      - ./config/litellm/config.yaml:/app/config.yaml:ro
+      # A template: ${MODEL_NAME}, ${MODEL_CONTEXT}, ${MODEL_MAX_OUTPUT} are filled
+      # in from the environment at startup (entrypoint below).
+      - ./config/litellm/config.yaml:/app/config.template.yaml:ro
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set LITELLM_SALT_KEY}
       DATABASE_URL: postgresql://${LLM_PG_USER:-llmservice}:${LLM_PG_PASSWORD}@postgres:5432/litellm
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      VLLM_API_KEY: ${VLLM_API_KEY}
+      VLLM_API_KEY: ${VLLM_API_KEY:-${LLAMACPP_API_KEY}}
       # ---- which engine the gateway talks to -------------------------------
       # config/litellm/config.yaml reads these through `os.environ/`, so the
       # gateway config is engine-agnostic and .env alone decides the backend.
@@ -594,13 +980,16 @@ services:
       # The defaults reproduce the vLLM wiring exactly, so an .env written
       # before llama.cpp existed keeps working untouched; setup.sh writes them
       # explicitly from here on.
-      ENGINE_API_BASE: ${ENGINE_API_BASE:-http://vllm:8000/v1}
+      MODEL_NAME: ${MODEL_NAME:?set MODEL_NAME in .env}
+      MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
+      MODEL_MAX_OUTPUT: ${MODEL_MAX_OUTPUT:-32768}
+      ENGINE_API_BASE: ${ENGINE_API_BASE:-http://llamacpp:8080/v1}
       # `openai/` is the PROTOCOL, not the vendor -- it means "speak the OpenAI
       # API to api_base". The part after it must equal the engine's served
       # model name (vLLM --served-model-name / llama.cpp --alias) or the engine
       # answers 404 to every request.
-      ENGINE_MODEL: ${ENGINE_MODEL:-openai/${VLLM_SERVED_MODEL_NAME:-default}}
-      ENGINE_API_KEY: ${ENGINE_API_KEY:-${VLLM_API_KEY}}
+      ENGINE_MODEL: ${ENGINE_MODEL:-openai/${MODEL_NAME}}
+      ENGINE_API_KEY: ${ENGINE_API_KEY:-${LLAMACPP_API_KEY}}
       STORE_MODEL_IN_DB: "True"
       # config/litellm/config.yaml reads these through `os.environ/`. This
       # service has no env_file, so a variable that is not named here does not
@@ -613,7 +1002,19 @@ services:
       LITELLM_BUDGET_DURATION: ${LITELLM_BUDGET_DURATION:-1mo}
     # One worker is ample for a small team and costs ~700 MB instead of ~3 GB.
     # Raise LITELLM_WORKERS only if the gateway itself becomes a bottleneck.
-    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "${LITELLM_WORKERS:-1}"]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        python3 - <<'PY'
+        import os, re
+        src = open("/app/config.template.yaml").read()
+        out = re.sub(r"\$\{(MODEL_NAME|MODEL_CONTEXT|MODEL_MAX_OUTPUT)\}", lambda m: os.environ[m.group(1)], src)
+        open("/tmp/config.yaml", "w").write(out)
+        PY
+        exec docker/prod_entrypoint.sh "$$@"
+      - litellm
+    command: ["--config", "/tmp/config.yaml", "--port", "4000", "--num_workers", "${LITELLM_WORKERS:-1}"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -703,7 +1104,12 @@ services:
     logging: *default-logging
 
   argus:
-    image: argus:${ARGUS_VERSION:-0.1.0-rc1}
+    image: argus:${ARGUS_VERSION:-latest}
+    # Not a public image: `docker compose up` builds it from this repository
+    # the first time (a few minutes), then reuses the local image.
+    build:
+      context: ..
+      target: server
     container_name: argus
     profiles: [argus]
     restart: unless-stopped
@@ -822,6 +1228,15 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
       LITELLM_DEFAULT_USER_BUDGET: ${LITELLM_DEFAULT_USER_BUDGET:-50}
       AUTHELIA_USERS_FILE: /authelia/users.yml
+      # For the Model card: what is running, and the shipped env-samples to
+      # switch to. The panel only SHOWS the steps; it has no Docker access.
+      MODEL_NAME: ${MODEL_NAME:-}
+      MODEL_CONTEXT: ${MODEL_CONTEXT:-}
+      LLAMACPP_MODEL_FILE: ${LLAMACPP_MODEL_FILE:-}
+      LLAMACPP_MTP_DRAFT_MAX: ${LLAMACPP_MTP_DRAFT_MAX:-0}
+      GPU_POWER_LIMIT_W: ${GPU_POWER_LIMIT_W:-}
+      CPU_POWER_LIMIT_W: ${CPU_POWER_LIMIT_W:-}
+      ENV_SAMPLES_DIR: /env-samples
       ADMIN_GROUP: ${ADMIN_GROUP:-admins}
       LLM_DOMAIN: ${LLM_DOMAIN:-llm.localhost}
       # Argus's operator surface. The indexing card only renders when the token
@@ -845,6 +1260,8 @@ services:
       # The directory also holds secrets/, which is why only this one file's
       # directory is mounted rather than the whole config tree.
       - ./config/authelia:/authelia
+      # The sample deployments the Model card offers to switch to (read-only).
+      - ./env-samples:/env-samples:ro
     # NO depends_on, deliberately. `litellm` lives in the `gateway` profile and
     # this lives in `auth`; compose rejects the WHOLE project when an enabled
     # service depends on one whose profile is off, so `--profile auth` alone
@@ -880,7 +1297,7 @@ services:
     # here only if you need to bypass the proxy for debugging.
     volumes:
       - open-webui-data:/app/backend/data
-      - ./config/traefik/certs/ca.crt:/certs/ca.crt:ro
+      - traefik-certs:/certs:ro
     environment:
       # Through LiteLLM rather than straight at vLLM: the gateway fronts EVERY
       # engine, so each warm model shows up in the WebUI model picker. Point
@@ -929,10 +1346,27 @@ services:
       OAUTH_SCOPES: openid email profile groups
       OPENID_REDIRECT_URI: https://chat.${LLM_DOMAIN:-llm.localhost}/oauth/oidc/callback
       WEBUI_URL: https://chat.${LLM_DOMAIN:-llm.localhost}
-      # Python httpx honours SSL_CERT_FILE, so the private CA is trusted
-      # properly here rather than skipping verification.
-      SSL_CERT_FILE: /certs/ca.crt
-      REQUESTS_CA_BUNDLE: /certs/ca.crt
+      # .env is the source of truth. By default Open WebUI copies these into its
+      # own database on first boot and ignores the environment from then on,
+      # so a changed value in .env silently did nothing. Settings changed in its
+      # admin UI therefore do not survive a restart; change .env instead.
+      ENABLE_PERSISTENT_CONFIG: "false"
+      # Its built-in "Arena Model" appeared in everyone's model list next to
+      # the real one. The list should show the served model and nothing else.
+      ENABLE_EVALUATION_ARENA_MODELS: "false"
+      # Every signed-in person may use the served model. Open WebUI otherwise
+      # hides a connection's models from non-admins until an admin marks each
+      # one public in its UI -- a setting stored in its database under the model
+      # NAME, so it silently vanished for everyone the moment MODEL_NAME changed
+      # and people saw an empty model list. Access is already enforced where it
+      # matters: the gateway, per person, with their budget.
+      BYPASS_MODEL_ACCESS_CONTROL: "true"
+      DEFAULT_MODELS: ${MODEL_NAME:-}
+      # Python httpx honours SSL_CERT_FILE, so SSO verifies the stack's own
+      # certificate rather than skipping verification. bundle.crt is the public
+      # CAs plus ours (see tls-init), so outbound internet HTTPS still works.
+      SSL_CERT_FILE: /certs/bundle.crt
+      REQUESTS_CA_BUNDLE: /certs/bundle.crt
     depends_on:
       # required:false -- Open WebUI talks to LiteLLM, not to the engine, so it
       # must still start when the engine is a different service (llamacpp) or
@@ -944,6 +1378,9 @@ services:
       llamacpp:
         condition: service_started
         required: false
+      # SSO verifies the certificate tls-init writes; it must exist first.
+      tls-init:
+        condition: service_completed_successfully
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.open-webui.loadbalancer.server.port=8080"
@@ -957,15 +1394,62 @@ services:
   # METRICS: collection, alerting, dashboards
   # ============================================================================
 
+  # Copies Prometheus's scrape tokens onto a Docker volume it can read, then exits.
+  #
+  # The tokens are secrets, so on the host they are 0600 and owned by the
+  # operator. Prometheus runs as uid 65534 and cannot read that. The first fix
+  # was a POSIX ACL granting 65534 read; on an NTFS (ntfs3) project directory
+  # the ACL silently disappeared across a reboot, the llamacpp target went
+  # "permission denied", and every engine panel froze on its last value with
+  # nothing looking broken.
+  #
+  # A named volume lives under /var/lib/docker on the host's own filesystem, so
+  # ownership and mode stick regardless of where the project is checked out. This
+  # runs as root (which can read the 0600 source) on every `up`, so a rotated
+  # token lands without anyone remembering to copy it. Same image as Prometheus:
+  # no extra pull.
+  prometheus-secrets:
+    image: prom/prometheus:v3.1.0
+    container_name: prometheus-secrets
+    restart: "no"
+    network_mode: none
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        rm -f /dst/*.token
+        # The scrape token IS the engine's API key; take it straight from .env.
+        if [ -n "$$LLAMACPP_API_KEY" ]; then printf '%s' "$$LLAMACPP_API_KEY" > /dst/llamacpp.token; fi
+        for f in /src/*.token; do
+          [ -f "$$f" ] || continue
+          [ -f "/dst/$$(basename "$$f")" ] || cp "$$f" /dst/
+        done
+        chown -R 65534:65534 /dst
+        chmod 500 /dst
+        chmod 400 /dst/*.token 2>/dev/null || true
+        ls -ln /dst
+    environment:
+      LLAMACPP_API_KEY: ${LLAMACPP_API_KEY:-}
+    volumes:
+      - ./config/prometheus/secrets:/src:ro
+      - prometheus-secrets:/dst
+    logging: *default-logging
+
   prometheus:
     image: prom/prometheus:v3.1.0
     container_name: prometheus
     restart: unless-stopped
     networks: [llm-net]
+    depends_on:
+      prometheus-secrets:
+        condition: service_completed_successfully
     # No published ports: Traefik is the only way in. Re-add a mapping
     # here only if you need to bypass the proxy for debugging.
     volumes:
       - ./config/prometheus:/etc/prometheus:ro
+      # Mounted OVER the bind-mounted secrets directory; see prometheus-secrets.
+      - prometheus-secrets:/etc/prometheus/secrets:ro
       - prometheus-data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -1292,7 +1776,7 @@ services:
     environment:
       CLICKHOUSE_DB: default
       CLICKHOUSE_USER: clickhouse
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-${LLM_PG_PASSWORD}}
       CLICKHOUSE_SKIP_USER_SETUP: "0"
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
@@ -1318,7 +1802,7 @@ services:
       - minio-data:/data
     environment:
       MINIO_ROOT_USER: minio
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-${LLM_PG_PASSWORD}}
     entrypoint: ["sh", "-c", "mkdir -p /data/langfuse && exec minio server /data --address :9000 --console-address :9001"]
     healthcheck:
       test: ["CMD-SHELL", "mc ready local || exit 0"]
@@ -1343,21 +1827,21 @@ services:
     networks: [llm-net]
     environment: &langfuse-env
       DATABASE_URL: postgresql://${LLM_PG_USER:-llmservice}:${LLM_PG_PASSWORD}@postgres:5432/langfuse
-      SALT: ${LANGFUSE_SALT:?set LANGFUSE_SALT}
-      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?set LANGFUSE_ENCRYPTION_KEY}
+      SALT: ${LANGFUSE_SALT:-}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-}
       TELEMETRY_ENABLED: "false"
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
       CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: clickhouse
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-${LLM_PG_PASSWORD}}
       CLICKHOUSE_CLUSTER_ENABLED: "false"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
       LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
       LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
-      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-${LLM_PG_PASSWORD}}
       LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
       LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
@@ -1377,14 +1861,14 @@ services:
     # No published ports: Traefik is the only way in. Re-add a mapping
     # here only if you need to bypass the proxy for debugging.
     volumes:
-      - ./config/traefik/certs/ca.crt:/certs/ca.crt:ro
+      - traefik-certs:/certs:ro
     environment:
       <<: *langfuse-env
       # NextAuth derives the OAuth redirect_uri from this. It must be the proxy
       # hostname registered in Authelia, not the direct port, or the
       # authorization request is rejected for an invalid redirect_uri.
       NEXTAUTH_URL: https://traces.${LLM_DOMAIN:-llm.localhost}
-      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?set LANGFUSE_NEXTAUTH_SECRET}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-}
       LANGFUSE_INIT_ORG_ID: llmservice
       LANGFUSE_INIT_ORG_NAME: LLMService
       LANGFUSE_INIT_PROJECT_ID: local
@@ -1396,8 +1880,8 @@ services:
       AUTH_CUSTOM_NAME: Authelia
       AUTH_CUSTOM_SCOPE: openid email profile
       AUTH_DISABLE_USERNAME_PASSWORD: "false"
-      # Node reads this to extend its CA bundle with our private CA.
-      NODE_EXTRA_CA_CERTS: /certs/ca.crt
+      # Node adds this to its trust store: the stack's generated certificate.
+      NODE_EXTRA_CA_CERTS: /certs/tls.crt
     depends_on:
       langfuse-worker: { condition: service_started }
     labels:
