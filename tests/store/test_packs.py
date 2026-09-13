@@ -219,9 +219,25 @@ def test_search_text_on_absent_terms_is_empty(both):
     assert packs.search_text(both, "zzznotpresentanywhere") == []
 
 
-def test_a_malformed_match_expression_is_a_query_error_not_a_crash(both):
-    with pytest.raises(packs.PackQueryError, match="invalid search query"):
-        packs.search_text(both, 'unbalanced "quote')
+def test_fts_syntax_in_a_query_is_searched_for_literally_not_parsed(both):
+    """Input is quoted into phrases, so nothing in it is FTS5 syntax.
+
+    This replaces a test asserting that 'unbalanced "quote' raised
+    PackQueryError. That was the honest behaviour of passing raw text to MATCH,
+    but it made the tool reject the most natural things its caller sends: an MCP
+    tool is called by a language model, and "what is a mutex?" failed on the
+    question mark while "std::atomic_exchange" failed because ':' is FTS5's
+    column operator. The stronger property -- never crash -- still holds; the
+    weaker one -- report a syntax error -- was the bug.
+    """
+    for query in ('unbalanced "quote', 'what is a mutex?', 'std::atomic_exchange',
+                  'a AND b OR NOT c', 'star* and (parens)'):
+        packs.search_text(both, query)          # must not raise
+
+
+def test_a_query_with_no_searchable_terms_is_empty(both):
+    assert packs.search_text(both, "   ") == []
+    assert packs.search_text(both, "???") == []
 
 
 # --- source filtering ----------------------------------------------------------

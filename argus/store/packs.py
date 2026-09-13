@@ -244,6 +244,32 @@ def _authority(row: dict[str, Any], name: str) -> tuple:
         len(row["doc_path"]),
     )
 
+#: Characters that mean something to FTS5 -- ? : - * " ( ) and the bare words
+#: AND / OR / NOT -- appear constantly in ordinary questions and in C++ names.
+#: Passing raw text to MATCH therefore rejected the most natural things a caller
+#: sends: "what is a mutex?" failed on the question mark, and
+#: "std::atomic_exchange" failed because ':' is FTS5's column operator.
+#:
+#: An MCP tool is called by a language model, which sends prose. Quoting each
+#: term as a phrase makes that work. The cost is that a caller can no longer type
+#: raw FTS5 operators and have them honoured -- they become literal search terms
+#: -- which is the right trade for a tool whose caller is a model rather than a
+#: person who has read FTS5's grammar.
+_FTS_TERM = re.compile(r"\w[\w.:+#-]*", re.UNICODE)
+
+
+def _fts_match(raw: str) -> str:
+    """Turn arbitrary text into a valid FTS5 MATCH expression.
+
+    Every term becomes a quoted phrase, so nothing in the input is interpreted
+    as syntax. Returns "" when there is nothing searchable, which callers treat
+    as "no results" rather than as an error.
+    """
+    terms = _FTS_TERM.findall(raw or "")
+    # A doubled quote is FTS5's own escape inside a phrase.
+    return " ".join('"' + t.replace('"', '""') + '"' for t in terms)
+
+
 def search_text(
     packs: Sequence[Pack], query: str, lang: str | None = None, limit: int = 20,
 ) -> list[dict[str, Any]]:
@@ -253,6 +279,9 @@ def search_text(
     search refuses. bm25 is comparable across packs because it is computed per
     pack over the same kind of corpus; results are merged on it directly.
     """
+    match = _fts_match(query)
+    if not match:
+        return []
     results: list[tuple[float, dict[str, Any]]] = []
     for pack in select_packs(packs, lang):
         try:
@@ -263,7 +292,7 @@ def search_text(
                 WHERE docs_fts MATCH ?
                 ORDER BY rank
                 LIMIT ?
-            """, (query, limit)).fetchall()
+            """, (match, limit)).fetchall()
         except sqlite3.OperationalError as exc:
             # FTS5 rejects malformed match expressions (an unbalanced quote is
             # enough). Surface it as a query problem rather than a crash.
