@@ -218,6 +218,18 @@ services:
     container_name: traefik
     depends_on:
       tls-init: { condition: service_completed_successfully }
+    # traefik.yml limits discovery to THIS compose project, and Traefik's static
+    # config cannot read environment variables. So the project name is filled in
+    # at startup: a hard-coded `llmservice` meant any other COMPOSE_PROJECT_NAME
+    # got a 404 on every hostname, with every container healthy.
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-llmservice}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed "s/@COMPOSE_PROJECT_NAME@/$$COMPOSE_PROJECT_NAME/g" /etc/traefik/traefik.yml > /tmp/traefik.yml
+        exec /entrypoint.sh traefik --configFile=/tmp/traefik.yml
     profiles: [proxy]
     restart: unless-stopped
     networks:

@@ -110,7 +110,8 @@ providers:
     # exposedByDefault: false does NOT protect against this: the other
     # container opted in for its own Traefik, and ours cannot tell the
     # difference.
-    constraints: "Label(`com.docker.compose.project`,`llmservice`)"
+    # @COMPOSE_PROJECT_NAME@ is replaced from .env when the container starts.
+    constraints: "Label(`com.docker.compose.project`,`@COMPOSE_PROJECT_NAME@`)"
 
   file:
     directory: /etc/traefik/dynamic
