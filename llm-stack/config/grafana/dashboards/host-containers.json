@@ -228,7 +228,7 @@
     },
     {
       "type": "row",
-      "title": "Containers",
+      "title": "Containers (needs the cadvisor profile; empty without it)",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
       "collapsed": false,
       "panels": []

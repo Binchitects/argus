@@ -188,7 +188,7 @@
     },
     {
       "type": "row",
-      "title": "DCGM exporter (profile: dcgm, bare-metal Linux only)",
+      "title": "DCGM exporter (needs the dcgm profile, bare-metal Linux only; empty without it)",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
       "collapsed": true,
       "panels": [

@@ -38,8 +38,8 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Generation",
-      "description": "Decode speed, tok/s. Ratio of two counters, so it is tokens per second of ACTUAL decoding, matching what the engine reports per request. Gaps when idle are correct. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
+      "title": "Decode rate (live)",
+      "description": "Tokens per second EACH active request is getting right now. Built from the decode-step counter, which advances while tokens are produced, times accepted MTP draft tokens per step when speculative decoding is on. The engine's token counters cannot be used for this: they only move when a request finishes, so a rate over them reads 0 for the whole of a long answer and spikes afterwards. 0 when idle -- it is never a stale value.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -57,11 +57,87 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(rate(llamacpp:tokens_predicted_total[$__rate_interval]) / rate(llamacpp:tokens_predicted_seconds_total[$__rate_interval]) >= 0) or (llamacpp:tokens_predicted_total / llamacpp:tokens_predicted_seconds_total)",
+          "expr": "(sum(rate(llamacpp:n_decode_total[$__rate_interval])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))))",
           "legendFormat": "",
+          "refId": "A",
           "instant": true,
-          "range": false,
-          "refId": "A"
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "green",
+                "value": 9
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Generation, finished requests (5 min)",
+      "description": "Average decode speed of requests that FINISHED in the last 5 minutes, as the engine timed them. Exact, but it only updates when a request completes. Shows 'idle' when nothing finished in the window, instead of carrying an old number forward.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(llamacpp:tokens_predicted_total[5m])) / sum(rate(llamacpp:tokens_predicted_seconds_total[5m])) >= 0",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {
@@ -101,78 +177,8 @@
                 "value": 9
               }
             ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 4,
-      "type": "stat",
-      "title": "Prefill",
-      "description": "Prompt-processing speed, tok/s. Declines with prompt length. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 4,
-        "y": 1
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
           },
-          "editorMode": "code",
-          "expr": "(rate(llamacpp:prompt_tokens_total[$__rate_interval]) / rate(llamacpp:prompt_seconds_total[$__rate_interval]) >= 0) or (llamacpp:prompt_tokens_total / llamacpp:prompt_seconds_total)",
-          "legendFormat": "",
-          "instant": true,
-          "range": false,
-          "refId": "A"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "decimals": 1,
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 50
-              },
-              {
-                "color": "green",
-                "value": 150
-              }
-            ]
-          }
+          "noValue": "idle"
         },
         "overrides": []
       }
@@ -180,8 +186,8 @@
     {
       "id": 6,
       "type": "stat",
-      "title": "In flight",
-      "description": "Requests being served now.",
+      "title": "Prefill, finished requests (5 min)",
+      "description": "Prompt-processing speed of requests that finished in the last 5 minutes. 'idle' when none did.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -199,11 +205,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "llamacpp:requests_processing",
+          "expr": "sum(rate(llamacpp:prompt_tokens_total[5m])) / sum(rate(llamacpp:prompt_seconds_total[5m])) >= 0",
           "legendFormat": "",
-          "range": false,
+          "refId": "A",
           "instant": true,
-          "refId": "A"
+          "range": false
         }
       ],
       "options": {
@@ -235,7 +241,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "idle"
         },
         "overrides": []
       }
@@ -243,8 +250,8 @@
     {
       "id": 8,
       "type": "stat",
-      "title": "Queued",
-      "description": "Requests waiting for a slot. Persistently >0 means --parallel is too low.",
+      "title": "Active requests",
+      "description": "Requests being processed now, across all slots. The engine runs LLAMACPP_PARALLEL slots; beyond that, requests queue.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -262,11 +269,75 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "llamacpp:requests_deferred",
+          "expr": "sum(llamacpp:requests_processing)",
           "legendFormat": "",
-          "range": false,
+          "refId": "A",
           "instant": true,
-          "refId": "A"
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Queued",
+      "description": "Requests waiting for a free slot. Anything above 0 for long means more concurrent users than slots.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(llamacpp:requests_deferred)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "options": {
@@ -300,18 +371,23 @@
               {
                 "color": "orange",
                 "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       }
     },
     {
-      "id": 10,
+      "id": 12,
       "type": "stat",
-      "title": "Prefix cache hit",
-      "description": "Share of prompt tokens served from the prefix cache instead of being re-processed. This is what --cache-reuse and llama.cpp's slot reuse buy you. NOTE: high hit rates make a throughput benchmark meaningless -- vary prompts when measuring. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
+      "title": "MTP draft acceptance (5 min)",
+      "description": "Share of multi-token-prediction draft tokens the model accepted, for requests finished in the last 5 minutes. Higher means more speedup. 'off' when speculative decoding is not enabled or nothing finished recently.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -319,7 +395,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 16,
+        "x": 20,
         "y": 1
       },
       "targets": [
@@ -329,11 +405,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(rate(llamacpp:prompt_tokens_cached_total[$__rate_interval]) / (rate(llamacpp:prompt_tokens_total[$__rate_interval]) + rate(llamacpp:prompt_tokens_cached_total[$__rate_interval])) * 100 >= 0) or (llamacpp:prompt_tokens_cached_total / (llamacpp:prompt_tokens_total + llamacpp:prompt_tokens_cached_total) * 100)",
+          "expr": "100 * sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_draft_tokens_total[5m])) >= 0",
           "legendFormat": "",
+          "refId": "A",
           "instant": true,
-          "range": false,
-          "refId": "A"
+          "range": false
         }
       ],
       "options": {
@@ -353,67 +429,6 @@
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
-          "decimals": 1,
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 12,
-      "type": "stat",
-      "title": "Max tokens in slot",
-      "description": "llamacpp:n_tokens_max -- the high-water mark of tokens held in a slot, against the 262,144 window.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 1
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "llamacpp:n_tokens_max",
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
           "decimals": 0,
           "color": {
             "mode": "thresholds"
@@ -422,11 +437,20 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "text",
+                "color": "red",
                 "value": null
+              },
+              {
+                "color": "orange",
+                "value": 40
+              },
+              {
+                "color": "green",
+                "value": 60
               }
             ]
-          }
+          },
+          "noValue": "off"
         },
         "overrides": []
       }
@@ -434,8 +458,8 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "Prefill vs generation (tok/s)",
-      "description": "The two numbers that define this deployment. Generation is CPU-bound here (experts run on CPU); prefill is GPU-assisted and falls off with prompt length. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
+      "title": "Decode and prefill speed (tok/s)",
+      "description": "'live decode' is per active request, right now. The two '(finished, 5 min)' lines are the engine's own timings of completed requests, so they lag and have gaps when nothing finished. None of these fall back to a lifetime average any more, which is what used to freeze the numbers.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -453,11 +477,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(rate(llamacpp:tokens_predicted_total[$__rate_interval]) / rate(llamacpp:tokens_predicted_seconds_total[$__rate_interval]) >= 0) or (llamacpp:tokens_predicted_total / llamacpp:tokens_predicted_seconds_total)",
-          "legendFormat": "generation",
+          "expr": "(sum(rate(llamacpp:n_decode_total[$__rate_interval])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))))",
+          "legendFormat": "live decode (per request)",
+          "refId": "A",
           "instant": false,
-          "range": true,
-          "refId": "A"
+          "range": true
         },
         {
           "datasource": {
@@ -465,11 +489,23 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(rate(llamacpp:prompt_tokens_total[$__rate_interval]) / rate(llamacpp:prompt_seconds_total[$__rate_interval]) >= 0) or (llamacpp:prompt_tokens_total / llamacpp:prompt_seconds_total)",
-          "legendFormat": "prefill",
+          "expr": "sum(rate(llamacpp:tokens_predicted_total[5m])) / sum(rate(llamacpp:tokens_predicted_seconds_total[5m])) >= 0",
+          "legendFormat": "generation (finished, 5 min)",
+          "refId": "B",
           "instant": false,
-          "range": true,
-          "refId": "B"
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(llamacpp:prompt_tokens_total[5m])) / sum(rate(llamacpp:prompt_seconds_total[5m])) >= 0",
+          "legendFormat": "prefill (finished, 5 min)",
+          "refId": "C",
+          "instant": false,
+          "range": true
         }
       ],
       "options": {
@@ -513,7 +549,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "Token volume (per window)",
-      "description": "Tokens actually processed, from the counters. Replaces llama.cpp's own predicted_tokens_seconds / prompt_tokens_seconds gauges, which read 0 whenever nothing is in flight -- a panel that is flat zero while the engine is healthy teaches you to stop looking at it.",
+      "description": "Tokens counted per window. The engine adds a request's tokens when it FINISHES, so a long answer appears as one bar at its end, not spread over the time it took.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -599,8 +635,8 @@
     {
       "id": 21,
       "type": "timeseries",
-      "title": "Prefix cache hit rate over time",
-      "description": "Cached prompt tokens as a share of all prompt tokens. Idle windows fall back to the lifetime average: a bare rate-ratio is 0/0 when nothing has been served recently, which evaluates to NaN and draws as 'No data' rather than as 'quiet'.",
+      "title": "Prefix cache hit and MTP acceptance (%)",
+      "description": "Prefix cache hit: share of prompt tokens served from cache (a repeated system prompt or conversation history). MTP acceptance: share of draft tokens accepted. Both over finished requests, 5 min windows.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -618,11 +654,23 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(rate(llamacpp:prompt_tokens_cached_total[$__rate_interval]) / (rate(llamacpp:prompt_tokens_total[$__rate_interval]) + rate(llamacpp:prompt_tokens_cached_total[$__rate_interval])) * 100 >= 0) or (llamacpp:prompt_tokens_cached_total / (llamacpp:prompt_tokens_total + llamacpp:prompt_tokens_cached_total) * 100)",
-          "legendFormat": "cache hit %",
+          "expr": "100 * sum(rate(llamacpp:prompt_tokens_cached_total[5m])) / (sum(rate(llamacpp:prompt_tokens_total[5m])) + sum(rate(llamacpp:prompt_tokens_cached_total[5m]))) >= 0",
+          "legendFormat": "prefix cache hit %",
+          "refId": "A",
           "instant": false,
-          "range": true,
-          "refId": "A"
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "100 * sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_draft_tokens_total[5m])) >= 0",
+          "legendFormat": "MTP acceptance %",
+          "refId": "B",
+          "instant": false,
+          "range": true
         }
       ],
       "options": {
@@ -668,7 +716,7 @@
       "id": 24,
       "type": "timeseries",
       "title": "Concurrency",
-      "description": "Queued > 0 for sustained periods means you need more slots (--parallel), at the cost of dividing the context window between them.",
+      "description": "Requests in slots versus waiting for one. 'busy slots / decode' was removed: the engine exports it as a LIFETIME average, so it never reflected current load.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -686,11 +734,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "llamacpp:requests_processing",
-          "legendFormat": "processing",
-          "range": true,
+          "expr": "sum(llamacpp:requests_processing)",
+          "legendFormat": "active",
+          "refId": "A",
           "instant": false,
-          "refId": "A"
+          "range": true
         },
         {
           "datasource": {
@@ -698,22 +746,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "llamacpp:requests_deferred",
-          "legendFormat": "deferred/queued",
-          "range": true,
+          "expr": "sum(llamacpp:requests_deferred)",
+          "legendFormat": "queued",
+          "refId": "B",
           "instant": false,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "llamacpp:n_busy_slots_per_decode",
-          "legendFormat": "busy slots / decode",
-          "range": true,
-          "refId": "C"
+          "range": true
         }
       ],
       "options": {

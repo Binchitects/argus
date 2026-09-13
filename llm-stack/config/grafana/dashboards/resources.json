@@ -1233,7 +1233,7 @@
     },
     {
       "type": "row",
-      "title": "Physical host (windows_exporter / hwmon)",
+      "title": "Physical host: CPU temperature",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -1344,202 +1344,216 @@
       "description": "From the cpu-temp-exporter. Linux reads coretemp/k10temp via hwmon. Windows has no CPU temperature in node-exporter or windows_exporter (its ACPI thermal zone measured a fixed 27.85 C under full load), so it scrapes LibreHardwareMonitor on the host. cpu_temperature_available is 0 when no real sensor exists."
     },
     {
-      "type": "timeseries",
-      "title": "Host CPU busy (real machine, not the VM)",
-      "description": "node-exporter measures the WSL2 VM. This is the actual Windows host, per logical processor.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "type": "row",
+      "title": "Windows host (windows_exporter; Docker Desktop on Windows only)",
+      "collapsed": true,
       "gridPos": {
-        "h": 7,
-        "w": 9,
-        "x": 15,
-        "y": 55
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "100 - (avg by (core) (rate(windows_cpu_time_total{mode=\"idle\"}[5m])) * 100)",
-          "legendFormat": "core {{core}}"
-        },
-        {
-          "refId": "B",
-          "expr": "100 - (avg(rate(windows_cpu_time_total{mode=\"idle\"}[5m])) * 100)",
-          "legendFormat": "total"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "lineWidth": 1,
-            "showPoints": "never"
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "total"
-            },
-            "properties": [
-              {
-                "id": "custom.lineWidth",
-                "value": 3
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "orange"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Host memory",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
+        "h": 1,
+        "w": 24,
         "x": 0,
         "y": 62
       },
-      "targets": [
+      "id": 1,
+      "panels": [
         {
-          "refId": "A",
-          "expr": "windows_memory_available_bytes",
-          "legendFormat": "available"
-        },
-        {
-          "refId": "B",
-          "expr": "windows_memory_committed_bytes",
-          "legendFormat": "committed"
-        },
-        {
-          "refId": "C",
-          "expr": "windows_memory_cache_bytes",
-          "legendFormat": "cache"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
+          "type": "timeseries",
+          "title": "Host CPU busy (real machine, not the VM)",
+          "description": "node-exporter measures the WSL2 VM. This is the actual Windows host, per logical processor.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 9,
+            "x": 15,
+            "y": 63
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 - (avg by (core) (rate(windows_cpu_time_total{mode=\"idle\"}[5m])) * 100)",
+              "legendFormat": "core {{core}}"
+            },
+            {
+              "refId": "B",
+              "expr": "100 - (avg(rate(windows_cpu_time_total{mode=\"idle\"}[5m])) * 100)",
+              "legendFormat": "total"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "lineWidth": 1,
+                "showPoints": "never"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "total"
+                },
+                "properties": [
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 3
+                  },
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "orange"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": false
+            }
           }
         },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Host CPU core frequency",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 62
-      },
-      "targets": [
         {
-          "refId": "A",
-          "expr": "windows_cpu_core_frequency_mhz",
-          "legendFormat": "core {{core}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "rotmhz",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "lineWidth": 1,
-            "showPoints": "never"
+          "type": "timeseries",
+          "title": "Host memory",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 63
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "windows_memory_available_bytes",
+              "legendFormat": "available"
+            },
+            {
+              "refId": "B",
+              "expr": "windows_memory_committed_bytes",
+              "legendFormat": "committed"
+            },
+            {
+              "refId": "C",
+              "expr": "windows_memory_cache_bytes",
+              "legendFormat": "cache"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 2,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            }
           }
         },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Host disk free",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 62
-      },
-      "targets": [
         {
-          "refId": "A",
-          "expr": "windows_logical_disk_free_bytes",
-          "legendFormat": "{{volume}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
+          "type": "timeseries",
+          "title": "Host CPU core frequency",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 63
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "windows_cpu_core_frequency_mhz",
+              "legendFormat": "core {{core}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "rotmhz",
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "lineWidth": 1,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": false
+            }
           }
         },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        {
+          "type": "timeseries",
+          "title": "Host disk free",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 63
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "windows_logical_disk_free_bytes",
+              "legendFormat": "{{volume}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 2,
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            }
+          }
         }
-      }
+      ]
     }
   ]
 }

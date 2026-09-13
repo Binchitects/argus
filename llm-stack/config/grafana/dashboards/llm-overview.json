@@ -794,7 +794,7 @@
     },
     {
       "type": "row",
-      "title": "vLLM-native (empty unless vLLM is the running engine)",
+      "title": "Engine (vLLM or llama.cpp, whichever is running)",
       "collapsed": true,
       "gridPos": {
         "x": 0,
@@ -806,7 +806,7 @@
         {
           "type": "stat",
           "title": "Requests running",
-          "description": "Sequences currently being decoded by the engine.",
+          "description": "Requests being processed now, on whichever engine is running.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -820,7 +820,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(vllm:num_requests_running{model_name=~\"$model\"})",
+              "expr": "sum(vllm:num_requests_running) or sum(llamacpp:requests_processing)",
               "legendFormat": "running"
             }
           ],
@@ -861,7 +861,7 @@
         {
           "type": "stat",
           "title": "Requests queued",
-          "description": "Waiting for a scheduler slot. Sustained non-zero means you are past capacity.",
+          "description": "Requests waiting for a free slot.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -875,7 +875,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(vllm:num_requests_waiting{model_name=~\"$model\"})",
+              "expr": "sum(vllm:num_requests_waiting) or sum(llamacpp:requests_deferred)",
               "legendFormat": "waiting"
             }
           ],
@@ -916,8 +916,8 @@
         },
         {
           "type": "gauge",
-          "title": "KV cache used",
-          "description": "Fraction of the paged-attention block pool in use. Above ~95% vLLM starts preempting sequences.",
+          "title": "KV cache used (vLLM only)",
+          "description": "vLLM reports KV cache occupancy; llama.cpp exports no equivalent metric, so this is empty on llama.cpp.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -931,7 +931,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "max(vllm:gpu_cache_usage_perc{model_name=~\"$model\"})",
+              "expr": "max(vllm:gpu_cache_usage_perc)",
               "legendFormat": "kv cache"
             }
           ],
@@ -972,8 +972,8 @@
         },
         {
           "type": "stat",
-          "title": "Output tokens/sec",
-          "description": "Generation throughput averaged over 5 minutes.",
+          "title": "Output tokens/sec (5 min avg)",
+          "description": "Tokens delivered per second across all users, averaged over 5 minutes. On llama.cpp tokens are counted when a request finishes, so this lags a long answer; Stack Performance has the live rate.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -987,7 +987,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(vllm:generation_tokens_total{model_name=~\"$model\"}[5m]))",
+              "expr": "sum(rate(vllm:generation_tokens_total[5m])) or sum(rate(llamacpp:tokens_predicted_total[5m]))",
               "legendFormat": "tok/s"
             }
           ],
@@ -1016,8 +1016,8 @@
         },
         {
           "type": "timeseries",
-          "title": "Time to first token (TTFT)",
-          "description": "Dominated by prefill compute plus queue wait. Compare with queue depth below to tell the two apart.",
+          "title": "Time to first token (vLLM histogram)",
+          "description": "vLLM's own TTFT histogram; llama.cpp has none. The 'Time to first token' panel above, from the gateway's logs, works for both.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -1031,17 +1031,17 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
               "legendFormat": "p50"
             },
             {
               "refId": "B",
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
               "legendFormat": "p95"
             },
             {
               "refId": "C",
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=~\"$model\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
               "legendFormat": "p99"
             }
           ],
@@ -1081,12 +1081,12 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(vllm:num_requests_running{model_name=~\"$model\"})",
+              "expr": "sum(vllm:num_requests_running) or sum(llamacpp:requests_processing)",
               "legendFormat": "running"
             },
             {
               "refId": "B",
-              "expr": "sum(vllm:num_requests_waiting{model_name=~\"$model\"})",
+              "expr": "sum(vllm:num_requests_waiting) or sum(llamacpp:requests_deferred)",
               "legendFormat": "waiting"
             }
           ],
