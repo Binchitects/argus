@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .. import access, acl
+from .. import access, acl, auditlog
 from ..config import Config
 from ..store import writes
 from ..store.db import connect, connect_audit, migrate
@@ -253,7 +253,7 @@ class BearerAuthMiddleware:
         finally:
             conn.close()
 
-    async def _audit_denied(self) -> None:
+    async def _audit_denied(self, reason: str = "denied", path: str = "") -> None:
         """Run `_write_denied_audit` off the event loop; never let it raise.
 
         Same one-thread-per-connection discipline as `_resolve_identity`:
@@ -267,6 +267,7 @@ class BearerAuthMiddleware:
             await run_in_threadpool(self._write_denied_audit)
         except Exception:
             log.warning("failed to record audit row for a denied request", exc_info=True)
+        auditlog.denied(reason=reason, path=path)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         _path = scope.get("path") or ""
@@ -280,7 +281,7 @@ class BearerAuthMiddleware:
 
         token = _extract_bearer(Headers(scope=scope).get("authorization"))
         if token is None:
-            await self._audit_denied()
+            await self._audit_denied("missing_token", _path)
             response = unauthorized(
                 "Missing or malformed Authorization header. "
                 "Expected 'Authorization: Bearer <token>'."
@@ -299,7 +300,7 @@ class BearerAuthMiddleware:
             else:
                 identity = await run_in_threadpool(self._resolve_identity, token)
         except acl.AclDenied as exc:
-            await self._audit_denied()
+            await self._audit_denied("token_rejected", _path)
             await unauthorized(str(exc))(scope, receive, send)
             return
 

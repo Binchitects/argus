@@ -149,6 +149,33 @@ instructions block. Two useful end-to-end probes:
 
 ---
 
+## Who asked what: Argus in Grafana
+
+Every tool call and every refused request is written to the audit table in
+Argus's sidecar database, and **also printed as one JSON line on stdout**
+(`argus/auditlog.py`):
+
+```json
+{"ts": "2026-09-14T06:48:04Z", "event": "tool_call", "tool": "get_file", "user": "dev_alpha", "user_id": 2, "outcome": "ok", "error": null, "duration_ms": 16.6, "repos_visible": 1, "args": {"repo_id": 3, "path": "src/decoder.c"}}
+{"ts": "2026-09-14T06:44:54Z", "event": "denied", "reason": "missing_token", "path": "/mcp"}
+```
+
+`outcome` is `ok`, `no_access` (only repositories the person cannot read
+matched; Argus named the maintainers instead) or `error`. `denied` means no
+bearer token, or a GitLab token GitLab rejected; no tool ran.
+
+With the `logging` profile on (`COMPOSE_PROFILES=...,argus,logging`), Promtail
+ships these lines to Loki with `event`, `outcome` and `tool` as labels, and the
+**Argus** dashboard in Grafana shows calls by tool and by person, no-access
+answers, errors, refusals, p95 latency, and a searchable audit trail with each
+call's arguments. Calls from Qwen Code, Claude Code or any MCP client and from
+Open WebUI all appear under the person's GitLab username.
+
+`ARGUS_AUDIT_LOG=0` on the argus service stops the stdout lines; the audit table
+is unaffected. Loki keeps logs for 14 days (`config/loki/loki-config.yml`).
+
+---
+
 ## Connecting an agent
 
 Argus is a plain StreamableHTTP MCP server, so any MCP-capable client can use

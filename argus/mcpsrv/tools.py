@@ -11,7 +11,7 @@ from typing import Any, TypeVar
 from mcp.server.fastmcp import Context, FastMCP
 from starlette.concurrency import run_in_threadpool
 
-from .. import access, acl
+from .. import access, acl, auditlog
 from ..config import Config
 from ..embed import EMBED_DIM, EMBED_MODEL, EmbeddingUnavailable, embed_batch
 from ..packs import format as pack_format
@@ -273,12 +273,23 @@ async def _with_audit(db_path: Path | str, tool: str, identity: acl.Identity,
     derived from it beyond the already-resolved, token-free `Identity`)
     would risk that token reaching `args_json`.
     """
+    started = time.monotonic()
+    error: BaseException | None = None
     try:
         return await call()
+    except BaseException as exc:
+        error = exc
+        raise
     finally:
         await _record_audit(
             db_path, user_id=identity.user_id, username=identity.username,
             tool=tool, args=args, repo_ids=identity.allowed_repo_ids,
+        )
+        # The same fact as a log line, for Loki/Grafana (see argus.auditlog).
+        auditlog.tool_call(
+            tool=tool, user=identity.username, user_id=identity.user_id, args=args,
+            repos_visible=len(identity.allowed_repo_ids) if identity.allowed_repo_ids is not None else None,
+            duration_ms=(time.monotonic() - started) * 1000, error=error,
         )
 
 

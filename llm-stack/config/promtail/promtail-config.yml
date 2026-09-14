@@ -84,3 +84,21 @@ scrape_configs:
                 expression: 'level=(?P<level>[a-zA-Z]+)'
             - labels:
                 level:
+
+      # Argus prints one JSON object per tool call or refused request
+      # (argus/auditlog.py). event, outcome and tool become labels: a handful of
+      # values each, and what the Argus dashboard groups by. The person stays in
+      # the line and is read with `| json` at query time -- a label per user
+      # would multiply streams for nothing.
+      - match:
+          selector: '{container="argus"} |~ "^[{]\"ts\""'
+          stages:
+            - json:
+                expressions:
+                  event: event
+                  outcome: outcome
+                  tool: tool
+            - labels:
+                event:
+                outcome:
+                tool:
