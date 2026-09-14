@@ -8,7 +8,7 @@ budget per person, single sign-on, an admin panel and dashboards.
 The short version:
 
 ```bash
-cp env-samples/qwen3.8-flash-next.rtx3090.env .env
+cp env-samples/qwen3.8-flash-next.rtx5090.env .env
 ```
 
 ```bash
@@ -20,6 +20,6 @@ docker compose up -d
 ```
 
 `.env` is the whole configuration: model, paths, domain, power limits, secrets.
-`env-samples/` holds complete deployments for Qwen3.8-Flash-Next and Qwen3.8-27B on
-RTX 3090 and RTX 5090. `docs/` holds reference material and measurement history; the
+`env-samples/` holds complete, measured deployments for Qwen3.8-Flash-Next and
+Qwen3.8-27B on an RTX 5090. `docs/` holds reference material and measurement history; the
 top-level README is authoritative where they differ.

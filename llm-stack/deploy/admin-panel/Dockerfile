@@ -21,7 +21,10 @@ WORKDIR /app
 COPY app.py .
 
 RUN useradd --create-home --shell /usr/sbin/nologin panel
-USER panel
+# No USER: entrypoint.sh drops to the owner of the mounted config/authelia,
+# so the panel can read and replace users.yml whatever the host uid is.
+COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 EXPOSE 8080
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", \

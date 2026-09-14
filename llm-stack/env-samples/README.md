@@ -4,17 +4,15 @@ Each `.env` here is a complete, working deployment for one model on one card.
 
 | sample | model | card | status |
 |---|---|---|---|
-| `qwen3.8-flash-next.rtx3090.env` | Qwen3.8-Flash-Next, 177B MoE | RTX 3090 24 GB + 64 GB RAM | measured |
-| `qwen3.8-flash-next.rtx5090.env` | Qwen3.8-Flash-Next, 177B MoE | RTX 5090 32 GB + 64 GB RAM | derived |
-| `qwen3.8-27b.rtx3090.env` | Qwen3.8-27B, dense | RTX 3090 24 GB | measured |
-| `qwen3.8-27b.rtx5090.env` | Qwen3.8-27B, dense | RTX 5090 32 GB | derived |
+| `qwen3.8-flash-next.rtx5090.env` | Qwen3.8-Flash-Next, 177B MoE, UD-IQ4_XS | RTX 5090 32 GB + 64 GB+ RAM | measured |
+| `qwen3.8-27b.rtx5090.env` | Qwen3.8-27B, dense, NVFP4 with MTP | RTX 5090 32 GB | measured |
 
 ## Using one
 
 From `llm-stack/`:
 
 ```bash
-cp env-samples/qwen3.8-flash-next.rtx3090.env .env
+cp env-samples/qwen3.8-flash-next.rtx5090.env .env
 ```
 
 Make the secrets. Every empty value under `SECRETS` has a comment saying how to

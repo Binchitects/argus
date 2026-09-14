@@ -172,8 +172,9 @@ def main():
     rec("admin", "panel console renders for an admin", code == 200 and "Add a person" in body, f"HTTP {code}")
     rec("admin", "admin sees the indexing card", "<h2>Indexing</h2>" in body)
     samples = len(re.findall(r"<details", body))
-    rec("admin", "admin sees the Model card with every env-sample", "<h2>Model</h2>" in body and samples >= 4,
-        f"{samples} samples")
+    shipped = len(list((ROOT / "env-samples").glob("*.env")))
+    rec("admin", "admin sees the Model card with every env-sample", "<h2>Model</h2>" in body and samples == shipped,
+        f"{samples} of {shipped} samples")
     rec("admin", "the Model card names the running model", f"<strong>{MODEL}</strong>" in body, MODEL)
 
     code, loc = post_panel(admin, "/admin/create", {"username": who, "email": email, "budget": "5"})

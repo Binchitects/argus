@@ -77,17 +77,15 @@ panel and dashboards. **The whole deployment is one `.env` file and
 
 ```bash
 cd llm-stack
-cp env-samples/qwen3.8-flash-next.rtx3090.env .env
+cp env-samples/qwen3.8-flash-next.rtx5090.env .env
 ```
 
 Pick the sample that matches your model and card:
 
 | sample | model | card | first-start download | status |
 |---|---|---|---|---|
-| `qwen3.8-flash-next.rtx3090.env` | Qwen3.8-Flash-Next, 177B MoE | RTX 3090 24 GB + 64 GB RAM | 94 GB | measured here |
-| `qwen3.8-flash-next.rtx5090.env` | Qwen3.8-Flash-Next, 177B MoE | RTX 5090 32 GB + 64 GB RAM | 94 GB | derived, not measured |
-| `qwen3.8-27b.rtx3090.env` | Qwen3.8-27B, dense | RTX 3090 24 GB | 17.6 GB | measured here |
-| `qwen3.8-27b.rtx5090.env` | Qwen3.8-27B, dense | RTX 5090 32 GB | 17.6 GB | derived, not measured |
+| `qwen3.8-flash-next.rtx5090.env` | Qwen3.8-Flash-Next, 177B MoE, UD-IQ4_XS | RTX 5090 32 GB + 64 GB+ RAM | 94 GB | measured here |
+| `qwen3.8-27b.rtx5090.env` | Qwen3.8-27B, dense, NVFP4 with MTP | RTX 5090 32 GB | 17.1 GB | measured here |
 
 Then make the secrets. No sample ships one; every empty value in the SECRETS section
 has a comment saying how to make it, and this fills them all at once (the two LiteLLM
@@ -322,7 +320,27 @@ a socket in a web app is root on the host for anyone who reaches it.
 
 ### Measured
 
-On one machine: i7-13700K (16 physical cores), 61 GB RAM, RTX 3090, NVMe, with the
+**RTX 5090, the shipped samples.** i7-14700K (20 physical cores), 123 GB RAM, RTX 5090
+32 GB, NVMe, no power caps (the CPU peaked at 80 °C under two people). `multiuser-bench.py`,
+400-token answers through the gateway, medians of 3 rounds, q8_0 KV cache, 256K context:
+
+| | one person | two people, each | 28,500-token prompt | VRAM |
+|---|---|---|---|---|
+| Qwen3.8-Flash-Next UD-IQ4_XS, `N_CPU_MOE=37`, `-ub 2048` (sample) | **26.9 tok/s** | 16.1 tok/s | 48 s | 31.0 GB |
+| Qwen3.8-Flash-Next UD-IQ4_XS, `N_CPU_MOE=36`, `-ub 1024` | 28.2 tok/s | 16.6 tok/s | 75 s | 28.2 GB |
+| Qwen3.8-Flash-Next NVFP4 W4A16 (180 GB), `N_CPU_MOE=39` | 23.9 tok/s | 13.9 tok/s | 90 s | 29.6 GB |
+| Qwen3.8-27B NVFP4, MTP 2 drafts (sample) | **112.8 tok/s** | 83.2 tok/s | 7.8 s | 28.2 GB |
+| Qwen3.8-27B NVFP4, MTP 3 drafts | 107.0 tok/s | 89.3 tok/s | | |
+| Qwen3.8-27B NVFP4, no MTP | 77.7 tok/s | 66.4 tok/s | | |
+
+The NVFP4 build of Flash-Next keeps attention, shared experts and per-layer embeddings
+in BF16, which makes it larger than RAM plus VRAM, so part of it is always paged from
+NVMe; UD-IQ4_XS fits in memory and is faster at everything measured. For the 27B, NVFP4
+runs entirely on the card and MTP with 2 drafts is the fastest for one person (~69% of
+drafts accepted); 3 drafts helps two people a little and one person less.
+
+The rest of this section is from the earlier machine, which no sample targets any more:
+i7-13700K (16 physical cores), 61 GB RAM, RTX 3090, NVMe, with the
 power limits below applied. Every number comes from a script in `llm-stack/scripts/`.
 
 **Two people at once** — Qwen3.8-Flash-Next, 400-token answers through the gateway
