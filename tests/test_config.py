@@ -28,6 +28,13 @@ def test_env_overrides_token(tmp_path, monkeypatch):
     assert Config.load(p).gitlab.token == "from-env"
 
 
+def test_env_overrides_url(tmp_path, monkeypatch):
+    p = tmp_path / "c.yaml"
+    p.write_text(YAML)
+    monkeypatch.setenv("ARGUS_GITLAB_URL", "https://gitlab.example.internal/")
+    assert Config.load(p).gitlab.url == "https://gitlab.example.internal"
+
+
 def test_defaults_applied(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text(YAML)

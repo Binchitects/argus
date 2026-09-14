@@ -133,9 +133,12 @@ class Config:
         ix = raw.get("index") or {}
         pk = raw.get("packs") or {}
 
-        url = gl.get("url")
+        # ARGUS_GITLAB_URL overrides the file, like the token below. The stack
+        # documents it as the one place to point Argus at a GitLab; without this
+        # it was ignored and the committed config.yaml URL won silently.
+        url = os.environ.get("ARGUS_GITLAB_URL") or gl.get("url")
         if not url:
-            raise ConfigError("gitlab.url is required")
+            raise ConfigError("gitlab.url is required (or ARGUS_GITLAB_URL)")
 
         token = os.environ.get("ARGUS_GITLAB_TOKEN") or gl.get("token") or ""
         username = os.environ.get("ARGUS_GITLAB_USERNAME") or gl.get("username") or ""

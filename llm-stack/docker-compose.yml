@@ -1152,6 +1152,8 @@ services:
       ARGUS_OLLAMA_URL: ${ARGUS_OLLAMA_URL:-http://ollama:11434}
       ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
       ARGUS_EMBED_DIM: ${ARGUS_EMBED_DIM:-768}
+      # Which GitLab, overriding config/argus/config.yaml. Empty = that file's URL.
+      ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
       # Privileged service token: reads every repository the index covers.
       ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:-}
     volumes:
