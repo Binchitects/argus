@@ -59,3 +59,5 @@ config/prometheus/secrets/*
 config/authelia/users.yml.bak
 config/authelia/users.yml.tmp
 config/authelia/directory/
+config/ca/*.crt
+config/ca/*.pem

@@ -169,6 +169,10 @@ services:
   #
   # The public certificate is also copied to config/traefik/certs/tls.crt for
   # host-side tools. The private key never leaves the volume.
+  #
+  # bundle.crt is what containers that call out trust (Argus, Open WebUI): the
+  # public CAs, this certificate, and every .crt/.pem in config/ca/ -- put the
+  # company CA there when GitLab or another internal service uses one.
   tls-init:
     image: authelia/authelia:4.39
     container_name: tls-init
@@ -197,8 +201,15 @@ services:
         else
           echo "tls-init: certificate for $$LLM_DOMAIN already present"
         fi
-        # Public CAs plus ours, for containers that also talk to the internet.
-        cat /etc/ssl/certs/ca-certificates.crt "$$D/tls.crt" > "$$D/bundle.crt"
+        # Public CAs, ours, and any extra CA the operator added (config/ca/).
+        cat /etc/ssl/certs/ca-certificates.crt "$$D/tls.crt" > "$$D/bundle.crt.new"
+        for ca in /extra-ca/*.crt /extra-ca/*.pem; do
+          [ -f "$$ca" ] || continue
+          grep -q "BEGIN CERTIFICATE" "$$ca" || { echo "tls-init: $$(basename "$$ca") in config/ca is not a PEM certificate"; exit 1; }
+          { echo; cat "$$ca"; } >> "$$D/bundle.crt.new"
+          echo "tls-init: trusting $$(basename "$$ca") from config/ca"
+        done
+        mv "$$D/bundle.crt.new" "$$D/bundle.crt"
         chmod 644 "$$D/tls.crt" "$$D/bundle.crt"
         chmod 600 "$$D/tls.key"
         # Owned by whoever owns the directory, so the operator can delete it.
@@ -209,6 +220,7 @@ services:
     volumes:
       - traefik-certs:/certs
       - ./config/traefik/certs:/export
+      - ./config/ca:/extra-ca:ro
     logging: *default-logging
 
   traefik:
@@ -479,6 +491,10 @@ services:
       AUTHELIA_STORAGE_ENCRYPTION_KEY: ${AUTHELIA_STORAGE_ENCRYPTION_KEY:?set AUTHELIA_STORAGE_ENCRYPTION_KEY in .env}
       AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET: ${AUTHELIA_JWT_SECRET:?set AUTHELIA_JWT_SECRET in .env}
       AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET: ${AUTHELIA_OIDC_HMAC_SECRET:?set AUTHELIA_OIDC_HMAC_SECRET in .env}
+      # The startup clock check asks time.cloudflare.com, which an air-gapped
+      # host cannot reach. Keeping the clock right is the host's job (chrony,
+      # pointed at an internal NTP server there).
+      AUTHELIA_NTP_DISABLE_STARTUP_CHECK: "true"
     depends_on:
       redis:
         condition: service_healthy
@@ -671,6 +687,9 @@ services:
   #       they land flat, by file name). Files already present at the published
   #       size are skipped, downloads resume, and every LFS file is checked
   #       against the SHA-256 Hugging Face publishes before it is used.
+  #       Offline (an air gap, or Hugging Face down) files already on disk are
+  #       used as they are: a download only takes its final name once complete
+  #       and verified, so a present file is a finished one.
   #   LLAMACPP_ENGINE_URL (+ _SHA256)        a llama.cpp release tarball to run
   #       instead of the image's own server -- for MTP, which mainline llama.cpp
   #       lacks for Qwen3.8 (ggml-org/llama.cpp#28243). Unpacked into the
@@ -709,15 +728,24 @@ services:
         set -euo pipefail
         auth=(); [ -n "$$HF_TOKEN" ] && auth=(-H "Authorization: Bearer $$HF_TOKEN")
         owner=$$(stat -c %u:%g /gguf)
+        offline=""
         for f in $$LLAMACPP_HF_FILES; do
           name=$$(basename "$$f"); url="https://huggingface.co/$$LLAMACPP_HF_REPO/resolve/main/$$f"
-          head=$$(curl -sI "$${auth[@]}" "$$url" | tr -d '\r')
+          # Without the timeouts a firewall that drops packets stalled this for
+          # minutes per file; without `|| offline=1` set -e ended the script
+          # with no message, so on an air-gapped host the engine never started.
+          head=""
+          [ -n "$$offline" ] || head=$$(curl -sI --connect-timeout 10 --max-time 60 "$${auth[@]}" "$$url" | tr -d '\r') || offline=1
           size=$$(printf '%s\n' "$$head" | sed -n 's/^x-linked-size: //Ip' | head -1)
           [ -n "$$size" ] || size=$$(printf '%s\n' "$$head" | sed -n 's/^content-length: //Ip' | tail -1)
           sha=$$(printf '%s\n' "$$head" | sed -n 's/^x-linked-etag: "\{0,1\}\([0-9a-f]\{64\}\)"\{0,1\}/\1/Ip' | head -1)
+          if [ -f "/gguf/$$name" ] && [ -n "$$offline" ]; then
+            echo "model-init: have $$name (Hugging Face unreachable: using the file on disk)"; continue
+          fi
           if [ -f "/gguf/$$name" ] && [ "$$(stat -c %s "/gguf/$$name")" = "$$size" ]; then
             echo "model-init: have $$name"; continue
           fi
+          [ -z "$$offline" ] || { echo "model-init: $$name is not in LLAMACPP_MODEL_DIR and Hugging Face is unreachable; copy it there"; exit 1; }
           [ -n "$$size" ] || { echo "model-init: $$LLAMACPP_HF_REPO/$$f not found on Hugging Face"; exit 1; }
           echo "model-init: downloading $$name ($$((size / 1000000)) MB) from $$LLAMACPP_HF_REPO"
           curl -fL --retry 20 --retry-delay 10 -C - "$${auth[@]}" -o "/gguf/$$name.part" "$$url"
@@ -988,6 +1016,11 @@ services:
       DATABASE_URL: postgresql://${LLM_PG_USER:-llmservice}:${LLM_PG_PASSWORD}@postgres:5432/litellm
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      # The price list bundled with the image, not a fetch from GitHub on every
+      # start (which waits out its timeout on an air-gapped host).
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      # Prisma's CLI reports to checkpoint.prisma.io on every migrate at start.
+      CHECKPOINT_DISABLE: "1"
       VLLM_API_KEY: ${VLLM_API_KEY:-${LLAMACPP_API_KEY}}
       # ---- which engine the gateway talks to -------------------------------
       # config/litellm/config.yaml reads these through `os.environ/`, so the
@@ -1164,6 +1197,10 @@ services:
       ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
       # Privileged service token: reads every repository the index covers.
       ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:-}
+      # API calls (httpx) and git clones both verify GitLab's certificate
+      # against this bundle: public CAs plus config/ca/.
+      SSL_CERT_FILE: /certs/bundle.crt
+      GIT_SSL_CAINFO: /certs/bundle.crt
     volumes:
       # Config travels with the repo, so a fresh host needs nothing extra.
       - ./config/argus/config.yaml:/etc/argus/config.yaml:ro
@@ -1176,6 +1213,11 @@ services:
       # admin panel replaces the file atomically (see authelia). Only the
       # hash-free copy: Argus has no business reading password hashes.
       - ./config/authelia/directory:/authelia:ro
+      # The CAs to trust when calling GitLab (see tls-init): a GitLab behind a
+      # company CA works once that CA is in config/ca/.
+      - traefik-certs:/certs:ro
+    depends_on:
+      tls-init: { condition: service_completed_successfully }
     # GitLab runs on the host, not in this compose project.
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -1384,6 +1426,10 @@ services:
       SCARF_NO_ANALYTICS: "true"
       DO_NOT_TRACK: "true"
       ANONYMIZED_TELEMETRY: "false"
+      # Models for document search come from the image's cache in the data
+      # volume, never from Hugging Face; no version check, no pip installs for
+      # tools. Without it every start asked Hugging Face first.
+      OFFLINE_MODE: "true"
       # OIDC single sign-on through Authelia.
       ENABLE_OAUTH_SIGNUP: "true"
       OAUTH_MERGE_ACCOUNTS_BY_EMAIL: "true"
@@ -1555,6 +1601,12 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      # Nothing from grafana.com or gravatar.com: the bundled Explore apps stay
+      # as installed instead of being updated on every start, and avatars are
+      # drawn locally. Both were measured leaving the server.
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
       GF_NEWS_NEWS_FEED_ENABLED: "false"
       GF_INSTALL_PLUGINS: ""
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/llm-overview.json

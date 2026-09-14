@@ -41,7 +41,9 @@ KEEP="$(env_get BACKUP_KEEP)"; KEEP="${KEEP:-14}"
 INCLUDE_LOGS="$(env_get BACKUP_INCLUDE_LOGS)"; INCLUDE_LOGS="${INCLUDE_LOGS:-1}"
 BACKUP_TIME="$(env_get BACKUP_TIME)"; BACKUP_TIME="${BACKUP_TIME:-03:30}"
 PG_USER="$(env_get LLM_PG_USER)"; PG_USER="${PG_USER:-llmservice}"
-HELPER=python:3.12-slim
+# The image cpu-temp-exporter already runs: on an air-gapped host a backup must
+# not need an image that was never pulled (or was pruned as unused).
+HELPER=python:3.13-slim
 case "$BACKUP_DIR" in /*) ;; *) BACKUP_DIR="$ROOT/${BACKUP_DIR#./}" ;; esac
 
 # Named volumes that are caches or models, not state.
