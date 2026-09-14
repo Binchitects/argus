@@ -1315,12 +1315,15 @@ services:
     # Open WebUI connects inside the network (http://argus:7700) and forwards
     # the signed-in person's email (ENABLE_FORWARD_USER_INFO_HEADERS), so Argus
     # shows each person only the repositories their GitLab account can read.
+    # access_grants user:* read is what lets non-admins see it: Open WebUI lists
+    # an admin-configured tool server only to admins unless it is granted, so
+    # without it every developer found no Argus under Integrations.
     entrypoint:
       - /bin/bash
       - -c
       - |
         if [ -n "$$ARGUS_CHAT_CLIENT_TOKEN" ] && [[ ",$$COMPOSE_PROFILES," == *",argus,"* ]]; then
-          export TOOL_SERVER_CONNECTIONS='[{"type":"mcp","url":"http://argus:7700/mcp","path":"","auth_type":"bearer","key":"'"$$ARGUS_CHAT_CLIENT_TOKEN"'","config":{"enable":true},"info":{"id":"argus","name":"Argus","description":"Your organisation code (what your GitLab account can read) and SDK/WDK/C++ documentation"}}]'
+          export TOOL_SERVER_CONNECTIONS='[{"type":"mcp","url":"http://argus:7700/mcp","path":"","auth_type":"bearer","key":"'"$$ARGUS_CHAT_CLIENT_TOKEN"'","config":{"enable":true,"access_grants":[{"principal_type":"user","principal_id":"*","permission":"read"}]},"info":{"id":"argus","name":"Argus","description":"Your organisation code (what your GitLab account can read) and SDK/WDK/C++ documentation"}}]'
         fi
         exec bash start.sh
     restart: unless-stopped
