@@ -52,6 +52,7 @@ PORT = env("TRAEFIK_HTTPS_PORT", "443")
 SUFFIX = "" if PORT == "443" else f":{PORT}"
 CTX = ssl.create_default_context(cafile=str(ROOT / "config/traefik/certs/tls.crt"))
 RESULTS = []
+WEBUI = {}  # the test person's Open WebUI id and an admin token, for cleanup
 
 
 def u(host, path="/"):
@@ -247,6 +248,25 @@ def main():
     code, final, body = sso(person, u("chat", "/oauth/oidc/login"), "chat")
     token = person.cookie("token")
     rec("sso", "Open WebUI signs the person in", bool(token), f"landed on {urllib.parse.urlparse(final).path}")
+    if token:
+        code, body, _, _ = person.req(u("chat", "/api/v1/auths/"), headers={"Authorization": f"Bearer {token}"})
+        me = json.loads(body) if code == 200 else {}
+        WEBUI["person_id"] = me.get("id")
+        rec("sso", "Open WebUI makes the person a user, not an admin", me.get("role") == "user", f"role={me.get('role')}")
+    sso(admin, u("chat", "/oauth/oidc/login"), "chat")
+    WEBUI["admin_token"] = admin.cookie("token")
+    code, body, _, _ = admin.req(u("chat", "/api/v1/auths/"),
+                                 headers={"Authorization": f"Bearer {WEBUI['admin_token']}"})
+    role = json.loads(body).get("role") if code == 200 else None
+    rec("sso", "Open WebUI makes a member of admins an admin", role == "admin", f"role={role}, HTTP {code}")
+    # SSO only. An email that fails validation means an open signup answers 400
+    # and creates nothing, so this probe cannot leave an account behind.
+    anon = Browser()
+    code = anon.req(u("chat", "/api/v1/auths/signin"), {"email": email, "password": "not-the-password"})[0]
+    rec("sso", "Open WebUI refuses password sign-in (SSO only)", code == 403, f"HTTP {code}")
+    code = anon.req(u("chat", "/api/v1/auths/signup"),
+                    {"name": "probe", "email": "not-an-email", "password": secrets.token_urlsafe(16)})[0]
+    rec("sso", "Open WebUI refuses self sign-up", code == 403, f"HTTP {code}")
     webui_ok = False
     if token:
         hdr = {"Authorization": f"Bearer {token}"}
@@ -354,7 +374,14 @@ def finish(who, email, keep):
         r = subprocess.run(["docker", "exec", "admin-panel", "python", "-c",
                             "import app; u=app.load_users(); u.pop(%r, None); app.save_users(u)" % who],
                            capture_output=True, text=True)
-        print(f"  removed {who}: litellm {codes}, authelia exit {r.returncode} {r.stderr.strip()[:120]}")
+        # And the Open WebUI account its SSO sign-in created. Every run used to
+        # leave one behind, which piled up as fake people in the chat admin.
+        webui = None
+        if WEBUI.get("person_id") and WEBUI.get("admin_token"):
+            webui = Browser().req(u("chat", f"/api/v1/users/{WEBUI['person_id']}"), method="DELETE",
+                                  headers={"Authorization": f"Bearer {WEBUI['admin_token']}"})[0]
+        print(f"  removed {who}: litellm {codes}, authelia exit {r.returncode} {r.stderr.strip()[:120]}, "
+              f"open-webui {webui}")
     failed = [r for r in RESULTS if not r[2]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")
     for area, name, _, detail in failed:

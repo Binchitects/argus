@@ -1417,11 +1417,25 @@ services:
       ENABLE_OLLAMA_API: "false"
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY}
       WEBUI_NAME: LLMService
-      # Signup stays on so Authelia provisions accounts on first OIDC login, but
-      # new accounts are NOT admins. Behind SSO, anyone able to authenticate
-      # would otherwise self-promote to administrator.
-      ENABLE_SIGNUP: "true"
+      # SSO is the only way in. chat.<domain> has no Authelia in front of it --
+      # Open WebUI signs people in itself, over OIDC -- and its own password
+      # login and self-signup were both on, so anyone who could reach it could
+      # create an account Authelia never saw. The first account made that way
+      # (by e2e-check.py, with a password written in this repository) had become
+      # the Open WebUI admin. First SSO sign-in still creates the account:
+      # that is ENABLE_OAUTH_SIGNUP below; ENABLE_SIGNUP governs only the form.
+      ENABLE_SIGNUP: "false"
+      ENABLE_LOGIN_FORM: "false"
+      ENABLE_PASSWORD_AUTH: "false"
       DEFAULT_USER_ROLE: ${WEBUI_DEFAULT_ROLE:-user}
+      # Roles follow Authelia groups at every sign-in, as Grafana's do: members
+      # of the admins group are Open WebUI admins, everyone else a user. Before,
+      # the role was whatever the account got when it was created, so the real
+      # admin was a plain user and nothing could correct it.
+      ENABLE_OAUTH_ROLE_MANAGEMENT: "true"
+      OAUTH_ROLES_CLAIM: groups
+      OAUTH_ALLOWED_ROLES: "*"
+      OAUTH_ADMIN_ROLES: ${ADMIN_GROUP:-admins}
       # Keep everything local: no telemetry, no outbound embedding downloads.
       SCARF_NO_ANALYTICS: "true"
       DO_NOT_TRACK: "true"

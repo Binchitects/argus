@@ -341,14 +341,13 @@ def main() -> int:
         record("over-budget person refused in chat", refused,
                "attribution without enforcement is the failure mode this catches")
     except urllib.error.HTTPError as exc:
-        # Open WebUI refuses signup once an account exists (ENABLE_SIGNUP), so
-        # this check can only run on a stack that has none. That is the normal
-        # state during a from-zero deploy and NOT on a stack already in use --
-        # reporting it as a failure there was misleading, because nothing is
-        # broken. Skip loudly instead.
+        # Open WebUI is SSO-only (ENABLE_PASSWORD_AUTH, ENABLE_SIGNUP off), so a
+        # local signup is refused -- as it must be: when it was allowed, the
+        # account this made became the Open WebUI admin, with the password
+        # above. functional-test.py covers the chat path through Authelia.
         if exc.code == 403:
-            print(f"  [{YELLOW}SKIP{OFF}] chat path: signup disabled "
-                  f"(an account already exists) -- run on a fresh stack to cover it",
+            print(f"  [{YELLOW}SKIP{OFF}] chat path: Open WebUI is SSO-only, no local signup "
+                  f"-- functional-test.py covers chat attribution through SSO",
                   flush=True)
         else:
             record("chat path", False, f"HTTP {exc.code}")

@@ -10,6 +10,8 @@
 #
 # Settings, all in .env:
 #   BACKUP_DIR            where backups go                        default ./backups
+#   BACKUP_COPY_DIR       a second copy of each good backup, verified, on ANOTHER disk:
+#                         then one failed disk cannot take the data and every backup   default none
 #   BACKUP_KEEP           how many backups to keep                default 14
 #   BACKUP_INCLUDE_LOGS   1 = also Loki logs, Prometheus metrics  default 1
 #   BACKUP_TIME           when --install-timer runs it (systemd)  default 03:30
@@ -26,6 +28,7 @@
 #
 # The backup directory holds every secret of the stack: it is created 0700 and
 # its files 0600. Models are not backed up (LLAMACPP_MODEL_DIR, re-downloadable).
+# A copy is a backup like any other: --verify DIR and --restore --from DIR take it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -45,6 +48,8 @@ PG_USER="$(env_get LLM_PG_USER)"; PG_USER="${PG_USER:-llmservice}"
 # not need an image that was never pulled (or was pruned as unused).
 HELPER=python:3.13-slim
 case "$BACKUP_DIR" in /*) ;; *) BACKUP_DIR="$ROOT/${BACKUP_DIR#./}" ;; esac
+COPY_DIR="$(env_get BACKUP_COPY_DIR)"
+case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
 
 # Named volumes that are caches or models, not state.
 SKIP_VOLUMES=" hf-cache vllm-cache ollama-models llamacpp-engine postgres-data "
@@ -61,7 +66,7 @@ while [[ $# -gt 0 ]]; do
     --with-config) WITH_CONFIG=1; shift ;;
     --out) BACKUP_DIR="$2"; shift 2 ;;   # kept for compatibility
     --include-model-cache) SKIP_VOLUMES="${SKIP_VOLUMES/ hf-cache / }"; shift ;;
-    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,31p' "$0" | grep '^#'; exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
   esac
 done
@@ -88,9 +93,11 @@ latest_backup() { ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* 2>/dev/null | sort | tai
 
 # ============================================================================ list
 if [[ $ACTION == list ]]; then
-  say "Backups in $BACKUP_DIR (keeping $KEEP):"
-  for d in $(ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* 2>/dev/null | sort); do
-    printf '  %s  %6s  %s\n' "$(basename "$d")" "$(du -sh "$d" 2>/dev/null | cut -f1)" "$(cat "$d/RESULT" 2>/dev/null)"
+  for where in "$BACKUP_DIR" ${COPY_DIR:+"$COPY_DIR"}; do
+    say "Backups in $where (keeping $KEEP):"
+    for d in $(ls -1d "$where"/20[0-9][0-9]-*_* 2>/dev/null | grep -v '\.part$' | sort); do
+      printf '  %s  %6s  %s\n' "$(basename "$d")" "$(du -sh "$d" 2>/dev/null | cut -f1)" "$(cat "$d/RESULT" 2>/dev/null)"
+    done
   done
   exit 0
 fi
@@ -111,7 +118,7 @@ if [[ $ACTION == timer ]]; then
 Description=${PROJECT}: complete backup of the LLM stack into ${BACKUP_DIR}
 Requires=docker.service
 After=docker.service
-RequiresMountsFor=${BACKUP_DIR}
+RequiresMountsFor=${BACKUP_DIR} ${COPY_DIR}
 
 [Service]
 Type=oneshot
@@ -303,15 +310,39 @@ chmod -R go-rwx "$OUT"
 
 RESULT="ok"; [[ $FAILED -gt 0 ]] && RESULT="FAILED ($FAILED problem(s))"
 echo "$RESULT" > "$OUT/RESULT"
-printf '%s  %-8s %6s  %ss  %s\n' "$STAMP" "$RESULT" "$(du -sh "$OUT" | cut -f1)" "$(( $(date +%s) - START ))" "$OUT" >> "$BACKUP_DIR/history.log"
 
-# ---- 5. retention: only after a good backup ----------------------------------------
-if [[ $FAILED -eq 0 ]]; then
-  ln -sfn "$STAMP" "$BACKUP_DIR/latest"
-  mapfile -t ALL < <(ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* 2>/dev/null | sort)
-  if (( ${#ALL[@]} > KEEP )); then
-    for old in "${ALL[@]:0:${#ALL[@]}-KEEP}"; do rm -rf "$old" && say "  removed old backup $(basename "$old")"; done
+# ---- 5. second copy on another disk, verified there ---------------------------------
+# Copied under a .part name and renamed only once its checksums match, so a
+# half-written copy is never taken for a backup. A failed copy fails the run
+# (the timer shows it) but does not taint the backup itself.
+COPY="none"
+if [[ -n "$COPY_DIR" && $FAILED -eq 0 ]]; then
+  say "==> second copy -> $COPY_DIR"
+  if mkdir -p "$COPY_DIR" && chmod 700 "$COPY_DIR" && rm -rf "$COPY_DIR/$STAMP.part" \
+     && cp -a "$OUT" "$COPY_DIR/$STAMP.part" && verify_dir "$COPY_DIR/$STAMP.part" \
+     && mv "$COPY_DIR/$STAMP.part" "$COPY_DIR/$STAMP"; then
+    COPY="ok"; say "  verified: $COPY_DIR/$STAMP"
+  else
+    COPY="FAILED"; say "  FAILED: second copy to $COPY_DIR"
   fi
 fi
+printf '%s  %-8s %6s  %ss  %s%s\n' "$STAMP" "$RESULT" "$(du -sh "$OUT" | cut -f1)" "$(( $(date +%s) - START ))" "$OUT" \
+  "$([[ $COPY != none ]] && echo "  copy $COPY")" >> "$BACKUP_DIR/history.log"
+
+# ---- 6. retention: only after a good backup ----------------------------------------
+prune() {   # prune <dir>: point latest at this backup and keep the newest KEEP
+  local dir=$1 old
+  local -a all
+  ln -sfn "$STAMP" "$dir/latest"
+  mapfile -t all < <(ls -1d "$dir"/20[0-9][0-9]-*_* 2>/dev/null | grep -v '\.part$' | sort)
+  if (( ${#all[@]} > KEEP )); then
+    for old in "${all[@]:0:${#all[@]}-KEEP}"; do rm -rf "$old" && say "  removed old backup $old"; done
+  fi
+}
+if [[ $FAILED -eq 0 ]]; then
+  prune "$BACKUP_DIR"
+  [[ $COPY == ok ]] && prune "$COPY_DIR"
+fi
 say "backup $RESULT: $OUT ($(du -sh "$OUT" | cut -f1), $(( $(date +%s) - START ))s)"
-[[ $FAILED -eq 0 ]]
+[[ $COPY != none ]] && say "second copy $COPY: $COPY_DIR/$STAMP"
+[[ $FAILED -eq 0 && $COPY != FAILED ]]
