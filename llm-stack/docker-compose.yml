@@ -428,8 +428,15 @@ services:
 
         printf '%s:%s\n' "$$PROXY_AUTH_USER" "$$(hash bcrypt --password "$$PROXY_AUTH_PASSWORD")" > /traefik-auth/users.htpasswd
 
+        # Who is who, without password hashes, for Argus. The admin panel writes
+        # users.yml into it; the directory is created here so it has the right owner.
+        mkdir -p /config/directory
+
         chmod 600 /config/clients.yml /config/users.yml /config/secrets/oidc.pem /traefik-auth/users.htpasswd
-        chown -R "$$owner" /config/clients.yml /config/users.yml /config/secrets /traefik-auth/users.htpasswd 2>/dev/null || true
+        if [ -f /config/users.yml.bak ]; then chmod 600 /config/users.yml.bak; fi
+        chmod 755 /config/directory
+        chown -R "$$owner" /config/clients.yml /config/users.yml /config/secrets /config/directory /traefik-auth/users.htpasswd 2>/dev/null || true
+        if [ -f /config/users.yml.bak ]; then chown "$$owner" /config/users.yml.bak; fi
         echo "auth-init: clients.yml and users.htpasswd rebuilt from .env"
     logging: *default-logging
 
@@ -1147,7 +1154,8 @@ services:
       # token; no admin or sudo. Empty = chat cannot use Argus.
       ARGUS_CHAT_CLIENT_TOKEN: ${ARGUS_CHAT_CLIENT_TOKEN:-}
       # Maps a chat user's email to their sign-in username, which must equal
-      # their GitLab username (GitLab's public email is the fallback).
+      # their GitLab username (GitLab's public email is the fallback). The
+      # admin panel's hash-free copy of the account list, not users.yml.
       ARGUS_AUTHELIA_USERS_FILE: /authelia/users.yml
       ARGUS_OLLAMA_URL: ${ARGUS_OLLAMA_URL:-http://ollama:11434}
       ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
@@ -1165,8 +1173,9 @@ services:
       #   docker compose -f docker-compose.yml -f deploy/argus-local.yml up -d
       - argus-data:/var/lib/argus
       # The directory, not the file: a single-file mount pins an inode, and the
-      # admin panel replaces users.yml atomically (see authelia).
-      - ./config/authelia:/authelia:ro
+      # admin panel replaces the file atomically (see authelia). Only the
+      # hash-free copy: Argus has no business reading password hashes.
+      - ./config/authelia/directory:/authelia:ro
     # GitLab runs on the host, not in this compose project.
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -212,6 +212,7 @@ The trade-off is that CLI tools must resolve `*.llm.localhost` — run
 | `config/authelia/configuration.template.yml` | Policies, session, access rules; Authelia fills in the domain | yes |
 | `config/authelia/clients.yml` | OIDC clients + signing key | **no** — rebuilt by `auth-init` on every start |
 | `config/authelia/users.yml` | Users and password hashes | **no** — created once by `auth-init`, then the panel's |
+| `config/authelia/directory/users.yml` | Username → email, no hashes; what Argus reads | **no** — kept in step with `users.yml` by the admin panel |
 | `config/authelia/secrets/` | OIDC RSA private key | **no** — generated once by `auth-init` |
 | `scripts/get-token.sh` | Machine-client token helper | yes |
 

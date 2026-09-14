@@ -58,3 +58,4 @@ config/prometheus/secrets/*
 # It holds password hashes and must not be committed.
 config/authelia/users.yml.bak
 config/authelia/users.yml.tmp
+config/authelia/directory/
