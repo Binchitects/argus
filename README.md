@@ -24,7 +24,7 @@ xychart-beta
 | `qwen3.6:35b` (MoE, 36.0B) | 5 / 10 | **9 / 10** | **+80%** |
 | `qwen3.8:27b` (dense, 27.3B) | 5 / 9 | **9 / 10** | **+80%** |
 
-**All three models failed the same five tasks alone** — not similar scores, the *same five*, task for task. An 8-billion-parameter gap, a different architecture, and a newer generation all changed nothing. Full three-way breakdown in [docs/model-comparison.md](docs/model-comparison.md).
+**All three models failed the same five tasks alone** — not similar scores, the *same five*, task for task. An 8-billion-parameter gap, a different architecture, and a newer generation all changed nothing. Full three-way breakdown in [docs/argus/model-comparison.md](docs/argus/model-comparison.md).
 
 `qwen3.6:27b` is the reference model here, chosen on behaviour rather than size. It is the *smallest* of the three, scores identically closed book, and pulls ahead only once tools exist: **26 tool calls to 35b's 19**, winning the one task that separated them by checking instead of recalling. 35b answered that one in 2.2 s with **zero tool calls** — confidently, and wrongly. For an agent, willingness to verify is worth more than parameter count. The margin is one task in ten, so the honest claim is "checks more reliably", not "better at everything".
 
@@ -38,16 +38,30 @@ And it gets *faster*: `35b`'s median response fell from **5.5 s to 2.4 s** with 
 
 ## Quick start
 
+There are **two things here**, and either works without the other: the **stack**
+in [`stack/`](stack/) — the whole self-hosted LLM service, Argus included — and
+**Argus** itself in [`src/argus/`](src/), which also runs on its own.
+
 ```bash
-git clone https://github.com/aliGhadyani/hermes-argus && cd hermes-argus
-cp .env.example .env && $EDITOR .env      # GitLab URL + service token
-./deploy/bootstrap.sh                      # build, start, index, verify
+git clone https://github.com/Binchitects/argus && cd argus
+
+cd stack
+cp env-samples/qwen3.8-flash-next.rtx5090.env .env   # pick the one for your model and card
+make up                                              # preflight, then docker compose up -d
 ```
 
-Then prove it works before you tell anyone about it:
+`make up` builds the Argus image from this checkout, pulls the rest, and starts
+the stack. Full walkthrough — the secrets, the addresses, and what to do when
+something reports healthy but is not — under
+[Deploying the stack](#deploying-the-stack--read-this-part) below. No network on
+the target host? See [Deploying without a network](#deploying-without-a-network-airgap).
+
+Prove it before you tell anyone about it — this talks to the MCP endpoint over
+the real auth path, not to `/healthz`, which bypasses authentication and answers
+200 whether or not the server can serve anything:
 
 ```bash
-python deploy/smoke_test.py --url https://argus.example/mcp --token <developer-PAT>
+python scripts/smoke_test.py --url https://argus.llm.localhost/mcp --token <developer-PAT>
 ```
 
 ```
@@ -62,13 +76,33 @@ python deploy/smoke_test.py --url https://argus.example/mcp --token <developer-P
   7/7 checks passed
 ```
 
-Full walkthrough: **[docs/production.md](docs/production.md)**.
+### What is in here
+
+| directory | what it is | entry point |
+|---|---|---|
+| [`stack/`](stack/) | **The deployment.** Compose file, per-service config, env samples, operational scripts | [`stack/README.md`](stack/README.md) |
+| [`src/argus/`](src/argus/) | **The Argus package** — the MCP code index and documentation server. Installable on its own | [`docs/argus/`](docs/argus/) |
+| [`tests/`](tests/) | The Argus suite — 928 tests, no Docker required | `pytest` |
+| [`docs/`](docs/) | **All documentation**, split into `docs/argus/` and `docs/stack/` | [`docs/`](docs/) |
+| [`scripts/`](scripts/) | Repository tooling: release, packaging, the Hermes integrations, and the test GitLab the stack's fixtures use | [`scripts/release.sh`](scripts/release.sh) |
+| [`evals/`](evals/) | The measurement harness behind every number in this README | [`evals/README.md`](evals/README.md) |
+| `stack/scripts/` | Operational scripts **for a running stack** — backup, health, acceptance, the airgap bundle | `cd stack && make help` |
+
+Argus on its own, without the stack:
+
+```bash
+pip install ".[dev]"                       # from the repository root
+argus index --config config.yaml
+argus serve --config config.yaml
+```
+
+Full walkthrough: **[docs/argus/clients.md](docs/argus/clients.md)**.
 
 ---
 
-## Deploying the LLM stack — read this part
+## Deploying the stack — read this part
 
-`llm-stack/` is a complete self-hosted LLM service: a GPU inference engine, a chat
+`stack/` is a complete self-hosted LLM service: a GPU inference engine, a chat
 UI, an API gateway with a key and a budget per person, single sign-on, an admin
 panel and dashboards. **The whole deployment is one `.env` file and
 `docker compose up`.** There is no setup script.
@@ -76,7 +110,7 @@ panel and dashboards. **The whole deployment is one `.env` file and
 ### Three steps
 
 ```bash
-cd llm-stack
+cd stack
 cp env-samples/qwen3.8-flash-next.rtx5090.env .env
 ```
 
@@ -122,7 +156,7 @@ once about the self-signed certificate; accept it.
 
 **Adding a setup** for another model or card is one file: copy the closest sample,
 edit its header and its MODEL block, and check it. Step by step, with how to choose
-each value: [llm-stack/env-samples/README.md](llm-stack/env-samples/README.md).
+each value: [stack/env-samples/README.md](stack/env-samples/README.md).
 
 ### Deploying without a network (airgap)
 
@@ -131,7 +165,7 @@ instead of from a registry. Build the bundle **on a machine that already runs
 it**:
 
 ```bash
-cd llm-stack
+cd stack
 make airgap                                  # images + tree      (~7 GB measured)
 make airgap A="--with-models --with-packs"   # + weights + docs   (~100 GB)
 make airgap A="--split 4g"                   # parts for a FAT32 USB stick
@@ -140,9 +174,9 @@ make airgap A="--split 4g"                   # parts for a FAT32 USB stick
 Then, on the isolated host — no registry, no Hugging Face, no build:
 
 ```bash
-unzip llm-stack-airgap-<date>.zip
-cd llm-stack-airgap-<date>
-cp llm-stack/.env.airgap llm-stack/.env
+unzip stack-airgap-<date>.zip
+cd stack-airgap-<date>
+cp stack/.env.airgap stack/.env
 ./fill-secrets.sh        # generates the ones that can be generated
 ./load.sh --up
 ```
@@ -224,7 +258,7 @@ OpenAI-compatible tool needs the same four things:
 | base URL | `https://gateway.llm.localhost/v1` |
 | API key | that person's key (never `LITELLM_MASTER_KEY`: it has no budget and bills nobody) |
 | model | `MODEL_NAME` from `.env`, e.g. `Qwen3.8-Flash-Next` |
-| certificate | run host tools through `llm-stack/scripts/with-ca.sh` (below) |
+| certificate | run host tools through `stack/scripts/with-ca.sh` (below) |
 
 The certificate is self-signed, and **TLS verification happens in the client**:
 nothing the stack does on its side can make a host tool accept it. So each runtime
@@ -239,12 +273,12 @@ has to be told, and each wants a different variable.
 
 That add/replace split is why `tls.crt` alone is not enough for the bottom three:
 pointing `SSL_CERT_FILE` at it stops the tool trusting the public internet too.
-`llm-stack/scripts/with-ca.sh` sets every one of them correctly — `tls.crt` where
+`stack/scripts/with-ca.sh` sets every one of them correctly — `tls.crt` where
 the variable adds, `bundle.crt` (public roots **plus** the stack's) where it
 replaces — and installs nothing anywhere:
 
 ```bash
-cd llm-stack
+cd stack
 ./scripts/with-ca.sh curl https://gateway.llm.localhost/v1/models -H "Authorization: Bearer sk-YOURKEY"
 ./scripts/with-ca.sh dsh web
 ./scripts/with-ca.sh python3 my_client.py
@@ -269,7 +303,7 @@ setting; its own docs state it neither sets nor validates one. It reads
 nothing — it has to be in the environment that launches it:
 
 ```bash
-NODE_EXTRA_CA_CERTS="/path/to/llm-stack/config/traefik/certs/tls.crt" dsh web
+NODE_EXTRA_CA_CERTS="/path/to/stack/config/traefik/certs/tls.crt" dsh web
 ```
 
 Then add a provider with base URL `https://gateway.llm.localhost/v1` and the
@@ -277,7 +311,7 @@ person's key from the admin panel. (The wrapper form above does the same thing
 without exporting anything permanent.)
 
 ```bash
-curl --cacert llm-stack/config/traefik/certs/tls.crt https://gateway.llm.localhost/v1/chat/completions -H "Authorization: Bearer sk-YOURKEY" -H 'Content-Type: application/json' -d '{"model":"Qwen3.8-Flash-Next","messages":[{"role":"user","content":"hi"}],"max_tokens":300}'
+curl --cacert stack/config/traefik/certs/tls.crt https://gateway.llm.localhost/v1/chat/completions -H "Authorization: Bearer sk-YOURKEY" -H 'Content-Type: application/json' -d '{"model":"Qwen3.8-Flash-Next","messages":[{"role":"user","content":"hi"}],"max_tokens":300}'
 ```
 
 **Qwen Code** — `~/.qwen/settings.json` (the `mcpServers` part adds Argus, below):
@@ -286,7 +320,7 @@ curl --cacert llm-stack/config/traefik/certs/tls.crt https://gateway.llm.localho
 {
   "env": {
     "LOCAL_LLM_API_KEY": "sk-YOURKEY",
-    "NODE_EXTRA_CA_CERTS": "/path/to/llm-stack/config/traefik/certs/tls.crt"
+    "NODE_EXTRA_CA_CERTS": "/path/to/stack/config/traefik/certs/tls.crt"
   },
   "modelProviders": {
     "openai": [
@@ -310,7 +344,7 @@ curl --cacert llm-stack/config/traefik/certs/tls.crt https://gateway.llm.localho
 
 Then `qwen -m Qwen3.8-Flash-Next`.
 
-**Hermes** — see [llm-stack/docs/HERMES.md](llm-stack/docs/HERMES.md); use the model's
+**Hermes** — see [docs/stack/HERMES.md](docs/stack/HERMES.md); use the model's
 real name and append `tls.crt` to Hermes's own CA bundle.
 
 **Anything else** (OpenAI SDK, IDE plugins, other agents) takes the same base URL,
@@ -338,7 +372,7 @@ Qwen Code: the `mcpServers` block above. Any other MCP client: the same URL and 
    If no token can be issued for the account, set `ARGUS_GITLAB_USERNAME` and
    `ARGUS_GITLAB_PASSWORD` instead: Argus signs in through GitLab's web form and mints
    its own read-only token. See
-   [When no token can be issued](llm-stack/docs/ARGUS.md#when-no-token-can-be-issued-for-the-account).
+   [When no token can be issued](docs/stack/ARGUS.md#when-no-token-can-be-issued-for-the-account).
 3. If your GitLab's certificate is not from a public CA, set **one** of these — see
    [GitLab on a private CA](#gitlab-on-a-private-ca):
    `ARGUS_GITLAB_CA_CERT=/etc/argus/tls/gitlab-ca.pem` (drop the PEM in
@@ -361,7 +395,7 @@ Both settings in `.env` therefore apply to both transports:
 | `ARGUS_GITLAB_CA_CERT` | you have the CA that signed GitLab's certificate | verifies against the public roots **plus** that CA |
 | `ARGUS_GITLAB_VERIFY=false` | self-signed, and **no** CA file is available anywhere | disables verification for every request and clone to that GitLab |
 
-Drop the PEM in `llm-stack/config/argus/tls/` and give `ARGUS_GITLAB_CA_CERT` the path
+Drop the PEM in `stack/config/argus/tls/` and give `ARGUS_GITLAB_CA_CERT` the path
 **as the container sees it** (`/etc/argus/tls/<name>`). For a standalone deployment
 outside compose, point it at any path the Argus process can read.
 
@@ -424,7 +458,7 @@ recreates exactly the containers the change affects.
 
 | to change | set in `.env` | notes |
 |---|---|---|
-| **another model** (same family, other quant, other card) | the MODEL block | copy the block from the closest `env-samples/` file; how to choose each value is in [llm-stack/env-samples/README.md](llm-stack/env-samples/README.md) |
+| **another model** (same family, other quant, other card) | the MODEL block | copy the block from the closest `env-samples/` file; how to choose each value is in [stack/env-samples/README.md](stack/env-samples/README.md) |
 | **a model with no sample** | a new file in `env-samples/` | same guide, "Adding a new setup"; any GGUF on Hugging Face works via `LLAMACPP_HF_REPO` + `LLAMACPP_HF_FILES` |
 | context window | `MODEL_CONTEXT` | on a CUDA out-of-memory at start, lower `-ub` in `LLAMACPP_EXTRA_ARGS` first |
 | people served at once | `LLAMACPP_PARALLEL` | keep `--kv-unified` so they share one context pool |
@@ -444,9 +478,9 @@ recreates exactly the containers the change affects.
 | backups | `BACKUP_DIR`, `BACKUP_COPY_DIR`, `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`, `BACKUP_TIME` | `./scripts/backup.sh` takes a complete, verified backup (pg_dumpall, SQLite online copies, config with secrets); `sudo ./scripts/backup.sh --install-timer` runs it daily; `--restore --from <dir>` puts it back; `BACKUP_COPY_DIR` keeps a verified second copy on another disk |
 
 Config files, for what `.env` does not cover: alert rules in
-`llm-stack/config/prometheus/rules/`, dashboards in `llm-stack/config/grafana/dashboards/`
+`stack/config/prometheus/rules/`, dashboards in `stack/config/grafana/dashboards/`
 (edit the files; UI edits are overwritten), access rules in
-`llm-stack/config/authelia/configuration.template.yml`.
+`stack/config/authelia/configuration.template.yml`.
 
 ### Switching the model
 
@@ -483,7 +517,7 @@ drafts accepted); 3 drafts helps two people a little and one person less.
 
 The rest of this section is from the earlier machine, which no sample targets any more:
 i7-13700K (16 physical cores), 61 GB RAM, RTX 3090, NVMe, with the
-power limits below applied. Every number comes from a script in `llm-stack/scripts/`.
+power limits below applied. Every number comes from a script in `stack/scripts/`.
 
 **Two people at once** — Qwen3.8-Flash-Next, 400-token answers through the gateway
 (`multiuser-bench.py`, medians of 3 rounds, repeated across 4 engine restarts):
@@ -755,7 +789,7 @@ A reflection test walks the module and fails on any function that does not take 
 
 ## Measured
 
-Everything here is measured on real corpora, not estimated. Full detail in [docs/pack-measurements.md](docs/pack-measurements.md), [docs/index-measurements.md](docs/index-measurements.md), [docs/kpis.md](docs/kpis.md).
+Everything here is measured on real corpora, not estimated. Full detail in [docs/argus/pack-measurements.md](docs/argus/pack-measurements.md), [docs/argus/index-measurements.md](docs/argus/index-measurements.md), [docs/argus/kpis.md](docs/argus/kpis.md).
 
 ### Latency
 
@@ -805,15 +839,28 @@ That discipline extends to the benchmarks. The model comparison above found **th
 | 4 — Semantic layer | selective embeddings, `semantic_search` | ✅ |
 | 5 — Knowledge packs | 11 packs, 6 doc tools, `argus pack` | ✅ |
 
-**884 tests**, passing locally, 0 skipped.
+**928 tests**, passing locally.
 
-- **[llm-stack/docs/ARCHITECTURE.md](llm-stack/docs/ARCHITECTURE.md)** — every service in the stack, how a request flows through them, and what each failure looks like
-- **[llm-stack/docs/CONFIGURATION.md](llm-stack/docs/CONFIGURATION.md)** — every `.env` variable and every file under `config/`
-- **[llm-stack/docs/TESTING.md](llm-stack/docs/TESTING.md)** — what the suite covers, what a green run skips, and the tests still missing
-- **[docs/production.md](docs/production.md)** — deploy, verify, operate
-- **[docs/deployment.md](docs/deployment.md)** — wiring Hermes, and the failure modes
-- **[docs/knowledge-packs.md](docs/knowledge-packs.md)** — building and publishing packs
-- **[docs/pgvector-backend.md](docs/pgvector-backend.md)** — the optional Postgres backend for symbol embeddings, and what it measures
+Everything is under [`docs/`](docs/), split by which half of the repository it
+describes.
+
+**The stack** (`stack/`):
+
+- **[docs/stack/ARCHITECTURE.md](docs/stack/ARCHITECTURE.md)** — every service, how a request flows through them, and what each failure looks like
+- **[docs/stack/CONFIGURATION.md](docs/stack/CONFIGURATION.md)** — every `.env` variable and every file under `config/`
+- **[docs/stack/AUTHENTICATION.md](docs/stack/AUTHENTICATION.md)** — who signs in where, and how identity reaches each service
+- **[docs/stack/ADMIN-PANEL.md](docs/stack/ADMIN-PANEL.md)** — the admin console: accounts, keys, credit, the Model and Indexing cards
+- **[docs/stack/ARGUS.md](docs/stack/ARGUS.md)** — Argus inside the stack: the per-person ACL, private CAs, password mode, the audit stream
+- **[docs/stack/HERMES.md](docs/stack/HERMES.md)** — pointing Hermes at the model and at Argus
+- **[docs/stack/TESTING.md](docs/stack/TESTING.md)** — what the suite covers, what a green run skips, and the tests still missing
+
+**Argus** (`src/argus/`):
+
+- **[docs/argus/clients.md](docs/argus/clients.md)** — connecting an MCP client, and the reference client
+- **[docs/argus/knowledge-packs.md](docs/argus/knowledge-packs.md)** — building and publishing packs
+- **[docs/argus/backup-and-restore.md](docs/argus/backup-and-restore.md)** — what is worth keeping and how to get it back
+- **[docs/argus/pgvector-backend.md](docs/argus/pgvector-backend.md)** — the optional Postgres backend for symbol embeddings, and what it measures
+- **[docs/argus/roadmap.md](docs/argus/roadmap.md)** — what is not yet proven
 - **[evals/](evals/)** — every benchmark in this README, reproducible
 
 ---

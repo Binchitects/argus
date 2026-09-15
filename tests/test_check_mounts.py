@@ -1,6 +1,6 @@
 """The preflight bind-mount check.
 
-`llm-stack/scripts/lib/check_mounts.py` is not part of the argus package, but it
+`stack/scripts/lib/check_mounts.py` is not part of the argus package, but it
 is the guard that stands between an operator and four unrelated-looking crash
 loops, so it is tested here with everything else rather than only by running it.
 
@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 _MODULE_PATH = (Path(__file__).resolve().parent.parent
-                / "llm-stack" / "scripts" / "lib" / "check_mounts.py")
+                / "stack" / "scripts" / "lib" / "check_mounts.py")
 
 
 def _load():

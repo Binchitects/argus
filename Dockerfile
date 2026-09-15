@@ -48,27 +48,27 @@ WORKDIR /app
 FROM base AS test
 
 COPY pyproject.toml README.md ./
-COPY argus/ ./argus/
+COPY src/argus/ ./src/argus/
 RUN pip install -e ".[dev,pgvector]"
 
 COPY tests/ ./tests/
 
-# ONE file, not `COPY deploy/`. A test asserts properties of the reference
+# ONE file, not `COPY scripts/`. A test asserts properties of the reference
 # client, so the file must be present or that test fails with a bare
 # FileNotFoundError -- which is exactly how this was found, as a build that
 # passed 740 tests on the host and failed one only inside the image.
 #
-# Copying the whole directory would also pull deploy/test-gitlab/seeded.json,
+# Copying the whole directory would also pull scripts/test-gitlab/seeded.json,
 # which holds real GitLab tokens, into an image layer. Layers persist even if
 # a later step deletes the file, so this stays a single explicit file.
-COPY deploy/agent_client_example.py ./deploy/
+COPY scripts/agent_client_example.py ./scripts/
 
 # Same reasoning, one directory over. `check_mounts.py` is the preflight
-# bind-mount guard in llm-stack, and it is tested here with everything else
-# because a bug in it breaks `docker compose up` for every non-root operator.
-# Copying llm-stack/ wholesale would put a large tree -- and the deployment's
-# .env -- into an image layer for the sake of one file, so this names the file.
-COPY llm-stack/scripts/lib/check_mounts.py ./llm-stack/scripts/lib/
+# bind-mount guard for the stack in stack/, and it is tested here with
+# everything else because a bug in it breaks `docker compose up` for every
+# non-root operator. Copying stack/ wholesale would put a large tree -- and
+# the deployment's .env -- into an image layer for the sake of one file.
+COPY stack/scripts/lib/check_mounts.py ./stack/scripts/lib/
 
 RUN python -m pytest -q \
  && { echo "suite: passed"; \
@@ -111,7 +111,7 @@ RUN groupadd --gid "${ARGUS_GID}" argus \
  && useradd --uid "${ARGUS_UID}" --gid "${ARGUS_GID}" --create-home --shell /usr/sbin/nologin argus
 
 COPY pyproject.toml README.md ./
-COPY argus/ ./argus/
+COPY src/argus/ ./src/argus/
 # The host's file modes ride along with the copy, and a source file written
 # under a restrictive umask (0600, which is what an editor or tool honouring
 # umask 077 produces) stays unreadable to the `argus` user this image switches
@@ -121,7 +121,7 @@ COPY argus/ ./argus/
 # that module dies -- with a PermissionError from inside the import machinery.
 # Observed exactly that here after a new module was added by a tool that wrote
 # it 0600: `argus serve` came up healthy and the indexer could not import it.
-RUN chmod -R a+rX ./argus
+RUN chmod -R a+rX ./src/argus
 # [pgvector]: ships the optional Postgres backend so a deployment can select
 # it with ARGUS_VECTOR_BACKEND=pgvector without rebuilding. psycopg is ~10 MB
 # and imported lazily, so it costs nothing on the default sqlite-vec path.
@@ -162,37 +162,37 @@ CMD ["status", "--config", "/etc/argus/config.yaml"]
 # /var/lib/argus volume, just a different entrypoint and exposed port.
 FROM runtime AS server
 
-# `argus serve` binds 127.0.0.1 by default (see argus/cli.py) -- that default
-# protects a bare-metal or direct-`docker run` deployment from an accidental
-# plaintext listener on the LAN. Inside compose, Caddy runs as its own
-# container and cannot reach this one's loopback interface -- it has to reach
-# this container on the shared compose network -- so the CMD here overrides
-# --host to 0.0.0.0 explicitly. That is still safe: this image never
-# publishes 7700 to the host (see docker-compose.yml), so 0.0.0.0 only ever
-# means "reachable from Caddy inside the compose network," never "reachable
-# from the LAN." Caddy is what terminates TLS and is the only container
-# whose port reaches outside (see deploy/Caddyfile).
+# `argus serve` binds 127.0.0.1 by default (see src/argus/cli.py) -- that
+# default protects a bare-metal or direct-`docker run` deployment from an
+# accidental plaintext listener on the LAN. Behind a reverse proxy the proxy
+# runs as its own container and cannot reach this one's loopback interface --
+# it has to reach this container on the shared compose network -- so the CMD
+# here overrides --host to 0.0.0.0 explicitly. That is still safe: this image
+# never publishes 7700 to the host (see stack/docker-compose.yml), so 0.0.0.0
+# only ever means "reachable from the proxy inside the compose network", never
+# "reachable from the LAN". The proxy is what terminates TLS and is the only
+# container whose port reaches outside.
 #
-# --allowed-host must match what Caddy actually forwards as the Host header,
-# not this container's own bind address above. The FastMCP SDK's
+# --allowed-host must match what the proxy actually forwards as the Host
+# header, not this container's own bind address above. The FastMCP SDK's
 # DNS-rebinding protection validates the inbound Host header against an
-# allowlist that is fixed once the server object is built (argus/cli.py
-# threads --allowed-host into that construction explicitly, precisely
-# because the SDK never revisits the allowlist later, e.g. when --host is
-# reassigned to 0.0.0.0 as it is above). `deploy/Caddyfile`'s `reverse_proxy`
-# is a transparent proxy -- it forwards the client's original Host header
-# unchanged (Caddy does not rewrite it to the upstream address by default)
-# -- so a developer hitting
-# https://argus.internal/mcp arrives here with `Host: argus.internal`. Left
-# at the loopback-only default, every one of those requests -- the only
-# thing Hermes actually sends -- is rejected with 421 Invalid Host Header,
-# even though /healthz (a plain custom Starlette route outside this check)
-# looks perfectly healthy the whole time. Two forms are listed because a
-# client that includes an explicit port in the URL (https://argus.internal:443/mcp)
-# arrives with a Host header carrying that port, which only the wildcard
-# form matches -- the bare form only matches when no port is present, which
-# is what `hermes mcp add argus --url https://argus.internal` (docs/deployment.md)
-# actually sends. Update both if `deploy/Caddyfile`'s site address changes.
+# allowlist that is fixed once the server object is built (src/argus/cli.py
+# threads --allowed-host into that construction explicitly, precisely because
+# the SDK never revisits the allowlist later, e.g. when --host is reassigned
+# to 0.0.0.0 as it is above). A transparent reverse proxy forwards the
+# client's original Host header unchanged, so a request to
+# https://argus.<domain>/mcp arrives here with `Host: argus.<domain>`. Left at
+# the loopback-only default, every one of those requests is rejected with
+# 421 Invalid Host Header, even though /healthz (a plain custom Starlette
+# route outside this check) looks perfectly healthy the whole time.
+#
+# These two are the BARE-IMAGE defaults, and `argus.internal` is a
+# placeholder. The stack overrides them in stack/docker-compose.yml with
+# --allowed-host=argus.${LLM_DOMAIN}, which is the form a real deployment
+# uses. Both the bare and the wildcard form are listed because a client that
+# includes an explicit port in its URL (https://argus.internal:443/mcp)
+# arrives with a Host header carrying that port, which only the wildcard form
+# matches -- the bare form matches only when no port is present.
 EXPOSE 7700
 CMD ["serve", "--config", "/etc/argus/config.yaml", "--host", "0.0.0.0", "--port", "7700", \
      "--allowed-host", "argus.internal", "--allowed-host", "argus.internal:*"]

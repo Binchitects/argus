@@ -1,4 +1,4 @@
-# Shell scripts must keep LF endings. Git.autocrlf rewrote deploy/build-packs.sh
+# Shell scripts must keep LF endings. Git.autocrlf rewrote scripts/build-packs.sh
 # to CRLF on checkout and bash then failed with "unexpected EOF while looking
 # for matching quote" -- which silently skipped a queued pack rebuild.
 *.sh text eol=lf

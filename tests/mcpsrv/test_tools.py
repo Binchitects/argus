@@ -698,7 +698,7 @@ def test_the_example_client_uses_the_server_instructions_and_native_calling():
     import pathlib
 
     source = (pathlib.Path(__file__).resolve().parents[2]
-              / "deploy" / "agent_client_example.py").read_text(encoding="utf-8")
+              / "scripts" / "agent_client_example.py").read_text(encoding="utf-8")
     assert '"tools"' in source and "tool_calls" in source, "not native calling"
     assert "init.instructions" in source or 'getattr(init, "instructions"' in source
     assert "list_tools" in source, "schemas must come from the server"

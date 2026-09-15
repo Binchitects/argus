@@ -16,7 +16,7 @@ Three questions, none answerable from a small corpus:
    is the tool whose whole purpose is answering "where does this belong"
    and which cannot be exercised meaningfully below this scale.
 
-    python evals/run_estate.py --config deploy/test-gitlab/argus-host.yaml
+    python evals/run_estate.py --config scripts/test-gitlab/argus-host.yaml
 """
 from __future__ import annotations
 

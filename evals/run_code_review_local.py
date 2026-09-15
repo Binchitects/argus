@@ -101,7 +101,7 @@ SCHEMAS = [
      "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}}},
 ]
 
-PACKS_DIR = os.environ.get("ARGUS_PACKS", "deploy/test-gitlab/work/packs")
+PACKS_DIR = os.environ.get("ARGUS_PACKS", "scripts/test-gitlab/work/packs")
 
 # The same nudge the MCP server sends at connect time.
 from argus.mcpsrv.server import SERVER_INSTRUCTIONS

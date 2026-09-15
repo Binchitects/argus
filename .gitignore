@@ -19,13 +19,13 @@ config.yaml
 config.local.yaml
 .env
 
-# The bundled llm-stack deployment carries its own .gitignore. The unanchored
+# The bundled stack deployment carries its own .gitignore. The unanchored
 # `config.yaml` rule above matches at any depth, so without these exceptions it
-# silently strips two files that llm-stack's docker-compose bind-mounts, and a
+# silently strips two files that the stack's docker-compose bind-mounts, and a
 # fresh clone fails to start. Neither holds a secret: the Argus GitLab token and
 # the LiteLLM keys are both injected from the environment.
-!llm-stack/config/argus/config.yaml
-!llm-stack/config/litellm/config.yaml
+!stack/config/argus/config.yaml
+!stack/config/litellm/config.yaml
 
 # Editors / OS
 .vscode/
@@ -39,8 +39,8 @@ desktop.ini
 .claude/settings.local.json
 
 # Test-GitLab seeded credentials (throwaway, but still credentials)
-deploy/test-gitlab/seeded.json
-deploy/test-gitlab/work/
+scripts/test-gitlab/seeded.json
+scripts/test-gitlab/work/
 
 # Task 12 measurement checkouts (large upstream clones, never committed)
 .packwork/
@@ -53,7 +53,7 @@ dist/
 # swept 1.19 GB of these into a commit and the push died on it.
 #
 # Leading slash matters: a bare `packs/` matches any directory of that name at
-# any depth, which silently excluded argus/packs/ and tests/packs/ -- the pack
+# any depth, which silently excluded src/argus/packs/ and tests/packs/ -- the pack
 # source tree itself. Already-tracked files kept working, so the only symptom
 # was new files there refusing to be added.
 /packs/
