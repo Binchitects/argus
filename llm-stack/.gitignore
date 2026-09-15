@@ -66,6 +66,14 @@ config/prometheus/secrets/*
 # It holds password hashes and must not be committed.
 config/authelia/users.yml.bak
 config/authelia/users.yml.tmp
-config/authelia/directory/
+# The hash-free account list the admin panel publishes for Argus to read.
+#
+# The DIRECTORY is kept in the repository with a placeholder, and only its
+# CONTENTS are ignored. Without that, a fresh clone has no source for the argus
+# and admin-panel bind mounts, so Docker creates a root-owned empty directory
+# there instead -- which is exactly the failure `make preflight` exists to name,
+# and it would refuse `make up` on every clean deployment.
+config/authelia/directory/*
+!config/authelia/directory/.gitkeep
 config/ca/*.crt
 config/ca/*.pem
