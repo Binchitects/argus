@@ -779,3 +779,46 @@ class TestStdioIdentity:
                 t._identity(self._ctx(request))
         finally:
             t.set_stdio_identity(None)
+
+
+# ------------------------------------------------------ the vector read path
+#
+# sqlite-vec is loaded PER CONNECTION, and semantic_search is the only read
+# path that touches a vec0 table. The MCP impl never loaded it, so every
+# semantic search died with "no such module: vec0" -- which run_readonly
+# flattens into "the index is unavailable; do not retry this query". The tool
+# was broken for every caller, and its error told the agent to give up rather
+# than to report anything.
+
+def _fake_embed(texts: list[str]) -> list[list[float]]:
+    """Deterministic and text-dependent, so equal text embeds equally."""
+    from argus.embed import EMBED_DIM
+    out = []
+    for text in texts:
+        vector = [0.0] * EMBED_DIM
+        vector[abs(hash(text)) % EMBED_DIM] = 1.0
+        out.append(vector)
+    return out
+
+
+def test_semantic_search_impl_reaches_the_vector_table(two_repos_db, monkeypatch):
+    from argus import embed as embed_module, semantic
+
+    db_path, ids = two_repos_db
+    conn = open_db(db_path)
+    try:
+        semantic.build_symbol_embeddings(conn, embed_fn=_fake_embed)
+    finally:
+        conn.close()
+
+    # The impl embeds the QUERY through the real module; hand it the same fake
+    # so the query lands on the vector of a symbol that exists.
+    monkeypatch.setattr(embed_module, "embed_batch", _fake_embed)
+    query = semantic.embed_text_for("SharedName", "function", "(void)", "", "src/a.c")
+
+    rows = asyncio.run(tools.semantic_search_impl(db_path, _identity(ids["g/alpha"]), query))
+
+    assert rows, "the vector query never reached the table"
+    assert rows[0]["name"] == "SharedName"
+    # ACL still applies through the vector path.
+    assert {r["repo_id"] for r in rows} == {ids["g/alpha"]}

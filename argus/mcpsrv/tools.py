@@ -381,17 +381,26 @@ def _raise_if_repo_denied(conn, identity, repo_id: int, notices) -> None:
 
 async def code_contracts_impl(db_path: Path | str, identity: acl.Identity,
                               source: str, branch: str | None = None,
-                              limit: int = 40) -> list[dict]:
+                              limit: int = 40,
+                              notices: access.MemberDirectory | None = None) -> list[dict]:
     """Definition sites for every in-house symbol a source file names."""
     def _run(conn: Any) -> list[dict]:
         scoped = _scoped(conn, identity, branch)
-        return queries.symbol_contracts(scoped, conn, source, limit=limit)
+        rows = queries.symbol_contracts(scoped, conn, source, limit=limit)
+        if not rows:
+            # An empty contract list means "every in-house symbol here is
+            # unknown to me", which is also what a permission gap looks like.
+            _raise_if_only_denied(
+                conn, identity, branch, notices,
+                lambda ids: queries.symbol_contracts(ids, conn, source, limit=limit))
+        return rows
 
     return await run_readonly(db_path, _run)
 
 
 async def semantic_search_impl(db_path, identity, query: str,
-                               branch=None, limit: int = 10) -> list[dict]:
+                               branch=None, limit: int = 10,
+                               notices: access.MemberDirectory | None = None) -> list[dict]:
     """Embed the query, then search this organisation's own symbol vectors."""
     from .. import embed as embed_module
 
@@ -399,11 +408,28 @@ async def semantic_search_impl(db_path, identity, query: str,
     if not text:
         return []
     [vector] = embed_module.embed_batch([text])
-    rows = await run_readonly(
-        db_path,
-        lambda conn: queries.semantic_search(_scoped(conn, identity, branch),
-                                             conn, vector, limit=limit),
-    )
+
+    def _run(conn: Any) -> list:
+        # sqlite-vec is loaded PER CONNECTION, and this is the only read path
+        # that touches a vec0 table. Without this the query dies with
+        # "no such module: vec0", which run_readonly then flattens into "the
+        # index is unavailable" -- so semantic search failed for every caller,
+        # with a message telling the agent not to retry.
+        from ..packs.format import _load_vec_extension
+        _load_vec_extension(conn)
+
+        rows = queries.semantic_search(_scoped(conn, identity, branch),
+                                       conn, vector, limit=limit)
+        if not rows:
+            # A description-shaped query is the one most likely to match code
+            # the caller cannot read, and an empty list is indistinguishable
+            # from "this codebase does not contain that".
+            _raise_if_only_denied(
+                conn, identity, branch, notices,
+                lambda ids: queries.semantic_search(ids, conn, vector, limit=limit))
+        return rows
+
+    rows = await run_readonly(db_path, _run)
     return [dict(row) for row in rows]
 
 
@@ -548,18 +574,23 @@ async def repo_map_impl(db_path: Path | str, identity: acl.Identity,
 
 async def which_repo_impl(db_path: Path | str, identity: acl.Identity,
                           description: str,
-                          branch: str | None = None) -> list[dict]:
+                          branch: str | None = None,
+                          notices: access.MemberDirectory | None = None) -> list[dict]:
     # No `limit` parameter: the registered `which_repo` tool below never
     # exposes one to a caller, so this always ran with queries.which_repo's
     # own default anyway. Dropping it here removes a parameter nothing could
     # ever set to something other than that default, rather than plumbing an
     # unused knob through the MCP tool signature for a value this server has
     # never needed callers to tune.
-    return await run_readonly(
-        db_path,
-        lambda conn: queries.which_repo(_scoped(conn, identity, branch), conn,
-                                        description),
-    )
+    def _run(conn: Any) -> list:
+        rows = queries.which_repo(_scoped(conn, identity, branch), conn, description)
+        if not rows:
+            _raise_if_only_denied(
+                conn, identity, branch, notices,
+                lambda ids: queries.which_repo(ids, conn, description))
+        return rows
+
+    return await run_readonly(db_path, _run)
 
 
 async def docs_lookup_impl(packs_dir: Path | str, name: str,
@@ -893,12 +924,19 @@ _DOCS_SEARCH_DESC = (
 
 async def impact_of_impl(db_path: Path | str, identity: acl.Identity,
                          repo_id: int, path: str,
-                         max_depth: int = 3) -> dict[str, Any]:
-    return await run_readonly(
-        db_path,
-        lambda conn: queries.impact_of(
-            identity.allowed_repo_ids, conn, repo_id, path, max_depth=max_depth),
-    )
+                         max_depth: int = 3,
+                         notices: access.MemberDirectory | None = None) -> dict[str, Any]:
+    def _run(conn: Any) -> dict[str, Any]:
+        # The blast-radius answer already excludes what the caller cannot read,
+        # which is correct but silent: an EMPTY dict reads as "nothing depends
+        # on this". When the repository named is itself unreadable, say so
+        # instead -- otherwise the most reassuring possible answer is given for
+        # the one case where nothing was actually looked at.
+        _raise_if_repo_denied(conn, identity, repo_id, notices)
+        return queries.impact_of(
+            identity.allowed_repo_ids, conn, repo_id, path, max_depth=max_depth)
+
+    return await run_readonly(db_path, _run)
 
 
 _IMPACT_OF_DESC = (
@@ -1106,7 +1144,7 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
             db_path, "impact_of", identity,
             {"repo_id": repo_id, "path": path, "max_depth": max_depth},
             lambda: impact_of_impl(db_path, identity, repo_id, path,
-                                   max_depth=max_depth),
+                                   max_depth=max_depth, notices=notices),
         )
 
     @server.tool(name="code_contracts", description=_CODE_CONTRACTS_DESC)
@@ -1120,7 +1158,8 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         return await _with_audit(
             db_path, "code_contracts", identity,
             {"source_chars": len(source or ""), "branch": branch},
-            lambda: code_contracts_impl(db_path, identity, source, branch=branch),
+            lambda: code_contracts_impl(db_path, identity, source, branch=branch,
+                                        notices=notices),
         )
 
     @server.tool(name="semantic_search",
@@ -1132,7 +1171,7 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
             db_path, "semantic_search", identity,
             {"query": query, "branch": branch, "limit": limit},
             lambda: semantic_search_impl(db_path, identity, query,
-                                         branch=branch, limit=limit),
+                                         branch=branch, limit=limit, notices=notices),
         )
 
     @server.tool(name="find_symbol", description=_FIND_SYMBOL_DESC)
@@ -1201,5 +1240,6 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         return await _with_audit(
             db_path, "which_repo", identity,
             {"description": description[:200], "branch": branch},
-            lambda: which_repo_impl(db_path, identity, description, branch=branch),
+            lambda: which_repo_impl(db_path, identity, description, branch=branch,
+                                    notices=notices),
         )
