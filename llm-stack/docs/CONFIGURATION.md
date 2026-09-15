@@ -83,6 +83,31 @@ published host ports. Change them if something else owns 80/443; the URLs in
 the admin panel and the OIDC redirect URIs follow `TRAEFIK_HTTPS_PORT`
 automatically.
 
+### Where everything lives
+
+Every bind mount is a variable, so the layout is yours: config on one disk,
+models on another, the samples somewhere else again. A relative value resolves
+against this compose file, so the defaults keep a checkout self-contained.
+
+| variable | default | what it points at |
+|---|---|---|
+| `LLM_CONFIG_DIR` | `./config` | Authelia, Traefik, LiteLLM, Prometheus, Grafana, Loki, Postgres, Argus — every committed config file |
+| `LLM_DEPLOY_DIR` | `./deploy` | the build contexts and the exporter sources |
+| `LLM_MODELS_DIR` | `./models` | the bind mount at `/models`, and the default for `LLAMACPP_MODEL_DIR` |
+| `LLM_ENV_SAMPLES_DIR` | `./env-samples` | read by the admin panel's Model card |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Traefik's discovery and Promtail's log reading |
+| `HOST_DOCKER_DIR` | `/var/lib/docker` | Promtail's container logs, cAdvisor's view |
+| `HOST_ROOT` / `HOST_PROC` / `HOST_SYS` / `HOST_DEV_DISK` | `/`, `/proc`, `/sys`, `/dev/disk` | node-exporter and cAdvisor |
+
+`LLAMACPP_MODEL_DIR` defaults to `${LLM_MODELS_DIR}` rather than an absolute
+path, so a checkout that keeps its weights in `./models` needs no edit at all.
+
+**One placeholder, deliberately.** `config/argus/config.yaml` names
+`https://gitlab.example.com`, not a real instance — it is committed, and
+`ARGUS_GITLAB_URL` overrides it. It stays a valid URL rather than empty so a
+missing value fails as an unreachable host, which says what is wrong, instead
+of as a parse error.
+
 ---
 
 ## 4. MODEL

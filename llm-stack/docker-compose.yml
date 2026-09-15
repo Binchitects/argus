@@ -228,8 +228,8 @@ services:
         done
     volumes:
       - traefik-certs:/certs
-      - ./config/traefik/certs:/export
-      - ./config/ca:/extra-ca:ro
+      - ${LLM_CONFIG_DIR:-./config}/traefik/certs:/export
+      - ${LLM_CONFIG_DIR:-./config}/ca:/extra-ca:ro
     logging: *default-logging
 
   traefik:
@@ -285,12 +285,12 @@ services:
       # Traefik is the only ingress, so its failure is immediately obvious,
       # which is the whole point: a loud failure rather than a quiet wrong one.
       - type: bind
-        source: ./config/traefik/traefik.yml
+        source: ${LLM_CONFIG_DIR:-./config}/traefik/traefik.yml
         target: /etc/traefik/traefik.yml
         read_only: true
         bind: { create_host_path: false }
       - type: bind
-        source: ./config/traefik/dynamic
+        source: ${LLM_CONFIG_DIR:-./config}/traefik/dynamic
         target: /etc/traefik/dynamic
         read_only: true
         bind: { create_host_path: false }
@@ -300,12 +300,12 @@ services:
         target: /etc/traefik/certs
         read_only: true
       - type: bind
-        source: ./config/traefik/auth
+        source: ${LLM_CONFIG_DIR:-./config}/traefik/auth
         target: /etc/traefik/auth
         read_only: true
         bind: { create_host_path: false }
       # Read-only: Traefik only watches container events for label changes.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:${DOCKER_SOCKET:-/var/run/docker.sock}:ro
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 15s
@@ -367,8 +367,8 @@ services:
       PROXY_AUTH_USER: ${PROXY_AUTH_USER:-admin}
       PROXY_AUTH_PASSWORD: ${PROXY_AUTH_PASSWORD:?set PROXY_AUTH_PASSWORD in .env}
     volumes:
-      - ./config/authelia:/config
-      - ./config/traefik/auth:/traefik-auth
+      - ${LLM_CONFIG_DIR:-./config}/authelia:/config
+      - ${LLM_CONFIG_DIR:-./config}/traefik/auth:/traefik-auth
       - authelia-data:/data
     command:
       - |
@@ -486,7 +486,7 @@ services:
       # Mounting the directory makes the path resolve fresh on each open, so a
       # replaced file is picked up. Read-only still: nothing in the container
       # writes here.
-      - ./config/authelia:/config:ro
+      - ${LLM_CONFIG_DIR:-./config}/authelia:/config:ro
       - authelia-data:/data
     environment:
       # Authelia merges these two files; clients.yml is generated because OIDC
@@ -545,7 +545,7 @@ services:
       - hf-cache:/root/.cache/huggingface
       - vllm-cache:/root/.cache/vllm
       # Drop GGUF/safetensors here to serve a local model without HuggingFace.
-      - ./models:/models
+      - ${LLM_MODELS_DIR:-./models}:/models
     environment:
       HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
       HF_HOME: /root/.cache/huggingface
@@ -651,7 +651,7 @@ services:
     networks: [llm-net]
     command: ["python", "/app/exporter.py"]
     volumes:
-      - ./deploy/cpu-temp-exporter:/app:ro
+      - ${LLM_DEPLOY_DIR:-./deploy}/cpu-temp-exporter:/app:ro
       # No /sys mount: on Linux a container's own /sys already IS the host's
       # sysfs, so the exporter reads /sys/class/hwmon directly. (An earlier
       # version bind-mounted it to /host/sys, a path nothing reads.) Under WSL2
@@ -792,8 +792,8 @@ services:
     networks: [llm-net]
     volumes:
       # Same bind mount as vLLM, plus wherever the big GGUFs actually live.
-      - ./models:/models
-      - ${LLAMACPP_MODEL_DIR:-./models}:/gguf:ro
+      - ${LLM_MODELS_DIR:-./models}:/models
+      - ${LLAMACPP_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}:/gguf:ro
       # Filled by model-init from LLAMACPP_ENGINE_URL; empty = stock server.
       - llamacpp-engine:/engine:ro
     # Which llama-server runs, and MTP. Both come from .env via model-init:
@@ -944,7 +944,7 @@ services:
       # Same caches as the primary: a shared base model is downloaded once.
       - hf-cache:/root/.cache/huggingface
       - vllm-cache:/root/.cache/vllm
-      - ./models:/models
+      - ${LLM_MODELS_DIR:-./models}:/models
     environment:
       HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
       HF_HOME: /root/.cache/huggingface
@@ -1018,7 +1018,7 @@ services:
     volumes:
       # A template: ${MODEL_NAME}, ${MODEL_CONTEXT}, ${MODEL_MAX_OUTPUT} are filled
       # in from the environment at startup (entrypoint below).
-      - ./config/litellm/config.yaml:/app/config.template.yaml:ro
+      - ${LLM_CONFIG_DIR:-./config}/litellm/config.yaml:/app/config.template.yaml:ro
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set LITELLM_SALT_KEY}
@@ -1243,12 +1243,12 @@ services:
       GIT_SSL_CAINFO: /certs/bundle.crt
     volumes:
       # Config travels with the repo, so a fresh host needs nothing extra.
-      - ./config/argus/config.yaml:/etc/argus/config.yaml:ro
+      - ${LLM_CONFIG_DIR:-./config}/argus/config.yaml:/etc/argus/config.yaml:ro
       # Where a private CA goes. The directory exists in the repo and is empty
       # by default, so the mount never depends on an operator creating it --
       # and a PEM dropped here is reachable as /etc/argus/tls/<name>, which is
       # what ARGUS_GITLAB_CA_CERT points at.
-      - ./config/argus/tls:/etc/argus/tls:ro
+      - ${LLM_CONFIG_DIR:-./config}/argus/tls:/etc/argus/tls:ro
       # A named volume by default: drop-in deployments start with an empty
       # index and populate it by running the indexer. To reuse an index and
       # pack estate that already exist on the host, add the override file:
@@ -1257,7 +1257,7 @@ services:
       # The directory, not the file: a single-file mount pins an inode, and the
       # admin panel replaces the file atomically (see authelia). Only the
       # hash-free copy: Argus has no business reading password hashes.
-      - ./config/authelia/directory:/authelia:ro
+      - ${LLM_CONFIG_DIR:-./config}/authelia/directory:/authelia:ro
       # The CAs to trust when calling GitLab (see tls-init): a GitLab behind a
       # company CA works once that CA is in config/ca/.
       - traefik-certs:/certs:ro
@@ -1298,7 +1298,7 @@ services:
   # In the `gateway` profile because it is pointless without LiteLLM: with no
   # gateway there is no budget to enforce.
   identity-proxy:
-    build: ./deploy/identity-proxy
+    build: ${LLM_DEPLOY_DIR:-./deploy}/identity-proxy
     container_name: identity-proxy
     profiles: ["gateway"]
     restart: unless-stopped
@@ -1335,7 +1335,7 @@ services:
   # is why it publishes no port and is reachable only through the proxy.
   # ============================================================================
   admin-panel:
-    build: ./deploy/admin-panel
+    build: ${LLM_DEPLOY_DIR:-./deploy}/admin-panel
     container_name: admin-panel
     profiles: ["auth"]
     restart: unless-stopped
@@ -1376,9 +1376,9 @@ services:
       # it, so the panel prints the instruction instead. See docs/ADMIN-PANEL.md.
       # The directory also holds secrets/, which is why only this one file's
       # directory is mounted rather than the whole config tree.
-      - ./config/authelia:/authelia
+      - ${LLM_CONFIG_DIR:-./config}/authelia:/authelia
       # The sample deployments the Model card offers to switch to (read-only).
-      - ./env-samples:/env-samples:ro
+      - ${LLM_ENV_SAMPLES_DIR:-./env-samples}:/env-samples:ro
     # NO depends_on, deliberately. `litellm` lives in the `gateway` profile and
     # this lives in `auth`; compose rejects the WHOLE project when an enabled
     # service depends on one whose profile is off, so `--profile auth` alone
@@ -1617,7 +1617,7 @@ services:
     environment:
       LLAMACPP_API_KEY: ${LLAMACPP_API_KEY:-}
     volumes:
-      - ./config/prometheus/secrets:/src:ro
+      - ${LLM_CONFIG_DIR:-./config}/prometheus/secrets:/src:ro
       - prometheus-secrets:/dst
     logging: *default-logging
 
@@ -1632,7 +1632,7 @@ services:
     # No published ports: Traefik is the only way in. Re-add a mapping
     # here only if you need to bypass the proxy for debugging.
     volumes:
-      - ./config/prometheus:/etc/prometheus:ro
+      - ${LLM_CONFIG_DIR:-./config}/prometheus:/etc/prometheus:ro
       # Mounted OVER the bind-mounted secrets directory; see prometheus-secrets.
       - prometheus-secrets:/etc/prometheus/secrets:ro
       - prometheus-data:/prometheus
@@ -1660,7 +1660,7 @@ services:
     # No published ports: Traefik is the only way in. Re-add a mapping
     # here only if you need to bypass the proxy for debugging.
     volumes:
-      - ./config/alertmanager:/etc/alertmanager:ro
+      - ${LLM_CONFIG_DIR:-./config}/alertmanager:/etc/alertmanager:ro
       - alertmanager-data:/alertmanager
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
@@ -1684,8 +1684,8 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       # Provisioning: datasources and dashboards are code, not clicks.
-      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ${LLM_CONFIG_DIR:-./config}/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${LLM_CONFIG_DIR:-./config}/grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
@@ -1753,9 +1753,9 @@ services:
     # here only if you need to bypass the proxy for debugging.
     pid: host
     volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
+      - ${HOST_PROC:-/proc}:/host/proc:ro
+      - ${HOST_SYS:-/sys}:/host/sys:ro
+      - ${HOST_ROOT:-/}:/rootfs:ro
     command:
       - --path.procfs=/host/proc
       - --path.sysfs=/host/sys
@@ -1790,11 +1790,11 @@ services:
     devices:
       - /dev/kmsg
     volumes:
-      - /:/rootfs:ro
+      - ${HOST_ROOT:-/}:/rootfs:ro
       - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
+      - ${HOST_SYS:-/sys}:/sys:ro
+      - ${HOST_DOCKER_DIR:-/var/lib/docker}/:/var/lib/docker:ro
+      - ${HOST_DEV_DISK:-/dev/disk}/:/dev/disk:ro
     command:
       - --housekeeping_interval=10s
       - --docker_only=true
@@ -1861,7 +1861,7 @@ services:
     # No published ports: Traefik is the only way in. Re-add a mapping
     # here only if you need to bypass the proxy for debugging.
     volumes:
-      - ./config/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ${LLM_CONFIG_DIR:-./config}/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
     command: -config.file=/etc/loki/loki-config.yml
     labels:
@@ -1880,9 +1880,9 @@ services:
     restart: unless-stopped
     networks: [llm-net]
     volumes:
-      - ./config/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${LLM_CONFIG_DIR:-./config}/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ${HOST_DOCKER_DIR:-/var/lib/docker}/containers:${HOST_DOCKER_DIR:-/var/lib/docker}/containers:ro
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:${DOCKER_SOCKET:-/var/run/docker.sock}:ro
     command: -config.file=/etc/promtail/promtail-config.yml
     depends_on: [loki]
     logging: *default-logging
@@ -1912,7 +1912,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       # Creates the `litellm` and `langfuse` databases on first boot only.
-      - ./config/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ${LLM_CONFIG_DIR:-./config}/postgres/init:/docker-entrypoint-initdb.d:ro
     environment:
       # Fed from LLM_PG_*, not POSTGRES_*, and that indirection is the fix
       # for a measured outage-in-waiting. Compose gives the SHELL environment
