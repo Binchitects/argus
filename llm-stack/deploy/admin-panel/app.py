@@ -326,59 +326,151 @@ def _money(v) -> str:
     return "—" if v is None else f"${float(v):,.2f}"
 
 
-PAGE = """<!doctype html><html><head><meta charset="utf-8">
+def _tile(label: str, value: str, sub: str = "") -> str:
+    """One headline number. The figures an operator opens this page for were
+    scattered through table cells; a tile row answers them before any scroll."""
+    tail = f'<div class="sub">{_h(sub)}</div>' if sub else ""
+    return (f'<div class="tile"><div class="k">{_h(label)}</div>'
+            f'<div class="v">{value}</div>{tail}</div>')
+
+
+PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <title>{title}</title><style>
-:root{{--bg:#0f1115;--card:#171a21;--line:#262b36;--fg:#e6e9ef;--dim:#9aa4b2;
---acc:#4f8cff;--warn:#ffb020;--ok:#35c26b;--bad:#ff5c5c}}
+/* Design tokens. One palette, one spacing scale and one type scale, so a new
+   card cannot invent its own. Raises to a light theme when the OS asks for
+   one: an admin console gets opened on whatever machine is to hand. */
+:root{{
+ --bg:#0b0d12;--surface:#141821;--surface-2:#1a1f2a;--line:#242b38;--line-soft:#1d232e;
+ --fg:#e8ecf3;--fg-muted:#98a2b3;--fg-faint:#6b7686;
+ --accent:#5b8cff;--accent-soft:rgba(91,140,255,.14);
+ --ok:#3ecf8e;--ok-soft:rgba(62,207,142,.13);
+ --warn:#f5a524;--warn-soft:rgba(245,165,36,.13);
+ --bad:#f2555a;--bad-soft:rgba(242,85,90,.13);
+ --r-sm:6px;--r:10px;--r-lg:14px;
+ --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
+ --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+ --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}}
+@media (prefers-color-scheme:light){{
+ :root{{--bg:#f6f7f9;--surface:#fff;--surface-2:#f2f4f7;--line:#e3e6ec;--line-soft:#eef0f4;
+ --fg:#171a20;--fg-muted:#5b6472;--fg-faint:#8a93a1;--shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px -14px rgba(16,24,40,.18)}}
+}}
 *{{box-sizing:border-box}}
+html{{-webkit-text-size-adjust:100%}}
 body{{margin:0;background:var(--bg);color:var(--fg);
-font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}}
-header{{display:flex;align-items:center;gap:16px;padding:14px 22px;
-background:var(--card);border-bottom:1px solid var(--line)}}
-header h1{{font-size:15px;margin:0;font-weight:600}}
-header .who{{margin-left:auto;color:var(--dim);font-size:13px}}
-header a.out{{margin-left:14px;text-decoration:none;color:var(--dim);
-border:1px solid var(--line);border-radius:7px;padding:5px 11px;font-size:12px;
-font-weight:600}}
+ font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ -webkit-font-smoothing:antialiased}}
+:focus-visible{{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-sm)}}
+
+header{{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:var(--s3);
+ padding:var(--s3) var(--s5);background:color-mix(in srgb,var(--surface) 88%,transparent);
+ backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}}
+.brand{{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:-.01em}}
+.brand .mark{{width:22px;height:22px;border-radius:6px;flex:0 0 auto;
+ background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 45%,var(--ok)))}}
+header .who{{margin-left:auto;color:var(--fg-muted);font-size:13px}}
+header a.out{{text-decoration:none;color:var(--fg-muted);border:1px solid var(--line);
+ border-radius:var(--r-sm);padding:6px 12px;font-size:12px;font-weight:600;
+ transition:border-color .15s,color .15s}}
 header a.out:hover{{border-color:var(--bad);color:var(--bad)}}
-.badge{{background:var(--acc);color:#fff;border-radius:999px;padding:1px 9px;
-font-size:11px;font-weight:600;margin-left:8px}}
-main{{max-width:1080px;margin:0 auto;padding:22px}}
-.card{{background:var(--card);border:1px solid var(--line);border-radius:10px;
-padding:18px;margin-bottom:18px}}
-.card h2{{font-size:13px;margin:0 0 14px;color:var(--dim);font-weight:600;
-text-transform:uppercase;letter-spacing:.06em}}
-table{{width:100%;border-collapse:collapse}}
-th,td{{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);
-font-size:13px;vertical-align:middle}}
-th{{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;
-letter-spacing:.05em}}
+.badge{{background:var(--accent-soft);color:var(--accent);border-radius:999px;
+ padding:2px 10px;font-size:11px;font-weight:700;letter-spacing:.02em}}
+
+main{{max-width:1100px;margin:0 auto;padding:var(--s5) var(--s5) var(--s6)}}
+h1.page{{font-size:20px;font-weight:650;letter-spacing:-.02em;margin:0 0 var(--s1)}}
+p.lede{{color:var(--fg-muted);margin:0 0 var(--s5);font-size:13px}}
+
+/* A tile row for the numbers that answer "is it healthy and who is using it",
+   which are otherwise scattered as table cells. */
+.tiles{{display:grid;gap:var(--s3);grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+ margin-bottom:var(--s5)}}
+.tile{{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+ padding:var(--s4);box-shadow:var(--shadow)}}
+.tile .k{{color:var(--fg-faint);font-size:11px;font-weight:650;text-transform:uppercase;
+ letter-spacing:.07em;margin-bottom:var(--s2)}}
+.tile .v{{font-size:22px;font-weight:650;letter-spacing:-.02em;line-height:1.15}}
+.tile .sub{{color:var(--fg-muted);font-size:12px;margin-top:var(--s1)}}
+
+.card{{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+ padding:var(--s5);margin-bottom:var(--s4);box-shadow:var(--shadow)}}
+.card h2{{font-size:13px;margin:0 0 var(--s4);font-weight:650;
+ letter-spacing:-.005em;display:flex;align-items:center;gap:var(--s2)}}
+.card h2::before{{content:"";width:3px;height:14px;border-radius:2px;background:var(--accent)}}
+.card h2 .n{{color:var(--fg-faint);font-weight:600}}
+
+table{{width:100%;border-collapse:separate;border-spacing:0}}
+th,td{{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line-soft);
+ font-size:13px;vertical-align:middle}}
+th{{color:var(--fg-faint);font-weight:650;font-size:11px;text-transform:uppercase;
+ letter-spacing:.06em;background:var(--surface-2);
+ position:sticky;top:0}}
+th:first-child{{border-top-left-radius:var(--r-sm)}} th:last-child{{border-top-right-radius:var(--r-sm)}}
+tbody tr:hover td{{background:var(--surface-2)}}
 tr:last-child td{{border-bottom:0}}
-input,select{{background:#0e1116;border:1px solid var(--line);color:var(--fg);
-border-radius:7px;padding:8px 10px;font:inherit;min-width:0}}
-button{{background:var(--acc);color:#fff;border:0;border-radius:7px;
-padding:8px 13px;font:inherit;font-weight:600;cursor:pointer}}
-button.ghost{{background:transparent;border:1px solid var(--line);color:var(--fg)}}
-button.danger{{background:var(--bad)}}
+td.num,th.num{{text-align:right;font-variant-numeric:tabular-nums}}
+td.mono{{font-family:var(--mono);font-size:12px}}
+
+input,select{{background:var(--bg);border:1px solid var(--line);color:var(--fg);
+ border-radius:var(--r-sm);padding:9px 11px;font:inherit;min-width:0;
+ transition:border-color .15s,box-shadow .15s}}
+input:hover,select:hover{{border-color:var(--fg-faint)}}
+input:focus,select:focus{{border-color:var(--accent);
+ box-shadow:0 0 0 3px var(--accent-soft);outline:none}}
+label{{display:block;color:var(--fg-muted);font-size:12px;font-weight:600;margin-bottom:5px}}
+.field{{display:flex;flex-direction:column;gap:2px}}
+
+button{{background:var(--accent);color:#fff;border:1px solid transparent;
+ border-radius:var(--r-sm);padding:9px 14px;font:inherit;font-weight:600;
+ cursor:pointer;transition:filter .15s,background .15s,border-color .15s}}
+button:hover{{filter:brightness(1.08)}}
+button:active{{filter:brightness(.94)}}
+button.ghost{{background:transparent;border-color:var(--line);color:var(--fg)}}
+button.ghost:hover{{border-color:var(--accent);color:var(--accent);filter:none}}
+button.danger{{background:transparent;border-color:var(--line);color:var(--bad)}}
+button.danger:hover{{border-color:var(--bad);background:var(--bad-soft);filter:none}}
 a.btn{{display:inline-block;text-decoration:none;background:transparent;
-border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:8px 13px;
-font-weight:600}}
-a.btn:hover{{border-color:var(--acc);color:var(--acc)}}
-form.row{{display:flex;gap:9px;flex-wrap:wrap;align-items:center}}
-.msg{{padding:11px 14px;border-radius:8px;margin-bottom:16px;font-size:13px}}
-.msg.ok{{background:rgba(53,194,107,.12);border:1px solid var(--ok);color:var(--ok)}}
-.msg.bad{{background:rgba(255,92,92,.12);border:1px solid var(--bad);color:var(--bad)}}
-code.key{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
-background:#0e1116;border:1px solid var(--line);border-radius:6px;padding:3px 7px;
-display:inline-block;word-break:break-all}}
-.bar{{height:5px;background:#0e1116;border-radius:3px;overflow:hidden;margin-top:5px}}
-.bar i{{display:block;height:100%;background:var(--ok)}}
+ border:1px solid var(--line);color:var(--fg);border-radius:var(--r-sm);
+ padding:9px 14px;font-weight:600;transition:border-color .15s,color .15s}}
+a.btn:hover{{border-color:var(--accent);color:var(--accent)}}
+form.row{{display:flex;gap:var(--s3);flex-wrap:wrap;align-items:flex-end}}
+
+.msg{{padding:12px 15px;border-radius:var(--r);margin-bottom:var(--s4);font-size:13px;
+ border:1px solid transparent;display:flex;gap:10px;align-items:flex-start}}
+.msg::before{{font-weight:700;line-height:1.4}}
+.msg.ok{{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok)}}
+.msg.ok::before{{content:"✓"}}
+.msg.bad{{background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 45%,transparent);color:var(--bad)}}
+.msg.bad::before{{content:"!"}}
+
+code.key{{font-family:var(--mono);font-size:12px;background:var(--bg);
+ border:1px solid var(--line);border-radius:var(--r-sm);padding:4px 8px;
+ display:inline-block;word-break:break-all;color:var(--fg)}}
+.pill{{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:650}}
+.pill.ok{{background:var(--ok-soft);color:var(--ok)}}
+.pill.warn{{background:var(--warn-soft);color:var(--warn)}}
+.pill.bad{{background:var(--bad-soft);color:var(--bad)}}
+.bar{{height:6px;background:var(--surface-2);border-radius:999px;overflow:hidden;margin-top:6px}}
+.bar i{{display:block;height:100%;background:var(--ok);border-radius:999px;
+ transition:width .3s ease}}
 .bar i.warn{{background:var(--warn)}} .bar i.bad{{background:var(--bad)}}
-.dim{{color:var(--dim);font-size:12px}}
+.dim{{color:var(--fg-muted);font-size:12px}}
+.empty{{color:var(--fg-faint);font-size:13px;padding:var(--s4) 0;text-align:center}}
+
+@media (max-width:640px){{
+ main{{padding:var(--s4) var(--s3) var(--s5)}}
+ header{{padding:var(--s3) var(--s4);gap:var(--s2)}}
+ header .who{{display:none}}
+ .card{{padding:var(--s4)}}
+ th,td{{padding:8px 9px}}
+}}
+@media (prefers-reduced-motion:reduce){{*{{transition:none!important}}}}
 </style></head><body>
-<header><h1>LLM Service</h1>{badge}
-<div class="who">{who}</div>{logout}</header>
+<header>
+ <span class="brand"><span class="mark"></span>LLM Service</span>{badge}
+ <div class="who">{who}</div>{logout}
+</header>
 <main>{msg}{body}</main></body></html>"""
 
 
@@ -686,7 +778,19 @@ def admin_view(request: Request, who: Caller) -> Response:
             f'<input type="hidden" name="username" value="{_h(username)}">'
             f'<button class="ghost" type="submit">Reset password</button></form></td></tr>')
 
-    body = (_degraded(note)
+    spend_total = sum(float((u or {}).get("spend") or 0)
+                      for u in litellm_users.values())
+    tiles = ('<div class="tiles">'
+             + _tile("People", str(len(rows)), "accounts in Authelia")
+             + _tile("Spend", _money(spend_total), "across every key and chat")
+             + _tile("Model", _h(os.environ.get("MODEL_NAME", "")),
+                     _h(os.environ.get("MODEL_CONTEXT", "") + " token window"))
+             + "</div>")
+
+    body = ('<h1 class="page">Administration</h1>'
+            '<p class="lede">Accounts, credit and API keys for this deployment.</p>'
+            + tiles
+            + _degraded(note)
             + f'<div class="card"><h2>People ({len(rows)})</h2>'
             f'<table><tr><th>User</th><th>Usage / credit</th><th>API key</th>'
             f'<th>Credit</th><th>Actions</th></tr>{"".join(rows)}</table></div>'
