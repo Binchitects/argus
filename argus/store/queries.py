@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -867,28 +868,35 @@ def impact_of(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
 
     depth = max(1, min(int(max_depth), 10))
 
-    # A temp table rather than an IN (...) list: the recursive walk touches the
-    # allowlist at every hop, and SQLite's ~999 host-parameter ceiling would
-    # otherwise cap how many repos a caller can have. _chunks cannot help here
-    # because the recursion has to see the whole set at once.
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _impact_allowed (repo_id INTEGER PRIMARY KEY)")
-    conn.execute("DELETE FROM _impact_allowed")
-    conn.executemany("INSERT OR IGNORE INTO _impact_allowed (repo_id) VALUES (?)",
-                     [(i,) for i in ids])
-
+    # The allowlist travels as a JSON array in ONE host parameter, joined with
+    # json_each, rather than as an IN (...) list: the recursive walk touches
+    # the allowlist at every hop, and SQLite's ~999 host-parameter ceiling
+    # would otherwise cap how many repos a caller can have. _chunks cannot help
+    # here because the recursion has to see the whole set at once.
+    #
+    # It used to be a TEMP TABLE, which was a bug rather than a technique: the
+    # server's connection is opened with `PRAGMA query_only = ON`, so creating
+    # a temp table raises "attempt to write a readonly database". run_readonly
+    # flattened that into its generic "The index is unavailable; do not retry
+    # this query", which is why impact_of failed for every caller who DID have
+    # access while appearing to be a storage problem -- and why the permission
+    # notice it is supposed to raise for everyone else looked like the only
+    # behaviour it had.
     rows = conn.execute(
         """
-        WITH RECURSIVE reached(file_id, depth) AS (
+        WITH RECURSIVE
+        allowed(repo_id) AS (SELECT value FROM json_each(?)),
+        reached(file_id, depth) AS (
             SELECT i.file_id, 1
               FROM includes i
-              JOIN _impact_allowed a ON a.repo_id = i.repo_id
+              JOIN allowed a ON a.repo_id = i.repo_id
              WHERE i.resolved_file_id = ? AND i.resolution = 'resolved'
             UNION                       -- UNION, not UNION ALL: dedupes, and
                                         -- that is what terminates cycles
             SELECT i.file_id, r.depth + 1
               FROM includes i
               JOIN reached r ON i.resolved_file_id = r.file_id
-              JOIN _impact_allowed a ON a.repo_id = i.repo_id
+              JOIN allowed a ON a.repo_id = i.repo_id
              WHERE i.resolution = 'resolved' AND r.depth < ?
         )
         SELECT f.path, p.path_with_namespace, p.id AS repo_id, MIN(r.depth) AS depth
@@ -899,7 +907,7 @@ def impact_of(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
          ORDER BY depth, p.path_with_namespace, f.path
          LIMIT ?
         """,
-        (target["id"], depth, limit + 1),
+        (json.dumps(list(ids)), target["id"], depth, limit + 1),
     ).fetchall()
 
     truncated = len(rows) > limit

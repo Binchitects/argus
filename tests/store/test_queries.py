@@ -5,9 +5,8 @@ import pytest
 
 from argus import whichrepo
 from argus.resolve import Resolution
-from argus.store import graph
-from argus.store.db import open_db
-from argus.store import writes, queries
+from argus.store import graph, queries, writes
+from argus.store.db import connect_readonly, open_db
 
 
 def _public_query_functions():
@@ -1098,5 +1097,87 @@ def test_symbol_contracts_never_reveals_a_repo_outside_the_allowlist(tmp_path):
         rows = queries.symbol_contracts([mine], conn, "SecretHelper();")
         assert [r["repo"] for r in rows] == ["g/mine"], rows
         assert queries.symbol_contracts([], conn, "SecretHelper();") == []
+    finally:
+        conn.close()
+
+
+# --- impact_of on the connection the server actually uses -------------------
+
+
+@pytest.fixture
+def impact_db(tmp_path):
+    """One include edge: src/b.c includes include/a.h, and it resolved."""
+    db = tmp_path / "impact.db"
+    conn = open_db(db)
+    rid = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/alpha",
+                             default_branch="main", http_url="https://x/g/alpha")
+    header = writes.upsert_file(conn, repo_id=rid, path="include/a.h", lang="c",
+                                size=1, blob_sha="h1", content="x")
+    writes.upsert_file(conn, repo_id=rid, path="src/b.c", lang="c",
+                       size=1, blob_sha="c1", content="y")
+    writes.replace_includes(conn, rid, _file_id(conn, rid, "src/b.c"),
+                            [{"raw": "a.h", "is_angle": 0}])
+    conn.execute("UPDATE includes SET resolved_file_id = ?, "
+                 "resolution = 'resolved' WHERE file_id = ?",
+                 (header, _file_id(conn, rid, "src/b.c")))
+    conn.commit()
+    writes.set_last_indexed(conn, rid, "sha1", 1000)
+    conn.close()
+    return db, rid
+
+
+def _file_id(conn, repo_id: int, path: str) -> int:
+    return conn.execute("SELECT id FROM files WHERE repo_id = ? AND path = ?",
+                        (repo_id, path)).fetchone()["id"]
+
+
+def test_impact_of_works_on_the_servers_readonly_connection(impact_db):
+    """The server opens the index read-only, and impact_of used to build its
+    allowlist in a TEMP TABLE -- which is a write.
+
+    `PRAGMA query_only = ON` rejects it with "attempt to write a readonly
+    database", and run_readonly's catch-all flattened that into "The index is
+    unavailable; do not retry this query". So impact_of failed for every caller
+    who genuinely had access, while reading as a storage fault -- and the
+    permission notice it raises for everyone else made that look like the only
+    behaviour it had.
+
+    Unit tests missed it because the shared fixture connection is writable, and
+    a temp table is perfectly legal there. This one goes through
+    connect_readonly, which is what the MCP server uses.
+    """
+    db, rid = impact_db
+    conn = connect_readonly(db)
+    try:
+        got = queries.impact_of([rid], conn, rid, "include/a.h")
+    finally:
+        conn.close()
+    assert got["affected_files"] == 1
+    assert got["by_repo"] == {"g/alpha": [{"path": "src/b.c", "depth": 1}]}
+
+
+def test_impact_of_allowlist_larger_than_parameter_limit(impact_db):
+    """The JSON array is one host parameter, so the walk is not capped by
+    SQLITE_MAX_VARIABLE_NUMBER the way an IN (...) list would be -- and unlike
+    the temp table it replaced, it needs no write to set up."""
+    db, rid = impact_db
+    conn = connect_readonly(db)
+    try:
+        host_limit = conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+        big = list(range(10_000_000, 10_000_000 + host_limit + 500)) + [rid]
+        got = queries.impact_of(big, conn, rid, "include/a.h")
+    finally:
+        conn.close()
+    assert got["affected_files"] == 1
+
+
+def test_impact_of_excludes_a_repo_outside_the_allowlist(impact_db):
+    """The edge is only followed while its repository is permitted, so an
+    empty allowlist cannot reach the file at all."""
+    db, rid = impact_db
+    conn = connect_readonly(db)
+    try:
+        assert queries.impact_of([], conn, rid, "include/a.h") == {}
+        assert queries.impact_of([rid + 999], conn, rid, "include/a.h") == {}
     finally:
         conn.close()

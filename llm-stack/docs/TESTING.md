@@ -142,9 +142,34 @@ to spend), and behaviour when the engine is down (retry, then a clear error).
 
 ### S5 — Argus *(strong unit, weak integration)*
 
-Unit is 902 tests. Missing at the stack level: index → MCP → per-token ACL end to
+Unit is 906 tests. Missing at the stack level: index → MCP → per-token ACL end to
 end against a real GitLab (the `deploy/test-gitlab/` fixture exists but is not
 wired into a suite), and the audit JSON stream actually reaching Loki.
+
+**A whole tool was dead, and the suite said it was fine.** `impact_of` built its
+allowlist in a `TEMP TABLE`, but the server opens the index with
+`PRAGMA query_only = ON`, so the first statement raised *attempt to write a
+readonly database* for **every caller who had access**. `run_readonly`'s
+catch-all turned that into "The index is unavailable; do not retry this query",
+which reads as a storage fault and sends people to look at the disk. The unit
+tests passed because the shared fixture connection is *writable*, and a temp
+table is perfectly legal there — the one connection they never used is the one
+production uses.
+
+Found by exercising the tool against the running stack, not by reading it. The
+allowlist now travels as a JSON array joined with `json_each`, which needs no
+write and, as a bonus, is a single host parameter — so the recursive walk is no
+longer near `SQLITE_MAX_VARIABLE_NUMBER` either. The three tests that pin it
+(`test_impact_of_works_on_the_servers_readonly_connection`,
+`test_impact_of_allowlist_larger_than_parameter_limit`,
+`test_impact_of_excludes_a_repo_outside_the_allowlist`) all go through
+`connect_readonly`, which is what the MCP server uses; the first two fail with
+the exact production error against the old code.
+
+The general lesson is worth keeping: **a test fixture that is more permissive
+than production hides exactly the failures that only production can have.** Any
+query function that touches the connection should be exercised through
+`connect_readonly` at least once.
 
 Within that unit count, the GitLab **credential modes** are covered properly,
 because both failure directions here are expensive and neither is visible from
