@@ -33,6 +33,30 @@ model_list:
       api_key: os.environ/ENGINE_API_KEY
       input_cost_per_token: 0.0000002
       output_cost_per_token: 0.0000008
+      # ------------------------------------------------------- reasoning
+      # How hard the model thinks before it answers. These are the ENGINE's
+      # chat-template variables, not OpenAI's `reasoning_effort`.
+      #
+      # Why chat_template_kwargs and not the obvious field: llama-server runs
+      # with --jinja, so the model's own template decides what thinking means,
+      # and it reads `reasoning_effort` and `enable_thinking` out of Jinja
+      # variables. Passing OpenAI's top-level `reasoning_effort` looks like it
+      # should work and does not -- LiteLLM drops it for a custom `openai/`
+      # api_base. Measured both ways: a top-level reasoning_effort of "minimal"
+      # is accepted by the gateway and never reaches the template, while the
+      # same value inside chat_template_kwargs reaches it and raises
+      # "Unexpected reasoning effort". That one test is the whole reason this
+      # block looks unusual.
+      #
+      # Rendered from .env by the litellm entrypoint, because LiteLLM does not
+      # expand variables in nested values.
+      chat_template_kwargs:
+        # xhigh (the model's own default), medium, or low.
+        reasoning_effort: ${MODEL_REASONING_EFFORT}
+        # A real YAML boolean after substitution, deliberately: the template
+        # tests `enable_thinking is false`, and the STRING "false" is not false
+        # in Jinja, so a quoted value here would silently keep thinking on.
+        enable_thinking: ${MODEL_ENABLE_THINKING}
     model_info:
       mode: chat
       # Advertise the REAL window: clients cache /model/info, and a stale

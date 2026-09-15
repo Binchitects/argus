@@ -1041,6 +1041,12 @@ services:
       MODEL_NAME: ${MODEL_NAME:?set MODEL_NAME in .env}
       MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
       MODEL_MAX_OUTPUT: ${MODEL_MAX_OUTPUT:-32768}
+      # How hard the model thinks before answering. Rendered into
+      # config/litellm/config.yaml as the ENGINE's chat-template variables;
+      # see the note there for why OpenAI's own reasoning_effort field cannot
+      # be used for this.
+      MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-xhigh}
+      MODEL_ENABLE_THINKING: ${MODEL_ENABLE_THINKING:-true}
       ENGINE_API_BASE: ${ENGINE_API_BASE:-http://llamacpp:8080/v1}
       # `openai/` is the PROTOCOL, not the vendor -- it means "speak the OpenAI
       # API to api_base". The part after it must equal the engine's served
@@ -1067,7 +1073,7 @@ services:
         python3 - <<'PY'
         import os, re
         src = open("/app/config.template.yaml").read()
-        out = re.sub(r"\$\{(MODEL_NAME|MODEL_CONTEXT|MODEL_MAX_OUTPUT)\}", lambda m: os.environ[m.group(1)], src)
+        out = re.sub(r"\$\{(MODEL_NAME|MODEL_CONTEXT|MODEL_MAX_OUTPUT|MODEL_REASONING_EFFORT|MODEL_ENABLE_THINKING)\}", lambda m: os.environ[m.group(1)], src)
         open("/tmp/config.yaml", "w").write(out)
         PY
         exec docker/prod_entrypoint.sh "$$@"

@@ -100,6 +100,46 @@ refuse prompts the engine would happily accept, because they cache it.
 **`MODEL_MAX_OUTPUT`** *(sample `32768`)* — the largest completion the gateway
 advertises.
 
+**`MODEL_REASONING_EFFORT`** *(default `xhigh`)* — how hard the model thinks
+before it answers: `xhigh`, `medium`, or `low`. This is the **engine's**
+chat-template variable, not OpenAI's. The template raises on anything else, so a
+typo is a 500 on every request rather than a quiet fallback to the default.
+
+**`MODEL_ENABLE_THINKING`** *(default `true`)* — `false` turns thinking off, so
+the model answers immediately.
+
+Both are rendered into `config/litellm/config.yaml` as `chat_template_kwargs`
+and applied to every request through the gateway.
+
+### Changing the thinking level per chat or per model
+
+Open WebUI has a `reasoning_effort` field and it does **not** work here: LiteLLM
+drops it for a custom `openai/` api_base. Measured both ways — a top-level
+`reasoning_effort` of `minimal` is accepted by the gateway and never reaches the
+template, while the same value inside `chat_template_kwargs` reaches it and
+raises `Unexpected reasoning effort`.
+
+What does work is `chat_template_kwargs`. Open WebUI passes it through untouched,
+because it is not one of the parameter names Open WebUI interprets:
+
+* **per chat** — the chat controls' **Advanced Params**, add
+  `chat_template_kwargs` with the value below
+* **per model** — Admin → Models → the model → Advanced Params, so every new
+  chat starts from it
+
+A per-chat value beats a per-model value, which beats the `.env` default.
+
+| want | value |
+|---|---|
+| deepest reasoning (the model's own default) | `{"reasoning_effort": "xhigh"}` |
+| balanced | `{"reasoning_effort": "medium"}` |
+| quick answers | `{"reasoning_effort": "low"}` |
+| no thinking at all | `{"enable_thinking": false}` |
+
+Verified end-to-end through Open WebUI's own `/api/chat/completions`, not only
+at the gateway: a bogus `reasoning_effort` sent this way reaches the template and
+raises, while the same value sent as `reasoning_effort` is dropped.
+
 ---
 
 ## 5. The llama.cpp engine (`llamacpp` profile)
