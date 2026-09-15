@@ -30,6 +30,14 @@ config/traefik/certs/*
 config/traefik/auth/*
 !config/traefik/auth/.gitkeep
 
+# Argus's private CA for a GitLab that is not on a public one. Whatever an
+# operator drops here belongs to their environment, not to this repository --
+# and unlike the self-signed certificate above, it is not reproducible from
+# .env. The README stays so the directory exists in a fresh clone and the bind
+# mount in docker-compose.yml never has to be created by Docker.
+config/argus/tls/*
+!config/argus/tls/README.md
+
 # Authelia: generated secrets, OIDC signing key and user password hashes
 config/authelia/secrets/*
 config/authelia/clients.yml

@@ -98,8 +98,18 @@ awk '/^# SECRETS/{s=1} /^# PEOPLE/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -he
 Set `LLAMACPP_MODEL_DIR` to a directory **on NVMe** with room for the download, then:
 
 ```bash
-docker compose up -d
+make up
 ```
+
+`make up` runs `scripts/preflight.sh` and then `docker compose up -d`. The
+preflight earns its second: if this checkout has MOVED since the stack last
+started, Docker keeps the containers on the **old** absolute paths and has
+already created empty directories there to satisfy them, so nothing errors.
+What you get instead is Authelia crash-looping on a missing config,
+Alertmanager on a missing `alertmanager.yml`, the temperature exporter on a
+missing `exporter.py` and Traefik exiting 127 — four unrelated-looking failures
+that name files which plainly exist on disk. The preflight names the move.
+`make preflight` runs it alone.
 
 ```bash
 docker logs -f model-init
@@ -113,6 +123,51 @@ once about the self-signed certificate; accept it.
 **Adding a setup** for another model or card is one file: copy the closest sample,
 edit its header and its MODEL block, and check it. Step by step, with how to choose
 each value: [llm-stack/env-samples/README.md](llm-stack/env-samples/README.md).
+
+### Deploying without a network (airgap)
+
+Same stack, same `.env`, but every image, model and embedding arrives on a disk
+instead of from a registry. Build the bundle **on a machine that already runs
+it**:
+
+```bash
+cd llm-stack
+make airgap                                  # images + tree      (~7 GB measured)
+make airgap A="--with-models --with-packs"   # + weights + docs   (~100 GB)
+make airgap A="--split 4g"                   # parts for a FAT32 USB stick
+```
+
+Then, on the isolated host — no registry, no Hugging Face, no build:
+
+```bash
+unzip llm-stack-airgap-<date>.zip
+cd llm-stack-airgap-<date>
+cp llm-stack/.env.airgap llm-stack/.env
+./fill-secrets.sh        # generates the ones that can be generated
+./load.sh --up
+```
+
+Four things reach the network on a normal first start, and the bundle closes
+all four rather than leaving them to be discovered on a machine that cannot fix
+them:
+
+| what | how it is handled |
+|---|---|
+| container images | `docker save` / `docker load`, including the three built locally, so the target never builds and never pulls |
+| the GGUF weights | `--with-models`; `LLAMACPP_MODEL_DIR` is rewritten to a **relative** path, so the bundle runs from wherever it is unpacked |
+| `model-init`'s Hugging Face check | `LLAMACPP_HF_FILES` is emptied. This is not tidiness: it asks the remote for the file size *before* accepting a local file, so with no network it exits 1 even when every weight is already on disk — and `llamacpp` declares it `service_completed_successfully`, so that exit 1 means the **engine never starts** |
+| Ollama's embedding model | included, and restored into its volume. It is a Docker **volume**, not a bind mount, so nothing in the checkout hints that it is missing — and without it `docs_search` cannot embed a query |
+
+`--with-env` puts the live `.env` in the bundle verbatim, secrets and all. Without
+it the bundle ships `.env.airgap`: the same file with **every** secret emptied —
+by name as well as by position, because eight of them (among them
+`ARGUS_GITLAB_TOKEN`) live outside the `# SECRETS` block. `fill-secrets.sh` on
+the target fills what can be generated and names the one that cannot.
+
+The bundle is validated before it is written: every bind mount the compose file
+asks for is checked to exist inside the staged tree, so a missing placeholder
+directory cannot reach a host that has no way to fetch it. `./load.sh --check`
+verifies checksums, images and mounts on arrival without changing anything.
 
 ### What `docker compose up` does before anything serves
 
@@ -169,12 +224,57 @@ OpenAI-compatible tool needs the same four things:
 | base URL | `https://gateway.llm.localhost/v1` |
 | API key | that person's key (never `LITELLM_MASTER_KEY`: it has no budget and bills nobody) |
 | model | `MODEL_NAME` from `.env`, e.g. `Qwen3.8-Flash-Next` |
-| certificate | trust `llm-stack/config/traefik/certs/tls.crt` |
+| certificate | run host tools through `llm-stack/scripts/with-ca.sh` (below) |
 
-The certificate is self-signed, so each runtime needs to be told about it:
-curl `--cacert <file>`, Python `SSL_CERT_FILE=<file>`, Node
-`NODE_EXTRA_CA_CERTS=<file>`. A TLS error that looks like the stack is down is
-almost always this.
+The certificate is self-signed, and **TLS verification happens in the client**:
+nothing the stack does on its side can make a host tool accept it. So each runtime
+has to be told, and each wants a different variable.
+
+| runtime | variable | what it does with it |
+|---|---|---|
+| Node — DeepSeek Harness, Qwen Code | `NODE_EXTRA_CA_CERTS` | **adds** to the public roots |
+| Python — `requests`, `httpx`, `urllib` | `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` | **replaces** the trust store |
+| curl | `CURL_CA_BUNDLE` | **replaces** the trust store |
+| git | `GIT_SSL_CAINFO` | **replaces** the trust store |
+
+That add/replace split is why `tls.crt` alone is not enough for the bottom three:
+pointing `SSL_CERT_FILE` at it stops the tool trusting the public internet too.
+`llm-stack/scripts/with-ca.sh` sets every one of them correctly — `tls.crt` where
+the variable adds, `bundle.crt` (public roots **plus** the stack's) where it
+replaces — and installs nothing anywhere:
+
+```bash
+cd llm-stack
+./scripts/with-ca.sh curl https://gateway.llm.localhost/v1/models -H "Authorization: Bearer sk-YOURKEY"
+./scripts/with-ca.sh dsh web
+./scripts/with-ca.sh python3 my_client.py
+```
+
+To put them in your own shell instead of prefixing each command:
+
+```bash
+eval "$(./scripts/with-ca.sh --print)"     # same as: make ca
+```
+
+A `000`, a `certificate verify failed`, or a connection error from a host tool is
+almost always this variable rather than the stack being down. Containers need
+none of it: they mount the certificate and set these same variables themselves.
+Go and Java tools (Grafana, Traefik, most JVM CLIs) read the **operating
+system's** store and honour none of these variables — `with-ca.sh` says so on
+stderr rather than appearing to do nothing.
+
+**DeepSeek Harness (`dsh`)** is a Node process and has no per-provider CA
+setting; its own docs state it neither sets nor validates one. It reads
+`NODE_EXTRA_CA_CERTS` **at process start**, so setting it afterwards does
+nothing — it has to be in the environment that launches it:
+
+```bash
+NODE_EXTRA_CA_CERTS="/path/to/llm-stack/config/traefik/certs/tls.crt" dsh web
+```
+
+Then add a provider with base URL `https://gateway.llm.localhost/v1` and the
+person's key from the admin panel. (The wrapper form above does the same thing
+without exporting anything permanent.)
 
 ```bash
 curl --cacert llm-stack/config/traefik/certs/tls.crt https://gateway.llm.localhost/v1/chat/completions -H "Authorization: Bearer sk-YOURKEY" -H 'Content-Type: application/json' -d '{"model":"Qwen3.8-Flash-Next","messages":[{"role":"user","content":"hi"}],"max_tokens":300}'
@@ -235,8 +335,36 @@ Qwen Code: the `mcpServers` block above. Any other MCP client: the same URL and 
 2. Set `ARGUS_GITLAB_URL` and `ARGUS_GITLAB_TOKEN`. The token is **read-only**:
    `read_api` and `read_repository`, for an account that is at least Reporter in every
    project you want indexed. Argus never needs admin or sudo.
-3. `docker compose up -d`, then start an index run from the admin panel's
-   **Indexing** card.
+3. If your GitLab's certificate is not from a public CA, set **one** of these — see
+   [GitLab on a private CA](#gitlab-on-a-private-ca):
+   `ARGUS_GITLAB_CA_CERT=/etc/argus/tls/gitlab-ca.pem` (drop the PEM in
+   `config/argus/tls/` first), or `ARGUS_GITLAB_VERIFY=false` when no CA file
+   exists anywhere.
+4. `make up`, then start an index run from the admin panel's **Indexing** card.
+
+### GitLab on a private CA
+
+Argus reaches GitLab over **two transports that cannot see each other's TLS
+configuration**: `httpx` for the API, and the `git` binary for clones. Configuring
+one and not the other is the failure that costs the most time, because it reads as a
+bad credential — the API enumerates every project, and the first clone then dies with
+`server certificate verification failed`.
+
+Both settings in `.env` therefore apply to both transports:
+
+| setting | when | what it does |
+|---|---|---|
+| `ARGUS_GITLAB_CA_CERT` | you have the CA that signed GitLab's certificate | verifies against the public roots **plus** that CA |
+| `ARGUS_GITLAB_VERIFY=false` | self-signed, and **no** CA file is available anywhere | disables verification for every request and clone to that GitLab |
+
+Drop the PEM in `llm-stack/config/argus/tls/` and give `ARGUS_GITLAB_CA_CERT` the path
+**as the container sees it** (`/etc/argus/tls/<name>`). For a standalone deployment
+outside compose, point it at any path the Argus process can read.
+
+`ARGUS_GITLAB_VERIFY=false` means anything able to answer on that hostname can read
+the service token — the most privileged string in the deployment. Use the CA whenever
+one exists. Setting **both** is refused at startup rather than silently resolved,
+because a CA bundle is exactly what makes verification possible.
 
 ### Argus in Open WebUI
 
@@ -664,8 +792,10 @@ That discipline extends to the benchmarks. The model comparison above found **th
 | 4 — Semantic layer | selective embeddings, `semantic_search` | ✅ |
 | 5 — Knowledge packs | 11 packs, 6 doc tools, `argus pack` | ✅ |
 
-**827 tests**, passing locally, 0 skipped.
+**877 tests**, passing locally, 0 skipped.
 
+- **[llm-stack/docs/ARCHITECTURE.md](llm-stack/docs/ARCHITECTURE.md)** — every service in the stack, how a request flows through them, and what each failure looks like
+- **[llm-stack/docs/CONFIGURATION.md](llm-stack/docs/CONFIGURATION.md)** — every `.env` variable and every file under `config/`
 - **[docs/production.md](docs/production.md)** — deploy, verify, operate
 - **[docs/deployment.md](docs/deployment.md)** — wiring Hermes, and the failure modes
 - **[docs/knowledge-packs.md](docs/knowledge-packs.md)** — building and publishing packs

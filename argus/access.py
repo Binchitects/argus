@@ -35,7 +35,7 @@ from typing import Callable
 import httpx
 import yaml
 
-from . import credentials
+from . import credentials, tls
 from .acl import MIN_ACCESS_LEVEL, PER_PAGE, STALE_GRACE_SECONDS, TTL_SECONDS, AclDenied, Identity
 from .config import GitLabConfig
 
@@ -68,7 +68,7 @@ class MemberDirectory:
         self._users: dict[str, tuple[float, dict | None]] = {}
 
     def _get(self, path: str, params: dict) -> httpx.Response:
-        client = self._client or httpx.Client(timeout=15.0)
+        client = self._client or tls.client_for(self.cfg, timeout=15.0)
         try:
             return client.get(f"{self.cfg.url}/api/v4{path}", params=params,
                               headers=credentials.headers(self.cfg, client=client))

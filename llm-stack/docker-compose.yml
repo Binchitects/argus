@@ -213,10 +213,19 @@ services:
         chmod 644 "$$D/tls.crt" "$$D/bundle.crt"
         chmod 600 "$$D/tls.key"
         # Owned by whoever owns the directory, so the operator can delete it.
-        if cp "$$D/tls.crt" /export/tls.crt 2>/dev/null; then
-          chmod 644 /export/tls.crt
-          chown "$$(stat -c %u:%g /export)" /export/tls.crt 2>/dev/null || true
-        fi
+        #
+        # BOTH files, because host-side tools differ in whether a CA variable
+        # ADDS to the public roots or REPLACES them. Node's
+        # NODE_EXTRA_CA_CERTS adds, so tls.crt is right there; OpenSSL's
+        # SSL_CERT_FILE, curl's CURL_CA_BUNDLE and git's GIT_SSL_CAINFO all
+        # replace, so those need bundle.crt or they stop trusting the public
+        # internet. scripts/with-ca.sh picks the right one per variable.
+        for f in tls.crt bundle.crt; do
+          if cp "$$D/$$f" "/export/$$f" 2>/dev/null; then
+            chmod 644 "/export/$$f"
+            chown "$$(stat -c %u:%g /export)" "/export/$$f" 2>/dev/null || true
+          fi
+        done
     volumes:
       - traefik-certs:/certs
       - ./config/traefik/certs:/export
@@ -1197,6 +1206,31 @@ services:
       ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
       # Privileged service token: reads every repository the index covers.
       ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:-}
+      # TLS, for a GitLab that is not on a public CA. Both apply to the API AND
+      # to every clone, because Argus reaches GitLab over two transports that
+      # cannot see each other's configuration -- getting one right and the
+      # other wrong reads as a bad credential.
+      #
+      # Two ways to do it, and they compose rather than compete:
+      #
+      #   config/ca/            stack-wide. tls-init appends every PEM dropped
+      #                         there to /certs/bundle.crt, which the two
+      #                         variables at the bottom of this block point at.
+      #                         httpx honours SSL_CERT_FILE, so this covers
+      #                         Argus's API calls and its clones alike.
+      #   ARGUS_GITLAB_CA_CERT  this GitLab only, and it WINS over the above
+      #                         when set: mirror.py overwrites the inherited
+      #                         GIT_SSL_CAINFO, and httpx gets an explicit
+      #                         context. A path INSIDE the container; drop the
+      #                         PEM in config/argus/tls/ and use
+      #                         /etc/argus/tls/<name>.
+      ARGUS_GITLAB_CA_CERT: ${ARGUS_GITLAB_CA_CERT:-}
+      # Last resort, for a self-signed GitLab with NO CA file available
+      # anywhere: ARGUS_GITLAB_VERIFY=false. It disables certificate
+      # verification for every request and clone to that GitLab, so anything
+      # able to answer on the hostname can read the access token. Setting it
+      # alongside a CA is refused at startup rather than silently resolved.
+      ARGUS_GITLAB_VERIFY: ${ARGUS_GITLAB_VERIFY:-}
       # API calls (httpx) and git clones both verify GitLab's certificate
       # against this bundle: public CAs plus config/ca/.
       SSL_CERT_FILE: /certs/bundle.crt
@@ -1204,6 +1238,11 @@ services:
     volumes:
       # Config travels with the repo, so a fresh host needs nothing extra.
       - ./config/argus/config.yaml:/etc/argus/config.yaml:ro
+      # Where a private CA goes. The directory exists in the repo and is empty
+      # by default, so the mount never depends on an operator creating it --
+      # and a PEM dropped here is reachable as /etc/argus/tls/<name>, which is
+      # what ARGUS_GITLAB_CA_CERT points at.
+      - ./config/argus/tls:/etc/argus/tls:ro
       # A named volume by default: drop-in deployments start with an empty
       # index and populate it by running the indexer. To reuse an index and
       # pack estate that already exist on the host, add the override file:
@@ -1377,6 +1416,38 @@ services:
       - |
         if [ -n "$$ARGUS_CHAT_CLIENT_TOKEN" ] && [[ ",$$COMPOSE_PROFILES," == *",argus,"* ]]; then
           export TOOL_SERVER_CONNECTIONS='[{"type":"mcp","url":"http://argus:7700/mcp","path":"","auth_type":"bearer","key":"'"$$ARGUS_CHAT_CLIENT_TOKEN"'","config":{"enable":true,"access_grants":[{"principal_type":"user","principal_id":"*","permission":"read"}]},"info":{"id":"argus","name":"Argus","description":"Your organisation code (what your GitLab account can read) and SDK/WDK/C++ documentation"}}]'
+          # Open WebUI resolves every setting as "persisted row in webui.db,
+          # ELSE the environment" -- see Config.get in models/config.py. So a
+          # tool_server.connections row written on an earlier boot, when
+          # ARGUS_CHAT_CLIENT_TOKEN was empty (the argus profile off), SHADOWS
+          # the variable above for good.
+          #
+          # The failure is silent, which is why it needs a fix here rather than
+          # a note: this block runs, the variable really is set in the running
+          # process, every service is healthy, and the log still says
+          # "Initialized 0 tool server(s)". Chat then has no Argus tool and
+          # nothing anywhere reports an error. Observed exactly that, with the
+          # DB holding `tool_server.connections = []`.
+          #
+          # Delete just that one row so the environment wins. Confined to this
+          # branch on purpose: with Argus off the row is untouched, so a list
+          # built by hand in the UI survives. On a first boot there is no
+          # database yet, and this is a no-op.
+          # NOTE: the Python lines below sit at the SAME 8-space indentation as
+          # this script's first line, so that the YAML block scalar dedents them
+          # to column 0. Indenting them like the shell around them hands Python
+          # a script whose first line is flush and whose body is not, which is
+          # an IndentationError at startup and takes Open WebUI down with it.
+          python3 -c 'import os, sqlite3, sys
+        db = "/app/backend/data/webui.db"
+        if os.path.exists(db):
+            try:
+                con = sqlite3.connect(db)
+                with con:
+                    con.execute("DELETE FROM config WHERE key = ?", ("tool_server.connections",))
+                con.close()
+            except Exception as exc:
+                print("open-webui: could not clear persisted tool_server.connections:", exc, file=sys.stderr)' || true
         fi
         exec bash start.sh
     restart: unless-stopped

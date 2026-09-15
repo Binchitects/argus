@@ -2,14 +2,24 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help up down restart logs health smoke bench ps config pull clean backup gpu alerts
+.PHONY: help up down restart logs health smoke bench ps config pull clean backup gpu alerts preflight ca airgap
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 up: ## Start the stack (the whole deployment: cp env-samples/<one>.env .env first)
+	@./scripts/preflight.sh
 	@docker compose up -d
+
+preflight: ## Check that every bind mount resolves to real content, without starting anything
+	@./scripts/preflight.sh
+
+ca: ## Print the env exports that make HOST tools (dsh, curl, python) trust the stack certificate
+	@./scripts/with-ca.sh --print
+
+airgap: ## Build an offline bundle in dist/ (add A="--with-models --with-packs" for a complete one)
+	@./scripts/airgap-bundle.sh $(A)
 
 down: ## Stop the stack, keeping all volumes
 	@docker compose --profile "*" down --remove-orphans

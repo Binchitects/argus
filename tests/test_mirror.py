@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from argus.config import IndexConfig
+from argus.config import GitLabConfig, IndexConfig
 from argus import mirror
 from argus.gitlab import Project
 
@@ -227,3 +227,53 @@ def test_failed_authenticated_clone_leaves_no_token_in_index_errors(cfg, project
     assert rows, "expected the failed clone to record an error"
     for r in rows:
         assert SECRET not in r["message"], f"token persisted to index_errors: {r['message']}"
+
+
+# --------------------------------------------------------------------- TLS
+#
+# git reads neither httpx's configuration nor Python's, so the CA and
+# verify settings that make the API work have to be pushed into the
+# subprocess environment separately. Without these the API enumerates every
+# project and the first clone fails with "server certificate verification
+# failed", which reads as a credential problem.
+
+def test_auth_env_is_none_when_there_is_nothing_to_apply(cfg):
+    # The pre-existing contract: no token and no TLS policy means git inherits
+    # the ambient environment untouched.
+    assert mirror._auth_env(cfg, None, None) is None
+
+
+def test_auth_env_carries_verification_off(cfg):
+    env = mirror._auth_env(cfg, None, GitLabConfig(url="https://g", token="t",
+                                                   verify=False))
+    assert env is not None
+    assert env["GIT_SSL_NO_VERIFY"] == "true"
+
+
+def test_auth_env_carries_the_ca_bundle_alongside_the_token(cfg):
+    env = mirror._auth_env(cfg, "glpat-x",
+                           GitLabConfig(url="https://g", token="t",
+                                        ca_cert="/etc/ssl/private-ca.pem"))
+    assert env[mirror.ARGUS_TOKEN_ENV] == "glpat-x"
+    assert env["GIT_SSL_CAINFO"] == "/etc/ssl/private-ca.pem"
+    assert "GIT_SSL_NO_VERIFY" not in env
+
+
+def test_a_tls_policy_alone_still_builds_an_environment(cfg):
+    # The bug this pins: `_auth_env` used to return None whenever there was no
+    # token, so an operator who configured only `ca_cert` got a clone that
+    # ignored it and behaved exactly as if nothing had been configured.
+    env = mirror._auth_env(cfg, None,
+                           GitLabConfig(url="https://g", token="t",
+                                        ca_cert="/etc/ssl/private-ca.pem"))
+    assert env is not None
+    assert env["GIT_SSL_CAINFO"] == "/etc/ssl/private-ca.pem"
+
+
+def test_ensure_mirror_accepts_a_tls_policy(cfg, project, origin):
+    # A TLS policy must not disturb a clone that does not need one. git only
+    # consults these variables for https remotes, so a local path still works.
+    path = mirror.ensure_mirror(
+        cfg, project, clone_url=str(origin),
+        gitlab_cfg=GitLabConfig(url="https://g", token="t", verify=False))
+    assert (path / "HEAD").exists()

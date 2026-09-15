@@ -16,6 +16,30 @@ class ConfigError(Exception):
     """Raised when configuration is missing or malformed."""
 
 
+#: Spellings accepted for a boolean option. YAML produces real booleans, an
+#: environment variable is always a string, and shell users write all of these.
+_TRUE = ("1", "true", "yes", "on")
+_FALSE = ("0", "false", "no", "off")
+
+
+def _as_bool(name: str, value: object) -> bool:
+    """Parse a YAML or environment boolean, refusing anything ambiguous.
+
+    Raises rather than defaulting, because the option this parses
+    (`gitlab.verify`) turns certificate verification off when it is false.
+    A typo or an unexpected spelling silently meaning "verify" is a security
+    bug; silently meaning "do not verify" is a worse one.
+    """
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in _TRUE:
+        return True
+    if text in _FALSE:
+        return False
+    raise ConfigError(f"{name} must be a boolean (true or false), not {value!r}")
+
+
 @dataclass(frozen=True)
 class GitLabConfig:
     """How Argus authenticates to GitLab.
@@ -49,6 +73,19 @@ class GitLabConfig:
     #: for the life of the process because the OAuth token it buys expires,
     #: and a re-exchange is the only way to recover without a restart.
     password: str = ""
+    #: Path to a PEM bundle holding the CA that signed GitLab's certificate,
+    #: for an instance on a private or internal CA. Public roots stay loaded
+    #: alongside it -- see `tls.verify_for`.
+    ca_cert: str = ""
+    #: Whether to verify GitLab's certificate at all. Leave it alone unless
+    #: GitLab serves a self-signed certificate and there is NO CA file to
+    #: point at, which is a real situation rather than a misconfiguration.
+    #:
+    #: Setting it false disables verification for every API call and every
+    #: clone to this GitLab, so anything able to answer on that hostname can
+    #: read the access token. It exists because the alternative -- the operator
+    #: patching Argus -- is worse, not because it is good.
+    verify: bool = True
 
     def __post_init__(self) -> None:
         mode = (self.auth or ("password" if self.username else "token")).lower()
@@ -71,8 +108,17 @@ class GitLabConfig:
         appears, in any mode.
         """
         if self.auth == "password":
-            return f"{self.url} as {self.username} (password)"
-        return f"{self.url} (access token)"
+            described = f"{self.url} as {self.username} (password)"
+        else:
+            described = f"{self.url} (access token)"
+        if not self.verify:
+            # Named in the description because every credential and
+            # transport error carries it. An operator reading "could not
+            # reach GitLab ... certificate verification DISABLED" has the
+            # cause of a whole class of confusing failures in front of them,
+            # rather than having to remember a setting from weeks ago.
+            described += ", certificate verification DISABLED"
+        return described
 
 
 @dataclass(frozen=True)
@@ -133,12 +179,17 @@ class Config:
         ix = raw.get("index") or {}
         pk = raw.get("packs") or {}
 
-        # ARGUS_GITLAB_URL overrides the file, like the token below. The stack
-        # documents it as the one place to point Argus at a GitLab; without this
-        # it was ignored and the committed config.yaml URL won silently.
+        # The environment wins over the file, exactly as it does for the token
+        # and username below. This matters more than it looks: the shipped
+        # container config names a throwaway test GitLab, so without an
+        # override the one setting an operator is told to change lives in a
+        # file that `docker compose` cannot rewrite, and ARGUS_GITLAB_URL in
+        # .env is silently ignored. That was the actual behaviour.
         url = os.environ.get("ARGUS_GITLAB_URL") or gl.get("url")
         if not url:
-            raise ConfigError("gitlab.url is required (or ARGUS_GITLAB_URL)")
+            raise ConfigError(
+                "gitlab.url is required: set ARGUS_GITLAB_URL in the "
+                "environment or gitlab.url in the config file")
 
         token = os.environ.get("ARGUS_GITLAB_TOKEN") or gl.get("token") or ""
         username = os.environ.get("ARGUS_GITLAB_USERNAME") or gl.get("username") or ""
@@ -160,6 +211,44 @@ class Config:
             )
         password = os.environ.get("ARGUS_GITLAB_PASSWORD") or ""
 
+        # TLS, for a GitLab that is not on a public CA. `ca_cert` wins over
+        # `verify` and the two together are refused rather than silently
+        # resolved: whichever one an operator meant, guessing wrong either
+        # breaks the connection or turns verification off when they had
+        # supplied everything needed to keep it on.
+        ca_cert = str(
+            os.environ.get("ARGUS_GITLAB_CA_CERT") or gl.get("ca_cert") or ""
+        ).strip()
+        # An EMPTY environment variable means "not set", not "the empty
+        # string". Every shipped .env carries `ARGUS_GITLAB_VERIFY=` on purpose
+        # -- that is how a sample documents a setting it leaves at its default
+        # -- and reading it as a value crash-looped Argus on the very first
+        # start with "gitlab.verify must be a boolean, not ''".
+        #
+        # Blankness is tested explicitly rather than with `or`, because `or`
+        # would also discard a deliberate "0" and turn verification back ON
+        # under an operator who had turned it off.
+        verify_env = (os.environ.get("ARGUS_GITLAB_VERIFY") or "").strip()
+        verify = _as_bool("gitlab.verify",
+                          verify_env or gl.get("verify", True))
+        if ca_cert and not verify:
+            raise ConfigError(
+                "gitlab.ca_cert and gitlab.verify=false are both set, and they "
+                "contradict each other: a CA bundle is exactly what makes "
+                "verification possible. Keep gitlab.ca_cert, or drop it and "
+                "leave gitlab.verify=false."
+            )
+        if ca_cert and not Path(ca_cert).is_file():
+            # Caught here, at load, because the alternative is a
+            # CERTIFICATE_VERIFY_FAILED at the first API call that reads
+            # exactly like a wrong token or a wrong URL.
+            raise ConfigError(
+                f"gitlab.ca_cert is {ca_cert!r}, which is not a file. Point it "
+                f"at a PEM bundle containing the CA that signed GitLab's "
+                f"certificate, or set gitlab.verify=false if no such file "
+                f"exists."
+            )
+
         if not (token or username or password):
             raise ConfigError(
                 "no GitLab credential: set gitlab.token (or ARGUS_GITLAB_TOKEN), "
@@ -178,7 +267,8 @@ class Config:
 
         return Config(
             gitlab=GitLabConfig(url=url.rstrip("/"), token=token, auth=auth,
-                                username=username, password=password),
+                                username=username, password=password,
+                                ca_cert=ca_cert, verify=verify),
             index=IndexConfig(
                 data_dir=Path(ix["data_dir"]),
                 db_path=Path(ix["db_path"]),

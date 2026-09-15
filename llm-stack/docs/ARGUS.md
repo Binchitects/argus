@@ -67,6 +67,64 @@ authenticated caller regardless of repository access.
 
 ---
 
+## GitLab on a private CA
+
+Three `.env` values point Argus at your GitLab:
+
+| `.env` | meaning |
+|---|---|
+| `ARGUS_GITLAB_URL` | which GitLab. **Overrides** `url:` in `config/argus/config.yaml`, which is a committed default naming a throwaway test instance |
+| `ARGUS_GITLAB_CA_CERT` | path to the CA that signed GitLab's certificate, **as the container sees it** |
+| `ARGUS_GITLAB_VERIFY` | `false` to skip verification entirely. Last resort |
+
+`ARGUS_GITLAB_CA_CERT` and `ARGUS_GITLAB_VERIFY` both apply to the API **and** to
+every `git clone`, because Argus reaches GitLab over two transports that cannot
+see each other's TLS configuration. Configuring one and not the other is the
+failure that costs the most time, because it reads as a bad credential: the API
+enumerates every project, and the first clone then dies with
+
+```
+server certificate verification failed. CAfile: none CRLfile: none
+```
+
+Drop the PEM in `config/argus/tls/` — a directory that exists in the repo so the
+bind mount never has to be created by Docker — and it appears inside the
+container at `/etc/argus/tls/<name>`:
+
+```dotenv
+ARGUS_GITLAB_CA_CERT=/etc/argus/tls/gitlab-ca.pem
+```
+
+The public roots stay loaded alongside it, so a GitLab that redirects to a public
+host keeps working.
+
+When the certificate is self-signed and **no CA file exists anywhere**, set:
+
+```dotenv
+ARGUS_GITLAB_VERIFY=false
+```
+
+That turns verification off for every request and every clone to that GitLab, so
+anything able to answer on its hostname can read `ARGUS_GITLAB_TOKEN` — the most
+privileged string in the deployment. It is a last resort, not a convenience.
+Setting it **and** `ARGUS_GITLAB_CA_CERT` is refused at startup rather than
+silently resolved, and `ARGUS_GITLAB_VERIFY` rejects any value that is not a
+boolean rather than guessing, because guessing wrong toward "do not verify" is a
+security bug. `config/argus/tls/README.md` repeats this next to the directory
+itself.
+
+Verify the token before indexing. Against a private CA, `curl` needs the same
+treatment:
+
+```bash
+curl -s --cacert config/argus/tls/gitlab-ca.pem \
+  -H "PRIVATE-TOKEN: $ARGUS_GITLAB_TOKEN" \
+  "$ARGUS_GITLAB_URL/api/v4/projects?membership=false&simple=true&per_page=100" \
+  | python3 -c "import json,sys; print(len(json.load(sys.stdin)))"
+```
+
+---
+
 ## Storage: drop-in vs. reusing an existing index
 
 The base `docker-compose.yml` is **self-contained**. Argus gets a named volume

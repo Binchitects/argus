@@ -43,6 +43,37 @@ gitlab:
   # Prefer a token in general: it is scopeable to read_api + read_repository,
   # revocable on its own, and cannot be used to sign in to anything else.
 
+  # --- TLS, only for a GitLab that is NOT on a public CA --------------------
+  #
+  # These apply to the API *and* to every `git clone`. Argus reaches GitLab
+  # over two transports that cannot see each other's TLS configuration --
+  # httpx for the API, the git binary for clones -- so configuring one and not
+  # the other produces the failure that costs the most time: enumeration
+  # succeeds, and the first clone dies with "server certificate verification
+  # failed", which reads as a bad token or a bad URL.
+  #
+  # Preferred: the CA that signed GitLab's certificate. Prefer the
+  # ARGUS_GITLAB_CA_CERT environment variable over this field. A PEM bundle;
+  # the public roots stay loaded alongside it, so a GitLab that redirects to a
+  # public host keeps working.
+  #
+  #   ca_cert: /etc/argus/tls/gitlab-ca.pem
+  #
+  # Last resort, for a self-signed GitLab with NO CA file available anywhere:
+  #
+  #   verify: false
+  #
+  # That turns certificate verification off for every request and every clone
+  # to this GitLab, so anything able to answer on its hostname can read the
+  # access token. It exists because the alternative is an operator patching
+  # Argus, not because it is a good idea. ARGUS_GITLAB_VERIFY overrides it, and
+  # accepts true/false, yes/no, on/off or 1/0 -- anything else is refused
+  # rather than guessed at.
+  #
+  # `verify: false` and `ca_cert` together are refused: a CA bundle is exactly
+  # what makes verification possible, so one of the two is a mistake.
+  verify: true
+
 index:
   data_dir: /var/lib/argus
   db_path: /var/lib/argus/index.db

@@ -47,6 +47,57 @@ If that count is lower than what you actually have, stop. Every later
 measurement will be confidently wrong. `argus index` refuses to run in this
 state, but check anyway -- it is cheaper than discovering it later.
 
+### GitLab behind a private CA
+
+If that `curl` failed with `SSL certificate problem: self-signed certificate`,
+Argus will fail too, and it will fail in **two** places that look unrelated.
+
+Argus reaches GitLab over two transports that share no trust configuration:
+`httpx` for the API, and the `git` binary for clones. Left alone, the API calls
+fail first with `CERTIFICATE_VERIFY_FAILED`; configure only the API and you get
+enumeration succeeding and every clone then dying with
+
+```
+server certificate verification failed. CAfile: none CRLfile: none
+```
+
+which reads as a bad token or a wrong URL, and sends you looking in the wrong
+place. Both settings below apply to **both** transports, so one of them is
+enough:
+
+```yaml
+gitlab:
+  ca_cert: /etc/argus/gitlab-ca.pem   # preferred: the CA that signed GitLab's cert
+  # verify: false                     # last resort: no CA file exists anywhere
+```
+
+Prefer the environment, which overrides the file:
+
+```bash
+export ARGUS_GITLAB_CA_CERT=/etc/argus/gitlab-ca.pem
+# or, only when no CA file is available:
+export ARGUS_GITLAB_VERIFY=false
+```
+
+Notes that are easy to get wrong:
+
+* `ca_cert` must be a **file that exists when Argus loads its config**. A path
+  that is merely wrong is refused at startup rather than becoming a
+  `CERTIFICATE_VERIFY_FAILED` later that looks like a credential problem.
+* The public roots stay loaded alongside your CA, so a GitLab that redirects to
+  a public host keeps working. `ca_cert` does not replace the trust store.
+* `ARGUS_GITLAB_VERIFY=false` disables verification for every request and every
+  clone to that GitLab, so anything able to answer on the hostname can read the
+  service token. It exists for a self-signed instance whose CA you cannot
+  obtain -- not as a way to skip a fixable problem. Setting it **and**
+  `ARGUS_GITLAB_CA_CERT` is refused at startup rather than silently resolved.
+* `ARGUS_GITLAB_VERIFY` accepts `true/false`, `yes/no`, `on/off` and `1/0`.
+  Anything else is refused rather than guessed at, because guessing wrong in
+  the "do not verify" direction is a security bug.
+
+In the container deployment this is one line of `.env` and one file dropped in
+`llm-stack/config/argus/tls/`; see the top-level README.
+
 ---
 
 ## 3. Index the private code

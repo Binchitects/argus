@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from . import tls
 from .config import GitLabConfig
 from .store import writes
 
@@ -114,7 +115,7 @@ def resolve(conn: sqlite3.Connection, cfg: GitLabConfig, token: str, *,
                         json.loads(cached["repo_ids_json"]))
 
     owns_client = client is None
-    client = client or httpx.Client(timeout=15.0)
+    client = client or tls.client_for(cfg, timeout=15.0)
     try:
         user_id, username, gitlab_ids = _fetch(cfg, token, client)
     except AclDenied:
