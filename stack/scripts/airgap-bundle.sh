@@ -208,11 +208,18 @@ tar_excludes=(
   --exclude='./.claude'
   --exclude='./.superpowers'
   --exclude='./.pytest_cache'
+  --exclude='./.ruff_cache'
   --exclude='./dist'
   --exclude='./scripts/test-gitlab/work'
   --exclude='./stack/.env'
   --exclude='./stack/.env.*'
   --exclude='./stack/backups'
+  # The stack's own dist/ holds a previously built drop-in archive (hundreds of
+  # MB) and any release tarballs. Neither is needed on the target -- the images
+  # this bundle carries are in .airgap/images/ -- and shipping them put a copy
+  # of one artifact inside another.
+  --exclude='./stack/dist'
+  --exclude='./stack/.pkgstage'
   --exclude='./stack/config/traefik/certs/tls.crt'
   --exclude='./stack/config/traefik/certs/bundle.crt'
   --exclude='./stack/config/traefik/auth/users.htpasswd'
@@ -497,6 +504,44 @@ zip_opts=(-r -q)
 if [ -n "$SPLIT" ]; then zip_opts+=(-s "$SPLIT"); fi
 # From OUT_DIR so the archive carries the bundle directory as its root.
 ( cd "$OUT_DIR" && zip "${zip_opts[@]}" "$NAME.zip" "$NAME" )
+
+# ---------------------------------------------------- read it back ----------
+# Prove the archive can be read BEFORE anyone carries it to a machine that
+# cannot rebuild it. This is not paranoia, and it is not a formality:
+#
+# Measured on this project on 2026-09-16. `zip` exited 0, and wrote a 7.8 GB
+# file whose central directory sat 4.3 GB from the END, with 78 MB of non-zip
+# bytes before the first local header. `unzip` found no
+# end-of-central-directory and refused the whole thing. Every prior step had
+# reported success -- images saved, sha256s written, the tree validated against
+# every bind mount -- because the corruption happens in this last step and
+# nothing had ever re-read the result.
+#
+# An airgap bundle is the one artifact that cannot be re-made where it is
+# going. Discovering this on the target, holding a disk, is the worst case
+# this script exists to prevent.
+step "Verifying the archive reads back"
+if [ -z "$SPLIT" ]; then
+  if ! unzip -t "$OUT_DIR/$NAME.zip" >/dev/null 2>&1; then
+    die "$NAME.zip is NOT a valid archive, though zip exited 0.
+  Do not ship this file. The usual cause is the filesystem holding
+  $OUT_DIR rather than the contents -- zip reported success while
+  writing it. Re-run this script; if it fails again, build the bundle on a
+  local (non-network, non-FUSE) filesystem and copy the result."
+  fi
+  say "  unzip -t: archive is valid"
+else
+  # Info-ZIP cannot test a split set without joining it first, and joining
+  # needs as much free space again as the parts already occupy. Say so rather
+  # than implying a check happened.
+  for part in "$OUT_DIR/$NAME".z[0-9][0-9] "$OUT_DIR/$NAME.zip"; do
+    [ -f "$part" ] || die "missing part: $part"
+    [ -s "$part" ] || die "empty part: $part"
+  done
+  warn "split archive: the parts exist and are non-empty, but a full read-back"
+  warn "needs them joined, which needs the space again. Verify after joining:"
+  warn "  zip -s 0 $NAME.zip --out ${NAME}-joined.zip && unzip -t ${NAME}-joined.zip"
+fi
 
 step "Done"
 # A loop, not `ls <zip> <z01>`: with no --split the .z01 pattern matches
