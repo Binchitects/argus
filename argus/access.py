@@ -18,11 +18,17 @@ since it indexes it. Membership at Reporter or above is exactly the rule the
 personal-token path applies (`acl.MIN_ACCESS_LEVEL`), so both paths grant the
 same repositories.
 
-Mapping an email to a GitLab account without admin rights: a read-only token
-cannot see private emails. The chat user's sign-in USERNAME (from Authelia's
-users.yml) is looked up as a GitLab username first; GitLab's public-email
-search is the fallback. In practice: give people the same username in the admin
-panel as in GitLab.
+Mapping an email to a GitLab account: the email the chat client forwards is the
+key. GitLab decides how far that gets, and the distinction is invisible from
+the outside --
+
+  * an ADMIN service token matches the private address, so any account resolves;
+  * a non-admin token matches only `public_email`, which is empty by default.
+
+So the username is a fallback, not a requirement: it is still tried, because a
+read-only deployment cannot match a private address any other way. Naming the
+GitLab account the same as the chat account remains the one thing that works
+with either token, which is why the refusal message still says so.
 """
 from __future__ import annotations
 
@@ -118,7 +124,27 @@ class MemberDirectory:
         return self._cached(self._members, int(gitlab_id), fetch)
 
     def user(self, *, username: str | None = None, email: str | None = None) -> dict | None:
-        """A GitLab account by exact username, else by exact PUBLIC email."""
+        """A GitLab account by exact email, else by exact username.
+
+        EMAIL FIRST, because the email is what identifies the caller: Open
+        WebUI forwards the signed-in person's address, and it is the one
+        identifier the whole stack agrees on. Keying on the username first made
+        "your chat username must equal your GitLab username" a hard requirement
+        -- a rule no user can see, whose failure reads as a permissions problem.
+
+        The two lookups need different privileges, which is the whole reason
+        this is not a one-liner:
+
+          * an ADMIN service token matches the PRIVATE email, so
+            `/users?search=<address>` finds anybody;
+          * a non-admin token matches only `public_email`, so the same search
+            returns nothing for an account whose address is private -- the
+            default in GitLab.
+
+        Both fields are therefore matched, and the caller's token decides which
+        one is populated. See `resolve_person` for what it says when neither
+        lookup finds anybody.
+        """
         def lookup(params: dict, match: Callable[[dict], bool]) -> dict | None:
             resp = self._get("/users", params)
             if resp.status_code >= 500:
@@ -128,16 +154,29 @@ class MemberDirectory:
             hits = [u for u in resp.json() if match(u)]
             return hits[0] if len(hits) == 1 else None
 
+        if email:
+            addr = email.strip().lower()
+
+            def matches(u: dict) -> bool:
+                # `public_email` is visible to anyone; `email` only to an
+                # admin, and absent from the payload otherwise. Matching both
+                # is what makes an admin token strictly more capable instead of
+                # differently broken.
+                for field in ("public_email", "email"):
+                    if str(u.get(field) or "").strip().lower() == addr:
+                        return True
+                return False
+
+            found = self._cached(self._users, f"e:{addr}",
+                                 lambda: lookup({"search": addr}, matches))
+            if found:
+                return found
         if username:
             name = username.strip().lower()
             found = self._cached(self._users, f"u:{name}", lambda: lookup(
                 {"username": name}, lambda u: str(u.get("username", "")).lower() == name))
             if found:
                 return found
-        if email:
-            addr = email.strip().lower()
-            return self._cached(self._users, f"e:{addr}", lambda: lookup(
-                {"search": addr}, lambda u: str(u.get("public_email") or "").lower() == addr))
         return None
 
     def maintainers(self, gitlab_id: int, limit: int = 5) -> list[str]:
@@ -177,11 +216,16 @@ def resolve_person(conn, directory: MemberDirectory, email: str, *,
         raise AclDenied("Cannot verify your GitLab access right now and no recent cached "
                         "permission exists, so access is denied. Retry shortly.") from exc
     if user is None:
-        tried = f"GitLab username {username!r}" if username else "a GitLab username"
+        # The two ways this fails need different fixes, and the message names
+        # both rather than sending people to change a username that was never
+        # the problem.
+        also = f", then by username {username!r}" if username else ""
         raise AclDenied(
-            f"No GitLab account matches {email} (looked for {tried}, then a public email). "
-            "Ask an administrator to give your chat account the same username as your "
-            "GitLab account, or set that email as public on your GitLab profile.")
+            f"No GitLab account matches {email} (looked up by email{also}). "
+            "If that address is PRIVATE on the GitLab profile, only an "
+            "administrator service token can match it -- otherwise set it as "
+            "the profile's public email, or give the chat account the same "
+            "username as your GitLab account.")
     if user.get("state", "active") != "active":
         raise AclDenied(f"The GitLab account {user.get('username')} is not active.")
 

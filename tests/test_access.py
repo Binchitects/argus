@@ -28,7 +28,15 @@ MAINTAINERS = [
 
 
 def gitlab(members_by_project: dict[int, list[dict]], users: list[dict] | None = None,
-           calls: list | None = None):
+           calls: list | None = None, admin: bool = False):
+    """A fake GitLab. `admin` changes what `/users?search=` is able to match.
+
+    Measured against a real GitLab CE: an ADMIN token's search matches the
+    private `email` field, while a read-only token's matches only
+    `public_email` -- which is empty by default. The same lookup therefore
+    succeeds on one deployment and returns nothing on another, with nothing in
+    the payload to show why, so the difference is modelled rather than assumed.
+    """
     users = users if users is not None else [ALICE]
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -41,7 +49,12 @@ def gitlab(members_by_project: dict[int, list[dict]], users: list[dict] | None =
         if path.endswith("/users"):
             if "username" in params:
                 return httpx.Response(200, json=[u for u in users if u["username"] == params["username"]])
-            return httpx.Response(200, json=[u for u in users if params.get("search", "") in u.get("public_email", "")])
+            query = params.get("search", "")
+            fields = ("public_email", "email") if admin else ("public_email",)
+            return httpx.Response(200, json=[
+                u for u in users
+                if any(query in (u.get(f) or "") for f in fields)
+            ])
         if "/members/all" in path:
             gid = int(path.split("/projects/")[1].split("/")[0])
             page = params.get("page", "1")
@@ -206,3 +219,74 @@ def test_chat_client_without_a_person_is_refused(chat_env):
     resp = _app(cfg, gitlab({})).get("/mcp", headers={"Authorization": "Bearer chat-secret"})
     assert resp.status_code == 401
     assert "did not say who is asking" in resp.json()["error"]
+
+
+# --------------------------------------------------- email is the identity
+#
+# Open WebUI forwards the signed-in person's EMAIL, so that is the key. Keying
+# on the username first made "your chat username must equal your GitLab
+# username" a hard rule no user can see, and its failure reads as a permissions
+# problem.
+
+def test_email_decides_even_when_the_username_points_elsewhere(db):
+    """The address wins, so the chat account need not be named after GitLab."""
+    path, conn, ids, _ = db
+    # `alice` is the local sign-in name; the GitLab account is `a.smith`, and
+    # they share nothing but the address.
+    a_smith = {"id": 7, "username": "a.smith", "name": "Alice Smith",
+               "state": "active", "email": "alice@corp.example"}
+    ident = access.resolve_person(conn, directory(gitlab({101: [dict(a_smith, access_level=30)]},
+                                                         users=[a_smith], admin=True)),
+                                  "alice@corp.example")
+    assert ident.username == "a.smith"
+    assert ident.allowed_repo_ids == [ids["g/alpha"]]
+
+
+def test_private_email_matches_when_the_token_can_see_it(db):
+    """What an ADMIN service token returns: `public_email` empty, `email` set.
+
+    This is the field a read-only token never receives, and the reason the same
+    lookup succeeds on one deployment and fails on another with nothing in the
+    payload to show why.
+    """
+    path, conn, ids, _ = db
+    private = {"id": 8, "username": "b.private", "name": "Bob",
+               "state": "active", "email": "bob@corp.example", "public_email": None}
+    ident = access.resolve_person(conn, directory(gitlab({202: [dict(private, access_level=20)]},
+                                                         users=[private], admin=True)),
+                                  "bob@corp.example")
+    assert ident.username == "b.private"
+    assert ident.allowed_repo_ids == [ids["g/beta"]]
+
+
+def test_username_still_resolves_when_the_email_cannot_be_seen(db, tmp_path):
+    """The read-only case, kept working: no email match, then username.
+
+    A non-admin token cannot match a private address, so the Authelia username
+    is the only route left. Dropping it when the email lookup fails would break
+    every read-only deployment, which is the recommended one.
+    """
+    path, conn, ids, _ = db
+    carol = {"id": 5, "username": "carol", "name": "Carol", "state": "active",
+             "email": "", "public_email": ""}
+    users_file = tmp_path / "users.yml"
+    users_file.write_text(
+        "users:\n  carol:\n    email: 'carol@corp.example'\n    groups: [users]\n")
+    ident = access.resolve_person(conn, directory(gitlab({101: [dict(carol, access_level=30)]},
+                                                         users=[carol])),
+                                  "carol@corp.example", users_file=users_file)
+    assert ident.username == "carol"
+
+
+def test_a_partial_email_match_is_not_a_match(db):
+    """`search=` is a substring search, so the comparison must be exact.
+
+    Matching loosely here would hand someone another person's repositories,
+    which is the one failure this module exists to prevent.
+    """
+    path, conn, _, _ = db
+    almost = {"id": 6, "username": "eve", "name": "Eve", "state": "active",
+              "public_email": "evil-alice@corp.example"}
+    with pytest.raises(acl.AclDenied, match="No GitLab account matches"):
+        access.resolve_person(conn, directory(gitlab({}, users=[almost])),
+                              "alice@corp.example")
