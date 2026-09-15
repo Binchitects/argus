@@ -792,10 +792,11 @@ That discipline extends to the benchmarks. The model comparison above found **th
 | 4 — Semantic layer | selective embeddings, `semantic_search` | ✅ |
 | 5 — Knowledge packs | 11 packs, 6 doc tools, `argus pack` | ✅ |
 
-**877 tests**, passing locally, 0 skipped.
+**884 tests**, passing locally, 0 skipped.
 
 - **[llm-stack/docs/ARCHITECTURE.md](llm-stack/docs/ARCHITECTURE.md)** — every service in the stack, how a request flows through them, and what each failure looks like
 - **[llm-stack/docs/CONFIGURATION.md](llm-stack/docs/CONFIGURATION.md)** — every `.env` variable and every file under `config/`
+- **[llm-stack/docs/TESTING.md](llm-stack/docs/TESTING.md)** — what the suite covers, what a green run skips, and the tests still missing
 - **[docs/production.md](docs/production.md)** — deploy, verify, operate
 - **[docs/deployment.md](docs/deployment.md)** — wiring Hermes, and the failure modes
 - **[docs/knowledge-packs.md](docs/knowledge-packs.md)** — building and publishing packs
