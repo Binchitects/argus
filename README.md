@@ -160,8 +160,8 @@ them:
 
 `--with-env` puts the live `.env` in the bundle verbatim, secrets and all. Without
 it the bundle ships `.env.airgap`: the same file with **every** secret emptied —
-by name as well as by position, because eight of them (among them
-`ARGUS_GITLAB_TOKEN`) live outside the `# SECRETS` block. `fill-secrets.sh` on
+by name as well as by position, because some of them (`ARGUS_GITLAB_TOKEN`,
+`ARGUS_GITLAB_PASSWORD`) live outside the `# SECRETS` block. `fill-secrets.sh` on
 the target fills what can be generated and names the one that cannot.
 
 The bundle is validated before it is written: every bind mount the compose file
@@ -335,6 +335,10 @@ Qwen Code: the `mcpServers` block above. Any other MCP client: the same URL and 
 2. Set `ARGUS_GITLAB_URL` and `ARGUS_GITLAB_TOKEN`. The token is **read-only**:
    `read_api` and `read_repository`, for an account that is at least Reporter in every
    project you want indexed. Argus never needs admin or sudo.
+   If no token can be issued for the account, set `ARGUS_GITLAB_USERNAME` and
+   `ARGUS_GITLAB_PASSWORD` instead: Argus signs in through GitLab's web form and mints
+   its own read-only token. See
+   [When no token can be issued](llm-stack/docs/ARGUS.md#when-no-token-can-be-issued-for-the-account).
 3. If your GitLab's certificate is not from a public CA, set **one** of these — see
    [GitLab on a private CA](#gitlab-on-a-private-ca):
    `ARGUS_GITLAB_CA_CERT=/etc/argus/tls/gitlab-ca.pem` (drop the PEM in

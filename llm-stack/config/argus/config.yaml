@@ -4,22 +4,20 @@
 # must contain it or Argus will not start. It holds no secrets - the GitLab
 # token is injected from ARGUS_GITLAB_TOKEN in .env and never written here.
 gitlab:
-  # A DEFAULT, and only a default. ARGUS_GITLAB_URL in .env overrides it, which
-  # is the setting the deployment docs tell an operator to change -- this file
-  # is committed and names a throwaway test instance, so it must never be the
-  # answer for a real deployment. Leaving it here keeps `docker compose up`
-  # working against the bundled test GitLab with nothing configured at all.
-  #
-  # A PLACEHOLDER. ARGUS_GITLAB_URL in .env overrides it, and that is the
-  # setting to change -- this file is committed, so it must not name any real
-  # instance. It stays a valid https URL rather than empty so that a missing
-  # .env value fails as an unreachable host, which says what is wrong, instead
-  # of as a parse error.
+  # A PLACEHOLDER, and only a default. ARGUS_GITLAB_URL in .env overrides it,
+  # and that is the setting to change -- this file is committed, so it must not
+  # name any real instance. It stays a valid https URL rather than empty so
+  # that a missing .env value fails as an unreachable host, which says what is
+  # wrong, instead of as a parse error. Leaving it here keeps `docker compose
+  # up` working against the bundled test GitLab with nothing configured at all.
   #
   # (For a GitLab on this same machine from inside a container, the reachable
   # name is host.docker.internal, not localhost.)
   url: https://gitlab.example.com
-  # token comes from ARGUS_GITLAB_TOKEN in .env -- never written here.
+  # Credentials come from the environment only -- never written here. A token
+  # from ARGUS_GITLAB_TOKEN, or ARGUS_GITLAB_USERNAME with
+  # ARGUS_GITLAB_PASSWORD for the password mode described in docs/ARGUS.md. A
+  # `password` key in THIS file is refused outright rather than ignored.
   #
   # TLS for a GitLab that is not on a public CA comes from
   # ARGUS_GITLAB_CA_CERT (a path inside the container; drop the PEM in

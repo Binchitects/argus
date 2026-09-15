@@ -1212,6 +1212,23 @@ services:
       ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
       # Privileged service token: reads every repository the index covers.
       ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:-}
+      # A way in when no token can be issued for the account. `password` mode
+      # signs in through GitLab's web form and mints a personal access token
+      # from it; the password itself never leaves that one request.
+      #
+      # ARGUS_GITLAB_AUTH is inferred when empty: a token alone means token
+      # mode, and a username alone means password mode. It is inferred in that
+      # order of precedence -- a username WINS over a token -- so state
+      # `ARGUS_GITLAB_AUTH=token` explicitly if a username is left here from
+      # an earlier experiment and the token is the credential that should be
+      # used.
+      #
+      # Prefer a token wherever one is possible. A password is reusable
+      # everywhere that account signs in, and anything that reads this
+      # container's environment (`docker inspect`, a crash dump) reads it too.
+      ARGUS_GITLAB_AUTH: ${ARGUS_GITLAB_AUTH:-}
+      ARGUS_GITLAB_USERNAME: ${ARGUS_GITLAB_USERNAME:-}
+      ARGUS_GITLAB_PASSWORD: ${ARGUS_GITLAB_PASSWORD:-}
       # TLS, for a GitLab that is not on a public CA. Both apply to the API AND
       # to every clone, because Argus reaches GitLab over two transports that
       # cannot see each other's configuration -- getting one right and the

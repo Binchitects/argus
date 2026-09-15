@@ -106,6 +106,11 @@ if [ "${#external[@]}" -gt 0 ]; then
         say "    $name — a GitLab token with read_api + read_repository that can see"
         say "      every project you want indexed. See 'GitLab on a private CA' in"
         say "      the top-level README if your GitLab is not on a public CA." ;;
+      ARGUS_GITLAB_PASSWORD)
+        say "    $name — only if no token can be issued for the account. Fill in"
+        say "      ARGUS_GITLAB_USERNAME as well, or leave BOTH empty and use"
+        say "      ARGUS_GITLAB_TOKEN above. See 'When no token can be issued' in"
+        say "      llm-stack/docs/ARGUS.md." ;;
       HF_TOKEN)
         say "    $name — only needed to index gated Hugging Face repositories" ;;
       *)

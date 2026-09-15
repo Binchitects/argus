@@ -67,6 +67,67 @@ authenticated caller regardless of repository access.
 
 ---
 
+## When no token can be issued for the account
+
+Everything above assumes someone can create a personal access token for the
+service account. That is not always possible: an administrator can withhold
+token creation from an account or a group, and a locked-down GitLab may only
+offer the sign-in form. For that case Argus can sign in with a username and a
+password.
+
+```dotenv
+ARGUS_GITLAB_USERNAME=svc-argus
+ARGUS_GITLAB_PASSWORD=...
+```
+
+Set `ARGUS_GITLAB_AUTH=password` as well to be explicit. It is *inferred*
+whenever a username is present, and — worth knowing before it bites — **a
+username wins over a token**. A username left in `.env` from an earlier
+experiment keeps password mode on even after `ARGUS_GITLAB_TOKEN` is filled in,
+so a stale username silently outranks a working token. Naming the mode removes
+the ambiguity.
+
+Argus then does what a browser does: fetch GitLab's sign-in form, post the
+username and password to `/users/sign_in` with the form's CSRF token, check the
+session against `/api/v4/user`, and create a personal access token through the
+web endpoint carrying `read_api` and `read_repository` — nothing wider. Every
+request after that uses the minted token, and the password reaches exactly one
+request. Before minting, a token Argus created on a previous run is revoked, so
+restarts do not accumulate credentials.
+
+The token is not the session cookie, because `git`'s askpass protocol has no way
+to present a cookie and git-over-HTTP rejects one outright (measured: `401` on
+`info/refs`). That is also why the whole sign-in exists rather than a simpler
+"just use the session".
+
+Two consequences follow, and both are deliberate:
+
+**The password is worth more than the token it produces.** It is reusable
+everywhere that account signs in, so it is a bigger secret than a read-only
+PAT. Anything that can read this container's environment — `docker inspect`, a
+crash dump, a support bundle — reads it. Prefer a token whenever one is
+possible; also run `./scripts/airgap-bundle.sh` rather than `--with-env` when
+shipping a bundle, since the former empties every `*PASSWORD` by name.
+
+**A minted token expires.** With no `expires_at` GitLab applies its own default
+(measured: one year), and an administrator can revoke the token at any moment.
+Rather than leave a server authenticating with a credential that is simply gone,
+Argus treats a `401` on a read as "the token died, get another": it forgets the
+cached token, signs in again, and retries the request once. A second `401`
+is reported as-is, so a genuinely unauthorised account does not loop. Only
+password mode retries — a static token that GitLab rejects is wrong, and
+retrying it produces the same answer twice.
+
+Two failures are reported by name rather than as a bad password, because
+changing the password does not fix either:
+
+- the account has **two-factor authentication**, which a scripted sign-in cannot
+  satisfy — use a token;
+- the account may sign in, but an administrator has disabled **token creation**
+  for it.
+
+---
+
 ## GitLab on a private CA
 
 Three `.env` values point Argus at your GitLab:

@@ -142,9 +142,28 @@ to spend), and behaviour when the engine is down (retry, then a clear error).
 
 ### S5 — Argus *(strong unit, weak integration)*
 
-Unit is 884 tests. Missing at the stack level: index → MCP → per-token ACL end to
+Unit is 902 tests. Missing at the stack level: index → MCP → per-token ACL end to
 end against a real GitLab (the `deploy/test-gitlab/` fixture exists but is not
 wired into a suite), and the audit JSON stream actually reaching Loki.
+
+Within that unit count, the GitLab **credential modes** are covered properly,
+because both failure directions here are expensive and neither is visible from
+the outside:
+
+| test | asserts |
+|---|---|
+| `test_a_token_goes_in_the_private_token_header`, `test_a_password_becomes_a_bearer_token` | the header follows the mode. A minted token presented as `PRIVATE-TOKEN` works, but the mirror image — an OAuth-shaped value in the wrong header — reads as an ACL problem |
+| `test_password_mode_signs_in_and_mints_a_token` and friends | the sign-in → mint sequence, that a token from a previous run is revoked first, and that the minted token carries `read_api` + `read_repository` and not full `api` |
+| `test_the_password_is_sent_in_the_body_not_the_url` | the password is in a POST body, never in a query string |
+| `test_a_rejected_sign_in_does_not_echo_the_password`, `test_a_transport_failure_does_not_echo_the_password` | no failure path — including an `httpx` exception, which carries the request — puts the password into a message |
+| `test_a_401_re_mints_and_retries_once`, `test_a_401_that_survives_the_re_mint_is_returned_as_is`, `test_token_mode_never_re_mints` | a minted token that GitLab has expired or revoked is replaced and the read retried **once**; a second `401` is reported rather than looped on; static tokens are never retried |
+| `test_a_server_that_will_not_mint_tokens_says_so`, `test_two_factor_is_named_rather_than_reported_as_a_bad_password` | the two failures that are *not* a wrong password are named as such, because changing the password does not fix either |
+
+The measured facts those tests encode — the sign-in form endpoint, the CSRF
+token's two names, the flat `name` + repeated `scopes[]` parameters, the
+`unsupported_grant_type` that retired the old OAuth password grant, and the one
+year default expiry on a blank `expires_at` — were each read off a live GitLab
+(`deploy/test-gitlab/`) before being written down, not inferred from the docs.
 
 ### S6 — Data and disaster recovery
 

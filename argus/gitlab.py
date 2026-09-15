@@ -58,13 +58,20 @@ def list_projects(cfg: GitLabConfig, *,
     projects: list[Project] = []
     try:
         for page in range(1, MAX_PAGES + 1):
-            response = client.get(
-                f"{cfg.url}/api/v4/projects",
-                params={
-                    "membership": "false", "simple": "true",
-                    "archived": "false", "per_page": PER_PAGE, "page": page,
-                },
-                headers=credentials.headers(cfg, client=client),
+            response = credentials.authorized(
+                cfg,
+                # `page` is bound as a default rather than captured: a closure
+                # over a loop variable is a well-known way to send the last
+                # value to every call, and it costs nothing to be explicit.
+                lambda auth, page=page: client.get(
+                    f"{cfg.url}/api/v4/projects",
+                    params={
+                        "membership": "false", "simple": "true",
+                        "archived": "false", "per_page": PER_PAGE, "page": page,
+                    },
+                    headers=auth,
+                ),
+                client=client,
             )
             if response.status_code != 200:
                 raise GitLabError(
@@ -149,9 +156,13 @@ def enumeration_health(cfg: GitLabConfig, *,
     """Probe whether `list_projects` can see the whole estate."""
     owns_client = client is None
     client = client or tls.client_for(cfg, timeout=30.0)
-    headers = credentials.headers(cfg, client=client)
     try:
-        user = client.get(f"{cfg.url}/api/v4/user", headers=headers)
+        # Resolved per request rather than once: in password mode a 401 on the
+        # first call re-mints the token, and a header dict captured before that
+        # would carry the dead token into every request after it.
+        user = credentials.authorized(
+            cfg, lambda auth: client.get(f"{cfg.url}/api/v4/user", headers=auth),
+            client=client)
         if user.status_code != 200:
             raise GitLabError(
                 f"GET /user returned {user.status_code}: {user.text[:200]}")
@@ -164,11 +175,15 @@ def enumeration_health(cfg: GitLabConfig, *,
         def count(membership: str) -> int:
             total = 0
             for page in range(1, MAX_PAGES + 1):
-                response = client.get(
-                    f"{cfg.url}/api/v4/projects", headers=headers,
-                    params={"membership": membership, "simple": "true",
-                            "archived": "false", "per_page": PER_PAGE,
-                            "page": page},
+                response = credentials.authorized(
+                    cfg,
+                    lambda auth, page=page: client.get(
+                        f"{cfg.url}/api/v4/projects", headers=auth,
+                        params={"membership": membership, "simple": "true",
+                                "archived": "false", "per_page": PER_PAGE,
+                                "page": page},
+                    ),
+                    client=client,
                 )
                 if response.status_code != 200:
                     raise GitLabError(

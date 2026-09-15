@@ -339,6 +339,9 @@ name as well as position.
 | `ARGUS_VERSION` | `latest` | the image tag |
 | `ARGUS_GITLAB_URL` | `config/argus/config.yaml`'s value | **which GitLab.** Overrides `url:` in the committed config file, so this is the line to change |
 | `ARGUS_GITLAB_TOKEN` | — | read-only service token: `read_api` + `read_repository`, Reporter or above in every project to index. No admin, no sudo |
+| `ARGUS_GITLAB_AUTH` | inferred | `token` or `password`. Inferred when empty: a token alone means token mode, a username alone means password mode. **A username wins over a token**, so set this explicitly if a username is left behind from an earlier experiment |
+| `ARGUS_GITLAB_USERNAME` | — | password mode only: the account Argus signs in as |
+| `ARGUS_GITLAB_PASSWORD` | — | password mode only. Never read from `config/argus/config.yaml` — a `password` key there is refused outright rather than ignored |
 | `ARGUS_GITLAB_CA_CERT` | empty | path **inside the container** to the CA that signed GitLab's certificate. Drop the PEM in `config/argus/tls/` and use `/etc/argus/tls/<name>` |
 | `ARGUS_GITLAB_VERIFY` | empty | `false` disables certificate verification. Last resort for a self-signed GitLab with no CA file anywhere. Setting it **and** `ARGUS_GITLAB_CA_CERT` is refused at startup |
 | `ARGUS_EMBED_MODEL` | `nomic-embed-text` | Ollama model for query embeddings |
