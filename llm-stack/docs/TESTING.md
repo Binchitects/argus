@@ -218,10 +218,10 @@ variable:
 
 | test | asserts |
 |---|---|
-| C3.1 | DeepSeek Harness reaches the API with `NODE_EXTRA_CA_CERTS` set before launch |
+| C3.1 | DeepSeek Harness reaches the API with `NODE_EXTRA_CA_CERTS` set before launch. **Verified** — `dsh --profile headless` with `NODE_EXTRA_CA_CERTS` and `--patch` called `mcp__argus__find_symbol` and got `root/eal-core` back. The variable is read at process start, so it cannot be set afterwards |
 | C3.2 | Qwen Code, from the documented `settings.json`, lists the model and completes |
 | C3.3 | Hermes connects, lists tools and completes (see `docs/HERMES.md`) |
-| C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools |
+| C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik, and Open WebUI's MCP client lists 16 tools |
 | C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `deploy/test-gitlab/` exists to answer. **Now verified** against a real GitLab CE: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. Still not automated — see below |
 
 ### C4 — Browser *(G8, entirely missing)*
@@ -242,6 +242,33 @@ The only layer nothing touches. Minimum viable set, headless (Playwright):
 After a restore (S6.2), an existing per-person API key still works and the
 person's spend history is still there. A restore that silently invalidates every
 key is a failure that S6.2 alone would not catch.
+
+### The harness, 2026-09-15
+
+Argus as an MCP tool server for DeepSeek Harness, end to end:
+
+```bash
+cat > /tmp/argus-mcp.patch.yml <<'YML'
+- insert:                       # `insert:` is the append form; a bare entry
+  - name: '@deepseek-ai/dsh-mcp-client'   # is read as an override and rejected
+    config:
+      serverName: argus
+      transport: streamable-http
+      url: https://argus.llm.localhost/mcp
+      headers:
+        Authorization: !!js '`Bearer ${process.env.ARGUS_TOKEN}`'
+YML
+
+ARGUS_TOKEN=<gitlab PAT> NODE_EXTRA_CA_CERTS=config/traefik/certs/tls.crt \
+  dsh --profile headless --patch /tmp/argus-mcp.patch.yml \
+  "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
+# -> root/eal-core, and Argus logs the call: outcome=ok, user=dev_alpha
+```
+
+Two things this settled. The harness has **no per-server TLS option**, so
+`NODE_EXTRA_CA_CERTS` before launch is the only way to reach a self-signed
+endpoint. And `--profile headless "task"` is the way to exercise an MCP server
+from a script, with no browser and no server left running.
 
 ### Verified by hand, 2026-09-15
 
