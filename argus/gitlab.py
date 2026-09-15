@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -14,6 +15,32 @@ MAX_PAGES = 1000
 
 class GitLabError(RuntimeError):
     """GitLab returned an error or unusable response."""
+
+
+def clone_url_for(cfg: GitLabConfig, advertised: str) -> str:
+    """``http_url_to_repo`` with its origin replaced by the configured GitLab.
+
+    GitLab publishes a clone URL built from its OWN ``external_url``, which is
+    routinely not the address the indexer can reach:
+
+      * a container talking to a GitLab on its host is configured with
+        ``ARGUS_GITLAB_URL=http://host.docker.internal:8929`` while GitLab
+        advertises ``http://localhost:8929`` -- and inside that container
+        ``localhost`` is the container itself, so every clone fails with
+        "Failed to connect to localhost port 8929" AFTER enumeration succeeded
+        and reported three healthy projects;
+      * a GitLab behind a reverse proxy commonly advertises an internal name.
+
+    The configured URL is by definition reachable -- every API call has already
+    used it -- so it is the one to clone from. Only the scheme and authority
+    are replaced; the path, which carries the namespace and project, is kept
+    verbatim.
+    """
+    configured = urlsplit(cfg.url)
+    target = urlsplit(advertised)
+    return urlunsplit((configured.scheme or target.scheme,
+                       configured.netloc or target.netloc,
+                       target.path, target.query, target.fragment))
 
 
 @dataclass(frozen=True)
@@ -60,7 +87,11 @@ def list_projects(cfg: GitLabConfig, *,
                     gitlab_id=int(item["id"]),
                     path_with_namespace=item["path_with_namespace"],
                     default_branch=item["default_branch"],
-                    http_url=item["http_url_to_repo"],
+                    # Rewritten, not raw: see clone_url_for. GitLab's own idea
+                    # of its address is frequently not one the indexer can
+                    # reach, and the failure lands on the clone, after
+                    # enumeration has already reported success.
+                    http_url=clone_url_for(cfg, item["http_url_to_repo"]),
                 ))
     finally:
         if owns_client:
