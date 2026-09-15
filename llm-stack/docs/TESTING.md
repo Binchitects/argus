@@ -1,0 +1,289 @@
+# Testing: what is verified, what is not, and what to add
+
+Short answer to "is every part of the stack tested": **no.** Roughly two thirds
+of the services are referenced by a test; a third are not, and "referenced" is
+not the same as "verified" — being named in a health check means a container
+answered, not that its behaviour is correct.
+
+This document says exactly what runs today, what it leaves out, and defines the
+server-side and client-side tests that would close the gap.
+
+Every number here was measured against the tree, not estimated.
+
+---
+
+## 1. What runs today
+
+| layer | entry point | asserts | needs |
+|---|---|---|---|
+| **Unit** | `pytest tests/` — **884 tests** | the Argus Python package: config, credentials, gitlab, mirror, tls, acl, access, resolve, worker, cli, packs, parse, store, mcpsrv, auditlog | nothing running; no Docker |
+| **Acceptance** | `scripts/acceptance.py` | 7 groups — `config`, `routes`, `identity`, `infra`, `obs`, `ops`, `e2e`. Routes answer, OIDC discovery documents exist, scraping works, datasources are healthy | a running stack |
+| **E2E** | `scripts/e2e-check.py` | from **inside** the network: the engine serves the model the gateway advertises, an API call is attributed to the key that made it, a chat is attributed to the same person, an over-budget person is refused | a running stack |
+| **Functional** | `scripts/functional-test.py` | 36 checks of what a *person* does: SSO sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, self-signup refusal, per-person billing on both surfaces | `auth`,`gateway` profiles |
+| **Auth audit** | `scripts/audit-auth.sh` | a **real** OAuth2 authorization-code exchange per OIDC client, then the claims actually delivered | `auth` profile |
+| **Domain** | `scripts/domain-check.sh` | every hostname routes, TLS serves the right certificate, and the *old* domain is gone | `proxy` |
+| **Smoke** | `scripts/smoke-test.sh` | model listing, auth enforcement, a completion, a streaming completion, Prometheus saw the traffic | `gateway` |
+| **Health** | `scripts/health.sh` | Docker healthchecks plus an in-network probe, per enabled service | any |
+| **Benchmarks** | `benchmark.py`, `multiuser-bench.py` | throughput and latency under concurrency — **measurement, not assertion** | `vllm`/`llamacpp` |
+
+That is a genuinely good layer for the paths a person takes. It is not
+uniform coverage of the stack.
+
+---
+
+## 2. Coverage per service, measured
+
+Each of the 32 services against the nine test entry points, by name:
+
+| covered | service | by |
+|---|---|---|
+| ✅ | argus | acceptance, e2e-check, health, domain-check |
+| ✅ | authelia | acceptance, functional-test, health, audit-auth |
+| ✅ | open-webui | acceptance, e2e-check, functional-test, health, domain-check, audit-auth |
+| ✅ | litellm | acceptance, e2e-check, functional-test, health |
+| ✅ | grafana | acceptance, functional-test, health, domain-check, audit-auth |
+| ✅ | traefik | acceptance, functional-test, health, domain-check, audit-auth |
+| ✅ | langfuse | acceptance, health, audit-auth |
+| ✅ | prometheus, alertmanager, node-exporter, nvidia-smi-exporter, cadvisor, loki, redis, postgres, power-limits, clickhouse | acceptance/health only |
+| ✅ | llamacpp, vllm | e2e-check, health, smoke/bench |
+| ⚠️ | admin-panel, model-init, tls-init | one script each |
+| ❌ | **auth-init** | nothing |
+| ❌ | **identity-proxy** | nothing |
+| ❌ | **prometheus-secrets** | nothing |
+| ❌ | **ollama** | nothing |
+| ❌ | **cpu-temp-exporter** | nothing |
+| ❌ | **dcgm-exporter** | nothing |
+| ❌ | **langfuse-worker** | nothing |
+| ❌ | **minio** | nothing |
+| ❌ | **promtail** | nothing |
+| ❌ | **vllm-secondary** | nothing |
+
+Ten services are named by no test at all.
+
+### The bigger caveat: skipped is not passed
+
+`acceptance.py` is deliberately profile-aware — it emits `SKIP` rather than
+`FAIL` for a service whose profile is off, and the exit code stays 0. On the
+default deployment (`gateway,proxy,auth,smi,llamacpp,argus`) that means the
+whole of `tracing` (langfuse, langfuse-worker, clickhouse, minio), `logging`
+(loki, promtail), `cadvisor`, `dcgm`, `vllm`, `vllm-secondary` and `ollama`
+are **reported green without being exercised**. A green run says "nothing
+failed", not "everything passed".
+
+---
+
+## 3. What is not tested, categorised
+
+| # | gap | why it matters |
+|---|---|---|
+| G1 | **Ten services have no test** | auth-init and prometheus-secrets build files other services depend on; if they regress, everything downstream fails confusingly |
+| G2 | **Profile-gated stacks are skipped by default** | tracing, logging, cadvisor, dcgm, multi-model are shipped and claimed, never run |
+| G3 | **Restore has no test** | `backup.sh --restore` is the highest-risk operation in the repository and the only one that can destroy data. `--verify` runs its checksums, but nothing restores and compares |
+| G4 | **The airgap round trip is manual** | bundle → transfer → `load.sh` was verified by hand once. Nothing keeps it working |
+| G5 | **`preflight.sh` / `check_mounts.py` are manual** | only synthetic payloads I ran by hand; no test in the suite |
+| G6 | **`with-ca.sh` is manual** | the host-trust path for `dsh`, curl, python and git |
+| G7 | **Built images other than Argus** | admin-panel, identity-proxy and the cpu-temp-exporter image have no build-time test |
+| G8 | **No browser tests at all** | `functional-test.py` is an HTTP client with a cookie jar. It proves the endpoints; it cannot prove JavaScript, rendering, the tool picker, or SSE delivered token-by-token |
+| G9 | **No client-side tests** | Qwen Code, Hermes, DSH, the OpenAI SDK and MCP clients are documented, never executed |
+| G10 | **No upgrade or rollback test** | changing `ARGUS_VERSION` or an image tag and rolling back is untested |
+| G11 | **Disaster recovery is untested** | restore onto a *clean host*, which is the actual scenario |
+| G12 | **Windows / WSL** | every `.ps1` is unexercised here |
+
+---
+
+## 4. Server-side tests
+
+"Server side" = runs on the host or inside `llm-net`, asserting the stack's own
+contract. None of these need a browser.
+
+### S1 — Configuration and compose integrity *(partial: `preflight.sh`)*
+
+| test | asserts | status |
+|---|---|---|
+| S1.1 | `docker compose config` resolves with only `.env` edited | exists in preflight |
+| S1.2 | every bind mount resolves to real content, live **and** on a fresh clone | exists (`check_mounts.py planned`/`containers`) |
+| S1.3 | a missing required variable names the variable | manual only |
+| S1.4 | every profile combination renders | **missing** |
+| S1.5 | `env-samples/*.env` each render against the current compose | **missing** — a sample that no longer matches is invisible today |
+
+### S2 — Service contract, per service
+
+For **every** service, not just the 22 today:
+
+| test | asserts |
+|---|---|
+| S2.1 | the container reaches its own healthcheck within a bounded time |
+| S2.2 | a functional probe (not just liveness) returns the expected shape |
+| S2.3 | it logs no `ERROR`/`FATAL` in the first 60 s |
+| S2.4 | it is absent when its profile is off, and present when on |
+
+**Specifically missing:** `auth-init` (its three output files exist, are parseable
+and have the right modes), `prometheus-secrets` (the token is 0600 and non-empty),
+`identity-proxy` (it actually rewrites the `user` field), `ollama` (the embedding
+model is present and returns a 768-vector), `cpu-temp-exporter` (a reading is
+emitted), `dcgm-exporter`, `promtail` (a log line reaches Loki), `langfuse-worker`
+(a trace reaches ClickHouse), `minio` (a bucket exists), `vllm-secondary`
+(`api2.<domain>` serves its model).
+
+### S3 — Identity *(good: `audit-auth.sh`, `functional-test.py`)*
+
+| test | status |
+|---|---|
+| S3.1 | OIDC discovery + real code exchange per client, claims correct | exists |
+| S3.2 | forwardAuth allows/bypasses/denies per hostname per the access rules | **partial** — the happy path is covered; the **deny** cases are not |
+| S3.3 | `PROTECTED_CHAIN=protected-chain@file` (basic auth, `auth` profile off) | **missing** |
+| S3.4 | `config/authelia/directory/users.yml` is hash-free and Argus can read it while `users.yml` stays 0600 | **missing** — verified by hand once |
+| S3.5 | rotating `AUTHELIA_STORAGE_ENCRYPTION_KEY` makes `auth-init` refuse to start | **missing** — the guard exists, untested |
+
+### S4 — Gateway *(good)*
+
+Covered by `functional-test.py`. Missing: per-person **rate** limits (as opposed
+to spend), and behaviour when the engine is down (retry, then a clear error).
+
+### S5 — Argus *(strong unit, weak integration)*
+
+Unit is 884 tests. Missing at the stack level: index → MCP → per-token ACL end to
+end against a real GitLab (the `deploy/test-gitlab/` fixture exists but is not
+wired into a suite), and the audit JSON stream actually reaching Loki.
+
+### S6 — Data and disaster recovery
+
+| test | asserts | status |
+|---|---|---|
+| S6.1 | `backup.sh` produces a complete directory and `--verify` passes | **missing** |
+| S6.2 | **restore round trip**: back up, destroy the volumes, restore, and compare row counts and file counts | **missing** — the most important test in this document |
+| S6.3 | `--restore --with-config` restores `.env` and `config/` | **missing** |
+| S6.4 | `--install-timer` produces a working systemd unit | **missing** |
+| S6.5 | restore onto a **clean host** (no prior volumes) | **missing** (G11) |
+
+### S7 — Observability
+
+Every scrape target `up == 1` **for the profiles that are on**; rule files load;
+one alert is driven from a synthetic metric to Alertmanager and observed. Today
+only "the datasource is healthy" is checked.
+
+### S8 — Ingress and TLS
+
+Covered well by `domain-check.sh` and `acceptance.py` for routes. Missing:
+`api2`, `s3` and the `metrics` sub-routes per engine; and that a **denied**
+hostname really is denied.
+
+### S9 — Supply and offline
+
+| test | status |
+|---|---|
+| S9.1 | airgap bundle builds, its checksums verify, and `load.sh --check` passes | manual once |
+| S9.2 | full round trip: build → extract → load → `up` → the stack serves | **missing** |
+| S9.3 | the stack starts with `--network none` on the compose network, i.e. genuinely offline | **missing** — this is what the offline commits claim |
+| S9.4 | images build from a clean cache (all three local ones) | **missing** |
+
+### S10 — Migrations and upgrades
+
+`argus index` twice, compose `up` twice, `down`/`up`, and a version rollback.
+The repo has been bitten by idempotency before; nothing asserts it now.
+
+---
+
+## 5. Client-side tests
+
+"Client side" = a consumer **outside** the stack. These are the tests that would
+have caught the two problems this session opened with — DSH unable to reach the
+API and Open WebUI unable to register Argus — because both were client-side
+failures that every server-side check called healthy.
+
+### C1 — HTTP API clients
+
+| test | asserts |
+|---|---|
+| C1.1 | `curl` with the CA gets `/v1/models`, and lists exactly one model by its real name |
+| C1.2 | an OpenAI SDK (`openai` python) completes a chat through `gateway.<domain>` |
+| C1.3 | streaming: tokens arrive incrementally, not as one buffered body |
+| C1.4 | no key → 401; bad key → 401; over-budget → 429 with a usable message |
+| C1.5 | without the CA → a certificate error, i.e. the stack is **not** accidentally plaintext |
+
+### C2 — TLS trust per runtime *(G6)*
+
+`with-ca.sh` must be proven for each runtime, because each reads a different
+variable:
+
+| test | runtime | variable |
+|---|---|---|
+| C2.1 | Node | `NODE_EXTRA_CA_CERTS` (adds) |
+| C2.2 | Python `requests`/`httpx`/`urllib` | `SSL_CERT_FILE` (replaces) |
+| C2.3 | curl | `CURL_CA_BUNDLE` (replaces) |
+| C2.4 | git | `GIT_SSL_CAINFO` (replaces) |
+| C2.5 | and that C2.2–C2.4 still verify a **public** host, proving the combined bundle is correct |
+
+### C3 — Agent integrations
+
+| test | asserts |
+|---|---|
+| C3.1 | DeepSeek Harness reaches the API with `NODE_EXTRA_CA_CERTS` set before launch |
+| C3.2 | Qwen Code, from the documented `settings.json`, lists the model and completes |
+| C3.3 | Hermes connects, lists tools and completes (see `docs/HERMES.md`) |
+| C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools |
+| C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `deploy/test-gitlab/` exists to answer |
+
+### C4 — Browser *(G8, entirely missing)*
+
+The only layer nothing touches. Minimum viable set, headless (Playwright):
+
+| test | asserts |
+|---|---|
+| C4.1 | `https://admin.<domain>` follows the SSO redirect chain to the panel and back |
+| C4.2 | the self-signed certificate produces a warning that can be accepted, and the page then loads |
+| C4.3 | a chat in Open WebUI renders a streamed answer incrementally |
+| C4.4 | the Argus tool appears in the tool picker for a non-admin |
+| C4.5 | all nine Grafana dashboards render with data, no "datasource not found" |
+| C4.6 | sign-out ends the session at Authelia and the app |
+
+### C5 — Recovery from the client's point of view
+
+After a restore (S6.2), an existing per-person API key still works and the
+person's spend history is still there. A restore that silently invalidates every
+key is a failure that S6.2 alone would not catch.
+
+---
+
+## 6. Priority
+
+Ordered by (risk × likelihood), not by effort:
+
+| # | test | why first |
+|---|---|---|
+| 1 | **S6.2 restore round trip** | the only operation that can destroy data, and untested |
+| 2 | **S1.5 env-samples render** | cheap; every sample is a promise the compose file has not broken |
+| 3 | **S2 for the ten unreferenced services** | closes the largest named hole |
+| 4 | **C2 TLS trust per runtime** | this is the failure users actually hit; four small tests |
+| 5 | **S9.3 genuinely offline start** | the offline commits claim it; nothing checks it |
+| 6 | **S3.4 hash-free account list** | just added, verified once by hand |
+| 7 | **S9.1/S9.2 airgap round trip** | verified once by hand, easy to regress |
+| 8 | **C3.5 per-person ACL against test-gitlab** | the security property the whole design rests on |
+| 9 | **S10 idempotency** | two `up`s, two indexes, one `down`/`up` |
+| 10 | **C4 browser** | highest effort, and the only way to test the UI layer at all |
+
+---
+
+## 7. Running what exists
+
+```bash
+cd llm-stack
+
+# unit (no stack needed)
+docker build --target test -t argus:test .. && docker run --rm argus:test
+
+# with the stack up
+make health          # container state + in-network probes
+make smoke           # API surface
+./scripts/domain-check.sh
+./scripts/audit-auth.sh
+./scripts/acceptance.py        # note: SKIP is not PASS
+./scripts/functional-test.py   # the person-facing flows
+
+# from inside the network
+docker run --rm --network llm-net -e MK=<master-key> \
+  -v "$PWD/scripts:/s:ro" python:3.13-slim python /s/e2e-check.py
+```
+
+**Read the SKIP lines.** A green `acceptance.py` on the default profiles has not
+exercised tracing, logging, cadvisor, dcgm, the second model or Ollama.
