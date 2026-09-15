@@ -221,9 +221,13 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
             # config, and the credential is the OAuth token bought with the
             # password. `git_password` returns whichever mode is configured,
             # and git accepts both against the `oauth2` username.
+            # gitlab_cfg carries the TLS policy for the clone itself. Without
+            # it a self-signed GitLab enumerates projects fine and then fails
+            # every clone, which reads as a credential or URL problem.
             mirror_dir = ensure_mirror(cfg.index, project,
                                        clone_url=project.http_url,
-                                       token=credentials.git_password(cfg.gitlab))
+                                       token=credentials.git_password(cfg.gitlab),
+                                       gitlab_cfg=cfg.gitlab)
             branches = select_branches(list_branches(mirror_dir),
                                        cfg.index.branches,
                                        project.default_branch)

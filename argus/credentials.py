@@ -23,6 +23,7 @@ import threading
 
 import httpx
 
+from . import tls
 from .config import GitLabConfig
 
 
@@ -141,7 +142,7 @@ def credential(cfg: GitLabConfig, *,
         return "Authorization", f"Bearer {cached}"
 
     owns = client is None
-    client = client or httpx.Client(timeout=15.0)
+    client = client or tls.client_for(cfg, timeout=15.0)
     try:
         token = _exchange(cfg, client)
     finally:

@@ -10,7 +10,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import IndexConfig
+from . import tls
+from .config import GitLabConfig, IndexConfig
 from .gitlab import Project
 
 
@@ -105,18 +106,29 @@ def _askpass_program(askpass_dir: Path) -> Path:
     return py_path
 
 
-def _auth_env(index_cfg: IndexConfig, token: str | None) -> dict[str, str] | None:
+def _auth_env(index_cfg: IndexConfig, token: str | None,
+              gitlab_cfg: GitLabConfig | None = None) -> dict[str, str] | None:
     """Build the subprocess environment for a credentialed git operation.
 
     Returns None (subprocess.run then inherits the current environment
-    unchanged) when no token is given -- the existing behaviour every
-    local-path test in tests/test_mirror.py depends on.
+    unchanged) when there is neither a token NOR a TLS policy to apply -- the
+    existing behaviour every local-path test in tests/test_mirror.py depends on.
+
+    A TLS policy present is enough on its own to build an environment, because
+    the token and the certificate are independent failures: a GitLab behind a
+    private CA rejects every clone even when the credential is perfect, and
+    `git` reads neither httpx's configuration nor Python's. Leaving this to
+    the token's presence meant an operator who configured only `ca_cert` got a
+    clone that failed exactly as if they had configured nothing.
     """
-    if not token:
+    if not token and gitlab_cfg is None:
         return None
     env = dict(os.environ)
-    env["GIT_ASKPASS"] = str(_askpass_program(index_cfg.data_dir / ".askpass"))
-    env[ARGUS_TOKEN_ENV] = token
+    if token:
+        env["GIT_ASKPASS"] = str(_askpass_program(index_cfg.data_dir / ".askpass"))
+        env[ARGUS_TOKEN_ENV] = token
+    if gitlab_cfg is not None:
+        tls.git_env(gitlab_cfg, env)
     return env
 
 
@@ -179,8 +191,9 @@ def _branch_dir(branch: str) -> str:
 
 
 def ensure_mirror(index_cfg: IndexConfig, project: Project, *,
-                  clone_url: str, token: str | None = None) -> Path:
-    env = _auth_env(index_cfg, token)
+                  clone_url: str, token: str | None = None,
+                  gitlab_cfg: GitLabConfig | None = None) -> Path:
+    env = _auth_env(index_cfg, token, gitlab_cfg)
     secrets = (token,) if token else ()
     # credential.helper is cleared for this invocation only -- a `-c`, never
     # written to any config file -- so a configured system/global helper

@@ -296,6 +296,10 @@ fi
 echo
 echo "  Next:"
 echo "    cp env-samples/<one>.env .env   # then fill in SECRETS"
-echo "    docker compose up -d"
+echo "    make up                         # runs the preflight, then docker compose up -d"
+echo
+echo "  'make up' first checks that every bind mount resolves to real content."
+echo "  Starting with a plain 'docker compose up -d' after this checkout has"
+echo "  moved gives you four unrelated-looking crash loops instead of an error."
 echo
 exit $ISSUES

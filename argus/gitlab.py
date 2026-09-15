@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from . import credentials
+from . import credentials, tls
 from .config import GitLabConfig
 
 PER_PAGE = 100
@@ -27,7 +27,7 @@ class Project:
 def list_projects(cfg: GitLabConfig, *,
                   client: httpx.Client | None = None) -> list[Project]:
     owns_client = client is None
-    client = client or httpx.Client(timeout=30.0)
+    client = client or tls.client_for(cfg, timeout=30.0)
     projects: list[Project] = []
     try:
         for page in range(1, MAX_PAGES + 1):
@@ -117,7 +117,7 @@ def enumeration_health(cfg: GitLabConfig, *,
                        client: httpx.Client | None = None) -> EnumerationHealth:
     """Probe whether `list_projects` can see the whole estate."""
     owns_client = client is None
-    client = client or httpx.Client(timeout=30.0)
+    client = client or tls.client_for(cfg, timeout=30.0)
     headers = credentials.headers(cfg, client=client)
     try:
         user = client.get(f"{cfg.url}/api/v4/user", headers=headers)

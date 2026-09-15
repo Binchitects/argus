@@ -151,7 +151,7 @@ The `test` stage runs the **whole suite inside the image** before any runtime
 layer is produced, so a build cannot succeed with failing tests:
 
 ```bash
-docker build --target test -t argus:test .     # 827 passed
+docker build --target test -t argus:test .     # 877 passed
 docker build --target server -t argus:server . # 493 MB
 ```
 
@@ -159,7 +159,7 @@ Verified on the built image:
 
 | | |
 |---|---|
-| tests, inside the container | **827 passed** |
+| tests, inside the container | **877 passed** |
 | ctags | **Universal Ctags 5.9.0** — pinned; drift fails the build |
 | runs as | `uid=10001(argus)` — **never root** |
 | image size | **493 MB** |

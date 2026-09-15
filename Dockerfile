@@ -105,6 +105,16 @@ RUN groupadd --gid "${ARGUS_GID}" argus \
 
 COPY pyproject.toml README.md ./
 COPY argus/ ./argus/
+# The host's file modes ride along with the copy, and a source file written
+# under a restrictive umask (0600, which is what an editor or tool honouring
+# umask 077 produces) stays unreadable to the `argus` user this image switches
+# to below. That failure is deferred and silent, which is why it gets a
+# build-time fix rather than a note: `serve` starts, /healthz answers 200,
+# every container reports healthy, and only a request that happens to import
+# that module dies -- with a PermissionError from inside the import machinery.
+# Observed exactly that here after a new module was added by a tool that wrote
+# it 0600: `argus serve` came up healthy and the indexer could not import it.
+RUN chmod -R a+rX ./argus
 # [pgvector]: ships the optional Postgres backend so a deployment can select
 # it with ARGUS_VECTOR_BACKEND=pgvector without rebuilding. psycopg is ~10 MB
 # and imported lazily, so it costs nothing on the default sqlite-vec path.
