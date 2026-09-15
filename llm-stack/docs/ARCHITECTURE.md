@@ -231,6 +231,14 @@ The gateway and Argus authenticate the caller, not a browser session:
   it can answer with exactly the repositories that person may read. Replacing it
   with an SSO session would erase the per-caller identity the ACL is built on.
 
+  Argus still has to map a chat user's email to a GitLab username, which means
+  reading Authelia's account list — and `users.yml` holds password hashes at
+  mode 600. So the admin panel publishes a **hash-free** copy into
+  `config/authelia/directory/users.yml` (usernames, emails, display names;
+  disabled accounts left out) and Argus mounts only that directory. The panel
+  rewrites it on every account change and re-syncs every 30 s, so a hand edit of
+  `users.yml` reaches Argus without a restart.
+
 ---
 
 ## 6. Request flows
@@ -297,7 +305,7 @@ prometheus ──scrape──► node-exporter, nvidia-smi-exporter, cpu-temp-ex
      │
      ├─ rules in config/prometheus/rules/*.yml
      ├─ firing alerts ──► alertmanager ──► (filesystem notifier)
-     └─ datasource ──► grafana ──► 8 provisioned dashboards
+     └─ datasource ──► grafana ──► 9 provisioned dashboards
 ```
 
 Per-person token usage is **not** scraped: LiteLLM's `/metrics` is an
@@ -314,7 +322,7 @@ same spend tables the LiteLLM admin UI reads.
 | service | image | what it does |
 |---|---|---|
 | `traefik` | `traefik:v3.6.7` | the only published ports. Terminates TLS, routes by `Host(...)` label, applies middleware chains. Docker provider scoped to this compose project by label, file provider watches `config/traefik/dynamic/` |
-| `tls-init` | `authelia/authelia:4.39` | one-shot. Generates the self-signed certificate for `<domain>` and `*.<domain>` into `traefik-certs`, reuses it, and regenerates it when `LLM_DOMAIN` changes. Also copies the public cert and a public+private bundle to `config/traefik/certs/` for host-side tools |
+| `tls-init` | `authelia/authelia:4.39` | one-shot. Generates the self-signed certificate for `<domain>` and `*.<domain>` into `traefik-certs`, reuses it, and regenerates it when `LLM_DOMAIN` changes. Also builds `/certs/bundle.crt` — the public roots, this certificate, and **every `.crt`/`.pem` dropped in `config/ca/`** — so one company CA can be trusted stack-wide, and copies the public cert and the bundle to `config/traefik/certs/` for host-side tools |
 
 Traefik's Docker provider is constrained by
 ``Label(`com.docker.compose.project`, ...)``. Without that, router names are a
@@ -365,7 +373,7 @@ clients cached `/model/info` and showed every alias as a separate model.
 | service | image | what it does |
 |---|---|---|
 | `open-webui` | `ghcr.io/open-webui/open-webui:main` | chat. OIDC login, forwards the person's identity to the gateway, and registers Argus as an MCP tool when `ARGUS_CHAT_CLIENT_TOKEN` is set |
-| `argus` | built from this repository (`target: server`) | MCP code-search server over the private GitLab index |
+| `argus` | built from this repository (`target: server`) | MCP code-search server over the private GitLab index. Every answer is also written as a JSON audit line — who asked, which repositories were consulted, what was returned — which is what the Argus dashboard reads |
 
 ### 7.6 Observability
 
@@ -374,7 +382,7 @@ clients cached `/model/info` and showed every alias as a separate model.
 | `prometheus` | `prom/prometheus:v3.1.0` | always | scrapes 13 jobs; rules in `config/prometheus/rules/` |
 | `prometheus-secrets` | `prom/prometheus:v3.1.0` | always | one-shot. Puts the engine's scrape token into a volume Prometheus mounts read-only |
 | `alertmanager` | `prom/alertmanager:v0.28.0` | always | receives firing alerts. The default receiver is `null`, so alerts are visible in the UI and sent nowhere until you configure one |
-| `grafana` | `grafana/grafana:11.5.1` | always | 8 provisioned dashboards (Prometheus, Loki, Alertmanager and Postgres datasources) |
+| `grafana` | `grafana/grafana:11.5.1` | always | 9 provisioned dashboards (Prometheus, Loki, Alertmanager and Postgres datasources), including **Argus**: index size, query latency and audit events |
 | `node-exporter` | `prom/node-exporter:v1.9.0` | always | host CPU, memory, disk, network |
 | `nvidia-smi-exporter` | `utkuozdemir/nvidia_gpu_exporter:1.3.2` | `smi` | GPU via NVML |
 | `cpu-temp-exporter` | `python:3.13-slim` + `deploy/cpu-temp-exporter/exporter.py` | `smi` | CPU package temperature, which NVML does not report |
@@ -477,6 +485,7 @@ rather than designed. This table is the short path from symptom to cause.
 | `config/traefik/auth/users.htpasswd` | **yes**, every `up` | no |
 | `config/traefik/certs/*.crt` | **yes**, by `tls-init` | no |
 | `config/prometheus/secrets/llamacpp.token` | **yes** | no |
+| `config/authelia/directory/` | **yes** — the hash-free account list the admin panel publishes for Argus | no; the directory itself is kept with a `.gitkeep` |
 | `config/argus/tls/` | empty; you drop a CA here | yes, in the airgap/private-CA case |
 | `env-samples/*.env` | no | they are templates; copy one to `.env` |
 

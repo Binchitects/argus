@@ -52,7 +52,7 @@ Two consequences:
 ## 3. STACK
 
 **`COMPOSE_PROFILES`** — which parts of the stack run. Everything not named here
-is not created. See §9 for the full list. Adding a profile and running
+is not created. See §15 for the full list. Adding a profile and running
 `docker compose up -d` creates only the new containers.
 
 **`COMPOSE_PROJECT_NAME`** *(default `llmservice`)* — prefixes container names,
@@ -305,7 +305,36 @@ blobs), on the same Postgres as LiteLLM.
 
 ---
 
-## 13. Values compose derives — not in `.env`
+## 13. Backup
+
+`scripts/backup.sh` writes everything a restore needs into one dated directory.
+Every setting lives in `.env`:
+
+| variable | default | what it does |
+|---|---|---|
+| `BACKUP_DIR` | `./backups` | where backups go. **Put it on a different disk from the data it protects** |
+| `BACKUP_COPY_DIR` | empty | a second, verified copy of every good backup, on **another physical disk**. Empty means none — and then one failed disk takes the data and every backup of it |
+| `BACKUP_KEEP` | `14` | how many to keep. Older ones are removed *after* a good backup, never before |
+| `BACKUP_INCLUDE_LOGS` | `1` | also archive Loki's logs and Prometheus's metrics. Off is much smaller and loses the history |
+| `BACKUP_TIME` | `03:30` | when the systemd timer runs it (`HH:MM`, or any `OnCalendar` value). Installed by `sudo ./scripts/backup.sh --install-timer` |
+
+One backup is one directory, `BACKUP_DIR/<date>_<time>/`:
+
+* `postgres.sql.gz` — a `pg_dumpall` of the gateway database (people, API keys,
+  budgets, spend), taken **from the running server** so it is consistent.
+* `volumes/<name>.tar.gz` — every other named volume. SQLite databases inside
+  them (chat history, Grafana, Authelia sessions, the Argus index and audit) are
+  copied through SQLite's own online backup, so a write in progress cannot tear
+  them.
+* `config/` — `.env`, every compose file in `COMPOSE_FILE`, and `config/`.
+
+`--list` shows what is present, `--verify [DIR]` checks one against its
+checksums, and `--restore --from DIR` puts the volumes and the database back
+(with the stack stopped); `--with-config` also restores `.env` and `config/`.
+
+---
+
+## 14. Values compose derives — not in `.env`
 
 Do not add these to `.env`; they are composed from the ones above and would be
 overwritten in meaning if you set them independently.
@@ -321,10 +350,15 @@ overwritten in meaning if you set them independently.
 | `LHM_URL` | `http://host.docker.internal:8085/data.json` — one of three sources `cpu-temp-exporter` tries, in order: Linux `/sys/class/hwmon`, then LibreHardwareMonitor, then ACPI thermal zones. It exists because node-exporter's `node_hwmon_temp_celsius` has **zero series** on a Windows/WSL2 host — the kernel exposes no thermal sensors — and `windows_exporter` has no core-temperature collector at all |
 | `COMPOSE_PROJECT_NAME` (in Traefik) | `@COMPOSE_PROJECT_NAME@` in `traefik.yml`, replaced by `sed` at startup |
 | `POSTGRES_USER` / `POSTGRES_DB` | `LLM_PG_USER` / `llmservice` |
+| `OAUTH_ADMIN_ROLES` | `ADMIN_GROUP` (default `admins`) — the Authelia group that becomes a Grafana/Open WebUI admin |
+| `OAUTH_ALLOWED_ROLES` | `*` — any Authelia user may sign in; authorisation comes from the group claim |
+| `AUTHELIA_NTP_DISABLE_STARTUP_CHECK` | `"true"` — Authelia starts without reaching an NTP server, so a host with no internet is not a failed start |
+| `OFFLINE_MODE`, `CHECKPOINT_DISABLE`, `LITELLM_LOCAL_MODEL_COST_MAP` | LiteLLM does not phone home and uses its bundled model cost map instead of fetching one |
+| `GF_PLUGINS_PREINSTALL_DISABLED`, `GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES` | Grafana neither preinstalls nor checks for plugins over the network |
 
 ---
 
-## 14. Profiles
+## 15. Profiles
 
 `COMPOSE_PROFILES` is a comma-separated list. See
 [ARCHITECTURE.md §3](ARCHITECTURE.md#3-profiles-what-is-running-and-why-it-is-opt-in)
@@ -355,7 +389,7 @@ internal names; without `auth`, `PROTECTED_CHAIN` must be set to
 
 ---
 
-## 15. Files under `config/`
+## 16. Files under `config/`
 
 Everything here is committed and travels with the repository. **Nothing needs
 editing for a normal deployment** — the `.env` covers it — but each file is the
@@ -377,10 +411,11 @@ place to go for behaviour the `.env` does not expose.
 | `promtail/promtail-config.yml` | which logs to collect; reads the Docker socket and container log files |
 | `grafana/provisioning/datasources/datasources.yml` | Prometheus, Loki, Alertmanager **and Postgres** (the spend tables, because LiteLLM's `/metrics` is enterprise-only and vLLM's metrics have no user dimension) |
 | `grafana/provisioning/dashboards/dashboards.yml` | how dashboard JSON is loaded |
-| `grafana/dashboards/*.json` | eight dashboards: **LLM Overview**, **Usage by person**, **GPU Hardware**, **Resources (CPU, Memory, GPU)**, **Stack Health & Alerts**, **Stack Performance**, **Host & Containers**, **Logs** (needs the `logging` profile). They reference fixed datasource UIDs, which is why those UIDs are pinned in the datasource file |
+| `grafana/dashboards/*.json` | nine dashboards: **LLM Overview**, **Usage by person**, **GPU Hardware**, **Resources (CPU, Memory, GPU)**, **Stack Health & Alerts**, **Stack Performance**, **Host & Containers**, **Logs** (needs the `logging` profile) and **Argus** (index size, query latency, audit events) They reference fixed datasource UIDs, which is why those UIDs are pinned in the datasource file |
 | `postgres/init/01-create-databases.sql` | creates the `litellm`, `langfuse` and `argus` databases and the `vector` extension. Runs **once**, only when `postgres-data` is empty |
 | `argus/config.yaml` | container-side Argus config: the GitLab URL **as a default**, and where the index and packs live |
 | `argus/tls/` | empty. Drop a private CA here and point `ARGUS_GITLAB_CA_CERT` at it |
+| `ca/` | **stack-wide** extra CAs. `tls-init` appends every `.crt`/`.pem` here to `/certs/bundle.crt`, which the `argus` container verifies against (`SSL_CERT_FILE`, `GIT_SSL_CAINFO`) and every container that mounts `traefik-certs` can use. Only public certificates belong here, never a private key. The two mechanisms compose: a CA in `ca/` covers the whole stack, `ARGUS_GITLAB_CA_CERT` narrows it to one GitLab and wins when both are set |
 
 ### Generated — do not edit
 
@@ -391,12 +426,13 @@ place to go for behaviour the `.env` does not expose.
 | `traefik/auth/users.htpasswd` | `auth-init` | every `up`, from `PROXY_AUTH_USER`/`PROXY_AUTH_PASSWORD` |
 | `traefik/certs/tls.crt`, `bundle.crt` | `tls-init` | every `up`. Copies for host-side tools; the private key never leaves the volume |
 | `prometheus/secrets/llamacpp.token` | `prometheus-secrets` | every `up` |
+| `authelia/directory/users.yml` | the admin panel | on every account change, plus a 30 s background sync. The **hash-free** copy of the account list that Argus mounts (`config/authelia/directory` → `/authelia`): usernames, emails and display names only, so `users.yml` itself can stay mode 600 with its password hashes. The directory is kept in the tree with a `.gitkeep`; only its contents are ignored |
 
 ### The `deploy/` directory
 
 | path | what it is |
 |---|---|
-| `deploy/admin-panel/` | the admin panel: `app.py` and its Dockerfile. Provisioning, credit, key rotation, the Model card |
+| `deploy/admin-panel/` | the admin panel: `app.py`, its Dockerfile and `entrypoint.sh` (which runs it as whatever uid owns `config/authelia`, and creates the account-list directory). Provisioning, credit, key rotation, the Model card |
 | `deploy/identity-proxy/` | turns Open WebUI's forwarded identity header into the `user` field LiteLLM enforces budgets against |
 | `deploy/cpu-temp-exporter/` | a small exporter for CPU package temperature, which NVML does not report |
 | `deploy/argus-local.yml` | an **override**: reuse an existing Argus index and pack estate instead of the named volume. Requires `ARGUS_HOME` |
@@ -404,7 +440,7 @@ place to go for behaviour the `.env` does not expose.
 
 ---
 
-## 16. Scripts and entry points
+## 17. Scripts and entry points
 
 All paths are relative to `llm-stack/`.
 
@@ -413,12 +449,12 @@ All paths are relative to `llm-stack/`.
 | `make up` | `scripts/preflight.sh`, then `docker compose up -d` |
 | `make preflight` | checks that every bind mount resolves to real content — catches a moved checkout before it becomes four unrelated crash loops |
 | `make ca` | prints the environment exports that make **host** tools (`dsh`, `curl`, python, git) trust the stack certificate, installing nothing |
-| `make airgap` | builds an offline bundle into `dist/` (§17) |
+| `make airgap` | builds an offline bundle into `dist/` (§18) |
 | `make down` / `make clean` | stop, keeping volumes / stop and delete every volume |
 | `make health` | `scripts/health.sh` — every enabled component |
 | `make smoke` | `scripts/smoke-test.sh` — end-to-end API verification |
 | `make bench` | `scripts/benchmark.sh` — concurrency sweep |
-| `make backup` | `scripts/backup.sh` — archives the stateful volumes |
+| `make backup` | `scripts/backup.sh` — one complete, verified backup (§13). `--list`, `--verify`, `--restore`, `--install-timer` |
 | `make logs S=<name>` | follow one service |
 | `scripts/with-ca.sh <cmd>` | run one command with the stack's certificate trusted |
 | `scripts/domain-check.sh` | verify every hostname routes and redirects correctly, without `/etc/hosts` entries |
@@ -429,7 +465,7 @@ The `.ps1` equivalents are for Windows hosts.
 
 ---
 
-## 17. Airgap bundles
+## 18. Airgap bundles
 
 `scripts/airgap-bundle.sh` produces a self-contained zip; `load.sh` inside it
 loads every image, restores Ollama's model volume, runs the preflight and
@@ -449,7 +485,7 @@ secret emptied, matched by name as well as by position.
 
 ---
 
-## 18. Env samples
+## 19. Env samples
 
 `env-samples/` holds complete deployments for specific model/card combinations.
 Each file's header records the hardware, the first-start download size, and what
