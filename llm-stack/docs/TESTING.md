@@ -222,7 +222,7 @@ variable:
 | C3.2 | Qwen Code, from the documented `settings.json`, lists the model and completes |
 | C3.3 | Hermes connects, lists tools and completes (see `docs/HERMES.md`) |
 | C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools |
-| C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `deploy/test-gitlab/` exists to answer |
+| C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `deploy/test-gitlab/` exists to answer. **Now verified** against a real GitLab CE: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. Still not automated — see below |
 
 ### C4 — Browser *(G8, entirely missing)*
 
@@ -243,6 +243,29 @@ After a restore (S6.2), an existing per-person API key still works and the
 person's spend history is still there. A restore that silently invalidates every
 key is a failure that S6.2 alone would not catch.
 
+### Verified by hand, 2026-09-15
+
+The per-person path was exercised end to end against a real GitLab CE for the
+first time, which had been the largest untested claim in the project:
+
+```bash
+docker compose -f deploy/test-gitlab/docker-compose.yml up -d   # first boot: minutes
+# seed.py shells out to `docker exec`, so it needs the CLI and the socket
+docker run --rm --user root --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$(command -v docker)":/usr/local/bin/docker \
+  -v "$PWD/deploy/test-gitlab:/t" -w /t --entrypoint python argus:latest /t/seed.py
+docker exec argus argus index --config /etc/argus/config.yaml
+```
+
+Two things that had to be right first, both now recorded in the code:
+
+* Argus could not reach GitLab at all until the fixture was running, and every
+  Open WebUI tool connection came back **401** — Argus rejects a chat user it
+  cannot resolve access for, and Open WebUI drops the tool silently.
+* The clone URL had to be rebased onto the configured GitLab: GitLab advertises
+  `http://localhost:8929`, which inside a container is the container itself.
+
 ---
 
 ## 6. Priority
@@ -258,7 +281,7 @@ Ordered by (risk × likelihood), not by effort:
 | 5 | **S9.3 genuinely offline start** | the offline commits claim it; nothing checks it |
 | 6 | **S3.4 hash-free account list** | just added, verified once by hand |
 | 7 | **S9.1/S9.2 airgap round trip** | verified once by hand, easy to regress |
-| 8 | **C3.5 per-person ACL against test-gitlab** | the security property the whole design rests on |
+| 8 | **Automate C3.5** — the per-person ACL passes by hand (see C3.5) but nothing runs it, and `verify.py` cannot on this checkout: its index DB lands on the NTFS volume where SQLite's WAL mode fails with "disk I/O error" |
 | 9 | **S10 idempotency** | two `up`s, two indexes, one `down`/`up` |
 | 10 | **C4 browser** | highest effort, and the only way to test the UI layer at all |
 
