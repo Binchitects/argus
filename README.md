@@ -377,11 +377,20 @@ shared credential, so it proves it is the chat client with `ARGUS_CHAT_CLIENT_TO
 and forwards the signed-in person's email; Argus reads that person's GitLab project
 memberships with the read-only service token. Two rules follow:
 
-- **A person's chat username must equal their GitLab username.** Argus maps the
-  email to the sign-in username in Authelia, then to the GitLab account with that
-  username; GitLab's *public* email is the fallback. A read-only token cannot see
-  private emails, so there is no other way to match. Use the GitLab username when
-  you add someone in the admin panel.
+- **Argus matches the person by their email address.** That address is what
+  Open WebUI forwards and the one identifier the whole stack agrees on, so the
+  chat account and the GitLab account do **not** have to share a username. What
+  the lookup can see depends on your GitLab token, and nothing in the API
+  response says which case you are in:
+
+  | service token | what `search=` can match |
+  |---|---|
+  | an **administrator** | the private email — any account resolves |
+  | read-only *(recommended)* | only the **public** email, which is empty by default |
+
+  So with a read-only token, either set the address as the profile's public
+  email, or name the chat account after the GitLab account — that path is still
+  tried, second. With an admin token, nothing needs matching.
 - **The chat-client token only works from inside the stack.** Open WebUI calls
   `http://argus:7700` on the compose network; the same token arriving through
   Traefik is refused, so a leaked token cannot claim someone else's email.
