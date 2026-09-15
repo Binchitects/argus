@@ -1900,7 +1900,15 @@ services:
       - ${LLM_CONFIG_DIR:-./config}/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
       - ${HOST_DOCKER_DIR:-/var/lib/docker}/containers:${HOST_DOCKER_DIR:-/var/lib/docker}/containers:ro
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:${DOCKER_SOCKET:-/var/run/docker.sock}:ro
-    command: -config.file=/etc/promtail/promtail-config.yml
+    # `-config.expand-env` is what lets the config's `keep` filter name THIS
+    # compose project instead of every container on the daemon -- see the
+    # comment on that filter. COMPOSE_PROJECT_NAME has to be in the
+    # environment for the substitution to resolve.
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-llmservice}
+    command:
+      - -config.file=/etc/promtail/promtail-config.yml
+      - -config.expand-env=true
     depends_on: [loki]
     logging: *default-logging
 

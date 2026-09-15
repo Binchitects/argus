@@ -22,7 +22,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from .. import access, acl, auditlog
 from ..config import Config
 from ..store import writes
-from ..store.db import connect, connect_audit, migrate
+from ..store.db import connect, connect_audit, connect_readonly, migrate
 from .errors import unauthorized
 from .tools import register_tools
 
@@ -459,7 +459,8 @@ _index_job: dict = {"state": "idle", "branches": [], "started": None,
 _index_lock = threading.Lock()
 
 
-def _run_index(cfg_path: str, branches: list[str]) -> None:
+def _run_index(cfg_path: str, branches: list[str],
+               allow_partial: bool = False) -> None:
     """Run `argus index` as a CHILD PROCESS, never in this one.
 
     create_app's contract is that the server never writes index data -- it
@@ -467,10 +468,23 @@ def _run_index(cfg_path: str, branches: list[str]) -> None:
     inbound traffic cannot mutate it. Indexing in-process would make that
     false. A child gets its own connection and its own write transaction, and
     the serve process keeps the guarantee it documents.
+
+    The child's output is both kept for the panel's live tail AND echoed to
+    this process's stdout. Both matter, for different readers: the panel shows
+    one run to one operator who is watching it, while stdout is what Docker
+    captures, which is what Promtail ships to Loki, which is what makes a run
+    visible in Grafana and readable a week later. Capturing without echoing
+    meant indexing was the one part of Argus with no log history at all --
+    the run happened, failed, and left nothing behind but an exit code.
     """
     argv = [sys.executable, "-m", "argus.cli", "index", "--config", cfg_path]
     for b in branches:
         argv += ["--branch", b]
+    if allow_partial:
+        # The panel's opt-in for "index what the token can see". Without a way
+        # to pass this, a refusal told the operator to re-run with a flag they
+        # had no way to supply from the UI -- a dead end that read as a bug.
+        argv.append("--allow-partial-enumeration")
     try:
         proc = subprocess.Popen(argv, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True)
@@ -481,6 +495,10 @@ def _run_index(cfg_path: str, branches: list[str]) -> None:
             del tail[:-200]          # bounded: an estate-wide pass is chatty
             with _index_lock:
                 _index_job["tail"] = list(tail)
+            # Verbatim, unprefixed: an audit line is one JSON object starting
+            # with {"ts", and the Promtail config selects on exactly that to
+            # lift event/outcome labels. A prefix would silently unhook it.
+            print(line.rstrip(), flush=True)
         rc = proc.wait()
     except Exception as exc:         # noqa: BLE001
         rc = -1
@@ -509,16 +527,20 @@ def _register_admin_routes(server, cfg) -> None:
         except Exception:            # noqa: BLE001
             body = {}
         branches = [b for b in (body.get("branches") or []) if isinstance(b, str) and b.strip()]
+        allow_partial = bool(body.get("allow_partial"))
         with _index_lock:
             if _index_job["state"] == "running":
                 return JSONResponse({"error": "an index run is already in progress",
                                      "started": _index_job["started"]}, status_code=409)
             _index_job.update(state="running", branches=branches,
+                              allow_partial=allow_partial,
                               started=time.time(), finished=None,
                               returncode=None, tail=[])
-        threading.Thread(target=_run_index, args=(cfg_path, branches),
+        threading.Thread(target=_run_index,
+                         args=(cfg_path, branches, allow_partial),
                          daemon=True).start()
-        return JSONResponse({"status": "started", "branches": branches})
+        return JSONResponse({"status": "started", "branches": branches,
+                             "allow_partial": allow_partial})
 
     @server.custom_route(ADMIN_PREFIX + "index/status", methods=["GET"])
     async def admin_index_status(request: Request) -> Response:

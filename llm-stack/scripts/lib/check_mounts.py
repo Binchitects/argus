@@ -59,6 +59,17 @@ here, and scanning it could cost more than the whole deployment.
 Non-regular sources -- the Docker socket, a device -- are only required to
 exist. `os.path.isfile` is False for a socket, so treating "not a file" as
 "missing" would fail on a perfectly healthy `/var/run/docker.sock`.
+
+A path that cannot be SEEN is not the same as a path that is not there. This is
+not a nicety: `/var/lib/docker` is mode 0710 root:root on a stock Docker install,
+so an ordinary user cannot stat anything inside it and `os.path.exists` returns
+False for `/var/lib/docker/containers` -- a directory that is plainly present,
+and that the daemon binds successfully because the daemon runs as root. Checking
+it naively made Promtail's log mount look broken, which turned "enable the
+logging profile" into "preflight says your checkout has moved" for every
+non-root operator. Absence is only concluded when every directory above the
+path is searchable; otherwise the answer is genuinely unknown, and unknown is
+not a failure.
 """
 from __future__ import annotations
 
@@ -98,9 +109,31 @@ def first_regular_file(directory: str, limit: int = _SCAN_LIMIT) -> bool:
     return False
 
 
+def invisible(source: str) -> bool:
+    """True when a missing path may simply be unreadable to us.
+
+    `/var/lib/docker/containers` is the case this exists for: Docker's root is
+    mode 0710 root:root, so an ordinary user cannot stat anything inside it and
+    `os.path.exists` is False for a directory that is plainly there. Only the
+    first existing ancestor decides -- if that directory is not searchable, we
+    cannot see below it and must not claim anything is missing.
+    """
+    current = os.path.dirname(os.path.abspath(source))
+    while not os.path.exists(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False                 # reached the root: genuinely absent
+        current = parent
+    return not os.access(current, os.X_OK)
+
+
 def why_not_real(source: str, project: str | None) -> str | None:
     """Why `source` is not usable bind-mount content, or None if it is fine."""
     if not os.path.exists(source):
+        if invisible(source):
+            # Present but not statable by us, and the Docker daemon -- which
+            # does the actual binding, as root -- can read it.
+            return None
         return f"{source} does not exist"
 
     if os.path.isdir(source):

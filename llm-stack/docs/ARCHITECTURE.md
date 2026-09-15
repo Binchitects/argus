@@ -97,7 +97,7 @@ key always starts; everything else needs its profile named.
 | `smi` | `nvidia-smi-exporter`, `cpu-temp-exporter` | GPU/CPU telemetry via NVML and the host's own sensors |
 | `dcgm` | `dcgm-exporter` | the alternative GPU exporter; heavier, more detail |
 | `cadvisor` | `cadvisor` | per-container CPU/memory |
-| `logging` | `loki`, `promtail` | log aggregation |
+| `logging` | `loki`, `promtail` | log aggregation. **In the default `COMPOSE_PROFILES`** |
 | `tracing` | `langfuse`, `langfuse-worker`, `clickhouse`, `minio`, `postgres`, `redis` | LLM request tracing |
 
 `postgres` and `redis` appear in several profiles on purpose: they are shared,
@@ -382,13 +382,13 @@ clients cached `/model/info` and showed every alias as a separate model.
 | `prometheus` | `prom/prometheus:v3.1.0` | always | scrapes 13 jobs; rules in `config/prometheus/rules/` |
 | `prometheus-secrets` | `prom/prometheus:v3.1.0` | always | one-shot. Puts the engine's scrape token into a volume Prometheus mounts read-only |
 | `alertmanager` | `prom/alertmanager:v0.28.0` | always | receives firing alerts. The default receiver is `null`, so alerts are visible in the UI and sent nowhere until you configure one |
-| `grafana` | `grafana/grafana:11.5.1` | always | 9 provisioned dashboards (Prometheus, Loki, Alertmanager and Postgres datasources), including **Argus**: index size, query latency and audit events |
+| `grafana` | `grafana/grafana:11.5.1` | always | 10 provisioned dashboards (Prometheus, Loki, Alertmanager and Postgres datasources), including **Argus** (audit events, query latency) and **Indexing** (index passes, per-repo outcomes and failures) |
 | `node-exporter` | `prom/node-exporter:v1.9.0` | always | host CPU, memory, disk, network |
 | `nvidia-smi-exporter` | `utkuozdemir/nvidia_gpu_exporter:1.3.2` | `smi` | GPU via NVML |
 | `cpu-temp-exporter` | `python:3.13-slim` + `deploy/cpu-temp-exporter/exporter.py` | `smi` | CPU package temperature, which NVML does not report |
 | `dcgm-exporter` | `nvcr.io/nvidia/k8s/dcgm-exporter` | `dcgm` | the heavier alternative to `nvidia-smi-exporter` |
 | `cadvisor` | `gcr.io/cadvisor/cadvisor:v0.52.1` | `cadvisor` | per-container CPU and memory |
-| `loki` + `promtail` | `grafana/loki:3.4.1`, `grafana/promtail:3.4.1` | `logging` | log aggregation. Promtail reads the Docker socket and container log files |
+| `loki` + `promtail` | `grafana/loki:3.4.1`, `grafana/promtail:3.4.1` | `logging` (**default on**) | log aggregation. Promtail reads the Docker socket and container log files under `HOST_DOCKER_DIR`, and keeps only this compose project's containers |
 | `langfuse` + `langfuse-worker` | `langfuse/langfuse:3` | `tracing` | LLM request tracing, backed by `clickhouse` and `minio` |
 
 ### 7.7 Host control

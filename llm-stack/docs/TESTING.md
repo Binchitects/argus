@@ -16,7 +16,8 @@ Every number here was measured against the tree, not estimated.
 
 | layer | entry point | asserts | needs |
 |---|---|---|---|
-| **Unit** | `pytest tests/` — **884 tests** | the Argus Python package: config, credentials, gitlab, mirror, tls, acl, access, resolve, worker, cli, packs, parse, store, mcpsrv, auditlog | nothing running; no Docker |
+| **Unit** | `pytest tests/` — **928 tests** | the Argus Python package: config, credentials, gitlab, mirror, tls, acl, access, resolve, worker, cli, packs, parse, store, mcpsrv, auditlog — plus `check_mounts.py`, the stack's preflight guard | nothing running; no Docker |
+| **Panel** | `python test_app.py` in the admin-panel image build | the Indexing card's rendered HTML: the run log, the per-repo table, exit-code meanings, the partial-enumeration opt-in, and that a non-admin gets no card | nothing running; no Docker |
 | **Acceptance** | `scripts/acceptance.py` | 7 groups — `config`, `routes`, `identity`, `infra`, `obs`, `ops`, `e2e`. Routes answer, OIDC discovery documents exist, scraping works, datasources are healthy | a running stack |
 | **E2E** | `scripts/e2e-check.py` | from **inside** the network: the engine serves the model the gateway advertises, an API call is attributed to the key that made it, a chat is attributed to the same person, an over-budget person is refused | a running stack |
 | **Functional** | `scripts/functional-test.py` | 36 checks of what a *person* does: SSO sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, self-signup refusal, per-person billing on both surfaces | `auth`,`gateway` profiles |
@@ -106,6 +107,22 @@ contract. None of these need a browser.
 | S1.4 | every profile combination renders | **missing** |
 | S1.5 | `env-samples/*.env` each render against the current compose | **missing** — a sample that no longer matches is invisible today |
 
+`check_mounts.py` now has its own unit tests in `tests/test_check_mounts.py`
+(run with the Argus suite; the file is copied into the image's test stage).
+
+They exist because enabling `logging` by default turned `preflight.sh` red on a
+perfectly healthy host. `/var/lib/docker` is mode 0710 root:root, so an ordinary
+user cannot stat anything inside it and `os.path.exists` returned **False for
+`/var/lib/docker/containers`** — a directory that is plainly there and that the
+daemon binds successfully, because the daemon is root. Preflight called it
+missing and told the operator their checkout had moved, with instructions to
+tear the stack down and delete directories that did not need deleting.
+
+The rule is now explicit: absence is only concluded when every directory above
+the path is searchable. "Cannot see it" is not "it is not there". The tests
+stub the filesystem rather than chmod-ing, because the suite runs as root and
+root is not subject to the bits this is about.
+
 ### S2 — Service contract, per service
 
 For **every** service, not just the 22 today:
@@ -142,9 +159,36 @@ to spend), and behaviour when the engine is down (retry, then a clear error).
 
 ### S5 — Argus *(strong unit, weak integration)*
 
-Unit is 906 tests. Missing at the stack level: index → MCP → per-token ACL end to
+Unit is 928 tests. Missing at the stack level: index → MCP → per-token ACL end to
 end against a real GitLab (the `deploy/test-gitlab/` fixture exists but is not
 wired into a suite), and the audit JSON stream actually reaching Loki.
+
+**The Indexing card was broken in three separate ways at once**, and every one
+of them was found by using the running stack rather than by reading it:
+
+1. **The log was thrown away the moment a run ended.** The card kept the
+   child's output only while `state == "running"`; afterwards it rendered
+   "exit 3" and nothing else. The reason was in the tail the whole time. This
+   is what "I press Index and always get an error" actually was — the error was
+   real, and the explanation was discarded by the UI.
+2. **`/admin/index/status` raised `NameError`.** `connect_readonly` was never
+   imported, so the per-repo freshness table was *always* empty, and the broad
+   `except` that caught it stored the message in a field the panel did not
+   render. "Never worked" looked exactly like "nothing indexed yet".
+3. **`impact_of` was dead for everyone** — see the note below, which belongs to
+   the same class of finding.
+
+There was also a dead end: Argus refuses to index when the token cannot see the
+whole estate, and its refusal says "re-run with `--allow-partial-enumeration`" —
+a flag the panel had no way to pass. The card now has an explicit opt-in,
+unchecked by default, and exit 3 points at it.
+
+`test_app.py` in the admin-panel image exists because the card is built by
+string concatenation with closures in it, and one of those closures rendered the
+repository list where the log should have been — plausible-looking and wrong.
+The check that catches it asserts on the HTML-*unescaped* text; the first
+version compared raw quotes and passed against the bug, which is its own small
+lesson about testing rendered output.
 
 **A whole tool was dead, and the suite said it was fine.** `impact_of` built its
 allowlist in a `TEMP TABLE`, but the server opens the index with
@@ -205,6 +249,23 @@ year default expiry on a blank `expires_at` — were each read off a live GitLab
 Every scrape target `up == 1` **for the profiles that are on**; rule files load;
 one alert is driven from a synthetic metric to Alertmanager and observed. Today
 only "the datasource is healthy" is checked.
+
+Log *ingestion* is the newest gap to close, and the first live start showed why
+it needs a test. Promtail's `keep` filter was documented as "only ingest this
+stack's containers" and its regex was `".+"` — every container on the daemon
+carrying any compose project label. The bundled test GitLab's whole log was
+being shipped into this deployment's Loki, which is both volume and another
+project's data appearing in this project's Grafana. It now matches
+`COMPOSE_PROJECT_NAME`, and Loki's per-stream rate limit was raised from its
+3MB/s default: Promtail reads each container's entire existing log file on first
+start, and Loki answered `429 — entry ignored` for most of the backlog, which is
+exactly the history an operator enables collection to get.
+
+| test | asserts | status |
+|---|---|---|
+| S7.1 | only this compose project's containers appear in Loki | verified by hand; **no test** |
+| S7.2 | `{event="index_start"}` … `{event="index_end"}` reach Loki with their labels | verified by hand; **no test** |
+| S7.3 | an index run that never reaches a repository still emits `index_end` | unit-tested (`test_a_refused_run_still_emits_index_end_with_the_reason`) |
 
 ### S8 — Ingress and TLS
 

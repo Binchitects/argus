@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim-bookworm AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
@@ -19,6 +19,24 @@ RUN pip install \
 
 WORKDIR /app
 COPY app.py .
+
+# ---------------------------------------------------------------- test ------
+# The Indexing card is built by string concatenation with closures in it, which
+# is how its log block came to render the repository list instead of the log
+# while still looking plausible. test_app.py is plain asserts; see its
+# docstring for why there is no pytest here.
+FROM base AS test
+COPY test_app.py .
+# The receipt is what makes this stage part of the build graph. BuildKit builds
+# only what the target depends on, so without something in `final` COPYing from
+# here, `--target final` would skip the checks entirely -- the same trap the
+# argus Dockerfile documents.
+RUN python test_app.py && echo "rendering checks: passed" > /app/.checked
+
+# --------------------------------------------------------------- runtime -----
+FROM base AS final
+COPY --from=test /app/.checked /app/.checked
+RUN rm /app/.checked
 
 RUN useradd --create-home --shell /usr/sbin/nologin panel
 # No USER: entrypoint.sh drops to the owner of the mounted config/authelia,

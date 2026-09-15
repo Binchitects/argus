@@ -446,10 +446,23 @@ for what each brings up; this is the short reference:
 | `smi` | `nvidia-smi-exporter`, `cpu-temp-exporter` |
 | `dcgm` | `dcgm-exporter` |
 | `cadvisor` | `cadvisor` |
-| `logging` | `loki`, `promtail` |
+| `logging` | `loki`, `promtail` — **on by default**, because it is what makes logs searchable at all |
 | `tracing` | `langfuse`, `langfuse-worker`, `clickhouse`, `minio`, `postgres`, `redis` |
 
 `llamacpp` and `vllm` are mutually exclusive in practice: both want the GPU.
+
+`logging` ships in the default `COMPOSE_PROFILES`, so a fresh deployment
+collects logs without opting in. Remove it from that list to turn collection
+off; nothing else depends on it. Two things make it work, and both are worth
+knowing before something looks broken:
+
+- **Promtail reads `HOST_DOCKER_DIR`**, which defaults to `/var/lib/docker`. A
+  rootless daemon or a custom `data-root` collects nothing until that path is
+  corrected. Preflight checks the mount, so a wrong path is caught before `up`
+  rather than showing up as an empty Grafana later.
+- **Promtail collects only this compose project's containers.** A second stack
+  on the same daemon — the bundled test GitLab, for instance — does not end up
+  in this deployment's Loki.
 
 Running **without** `proxy` is supported but means reaching services by their
 internal names; without `auth`, `PROTECTED_CHAIN` must be set to
@@ -479,7 +492,7 @@ place to go for behaviour the `.env` does not expose.
 | `promtail/promtail-config.yml` | which logs to collect; reads the Docker socket and container log files |
 | `grafana/provisioning/datasources/datasources.yml` | Prometheus, Loki, Alertmanager **and Postgres** (the spend tables, because LiteLLM's `/metrics` is enterprise-only and vLLM's metrics have no user dimension) |
 | `grafana/provisioning/dashboards/dashboards.yml` | how dashboard JSON is loaded |
-| `grafana/dashboards/*.json` | nine dashboards: **LLM Overview**, **Usage by person**, **GPU Hardware**, **Resources (CPU, Memory, GPU)**, **Stack Health & Alerts**, **Stack Performance**, **Host & Containers**, **Logs** (needs the `logging` profile) and **Argus** (index size, query latency, audit events) They reference fixed datasource UIDs, which is why those UIDs are pinned in the datasource file |
+| `grafana/dashboards/*.json` | ten dashboards: **LLM Overview**, **Usage by person**, **GPU Hardware**, **Resources (CPU, Memory, GPU)**, **Stack Health & Alerts**, **Stack Performance**, **Host & Containers**, **Logs**, **Argus** (audit events, query latency) and **Indexing** (index passes, per-repo outcomes and failures). They reference fixed datasource UIDs, which is why those UIDs are pinned in the datasource file |
 | `postgres/init/01-create-databases.sql` | creates the `litellm`, `langfuse` and `argus` databases and the `vector` extension. Runs **once**, only when `postgres-data` is empty |
 | `argus/config.yaml` | container-side Argus config: the GitLab URL **as a default**, and where the index and packs live |
 | `argus/tls/` | empty. Drop a private CA here and point `ARGUS_GITLAB_CA_CERT` at it |

@@ -63,6 +63,13 @@ COPY tests/ ./tests/
 # a later step deletes the file, so this stays a single explicit file.
 COPY deploy/agent_client_example.py ./deploy/
 
+# Same reasoning, one directory over. `check_mounts.py` is the preflight
+# bind-mount guard in llm-stack, and it is tested here with everything else
+# because a bug in it breaks `docker compose up` for every non-root operator.
+# Copying llm-stack/ wholesale would put a large tree -- and the deployment's
+# .env -- into an image layer for the sake of one file, so this names the file.
+COPY llm-stack/scripts/lib/check_mounts.py ./llm-stack/scripts/lib/
+
 RUN python -m pytest -q \
  && { echo "suite: passed"; \
       echo "ctags: $(ctags --version | head -1)"; \

@@ -1,6 +1,6 @@
 {
   "uid": "stack-logs",
-  "title": "Logs (Loki; needs the logging profile)",
+  "title": "Logs (Loki)",
   "tags": ["llmservice", "logs"],
   "timezone": "browser",
   "schemaVersion": 39,

@@ -433,7 +433,7 @@ recreates exactly the containers the change affects.
 | domain | `LLM_DOMAIN` | certificate and single sign-on follow; check with `./scripts/domain-check.sh --old <previous>` |
 | reachable from the network | `BIND_ADDRESS=0.0.0.0` | default `127.0.0.1` is this machine only |
 | ports | `TRAEFIK_HTTP_PORT`, `TRAEFIK_HTTPS_PORT` | |
-| which services run | `COMPOSE_PROFILES` | `argus` code index, `tracing` Langfuse, `logging` Loki, `cadvisor`, `dcgm` |
+| which services run | `COMPOSE_PROFILES` | `argus` code index, `tracing` Langfuse, `cadvisor`, `dcgm`. `logging` (Loki + Promtail) is **on by default** — remove it to stop collecting logs |
 | GPU / CPU power cap | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | empty restores the hardware default |
 | CPU threads and ceilings | `LLAMACPP_THREADS`, `LLAMACPP_CPUS`, `OLLAMA_CPUS`, `POSTGRES_CPUS` | threads = physical cores; ceilings must sum under the core count |
 | engine RAM ceiling | `LLAMACPP_MEM_LIMIT` | e.g. `56g`; `0` = none |

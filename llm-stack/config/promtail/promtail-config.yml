@@ -33,9 +33,19 @@ scrape_configs:
       - source_labels: [__meta_docker_container_label_com_docker_compose_project]
         target_label: project
 
-      # Only ingest this stack's containers.
+      # Only ingest THIS stack's containers. `regex: ".+"` was the comment's
+      # claim and not what it did: it kept every container on the daemon that
+      # carries any compose project label, so a second stack on the same host
+      # -- the bundled test GitLab is one -- had its whole log shipped into
+      # this deployment's Loki. That is not just volume: it is another
+      # project's logs appearing in this project's Grafana, and on first start
+      # it is what pushed the busiest stream past Loki's rate limit.
+      #
+      # The project name comes from COMPOSE_PROJECT_NAME rather than a literal,
+      # so a renamed deployment keeps working. `-config.expand-env` in the
+      # service command is what makes the substitution happen.
       - source_labels: [__meta_docker_container_label_com_docker_compose_project]
-        regex: ".+"
+        regex: "${COMPOSE_PROJECT_NAME:-llmservice}"
         action: keep
 
     pipeline_stages:

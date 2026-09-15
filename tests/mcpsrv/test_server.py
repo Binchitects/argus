@@ -299,3 +299,121 @@ def test_middleware_does_not_migrate_per_request(cfg, monkeypatch):
         client.get(MCP_PATH, headers={"Authorization": "Bearer dev-token"})
 
     assert len(calls) == 1
+
+
+# --- the admin index surface ----------------------------------------------
+#
+# The panel's Indexing card reads all three of these. Two of them were broken
+# in ways only a live deployment showed: the per-repo list raised NameError
+# inside a broad except that stored the message in a field the panel did not
+# render -- so the table was silently empty and "never worked" looked exactly
+# like "nothing indexed yet".
+
+
+@pytest.fixture
+def admin_cfg(cfg, monkeypatch):
+    monkeypatch.setenv("ARGUS_ADMIN_TOKEN", "admin-secret")
+    return cfg
+
+
+def _admin_client(admin_cfg):
+    app = create_app(admin_cfg, client=_mock_client(_gitlab_ok([])))
+    return TestClient(app.streamable_http_app(), raise_server_exceptions=False)
+
+
+def test_index_status_lists_indexed_repos(admin_cfg):
+    """The regression: `connect_readonly` was not imported, so this raised
+    NameError and the panel's per-repo progress table was always empty."""
+    client = _admin_client(admin_cfg)
+    r = client.get("/admin/index/status",
+                   headers={"x-argus-admin-token": "admin-secret"})
+    assert r.status_code == 200
+    job = r.json()["job"]
+    assert "repos_error" not in job, f"status route failed: {job.get('repos_error')}"
+    assert [row["repo"] for row in r.json()["repos"]] == ["g/a"]
+
+
+def test_index_status_needs_the_admin_token(admin_cfg):
+    client = _admin_client(admin_cfg)
+    assert client.get("/admin/index/status").status_code == 403
+    assert client.get("/admin/index/status",
+                      headers={"x-argus-admin-token": "wrong"}).status_code == 403
+
+
+def test_allow_partial_is_passed_through_to_the_child(admin_cfg, monkeypatch):
+    """The panel's opt-in has to reach the command line, or the refusal tells
+    the operator to re-run with a flag the UI cannot supply."""
+    seen = {}
+
+    class FakeProc:
+        stdout = iter(["root/eal-core: up to date\n"])
+
+        def wait(self):
+            return 0
+
+    def fake_popen(argv, **kw):
+        seen["argv"] = argv
+        return FakeProc()
+
+    monkeypatch.setattr(server_mod.subprocess, "Popen", fake_popen)
+    client = _admin_client(admin_cfg)
+
+    r = client.post("/admin/index", json={"branches": [], "allow_partial": True},
+                    headers={"x-argus-admin-token": "admin-secret"})
+    assert r.status_code == 200 and r.json()["allow_partial"] is True
+
+    for _ in range(200):                     # the child runs on a thread
+        if "argv" in seen:
+            break
+        time.sleep(0.01)
+    assert "--allow-partial-enumeration" in seen["argv"]
+
+
+def test_allow_partial_is_absent_unless_asked_for(admin_cfg, monkeypatch):
+    seen = {}
+
+    class FakeProc:
+        stdout = iter([])
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(server_mod.subprocess, "Popen",
+                        lambda argv, **kw: seen.setdefault("argv", argv) or FakeProc())
+    client = _admin_client(admin_cfg)
+    client.post("/admin/index", json={"branches": []},
+                headers={"x-argus-admin-token": "admin-secret"})
+
+    for _ in range(200):
+        if "argv" in seen:
+            break
+        time.sleep(0.01)
+    assert "--allow-partial-enumeration" not in seen["argv"]
+
+
+def test_the_childs_output_is_mirrored_to_the_server_log(admin_cfg, monkeypatch, capsys):
+    """Docker captures this process's stdout, Promtail ships it to Loki, and
+    that is the only reason an index run has any history at all. The child's
+    output used to be captured into the panel's tail and dropped, so indexing
+    was the one part of Argus with no searchable log."""
+    class FakeProc:
+        stdout = iter(['{"ts": "2026-01-01T00:00:00Z", "event": "index_end"}\n',
+                       "root/eal-core: up to date\n"])
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(server_mod.subprocess, "Popen",
+                        lambda argv, **kw: FakeProc())
+    client = _admin_client(admin_cfg)
+    client.post("/admin/index", json={"branches": []},
+                headers={"x-argus-admin-token": "admin-secret"})
+
+    out = ""
+    for _ in range(200):
+        out = capsys.readouterr().out
+        if "index_end" in out:
+            break
+        time.sleep(0.01)
+    assert '"event": "index_end"' in out, "the audit line never reached stdout"
+    assert "root/eal-core: up to date" in out

@@ -11,7 +11,9 @@ import sys
 import time
 from pathlib import Path
 
-from . import credentials
+import httpx
+
+from . import auditlog, credentials
 from .config import Config, ConfigError
 from .embed import EmbeddingUnavailable
 from .gitlab import GitLabError, enumeration_health, list_projects
@@ -62,8 +64,15 @@ def preflight() -> str | None:
     return None
 
 
-def _index_branch(conn, cfg: Config, project, branch: str, mirror_dir) -> bool:
-    """Index one project at one branch. Returns True if it ended unhealthy.
+def _index_branch(conn, cfg: Config, project, branch: str,
+                  mirror_dir) -> tuple[bool, str]:
+    """Index one project at one branch. Returns (unhealthy, outcome).
+
+    `outcome` is what the audit stream records and what a dashboard groups by;
+    `unhealthy` is what the run's exit code is built from. They are not the
+    same thing -- `up_to_date` is a perfectly healthy outcome that means no
+    work was done, and separating it is what lets an operator tell "nothing
+    changed" from "it is doing the work" without reading the log text.
 
     The branch appears in the printed label only when it is not the default,
     so single-branch output is unchanged and a line naming a branch always
@@ -93,7 +102,10 @@ def _index_branch(conn, cfg: Config, project, branch: str, mirror_dir) -> bool:
             writes.record_run_state(conn, repo_id, timed_out=False,
                                     symbols_failed=False, ts=int(time.time()))
             print(f"{label}: up to date")
-            return False
+            auditlog.index_repo(repo=project.path_with_namespace, branch=branch,
+                                outcome="up_to_date",
+                                duration_ms=round((time.time() - started) * 1000, 1))
+            return False, "up_to_date"
         tree = sync_worktree(cfg.index, project.gitlab_id, mirror_dir, sha, branch)
         result = index_repo(conn, cfg.index, project, mirror_dir, tree, sha, old,
                             repo_id=repo_id)
@@ -106,7 +118,10 @@ def _index_branch(conn, cfg: Config, project, branch: str, mirror_dir) -> bool:
                                 symbols_failed=False, ts=int(time.time()),
                                 error=str(exc))
         print(f"{label}: FAILED ({exc})", file=sys.stderr)
-        return True
+        auditlog.index_repo(repo=project.path_with_namespace, branch=branch,
+                            outcome="failed", error=str(exc),
+                            duration_ms=round((time.time() - started) * 1000, 1))
+        return True, "failed"
     except Exception as exc:   # noqa: BLE001 - one bad repo must not end the run
         # Nothing caught a non-GitError escaping index_repo, so it aborted the
         # whole run: every repo after this one went unindexed.
@@ -115,7 +130,10 @@ def _index_branch(conn, cfg: Config, project, branch: str, mirror_dir) -> bool:
                                 symbols_failed=False, ts=int(time.time()),
                                 error=repr(exc))
         print(f"{label}: FAILED ({exc!r})", file=sys.stderr)
-        return True
+        auditlog.index_repo(repo=project.path_with_namespace, branch=branch,
+                            outcome="failed", error=repr(exc),
+                            duration_ms=round((time.time() - started) * 1000, 1))
+        return True, "failed"
 
     flags = ""
     if result.timed_out:
@@ -125,7 +143,19 @@ def _index_branch(conn, cfg: Config, project, branch: str, mirror_dir) -> bool:
     print(f"{label}: indexed={result.indexed} deleted={result.deleted} "
           f"skipped={result.skipped} errors={result.errors}{flags} "
           f"({time.time() - started:.1f}s)")
-    return bool(result.timed_out or result.symbols_failed)
+    if result.timed_out:
+        outcome = "timed_out"
+    elif result.symbols_failed:
+        outcome = "symbols_failed"
+    else:
+        outcome = "ok"
+    auditlog.index_repo(
+        repo=project.path_with_namespace, branch=branch, outcome=outcome,
+        duration_ms=round((time.time() - started) * 1000, 1),
+        indexed=result.indexed, deleted=result.deleted, skipped=result.skipped,
+        errors=result.errors, timed_out=bool(result.timed_out),
+        symbols_failed=bool(result.symbols_failed))
+    return bool(result.timed_out or result.symbols_failed), outcome
 
 
 def _prune_missing_branches(conn, project, keep) -> int:
@@ -152,6 +182,22 @@ def _prune_missing_branches(conn, project, keep) -> int:
 
 def _index(cfg: Config, only: str | None, reset_retries: bool = False,
            allow_partial: bool = False) -> int:
+    started = time.time()
+
+    def _give_up(code: int, reason: str) -> int:
+        """Record the run and return its exit code.
+
+        Every path out of this function goes through here or through the
+        index_end at the bottom, so a pass that never reached a repository --
+        unreachable GitLab, a refused enumeration, no ctags -- still appears in
+        Loki. Those are the failures an operator most needs to chart, and
+        without this they left no trace at all: exit 3, and nothing to say why.
+        """
+        auditlog.index_end(returncode=code,
+                           duration_ms=round((time.time() - started) * 1000, 1),
+                           repos=0, failed=0, up_to_date=0, reason=reason)
+        return code
+
     # The service token must be able to see every repository, or the index is
     # silently partial and every answer drawn from it is confidently
     # incomplete. Checked before any work, because the failure produces no
@@ -159,19 +205,27 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
     if not allow_partial:
         try:
             health = enumeration_health(cfg.gitlab)
-        except GitLabError as exc:
-            print(f"could not verify GitLab enumeration: {exc}", file=sys.stderr)
-            return 3
+        except (GitLabError, httpx.HTTPError, credentials.CredentialError) as exc:
+            # httpx.HTTPError and CredentialError, not just GitLabError: an
+            # unreachable GitLab, a TLS rejection or a refused sign-in all
+            # raise from the transport, and none of them is a GitLabError. They
+            # used to escape as a raw httpx traceback with exit 1, which the
+            # admin panel could only report as "exit 1" -- and which reads as
+            # an Argus bug rather than "the container cannot reach GitLab",
+            # the single most likely cause in a real deployment.
+            print(f"could not verify GitLab enumeration: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            return _give_up(3, "gitlab_unreachable")
         if not health.ok:
             print(health.problem, file=sys.stderr)
             print("\nRe-run with --allow-partial-enumeration to index anyway.",
                   file=sys.stderr)
-            return 3
+            return _give_up(3, "enumeration_incomplete")
 
     problem = preflight()
     if problem:
         print(problem, file=sys.stderr)
-        return 4
+        return _give_up(4, "preflight_failed")
 
     conn = open_db(cfg.index.db_path)
 
@@ -209,9 +263,15 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
 
     if not projects:
         print("no repos matched")
-        return 0
+        return _give_up(0, "no_repos_matched")
+
+    auditlog.index_start(branches=list(cfg.index.branches),
+                         allow_partial=allow_partial, repos=len(projects))
+    run_started = time.time()
 
     any_repo_unhealthy = False
+    failed_repos = 0
+    up_to_date = 0
     for project in projects:
         # One mirror per project, however many branches come out of it: the
         # mirror already carries every ref (ensure_mirror fetches
@@ -248,11 +308,21 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
                                     symbols_failed=False, ts=int(time.time()),
                                     error=str(exc))
             print(f"{project.path_with_namespace}: FAILED ({exc})", file=sys.stderr)
+            failed_repos += 1
+            auditlog.index_repo(repo=project.path_with_namespace,
+                                branch=project.default_branch,
+                                outcome="mirror_failed", error=str(exc))
             continue
 
         for branch in branches:
-            if _index_branch(conn, cfg, project, branch, mirror_dir):
+            unhealthy, outcome = _index_branch(conn, cfg, project, branch,
+                                               mirror_dir)
+            if unhealthy:
                 any_repo_unhealthy = True
+            if outcome == "failed":
+                failed_repos += 1
+            elif outcome == "up_to_date":
+                up_to_date += 1
 
         _prune_missing_branches(conn, project, branches)
 
@@ -276,6 +346,10 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
         # itself, the same category as a missing ctags binary, not a
         # per-repo health flag.
         print(f"resolve/rebuild failed: {exc!r}", file=sys.stderr)
+        auditlog.index_end(returncode=4,
+                           duration_ms=round((time.time() - run_started) * 1000, 1),
+                           repos=len(projects), failed=failed_repos,
+                           up_to_date=up_to_date)
         return 4
     print(f"includes: {counts.get('resolved', 0)} resolved, "
           f"{counts.get('external', 0)} external, "
@@ -286,7 +360,12 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
     # Exit codes 2/3/4 are already claimed (config, gitlab, preflight/resolve);
     # use a distinct code so a cron job can tell "ran, but a repo is
     # unhealthy" apart from those startup/run failures.
-    return 1 if any_repo_unhealthy else 0
+    returncode = 1 if any_repo_unhealthy else 0
+    auditlog.index_end(returncode=returncode,
+                       duration_ms=round((time.time() - run_started) * 1000, 1),
+                       repos=len(projects), failed=failed_repos,
+                       up_to_date=up_to_date)
+    return returncode
 
 
 
@@ -1025,6 +1104,16 @@ def main(argv: list[str] | None = None) -> int:
         return _status(cfg)
     except GitLabError as exc:
         print(f"gitlab error: {exc}", file=sys.stderr)
+        return 3
+    except (httpx.HTTPError, credentials.CredentialError) as exc:
+        # Anything else that could not reach GitLab. Named separately from the
+        # GitLabError handler above only to keep the wording honest: this is a
+        # transport or credential failure, not something GitLab said. Without
+        # it every command that touches the API could still exit on a raw
+        # traceback, which is unreadable in a log and indistinguishable from a
+        # crash in Argus itself.
+        print(f"could not reach GitLab: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
         return 3
 
 

@@ -283,12 +283,27 @@ Argus's sidecar database, and **also printed as one JSON line on stdout**
 matched; Argus named the maintainers instead) or `error`. `denied` means no
 bearer token, or a GitLab token GitLab rejected; no tool ran.
 
-With the `logging` profile on (`COMPOSE_PROFILES=...,argus,logging`), Promtail
-ships these lines to Loki with `event`, `outcome` and `tool` as labels, and the
-**Argus** dashboard in Grafana shows calls by tool and by person, no-access
-answers, errors, refusals, p95 latency, and a searchable audit trail with each
-call's arguments. Calls from Qwen Code, Claude Code or any MCP client and from
-Open WebUI all appear under the person's GitLab username.
+Promtail ships these lines to Loki — `logging` is in the default
+`COMPOSE_PROFILES`, so this works on a fresh deployment — with `event`,
+`outcome` and `tool` as labels. The **Argus** dashboard in Grafana shows calls
+by tool and by person, no-access answers, errors, refusals, p95 latency, and a
+searchable audit trail with each call's arguments. Calls from Qwen Code, Claude
+Code or any MCP client and from Open WebUI all appear under the person's GitLab
+username.
+
+Indexing writes to the same stream, which is what gives a pass a history
+instead of only an exit code. `argus index` emits one line per event —
+`index_start`, `index_repo` (one per repository and branch, with `outcome` of
+`ok`, `up_to_date`, `timed_out`, `symbols_failed`, `failed` or
+`mirror_failed`) and `index_end`. The **Indexing** dashboard charts those: runs
+by outcome, failures named by repository, time per repository, files indexed per
+pass, and the raw log. `repo` and `branch` are JSON fields rather than labels on
+purpose — an estate can have thousands of repositories, and a label each would
+multiply Loki streams for nothing. Filter with `| json | repo="group/name"`.
+
+The admin panel's **Indexing** card reads the same run directly through Argus's
+admin endpoint, so it shows the live tail without waiting for Loki, and keeps
+that log on screen after the run ends.
 
 `ARGUS_AUDIT_LOG=0` on the argus service stops the stdout lines; the audit table
 is unaffected. Loki keeps logs for 14 days (`config/loki/loki-config.yml`).

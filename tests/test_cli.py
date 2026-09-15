@@ -2,10 +2,11 @@ import subprocess
 import types
 from pathlib import Path
 
+import httpx
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from argus import cli
+from argus import cli, credentials
 from argus.gitlab import GitLabError, Project
 from argus.mcpsrv import DEFAULT_ALLOWED_HOSTS
 from argus.gitlab import EnumerationHealth
@@ -921,3 +922,123 @@ def test_backup_copies_installed_packs(tmp_path):
     out = tmp_path / "snap"
     cli.main(["backup", "--config", str(cfg_path), "--out", str(out)])
     assert (out / "packs" / "python.arguspack").is_file()
+
+
+def test_index_reports_an_unreachable_gitlab_instead_of_crashing(tmp_path, monkeypatch, capsys):
+    """Measured against the real stack, not inferred: with GitLab unreachable,
+    enumeration raised a bare httpx.ConnectError that `_index` did not catch --
+    it caught only GitLabError -- so the command died on a raw traceback and
+    exited 1.
+
+    The admin panel can only render that as "exit 1", which reads as an Argus
+    bug rather than as the most likely cause in a real deployment: the
+    container cannot reach GitLab at all. Exit 3 with one readable line
+    instead, and no traceback for the operator to scroll past.
+    """
+    def unreachable(cfg, **kw):
+        raise httpx.ConnectError("[Errno 111] Connection refused")
+
+    monkeypatch.setattr(cli, "enumeration_health", unreachable)
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "gitlab:\n  url: https://gl.test\n  token: t\n"
+        f"index:\n  data_dir: {tmp_path.as_posix()}\n"
+        f"  db_path: {(tmp_path / 'i.db').as_posix()}\n", encoding="utf-8")
+
+    assert cli.main(["index", "--config", str(path)]) == 3
+    err = capsys.readouterr().err
+    assert "could not verify GitLab enumeration" in err
+    assert "ConnectError" in err, "the class name is what tells TLS from DNS from refused"
+    assert "Traceback" not in err
+
+
+def test_index_reports_a_refused_sign_in_instead_of_crashing(tmp_path, monkeypatch, capsys):
+    """Password mode fails in credentials, not in gitlab, and the CLI caught
+    neither. A refused sign-in is a configuration answer, not a crash."""
+    def refused(cfg, **kw):
+        raise credentials.CredentialError("GitLab rejected the username/password sign-in")
+
+    monkeypatch.setattr(cli, "enumeration_health", refused)
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "gitlab:\n  url: https://gl.test\n  token: t\n"
+        f"index:\n  data_dir: {tmp_path.as_posix()}\n"
+        f"  db_path: {(tmp_path / 'i.db').as_posix()}\n", encoding="utf-8")
+
+    assert cli.main(["index", "--config", str(path)]) == 3
+    err = capsys.readouterr().err
+    assert "CredentialError" in err and "Traceback" not in err
+
+
+def test_a_failed_pass_still_emits_index_end(config_file, fake_projects, monkeypatch, capsys):
+    """The run's own record of how it ended. Without it, Loki has per-repo
+    lines and no way to chart "how many passes failed"."""
+    monkeypatch.setattr(cli, "resolve_includes",
+                        lambda conn: (_ for _ in ()).throw(RuntimeError("boom")))
+    rc = cli.main(["index", "--config", str(config_file)])
+    assert rc == 4
+    import json as _json
+    events = [_json.loads(l) for l in capsys.readouterr().out.splitlines()
+              if l.startswith('{"ts"')]
+    ends = [e for e in events if e["event"] == "index_end"]
+    assert len(ends) == 1
+    assert ends[0]["returncode"] == 4 and ends[0]["outcome"] == "error"
+
+
+def test_a_successful_pass_emits_start_and_end(config_file, fake_projects, capsys):
+    import json as _json
+    assert cli.main(["index", "--config", str(config_file)]) == 0
+    events = [_json.loads(l) for l in capsys.readouterr().out.splitlines()
+              if l.startswith('{"ts"')]
+    names = [e["event"] for e in events]
+    assert names[0] == "index_start" and names[-1] == "index_end"
+    assert any(e["event"] == "index_repo" for e in events)
+    assert events[-1]["outcome"] == "ok"
+
+
+def test_a_refused_run_still_emits_index_end_with_the_reason(tmp_path, monkeypatch, capsys):
+    """The runs that never touch a repository are the ones an operator most
+    needs to chart, and they were the ones that left no trace: exit 3 before
+    index_start, so Loki had nothing at all and the Grafana panel was blank
+    exactly when it mattered.
+    """
+    import json as _json
+    monkeypatch.setattr(cli, "enumeration_health",
+                        lambda cfg, **kw: EnumerationHealth(
+                            is_admin=False, visible_count=1, member_count=4))
+    monkeypatch.setattr(cli, "list_projects", lambda cfg: [])
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "gitlab:\n  url: https://gl.test\n  token: t\n"
+        f"index:\n  data_dir: {tmp_path.as_posix()}\n"
+        f"  db_path: {(tmp_path / 'i.db').as_posix()}\n", encoding="utf-8")
+
+    assert cli.main(["index", "--config", str(path)]) == 3
+    events = [_json.loads(l) for l in capsys.readouterr().out.splitlines()
+              if l.startswith('{"ts"')]
+    ends = [e for e in events if e["event"] == "index_end"]
+    assert len(ends) == 1, "a refused run left no record"
+    assert ends[0]["outcome"] == "error"
+    assert ends[0]["returncode"] == 3
+    assert ends[0]["reason"] == "enumeration_incomplete"
+    assert not [e for e in events if e["event"] == "index_start"], (
+        "nothing was started, so nothing should claim to have been")
+
+
+def test_an_unreachable_gitlab_records_its_own_reason(tmp_path, monkeypatch, capsys):
+    import json as _json
+
+    def unreachable(cfg, **kw):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(cli, "enumeration_health", unreachable)
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "gitlab:\n  url: https://gl.test\n  token: t\n"
+        f"index:\n  data_dir: {tmp_path.as_posix()}\n"
+        f"  db_path: {(tmp_path / 'i.db').as_posix()}\n", encoding="utf-8")
+
+    assert cli.main(["index", "--config", str(path)]) == 3
+    ends = [_json.loads(l) for l in capsys.readouterr().out.splitlines()
+            if l.startswith('{"ts"') and '"index_end"' in l]
+    assert [e["reason"] for e in ends] == ["gitlab_unreachable"]

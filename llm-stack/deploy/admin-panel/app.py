@@ -576,27 +576,68 @@ def indexing_card(is_admin: bool = False) -> str:
     repos = st.get("repos") or []
     running = job.get("state") == "running"
 
+    # The log is kept on screen AFTER the run ends, not only while it runs.
+    # It used to be dropped the moment the job went idle, so a failed pass
+    # showed "exit 3" and nothing else -- the one piece of information that
+    # says WHY sat in the tail the whole time and was then thrown away. That
+    # is the difference between "indexing is broken" and "the container cannot
+    # reach GitLab".
+    tail_text = "\n".join(job.get("tail") or [])
+    # Named for what it is, and NOT reused below: `shown` was the repos-table
+    # slice a few lines down, and a closure over it meant the log block
+    # rendered the list of repositories instead of the log. Python resolves
+    # that name when the closure RUNS, by which point it had been rebound.
+    log_text = tail_text[-6000:] if len(tail_text) > 6000 else tail_text
+
+    def log_block(label: str = "") -> str:
+        if not log_text:
+            return ""
+        return (f'{f"<p class=dim style=margin:8px_0_4px>{_h(label)}</p>" if label else ""}'
+                f'<pre style="max-height:280px;overflow:auto;background:#111;color:#ddd;'
+                f'padding:10px;border-radius:6px;font-size:12px;white-space:pre-wrap">'
+                f'{_h(log_text)}</pre>')
+
     if running:
-        started = _rel_time(job.get("started"))
-        tail = "\n".join(job.get("tail") or [])[-4000:]
-        status = (f'<div class="msg">Indexing <b>{_h(", ".join(job.get("branches") or []) or "default branches")}</b>'
-                  f' — started {_h(started)}. This page refreshes every 5s.</div>'
-                  f'<pre style="max-height:220px;overflow:auto;background:#111;color:#ddd;'
-                  f'padding:10px;border-radius:6px;font-size:12px">{_h(tail) or "starting…"}</pre>')
+        mode = ("indexing only what the token can see (may be partial)"
+                if job.get("allow_partial") else "full enumeration")
+        status = (f'<div class="msg">Indexing '
+                  f'<b>{_h(", ".join(job.get("branches") or []) or "default branches")}</b>'
+                  f' — {_h(mode)}, started {_h(_rel_time(job.get("started")))}. '
+                  f'This page refreshes every 5s.</div>')
     elif job.get("finished"):
         rc = job.get("returncode")
-        cls = "msg" if rc == 0 else "msg bad"
-        status = (f'<div class="{cls}">Last run finished {_h(_rel_time(job.get("finished")))} '
-                  f'— exit {_h(str(rc))}</div>')
+        ok = rc == 0
+        cls = "msg" if ok else "msg bad"
+        meaning = _INDEX_EXIT.get(rc, f"unrecognised exit code {rc}")
+        status = (f'<div class="{cls}">Last run finished '
+                  f'{_h(_rel_time(job.get("finished")))} — exit {_h(str(rc))}: '
+                  f'{_h(meaning)}</div>')
     else:
-        status = '<p class="dim" style="margin:0 0 12px">No run has been started from here yet.</p>'
+        status = ('<p class="dim" style="margin:0 0 12px">No run has been started '
+                  'from here since Argus last restarted.</p>')
+
+    # Exit 3 is the one code with an action attached, and it is the one an
+    # operator is most likely to hit on a fresh deployment: it means "use a
+    # token that can see everything, or accept a partial index on purpose".
+    hint = ""
+    if not running and job.get("finished") and job.get("returncode") == 3:
+        hint = ('<div class="msg bad" style="margin:8px 0">If the token is meant to '
+                'see only part of the estate, tick <b>Index what the token can see</b> '
+                'below and run again — otherwise use a token with admin rights, or add '
+                'the service account to every project to index.</div>')
+    if job.get("repos_error"):
+        # The per-repo table below is empty when this is set, and "empty" is
+        # indistinguishable from "nothing indexed yet" -- which is how a
+        # NameError in the status route went unnoticed. Say it out loud.
+        hint += (f'<div class="msg bad" style="margin:8px 0">Could not read per-repo '
+                 f'state: {_h(job["repos_error"])}</div>')
 
     # Per-repo freshness. Argus records one row PER REF, so a project indexed at
     # two branches legitimately appears twice; the branch column is what tells
     # them apart.
     body = ""
     if repos:
-        shown = repos[:40]
+        page_repos = repos[:40]
         trs = "".join(
             '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
                 _h(r.get("repo") or "?"),
@@ -606,24 +647,47 @@ def indexing_card(is_admin: bool = False) -> str:
                 ('<span class="bad">timed out</span>' if r.get("timed_out")
                  else (f'{_h(str(r.get("symbols_failed")))} failed'
                        if r.get("symbols_failed") else "ok")))
-            for r in shown)
-        more = (f'<p class="dim">showing {len(shown)} of {len(repos)} refs</p>'
-                if len(repos) > len(shown) else "")
+            for r in page_repos)
+        more = (f'<p class="dim">showing {len(page_repos)} of {len(repos)} refs</p>'
+                if len(repos) > len(page_repos) else "")
         body = (f'<table><thead><tr><th>Repo</th><th>Branch</th><th>Last indexed</th>'
                 f'<th>Result</th></tr></thead><tbody>{trs}</tbody></table>{more}')
 
     disabled = " disabled" if running else ""
     refresh = ('<meta http-equiv="refresh" content="5">' if running else "")
+    checked = " checked" if job.get("allow_partial") else ""
     return (f'{refresh}<div class="card"><h2>Indexing</h2>'
             f'{status}'
+            f'{hint}'
+            f'{log_block("Run log" if running else "Log from the last run")}'
             f'<form method="post" action="/admin/index" style="margin:12px 0">'
             f'<input name="branches" placeholder="branch or glob, e.g. develop or release/*" '
             f'style="min-width:280px"{disabled}> '
             f'<button class="btn" type="submit"{disabled}>Index all repos</button>'
             f'<p class="dim" style="margin:6px 0 0">Space-separated for several. Each '
             f'project&#39;s default branch is always included; repos without the named '
-            f'branch are indexed at their default rather than failing.</p></form>'
+            f'branch are indexed at their default rather than failing.</p>'
+            f'<label class="dim" style="display:block;margin-top:8px;cursor:pointer">'
+            f'<input type="checkbox" name="allow_partial" value="1"{checked}{disabled}> '
+            f'Index what the token can see, even if that is not the whole estate</label>'
+            f'<p class="dim" style="margin:6px 0 0">Off by default, and it should stay off: '
+            f'with a token that cannot see every repository, Argus refuses to run rather '
+            f'than build an index whose gaps nothing downstream can detect. Tick this only '
+            f'when a partial index is the intent.</p></form>'
             f'{body}</div>')
+
+
+#: What `argus index` can return, in the words of the person reading it. A bare
+#: "exit 3" tells an operator nothing and suggests Argus is broken; the number
+#: is only meaningful next to the reason, and the reason is what they act on.
+_INDEX_EXIT = {
+    0: "completed",
+    1: "ran, but at least one repository is unhealthy — the log names it",
+    3: "could not reach GitLab, or the token cannot enumerate every repository",
+    4: "preflight failed — ctags is missing or not Universal Ctags, or the "
+       "include graph could not be rebuilt",
+    -1: "Argus could not start the run at all",
+}
 
 
 ENV_SAMPLES_DIR = os.environ.get("ENV_SAMPLES_DIR", "/env-samples")
@@ -993,8 +1057,10 @@ async def admin_index(request: Request) -> Response:
     # Space-separated, deduplicated, order preserved. Empty means "whatever the
     # config already says", which is each project's default branch.
     branches = list(dict.fromkeys(b for b in raw.split() if b))
+    allow_partial = bool(form.get("allow_partial"))
     try:
-        _argus("/admin/index", {"branches": branches})
+        _argus("/admin/index", {"branches": branches,
+                                "allow_partial": allow_partial})
     except urllib.error.HTTPError as exc:
         if exc.code == 409:
             return _back(err="An index run is already in progress.")
@@ -1002,6 +1068,8 @@ async def admin_index(request: Request) -> Response:
     except Exception as exc:                                   # noqa: BLE001
         return _back(err=f"Could not reach Argus: {repr(exc)[:120]}")
     label = ", ".join(branches) if branches else "default branches"
+    if allow_partial:
+        label += "; partial enumeration allowed"
     return _back(msg=f"Indexing started across all repos ({label}).")
 
 

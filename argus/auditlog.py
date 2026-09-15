@@ -89,3 +89,75 @@ def tool_call(*, tool: str, user: str | None, user_id: int | None, args: dict,
 def denied(*, reason: str, path: str) -> None:
     """A request refused at the auth gate, before any tool or identity."""
     _emit({"event": "denied", "reason": reason, "path": path})
+
+
+# --- indexing --------------------------------------------------------------
+#
+# `argus index` runs as a child of the serve process and its output is mirrored
+# to the container log, so these lines reach Promtail -> Loki and the operator
+# can watch a pass without an ssh session.
+#
+# `repo` and `branch` are deliberately NOT labels. The Promtail config lifts
+# `event` and `outcome` into labels because each has a handful of values, and
+# keeps the person in the line for the same reason stated there: a label per
+# repository would multiply streams, and an estate can have thousands. Read
+# them at query time with `| json | repo="g/alpha"`.
+
+
+def index_start(*, branches: list[str], allow_partial: bool, repos: int) -> None:
+    """A pass has begun, after enumeration and the preflight checks."""
+    _emit({
+        "event": "index_start",
+        "repos": repos,
+        "branches": list(branches),
+        # Worth a field of its own: `true` means the index may be silently
+        # partial, which is the one thing about a run that nothing downstream
+        # can detect after the fact.
+        "allow_partial": bool(allow_partial),
+    })
+
+
+def index_repo(*, repo: str, branch: str, outcome: str,
+               duration_ms: float | None = None, indexed: int | None = None,
+               deleted: int | None = None, skipped: int | None = None,
+               errors: int | None = None, timed_out: bool | None = None,
+               symbols_failed: bool | None = None,
+               error: str | None = None) -> None:
+    """One repository, at one branch. `outcome` is what a dashboard groups by.
+
+    `up_to_date` is separated from `ok` on purpose: a pass where every repo is
+    up to date and a pass that reindexed everything both exit 0, and an
+    operator watching a dashboard needs to tell "nothing changed" from "it is
+    doing work" without reading the log text.
+    """
+    _emit({
+        "event": "index_repo", "repo": repo, "branch": branch,
+        "outcome": outcome, "duration_ms": duration_ms,
+        "indexed": indexed, "deleted": deleted, "skipped": skipped,
+        "errors": errors, "timed_out": timed_out,
+        "symbols_failed": symbols_failed, "error": error,
+    })
+
+
+def index_end(*, returncode: int, duration_ms: float, repos: int,
+              failed: int, up_to_date: int, reason: str | None = None) -> None:
+    """The pass is over. `returncode` is the process exit code the caller sees.
+
+    Emitted for EVERY outcome, including the ones that never reach a
+    repository -- an unreachable GitLab, a refusal, a missing ctags. Those are
+    the runs an operator most needs to see in a chart, and they are exactly the
+    ones that would leave no trace if this were only written at the end of a
+    successful walk.
+    """
+    _emit({
+        # `outcome` rather than only the numeric code, because it is a label:
+        # this is what makes "how many runs failed this week" a one-line query.
+        "event": "index_end",
+        "outcome": "ok" if returncode == 0 else "error",
+        "returncode": returncode,
+        "duration_ms": duration_ms,
+        "repos": repos, "failed": failed, "up_to_date": up_to_date,
+        # Set only on the early exits, where "repos" is 0 and the code alone
+        # does not say which of several preconditions was not met.
+        "reason": reason,
+    })
