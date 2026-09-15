@@ -2,6 +2,7 @@
 
 Each release's full notes are in its annotated tag: `git tag -n99 <version>`.
 
+- **v2.0.0** (2026-09-16) — indexing you can watch and logs you can search: Loki on by default, an Indexing dashboard, and five dead or silent tools fixed. `impact_of` failed for every permitted caller, `semantic_search` for everyone, the per-repo progress table had never worked, an unreachable GitLab exited on a raw traceback, and the panel discarded a failed run's log — leaving only an exit code. Plus GitLab username/password auth, a redesigned admin panel, and every path as an `.env` variable
 - **v1.14.0** (2026-09-15) — offline bundles, a settable thinking level, and four silent deploy failures; RTX 5090 / NVFP4 samples, a verified backup, and the Argus audit trail
 - **v1.13.0** (2026-09-14) — Argus per person in Open WebUI, read-only; 'ask a maintainer' notices; all instructions in README
 - **v1.12.1** (2026-09-14) — fresh-clone deploy verified
