@@ -70,6 +70,13 @@ COPY scripts/agent_client_example.py ./scripts/
 # the deployment's .env -- into an image layer for the sake of one file.
 COPY stack/scripts/lib/check_mounts.py ./stack/scripts/lib/
 
+# And the same again: `tests/test_seed_presets.py` writes Open WebUI's database
+# and is tested here with everything else. Without this line the test stage
+# cannot even COLLECT -- FileNotFoundError, exit 2, and the image does not
+# build -- which is how this was found, by the airgap bundle failing to make
+# its own images. The runner and the test have to travel together.
+COPY stack/deploy/seed-presets.py ./stack/deploy/
+
 RUN python -m pytest -q \
  && { echo "suite: passed"; \
       echo "ctags: $(ctags --version | head -1)"; \
