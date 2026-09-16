@@ -483,6 +483,61 @@ Only repository names and maintainers are disclosed, never a path, symbol or lin
 Reading a file or repository map in an unreadable repository gives the same message.
 `ARGUS_ACCESS_NOTICES=0` on the argus service restores a plain "nothing found".
 
+### "Failed to connect to Argus" in Open WebUI
+
+**Usually it is not a connection problem.** Argus answers `401`, and Open WebUI
+renders any 401 as a connection failure, so the obvious next step — checking DNS,
+the network, whether Argus is up — finds everything healthy and explains nothing.
+
+The usual cause is that **the person has no GitLab account**. Argus identifies a
+chat user by their email, falling back to their username, because the chat token
+is one shared credential and cannot say who is asking. If neither matches a GitLab
+account, Argus cannot know which repositories that person may read, so it refuses
+rather than guess.
+
+```bash
+docker compose logs argus | grep denied
+```
+
+```
+{"event":"denied","reason":"token_rejected","path":"/mcp",
+ "detail":"No GitLab account matches admin@llm.localhost (looked up by email,
+           then by username 'admin')."}
+```
+
+`detail` is the sentence the person was actually shown. Two fixes, depending on
+which is true:
+
+- **They should have GitLab access** — create the account, or make its email or
+  username match their SSO identity. Add them to the projects they need at
+  Reporter or above.
+- **They should not** — that is the ACL working. An operator who only runs the
+  stack and should not read the estate's code should not be given a GitLab
+  account for Argus's sake.
+
+To check a mapping without going through the UI, use the same path Open WebUI
+does — the chat token plus the email header:
+
+```bash
+docker compose exec admin-panel python - <<'PY'
+import json, urllib.request
+tok = "<ARGUS_CHAT_CLIENT_TOKEN from .env>"
+req = urllib.request.Request("http://argus:7700/mcp",
+    data=json.dumps({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-06-18","capabilities":{},
+        "clientInfo":{"name":"probe","version":"1"}}}).encode(),
+    headers={"Authorization": "Bearer " + tok,
+             "x-openwebui-user-email": "someone@example.com",
+             "Content-Type": "application/json",
+             "Accept": "application/json, text/event-stream"}, method="POST")
+print(urllib.request.urlopen(req, timeout=30).status,
+      urllib.request.urlopen(req, timeout=30).headers.get("mcp-session-id"))
+PY
+```
+
+A `401` names the reason. Anything else means the identity resolved and the
+problem is elsewhere.
+
 ### Customizing
 
 Everything is a value in `.env`. Change it, then run `docker compose up -d`: compose

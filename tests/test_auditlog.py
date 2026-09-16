@@ -128,3 +128,28 @@ def test_index_end_sets_outcome_from_the_exit_code(capsys):
     ok, bad = _lines(capsys)
     assert (ok["event"], ok["outcome"], ok["returncode"]) == ("index_end", "ok", 0)
     assert (bad["outcome"], bad["returncode"]) == ("error", 1)
+
+
+def test_a_denial_records_what_the_caller_was_told(capsys):
+    """The reason alone is not diagnosable.
+
+    Open WebUI renders a 401 from Argus as "failed to connect to argus", so
+    whoever sees it looks for a network problem. The sentence that actually
+    explains it -- "No GitLab account matches admin@llm.localhost" -- was only
+    ever in the response body, which nothing kept. Measured end to end: the
+    audit stream had `reason=token_rejected` and nothing else.
+    """
+    auditlog.denied(reason="token_rejected", path="/mcp",
+                    detail="No GitLab account matches admin@llm.localhost "
+                           "(looked up by email, then by username 'admin').")
+    (line,) = _lines(capsys)
+    assert line["reason"] == "token_rejected"
+    assert "No GitLab account matches admin@llm.localhost" in line["detail"]
+
+
+def test_detail_is_absent_rather_than_empty_when_there_is_nothing_to_say(capsys):
+    """A missing key and a null one read the same to `| json detail=""`, and
+    null is what a JSON encoder produces for a value that was never set."""
+    auditlog.denied(reason="missing_token", path="/mcp")
+    (line,) = _lines(capsys)
+    assert line["detail"] is None

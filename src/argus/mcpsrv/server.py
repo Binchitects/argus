@@ -253,7 +253,8 @@ class BearerAuthMiddleware:
         finally:
             conn.close()
 
-    async def _audit_denied(self, reason: str = "denied", path: str = "") -> None:
+    async def _audit_denied(self, reason: str = "denied", path: str = "",
+                            detail: str | None = None) -> None:
         """Run `_write_denied_audit` off the event loop; never let it raise.
 
         Same one-thread-per-connection discipline as `_resolve_identity`:
@@ -267,7 +268,13 @@ class BearerAuthMiddleware:
             await run_in_threadpool(self._write_denied_audit)
         except Exception:
             log.warning("failed to record audit row for a denied request", exc_info=True)
-        auditlog.denied(reason=reason, path=path)
+        # `detail` carries the sentence the caller was told. Without it the log
+        # line says only "token_rejected", and Open WebUI renders the 401 as
+        # "failed to connect to argus" -- so the operator goes looking for a
+        # network fault while the actual reason sits in a response body nobody
+        # kept. Loki indexes the line either way; `| json | detail!=""` finds
+        # every refusal that had something to say.
+        auditlog.denied(reason=reason, path=path, detail=detail)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         _path = scope.get("path") or ""
@@ -300,7 +307,7 @@ class BearerAuthMiddleware:
             else:
                 identity = await run_in_threadpool(self._resolve_identity, token)
         except acl.AclDenied as exc:
-            await self._audit_denied("token_rejected", _path)
+            await self._audit_denied("token_rejected", _path, detail=str(exc))
             await unauthorized(str(exc))(scope, receive, send)
             return
 

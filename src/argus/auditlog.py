@@ -86,9 +86,21 @@ def tool_call(*, tool: str, user: str | None, user_id: int | None, args: dict,
     })
 
 
-def denied(*, reason: str, path: str) -> None:
-    """A request refused at the auth gate, before any tool or identity."""
-    _emit({"event": "denied", "reason": reason, "path": path})
+def denied(*, reason: str, path: str, detail: str | None = None) -> None:
+    """A request refused at the auth gate, before any tool or identity.
+
+    `reason` is the short machine-readable class and is what the Grafana
+    panels group by. `detail` is the sentence the caller was actually told, and
+    it is the difference between a diagnosable refusal and a mystery.
+
+    Measured: Open WebUI reports a 401 from Argus as "failed to connect to
+    argus", which sends whoever sees it looking for a network problem. The
+    useful answer -- "No GitLab account matches admin@llm.localhost" -- was in
+    the response body and nowhere else, so `docker compose logs argus` had
+    only `reason=token_rejected` to offer. Both halves are logged now.
+    """
+    _emit({"event": "denied", "reason": reason, "path": path,
+           "detail": detail})
 
 
 # --- indexing --------------------------------------------------------------
