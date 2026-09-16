@@ -58,6 +58,38 @@ def env(key: str, default: str = "") -> str:
     return default
 
 
+def _ollama_processor(line: str) -> str:
+    """The PROCESSOR column of one `ollama ps` row.
+
+    The columns are NAME ID SIZE PROCESSOR UNTIL, and only SIZE has a stable
+    shape: PROCESSOR is `CPU`, `GPU` or `100% GPU`/`48%/52% CPU/GPU`, and UNTIL
+    is `Forever` or `4 minutes from now` -- so neither end of the line can be
+    counted back from. SIZE always ends in a unit, and it is the LAST such
+    token on the line (a model name never looks like `849 MB`), so anchor there
+    and read forward: two tokens when the first carries a percentage, one
+    otherwise.
+
+    Written this way because the first version read `[-2]`, which silently
+    returned `from` for `4 minutes from now` and would have reported a healthy
+    GPU embedder as a CPU fallback -- the exact false alarm this check exists to
+    avoid.
+    """
+    units = {"B", "KB", "MB", "GB", "TB", "KIB", "MIB", "GIB", "TIB"}
+    tokens = line.split()
+    ends = [i for i, t in enumerate(tokens) if t.upper() in units]
+    if not ends:
+        # A header, a blank line, or anything not shaped like a data row.
+        # Returning "?" rather than guessing means the caller reports SKIP
+        # instead of a device it inferred from the wrong column.
+        return "?"
+    rest = tokens[ends[-1] + 1:]
+    if not rest:
+        return "?"
+    if rest[0].endswith("%") and len(rest) >= 2:
+        return f"{rest[0]} {rest[1]}"
+    return rest[0]
+
+
 def _bash() -> str:
     """`bash` on PATH resolves to WSL's under native Windows Python, which
     cannot exec this repo's scripts ("execvpe(/bin/bash) failed"). Prefer Git
@@ -193,6 +225,33 @@ def check_infra() -> None:
     if "vllm" in state:
         record("infra", "engine reports healthy",
                "PASS" if "healthy" in state["vllm"] else "FAIL", state["vllm"])
+
+    # The embedder is the one component whose CPU fallback is SILENT. Ollama
+    # logs "no compatible GPUs were discovered" at model load and carries on at
+    # roughly eighteen times the latency, and nothing else in the stack
+    # notices: semantic_search still works, just slowly enough that people stop
+    # using it. Measured warm on the reference host: 5 ms per embed on the GPU
+    # against 94 ms on the two CPU cores it is capped to.
+    #
+    # Only meaningful once a model is resident -- `ollama ps` is empty until
+    # something has been embedded -- so an idle stack is SKIPped rather than
+    # failed. Ollama is not published on the host, so warming it from here would
+    # mean reaching onto llm-net for the sake of one line.
+    if "ollama" in state:
+        code, out = sh("docker", "compose", "exec", "-T", "ollama", "ollama", "ps")
+        resident = [l for l in out.splitlines() if l.strip() and "NAME" not in l]
+        if code != 0 or not resident:
+            record("infra", "embedding model is on the GPU", "SKIP",
+                   "nothing resident yet; re-run after a semantic_search")
+        else:
+            processors = [x for x in dict.fromkeys(
+                _ollama_processor(l) for l in resident)]
+            on_gpu = all("GPU" in p for p in processors)
+            record("infra", "embedding model is on the GPU",
+                   "PASS" if on_gpu else "FAIL",
+                   " | ".join(processors) if on_gpu
+                   else f"fell back to the CPU ({', '.join(processors)}); check "
+                        f"OLLAMA_GPU_LAYERS and nvidia-container-toolkit")
 
     code, out = sh("docker", "compose", "ps", "traefik", "--format", "{{.Ports}}")
     ok = f":{HTTPS_PORT}->" in out and f":{HTTP_PORT}->" in out

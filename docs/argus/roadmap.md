@@ -162,9 +162,40 @@ text the server no longer served. Clearing it is a required step after any
 description change. Nothing warns; the tool simply behaves as it did before
 the change, which reads as the change not working.
 
-**GPU embedding.** Query embedding is **2,254 ms median** on CPU-only Ollama,
-roughly 25× the entire search. It is the latency a user actually feels, and
-it is hardware rather than code.
+**~~GPU embedding.~~ DONE.** Query embedding was **2,254 ms median** on
+CPU-only Ollama, roughly 25× the entire search — the latency a user actually
+feels, and hardware rather than code. `ollama` now carries the same
+`gpu-reservation` anchor the engines use, and `ollama ps` reports **100% GPU**.
+
+Measured on the reference host (RTX 3090, 20.2 GB already held by
+`llama-server`, 3.5 GB free), warm, 30 runs:
+
+| | median | p95 | min | max |
+|---|---|---|---|---|
+| CPU (`OLLAMA_CPUS=2`) | 94 ms | — | 11 ms | 106 ms |
+| GPU (100% offload) | **5 ms** | 8 ms | 4 ms | 8 ms |
+
+**18× on the median.** The resident cost is 849 MB, `ollama ps`'s own figure
+including its CUDA context, which takes free VRAM from 3,466 MB to 2,634 MB.
+Checked for the obvious regression — a second CUDA process on a card the engine
+has 20 GB of — and there is none: engine throughput measured 19.3 tok/s median
+with the embedder resident against 19.8 tok/s before, inside the run-to-run
+spread (the baseline itself ranged 13.4–20.3 across prompts).
+
+It is not only query latency. A full pass embeds one vector per public symbol,
+so the bulk path moves by the same factor: **70 symbols in 0.43 s against
+6.58 s**, which extrapolates a 10,000-symbol estate from 15.7 minutes to about
+one. That was the other half of why embedding passes were something you ran
+overnight.
+
+The CPU figure moved a long way from the 2,254 ms originally recorded, which is
+worth stating rather than quietly replacing: that number was taken cold, and
+`OLLAMA_KEEP_ALIVE=-1` now keeps the model resident. 94 ms is the honest
+like-for-like comparison, and 5 ms is what the GPU buys over it.
+
+On a host where the engine needs the whole card, `OLLAMA_GPU_LAYERS` forces a
+partial offload and `OLLAMA_GPU_DEVICE` keeps the embedder on a different GPU.
+Both are documented in `docs/stack/CONFIGURATION.md`.
 
 **More packs**, now that both fetch paths exist — a git clone and a release
 archive cover essentially every documentation corpus worth having.

@@ -290,7 +290,9 @@ own section. They are also what keeps a 24 GB card from cooking itself.
 |---|---|---|
 | `LLAMACPP_THREADS` | sample `16` | physical core count for the engine. Hyperthreads measured *slower*, not faster |
 | `LLAMACPP_CPUS` | `16` | CPU ceiling for the engine container. Keep it equal to `LLAMACPP_THREADS` |
-| `OLLAMA_CPUS` | sample `2` | CPU ceiling for the embedding model |
+| `OLLAMA_CPUS` | sample `2` | CPU ceiling for the embedding model. Far less load-bearing since the model moved to the GPU — tokenisation and the HTTP layer are all that remain on the CPU |
+| `OLLAMA_GPU_LAYERS` | empty | how many layers of the embedding model to offload. Empty lets Ollama decide, which is "all of it" when it fits. Set an integer to force a partial offload, or `0` to keep it on the CPU |
+| `OLLAMA_GPU_DEVICE` | `all` | which GPU the embedder is pinned to (`NVIDIA_VISIBLE_DEVICES`). Set a device id on a multi-GPU host to keep the embedder off the card the engine is using |
 | `POSTGRES_CPUS` | sample `3` | CPU ceiling for Postgres |
 | `LLAMACPP_MEM_LIMIT` | `0` | engine RAM ceiling, e.g. `56g`. `0` is no limit |
 | `GPU_POWER_LIMIT_W` | sample `150` | GPU power cap in watts (`nvidia-smi -pl`). Empty leaves the driver default |

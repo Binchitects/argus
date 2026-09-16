@@ -42,6 +42,22 @@ the page) and `docs_verify` (check a draft you already wrote).
 Sixteen tools in total. Packs are licensed material — each result carries its
 own attribution, e.g. WDK pages are CC BY 4.0.
 
+`semantic_search` and `docs_find` turn a question into a vector with
+`nomic-embed-text` on **Ollama**, which runs with the same GPU reservation the
+inference engines do. It was CPU-only and capped at two cores, which made
+embedding — not the search — the entire cost of an indexed lookup: measured
+warm, 94 ms median per call against tens of milliseconds for the query itself,
+and 2,254 ms cold when it was first recorded. On the GPU the same call is
+**5 ms median, 8 ms p95**, an 18× improvement for 849 MB of the 3.5 GB that was
+free. Engine throughput was measured before and after — 19.8 against 19.3 tok/s,
+inside the run-to-run spread — so the second CUDA process on a shared card costs
+nothing measurable. `ollama ps` should say `100% GPU`; if it says CPU, the host
+is missing `nvidia-container-toolkit` and every other GPU service is failing
+too.
+
+`OLLAMA_GPU_LAYERS` forces a partial offload and `OLLAMA_GPU_DEVICE` pins the
+embedder to a specific card, for a host where the engine needs the whole GPU.
+
 ---
 
 ## Authentication

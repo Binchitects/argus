@@ -1137,6 +1137,20 @@ services:
     profiles: [argus, embed]
     restart: unless-stopped
     networks: [llm-net]
+    # Embeddings belong on the GPU.
+    #
+    # This service was CPU-only, capped at OLLAMA_CPUS=2, while a 3090 with
+    # 3.4 GB free sat next to it. Measured warm on the CPU: a 137M-parameter
+    # embedder took a median 94 ms per call. That is not slow in isolation, but
+    # it is the WHOLE cost of a semantic search -- the query itself is tens of
+    # milliseconds -- so the embedder, not the index, decided what retrieval
+    # latency was. The model is ~275 MB in fp16 and needs well under a gigabyte
+    # with its CUDA context, which is a quarter of what is free.
+    #
+    # It is also the fix that helps the OTHER problem: the CPU caps below exist
+    # because embedding ran at 767% CPU and drove the package to 94 C. Offload
+    # removes that load rather than rationing it.
+    <<: *gpu-reservation
     environment:
       # One model, kept resident: the alternative is paying the load cost on
       # every batch during a full index build.
@@ -1145,6 +1159,16 @@ services:
       # Threads inside Ollama as well as the cgroup cap below: the cap alone
       # throttles, but the process still spawns a thread per core and thrashes.
       OLLAMA_NUM_PARALLEL: "1"
+      # How many layers to offload. Empty means "let Ollama decide", which puts
+      # the whole model on the GPU when it fits. Set it to an integer to force a
+      # partial offload on a card that is too full for the whole model -- the
+      # escape hatch for a deployment sharing one GPU with a large engine.
+      OLLAMA_GPU_LAYERS: ${OLLAMA_GPU_LAYERS:-}
+      # Pinned explicitly rather than left to the runtime. The engine and the
+      # embedder share one card, and which one gets scheduled first should not
+      # be a race.
+      NVIDIA_VISIBLE_DEVICES: ${OLLAMA_GPU_DEVICE:-all}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
     # Embedding is throughput work with no latency requirement, and it ran at
     # 767% CPU unbounded -- the single biggest contributor to a 94 C package.
     # THE CEILINGS MUST SUM UNDER THE CORE COUNT. llamacpp 16 + ollama 4 +
@@ -1156,6 +1180,11 @@ services:
     # embedding is a rare bulk pass. For a large one-off index build, stop the
     # engine and raise OLLAMA_CPUS for the duration rather than oversubscribing
     # both at once.
+    #
+    # Much less load-bearing now that the model is on the GPU: tokenisation and
+    # the HTTP layer are all that is left on the CPU. Kept because the ceiling
+    # is what stops a runaway batch pass from starving the engine's own
+    # host-side work, and because a deployment with no GPU still runs this way.
     cpus: ${OLLAMA_CPUS:-2}
     volumes:
       - ollama-models:/root/.ollama
