@@ -1315,6 +1315,20 @@ services:
   # In the `gateway` profile because it is pointless without LiteLLM: with no
   # gateway there is no budget to enforce.
   identity-proxy:
+    # Explicit, NOT derived from the compose project name.
+    #
+    # Without this, compose names the built image `<project>-identity-proxy`,
+    # which ties it to COMPOSE_PROJECT_NAME -- and that breaks any deployment
+    # that renames the project. Measured: an airgap bundle built with the
+    # default `llmservice`, loaded on a target whose .env said
+    # `COMPOSE_PROJECT_NAME=airgaptest`, died at
+    #
+    #     No such image: airgaptest-identity-proxy:latest
+    #
+    # partway through `up`, with the other services already created. The
+    # prebuilt image WAS in the bundle; compose was looking for a different
+    # name. `argus` already declares an image for exactly this reason.
+    image: llmservice-identity-proxy:latest
     build: ${LLM_DEPLOY_DIR:-./deploy}/identity-proxy
     container_name: identity-proxy
     profiles: ["gateway"]
@@ -1352,6 +1366,9 @@ services:
   # is why it publishes no port and is reachable only through the proxy.
   # ============================================================================
   admin-panel:
+    # Explicit for the same reason as identity-proxy above: derive this from
+    # the project name and the image stops travelling with the bundle.
+    image: llmservice-admin-panel:latest
     build: ${LLM_DEPLOY_DIR:-./deploy}/admin-panel
     container_name: admin-panel
     profiles: ["auth"]

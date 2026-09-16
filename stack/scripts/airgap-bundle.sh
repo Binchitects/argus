@@ -409,6 +409,21 @@ step "Writing the manifest"
     echo "working tree: clean"
   fi
   echo
+  # The images above cover exactly the profiles that were on when this ran.
+  # Recorded because the failure it prevents is invisible: enable another
+  # profile on the target and `docker compose up` stops on a pull that host
+  # cannot make, partway through, with the other services already running.
+  # load.sh --check compares the two and refuses before anything starts.
+  echo "## Profiles covered"
+  if [ "$ALL_PROFILES" = 1 ]; then
+    echo "all (--all-profiles)"
+  else
+    echo "$(sed -n 's/^COMPOSE_PROFILES=//p' "$STACK_DIR/.env" | head -1)"
+    echo
+    echo "Only these. Another profile needs an image this bundle does not have;"
+    echo "rebuild with --all-profiles if the target will enable one."
+  fi
+  echo
   echo "## Images (${#IMAGES[@]})"
   for image in "${IMAGES[@]:-}"; do
     [ -n "$image" ] || continue
@@ -495,6 +510,22 @@ cd stack && make preflight
 EOF
 
 # -------------------------------------------------------------------- zip --
+# Make the payload readable before it is archived.
+#
+# `docker save -o` creates its output mode 0600 -- Docker's own choice, not the
+# umask (measured: umask 0002 here and the tars still came out 0600). zip
+# records that mode and unzip restores it, so an operator who unpacks with sudo
+# and then runs ./load.sh as their normal user gets "Permission denied" on
+# every image archive, on a machine that cannot re-make the bundle. Measured
+# exactly that after extracting as root.
+#
+# The one file that stays 0600 is a live .env, which only --with-env puts
+# there and which holds every secret in the deployment.
+step "Making the payload readable"
+chmod -R a+rX "$STAGE"
+[ -f "$STAGE/stack/.env" ] && chmod 600 "$STAGE/stack/.env"
+say "  payload is world-readable (a live .env, if shipped, stays 0600)"
+
 step "Zipping"
 rm -f "$OUT_DIR/$NAME".zip "$OUT_DIR/$NAME".z[0-9][0-9] "$ZIP"
 # Store, not deflate, by default: docker layers are already compressed, so
@@ -541,6 +572,10 @@ else
   warn "split archive: the parts exist and are non-empty, but a full read-back"
   warn "needs them joined, which needs the space again. Verify after joining:"
   warn "  zip -s 0 $NAME.zip --out ${NAME}-joined.zip && unzip -t ${NAME}-joined.zip"
+  warn ""
+  warn "The parts MUST be on a WRITABLE filesystem to join. Info-ZIP writes into"
+  warn "that directory while joining, and on a read-only mount it exits 0 having"
+  warn "produced a 0-byte file -- measured. Copy them somewhere writable first."
 fi
 
 step "Done"
@@ -557,9 +592,11 @@ if [ -n "$SPLIT" ]; then
   say "  Keep them together -- a missing part is undetectable until extraction."
   say ""
   say "  Info-ZIP's unzip CANNOT extract a split set: it warns about a multi-part"
-  say "  archive and produces nothing. Join first, from the directory holding"
-  say "  every part:"
+  say "  archive and produces nothing. Join first, from a WRITABLE directory"
+  say "  holding every part -- on a read-only mount the join exits 0 and writes a"
+  say "  0-byte file:"
   say "      zip -s 0 $NAME.zip --out ${NAME}-joined.zip"
+  say "      unzip -t ${NAME}-joined.zip   # verify BEFORE you trust it"
   say "      unzip ${NAME}-joined.zip"
 else
   say ""

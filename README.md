@@ -178,8 +178,22 @@ unzip stack-airgap-<date>.zip
 cd stack-airgap-<date>
 cp stack/.env.airgap stack/.env
 ./fill-secrets.sh        # generates the ones that can be generated
+./load.sh --check        # verify it all before anything starts
 ./load.sh --up
 ```
+
+**If you used `--split`**, the parts must be **joined first**, from a directory
+you can **write to**:
+
+```bash
+zip -s 0 stack-airgap-<date>.zip --out joined.zip   # writes into this directory
+unzip -t joined.zip                                 # verify BEFORE trusting it
+unzip joined.zip
+```
+
+Info-ZIP's `unzip` cannot read a split set at all, and the join writes into the
+directory holding the parts — on a read-only mount it exits 0 having produced a
+**0-byte file**, so verify with `unzip -t` rather than trusting the exit code.
 
 Four things reach the network on a normal first start, and the bundle closes
 all four rather than leaving them to be discovered on a machine that cannot fix
@@ -191,6 +205,24 @@ them:
 | the GGUF weights | `--with-models`; `LLAMACPP_MODEL_DIR` is rewritten to a **relative** path, so the bundle runs from wherever it is unpacked |
 | `model-init`'s Hugging Face check | `LLAMACPP_HF_FILES` is emptied. This is not tidiness: it asks the remote for the file size *before* accepting a local file, so with no network it exits 1 even when every weight is already on disk — and `llamacpp` declares it `service_completed_successfully`, so that exit 1 means the **engine never starts** |
 | Ollama's embedding model | included, and restored into its volume. It is a Docker **volume**, not a bind mount, so nothing in the checkout hints that it is missing — and without it `docs_search` cannot embed a query |
+
+**A fifth one is not a download at all: an image that is simply absent.**
+The bundle carries the images for the profiles that were enabled where it was
+built. Enable another profile on the target — edit `COMPOSE_PROFILES`, or drop
+a different env sample over `.env` — and `docker compose up` stops on a pull
+that host cannot make, *partway through*, with the other services already
+running. `load.sh --check` renders the compose file against the `.env` that
+will actually be used, compares the images it names with the bundle, and
+refuses before anything starts:
+
+```
+  the .env asks for image(s) this bundle does not carry:
+      vllm/vllm-openai:latest
+error: this bundle was built for a different set of profiles.
+```
+
+`stack/.airgap/manifest.txt` records which profiles the bundle covers. Build
+with `--all-profiles` if the target may enable others.
 
 `--with-env` puts the live `.env` in the bundle verbatim, secrets and all. Without
 it the bundle ships `.env.airgap`: the same file with **every** secret emptied —

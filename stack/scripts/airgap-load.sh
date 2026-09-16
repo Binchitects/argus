@@ -101,6 +101,62 @@ else
   [ "$failed" -eq 0 ] || die "$failed image(s) could not be loaded"
 fi
 
+# ------------------------------------------- does it cover what will run? --
+# The bundle carries the images for the profiles that were ENABLED where it was
+# built. Nothing stops the operator on the target from enabling another one --
+# by editing COMPOSE_PROFILES, or by copying a different env sample over .env
+# -- and then `docker compose up` fails on a pull that an airgapped host cannot
+# do. Worse, it fails partway: the services whose images did arrive start, and
+# the one that did not is the only thing that says why.
+#
+# Checked HERE, before anything starts, and against the .env that will actually
+# be used. `docker compose config` resolves the interpolation and honours
+# COMPOSE_PROFILES, so this compares real image names rather than raw `image:`
+# lines, which is what makes it able to see a changed default.
+step "Image coverage for the configured profiles"
+compose_file="stack/docker-compose.yml"
+if [ ! -f "$compose_file" ]; then
+  warn "no $compose_file in this bundle; cannot check image coverage"
+else
+  # The env that will be used: a real .env if one has been made, else the
+  # shipped template -- `--check` is expected to run before anyone has filled
+  # the secrets in, and `docker compose config` refuses to render while a `:?`
+  # variable is empty. Placeholders are appended for those and nothing else,
+  # and only into a throwaway copy.
+  cov_env="$(mktemp)"
+  env_source=""
+  [ -f stack/.env ] && env_source="stack/.env"
+  [ -n "$env_source" ] || { [ -f stack/.env.airgap ] && env_source="stack/.env.airgap"; }
+  [ -n "$env_source" ] && cat "$env_source" > "$cov_env"
+  for v in $(grep -oE '\$\{[A-Z0-9_]+:\?' "$compose_file" | sed 's/\${//; s/:?//' | sort -u); do
+    grep -qE "^${v}=.+" "$cov_env" || printf '%s=placeholder-for-coverage-check\n' "$v" >> "$cov_env"
+  done
+
+  needed="$(docker compose --env-file "$cov_env" -f "$compose_file" config 2>/dev/null \
+            | sed -n 's/^ *image: *//p' | tr -d '"' | sort -u)"
+  rm -f "$cov_env"
+
+  if [ -z "$needed" ]; then
+    warn "could not render $compose_file; skipping the coverage check"
+  else
+    absent=""
+    while IFS= read -r img; do
+      [ -n "$img" ] || continue
+      grep -qF "$(printf '\t%s' "$img")" "$IMAGES_LIST" || absent="$absent $img"
+    done <<< "$needed"
+
+    if [ -n "$absent" ]; then
+      printf '  the .env asks for image(s) this bundle does not carry:\n' >&2
+      for img in $absent; do printf '      %s\n' "$img" >&2; done
+      die "this bundle was built for a different set of profiles.
+  Its images.list covers $(wc -l < "$IMAGES_LIST" | tr -d ' ') image(s); the .env needs more.
+  Either turn those profiles off in COMPOSE_PROFILES, or rebuild the bundle
+  with --all-profiles on a machine that can reach a registry."
+    fi
+    say "  all $(echo "$needed" | wc -l | tr -d ' ') image(s) the .env needs are in this bundle"
+  fi
+fi
+
 # ------------------------------------------------------- ollama's volume --
 # It is a VOLUME, not a bind mount, so `docker compose up` cannot create it
 # from the checkout and nothing in the tree hints that it is missing. Without
