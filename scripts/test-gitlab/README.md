@@ -38,34 +38,87 @@ has failed, and the check says so rather than passing quietly.
 ## Running it
 
 ```bash
-docker compose -f scripts/test-gitlab/docker-compose.yml up -d
+./scripts/test-gitlab/run.sh
 ```
 
-First boot takes several minutes. Watch until the API answers:
+That is the whole lifecycle in one command: start the instance, wait for the API
+to actually be ready, seed the fixtures, run `verify.py`, and take the instance
+down again — including when seeding or verification fails, because the run that
+leaves it up is the one nobody comes back to.
+
+| flag | what it does |
+|---|---|
+| *(none)* | up → seed → verify → **down** |
+| `--keep` | leave the instance up when it finishes, for interactive work |
+| `--skip-verify` | up and seed only |
+| `--down` | stop it and delete its data |
+
+**The fixture is not a service.** Its compose file says `restart: "no"` on
+purpose, and it is worth being explicit about why: it used to say
+`unless-stopped`, which is the one restart policy a disposable fixture must
+never have. It survived reboots, came back after everyone had forgotten it, and
+measurements on a machine where it had been up five hours and was serving
+nothing showed **2.17% CPU and 2.63 GiB resident**. On a host whose entire
+purpose is to keep a GPU and 24 cores busy with something else, that is a
+fixture quietly competing with the thing it exists to test.
+
+If the instance was already running when `run.sh` started — a previous `--keep`,
+or a session you are in the middle of — it is left alone on exit and the script
+says so. Tearing down something somebody else deliberately started is worse than
+leaving it up.
+
+### Doing it by hand
 
 ```bash
+docker compose -f scripts/test-gitlab/docker-compose.yml up -d
 docker compose -f scripts/test-gitlab/docker-compose.yml logs -f gitlab
 ```
+
+First boot takes several minutes and the container reports `healthy` well before
+the API is ready, so wait for `curl -fsS http://localhost:8929/-/readiness`
+rather than for the healthcheck.
 
 Then seed and verify:
 
 ```bash
 python scripts/test-gitlab/seed.py
-```
-
-```bash
 python scripts/test-gitlab/verify.py
 ```
 
-`verify.py` exits non-zero if any check fails and writes `docs/argus/verification-report.md`
-with the index measurements (wall-clock, file/symbol/**public-symbol** counts — that
-last one is the Phase 4 vector estimate) alongside the pass/fail table.
+Both need `httpx`, which the `argus` image has and a bare host usually does not;
+`seed.py` additionally shells out to the `docker` CLI to run `gitlab-rails
+runner`. `run.sh` wraps both in the `docker run` invocation that supplies them.
+
+`verify.py` exits non-zero if any check fails and writes
+`docs/argus/verification-report.md` with the index measurements (wall-clock,
+file/symbol/**public-symbol** counts — that last one is the Phase 4 vector
+estimate) alongside the pass/fail table.
+
+Set `ARGUS_TEST_WORK` to move the mirrors and index out of the checkout:
+
+```bash
+ARGUS_TEST_WORK=/var/lib/argus-test-work python scripts/test-gitlab/verify.py
+```
+
+The default is `scripts/test-gitlab/work`, inside the checkout, and SQLite in
+WAL mode cannot open its shared-memory file on some bind-mounted filesystems —
+on an NTFS checkout `argus index` dies with `disk I/O error` before indexing
+anything. `run.sh` always sets it, to a Docker volume.
 
 ## Tear down
 
 ```bash
+./scripts/test-gitlab/run.sh --down
+```
+
+or, by hand:
+
+```bash
 docker compose -f scripts/test-gitlab/docker-compose.yml down -v
 ```
+
+`-v` matters: this instance's volumes are the disposable part, and leaving them
+behind is how a temporary fixture accumulates tens of gigabytes.
 
 ## This is not production
 

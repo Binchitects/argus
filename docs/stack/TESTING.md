@@ -381,22 +381,51 @@ The per-person path was exercised end to end against a real GitLab CE for the
 first time, which had been the largest untested claim in the project:
 
 ```bash
+./scripts/test-gitlab/run.sh          # up, seed, verify, down
+```
+
+That one command replaces the sequence below, and takes the fixture down again
+when it is finished — including when verification fails. The fixture is
+`restart: "no"` now; it used to be `unless-stopped`, which meant it survived
+reboots and sat at 2.63 GiB of RAM and 2.17% CPU indefinitely on a host whose
+whole job is to keep the GPU busy with something else.
+
+By hand, which is what `run.sh` wraps:
+
+```bash
 docker compose -f scripts/test-gitlab/docker-compose.yml up -d   # first boot: minutes
+# Wait for `curl -fsS http://localhost:8929/-/readiness`. The container reports
+# `healthy` several minutes before the API can answer, and seeding against a
+# GitLab that is still reconfiguring fails in ways that look like a bad seed.
 # seed.py shells out to `docker exec`, so it needs the CLI and the socket
 docker run --rm --user root --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(command -v docker)":/usr/local/bin/docker \
   -v "$PWD/scripts/test-gitlab:/t" -w /t --entrypoint python argus:latest /t/seed.py
 docker exec argus argus index --config /etc/argus/config.yaml
+docker compose -f scripts/test-gitlab/docker-compose.yml down -v   # do not skip this
 ```
 
-Two things that had to be right first, both now recorded in the code:
+`verify.py` additionally needs `ARGUS_TEST_WORK` set to a path outside the
+checkout on an NTFS host — SQLite in WAL mode cannot open its shared-memory file
+over that filesystem and `argus index` dies with `disk I/O error`. `run.sh`
+points it at a Docker volume for exactly that reason.
+
+Three things that had to be right first, all now recorded in the code:
 
 * Argus could not reach GitLab at all until the fixture was running, and every
   Open WebUI tool connection came back **401** — Argus rejects a chat user it
   cannot resolve access for, and Open WebUI drops the tool silently.
 * The clone URL had to be rebased onto the configured GitLab: GitLab advertises
   `http://localhost:8929`, which inside a container is the container itself.
+* `verify.py` wrote its report to `docs/verification-report.md`, a path the
+  repository restructure left behind. It never failed — it just stopped updating
+  the report anybody reads, which is the worst way for a document to break.
+
+Note that a deployment pointed at this fixture (`ARGUS_GITLAB_URL` in `.env`)
+has nothing to index while the fixture is down, so `ArgusIndexStale` fires and
+the admin console's Overview says the repositories are out of date. That is the
+system being right, not broken: the index genuinely cannot refresh.
 
 ---
 

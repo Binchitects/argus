@@ -298,6 +298,32 @@ check("1 of them have never been indexed" in banner,
       "a repository that was never indexed at all reads the same as a late one")
 check("/indexing" in banner, "the banner offers no way to fix it")
 
+# A stale index has several causes with different fixes -- no schedule, GitLab
+# unreachable, a token that can no longer enumerate, a pass that keeps timing
+# out. The exit code is what tells them apart, and it is already on the Indexing
+# page; repeating it here is the difference between an alarm the reader can act
+# on and one they have to go investigating.
+unreachable = panel.index_alert(idx(stale=3, returncode=3,
+                                    stale_names=["g/a@main"]))
+check("could not reach GitLab" in unreachable,
+      "a stale index caused by an unreachable GitLab does not say so")
+check("advises on nothing" not in unreachable, "sanity")
+
+timed_out = panel.index_alert(idx(stale=3, returncode=1,
+                                  stale_names=["g/a@main"]))
+check("could not reach GitLab" not in timed_out,
+      "a failing repository is reported as an unreachable GitLab")
+check("unhealthy" in timed_out, "a failing repository is not described")
+
+# A clean last run means the cause is elsewhere -- most often that nothing is
+# scheduled -- so the banner must not invent one.
+check("The last pass ended" not in panel.index_alert(
+        idx(stale=3, returncode=0, stale_names=["g/a@main"])),
+      "a successful last pass is reported as the cause of staleness")
+check("The last pass ended" not in panel.index_alert(
+        idx(stale=3, stale_names=["g/a@main"])),
+      "a never-run index is reported with an exit-code cause it does not have")
+
 # --- the indexing cadence ---------------------------------------------------
 #
 # The stack shipped for months with nothing ever running `argus index` on a

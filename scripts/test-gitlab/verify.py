@@ -22,6 +22,7 @@ Exits non-zero if any assertion fails. Writes docs/argus/verification-report.md.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -33,8 +34,24 @@ import httpx
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 SEEDED = HERE / "seeded.json"
-REPORT = ROOT / "docs" / "verification-report.md"
-WORK = HERE / "work"
+# `docs/argus/`, not `docs/`. The report was moved into the per-area tree when
+# the repository was restructured into src-layout, and this constant was not
+# moved with it -- so a run wrote a second, new report to the old path and the
+# tracked one silently stopped updating. Nothing failed; the report just went
+# stale, which is the worst way for a document to break.
+REPORT = ROOT / "docs" / "argus" / "verification-report.md"
+
+# Where the mirrors and the index live. Overridable because the default is
+# INSIDE the checkout, and SQLite in WAL mode cannot open its shared-memory
+# file on some bind-mounted filesystems (measured: an NTFS checkout, where
+# `argus index` dies with "disk I/O error" before indexing anything). Point
+# this at a native path -- or a Docker volume -- on such a host:
+#
+#   ARGUS_TEST_WORK=/var/lib/argus-test-work python scripts/test-gitlab/verify.py
+#
+# `scripts/test-gitlab/run.sh` does exactly that, so the one-command path works
+# on every host rather than only on the ones with a friendly filesystem.
+WORK = pathlib.Path(os.environ.get("ARGUS_TEST_WORK") or (HERE / "work"))
 
 results: list[tuple[str, bool, str]] = []
 
@@ -205,7 +222,14 @@ def main() -> int:
         "|---|---|---|",
     ] + [f"| {n} | {'PASS' if ok else '**FAIL**'} | {d} |" for n, ok, d in results]
     REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # `newline="\n"` explicitly, not the platform default. `write_text` with
+    # newline=None translates to `os.linesep`, so this file's line endings
+    # flipped depending on whether the run happened on Windows or Linux -- and
+    # because it is a TRACKED file, every run on the "other" OS produced a
+    # 70-line whole-file diff of text that had not changed. A generated file
+    # whose diff is always meaningless is a generated file nobody reviews.
+    with REPORT.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write("\n".join(lines) + "\n")
 
     print(f"\n{passed}/{total} checks passed -> {REPORT.relative_to(ROOT)}")
     return 0 if passed == total else 1

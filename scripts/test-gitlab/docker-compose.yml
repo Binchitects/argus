@@ -21,7 +21,20 @@ services:
     image: gitlab/gitlab-ce:latest
     container_name: argus-test-gitlab
     hostname: gitlab.test
-    restart: unless-stopped
+    # "no", deliberately, and NOT `unless-stopped`.
+    #
+    # This is a disposable fixture, not a service, and `unless-stopped` is the
+    # one restart policy a fixture must never have: it survives a reboot, comes
+    # back after everyone has forgotten why it exists, and holds memory and CPU
+    # forever. Measured while it had been up five hours and was serving nothing:
+    # 2.17% CPU and 2.63 GiB resident, on a machine whose whole point is that
+    # the GPU and the CPU are busy with something else.
+    #
+    # With `no` the fixture lives exactly as long as the run that started it and
+    # a reboot necessarily clears it. `scripts/test-gitlab/run.sh` brings it up,
+    # seeds it, verifies against it and takes it down again in one command,
+    # which is the lifecycle this always should have had.
+    restart: "no"
     shm_size: 256m
     environment:
       # Must survive GitLab's password-complexity check. A readable passphrase

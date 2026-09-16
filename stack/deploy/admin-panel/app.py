@@ -740,12 +740,22 @@ def index_summary() -> dict:
     `configured: False` when Argus has no admin token: the endpoint does not
     exist on its side in that case, and reporting "unreachable" would be a
     lie about a deployment that was never wired for indexing.
+
+    The last run's exit code rides along. "Three repositories are stale" is a
+    symptom with several causes -- no schedule, an unreachable GitLab, a bad
+    token -- and the exit code is what tells them apart. Leaving it on the
+    Indexing page means the Overview raises an alarm the reader has to go
+    somewhere else to understand, which is how an alarm becomes noise.
     """
     if not (ARGUS_URL and ARGUS_ADMIN_TOKEN):
         return {"configured": False}
     try:
         st = _argus("/admin/index/status")
-        return {"configured": True, "ok": True, **(st.get("index") or {})}
+        job = st.get("job") or {}
+        return {"configured": True, "ok": True,
+                "returncode": job.get("returncode"),
+                "finished": job.get("finished"),
+                **(st.get("index") or {})}
     except Exception as exc:                  # noqa: BLE001 - a tile is never
         return {"configured": True, "ok": False,       # worth a 500 page
                 "error": f"{type(exc).__name__}: {exc}"[:160]}
@@ -801,9 +811,20 @@ def index_alert(idx: dict) -> str:
     never = idx.get("never_run", 0)
     why = (f"{never} of them have never been indexed at all. "
            if never else "")
+    # The cause, not just the count. A stale index has several very different
+    # causes -- no schedule configured, GitLab unreachable, a token that can no
+    # longer enumerate, a pass that keeps timing out -- and each has a different
+    # fix. The exit code is the one thing that separates them, and it is already
+    # on the Indexing page; repeating it here is the difference between an alarm
+    # the reader can act on and one they have to go investigating.
+    cause = _INDEX_EXIT.get(idx.get("returncode"))
+    if cause and idx.get("returncode") not in (0, None):
+        cause_line = f"The last pass ended {_h(cause)}. "
+    else:
+        cause_line = ""
     return (f'<div class="msg bad"><strong>{stale} repository(ies) have a stale '
-            f'index.</strong><br>{why}Answers about them are served from old data '
-            f'with nothing on screen to say so.<br>{names}{more} '
+            f'index.</strong><br>{why}{cause_line}Answers about them are served '
+            f'from old data with nothing on screen to say so.<br>{names}{more} '
             f'<a href="/indexing">Index now</a></div>')
 
 

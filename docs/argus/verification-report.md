@@ -7,7 +7,7 @@ Run against a real GitLab CE at `http://localhost:8929`.
 
 | Metric | Value |
 |---|---|
-| Full index wall-clock | 2.8s |
+| Full index wall-clock | 1.6s |
 | repos | 3 |
 | files | 8 |
 | symbols | 70 |
@@ -20,7 +20,7 @@ Run against a real GitLab CE at `http://localhost:8929`.
 |---|---|---|
 | service token enumerates every seeded private project | PASS | expected ['driver-shim', 'eal-core', 'etl-decoder'], saw ['driver-shim', 'eal-core', 'etl-decoder'] |
 | a NON-admin token sees fewer projects (membership=false caveat is real) | PASS | admin saw 3, dev_alpha saw 1 |
-| index run completed | PASS | 2.8s |
+| index run completed | PASS | 1.6s |
 | symbols were extracted | PASS |  |
 | cross-repo includes were recorded | PASS |  |
 | dev_alpha's allowlist is exactly their one project | PASS | got ['eal-core'] |
