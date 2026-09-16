@@ -77,6 +77,16 @@ COPY stack/scripts/lib/check_mounts.py ./stack/scripts/lib/
 # its own images. The runner and the test have to travel together.
 COPY stack/deploy/seed-presets.py ./stack/deploy/
 
+# And again: `tests/test_acceptance.py` reads the embedder's device out of
+# `ollama ps`, and that parsing lives in the acceptance script.
+#
+# This is the fourth file added here one at a time, each time after the same
+# failure: the suite passes on the host and dies inside `docker build` with a
+# bare FileNotFoundError and no mention of the Dockerfile. `tests/test_dockerfile.py`
+# now checks the COPY list below against what the suite actually reads, so a
+# fifth one fails on the developer's own machine and names the line to add.
+COPY stack/scripts/acceptance.py ./stack/scripts/
+
 RUN python -m pytest -q \
  && { echo "suite: passed"; \
       echo "ctags: $(ctags --version | head -1)"; \

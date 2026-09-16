@@ -204,6 +204,7 @@ def ensure_mirror(index_cfg: IndexConfig, project: Project, *,
     auth_args = ("-c", "credential.helper=") if token else ()
     path = mirror_path(index_cfg, project.gitlab_id)
     if path.exists():
+        _retarget(path, clone_url, auth_args, env, secrets)
         _git(path, *auth_args, "fetch", "--prune", "--quiet", "origin",
              "+refs/heads/*:refs/heads/*", env=env, secrets=secrets)
         return path
@@ -211,6 +212,33 @@ def ensure_mirror(index_cfg: IndexConfig, project: Project, *,
     _git(path.parent, *auth_args, "clone", "--mirror", "--quiet", clone_url,
         str(path), env=env, secrets=secrets)
     return path
+
+
+def _retarget(mirror: Path, clone_url: str, auth_args: tuple[str, ...],
+              env: dict, secrets: tuple[str, ...]) -> None:
+    """Point an existing mirror at the URL we were told to use.
+
+    A mirror's `origin` is set once, at clone time, and every later fetch uses
+    whatever is in `.git/config` -- so changing the configured GitLab (a
+    migration, a new DNS name, or the same instance reached from a different
+    network position, which is exactly what the end-to-end fixture does) left
+    every existing mirror fetching from the OLD address. The failure reads
+    `Failed to connect to localhost port 8929` while nothing in the operator's
+    configuration mentions localhost any more, which points the investigation
+    at the wrong thing entirely.
+
+    Silent when the URL already matches, so the common path costs one `git
+    config --get` and no write. Never raises: if the comparison itself fails,
+    the fetch that follows reports the real problem.
+    """
+    try:
+        current = _git(mirror, "config", "--get", "remote.origin.url").strip()
+    except Exception:                     # noqa: BLE001 - fetch will report it
+        return
+    if current == clone_url:
+        return
+    _git(mirror, *auth_args, "remote", "set-url", "origin", clone_url,
+         env=env, secrets=secrets)
 
 
 def head_sha(mirror: Path, branch: str) -> str:

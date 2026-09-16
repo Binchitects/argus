@@ -327,7 +327,7 @@ variable:
 | C3.2 | Qwen Code connects to Argus, calls a tool and completes. **Now verified** on v2.1.2 with qwen 0.23.3, against the stack's own gateway (`--auth-type openai --openai-base-url https://gateway.<domain>/v1`) rather than a cloud key: it called `find_symbol`, distinguished the definition in `src/decoder.c` from the declaration in `include/eal/decoder.h`, and Argus logged `user=dev_alpha outcome=ok`. Two things had to be learned: `--trust` is required in a headless run or every call waits for confirmation, and the gateway host is `gateway.<domain>` — `api.<domain>` routes to Authelia and answers with a login redirect that reads as a 401. Config: `clients/qwen-code/` |
 | C3.3 | Hermes connects, lists tools and completes (see `docs/HERMES.md`) |
 | C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik, and Open WebUI's MCP client lists 16 tools |
-| C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `scripts/test-gitlab/` exists to answer. **Now verified** against a real GitLab CE: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. Still not automated — see below |
+| C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `scripts/test-gitlab/` exists to answer. **Verified and now automated** against a real GitLab CE by `./scripts/test-gitlab/run.sh`, which is one command from a cold start: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. `verify_tools.py` extends it to **all sixteen MCP tools over the wire**, checks each result's declared shape, and asserts that no structured field names a repository the caller cannot read |
 
 ### C4 — Browser *(G8, entirely missing)*
 
@@ -442,7 +442,7 @@ Ordered by (risk × likelihood), not by effort:
 | 5 | **S9.3 genuinely offline start** | the offline commits claim it; nothing checks it |
 | 6 | **S3.4 hash-free account list** | just added, verified once by hand |
 | 7 | **S9.1/S9.2 airgap round trip** | verified once by hand, easy to regress |
-| 8 | **Automate C3.5** — the per-person ACL passes by hand (see C3.5) but nothing runs it, and `verify.py` cannot on this checkout: its index DB lands on the NTFS volume where SQLite's WAL mode fails with "disk I/O error" |
+| ~~8~~ | ~~**Automate C3.5**~~ — **done.** `./scripts/test-gitlab/run.sh` runs the whole lifecycle, and `ARGUS_TEST_WORK` moves the index off the NTFS volume that SQLite's WAL mode cannot use. All sixteen tools are contract-tested over the wire; the six `docs_*` tools are reported as NOT COVERED because the fixture has no documentation pack installed |
 | 9 | **S10 idempotency** | two `up`s, two indexes, one `down`/`up` |
 | 10 | **C4 browser** | highest effort, and the only way to test the UI layer at all |
 

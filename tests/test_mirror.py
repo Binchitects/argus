@@ -13,6 +13,12 @@ def git(cwd, *args):
                    capture_output=True, text=True)
 
 
+def git_out(cwd, *args):
+    """The command's stdout, for the few assertions that read git's answer."""
+    return subprocess.run(["git", *args], cwd=cwd, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
 @pytest.fixture
 def origin(tmp_path):
     """A real git repo standing in for GitLab."""
@@ -277,3 +283,40 @@ def test_ensure_mirror_accepts_a_tls_policy(cfg, project, origin):
         cfg, project, clone_url=str(origin),
         gitlab_cfg=GitLabConfig(url="https://g", token="t", verify=False))
     assert (path / "HEAD").exists()
+
+
+def test_an_existing_mirror_is_retargeted_when_the_url_changes(cfg, project, origin, tmp_path):
+    """A mirror's origin is set once, at clone time, and every later fetch uses
+    `.git/config` -- so changing the configured GitLab left every existing
+    mirror fetching from the OLD address.
+
+    Found by moving the end-to-end fixture from the host network to the stack's
+    network, where the same GitLab is `host.docker.internal:8929` instead of
+    `localhost:8929`: the index run then failed with `Failed to connect to
+    localhost port 8929` while nothing in the configuration mentioned localhost
+    any more. A migration to a new GitLab host would have produced exactly the
+    same misleading error, on every repository at once.
+    """
+    first = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    assert git_out(first, "config", "--get", "remote.origin.url") == str(origin)
+
+    # A second location for the same repository -- a different path in, which is
+    # what a changed GitLab URL looks like from the mirror's point of view.
+    moved = tmp_path / "moved"
+    moved.mkdir()
+    subprocess.run(["git", "clone", "--mirror", "--quiet", str(origin), str(moved)],
+                   check=True, capture_output=True)
+
+    again = mirror.ensure_mirror(cfg, project, clone_url=str(moved))
+    assert again == first, "the mirror should be reused, not re-cloned"
+    assert git_out(again, "config", "--get", "remote.origin.url") == str(moved), \
+        "the mirror kept fetching from the old URL"
+
+
+def test_an_unchanged_url_is_left_alone(cfg, project, origin):
+    """The retarget must be a no-op on the common path -- one `git config --get`
+    and no write -- or every index run rewrites every mirror's config."""
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    before = (m / "config").read_bytes()
+    mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    assert (m / "config").read_bytes() == before

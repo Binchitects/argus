@@ -94,6 +94,25 @@ runner`. `run.sh` wraps both in the `docker run` invocation that supplies them.
 file/symbol/**public-symbol** counts — that last one is the Phase 4 vector
 estimate) alongside the pass/fail table.
 
+`verify_tools.py` is the per-tool contract, and it is the one that cannot rot.
+It drives the real MCP protocol over the wire with real developer tokens and
+checks, for **every tool the server advertises**:
+
+| check | what it catches |
+|---|---|
+| every advertised tool has a case, and every case names an advertised tool | a tool shipping untested, or a case left behind by a rename. There is no count to keep in sync |
+| it answers with the declared shape (list vs object) | a tool whose result shape changed, which breaks every generated client while still returning 200 |
+| no structured field names a repository the caller cannot read | an ACL hole, in all sixteen tools rather than in the three that were checked by hand |
+| the project with no members is never named, for anyone | the single claim the whole design rests on |
+| a refusal says which repository and who to maintainers ask | a refusal nobody can act on, which is the same as no refusal |
+| at least one caller gets a real result | vacuity: "nothing leaked" is trivially true against empty results, which is how this project has repeatedly reported success for a query that never ran |
+
+Tools whose preconditions the fixture cannot provide are **skipped and printed
+as not covered**, never counted as passing. Today that is the six `docs_*`
+tools, which need a documentation pack installed and fail with an actionable
+message when there is none — the absence of a pack is not something an empty
+result should be allowed to hide.
+
 Set `ARGUS_TEST_WORK` to move the mirrors and index out of the checkout:
 
 ```bash
@@ -104,6 +123,11 @@ The default is `scripts/test-gitlab/work`, inside the checkout, and SQLite in
 WAL mode cannot open its shared-memory file on some bind-mounted filesystems —
 on an NTFS checkout `argus index` dies with `disk I/O error` before indexing
 anything. `run.sh` always sets it, to a Docker volume.
+
+Set `ARGUS_TEST_GITLAB_URL` to reach the same GitLab from a different network
+position (`run.sh` uses `http://host.docker.internal:8929` from `llm-net`), and
+`ARGUS_OLLAMA_URL` to the stack's embedder so the vector half of the index is
+built and `semantic_search` is exercised rather than skipped.
 
 ## Tear down
 

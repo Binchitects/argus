@@ -67,7 +67,13 @@ def main() -> int:
         print(f"missing {SEEDED}; run seed.py first", file=sys.stderr)
         return 2
     seeded = json.loads(SEEDED.read_text(encoding="utf-8"))
-    gitlab_url = seeded["gitlab_url"]
+    # Overridable, because "where the fixture GitLab is" depends on where this
+    # runs from. On the host network it is `http://localhost:8929` (what seed.py
+    # records); on `llm-net`, alongside the stack, the same instance is
+    # `http://host.docker.internal:8929`. Hardcoding the first meant the
+    # verification could only ever run from one position, which is how it ended
+    # up being a script somebody ran by hand from one particular directory.
+    gitlab_url = os.environ.get("ARGUS_TEST_GITLAB_URL") or seeded["gitlab_url"]
     admin = seeded["admin_token"]
     users = seeded["users"]
     projects = seeded["projects"]
@@ -125,6 +131,33 @@ def main() -> int:
         print(proc.stderr[-2000:], file=sys.stderr)
     check("index run completed", proc.returncode == 0, f"{elapsed:.1f}s")
 
+    # ------------------------------------------------------- embed it ------
+    # Without this the vector half of the index is EMPTY, and `semantic_search`
+    # answers "The index is unavailable; do not retry this query." -- an honest
+    # refusal, but one that meant the semantic path had never been exercised
+    # here at all. Cheap now that the embedder is on the GPU: measured at about
+    # 5 ms per symbol, so this fixture's seventy cost under half a second.
+    #
+    # Not fatal if the embedder is unreachable. A fixture run without Ollama is
+    # still a valid ACL verification; it is simply one that cannot say anything
+    # about search, and saying so is the point.
+    print("\n== Embedding (needs a reachable Ollama) ==")
+    t0 = time.time()
+    proc = subprocess.run(
+        [sys.executable, "-m", "argus.cli", "embed", "--config", str(WORK / "config.yaml")],
+        capture_output=True, text=True, cwd=ROOT, timeout=1800,
+    )
+    embed_elapsed = time.time() - t0
+    embedded = proc.returncode == 0
+    print(proc.stdout[-1000:])
+    if not embedded:
+        print(proc.stderr[-1000:], file=sys.stderr)
+    check("the vector index was built, so semantic_search can be verified",
+          embedded,
+          f"{embed_elapsed:.1f}s" if embedded else
+          f"embed failed: {proc.stderr.strip().splitlines()[-1][:120] if proc.stderr.strip() else 'see output'}"
+          f" -- set ARGUS_OLLAMA_URL to a reachable embedder to close this")
+
     conn = open_db(cfg.index.db_path)
     counts = {
         "repos": conn.execute("SELECT COUNT(*) c FROM repos").fetchone()["c"],
@@ -170,31 +203,59 @@ def main() -> int:
 
     # DecodeFrame is defined in eal-core and called from BOTH other repos, so a
     # broken filter shows up as extra rows rather than as an error.
+    #
     # GUARD AGAINST A VACUOUS PASS. If indexing failed there are no symbols at
     # all, and every "never crosses the allowlist" assertion below is trivially
-    # true against two empty sets -- the exact failure mode this project has hit
-    # eight times. Refuse to report those as passes.
-    indexed_ok = check(
-        "index is non-empty, so the isolation checks below are meaningful",
-        counts["symbols"] > 0,
-        "no symbols indexed -- isolation assertions would pass vacuously")
+    # true against empty sets -- the exact failure mode this project has hit
+    # eight times.
+    #
+    # The first version of this guard was itself the bug. It printed its FAILURE
+    # message as the detail line on success ("no symbols indexed -- isolation
+    # assertions would pass vacuously" next to a green PASS), and it skipped one
+    # check while letting the rest run and pass against nothing. A guard that
+    # says the assertions are meaningless and then reports them as passes is
+    # worse than no guard, because the green line is what gets read.
+    #
+    # So the vacuity flag is folded into every check it applies to: when the
+    # index is empty each of them FAILS, which is the honest answer -- none of
+    # them has been demonstrated.
+    symbols_indexed = counts["symbols"] > 0
+    check("index is non-empty, so the isolation checks below are meaningful",
+          symbols_indexed,
+          f"{counts['symbols']} symbols indexed" if symbols_indexed else
+          "no symbols indexed -- the isolation checks below cannot be demonstrated")
+
+    def not_vacuous(condition: bool, detail: str) -> tuple[bool, str]:
+        return (symbols_indexed and condition,
+                detail if symbols_indexed else "VACUOUS: nothing was indexed")
 
     a_syms = queries.find_symbol(alpha.allowed_repo_ids, ro, "DecodeFrame")
     b_syms = queries.find_symbol(beta.allowed_repo_ids, ro, "DecodeFrame")
-    if indexed_ok:
-        check("DecodeFrame is actually findable by the repo that defines it",
-              len(a_syms) > 0, f"alpha found {len(a_syms)}")
-    a_repos = {r["path_with_namespace"] for r in a_syms}
-    b_repos = {r["path_with_namespace"] for r in b_syms}
+    a_repos = {r["path_with_namespace"].rsplit("/", 1)[-1] for r in a_syms}
+    b_repos = {r["path_with_namespace"].rsplit("/", 1)[-1] for r in b_syms}
     print(f"  find_symbol DecodeFrame: alpha={sorted(a_repos)} beta={sorted(b_repos)}")
-    check("find_symbol never crosses the allowlist", not (a_repos & b_repos) or not a_repos or not b_repos,
-          f"alpha={sorted(a_repos)} beta={sorted(b_repos)}")
+
+    # Not "the two sets are disjoint" -- that is true when either is EMPTY,
+    # which is precisely how an over-restrictive filter hides. alpha must
+    # actually find it, and neither may name a repository outside its own
+    # allowlist.
+    ok, detail = not_vacuous(
+        bool(a_repos) and a_repos <= {"eal-core"} and b_repos <= {"etl-decoder"},
+        f"alpha={sorted(a_repos)} (want eal-core) beta={sorted(b_repos)} "
+        f"(want a subset of etl-decoder)")
+    check("find_symbol returns only what the caller may read, and finds it",
+          ok, detail)
 
     a_refs = queries.find_references(alpha.allowed_repo_ids, ro, "DecodeFrame")
     b_refs = queries.find_references(beta.allowed_repo_ids, ro, "DecodeFrame")
-    check("find_references never crosses the allowlist",
-          not ({r["repo"] for r in a_refs} & {r["repo"] for r in b_refs}),
-          f"alpha={sorted({r['repo'] for r in a_refs})} beta={sorted({r['repo'] for r in b_refs})}")
+    a_ref_repos = {r["repo"].rsplit("/", 1)[-1] for r in a_refs}
+    b_ref_repos = {r["repo"].rsplit("/", 1)[-1] for r in b_refs}
+    ok, detail = not_vacuous(
+        bool(a_ref_repos) and bool(b_ref_repos)
+        and a_ref_repos <= {"eal-core"} and b_ref_repos <= {"etl-decoder"},
+        f"alpha={sorted(a_ref_repos)} beta={sorted(b_ref_repos)}")
+    check("find_references returns only what the caller may read, and finds it",
+          ok, detail)
 
     check("an EMPTY allowlist returns nothing, not everything",
           queries.find_symbol([], ro, "DecodeFrame") == []
