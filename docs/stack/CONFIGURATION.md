@@ -136,23 +136,66 @@ the model answers immediately.
 Both are rendered into `config/litellm/config.yaml` as `chat_template_kwargs`
 and applied to every request through the gateway.
 
-### Changing the thinking level per chat or per model
+### Changing the thinking level per chat
 
-Open WebUI has a `reasoning_effort` field and it does **not** work here: LiteLLM
-drops it for a custom `openai/` api_base. Measured both ways — a top-level
-`reasoning_effort` of `minimal` is accepted by the gateway and never reaches the
-template, while the same value inside `chat_template_kwargs` reaches it and
-raises `Unexpected reasoning effort`.
+**Pick it from the model dropdown.** The stack creates one Open WebUI model per
+level on every start, so the level is chosen per chat the same way the model is:
 
-What does work is `chat_template_kwargs`. Open WebUI passes it through untouched,
-because it is not one of the parameter names Open WebUI interprets:
+| picker entry | what it sends |
+|---|---|
+| `Qwen3.8-Flash-Next · Deep think` | `reasoning_effort: xhigh` (the engine default) |
+| `Qwen3.8-Flash-Next · Balanced` | `reasoning_effort: medium` |
+| `Qwen3.8-Flash-Next · Quick` | `reasoning_effort: low` |
+| `Qwen3.8-Flash-Next · No thinking` | `enable_thinking: false` |
 
-* **per chat** — the chat controls' **Advanced Params**, add
-  `chat_template_kwargs` with the value below
-* **per model** — Admin → Models → the model → Advanced Params, so every new
-  chat starts from it
+Configured by `THINKING_PRESETS` (`level:Label`, comma-separated); empty turns
+the presets off. They are created by `stack/deploy/seed-presets.py`, which the
+open-webui entrypoint starts in the background — it waits for the first admin to
+sign in, because Open WebUI will not list a model that has no owner, and on a
+fresh deployment no user exists until someone signs in through SSO.
 
-A per-chat value beats a per-model value, which beats the `.env` default.
+Measured end to end through Open WebUI, same prompt, three picker entries:
+
+```
+Deep think    reasoning=2654 chars   completion_tokens=1319
+Quick         reasoning=1251 chars   completion_tokens= 667
+No thinking   reasoning=   0 chars   completion_tokens= 910
+```
+
+#### Why the field Open WebUI already has does not work
+
+Open WebUI has a `reasoning_effort` parameter, offered in the chat controls'
+Advanced Params and in the model editor, and it looks like exactly the right
+control. **It does nothing here.** It goes out as a top-level field, and LiteLLM
+drops a top-level `reasoning_effort` when the backend is a custom `openai/`
+api_base — which this stack is. Measured, same prompt:
+
+| request | reasoning | honoured? |
+|---|---|---|
+| no override | 2654 chars | — (the engine default) |
+| `reasoning_effort: low` at the top level | 2654 chars | **no** |
+| `chat_template_kwargs: {reasoning_effort: low}` | 1251 chars | yes |
+| `chat_template_kwargs: {enable_thinking: false}` | 0 chars | yes |
+
+`--jinja` means the model's own template decides what thinking means, and it
+reads `reasoning_effort` and `enable_thinking` as Jinja variables. Only
+`chat_template_kwargs` reaches it. A typo there is loud — the template raises
+`Unexpected reasoning effort` — which is the one mercy in this arrangement.
+
+This is why the presets carry the value in `custom_params`, which Open WebUI
+deep-merges into the outgoing body (see `apply_model_params_to_body_openai`).
+
+#### Doing it by hand
+
+Any request whose params carry `chat_template_kwargs` works, so the API and a
+model preset both do:
+
+```json
+{ "custom_params": { "chat_template_kwargs": { "reasoning_effort": "low" } } }
+```
+
+The value must be a real object, not a string. A JSON string is passed through
+as a string and the engine never sees a variable it recognises.
 
 | want | value |
 |---|---|

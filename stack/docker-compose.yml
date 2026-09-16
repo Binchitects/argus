@@ -1489,6 +1489,21 @@ services:
             except Exception as exc:
                 print("open-webui: could not clear persisted tool_server.connections:", exc, file=sys.stderr)' || true
         fi
+        # Thinking level per chat. ONE PRESET PER LEVEL, chosen from the model
+        # picker, because that is the only per-chat control Open WebUI offers
+        # that can reach this engine: the `reasoning_effort` field its own
+        # params panel accepts goes out as a TOP-LEVEL field, and LiteLLM drops
+        # that for a custom `openai/` api_base. Measured, same prompt: 270
+        # chars of reasoning with and without it. `custom_params` is deep-merged
+        # into the outgoing body, so it does arrive.
+        #
+        # Backgrounded on purpose: a preset needs an owner, no user exists until
+        # someone signs in through SSO, and that happens after this starts. The
+        # script waits for the first admin and then creates them; on every later
+        # boot the wait is over at once. See stack/deploy/seed-presets.py.
+        if [[ ",$$COMPOSE_PROFILES," == *",llamacpp,"* ]] && [ -n "$$THINKING_PRESETS" ]; then
+          python3 /seed-presets.py &
+        fi
         exec bash start.sh
     restart: unless-stopped
     networks: [llm-net]
@@ -1497,6 +1512,7 @@ services:
     volumes:
       - open-webui-data:/app/backend/data
       - traefik-certs:/certs:ro
+      - ${LLM_DEPLOY_DIR:-./deploy}/seed-presets.py:/seed-presets.py:ro
     environment:
       # Through LiteLLM rather than straight at vLLM: the gateway fronts EVERY
       # engine, so each warm model shows up in the WebUI model picker. Point
@@ -1525,6 +1541,14 @@ services:
       ENABLE_FORWARD_USER_INFO_HEADERS: "true"
       ARGUS_CHAT_CLIENT_TOKEN: ${ARGUS_CHAT_CLIENT_TOKEN:-}
       COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+      # One Open WebUI model per thinking level, so the level is chosen per
+      # chat from the model picker. Empty turns it off; see
+      # deploy/seed-presets.py for why the picker and not a params field.
+      THINKING_PRESETS: ${THINKING_PRESETS:-xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking}
+      # Needed by the preset seeder: it names each preset after the model it is
+      # a preset OF. Open WebUI itself does not read this -- it talks to the
+      # gateway, which is what serves MODEL_NAME.
+      MODEL_NAME: ${MODEL_NAME:-}
       ENABLE_OLLAMA_API: "false"
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY}
       WEBUI_NAME: LLMService

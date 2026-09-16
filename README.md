@@ -706,6 +706,25 @@ with context × ubatch and appears in no weights-plus-KV calculation; at 256K co
 `reasoning_content` field. With a small `max_tokens` the whole budget goes to
 reasoning and the reply is empty. Give it 300+ tokens.
 
+**Thinking level.** Chosen per chat from the model dropdown, because the stack
+creates one Open WebUI model per level:
+
+| picker entry | what it does |
+|---|---|
+| `… · Deep think` | `reasoning_effort: xhigh` — the engine's own default |
+| `… · Balanced` | `reasoning_effort: medium` |
+| `… · Quick` | `reasoning_effort: low` |
+| `… · No thinking` | `enable_thinking: false` — answers immediately |
+
+Measured on the same prompt: 2654 / 1251 / 0 characters of reasoning. Set
+`THINKING_PRESETS` in `.env` to change the list, or leave it empty for none.
+
+**The `Reasoning Effort` field in Open WebUI's own params panel does nothing
+here** — it goes out as a top-level field, and LiteLLM drops that for a custom
+`openai/` api_base. Measured identical to setting nothing at all. Use the
+picker. See
+[docs/stack/CONFIGURATION.md](docs/stack/CONFIGURATION.md#changing-the-thinking-level-per-chat).
+
 **Low GPU utilisation with Flash-Next.** Expected: the experts run on the CPU, and the
 card idles between attention layers.
 
