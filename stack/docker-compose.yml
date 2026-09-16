@@ -1399,6 +1399,14 @@ services:
       # charts. Grafana already has usage-by-user and the hardware views.
       GRAFANA_URL: https://grafana.${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}
       AUTHELIA_URL: https://auth.${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}
+      # Probed by the console's Overview and Monitoring pages. Internal names
+      # on purpose: the container reaches a container. Querying the PUBLIC
+      # hostname from in here fails, because `grafana.<domain>` resolves to the
+      # host's loopback and not to Traefik -- measured, and it showed up as a
+      # URLError next to four green lights, which reads as Grafana being down.
+      PROMETHEUS_URL: http://prometheus:9090
+      GRAFANA_PROBE_URL: http://grafana:3000
+      AUTHELIA_PROBE_URL: http://authelia:9091
       REQUIRE_FORWARDED: "1"
     volumes:
       # Read-write on purpose: creating a person and resetting a password both

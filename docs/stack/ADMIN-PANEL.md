@@ -1,12 +1,42 @@
 # Admin panel
 
-`https://admin.<LLM_DOMAIN>` — one page, two faces. Everyone who signs in sees
-their own usage and can change their password. Members of the `admins` group
-also get a console: create people, set credit, revoke and reissue API keys,
-reset passwords.
+`https://admin.<LLM_DOMAIN>` — two faces behind one sign-in. Everyone sees their
+own account: what they have spent, their keys, and a password form. Members of
+the `admins` group get a console with a sidebar:
+
+| section | what is there |
+|---|---|
+| **Overview** | services reachable from the container, totals, and who is at or past their credit |
+| **People** | every account joined across Authelia and LiteLLM — search, paged, credit, keys, CSV export |
+| **Model** | what is serving and what it was configured with, plus the thinking-level presets |
+| **Indexing** | the Argus code index: coverage, per-repo freshness, run log, and the button |
+| **Monitoring** | service health and links out to Grafana, Prometheus and the MCP endpoint |
+| **Settings** | the effective configuration, read-only |
+
+A person's own page is `/people/<username>`, which is also where the per-account
+actions live: set credit, issue a key, reset a password, delete the account.
 
 Runs under the `auth` profile, because without Authelia it has no way to know
 who is asking and no reason to exist.
+
+## What it deliberately does not do
+
+**No Docker socket.** This container holds the LiteLLM master key and writes
+Authelia's account file; mounting the socket would also give it the host. So
+"is Prometheus up" is answered by an HTTP probe from inside `llm-net`, not by
+inspecting containers — and the Overview says so rather than implying more.
+
+**No secrets on the Settings page.** Not even masked. A masked value still shows
+its length and first characters in every screenshot, and the page is an
+allow-list of variable *names* rather than a dump of `os.environ`.
+
+**No self-deletion, and no deleting the last admin.** Both are refused. The
+first version of that guard compared the username against `who.label`, which is
+the *email* — so it never matched, and the administrator account was deleted
+from a live stack while the guard was being tested. It now matches on username,
+email and label, and refuses to remove the last administrator, because that
+leaves a deployment nobody can administer and every remaining account is refused
+the page it would take to undo.
 
 ## Who is who
 

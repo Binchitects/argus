@@ -75,6 +75,15 @@ DIRECTORY_FILE = os.environ.get(
     os.path.join(os.path.dirname(USERS_FILE), "directory", "users.yml"))
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "admins")
 GRAFANA_URL = os.environ.get("GRAFANA_URL", "")
+#: Probed by the Monitoring page. Internal name on purpose: this is the
+#: container talking to a container, not a browser round-tripping the proxy.
+PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://prometheus:9090").rstrip("/")
+#: Where the health probes go, as opposed to where the links go. The public
+#: hostnames resolve to the host's loopback, which is not Traefik from inside
+#: this container -- so probing them reported Grafana as down while it was
+#: serving fine.
+GRAFANA_PROBE_URL = os.environ.get("GRAFANA_PROBE_URL", "http://grafana:3000").rstrip("/")
+AUTHELIA_PROBE_URL = os.environ.get("AUTHELIA_PROBE_URL", "http://authelia:9091").rstrip("/")
 #: Argus's operator control surface. Both must be set for the indexing card to
 #: appear: without the token the endpoint does not exist on Argus's side, so
 #: rendering a button that cannot work would only mislead.
@@ -466,30 +475,179 @@ code.key{{font-family:var(--mono);font-size:12px;background:var(--bg);
  th,td{{padding:8px 9px}}
 }}
 @media (prefers-reduced-motion:reduce){{*{{transition:none!important}}}}
+
+/* ---------------------------------------------------------------- shell ----
+   The console was a single scrolling page. A sidebar is what makes it a set of
+   places rather than one list, and it is the difference between "a page with
+   tables on it" and something an operator can move around in. */
+.shell{{display:grid;grid-template-columns:238px 1fr;min-height:100vh}}
+nav.side{{position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column;
+ gap:2px;padding:var(--s4) var(--s3);background:var(--surface);border-right:1px solid var(--line)}}
+nav.side .brand{{padding:0 var(--s2) var(--s4)}}
+nav.side .group{{margin:var(--s4) 0 var(--s1);padding:0 10px;font-size:10.5px;font-weight:700;
+ letter-spacing:.07em;text-transform:uppercase;color:var(--fg-faint)}}
+nav.side a.item{{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-sm);
+ color:var(--fg-muted);text-decoration:none;font-weight:550;font-size:13px;
+ transition:background .12s,color .12s}}
+nav.side a.item:hover{{background:var(--surface-2);color:var(--fg)}}
+nav.side a.item.on{{background:var(--accent-soft);color:var(--accent)}}
+nav.side a.item .ic{{width:16px;height:16px;flex:0 0 auto;opacity:.85}}
+nav.side a.item .n{{margin-left:auto;font-size:11px;color:var(--fg-faint);font-variant-numeric:tabular-nums}}
+nav.side .foot{{margin-top:auto;padding-top:var(--s3);border-top:1px solid var(--line-soft)}}
+nav.side .me{{display:flex;align-items:center;gap:9px;padding:8px 10px;font-size:12px;
+ color:var(--fg-muted);min-width:0}}
+nav.side .me .who{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.avatar{{width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
+ display:grid;place-items:center;font-weight:700;font-size:11px;flex:0 0 auto;text-transform:uppercase}}
+.content{{min-width:0;display:flex;flex-direction:column}}
+.topbar{{position:sticky;top:0;z-index:9;display:flex;align-items:center;gap:var(--s3);
+ padding:var(--s3) var(--s5);background:color-mix(in srgb,var(--bg) 88%,transparent);
+ backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}}
+.crumbs{{font-size:12px;color:var(--fg-muted)}} .crumbs b{{color:var(--fg);font-weight:600}}
+.topbar .spacer{{margin-left:auto}}
+.chip{{border:1px solid var(--line);background:transparent;color:var(--fg-muted);border-radius:var(--r-sm);
+ padding:5px 10px;font-size:12px;cursor:pointer;text-decoration:none;display:inline-flex;
+ gap:6px;align-items:center;font-weight:550}}
+.chip:hover{{color:var(--fg);border-color:var(--fg-faint)}}
+.toolbar{{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;margin:0 0 var(--s3)}}
+.toolbar form{{display:flex;gap:var(--s2);align-items:center;margin:0}}
+.toolbar .spacer{{margin-left:auto}}
+.tablewrap{{overflow-x:auto}}
+.btn.primary{{background:var(--accent);border-color:var(--accent);color:#08101f}}
+.btn.danger{{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent);
+ background:transparent}}
+.btn.danger:hover{{background:var(--bad-soft)}}
+.svc{{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft);
+ font-size:13px}}
+.svc:last-child{{border-bottom:0}}
+.dot{{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:var(--fg-faint)}}
+.dot.ok{{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}}
+.dot.bad{{background:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}}
+.svc .name{{font-weight:550}}
+.svc .ms{{margin-left:auto;color:var(--fg-muted);font-size:12px;
+ font-variant-numeric:tabular-nums;white-space:nowrap}}
+.pager{{display:flex;gap:var(--s2);align-items:center;justify-content:flex-end;
+ margin-top:var(--s3);font-size:12px;color:var(--fg-muted)}}
+.pager a{{color:var(--fg-muted);text-decoration:none;border:1px solid var(--line);
+ border-radius:var(--r-sm);padding:5px 10px}}
+.pager a:hover{{color:var(--fg);border-color:var(--fg-faint)}}
+.pager a.off{{opacity:.4;pointer-events:none}}
+.kv{{display:grid;grid-template-columns:minmax(170px,250px) 1fr;gap:0}}
+.kv dt{{padding:9px 0;border-bottom:1px solid var(--line-soft);color:var(--fg-muted);font-size:13px}}
+.kv dd{{margin:0;padding:9px 0;border-bottom:1px solid var(--line-soft);
+ font-family:var(--mono);font-size:12.5px;overflow-wrap:anywhere}}
+.sectionnav{{display:flex;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s4)}}
+.sectionnav a{{text-decoration:none;color:var(--fg-muted);font-size:12px;font-weight:600;
+ border:1px solid var(--line);border-radius:999px;padding:5px 12px}}
+.sectionnav a.on{{background:var(--accent-soft);color:var(--accent);border-color:transparent}}
+@media (max-width:900px){{
+ .shell{{grid-template-columns:1fr}}
+ nav.side{{position:static;height:auto;flex-direction:row;align-items:center;overflow-x:auto;
+  border-right:0;border-bottom:1px solid var(--line);padding:var(--s2) var(--s3);gap:var(--s1)}}
+ nav.side .brand,nav.side .group,nav.side .foot{{display:none}}
+ nav.side a.item{{white-space:nowrap;padding:6px 10px}}
+ topbar,.topbar{{padding:var(--s2) var(--s4)}}
+ main{{padding:var(--s4) var(--s4) var(--s6)}}
+}}
 </style></head><body>
-<header>
- <span class="brand"><span class="mark"></span>LLM Service</span>{badge}
- <div class="who">{who}</div>{logout}
-</header>
-<main>{msg}{body}</main></body></html>"""
+<div class="shell">
+<nav class="side">
+ <span class="brand"><span class="mark"></span>LLM Service</span>
+ {nav}
+ <div class="foot">{face}</div>
+</nav>
+<div class="content">
+ <div class="topbar"><div class="crumbs">{crumbs}</div><div class="spacer"></div>{theme}</div>
+ <main>{msg}{body}</main>
+</div></div></body></html>"""
 
 
-def page(title: str, body: str, who: str, admin: bool, msg: str = "") -> HTMLResponse:
-    # Applied to every page, not just the ones showing a credential: a one-time
-    # secret is rendered through this same function, and a header that is only
-    # sometimes present is a header someone will eventually forget.
-    #
-    #   no-store      keeps a shown-once password out of the disk cache and out
-    #                 of the back button.
-    #   no-referrer   the page links out to Grafana; without this the URL of the
-    #                 page that displayed the secret travels in the Referer.
-    logout = (f'<a class="out" href="{_h(AUTHELIA_URL)}/logout'
+#: The sections of the console. `icon` is an SVG path, `admin` hides it from
+#: ordinary people, and `count` is filled in per request where a number is
+#: useful at a glance -- the sidebar is where "how many people" belongs, not a
+#: tile you have to scroll to.
+NAV_ITEMS = (
+    ("overview",   "/",           "Overview",   "M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z", False),
+    ("people",     "/people",     "People",     "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8M22 21v-2a4 4 0 0 0-3-3.9", True),
+    ("model",      "/model",      "Model",      "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5", False),
+    ("indexing",   "/indexing",   "Indexing",   "M21 12a9 9 0 1 1-6.2-8.6M22 4v6h-6", False),
+    ("monitoring", "/monitoring", "Monitoring", "M3 3v18h18M19 9l-5 5-4-4-3 3", False),
+    ("settings",   "/settings",   "Settings",   "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.18V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 7.26 19.4l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.09 14H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 8.74l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 10 4.6V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 2.74 1.18l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 10V10a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z", True),
+)
+
+THEMES = ("system", "dark", "light")
+
+
+def _theme(request: Request) -> str:
+    """Which theme to render, from a cookie. Falls back to the OS preference.
+
+    A cookie rather than a database or a query string: this is one person's
+    view of one page, and it should survive a navigation without becoming
+    part of a URL that someone pastes into a ticket.
+    """
+    value = (request.cookies.get("theme") or "system").lower()
+    return value if value in THEMES else "system"
+
+
+def _nav(active: str, admin: bool, counts: dict[str, str]) -> str:
+    def item(key, href, label, icon):
+        on = " on" if key == active else ""
+        n = counts.get(key)
+        badge = f'<span class="n">{_h(n)}</span>' if n else ""
+        return (f'<a class="item{on}" href="{href}">'
+                f'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                f'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+                f'<path d="{icon}"/></svg>{_h(label)}{badge}</a>')
+    if not admin:
+        # One place to go. Listing sections they cannot open reads as a
+        # permissions problem rather than as a design decision, and the 403 is
+        # the first thing a new person would see.
+        return ('<div class="group">Your account</div>'
+                + item("profile", "/profile", "Your account",
+                       "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8"))
+    primary = "".join(item(*i[:4]) for i in NAV_ITEMS[:5])
+    extra = ('<div class="group">Configuration</div>'
+             + "".join(item(*i[:4]) for i in NAV_ITEMS[5:]))
+    return ('<div class="group">Operations</div>' + primary + extra)
+
+
+def page(request: Request, title: str, body: str, who: str, admin: bool,
+         msg: str = "", active: str = "overview", crumbs: str = "",
+         counts: dict[str, str] | None = None) -> HTMLResponse:
+    """Render the shell around a page body.
+
+    Headers, and why each is here:
+
+      no-store      keeps a shown-once password out of the disk cache and out
+                    of the back button.
+      no-referrer   the console links out to Grafana; without this the URL of
+                    the page that displayed a secret travels in the Referer.
+    """
+    theme = _theme(request)
+    logout = (f'<a class="chip" href="{_h(AUTHELIA_URL)}/logout'
               f'?rd={urllib.parse.quote(f"https://admin.{DOMAIN}/")}">Sign out</a>'
               if AUTHELIA_URL else "")
+    cycle = THEMES[(THEMES.index(theme) + 1) % len(THEMES)]
+    glyph = {"system": "auto", "dark": "dark", "light": "light"}[theme]
     return HTMLResponse(
-        PAGE.format(title=_h(title), body=body, who=_h(who), msg=msg,
-                    logout=logout,
-                    badge='<span class="badge">admin</span>' if admin else ""),
+        PAGE.format(
+            title=_h(title), body=body, msg=msg,
+            nav=_nav(active, admin, counts or {}),
+            crumbs=crumbs or f"<b>{_h(title)}</b>",
+            theme=(f'<form method="post" action="/theme" style="margin:0">'
+                   f'<input type="hidden" name="theme" value="{cycle}">'
+                   f'<input type="hidden" name="to" value="{_h(active)}">'
+                   f'<button class="chip" type="submit" title="Theme">'
+                   f'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" '
+                   f'stroke="currentColor" stroke-width="1.8" stroke-linecap="round">'
+                   f'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4'
+                   f'M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'
+                   f'</svg>{glyph}</button></form>'),
+            face=(f'<div class="me"><span class="avatar">{_h((who or "?")[:2])}</span>'
+                  f'<div class="who">{_h(who)}'
+                  f'{" <span class=\"badge\">admin</span>" if admin else ""}</div></div>'
+                  f'{logout}') if who else logout,
+        ),
         headers={"Cache-Control": "no-store, no-cache, must-revalidate",
                  "Pragma": "no-cache",
                  "Referrer-Policy": "no-referrer",
@@ -782,103 +940,423 @@ def monitoring_card() -> str:
 
 
 # -------------------------------------------------------------------- views --
+# ------------------------------------------------------------- data shaping --
+#: How many people fit on one page. The table used to render every account in
+#: one <table>, which is fine for five and unusable for two hundred.
+PAGE_SIZE = 25
+
+
+def _probe(url: str, timeout: float = 2.5) -> tuple[bool, str]:
+    """Is something answering there, and how fast. Never raises.
+
+    TLS is not verified: the stack serves a self-signed certificate and this is
+    a liveness check, not a trust decision. The decision it replaces --
+    "everything looks healthy but one tab is empty" -- is worth far more than
+    the reassurance of a verified handshake against our own container.
+    """
+    import ssl
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    started = time.time()
+    try:
+        with urllib.request.urlopen(url, timeout=timeout, context=ctx) as r:
+            ms = (time.time() - started) * 1000
+            return 200 <= r.status < 400, f"{r.status} · {ms:.0f} ms"
+    except urllib.error.HTTPError as exc:
+        # An HTTP error is still an answer. Authelia replying 401 to a bare GET
+        # means it is up, which is the question being asked.
+        ms = (time.time() - started) * 1000
+        return exc.code < 500, f"{exc.code} · {ms:.0f} ms"
+    except Exception as exc:  # noqa: BLE001 - a probe must never break the page
+        return False, type(exc).__name__
+
+
+def _services() -> list[tuple[str, bool, str]]:
+    """The five things this console can see, and what each one is for.
+
+    No Docker socket here on purpose: this container holds the LiteLLM master
+    key and writes Authelia's account file, and mounting the socket would give
+    it the host as well. Reachability over HTTP is what it can honestly claim.
+    """
+    return [
+        ("LiteLLM gateway", *_probe(LITELLM.rstrip("/") + "/health/liveliness")),
+        ("Argus index", *_probe(ARGUS_URL.rstrip("/") + "/healthz")),
+        ("Prometheus", *_probe(PROMETHEUS_URL + "/-/healthy")),
+        ("Grafana", *_probe(GRAFANA_PROBE_URL + "/api/health")),
+        ("Authelia", *_probe(AUTHELIA_PROBE_URL + "/api/health")),
+    ]
+
+
+def _people(with_keys: bool = False) -> list[dict]:
+    """Every account, joined across both systems.
+
+    Authelia owns who exists and what they may do; LiteLLM owns what they have
+    spent and what keys they hold. The two are keyed by email, because that is
+    the one field both agree on -- a username can differ between them, which is
+    the whole reason Argus resolves people by email.
+    """
+    litellm_users, note = spend_by_user()
+    rows = []
+    for username, entry in sorted(load_users().items()):
+        email = (entry.get("email") or username).lower()
+        u = litellm_users.get(email, {"spend": 0.0, "budget": None})
+        groups = entry.get("groups") or []
+        row = {
+            "username": username,
+            "email": email,
+            "display": entry.get("displayname") or username,
+            "groups": groups,
+            "admin": ADMIN_GROUP in groups,
+            "spend": float(u.get("spend") or 0.0),
+            "budget": u.get("budget"),
+            "user_id": u.get("user_id") or email,
+        }
+        if with_keys:
+            row["keys"] = keys_for(row["user_id"])
+        rows.append(row)
+    return rows, note
+
+
+def _svc_list(services) -> str:
+    out = []
+    for name, ok, detail in services:
+        out.append(f'<div class="svc"><span class="dot {"ok" if ok else "bad"}"></span>'
+                   f'<span class="name">{_h(name)}</span>'
+                   f'<span class="ms">{_h(detail)}</span></div>')
+    return "".join(out)
+
+
+def _pager(base: str, page: int, pages: int, q: str = "") -> str:
+    if pages <= 1:
+        return ""
+    extra = f"&q={urllib.parse.quote(q)}" if q else ""
+
+    def link(n, label, off=False):
+        cls = ' class="off"' if off else ""
+        return f'<a{cls} href="{base}?p={n}{extra}">{label}</a>'
+
+    window = [n for n in (page - 1, page, page + 1) if 1 <= n <= pages]
+    middle = "".join(link(n, str(n)) if n != page else f"<span>{n}</span>" for n in window)
+    return (f'<div class="pager">Page {page} of {pages}{link(page - 1, "‹", page <= 1)}'
+            f'{middle}{link(page + 1, "›", page >= pages)}</div>')
+
+
+def _usage_cell(row: dict, who: str = "") -> str:
+    return _usage_row({"spend": row["spend"], "budget": row["budget"]})
+
+
+# ------------------------------------------------------------------- views --
+def overview_view(request: Request, who: Caller) -> Response:
+    people, note = _people()
+    services = _services()
+    up = sum(1 for _, ok, _ in services if ok)
+    spend_total = sum(p["spend"] for p in people)
+    admins = sum(1 for p in people if p["admin"])
+    over = [p for p in people if p["budget"] and p["spend"] >= float(p["budget"])]
+
+    tiles = ('<div class="tiles">'
+             + _tile("Services up", f"{up}/{len(services)}",
+                     "reachable from this container")
+             + _tile("People", str(len(people)), f"{admins} admin")
+             + _tile("Spend", _money(spend_total), "across every key and chat")
+             + _tile("Over credit", str(len(over)),
+                     "ask before they notice" if over else "nobody")
+             + "</div>")
+
+    attention = ""
+    if over:
+        names = ", ".join(_h(p["username"]) for p in over[:5])
+        more = f" and {len(over) - 5} more" if len(over) > 5 else ""
+        attention = (f'<div class="msg bad"><strong>{len(over)} account(s) at or past '
+                     f'their credit.</strong><br>{names}{more}</div>')
+    elif note:
+        attention = _degraded(note)
+
+    body = ('<h1 class="page">Overview</h1>'
+            '<p class="lede">Everything this console can see, at a glance.</p>'
+            + tiles + attention
+            + f'<div class="card"><h2>Services</h2>{_svc_list(services)}</div>'
+            + model_card()
+            + '<div class="card"><h2>Jump to</h2><div class="sectionnav">'
+              '<a href="/people">People</a><a href="/indexing">Indexing</a>'
+              '<a href="/monitoring">Monitoring</a>'
+              '<a href="' + _h(GRAFANA_URL) + '" target="_blank" rel="noopener noreferrer">Grafana ↗</a>'
+              '</div></div>')
+    return page(request, "Overview", body, who.label, True, _flash(request),
+                active="overview", crumbs="<b>Overview</b>",
+                counts={"people": str(len(people))})
+
+
+def people_view(request: Request, who: Caller) -> Response:
+    q = (request.query_params.get("q") or "").strip().lower()
+    try:
+        page_no = max(1, int(request.query_params.get("p") or 1))
+    except ValueError:
+        page_no = 1
+
+    people, note = _people()
+    if q:
+        people = [p for p in people
+                  if q in p["username"].lower() or q in p["email"].lower()
+                  or q in p["display"].lower()]
+
+    pages = max(1, (len(people) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page_no = min(page_no, pages)
+    window = people[(page_no - 1) * PAGE_SIZE: page_no * PAGE_SIZE]
+
+    rows = []
+    for p in window:
+        rows.append(
+            f'<tr><td><a class="plain" href="/people/{urllib.parse.quote(p["username"])}">'
+            f'<strong>{_h(p["username"])}</strong></a>'
+            f'{" <span class=badge>admin</span>" if p["admin"] else ""}'
+            f'<div class="dim">{_h(p["email"])}</div></td>'
+            f'<td>{_usage_cell(p)}</td>'
+            f'<td><form class="row" method="post" action="/admin/budget">'
+            f'<input type="hidden" name="email" value="{_h(p["email"])}">'
+            f'<input type="hidden" name="to" value="people">'
+            f'<input type="number" name="budget" step="1" min="0" style="width:88px" '
+            f'value="{_h(p["budget"] or "")}" placeholder="none">'
+            f'<button class="ghost" type="submit">Set</button></form></td>'
+            f'<td><form method="post" action="/admin/rotate" style="display:inline">'
+            f'<input type="hidden" name="email" value="{_h(p["email"])}">'
+            f'<input type="hidden" name="to" value="people">'
+            f'<button class="ghost" type="submit">New key</button></form> '
+            f'<a class="chip" href="/people/{urllib.parse.quote(p["username"])}">Open</a></td></tr>')
+    if not rows:
+        rows = ['<tr><td colspan="4"><div class="empty">'
+                + (f'No account matches “{_h(q)}”.' if q else "No accounts yet.")
+                + '</div></td></tr>']
+
+    toolbar = (
+        '<div class="toolbar">'
+        f'<form method="get" action="/people">'
+        f'<input name="q" value="{_h(q)}" placeholder="Search name, email or username" '
+        f'style="min-width:240px"><button class="ghost" type="submit">Search</button>'
+        + ('<a class="chip" href="/people">Clear</a>' if q else "") + '</form>'
+        '<div class="spacer"></div>'
+        '<a class="chip" href="/export/people.csv">Export CSV</a>'
+        '</div>')
+
+    body = ('<h1 class="page">People</h1>'
+            f'<p class="lede">{len(people)} account(s)'
+            + (f' matching “{_h(q)}”' if q else "")
+            + ' · credit, keys and access.</p>'
+            + _degraded(note) + toolbar
+            + '<div class="card"><div class="tablewrap"><table>'
+              '<tr><th>Person</th><th>Usage / credit</th><th>Credit</th><th></th></tr>'
+            + "".join(rows) + '</table></div>'
+            + _pager("/people", page_no, pages, q) + '</div>')
+    return page(request, "People", body, who.label, True, _flash(request),
+                active="people", crumbs="<b>People</b>",
+                counts={"people": str(len(people))})
+
+
+def person_view(request: Request, who: Caller, username: str) -> Response:
+    people, note = _people(with_keys=True)
+    me = next((p for p in people if p["username"] == username), None)
+    if me is None:
+        return page(request, "Not found",
+                    f'<h1 class="page">No such person</h1>'
+                    f'<div class="msg bad">There is no account named {_h(username)}.</div>'
+                    f'<p><a class="chip" href="/people">Back to people</a></p>',
+                    who.label, True, "", active="people",
+                    crumbs='<a href="/people">People</a> / <b>Not found</b>')
+
+    keys = me.get("keys") or []
+    key_rows = "".join(
+        f'<tr><td><code class="key">{_h(k["token"][:18])}…</code></td>'
+        f'<td>{_h(k["alias"] or "—")}</td><td>{_money(k["spend"])}</td></tr>'
+        for k in keys) or ('<tr><td colspan="3"><div class="empty">'
+                           'No API key issued yet.</div></td></tr>')
+
+    confirm_delete = ("return confirm('Delete ' + this.dataset.u + '? "
+                      "Their Authelia account and every API key stop working immediately. "
+                      "This cannot be undone.')")
+    body = (
+        f'<h1 class="page">{_h(me["display"])}</h1>'
+        f'<p class="lede">{_h(me["username"])} · {_h(me["email"])}'
+        + (" · <span class=\"badge\">admin</span>" if me["admin"] else "") + '</p>'
+        + _degraded(note)
+        + '<div class="tiles">'
+        + _tile("Spent", _money(me["spend"]), "lifetime, through the gateway")
+        + _tile("Credit", _money(me["budget"]) if me["budget"] else "unlimited",
+                "set below")
+        + _tile("Keys", str(len(keys)), "active API keys")
+        + '</div>'
+        + f'<div class="card"><h2>Credit</h2>'
+          f'<form class="row" method="post" action="/admin/budget">'
+          f'<input type="hidden" name="email" value="{_h(me["email"])}">'
+          f'<input type="hidden" name="to" value="person">'
+          f'<input type="hidden" name="username" value="{_h(me["username"])}">'
+          f'<input type="number" name="budget" step="1" min="0" style="width:120px" '
+          f'value="{_h(me["budget"] or "")}" placeholder="empty = unlimited">'
+          f'<button type="submit">Set credit</button></form>'
+          f'<p class="dim" style="margin:10px 0 0">Empty means no limit. '
+          f'A person at or past their credit is refused by the gateway, not by Argus.</p></div>'
+        + f'<div class="card"><h2>API keys ({len(keys)})</h2>'
+          f'<div class="tablewrap"><table><tr><th>Key</th><th>Alias</th><th>Spend</th></tr>'
+          f'{key_rows}</table></div>'
+          f'<form method="post" action="/admin/rotate" style="margin-top:12px">'
+          f'<input type="hidden" name="email" value="{_h(me["email"])}">'
+          f'<input type="hidden" name="to" value="person">'
+          f'<input type="hidden" name="username" value="{_h(me["username"])}">'
+          f'<button class="ghost" type="submit">Issue a new key</button></form>'
+          f'<p class="dim" style="margin:10px 0 0">The new key is shown once. '
+          f'Existing keys keep working until you delete them.</p></div>'
+        + f'<div class="card"><h2>Account</h2>'
+          f'<form class="row" method="post" action="/admin/reset">'
+          f'<input type="hidden" name="username" value="{_h(me["username"])}">'
+          f'<input type="hidden" name="to" value="person">'
+          f'<button class="ghost" type="submit">Reset password</button></form>'
+          f'<form method="post" action="/admin/delete" style="margin-top:12px" '
+          f'data-u="{_h(me["username"])}" onsubmit="{confirm_delete}">'
+          f'<input type="hidden" name="username" value="{_h(me["username"])}">'
+          f'<button class="btn danger" type="submit">Delete this person</button></form>'
+          f'<p class="dim" style="margin:10px 0 0">Deleting removes the Authelia '
+          f'account and every API key it holds. It cannot be undone.</p></div>')
+    return page(request, me["display"], body, who.label, True, _flash(request),
+                active="people",
+                crumbs=f'<a href="/people">People</a> / <b>{_h(me["username"])}</b>')
+
+
+def model_view(request: Request, who: Caller) -> Response:
+    body = ('<h1 class="page">Model</h1>'
+            '<p class="lede">What is serving, and what it was configured with.</p>'
+            + model_card())
+    return page(request, "Model", body, who.label, True, _flash(request),
+                active="model", crumbs="<b>Model</b>")
+
+
+def indexing_view(request: Request, who: Caller) -> Response:
+    body = ('<h1 class="page">Indexing</h1>'
+            '<p class="lede">The Argus code index: what it covers and what it is doing.</p>'
+            + indexing_card(is_admin=True))
+    return page(request, "Indexing", body, who.label, True, _flash(request),
+                active="indexing", crumbs="<b>Indexing</b>")
+
+
+def monitoring_view(request: Request, who: Caller) -> Response:
+    links = [
+        ("Grafana", GRAFANA_URL, "dashboards: usage, GPU, logs, Argus, indexing"),
+        ("Prometheus", PROMETHEUS_URL, "raw metrics and alert rules"),
+        ("Argus MCP", f"https://argus.{DOMAIN}/mcp", "the code index, for agents"),
+        ("Authelia", AUTHELIA_URL, "the identity provider behind every login"),
+    ]
+    rows = "".join(
+        f'<div class="svc"><span class="name">{_h(n)}</span>'
+        f'<span class="ms dim">{_h(d)}</span>'
+        f'<a class="chip" href="{_h(u)}" target="_blank" rel="noopener noreferrer">Open ↗</a></div>'
+        for n, u, d in links)
+    body = ('<h1 class="page">Monitoring</h1>'
+            '<p class="lede">Where the numbers live. This console links out rather '
+            'than rebuilding charts badly.</p>'
+            + f'<div class="card"><h2>Services</h2>{_svc_list(_services())}</div>'
+            + f'<div class="card"><h2>Dashboards</h2>{rows}</div>'
+            + '<div class="card"><h2>Sign in</h2>'
+              '<p class="dim" style="margin:0">Grafana and the Argus MCP endpoint both '
+              'sit behind the same single sign-on as this console, so an open tab is '
+              'usually already signed in.</p></div>')
+    return page(request, "Monitoring", body, who.label, True, _flash(request),
+                active="monitoring", crumbs="<b>Monitoring</b>")
+
+
+#: Read-only view of the effective configuration. Deliberately an allow-list:
+#: an accidental `os.environ` dump is how a console leaks the LiteLLM master
+#: key into a screenshot, and this container holds several secrets.
+SETTINGS_VIEW = (
+    ("Deployment", [
+        ("LLM_DOMAIN", "the domain every hostname hangs off"),
+        ("COMPOSE_PROFILES", "which parts of the stack are running"),
+        ("ADMIN_GROUP", "the Authelia group that sees this console"),
+    ]),
+    ("Model", [
+        ("MODEL_NAME", "what the gateway serves"),
+        ("MODEL_CONTEXT", "token window"),
+        ("MODEL_MAX_OUTPUT", "maximum reply length"),
+        ("MODEL_REASONING_EFFORT", "engine default thinking level"),
+        ("MODEL_ENABLE_THINKING", "whether it thinks at all"),
+        ("THINKING_PRESETS", "per-chat presets offered in Open WebUI"),
+    ]),
+    ("Argus", [
+        ("ARGUS_URL", "where the code index is reached"),
+        ("ARGUS_GITLAB_URL", "the GitLab it indexes"),
+        ("ARGUS_GITLAB_AUTH", "token or password"),
+        ("ARGUS_GITLAB_USERNAME", "who it signs in as, in password mode"),
+    ]),
+)
+
+
+def settings_view(request: Request, who: Caller) -> Response:
+    blocks = []
+    for title, keys in SETTINGS_VIEW:
+        rows = "".join(
+            f'<dt>{_h(k)}<div class="dim">{_h(why)}</div></dt>'
+            f'<dd>{_h(os.environ.get(k) or "—")}</dd>'
+            for k, why in keys)
+        blocks.append(f'<div class="card"><h2>{_h(title)}</h2><dl class="kv">{rows}</dl></div>')
+    body = ('<h1 class="page">Settings</h1>'
+            '<p class="lede">The effective configuration. Read-only — these come from '
+            '<code>.env</code> and are applied at container start.</p>'
+            + "".join(blocks)
+            + '<div class="card"><h2>Changing these</h2>'
+              '<p class="dim" style="margin:0">Edit <code>stack/.env</code> and run '
+              '<code>docker compose up -d</code>. Secrets are deliberately not shown '
+              'here — not even masked, because a masked value still leaks its length '
+              'and the first characters into every screenshot.</p></div>')
+    return page(request, "Settings", body, who.label, True, _flash(request),
+                active="settings", crumbs="<b>Settings</b>")
+
+
+def profile_view(request: Request, who: Caller) -> Response:
+    """The signed-in person's own page, admin or not."""
+    people, note = _people(with_keys=True)
+    me = next((p for p in people if p["username"] == who.label), None)
+    if me is None:
+        me = {"display": who.label, "username": who.label, "email": who.email or who.label,
+              "admin": who.is_admin, "spend": 0.0, "budget": None, "keys": [], "groups": []}
+    keys = me.get("keys") or []
+    key_rows = "".join(
+        f'<tr><td><code class="key">{_h(k["token"][:18])}…</code></td>'
+        f'<td>{_h(k["alias"] or "—")}</td><td>{_money(k["spend"])}</td></tr>'
+        for k in keys) or ('<tr><td colspan="3"><div class="empty">'
+                           'No API key yet — ask an administrator for one.</div></td></tr>')
+    body = (
+        f'<h1 class="page">{_h(me["display"])}</h1>'
+        f'<p class="lede">{_h(me["email"])}</p>' + _degraded(note)
+        + '<div class="tiles">'
+        + _tile("Spent", _money(me["spend"]), "lifetime")
+        + _tile("Credit", _money(me["budget"]) if me["budget"] else "unlimited",
+                "set by an administrator")
+        + _tile("Keys", str(len(keys)), "yours to use")
+        + '</div>'
+        + f'<div class="card"><h2>Your API keys</h2>'
+          f'<div class="tablewrap"><table><tr><th>Key</th><th>Alias</th><th>Spend</th></tr>'
+          f'{key_rows}</table></div></div>'
+        + '<div class="card"><h2>Change password</h2>'
+          '<form class="row" method="post" action="/password">'
+          '<input type="password" name="current" placeholder="Current password" required>'
+          '<input type="password" name="new" placeholder="New password (min 12)" '
+          'minlength="12" required>'
+          '<button type="submit">Update</button></form>'
+          '<p class="dim" style="margin:10px 0 0">Minimum 12 characters. This changes '
+          'the password you sign in to the portal with.</p></div>')
+    return page(request, "Your account", body, who.label, who.is_admin,
+                _flash(request), active="profile", crumbs="<b>Your account</b>")
+
+
 async def index(request: Request) -> Response:
     who = caller(request)
     if who is None:
         return HTMLResponse("<h1>403</h1><p>Sign in through the portal.</p>",
                             status_code=403)
-    return admin_view(request, who) if who.is_admin else self_view(request, who)
+    return overview_view(request, who) if who.is_admin else profile_view(request, who)
 
 
 def _degraded(note: str | None) -> str:
     return f'<div class="msg bad">{_h(note)}</div>' if note else ""
-
-
-def self_view(request: Request, who: Caller) -> Response:
-    users, note = spend_by_user()
-    me = users.get(who.label.lower()) or {"spend": 0.0, "budget": None,
-                                          "email": who.label}
-    body = (_degraded(note)
-            + f'<div class="card"><h2>Your usage</h2>{_usage_row(me)}</div>'
-            + monitoring_card()
-            + '<div class="card"><h2>Change password</h2>'
-              '<form class="row" method="post" action="/password">'
-              '<input type="password" name="current" placeholder="Current password" required>'
-              '<input type="password" name="new" placeholder="New password (min 12)" '
-              'minlength="12" required>'
-              '<button type="submit">Update password</button></form>'
-              '<p class="dim" style="margin:10px 0 0">Minimum 12 characters.</p></div>')
-    return page("Your usage", body, who.label, False, _flash(request))
-
-
-def admin_view(request: Request, who: Caller) -> Response:
-    litellm_users, note = spend_by_user()
-    authelia_users = load_users()
-
-    rows = []
-    for username, entry in sorted(authelia_users.items()):
-        email = (entry.get("email") or username).lower()
-        u = litellm_users.get(email, {"spend": 0.0, "budget": None})
-        groups = entry.get("groups") or []
-        is_admin = ADMIN_GROUP in groups
-        keys = keys_for(u.get("user_id") or email)
-        keycell = (f'<code class="key">{_h(keys[0]["token"][:14])}…</code>'
-                   if keys else '<span class="dim">no key</span>')
-        rows.append(
-            f'<tr><td><strong>{_h(username)}</strong>'
-            f'{" <span class=badge>admin</span>" if is_admin else ""}'
-            f'<div class="dim">{_h(email)}</div></td>'
-            f'<td>{_usage_row(u)}</td>'
-            f'<td>{keycell}</td>'
-            f'<td><form class="row" method="post" action="/admin/budget">'
-            f'<input type="hidden" name="email" value="{_h(email)}">'
-            f'<input type="number" name="budget" step="1" min="0" style="width:90px" '
-            f'value="{_h(u.get("budget") or "")}" placeholder="none">'
-            f'<button class="ghost" type="submit">Set</button></form></td>'
-            f'<td><form method="post" action="/admin/rotate" style="display:inline">'
-            f'<input type="hidden" name="email" value="{_h(email)}">'
-            f'<button class="ghost" type="submit">New key</button></form> '
-            f'<form method="post" action="/admin/reset" style="display:inline">'
-            f'<input type="hidden" name="username" value="{_h(username)}">'
-            f'<button class="ghost" type="submit">Reset password</button></form></td></tr>')
-
-    spend_total = sum(float((u or {}).get("spend") or 0)
-                      for u in litellm_users.values())
-    tiles = ('<div class="tiles">'
-             + _tile("People", str(len(rows)), "accounts in Authelia")
-             + _tile("Spend", _money(spend_total), "across every key and chat")
-             + _tile("Model", _h(os.environ.get("MODEL_NAME", "")),
-                     _h(os.environ.get("MODEL_CONTEXT", "") + " token window"))
-             + "</div>")
-
-    body = ('<h1 class="page">Administration</h1>'
-            '<p class="lede">Accounts, credit and API keys for this deployment.</p>'
-            + tiles
-            + _degraded(note)
-            + f'<div class="card"><h2>People ({len(rows)})</h2>'
-            f'<table><tr><th>User</th><th>Usage / credit</th><th>API key</th>'
-            f'<th>Credit</th><th>Actions</th></tr>{"".join(rows)}</table></div>'
-            + model_card()
-            + indexing_card(is_admin=True)
-            + monitoring_card()
-            + '<div class="card"><h2>Add a person</h2>'
-              '<form class="row" method="post" action="/admin/create">'
-              '<input name="username" placeholder="username" required>'
-              '<input name="email" type="email" placeholder="email" required>'
-              '<input name="displayname" placeholder="Display name">'
-              f'<input name="budget" type="number" step="1" min="0" style="width:110px" '
-              f'value="{int(DEFAULT_BUDGET)}" placeholder="credit">'
-              '<label class="dim"><input type="checkbox" name="admin" value="1"> admin</label>'
-              '<button type="submit">Create</button></form>'
-              '<p class="dim" style="margin:10px 0 0">A password and an API key are '
-              'generated and shown once.</p></div>'
-              '<div class="card"><h2>Your password</h2>'
-              '<form class="row" method="post" action="/password">'
-              '<input type="password" name="current" placeholder="Current password" required>'
-              '<input type="password" name="new" placeholder="New password (min 12)" '
-              'minlength="12" required>'
-              '<button type="submit">Update password</button></form></div>')
-    return page("Admin", body, who.label, True, _flash(request))
 
 
 # ------------------------------------------------------------------ actions --
@@ -912,14 +1390,44 @@ def _pop(token: str) -> str:
     return text if exp >= time.time() else ""
 
 
-def _back(msg: str = "", err: str = "") -> RedirectResponse:
+#: Where a POST sends you back to. The console has real pages now, so an action
+#: taken on /people must return to /people -- landing on the overview after
+#: every button is the kind of thing that makes a console feel unfinished.
+_RETURN = {"overview": "/", "people": "/people", "model": "/model",
+           "indexing": "/indexing", "monitoring": "/monitoring",
+           "settings": "/settings"}
+
+
+def _where(name: str) -> str:
+    return _RETURN.get((name or "").strip(), "/")
+
+
+def _dest(form) -> str:
+    """Where to send the browser after a POST.
+
+    "person" is special: the action was taken on one account's page, so it goes
+    back to that page rather than to the list. Landing on /people after
+    resetting one password loses the context the operator was working in.
+    """
+    to = str(form.get("to") or "")
+    if to == "person":
+        name = str(form.get("username") or "").strip()
+        return f"/people/{urllib.parse.quote(name)}" if name else "/people"
+    return _where(to)
+
+
+def _back(msg: str = "", err: str = "", to: str = "") -> RedirectResponse:
     q = urllib.parse.urlencode({"ok": msg} if msg else {"err": err})
-    return RedirectResponse(f"/?{q}", status_code=303)
+    sep = "&" if "?" in to else "?"
+    return RedirectResponse(f"{to or '/'}{sep}{q}" if (msg or err) else (to or "/"),
+                            status_code=303)
 
 
-def _back_secret(text: str) -> RedirectResponse:
+def _back_secret(text: str, to: str = "") -> RedirectResponse:
     """Redirect carrying a TOKEN, never the secret itself."""
-    return RedirectResponse(f"/?shown={_stash(text)}", status_code=303)
+    base = to or "/"
+    sep = "&" if "?" in base else "?"
+    return RedirectResponse(f"{base}{sep}shown={_stash(text)}", status_code=303)
 
 
 async def change_password(request: Request) -> Response:
@@ -960,12 +1468,15 @@ async def admin_create(request: Request) -> Response:
     username = str(form.get("username") or "").strip().lower()
     email = str(form.get("email") or "").strip().lower()
     if not _USERNAME.match(username):
-        return _back(err="Username must be 2-64 chars of a-z 0-9 . _ -")
+        return _back(err="Username must be 2-64 chars of a-z 0-9 . _ -",
+                     to=_where(form.get("to")) or "/people")
     if not _EMAIL.match(email):
-        return _back(err="That does not look like an email address.")
+        return _back(err="That does not look like an email address.",
+                     to=_where(form.get("to")) or "/people")
     users = load_users()
     if username in users:
-        return _back(err=f"{username} already exists.")
+        return _back(err=f"{username} already exists.",
+                     to=_where(form.get("to")) or "/people")
 
     password = secrets.token_urlsafe(15)
     groups = [ADMIN_GROUP] if form.get("admin") else ["users"]
@@ -998,9 +1509,11 @@ async def admin_create(request: Request) -> Response:
     except urllib.error.HTTPError as exc:
         return _back_secret(f"Created {username} in Authelia, but LiteLLM refused "
                             f"(HTTP {exc.code}) so there is no API key yet. "
-                            f"Password: {password}")
+                            f"Password: {password}",
+                            to=f"/people/{urllib.parse.quote(username)}")
     return _back_secret(f"{username} -- password: {password} -- API key: {key}"
-                        + (RELOAD_NOTE if WARN_RELOAD else ""))
+                        + (RELOAD_NOTE if WARN_RELOAD else ""),
+                        to=f"/people/{urllib.parse.quote(username)}")
 
 
 async def admin_rotate(request: Request) -> Response:
@@ -1010,7 +1523,7 @@ async def admin_rotate(request: Request) -> Response:
     form = await request.form()
     email = str(form.get("email") or "").strip().lower()
     if not email:
-        return _back(err="No user given.")
+        return _back(err="No user given.", to=_dest(form))
     # Delete first, then mint: the reverse order leaves a window in which the
     # old key still works alongside the new one, which is the opposite of what
     # "revoke" is asked for here.
@@ -1019,7 +1532,8 @@ async def admin_rotate(request: Request) -> Response:
         try:
             api("/key/delete", {"keys": existing})
         except urllib.error.HTTPError as exc:
-            return _back(err=f"Could not revoke the old key: HTTP {exc.code}")
+            return _back(err=f"Could not revoke the old key: HTTP {exc.code}",
+                         to=_dest(form))
     try:
         key = api("/key/generate",
                   {"user_id": email, "key_alias": f"panel-{email}"}).get("key", "")
@@ -1027,7 +1541,7 @@ async def admin_rotate(request: Request) -> Response:
         return _back(err=f"Revoked {len(existing)} key(s) but minting failed: "
                          f"HTTP {exc.code}")
     return _back_secret(f"Revoked {len(existing)} key(s) for {email}. "
-                        f"New API key: {key}")
+                        f"New API key: {key}", to=_dest(form))
 
 
 async def admin_reset(request: Request) -> Response:
@@ -1040,7 +1554,8 @@ async def admin_reset(request: Request) -> Response:
     try:
         set_password(username, password)
     except KeyError:
-        return _back(err=f"No Authelia account named {username}.")
+        return _back(err=f"No Authelia account named {username}.",
+                     to=_where(form.get("to")) or "/people")
     return _back_secret(f"New password for {username}: {password}"
                         + (RELOAD_NOTE if WARN_RELOAD else ""))
 
@@ -1051,7 +1566,8 @@ async def admin_index(request: Request) -> Response:
     if who is None:
         return JSONResponse({"error": "forbidden"}, status_code=403)
     if not (ARGUS_URL and ARGUS_ADMIN_TOKEN):
-        return _back(err="Indexing is not configured: ARGUS_ADMIN_TOKEN is unset.")
+        return _back(err="Indexing is not configured: ARGUS_ADMIN_TOKEN is unset.",
+                     to="/indexing")
     form = await request.form()
     raw = str(form.get("branches") or "").strip()
     # Space-separated, deduplicated, order preserved. Empty means "whatever the
@@ -1063,14 +1579,14 @@ async def admin_index(request: Request) -> Response:
                                 "allow_partial": allow_partial})
     except urllib.error.HTTPError as exc:
         if exc.code == 409:
-            return _back(err="An index run is already in progress.")
-        return _back(err=f"Argus refused the request: HTTP {exc.code}")
+            return _back(err="An index run is already in progress.", to="/indexing")
+        return _back(err=f"Argus refused the request: HTTP {exc.code}", to="/indexing")
     except Exception as exc:                                   # noqa: BLE001
-        return _back(err=f"Could not reach Argus: {repr(exc)[:120]}")
+        return _back(err=f"Could not reach Argus: {repr(exc)[:120]}", to="/indexing")
     label = ", ".join(branches) if branches else "default branches"
     if allow_partial:
         label += "; partial enumeration allowed"
-    return _back(msg=f"Indexing started across all repos ({label}).")
+    return _back(msg=f"Indexing started across all repos ({label}).", to="/indexing")
 
 
 async def admin_budget(request: Request) -> Response:
@@ -1083,13 +1599,14 @@ async def admin_budget(request: Request) -> Response:
     try:
         quota = {"max_budget": float(raw)} if raw else {"max_budget": None}
     except ValueError:
-        return _back(err="Credit must be a number.")
+        return _back(err="Credit must be a number.", to=_dest(form))
     try:
         api("/user/update", {"user_id": email, **quota})
         api("/end_user/update", {"user_id": email, **quota})
     except urllib.error.HTTPError as exc:
-        return _back(err=f"LiteLLM refused: HTTP {exc.code}")
-    return _back(f"Credit for {email} set to {_money(quota['max_budget'])}.")
+        return _back(err=f"LiteLLM refused: HTTP {exc.code}", to=_dest(form))
+    return _back(f"Credit for {email} set to {_money(quota['max_budget'])}.",
+                 to=_dest(form))
 
 
 async def healthz(_request: Request) -> Response:
@@ -1105,13 +1622,202 @@ async def healthz(_request: Request) -> Response:
                         status_code=200 if ok else 503)
 
 
+
+# ------------------------------------------------------------------- theme --
+async def theme(request: Request) -> Response:
+    """Switch the console's theme, then return to the page you were on.
+
+    A POST rather than a link so it is not prefetched by the browser or followed
+    by a crawler, and so the choice is not part of a URL someone pastes.
+    """
+    form = await request.form()
+    choice = str(form.get("theme") or "system").lower()
+    if choice not in THEMES:
+        choice = "system"
+    response = RedirectResponse(_where(str(form.get("to") or "")), status_code=303)
+    # Not HttpOnly: this cookie is a display preference, not a credential, and
+    # nothing here reads it from JavaScript -- but marking it HttpOnly would
+    # imply it protects something.
+    response.set_cookie("theme", choice, max_age=60 * 60 * 24 * 365,
+                        samesite="lax", path="/")
+    return response
+
+
+# ------------------------------------------------------------------ export --
+def _csv_cell(value: object) -> str:
+    """Quote a CSV field the way Excel expects.
+
+    The filename and the values are attacker-controlled in the sense that a
+    username can contain anything; a leading = or + makes a spreadsheet treat
+    the cell as a formula, so those are prefixed. Spend is numbers only, which
+    is why it is safe to write unquoted.
+    """
+    text = "" if value is None else str(value)
+    if text[:1] in ("=", "+", "-", "@"):
+        text = "'" + text
+    return '"' + text.replace('"', '""') + '"'
+
+
+async def export_people(request: Request) -> Response:
+    who = _require_admin(request)
+    if who is None:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    people, _ = _people()
+    lines = ["username,display_name,email,admin,spend,budget,credit_left"]
+    for p in people:
+        left = ("" if not p["budget"]
+                else f'{max(0.0, float(p["budget"]) - p["spend"]):.4f}')
+        lines.append(",".join(_csv_cell(v) for v in (
+            p["username"], p["display"], p["email"], "yes" if p["admin"] else "no",
+            f'{p["spend"]:.4f}', p["budget"] if p["budget"] else "", left)))
+    stamp = time.strftime("%Y-%m-%d")
+    return Response("\n".join(lines) + "\n", media_type="text/csv",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="people-{stamp}.csv"'})
+
+
+# ------------------------------------------------------------------ delete --
+def _delete_refusal(who: Caller, username: str, email: str,
+                    users: dict) -> str | None:
+    """Why this account must not be deleted, or None if it may be.
+
+    Two refusals, and the first one is here because it did not work:
+
+    Deleting YOURSELF is matched on every identity rather than on one of them.
+    The first version compared the username to `who.label`, which is the EMAIL
+    -- so the two never matched, the guard did nothing, and the administrator
+    account was deleted from a live stack while I was checking that the guard
+    worked. A comparison between two different fields always fails open, and
+    this one failed open on the account that administers everything.
+
+    Deleting the LAST administrator is the same failure one step away: one
+    click leaves a deployment nobody can administer, and every remaining
+    account is refused the page it would take to undo.
+    """
+    mine = {x for x in ((who.user or "").lower(), (who.email or "").lower(),
+                        (who.label or "").lower()) if x}
+    if username.lower() in mine or (email or "").lower() in mine:
+        return "Refusing to delete the account you are signed in as."
+    admins = [n for n, e in users.items()
+              if ADMIN_GROUP in ((e or {}).get("groups") or [])]
+    if username in admins and len(admins) <= 1:
+        return (f"{username} is the only administrator. "
+                f"Make someone else an admin first.")
+    return None
+
+
+async def admin_delete(request: Request) -> Response:
+    """Remove an account, its password and its API keys.
+
+    There was no way to do this at all, which meant an offboarded person kept a
+    working key until someone edited users.yml by hand.
+    """
+    who = _require_admin(request)
+    if who is None:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    form = await request.form()
+    username = str(form.get("username") or "").strip().lower()
+    target = "/people"
+
+    users = load_users()
+    entry = users.get(username)
+    if entry is None:
+        return _back(err=f"No account named {username}.", to=target)
+    email = (entry.get("email") or username).lower()
+
+    refusal = _delete_refusal(who, username, email, users)
+    if refusal:
+        return _back(err=refusal, to=target)
+
+    keys_deleted = 0
+    try:
+        for key in keys_for(email):
+            token = key.get("token") or ""
+            if not token:
+                continue
+            try:
+                api("/key/delete", {"keys": [token]})
+                keys_deleted += 1
+            except urllib.error.HTTPError:
+                pass
+    except Exception:                                        # noqa: BLE001
+        pass
+
+    del users[username]
+    save_users(users)
+    return _back(f"Deleted {username}: account removed, {keys_deleted} key(s) revoked.",
+                 to=target)
+
+
+# ------------------------------------------------------------------- pages --
+async def people_page(request: Request) -> Response:
+    who = _require_admin(request)
+    return people_view(request, who) if who else _forbidden()
+
+
+async def person_page(request: Request) -> Response:
+    who = _require_admin(request)
+    if who is None:
+        return _forbidden()
+    return person_view(request, who, request.path_params.get("username", ""))
+
+
+async def model_page(request: Request) -> Response:
+    who = _require_admin(request)
+    return model_view(request, who) if who else _forbidden()
+
+
+async def indexing_page(request: Request) -> Response:
+    who = _require_admin(request)
+    return indexing_view(request, who) if who else _forbidden()
+
+
+async def monitoring_page(request: Request) -> Response:
+    who = _require_admin(request)
+    return monitoring_view(request, who) if who else _forbidden()
+
+
+async def settings_page(request: Request) -> Response:
+    who = _require_admin(request)
+    return settings_view(request, who) if who else _forbidden()
+
+
+async def profile_page(request: Request) -> Response:
+    who = caller(request)
+    if who is None:
+        return _forbidden()
+    return profile_view(request, who)
+
+
+def _forbidden() -> Response:
+    return HTMLResponse(
+        '<!doctype html><meta charset="utf-8"><title>Forbidden</title>'
+        '<body style="font:15px system-ui;background:#0b0d12;color:#e8ecf3;'
+        'display:grid;place-items:center;height:100vh;margin:0">'
+        '<div style="text-align:center"><h1 style="font-weight:650">403</h1>'
+        '<p style="color:#98a2b3">This page is for administrators. '
+        'Sign in through the portal.</p>'
+        '<p><a style="color:#5b8cff" href="/">Your account</a></p></div>',
+        status_code=403)
+
+
 app = Starlette(routes=[
     Route("/healthz", healthz, methods=["GET"]),
     Route("/", index, methods=["GET"]),
+    Route("/profile", profile_page, methods=["GET"]),
+    Route("/people", people_page, methods=["GET"]),
+    Route("/people/{username}", person_page, methods=["GET"]),
+    Route("/model", model_page, methods=["GET"]),
+    Route("/indexing", indexing_page, methods=["GET"]),
+    Route("/monitoring", monitoring_page, methods=["GET"]),
+    Route("/settings", settings_page, methods=["GET"]),
+    Route("/export/people.csv", export_people, methods=["GET"]),
+    Route("/theme", theme, methods=["POST"]),
     Route("/password", change_password, methods=["POST"]),
     Route("/admin/create", admin_create, methods=["POST"]),
     Route("/admin/rotate", admin_rotate, methods=["POST"]),
     Route("/admin/reset", admin_reset, methods=["POST"]),
     Route("/admin/budget", admin_budget, methods=["POST"]),
+    Route("/admin/delete", admin_delete, methods=["POST"]),
     Route("/admin/index", admin_index, methods=["POST"]),
 ], on_startup=[_start_directory_sync])
