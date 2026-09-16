@@ -390,6 +390,18 @@ name as well as position.
 | `ARGUS_EMBED_MODEL` | `nomic-embed-text` | Ollama model for query embeddings |
 | `ARGUS_EMBED_DIM` | `768` | its output dimension. Must match the model, or the pack vectors are unusable |
 | `ARGUS_OLLAMA_URL` | `http://ollama:11434` | without this Argus falls back to `localhost:11434`, which inside a container is the container itself |
+| `ARGUS_INDEX_INTERVAL` | `900` | seconds between automatic index passes. **`0` turns automatic reindexing off**, and then the index only advances when somebody presses *Index all repos* in the console |
+| `ARGUS_INDEX_STALE_AFTER` | `3600` | seconds without a successful pass before a repository counts as stale. Feeds `argus_index_stale`, the `ArgusIndexStale` alert and the number on the console's Overview. Default is 4 × the interval above |
+
+`ARGUS_INDEX_INTERVAL` is the setting that makes the rest of the freshness
+story work. Before it existed the stack had alert rules, a stale metric and a
+button, and nothing that ran a pass on a timer: `argus_index_stale` was `1` on
+every healthy deployment, and an alert that is always firing is an alert
+nobody reads. The timer runs **inside the `argus` serve process**, not as a
+second container, because two processes writing one SQLite index would fail
+each other with `database is locked`. Raise
+`ARGUS_INDEX_STALE_AFTER` on an estate where a full pass legitimately takes
+longer than the interval.
 
 Both TLS settings apply to the API **and** to every `git clone`, because Argus
 reaches GitLab over two transports that share no TLS configuration. Configuring
@@ -528,8 +540,8 @@ place to go for behaviour the `.env` does not expose.
 | `traefik/dynamic/tls.yml` | the certificate store and TLS options: minimum version TLS 1.2, and a restricted cipher list |
 | `authelia/configuration.template.yml` | Authelia's whole configuration with `{{ env "LLM_DOMAIN" }}` placeholders: session cookies, access-control rules per hostname, OIDC claims policies, regulation (brute-force) settings |
 | `litellm/config.yaml` | the model list and its advertised window, router retries and timeout, the default per-person budget, the Redis cache policy (`mode: default_off`), and `user_header_mappings` — the mapping that makes chat spend and API spend one number |
-| `prometheus/prometheus.yml` | the 13 scrape jobs and their intervals |
-| `prometheus/rules/*.yml` | alerting rules: `hardware.yml` (9), `llm.yml` (7), `stack.yml` (5), `slo.yml` (2) |
+| `prometheus/prometheus.yml` | the 15 scrape jobs and their intervals |
+| `prometheus/rules/*.yml` | alerting rules: `hardware.yml` (9), `llm.yml` (7), `stack.yml` (5), `argus.yml` (4). `slo.yml` holds two more written out but **commented off** — an SLO alert needs a target somebody agreed to, and shipping guesses produces alarms nobody owns |
 | `alertmanager/alertmanager.yml` | routing and receivers. **Out of the box everything routes to the `null` receiver**: alerts are visible in Prometheus and Alertmanager and notified nowhere. Slack, SMTP and generic-webhook receivers are present but commented out, and read their secrets from files (`slack_api_url_file`, `auth_password_file`) so a real URL never lands in version control |
 | `loki/loki-config.yml` | storage and retention for log aggregation — retention is **enabled**, at 336 h (14 days), with a 2 h delete delay |
 | `promtail/promtail-config.yml` | which logs to collect; reads the Docker socket and container log files |

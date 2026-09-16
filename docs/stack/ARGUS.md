@@ -294,19 +294,89 @@ username.
 Indexing writes to the same stream, which is what gives a pass a history
 instead of only an exit code. `argus index` emits one line per event —
 `index_start`, `index_repo` (one per repository and branch, with `outcome` of
-`ok`, `up_to_date`, `timed_out`, `symbols_failed`, `failed` or
-`mirror_failed`) and `index_end`. The **Indexing** dashboard charts those: runs
+`ok`, `up_to_date`, `timed_out`, `symbols_failed`, `failed`, `mirror_failed` or
+`no_branches`) and `index_end`. The **Indexing** dashboard charts those: runs
 by outcome, failures named by repository, time per repository, files indexed per
 pass, and the raw log. `repo` and `branch` are JSON fields rather than labels on
 purpose — an estate can have thousands of repositories, and a label each would
 multiply Loki streams for nothing. Filter with `| json | repo="group/name"`.
 
+`no_branches` is the one outcome that is not a problem: the project exists in
+GitLab and has no commits, so there is nothing to index. It used to produce no
+event, no log line and no database row at all, which meant a pass reported four
+repositories and the index held three with nothing anywhere saying which one
+was missing. An empty repository deliberately gets **no** `repos` row, because
+that table is what staleness is measured against and a repository that can never
+be indexed would alert forever.
+
 The admin panel's **Indexing** card reads the same run directly through Argus's
 admin endpoint, so it shows the live tail without waiting for Loki, and keeps
-that log on screen after the run ends.
+that log on screen after the run ends. It also says whether automatic
+reindexing is on, in the units a person reads (`every 15 minutes`), because
+"do I have to press this button every time?" was previously answerable only by
+finding a cron job that did not exist.
 
 `ARGUS_AUDIT_LOG=0` on the argus service stops the stdout lines; the audit table
 is unaffected. Loki keeps logs for 14 days (`config/loki/loki-config.yml`).
+
+---
+
+## Is the index still telling the truth?
+
+Every alert rule in this stack answers a question about the machine: is the GPU
+too hot, is the disk filling, is an engine listening. All of them can be green
+while Argus answers every question out of an index that stopped updating last
+Tuesday, and an out-of-date index is the worst failure this stack has — the
+answers stay exactly as confident as they were on the day the data was good.
+Nothing goes red, so nothing looks wrong.
+
+Two things close that hole, and they only work together.
+
+**The index reindexes itself.** `ARGUS_INDEX_INTERVAL` (default 900 s) makes the
+`argus` serve process run a pass on a timer. It runs *inside* the serve process
+rather than as a second container because both would write the same SQLite
+index, and `store.connect` sets no `busy_timeout`: the two would fail each other
+with `database is locked` and neither failure would say why. Sharing one
+`_index_lock` also means a scheduled pass is visible on the console's Indexing
+page exactly like a manual one — progress, log and exit code — and it clears
+the staleness below the moment it finishes.
+
+If the index is found stale or empty at startup, the first pass runs after 30
+seconds instead of waiting out a full interval. A fresh drop-in deployment with
+an empty named volume indexes itself rather than sitting empty for fifteen
+minutes while the console insists everything is fine.
+
+**The index is measured, and it alerts.** `GET /admin/metrics` on port 7700
+exports, per repository and branch:
+
+| Metric | Meaning |
+| --- | --- |
+| `argus_index_last_run_timestamp_seconds` | Unix time of the last pass; **0** if it has never run, so a repository cannot hide from a rule by being absent |
+| `argus_index_last_indexed_timestamp_seconds` | the last pass that actually changed something |
+| `argus_index_files`, `argus_index_symbols` | how big the indexed copy is |
+| `argus_index_stale` | 1 when there has been no successful pass within `ARGUS_INDEX_STALE_AFTER` |
+| `argus_index_timed_out`, `argus_index_symbols_failed`, `argus_index_errored` | what went wrong on the last pass |
+| `argus_index_repos`, `argus_index_stale_repos`, `argus_index_errored_repos`, `argus_index_scrape_ok` | the estate-wide roll-up, and whether this scrape could read the index at all |
+
+The endpoint is under `/admin/`, so it carries a credential — it names every
+repository in the estate, and an open endpoint for that is a map of the
+organisation handed to anything that can reach the port. The stack sends the
+same `ARGUS_ADMIN_TOKEN` the console uses, as a bearer token, because
+Prometheus can only read a credential from a file
+(`authorization.credentials_file`). `prometheus-secrets` writes it out of
+`.env` on every `up`, so there is one secret to rotate rather than two.
+
+`config/prometheus/rules/argus.yml` turns those into four alerts:
+`ArgusIndexStale` (per repository), `ArgusIndexErrored`,
+`ArgusIndexUnreadable` (the index query itself failed — the scrape still
+returns 200 and `up` is still 1, which is why this watches
+`argus_index_scrape_ok` rather than `up`) and `ArgusIndexEmpty` (Argus is up
+and knows about nothing, which used to present as an empty table that looked
+like a fresh install).
+
+The console's **Overview** reads the same computation, so the tile, the Grafana
+line and the alert cannot disagree; `CONTRIBUTING`-style threshold changes
+belong in `.env`, not in the console.
 
 ---
 

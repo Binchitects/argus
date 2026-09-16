@@ -1042,3 +1042,60 @@ def test_an_unreachable_gitlab_records_its_own_reason(tmp_path, monkeypatch, cap
     ends = [_json.loads(l) for l in capsys.readouterr().out.splitlines()
             if l.startswith('{"ts"') and '"index_end"' in l]
     assert [e["reason"] for e in ends] == ["gitlab_unreachable"]
+
+
+def test_an_empty_repository_is_reported_not_silently_dropped(
+        config_file, tmp_path, monkeypatch, capsys):
+    """The bug: a project that enumerates but has no refs anywhere.
+
+    `select_branches` returns [], the per-branch loop never ran, and the
+    project vanished -- no `repos` row, no log line, no `index_repo` event and
+    no entry in `failed`. A pass announced four repositories, the index held
+    three, and the admin console's "3/3 current" tile could not be reconciled
+    with the run's own "repos: 4" without counting mirrors by hand.
+
+    Empty is NOT a failure and must not be counted as one: a red run for a
+    repository with nothing in it teaches people to ignore red runs.
+    """
+    empty = tmp_path / "empty.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(empty)],
+                   check=True, capture_output=True)
+    project = Project(gitlab_id=77, path_with_namespace="g/empty",
+                      default_branch="main", http_url=str(empty))
+    monkeypatch.setattr(cli, "list_projects", lambda cfg: [project])
+
+    starts, repos, ends = [], [], []
+    monkeypatch.setattr(cli.auditlog, "index_start",
+                        lambda **kw: starts.append(kw))
+    monkeypatch.setattr(cli.auditlog, "index_repo",
+                        lambda **kw: repos.append(kw))
+    monkeypatch.setattr(cli.auditlog, "index_end",
+                        lambda **kw: ends.append(kw))
+
+    assert cli.main(["index", "--config", str(config_file)]) == 0, \
+        "an empty repository turned the whole run into a failure"
+    out = capsys.readouterr().out
+    assert "no branches" in out and "g/empty" in out, \
+        "the empty repository was dropped without saying so"
+    assert "1 empty" in out, "the run summary does not account for it"
+
+    assert [r["outcome"] for r in repos] == ["no_branches"], \
+        f"no index_repo event for the empty repository: {repos}"
+    assert ends and ends[-1]["empty"] == 1, \
+        f"index_end does not report the empty repository: {ends}"
+    assert ends[-1]["failed"] == 0, "an empty repository was counted as a failure"
+
+    # And it must NOT be given a `repos` row. `metrics.snapshot` measures
+    # freshness against those rows and treats "never ran" as stale, so a
+    # repository that can never be indexed would raise ArgusIndexStale
+    # forever -- a permanent alert, which is a broken alert.
+    from argus.store.db import open_db
+    import yaml
+    cfg = yaml.safe_load(config_file.read_text())
+    conn = open_db(cfg["index"]["db_path"])
+    try:
+        rows = conn.execute("SELECT path_with_namespace FROM repos").fetchall()
+    finally:
+        conn.close()
+    assert [r[0] for r in rows] == [], \
+        "the empty repository got a row and will now alert as stale forever"

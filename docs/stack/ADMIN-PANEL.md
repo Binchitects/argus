@@ -6,15 +6,26 @@ the `admins` group get a console with a sidebar:
 
 | section | what is there |
 |---|---|
-| **Overview** | services reachable from the container, totals, and who is at or past their credit |
+| **Overview** | services reachable from the container, totals, who is at or past their credit, and whether the code index is current |
 | **People** | every account joined across Authelia and LiteLLM — search, paged, credit, keys, CSV export |
 | **Model** | what is serving and what it was configured with, plus the thinking-level presets |
-| **Indexing** | the Argus code index: coverage, per-repo freshness, run log, and the button |
+| **Indexing** | the Argus code index: coverage, per-repo freshness, run log, the reindexing cadence, and the button |
 | **Monitoring** | service health and links out to Grafana, Prometheus and the MCP endpoint |
 | **Settings** | the effective configuration, read-only |
 
 A person's own page is `/people/<username>`, which is also where the per-account
 actions live: set credit, issue a key, reset a password, delete the account.
+
+The Overview's **Code index** tile is the one number here whose failure is
+invisible everywhere else on the page: the services are all green and the
+answers are simply old. It reads *3/3 repositories current*, names how many are
+out of date (and which, in the banner beneath), and distinguishes a repository
+that is failing to index from one that is merely late. It calls Argus for all of
+it rather than computing freshness itself, so the tile, the Grafana line and the
+`ArgusIndexStale` alert are one number — a second opinion on "is this current?"
+is a bug waiting for somebody to change a threshold. The same page says whether
+automatic reindexing is on, because a console that shows a working index next to
+a stack that never reindexes is worse than showing nothing.
 
 Runs under the `auth` profile, because without Authelia it has no way to know
 who is asking and no reason to exist.

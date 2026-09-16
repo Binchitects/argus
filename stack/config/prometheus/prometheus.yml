@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Prometheus scrape configuration for the LLMService stack.
 #
 # Targets belonging to optional compose profiles carry `tier: optional` so that
@@ -172,3 +172,26 @@ scrape_configs:
         labels:
           tier: optional
           component: host
+
+  # ---- Code index ------------------------------------------------------------
+  # Argus's own exposition: how many repositories are indexed, how big each one
+  # is, and -- the reason this exists -- how long since each one last had a
+  # successful pass. Nineteen rules covered the hardware and the engine and not
+  # one covered the index, so a stalled index produced no signal anywhere.
+  #
+  # Bearer, not a custom header: Prometheus can only send a credential it reads
+  # from a file (`authorization.credentials_file`), and this endpoint names
+  # every repository in the estate. prometheus-secrets writes the token from
+  # ARGUS_ADMIN_TOKEN -- the same value the admin panel uses, so there is one
+  # secret to rotate rather than two.
+  - job_name: argus
+    metrics_path: /admin/metrics
+    authorization:
+      credentials_file: /etc/prometheus/secrets/argus.token
+    static_configs:
+      - targets: ["argus:7700"]
+        labels:
+          # Profile-gated like the engine, so a disabled argus profile is not a
+          # permanent TargetDown false alarm.
+          tier: optional
+          component: index

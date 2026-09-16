@@ -272,6 +272,7 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
     any_repo_unhealthy = False
     failed_repos = 0
     up_to_date = 0
+    empty_repos = 0
     for project in projects:
         # One mirror per project, however many branches come out of it: the
         # mirror already carries every ref (ensure_mirror fetches
@@ -312,6 +313,31 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
             auditlog.index_repo(repo=project.path_with_namespace,
                                 branch=project.default_branch,
                                 outcome="mirror_failed", error=str(exc))
+            continue
+
+        if not branches:
+            # An enumerated project with no refs at all -- an empty repository.
+            #
+            # Not a failure: there is nothing wrong with it and nothing to
+            # index. But not nothing, either, which is what it used to be.
+            # This path emitted no row, no log line and no event, so a run
+            # announced four repositories, the index held three, and nothing
+            # anywhere said which one was missing or why. The overview tile
+            # read "3/3 current" while the log said "repos: 4", and the only
+            # way to reconcile them was to count mirrors by hand.
+            #
+            # Deliberately NOT given a `repos` row. A row is what
+            # `metrics.snapshot` measures freshness against, and it counts
+            # "never ran" as stale -- so a repository that can never be
+            # indexed would raise ArgusIndexStale forever, which is how a real
+            # alert becomes background noise. The event and the run summary
+            # are where this belongs.
+            print(f"{project.path_with_namespace}: no branches "
+                  f"(empty repository) -- nothing to index")
+            auditlog.index_repo(repo=project.path_with_namespace,
+                                branch=project.default_branch,
+                                outcome="no_branches")
+            empty_repos += 1
             continue
 
         for branch in branches:
@@ -356,6 +382,14 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
           f"{counts.get('ambiguous', 0)} ambiguous, "
           f"{counts.get('not_found', 0)} not found")
     print(f"repo graph: {edges} cross-repo edges")
+    # Only when it is non-zero, so an ordinary run does not carry arithmetic
+    # nobody needs. When it IS non-zero it is the missing line: `index_start`
+    # counts PROJECTS while the admin console's index tile counts REFS, so a
+    # run that announced "repos: 4" next to a tile reading "3/3 current" had no
+    # explanation anywhere in its own output.
+    if empty_repos:
+        print(f"repos: {len(projects)} seen, {empty_repos} empty (nothing to "
+              f"index), {len(projects) - empty_repos} indexed")
 
     # Exit codes 2/3/4 are already claimed (config, gitlab, preflight/resolve);
     # use a distinct code so a cron job can tell "ran, but a repo is
@@ -364,7 +398,7 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
     auditlog.index_end(returncode=returncode,
                        duration_ms=round((time.time() - run_started) * 1000, 1),
                        repos=len(projects), failed=failed_repos,
-                       up_to_date=up_to_date)
+                       up_to_date=up_to_date, empty=empty_repos)
     return returncode
 
 

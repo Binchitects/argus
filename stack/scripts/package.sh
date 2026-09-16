@@ -190,6 +190,22 @@ fi
 printf '  %sno secrets found%s\n' "$green" "$off"
 
 # ---------------------------------------------------------------------------
+# Make the staged tree readable by the containers that will mount it.
+#
+# `cp` gives the destination the SOURCE's permission bits, and python's
+# zipfile records them in the archive, so this script inherited whatever umask
+# the machine that built it happened to have. A developer with `umask 077` --
+# or an editor that creates a new config file 0600, which is what happened
+# here -- produced an archive whose files are unreadable to the unprivileged
+# users the stack runs as: Prometheus (65534) cannot read its own alert rules,
+# and the reload fails with `open /etc/prometheus/rules/argus.yml: permission
+# denied`, naming a file that plainly exists in the archive.
+#
+# The airgap bundler has always done this; this script did not. `a+rX` and not
+# `a+r`: directories need the execute bit to be traversable, and `X` gives it
+# only where it is already set or the entry is a directory.
+chmod -R a+rX "$STAGE"
+
 say "writing $OUT"
 rm -f "$OUT"
 # python's zipfile is used rather than the zip binary: it is present wherever

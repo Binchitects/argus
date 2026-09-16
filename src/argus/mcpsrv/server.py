@@ -24,6 +24,7 @@ from ..config import Config
 from ..store import writes
 from ..store.db import connect, connect_audit, connect_readonly, migrate
 from .errors import unauthorized
+from . import metrics
 from .tools import register_tools
 
 HEALTHZ_PATH = "/healthz"
@@ -453,6 +454,16 @@ def create_app(
     if _admin_enabled():
         _register_admin_routes(server, cfg)
 
+    # Periodic reindexing. Deliberately NOT gated on the admin token: keeping
+    # the index current is a core function, not an operator convenience, and a
+    # deployment that never reindexes serves yesterday's answers no matter who
+    # can reach the console. Off unless ARGUS_INDEX_INTERVAL says otherwise --
+    # see _scheduler for why it runs in this process and not as its own
+    # container.
+    if index_interval() > 0:
+        threading.Thread(target=_scheduler, args=(cfg, _cfg_path(cfg)),
+                         daemon=True).start()
+
     register_tools(server, cfg)
 
     return server
@@ -462,8 +473,120 @@ def create_app(
 #: is not merely wasteful: both would write, and writers serialise, so the two
 #: would spend the run blocking each other while appearing to progress.
 _index_job: dict = {"state": "idle", "branches": [], "started": None,
-                    "finished": None, "returncode": None, "tail": []}
+                    "finished": None, "returncode": None, "tail": [],
+                    "trigger": None}
 _index_lock = threading.Lock()
+
+#: Seconds between automatic index passes. 0 -- the default -- means only a
+#: person pressing the button ever reindexes.
+DEFAULT_INDEX_INTERVAL = 0
+
+#: Grace period before the first automatic pass, when the index needs one.
+#: Long enough for the container to be reachable and its healthcheck to have
+#: passed; short enough that a fresh drop-in deployment is not sitting on an
+#: empty index for a quarter of an hour while the admin console insists
+#: everything is fine.
+FIRST_PASS_GRACE = 30
+
+
+def index_interval() -> int:
+    """Seconds between automatic passes; <= 0 disables them. Read per call, not
+    at import, so it can be changed and tested like any other setting."""
+    try:
+        return int(os.environ.get("ARGUS_INDEX_INTERVAL", DEFAULT_INDEX_INTERVAL))
+    except ValueError:
+        return DEFAULT_INDEX_INTERVAL
+
+
+def _index_is_current(db_path) -> bool:
+    """Is every repository in the index fresh?
+
+    A missing or unreadable index is not current, which is exactly what makes
+    a fresh deployment -- empty named volume, no tables yet -- index itself
+    shortly after it comes up instead of waiting out a full interval.
+    """
+    try:
+        snap = metrics.snapshot(db_path)
+    except Exception:               # noqa: BLE001 - unreadable == not current
+        return False
+    return bool(snap["repos"]) and snap["stale_repos"] == 0
+
+
+def _cfg_path(cfg) -> str:
+    """Where `argus index` will read its configuration from.
+
+    The same value the admin routes use, so a run started by the schedule and
+    a run started by the button cannot be indexing different estates.
+    """
+    return str(getattr(cfg, "source_path", "") or
+               os.environ.get("ARGUS_CONFIG", "/etc/argus/config.yaml"))
+
+
+def _start_index(cfg_path: str, branches: list[str] | None = None,
+                 allow_partial: bool = False, trigger: str = "manual") -> bool:
+    """Claim the single index slot and run in the background.
+
+    Returns False when a pass is already in flight, having started nothing.
+    The claim and the state update happen under one lock, so two callers --
+    a person and the schedule, or two people -- cannot both believe they won.
+    """
+    with _index_lock:
+        if _index_job["state"] == "running":
+            return False
+        _index_job.update(state="running", branches=list(branches or []),
+                          allow_partial=allow_partial, trigger=trigger,
+                          started=time.time(), finished=None,
+                          returncode=None, tail=[])
+    threading.Thread(target=_run_index,
+                     args=(cfg_path, list(branches or []), allow_partial),
+                     daemon=True).start()
+    return True
+
+
+def _scheduler(cfg, cfg_path: str) -> None:
+    """Reindex on a timer, in THIS process rather than in a second container.
+
+    WHY NOT `argus index --interval 900` AS ITS OWN SERVICE
+
+    That command already loops, and a second compose service is the obvious
+    shape. It is also the wrong one. Both processes would open the same SQLite
+    index for writing, and `store.connect` sets no `busy_timeout`, so the
+    second writer gets `database is locked` immediately instead of waiting:
+    the poller and the admin console's "Index now" button would fail each
+    other at random, and neither failure would say why.
+
+    Running the schedule here means one process holds one `_index_lock`, and
+    every pass -- scheduled or manual -- is serialised by it.
+
+    It also makes the automatic pass visible. It runs through the same
+    `_index_job` the console polls, so the Indexing page shows a scheduled
+    run's progress, log and exit code exactly as it shows a manual one, and
+    `argus_index_last_run_timestamp_seconds` moves the moment it finishes,
+    which is what clears ArgusIndexStale. A second container could not do
+    that: its logs would be in Loki but its progress would not be on the page
+    the operator is looking at.
+
+    This is the half of the freshness story that was missing. Nineteen alert
+    rules and a stale gauge are useless against a deployment where nothing
+    ever reindexes -- the gauge would be a permanent warning, which is how
+    people learn to ignore warnings.
+    """
+    interval = index_interval()
+    if interval <= 0:
+        return
+    fresh = _index_is_current(cfg.index.db_path)
+    delay = interval if fresh else FIRST_PASS_GRACE
+    auditlog.index_scheduled(interval=interval, first_pass_in=delay,
+                             reason=None if fresh else "the index is not current")
+    while True:
+        time.sleep(delay)
+        # Start-to-start, not end-to-start: `_start_index` returns as soon as
+        # the worker thread has claimed the slot, so a long pass does not push
+        # the next one later and later.
+        delay = interval
+        if not _start_index(cfg_path, trigger="schedule"):
+            auditlog.index_scheduled(interval=interval,
+                                     skipped="a run is already in progress")
 
 
 def _run_index(cfg_path: str, branches: list[str],
@@ -516,13 +639,23 @@ def _run_index(cfg_path: str, branches: list[str],
 
 
 def _register_admin_routes(server, cfg) -> None:
-    cfg_path = str(getattr(cfg, "source_path", "") or
-                   os.environ.get("ARGUS_CONFIG", "/etc/argus/config.yaml"))
+    cfg_path = _cfg_path(cfg)
 
     def _authorised(request: Request) -> bool:
         # compare_digest, not ==: a plain comparison leaks the shared secret
         # one byte at a time to anyone who can time the response.
+        #
+        # Two transports for the same secret. `x-argus-admin-token` is what the
+        # admin panel sends. `Authorization: Bearer` is accepted as well because
+        # Prometheus can only send a bearer credential from a file
+        # (`authorization.credentials_file`) -- it has no way to set an
+        # arbitrary header in a scrape config, and the metrics endpoint names
+        # every repository in the estate, so leaving it unauthenticated to keep
+        # the header count down would be the wrong trade.
         supplied = request.headers.get("x-argus-admin-token", "")
+        if not supplied:
+            bearer = _extract_bearer(request.headers.get("authorization"))
+            supplied = bearer or ""
         return bool(supplied) and hmac.compare_digest(supplied, _admin_token())
 
     @server.custom_route(ADMIN_PREFIX + "index", methods=["POST"])
@@ -535,19 +668,34 @@ def _register_admin_routes(server, cfg) -> None:
             body = {}
         branches = [b for b in (body.get("branches") or []) if isinstance(b, str) and b.strip()]
         allow_partial = bool(body.get("allow_partial"))
-        with _index_lock:
-            if _index_job["state"] == "running":
-                return JSONResponse({"error": "an index run is already in progress",
-                                     "started": _index_job["started"]}, status_code=409)
-            _index_job.update(state="running", branches=branches,
-                              allow_partial=allow_partial,
-                              started=time.time(), finished=None,
-                              returncode=None, tail=[])
-        threading.Thread(target=_run_index,
-                         args=(cfg_path, branches, allow_partial),
-                         daemon=True).start()
+        if not _start_index(cfg_path, branches, allow_partial, trigger="manual"):
+            with _index_lock:
+                started = _index_job["started"]
+            return JSONResponse({"error": "an index run is already in progress",
+                                 "started": started}, status_code=409)
         return JSONResponse({"status": "started", "branches": branches,
                              "allow_partial": allow_partial})
+
+    @server.custom_route(ADMIN_PREFIX + "metrics", methods=["GET"])
+    async def admin_metrics(request: Request) -> Response:
+        """The index, in Prometheus's text format.
+
+        Under the admin prefix, so it carries the admin credential: this names
+        every repository in the estate along with how big each one is, and an
+        open endpoint for that would be a map of the organisation handed to
+        anything that can reach the port.
+        """
+        if not _authorised(request):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        try:
+            body = metrics.render(cfg.index.db_path)
+        except Exception as exc:            # noqa: BLE001
+            # A scrape must not 500: Prometheus reads a failed scrape as the
+            # target being down, which is a different and misleading incident.
+            # `argus_index_scrape_ok 0` is what the ArgusIndexUnreadable rule
+            # watches instead.
+            body = metrics.render_error(exc)
+        return Response(body, media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @server.custom_route(ADMIN_PREFIX + "index/status", methods=["GET"])
     async def admin_index_status(request: Request) -> Response:
@@ -572,4 +720,33 @@ def _register_admin_routes(server, cfg) -> None:
                 conn.close()
         except Exception as exc:     # noqa: BLE001
             job["repos_error"] = repr(exc)[:200]
-        return JSONResponse({"job": job, "repos": rows})
+
+        # The same snapshot the Prometheus exposition renders, so the number on
+        # the admin console and the number the ArgusIndexStale rule pages on
+        # cannot disagree. The panel deliberately does NOT decide staleness for
+        # itself: two answers to "is this index current?" is one too many, and
+        # the one on screen is the one people believe.
+        try:
+            snap = metrics.snapshot(cfg.index.db_path)
+            summary: dict = {
+                "repos": len(snap["repos"]),
+                "stale": snap["stale_repos"],
+                "errored": snap["errored_repos"],
+                "stale_after": snap["stale_after"],
+                "version": snap["version"],
+                "never_run": sum(1 for r in snap["repos"] if not r["last_run_at"]),
+                "files": sum(r["files"] for r in snap["repos"]),
+                "symbols": sum(r["symbols"] for r in snap["repos"]),
+                # Named so the console can say WHICH repository, not just how
+                # many. Capped: this is a banner, not the indexing table.
+                "stale_names": [f'{r["repo"]}@{r["branch"]}'
+                                for r in snap["repos"] if r["stale"]][:8],
+            }
+        except Exception as exc:     # noqa: BLE001
+            summary = {"error": f"{type(exc).__name__}: {exc}"[:200]}
+        # The cadence comes from the process that actually runs the schedule,
+        # not from the console's own environment: the console has no way to
+        # know it otherwise, and a settings page reading a stale copy of a
+        # value is worse than one that does not show it.
+        return JSONResponse({"job": job, "repos": rows, "index": summary,
+                             "interval": index_interval()})

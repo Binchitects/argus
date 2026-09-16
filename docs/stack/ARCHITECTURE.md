@@ -379,7 +379,7 @@ clients cached `/model/info` and showed every alias as a separate model.
 
 | service | image | profile | what it does |
 |---|---|---|---|
-| `prometheus` | `prom/prometheus:v3.1.0` | always | scrapes 13 jobs; rules in `config/prometheus/rules/` |
+| `prometheus` | `prom/prometheus:v3.1.0` | always | scrapes 15 jobs; rules in `config/prometheus/rules/` |
 | `prometheus-secrets` | `prom/prometheus:v3.1.0` | always | one-shot. Puts the engine's scrape token into a volume Prometheus mounts read-only |
 | `alertmanager` | `prom/alertmanager:v0.28.0` | always | receives firing alerts. The default receiver is `null`, so alerts are visible in the UI and sent nowhere until you configure one |
 | `grafana` | `grafana/grafana:11.5.1` | always | 10 provisioned dashboards (Prometheus, Loki, Alertmanager and Postgres datasources), including **Argus** (audit events, query latency) and **Indexing** (index passes, per-repo outcomes and failures) |

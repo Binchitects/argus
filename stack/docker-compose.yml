@@ -1208,6 +1208,21 @@ services:
       ARGUS_OLLAMA_URL: ${ARGUS_OLLAMA_URL:-http://ollama:11434}
       ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
       ARGUS_EMBED_DIM: ${ARGUS_EMBED_DIM:-768}
+      # How often the server reindexes by itself, in seconds. 0 or unset means
+      # NEVER, which is what this stack shipped with: the index only advanced
+      # when an operator pressed "Index now", so every answer was served from
+      # whatever was indexed the last time somebody remembered. 900 is the
+      # documented cadence.
+      #
+      # It runs inside the serve process rather than as a second container on
+      # purpose -- see mcpsrv.server._scheduler. Two writers on one SQLite
+      # index would fail each other with "database is locked".
+      ARGUS_INDEX_INTERVAL: ${ARGUS_INDEX_INTERVAL:-900}
+      # When a repository counts as stale, for the metric and the alert. Four
+      # times the interval above, so one slow or skipped pass is not an
+      # incident but an hour of silence is. Raise it on an estate where a
+      # single pass legitimately takes longer than the interval.
+      ARGUS_INDEX_STALE_AFTER: ${ARGUS_INDEX_STALE_AFTER:-3600}
       # Which GitLab, overriding config/argus/config.yaml. Empty = that file's URL.
       ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
       # Privileged service token: reads every repository the index covers.
@@ -1672,6 +1687,9 @@ services:
         rm -f /dst/*.token
         # The scrape token IS the engine's API key; take it straight from .env.
         if [ -n "$$LLAMACPP_API_KEY" ]; then printf '%s' "$$LLAMACPP_API_KEY" > /dst/llamacpp.token; fi
+        # Argus's admin token doubles as its scrape credential: the same secret
+        # the panel sends in x-argus-admin-token, sent as a bearer instead.
+        if [ -n "$$ARGUS_ADMIN_TOKEN" ]; then printf '%s' "$$ARGUS_ADMIN_TOKEN" > /dst/argus.token; fi
         for f in /src/*.token; do
           [ -f "$$f" ] || continue
           [ -f "/dst/$$(basename "$$f")" ] || cp "$$f" /dst/
@@ -1682,6 +1700,7 @@ services:
         ls -ln /dst
     environment:
       LLAMACPP_API_KEY: ${LLAMACPP_API_KEY:-}
+      ARGUS_ADMIN_TOKEN: ${ARGUS_ADMIN_TOKEN:-}
     volumes:
       - ${LLM_CONFIG_DIR:-./config}/prometheus/secrets:/src:ro
       - prometheus-secrets:/dst

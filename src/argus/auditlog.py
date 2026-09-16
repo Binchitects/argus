@@ -152,7 +152,8 @@ def index_repo(*, repo: str, branch: str, outcome: str,
 
 
 def index_end(*, returncode: int, duration_ms: float, repos: int,
-              failed: int, up_to_date: int, reason: str | None = None) -> None:
+              failed: int, up_to_date: int, reason: str | None = None,
+              empty: int = 0) -> None:
     """The pass is over. `returncode` is the process exit code the caller sees.
 
     Emitted for EVERY outcome, including the ones that never reach a
@@ -160,6 +161,10 @@ def index_end(*, returncode: int, duration_ms: float, repos: int,
     the runs an operator most needs to see in a chart, and they are exactly the
     ones that would leave no trace if this were only written at the end of a
     successful walk.
+
+    `repos` counts PROJECTS and `up_to_date` counts REFS, which is why `empty`
+    exists: a project with no branches produces neither, and without it a run
+    could report four repositories, three up to date and one nowhere.
     """
     _emit({
         # `outcome` rather than only the numeric code, because it is a label:
@@ -169,7 +174,32 @@ def index_end(*, returncode: int, duration_ms: float, repos: int,
         "returncode": returncode,
         "duration_ms": duration_ms,
         "repos": repos, "failed": failed, "up_to_date": up_to_date,
+        # Enumerated but with no refs: an empty repository. Not a failure, and
+        # not something to subtract from a health percentage either.
+        "empty": empty,
         # Set only on the early exits, where "repos" is 0 and the code alone
         # does not say which of several preconditions was not met.
         "reason": reason,
     })
+
+
+def index_scheduled(*, interval: int, first_pass_in: float | None = None,
+                    reason: str | None = None, skipped: str | None = None) -> None:
+    """The automatic reindex timer, saying what it decided.
+
+    Two things an operator otherwise has to guess at. `first_pass_in` answers
+    "it has been up for ten minutes, why is nothing indexed?" -- and `reason`
+    says whether that pass is happening because the timer came round or
+    because the index was found stale at startup, which is the difference
+    between a normal tick and a deployment that came up behind.
+    `skipped` records a tick that found a run already in flight: not an error,
+    but the only evidence that the interval is shorter than a pass takes.
+    """
+    fields: dict = {"event": "index_scheduled", "interval": interval}
+    if first_pass_in is not None:
+        fields["first_pass_in"] = first_pass_in
+        fields["reason"] = reason or "the index is current"
+    if skipped is not None:
+        fields["skipped"] = skipped
+        fields["outcome"] = "skipped"
+    _emit(fields)

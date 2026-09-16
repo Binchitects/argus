@@ -18,19 +18,22 @@ import html as _html
 import app as panel
 
 FAILURES: list[str] = []
+CHECKS: list[str] = []
 
 
 def check(condition: bool, message: str) -> None:
+    CHECKS.append(message)
     if not condition:
         FAILURES.append(message)
 
 
 def status(*, state="idle", tail=None, repos=None, returncode=0,
-           finished=1_700_000_000.0, allow_partial=False):
+           finished=1_700_000_000.0, allow_partial=False, trigger=None):
     return {
         "job": {"state": state, "branches": [], "started": 1_699_999_000.0,
                 "finished": finished, "returncode": returncode,
-                "tail": tail or [], "allow_partial": allow_partial},
+                "tail": tail or [], "allow_partial": allow_partial,
+                "trigger": trigger},
         "repos": repos or [],
     }
 
@@ -117,11 +120,7 @@ panel.ARGUS_ADMIN_TOKEN = ""
 check(card(status()) == "",
       "the card must not render when Argus's admin surface is unconfigured")
 
-if FAILURES:
-    for line in FAILURES:
-        print(f"FAIL: {line}")
-    raise SystemExit(1)
-print(f"admin panel: {len(FAILURES)} failures, all rendering checks passed")
+panel.ARGUS_ADMIN_TOKEN = "test-token"
 
 
 # --- the console shell ------------------------------------------------------
@@ -244,3 +243,109 @@ def test_an_ordinary_person_can_still_be_deleted():
     two = {"admin": {"groups": ["admins"]}, "second": {"groups": ["admins"]}}
     check(panel._delete_refusal(ADMIN, "second", "s@x.test", two) is None,
           "an administrator could not be deleted while another remains")
+
+
+# --- the Overview's index numbers -------------------------------------------
+#
+# The index is the one component whose failure is invisible from every other
+# page: the machine is healthy, the engine answers, and the answers are just
+# out of date. So the Overview has to say so, and it has to say which
+# repository -- "3 stale" is a number nobody can act on.
+
+def idx(**kw):
+    base = {"configured": True, "ok": True, "repos": 4, "stale": 0,
+            "errored": 0, "never_run": 0, "stale_names": []}
+    base.update(kw)
+    return base
+
+
+check(panel.index_tile({"configured": False}) == "",
+      "a deployment with no index should not get an index tile")
+check("unreachable" in panel.index_tile({"configured": True, "ok": False,
+                                         "error": "URLError: refused"}),
+      "an unreachable Argus is not reported on the Overview")
+check("empty" in panel.index_tile(idx(repos=0)),
+      "an index with no repositories is not reported as empty")
+
+current = panel.index_tile(idx(repos=4, stale=0))
+check("4/4" in current and "repositories current" in current,
+      "a fully current index should read 4/4")
+behind = panel.index_tile(idx(repos=4, stale=1))
+check("3/4" in behind and "1 out of date" in behind,
+      "a stale repository is not counted against the index total")
+# Errored is its own state: the pass RUNS on schedule, so a freshness-only
+# reading is perfect while the answers come from a failed pass.
+check("3/4" in panel.index_tile(idx(repos=4, stale=0, errored=1))
+      and "failing to index" in panel.index_tile(idx(repos=4, stale=0, errored=1)),
+      "repositories failing to index are indistinguishable from healthy ones")
+
+check(panel.index_alert(idx()) == "",
+      "a healthy index should not raise an alert banner")
+check(panel.index_alert({"configured": False}) == "",
+      "an unconfigured index should not raise an alert banner")
+check("unreachable" in panel.index_alert({"configured": True, "ok": False,
+                                          "error": "URLError: refused"}),
+      "an unreachable index raises no banner")
+check("No repository is indexed" in panel.index_alert(idx(repos=0, stale=0)),
+      "an empty index raises no banner")
+
+banner = panel.index_alert(idx(stale=2, never_run=1,
+                               stale_names=["group/alpha@main", "group/beta@main"]))
+check("2 repository(ies) have a stale" in banner, "the stale count is missing")
+check("group/alpha@main" in banner and "group/beta@main" in banner,
+      "the banner does not name the repositories, so nobody can act on it")
+check("1 of them have never been indexed" in banner,
+      "a repository that was never indexed at all reads the same as a late one")
+check("/indexing" in banner, "the banner offers no way to fix it")
+
+# --- the indexing cadence ---------------------------------------------------
+#
+# The stack shipped for months with nothing ever running `argus index` on a
+# timer: the index advanced only when an operator pressed the button, and the
+# console never said so. These pin the line that says it, in both states.
+
+check(panel._duration(900) == "15 minutes", f"900s read as {panel._duration(900)!r}")
+check(panel._duration(3600) == "1 hour", f"3600s read as {panel._duration(3600)!r}")
+check(panel._duration(60) == "1 minute", f"60s read as {panel._duration(60)!r}")
+check(panel._duration(45) == "45 seconds", f"45s read as {panel._duration(45)!r}")
+check(panel._duration(7200) == "2 hours", f"7200s read as {panel._duration(7200)!r}")
+
+
+def with_interval(seconds, **kw):
+    payload = status(**kw)
+    payload["interval"] = seconds
+    return card(payload)
+
+
+auto = with_interval(900)
+check("Reindexes itself every" in auto and "15 minutes" in auto,
+      "an enabled schedule is not stated on the Indexing page")
+check("not required" in auto,
+      "the page does not say the button is optional once a schedule exists")
+
+manual = with_interval(0)
+check("Automatic reindexing is" in manual and "off" in manual,
+      "a stack that never reindexes does not say so -- this is the bug")
+check("ARGUS_INDEX_INTERVAL" in manual,
+      "the page names the problem but not the setting that fixes it")
+
+# A run the schedule started must not read as somebody else having pressed the
+# button: "why is this running?" is the first question an operator asks.
+check("the schedule" in with_interval(900, state="running", trigger="schedule"),
+      "a scheduled run is indistinguishable from a manual one")
+check("this console" in with_interval(900, state="running", trigger="manual"),
+      "a manual run is indistinguishable from a scheduled one")
+
+# --- the summary has to be the LAST thing in this file -----------------------
+#
+# It used to sit two thirds of the way down, just after the Indexing-card
+# checks. Everything below it -- the console shell, the theme, the redirects,
+# the CSV escaping and both delete guards -- appended to FAILURES that nobody
+# ever read, so the build passed no matter what those checks said. A guard that
+# cannot fail is worse than no guard, because it is believed.
+
+if FAILURES:
+    for line in FAILURES:
+        print(f"FAIL: {line}")
+    raise SystemExit(1)
+print(f"admin panel: {len(CHECKS)} rendering checks passed")

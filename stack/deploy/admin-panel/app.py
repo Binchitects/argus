@@ -707,6 +707,106 @@ def _rel_time(ts) -> str:
     return f"{int(delta // 86400)}d ago"
 
 
+def _duration(seconds) -> str:
+    """A span of seconds, in the units a person would say it in.
+
+    "every 900s" makes a reader do arithmetic to find out whether the index is
+    current; "every 15 minutes" does not. Returns unescaped text -- the caller
+    escapes it, like every other value on these pages.
+    """
+    try:
+        s = int(seconds)
+    except (TypeError, ValueError):
+        return str(seconds)
+    if s < 60:
+        return f"{s} second{'s' if s != 1 else ''}"
+    if s < 3600:
+        m = s / 60
+        return f"{m:.0f} minute{'s' if round(m) != 1 else ''}"
+    h = s / 3600
+    return f"{h:.0f} hour{'s' if round(h) != 1 else ''}"
+
+
+def index_summary() -> dict:
+    """How current the code index is, as Argus itself judges it.
+
+    Argus does the deciding. This consumes the same snapshot that its
+    Prometheus exposition renders and that the ArgusIndexStale rule is built
+    on, so the tile on this page, the line in Grafana and the alert that
+    pages someone are all one number. Recomputing "is this stale" from raw
+    timestamps here would be a second opinion, and a second opinion is a bug
+    waiting for somebody to change a threshold.
+
+    `configured: False` when Argus has no admin token: the endpoint does not
+    exist on its side in that case, and reporting "unreachable" would be a
+    lie about a deployment that was never wired for indexing.
+    """
+    if not (ARGUS_URL and ARGUS_ADMIN_TOKEN):
+        return {"configured": False}
+    try:
+        st = _argus("/admin/index/status")
+        return {"configured": True, "ok": True, **(st.get("index") or {})}
+    except Exception as exc:                  # noqa: BLE001 - a tile is never
+        return {"configured": True, "ok": False,       # worth a 500 page
+                "error": f"{type(exc).__name__}: {exc}"[:160]}
+
+
+def index_tile(idx: dict) -> str:
+    """The Overview's index headline. Empty when this deployment has no index.
+
+    `erroring` deserves a visual state of its own: those repositories ARE
+    being indexed on schedule, so a freshness number alone would look perfect
+    while the answers underneath it come from a failed pass.
+    """
+    if not idx.get("configured"):
+        return ""
+    if not idx.get("ok"):
+        return _tile("Code index", "unreachable", "Argus did not answer")
+    total, stale = idx.get("repos", 0), idx.get("stale", 0)
+    if not total:
+        return _tile("Code index", "empty", "no repository indexed yet")
+    if stale:
+        return _tile("Code index", f"{total - stale}/{total}",
+                     f"{stale} out of date")
+    errored = idx.get("errored", 0)
+    if errored:
+        return _tile("Code index", f"{total - errored}/{total}",
+                     f"{errored} failing to index")
+    return _tile("Code index", f"{total}/{total}", "repositories current")
+
+
+def index_alert(idx: dict) -> str:
+    """What needs acting on, spelled out, under the tiles.
+
+    This is the console's half of the ArgusIndexStale alert. The rule reaches
+    whoever watches Alertmanager; this reaches whoever happens to be looking,
+    who is usually the person who can actually fix it.
+    """
+    if not idx.get("configured"):
+        return ""
+    if not idx.get("ok"):
+        return ('<div class="msg bad"><strong>The code index is unreachable.</strong><br>'
+                'Argus did not answer. Every indexed answer in chat is failing right '
+                'now. ' + _h(idx.get("error", "")) + '</div>')
+    if not idx.get("repos"):
+        return ('<div class="msg bad"><strong>No repository is indexed.</strong><br>'
+                'Argus is up but knows about nothing to search. Usually an expired '
+                'GitLab token. Check <a href="/indexing">Indexing</a>.</div>')
+    stale = idx.get("stale", 0)
+    if not stale:
+        return ""
+    names = ", ".join(_h(n) for n in (idx.get("stale_names") or [])[:5])
+    extra = len(idx.get("stale_names") or []) - 5
+    more = f" and {extra} more" if extra > 0 else ""
+    never = idx.get("never_run", 0)
+    why = (f"{never} of them have never been indexed at all. "
+           if never else "")
+    return (f'<div class="msg bad"><strong>{stale} repository(ies) have a stale '
+            f'index.</strong><br>{why}Answers about them are served from old data '
+            f'with nothing on screen to say so.<br>{names}{more} '
+            f'<a href="/indexing">Index now</a></div>')
+
+
 def indexing_card(is_admin: bool = False) -> str:
     """Trigger an index pass across every repo at a chosen branch, and show progress.
 
@@ -758,9 +858,16 @@ def indexing_card(is_admin: bool = False) -> str:
     if running:
         mode = ("indexing only what the token can see (may be partial)"
                 if job.get("allow_partial") else "full enumeration")
+        # `trigger` is why the run exists. Without it the page could not tell
+        # an automatic pass from somebody else having pressed the button, and
+        # "why is this running?" is the first question a surprised operator
+        # asks.
+        who_started = ("the schedule" if job.get("trigger") == "schedule"
+                       else "this console")
         status = (f'<div class="msg">Indexing '
                   f'<b>{_h(", ".join(job.get("branches") or []) or "default branches")}</b>'
-                  f' — {_h(mode)}, started {_h(_rel_time(job.get("started")))}. '
+                  f' — {_h(mode)}, started by {_h(who_started)} '
+                  f'{_h(_rel_time(job.get("started")))}. '
                   f'This page refreshes every 5s.</div>')
     elif job.get("finished"):
         rc = job.get("returncode")
@@ -773,6 +880,21 @@ def indexing_card(is_admin: bool = False) -> str:
     else:
         status = ('<p class="dim" style="margin:0 0 12px">No run has been started '
                   'from here since Argus last restarted.</p>')
+
+    # The cadence, told by the process that runs it. This line is the answer to
+    # "do I have to press this button every time?", which the console used to
+    # leave the operator to work out from the presence or absence of a cron
+    # job that was never installed.
+    interval = st.get("interval") or 0
+    if interval > 0:
+        schedule = (f'<p class="dim" style="margin:0 0 10px">Reindexes itself every '
+                    f'<b>{_h(_duration(interval))}</b>. The button below starts a pass '
+                    f'now; it is not required to keep the index current.</p>')
+    else:
+        schedule = ('<p class="dim" style="margin:0 0 10px"><b>Automatic reindexing is '
+                    'off.</b> The index only advances when somebody presses the button '
+                    'below, so every answer is served from whenever that last happened. '
+                    'Set <code>ARGUS_INDEX_INTERVAL</code> to change this.</p>')
 
     # Exit 3 is the one code with an action attached, and it is the one an
     # operator is most likely to hit on a fresh deployment: it means "use a
@@ -815,6 +937,7 @@ def indexing_card(is_admin: bool = False) -> str:
     refresh = ('<meta http-equiv="refresh" content="5">' if running else "")
     checked = " checked" if job.get("allow_partial") else ""
     return (f'{refresh}<div class="card"><h2>Indexing</h2>'
+            f'{schedule}'
             f'{status}'
             f'{hint}'
             f'{log_block("Run log" if running else "Log from the last run")}'
@@ -1056,6 +1179,8 @@ def overview_view(request: Request, who: Caller) -> Response:
     admins = sum(1 for p in people if p["admin"])
     over = [p for p in people if p["budget"] and p["spend"] >= float(p["budget"])]
 
+    idx = index_summary()
+
     tiles = ('<div class="tiles">'
              + _tile("Services up", f"{up}/{len(services)}",
                      "reachable from this container")
@@ -1063,6 +1188,10 @@ def overview_view(request: Request, who: Caller) -> Response:
              + _tile("Spend", _money(spend_total), "across every key and chat")
              + _tile("Over credit", str(len(over)),
                      "ask before they notice" if over else "nobody")
+             # The index is the one component whose failure is invisible from
+             # everywhere else: the machine is healthy, the engine answers, and
+             # the answers are simply out of date. It earns a headline number.
+             + index_tile(idx)
              + "</div>")
 
     attention = ""
@@ -1073,6 +1202,7 @@ def overview_view(request: Request, who: Caller) -> Response:
                      f'their credit.</strong><br>{names}{more}</div>')
     elif note:
         attention = _degraded(note)
+    attention += index_alert(idx)
 
     body = ('<h1 class="page">Overview</h1>'
             '<p class="lede">Everything this console can see, at a glance.</p>'
