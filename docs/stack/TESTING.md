@@ -85,7 +85,7 @@ failed", not "everything passed".
 | G6 | **`with-ca.sh` is manual** | the host-trust path for `dsh`, curl, python and git |
 | G7 | **Built images other than Argus** | admin-panel, identity-proxy and the cpu-temp-exporter image have no build-time test |
 | G8 | **No browser tests at all** | `functional-test.py` is an HTTP client with a cookie jar. It proves the endpoints; it cannot prove JavaScript, rendering, the tool picker, or SSE delivered token-by-token |
-| G9 | **No client-side tests** | Qwen Code, Hermes, DSH, the OpenAI SDK and MCP clients are documented, never executed |
+| G9 | **Two clients executed, three transcribed** | DSH and Qwen Code now run end to end and their configs are in `clients/`, marked as executed. Claude Code and Continue are written from their own documentation and marked as such; Hermes is unexercised; the OpenAI SDK has no test at all. The distinction is recorded per file in `clients/README.md` so a transcribed config is never mistaken for a verified one |
 | G10 | **No upgrade or rollback test** | changing `ARGUS_VERSION` or an image tag and rolling back is untested |
 | G11 | **Disaster recovery is untested** | restore onto a *clean host*, which is the actual scenario |
 | G12 | **Windows / WSL** | every `.ps1` is unexercised here |
@@ -323,8 +323,8 @@ variable:
 
 | test | asserts |
 |---|---|
-| C3.1 | DeepSeek Harness reaches the API with `NODE_EXTRA_CA_CERTS` set before launch. **Verified** — `dsh --profile headless` with `NODE_EXTRA_CA_CERTS` and `--patch` called `mcp__argus__find_symbol` and got `root/eal-core` back. The variable is read at process start, so it cannot be set afterwards |
-| C3.2 | Qwen Code, from the documented `settings.json`, lists the model and completes |
+| C3.1 | DeepSeek Harness reaches the API with `NODE_EXTRA_CA_CERTS` set before launch. **Verified, and re-verified on v2.1.2** — `dsh --profile headless` with `NODE_EXTRA_CA_CERTS` and `--patch` called `mcp__argus__find_symbol`, got `root/eal-core` back, and Argus logged `tool=find_symbol user=dev_alpha outcome=ok`. The variable is read at process start, so it cannot be set afterwards. Config: `clients/deepseek-harness/` |
+| C3.2 | Qwen Code connects to Argus, calls a tool and completes. **Now verified** on v2.1.2 with qwen 0.23.3, against the stack's own gateway (`--auth-type openai --openai-base-url https://gateway.<domain>/v1`) rather than a cloud key: it called `find_symbol`, distinguished the definition in `src/decoder.c` from the declaration in `include/eal/decoder.h`, and Argus logged `user=dev_alpha outcome=ok`. Two things had to be learned: `--trust` is required in a headless run or every call waits for confirmation, and the gateway host is `gateway.<domain>` — `api.<domain>` routes to Authelia and answers with a login redirect that reads as a 401. Config: `clients/qwen-code/` |
 | C3.3 | Hermes connects, lists tools and completes (see `docs/HERMES.md`) |
 | C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik, and Open WebUI's MCP client lists 16 tools |
 | C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `scripts/test-gitlab/` exists to answer. **Now verified** against a real GitLab CE: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. Still not automated — see below |

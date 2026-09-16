@@ -84,6 +84,7 @@ python scripts/smoke_test.py --url https://argus.llm.localhost/mcp --token <deve
 | [`src/argus/`](src/argus/) | **The Argus package** — the MCP code index and documentation server. Installable on its own | [`docs/argus/`](docs/argus/) |
 | [`tests/`](tests/) | The Argus suite — 928 tests, no Docker required | `pytest` |
 | [`docs/`](docs/) | **All documentation**, split into `docs/argus/` and `docs/stack/` | [`docs/`](docs/) |
+| [`clients/`](clients/) | **Copy-pasteable configs** for DeepSeek Harness, Qwen Code, Claude Code, Continue and any generic MCP client, each marked with whether it was actually executed | [`clients/README.md`](clients/README.md) |
 | [`scripts/`](scripts/) | Repository tooling: release, packaging, the Hermes integrations, and the test GitLab the stack's fixtures use | [`scripts/release.sh`](scripts/release.sh) |
 | [`evals/`](evals/) | The measurement harness behind every number in this README | [`evals/README.md`](evals/README.md) |
 | `stack/scripts/` | Operational scripts **for a running stack** — backup, health, acceptance, the airgap bundle | `cd stack && make help` |

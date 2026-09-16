@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "argus": {
+      "httpUrl": "https://argus.llm.localhost/mcp",
+      "headers": {
+        "Authorization": "Bearer <gitlab-pat>"
+      },
+      "trust": true,
+      "description": "Organisation code index"
+    }
+  }
+}

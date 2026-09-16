@@ -4,6 +4,11 @@ Argus speaks standard MCP. Nothing in the protocol path is specific to one
 agent -- `scripts/smoke_test.py` and `scripts/agent_client_example.py` both use
 the vanilla `mcp` SDK, and both work unmodified.
 
+> **Copy-pasteable configs for specific clients live in [`clients/`](../../clients/).**
+> That directory says which ones were actually executed and which are
+> transcribed from a client's own documentation. This page is the explanation;
+> that one is the files.
+
 Two transports, and the choice is about deployment shape rather than features.
 The tools, the ACL and the audit log are identical on both.
 
@@ -75,6 +80,32 @@ argus serve --config /etc/argus/config.yaml --host 0.0.0.0 --port 7700
 ```bash
 claude mcp add --transport http argus https://argus.internal/mcp --header "Authorization: Bearer <pat>"
 ```
+
+### DeepSeek Harness
+
+Executed end to end against a live stack; see
+[`clients/deepseek-harness/`](../../clients/deepseek-harness/).
+
+```bash
+ARGUS_TOKEN=<pat> NODE_EXTRA_CA_CERTS=stack/config/traefik/certs/tls.crt \
+  dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
+  "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
+```
+
+Argus logged `tool=find_symbol user=dev_alpha outcome=ok` — the per-person
+identity arriving on the GitLab token, not the shared chat credential.
+
+### Qwen Code
+
+Executed end to end; see [`clients/qwen-code/`](../../clients/qwen-code/).
+
+```bash
+qwen mcp add argus https://argus.internal/mcp -t http \
+  -H "Authorization: Bearer <pat>" --trust
+```
+
+`--trust` is required in a headless run: without it Qwen Code stops for
+confirmation before every Argus call and nothing proceeds.
 
 ### Continue, Cursor, and anything else taking a URL
 
