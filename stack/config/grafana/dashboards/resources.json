@@ -1233,7 +1233,7 @@
     },
     {
       "type": "row",
-      "title": "Physical host: CPU temperature",
+      "title": "Physical host: temperatures",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -1253,7 +1253,7 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 6,
+        "w": 4,
         "x": 0,
         "y": 55
       },
@@ -1310,8 +1310,8 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 9,
-        "x": 6,
+        "w": 8,
+        "x": 8,
         "y": 55
       },
       "targets": [
@@ -1342,6 +1342,106 @@
         "noValue": "No CPU sensor available on this host"
       },
       "description": "From the cpu-temp-exporter. Linux reads coretemp/k10temp via hwmon. Windows has no CPU temperature in node-exporter or windows_exporter (its ACPI thermal zone measured a fixed 27.85 C under full load), so it scrapes LibreHardwareMonitor on the host. cpu_temperature_available is 0 when no real sensor exists."
+    },
+    {
+      "type": "stat",
+      "title": "NVMe temperature",
+      "description": "NVMe composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. Series are the two drives, named by the query from the hwmon chip (nvme_nvme0 = WD_BLACK SN850X, nvme_nvme1 = Samsung 990 PRO); update those names if the drives change. The 990 PRO also reports Sensor 1 and Sensor 2 (NAND and controller) as temp2/temp3, which the drive's Composite lags under sustained writes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 4,
+        "y": 55
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace(label_replace(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"},\"drive\",\"$1\",\"chip\",\"^nvme_(nvme[0-9]+)$\"),\"drive\",\"Samsung SSD 990 PRO 2TB\",\"chip\",\"^nvme_nvme1$\"),\"drive\",\"WD_BLACK SN850X 1TB\",\"chip\",\"^nvme_nvme0$\")",
+          "legendFormat": "{{drive}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "noValue": "No NVMe sensor on this host"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "NVMe temperature over time",
+      "description": "NVMe composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. Series are the two drives, named by the query from the hwmon chip (nvme_nvme0 = WD_BLACK SN850X, nvme_nvme1 = Samsung 990 PRO); update those names if the drives change. The 990 PRO also reports Sensor 1 and Sensor 2 (NAND and controller) as temp2/temp3, which the drive's Composite lags under sustained writes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 55
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace(label_replace(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"},\"drive\",\"$1\",\"chip\",\"^nvme_(nvme[0-9]+)$\"),\"drive\",\"Samsung SSD 990 PRO 2TB\",\"chip\",\"^nvme_nvme1$\"),\"drive\",\"WD_BLACK SN850X 1TB\",\"chip\",\"^nvme_nvme0$\")",
+          "legendFormat": "{{drive}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "noValue": "No NVMe sensor available on this host"
+      }
     },
     {
       "type": "row",
