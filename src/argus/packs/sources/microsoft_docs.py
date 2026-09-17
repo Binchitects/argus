@@ -235,11 +235,36 @@ class _MicrosoftApiRef:
                                 doc_path=doc_path, anchor="", signature=signature)
 
 
+#: The OS a page's API arrived in, straight from Microsoft's own front matter.
+#:
+#: `req.target-min-winverclnt` is populated on 52,506 of the 65,908 sdk-api
+#: pages, across 285 distinct values spanning Windows 2000 to Windows 11, and
+#: `req.target-min-winversvr` on 50,530 more. It is the only thing in this
+#: corpus that can answer "will this run on XP" or "what arrived in Windows
+#: 10" -- and both fields were being parsed and then dropped, so every pack
+#: built from here knew an API's header and its .lib and not whether the
+#: machine it has to run on has the function at all.
+#:
+#: `req.max-support` carries a maximum rather than a minimum, and is populated
+#: on six pages, so it earns no field.
+_OS_FIELDS = (
+    ("Minimum client", "req.target-min-winverclnt"),
+    ("Minimum server", "req.target-min-winversvr"),
+    ("Redistributable", "req.redist"),
+)
+
+
 def _prepend_requirements(meta: dict, description: str, body: str) -> str:
-    """Put header/library/DLL/IRQL facts in front of the page text."""
-    wanted = (("Header", "req.header"), ("Library", "req.lib"),
-              ("DLL", "req.dll"), ("IRQL", "req.irql"),
-              ("Unicode/ANSI", "req.unicode-ansi"))
+    """Put the OS requirement, then header/library/DLL/IRQL, before the text.
+
+    The OS line leads because it is the one requirement that is not a build
+    detail: a header can be included anywhere, but a function the target OS
+    does not export cannot be called at all.
+    """
+    wanted = _OS_FIELDS + (
+        ("Header", "req.header"), ("Library", "req.lib"),
+        ("DLL", "req.dll"), ("IRQL", "req.irql"),
+        ("Unicode/ANSI", "req.unicode-ansi"))
     lines = [f"{label}: {meta[key]}" for label, key in wanted
              if str(meta.get(key) or "").strip()]
     parts = [p for p in (description, "\n".join(lines), body) if p.strip()]
@@ -334,8 +359,15 @@ def _requirement_line(meta: dict) -> str:
     was searched. Ranking cannot fix an absent word, and the whole 25-question
     set scored 4% top-1 largely on this.
     """
-    wanted = (("Header", "req.header"), ("Library", "req.lib"),
-              ("DLL", "req.dll"), ("IRQL", "req.irql"))
+    # The OS fields lead, and they stay `Key: value` pairs rather than prose
+    # for the reason above. `docs_contracts` splits this field on ";" and reads
+    # only the keys it knows (`header`, `library`, `dll`, `irql`), so the
+    # version values that themselves contain a semicolon -- "Windows 10,
+    # version 1809 (10.0; Build 17763)" -- yield a fragment with no key and are
+    # ignored, exactly as before. 253 of 52,506 values carry one.
+    wanted = _OS_FIELDS + (
+        ("Header", "req.header"), ("Library", "req.lib"),
+        ("DLL", "req.dll"), ("IRQL", "req.irql"))
     contract = "; ".join(f"{label}: {meta[key]}" for label, key in wanted
                          if str(meta.get(key) or "").strip())
     description = _clean_description(meta)

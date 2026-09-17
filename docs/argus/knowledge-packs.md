@@ -25,6 +25,41 @@ float32 vectors would be 3072 bytes per chunk. At a million chunks that is the
 difference between a ~96 MB scan and a ~3 GB one, which is what makes a pack a
 file you download rather than a service you host.
 
+## Which operating system an API arrived in
+
+The Microsoft references keep the OS requirement Microsoft ships in each
+page's front matter, and it leads both the symbol contract and the page text:
+
+```
+Minimum client: Windows XP [desktop apps only]
+Minimum server: Windows Server 2003 [desktop apps only]
+Header: fileapi.h
+Library: Kernel32.lib
+DLL: Kernel32.dll
+```
+
+It is populated on **52,506 of sdk-api's 65,908 pages** and **25,418 of the
+driver reference's 25,903**, across 285 distinct values running from Windows
+2000 Professional to Windows 11 24H2 and Server 2025.
+
+This is the one requirement a header name cannot imply. Knowing an API is
+declared in `fileapi.h` says nothing about whether the machine it has to run
+on exports the function at all, and that is usually the first thing worth
+knowing about a Windows API. With the field captured, `docs_lookup` answers
+"what does this need" and `docs_search` can be asked what arrived in a given
+release — neither of which was answerable from the pack before, because the
+adapter parsed these keys and then dropped them.
+
+`req.redist` travels with them where it exists (2,893 pages), because a
+redistributable is a different kind of requirement from an OS version: the
+API is there, and something else has to be installed first.
+
+One detail worth keeping in mind if you change the contract format: 253 of
+those 52,506 values contain a semicolon — `Windows 10, version 1809 (10.0;
+Build 17763)`. `docs_contracts` splits the field on `;` and reads only the keys
+it knows, so the trailing fragment is ignored rather than becoming a field.
+A test holds that.
+
 ## Using packs
 
 Everything below works without a GitLab config. `--packs-dir` exists precisely
@@ -128,7 +163,11 @@ rev-parse` searches upwards, so a work directory merely sitting inside another
 repository would otherwise record that repository's commit as the pack's
 provenance.
 
-Available sources: `python` (CPython, PSF-2.0), `react` (react.dev, CC-BY-4.0).
+Available sources: `python`, `react`, `cpp`, `dotnet`, `scripting`, `sqlite`,
+`cppreference`, `debugger`, `algorithms`, `system-design`, the two composites
+`win32` and `wdk` (API reference *and* samples in one pack), and the halves on
+their own — `win32-docs`, `wdk-docs`, `win32-samples`, `wdk-samples`.
+`argus pack build --help` prints the list.
 
 A build refuses to produce a pack whose source records no licence,
 licence URL, or attribution. It also writes to a temporary file and renames on

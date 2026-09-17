@@ -945,6 +945,42 @@ xychart-beta
 | `sqlite` — SQL, pragmas, FTS5 | 837 | 8,987 | 36 | 18.4 MB | public domain |
 | **total** | **132,033** | **1,100,423** | **412,779** | **1.6 GB** | |
 
+### Which Windows an API needs
+
+Both Microsoft packs carry the OS each API arrived in, taken from the front
+matter Microsoft ships on every one of their pages, and it leads the contract
+that `docs_lookup` and `docs_search` return:
+
+```
+Minimum client: Windows XP [desktop apps only]
+Minimum server: Windows Server 2003 [desktop apps only]
+Header: fileapi.h
+Library: Kernel32.lib
+DLL: Kernel32.dll
+```
+
+**72,206 of the win32 pack's 87,206 symbols** carry one — 282 distinct values,
+running from Windows 2000 Professional to Windows 11 24H2 and Server 2025:
+
+| the oldest OS it runs on | symbols |
+|---|---|
+| Windows 2000 | 17,501 |
+| Windows XP | 15,655 |
+| Windows Vista | 18,669 |
+| Windows 7 | 6,491 |
+| Windows 8 | 5,126 |
+| Windows 10 | 3,431 |
+| Windows 11 | 218 |
+| none supported | 5,115 |
+
+This is the one requirement a header name cannot imply. `fileapi.h` says where
+a function is declared, not whether the machine it has to run on exports it —
+and that is usually the first thing worth knowing about a Windows API. It was
+in the source all along; the adapter parsed those keys and dropped them, so
+every pack built before this knew an API's `.lib` and not its floor. Asked
+`docs_search` for *"minimum supported client Windows 11"*, the pack now answers
+with `wldp.h`, `windows.graphics.display.interop.h` and `appxpackaging.h`.
+
 Three more are built and parked in `packs/disabled/` (`algorithms`, `react`,
 `system-design`) — small corpora that were not worth the shelf space. Every pack
 reports **0 unresolved symbols**, which is the cheapest quality signal in the

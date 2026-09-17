@@ -262,6 +262,90 @@ class TestSignatureCarriesDescription:
         assert _requirement_line({"description": "Does a thing."}) == "Does a thing."
 
 
+class TestOsRequirements:
+    """The OS an API arrived in, which the adapter parsed and then dropped.
+
+    `req.target-min-winverclnt` is populated on 52,506 of the 65,908 sdk-api
+    pages, across 285 distinct values spanning Windows 2000 to Windows 11, and
+    `req.target-min-winversvr` on 50,530. Without them a pack can say which
+    header declares a function and not whether the machine it has to run on
+    exports the function at all -- which is the first question asked of any
+    Windows API.
+    """
+
+    def test_the_minimum_os_leads_the_contract(self):
+        from argus.packs.sources.microsoft_docs import _requirement_line
+
+        line = _requirement_line({
+            "req.target-min-winverclnt": "Windows XP [desktop apps only]",
+            "req.target-min-winversvr": "Windows Server 2003 [desktop apps only]",
+            "req.header": "fileapi.h",
+            "req.lib": "Kernel32.lib",
+        })
+
+        contract = line.split(" -- ", 1)[0]
+        assert contract.startswith("Minimum client: Windows XP")
+        assert "Minimum server: Windows Server 2003" in contract
+        assert "Header: fileapi.h" in contract, "the build contract was dropped"
+
+    def test_the_minimum_os_reaches_the_indexed_body(self):
+        """`docs_search` reads the body, so a lookup that answered from the
+        signature alone would leave the version unfindable by the tool most
+        likely to be asked about it."""
+        from argus.packs.sources.microsoft_docs import _prepend_requirements
+
+        text = _prepend_requirements(
+            {"req.target-min-winverclnt": "Windows 10 [desktop apps only]",
+             "req.header": "x.h"},
+            "Does a thing.", "Body prose.")
+
+        assert text.startswith("Does a thing.")
+        assert "Minimum client: Windows 10" in text
+        assert text.index("Minimum client") < text.index("Header:"), (
+            "the OS requirement should precede the build details")
+
+    def test_a_version_value_containing_a_semicolon_does_not_break_the_parse(self):
+        """253 of the 52,506 values carry one -- "Windows 10, version 1809
+        (10.0; Build 17763)". `docs_contracts` splits this field on ';' and
+        reads only the keys it knows (`header`, `library`, `dll`, `irql`), so
+        the fragment must not become a field and must not displace a real one.
+        """
+        from argus.packs.sources.microsoft_docs import _requirement_line
+
+        line = _requirement_line({
+            "req.target-min-winverclnt":
+                "Windows 10, version 1809 (10.0; Build 17763)",
+            "req.header": "d3d12.h", "req.lib": "d3d12.lib",
+            "req.dll": "d3d12.dll", "req.irql": "<= DISPATCH_LEVEL",
+        })
+
+        documented = {k.strip().lower(): v.strip()
+                      for k, v in (part.split(":", 1)
+                                   for part in line.split(" -- ", 1)[0].split(";")
+                                   if ":" in part)}
+        assert documented["header"] == "d3d12.h"
+        assert documented["library"] == "d3d12.lib"
+        assert documented["dll"] == "d3d12.dll"
+        assert documented["irql"] == "<= DISPATCH_LEVEL"
+
+    def test_a_page_with_no_os_field_is_unchanged(self):
+        from argus.packs.sources.microsoft_docs import _requirement_line
+
+        assert _requirement_line({"req.header": "wdm.h"}) == "Header: wdm.h"
+
+    def test_the_wdk_adapter_carries_the_os_field_too(self, tmp_path):
+        """One adapter serves win32 and wdk, so a driver page gets the same
+        treatment as an application one."""
+        page = SDK_PAGE.replace("UID: NF:winuser.MessageBox",
+                                "UID: NF:wdm.ExAllocatePool2").replace(
+            "req.header: winuser.h",
+            "req.target-min-winverclnt: Windows 10, version 2004\nreq.header: wdm.h")
+        _write(tmp_path, "wdk-ddi-src/content/wdm/nf-wdm-exallocatepool2.md", page)
+
+        syms = {s.name: s for s in WdkDdi().iter_symbols(tmp_path)}
+        assert "Minimum client: Windows 10" in syms["ExAllocatePool2"].signature
+
+
 class TestPageLede:
     """cpp-docs frontmatter descriptions are title echoes, so the symbol
     description comes from the page body instead.
