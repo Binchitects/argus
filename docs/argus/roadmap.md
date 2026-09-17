@@ -45,6 +45,30 @@ Success is 35b reaching 10/10 without losing a task it currently passes.
 roughly doubles it, and that cost lands on every question including the ones
 that never needed checking.
 
+**Status: the enforcement point exists; the measurement does not.** `docs_verify`
+has been an MCP tool all along, and that was the problem -- every client can run
+a SHELL COMMAND when the model finishes and block on its exit code, and almost
+none can be made to call a *tool* at that moment. So verify-after could not be
+forced in any client, however good the tool was. `argus verify` is that same
+check with an exit code, and `clients/claude-code/verify-after.sh` wires it into
+Claude Code's `Stop` hook, which blocks the turn and feeds the contradictions
+back to the model.
+
+The exit codes carry the contract, and the interesting one is 6: "could not
+check" -- no packs installed, or unreadable ones -- which does **not** block. A
+mandatory verifier that cannot verify must not become an agent that can never
+finish a sentence, and "I could not check" is a different answer from "you are
+wrong". Everything except a contradiction fails open, including an unexpected
+error.
+
+What is left is the bench this item was always measured by: forced-verify
+against model-choice on the same ten tasks, both models, with 35b reaching 10/10
+without losing a task it currently passes. That needs the agent and the larger
+model in the loop, and neither is available here. Until it runs, this is a fix
+that has been *made possible and wired up*, not a fix that has been *shown to
+work* -- which is a weaker claim than the DONE markers elsewhere in this file,
+and is written that way on purpose.
+
 ### 2.2 Prove Phase 4 on real data — DONE
 
 76,636 vectors built over postgres, openssl, git, curl, redis and freetype.

@@ -60,6 +60,47 @@ embedder to a specific card, for a host where the engine needs the whole GPU.
 
 ---
 
+## Checking a draft: `docs_verify` and `argus verify`
+
+`docs_verify` is a tool the model can call on an answer it has already written.
+It reports only what the documentation **contradicts** — a claim it confirms, or
+says nothing about, passes through untouched — because the measured harm here is
+a retrieval miss displacing something the model had right: pack context placed
+*before* an answer took Win32 accuracy from 5/5 to 1/5.
+
+But a tool is advisory, and the failure this was built for is a model that makes
+no tool calls at all. Measured: asked to review kernel code, one model answered
+in 2.2 seconds naming `wcscpy_s` (user-mode), `<string.h>` (user-mode) and
+`ucrt.lib` (user-mode) — three real things and the wrong answer to a question
+about kernel code. The instructions already told it to verify. It did not.
+
+`argus verify` is the same check with an exit code, which is what a *hook* can
+use — every agent client can run a shell command when the model finishes and
+block on the result, and almost none can be made to call an MCP tool at that
+moment.
+
+```bash
+argus verify --config /etc/argus/config.yaml --text-file -   # draft on stdin
+argus verify --config /etc/argus/config.yaml --text "..." --json
+```
+
+| exit | meaning | what a hook should do |
+|---|---|---|
+| `0` | nothing contradicted — including when the packs are silent about every identifier, and when the draft is empty | let the turn end |
+| `2` | the documentation contradicts the draft; the contradictions are on stderr | **block**, and hand stderr back to the model |
+| `6` | could not check — no packs installed, or unreadable ones | let the turn end |
+
+`6` is not `2` on purpose. A mandatory verifier that cannot verify must not
+become an agent that can never finish a sentence, so everything except a
+contradiction fails open, including an unexpected error. The contradiction text
+is phrased as an instruction rather than a fact — the reader is a model that has
+just finished an answer and has to decide what to do next.
+
+`clients/claude-code/verify-after.sh` wires it into Claude Code's `Stop` hook.
+See [clients/README.md](../../clients/README.md#forcing-verify-after).
+
+---
+
 ## Authentication
 
 **Argus does not use Authelia.** Every caller presents their own GitLab

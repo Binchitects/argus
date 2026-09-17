@@ -27,6 +27,7 @@ from .packs.build import BuildError, build_pack, fetch_source
 from .packs.registry import RegistryError
 from .packs.sources import SOURCES
 from .resolve import resolve_includes
+from .store import packs as store_packs
 from .store import queries, writes
 from .store.db import open_db
 from .store.graph import rebuild_repo_deps
@@ -39,6 +40,23 @@ DEFAULT_SERVE_PORT = 7700
 #: existing 2 (config), 3 (gitlab) and 4 (indexing) so a script can tell a
 #: pack problem from an index one.
 EXIT_PACK = 5
+
+#: `argus verify` exit codes, chosen to line up with the hook protocol every
+#: agent client already speaks rather than invented here.
+#:
+#: A `Stop` hook in Claude Code (and the equivalent elsewhere) blocks the model
+#: from finishing by exiting 2, and the stderr it printed is handed back as the
+#: reason. So 2 has to mean "the draft is wrong" and nothing else.
+EXIT_VERIFY_CONTRADICTED = 2
+#: Could not check -- no packs installed, packs unreadable, bad config.
+#:
+#: DELIBERATELY NOT 2. A mandatory verifier that cannot verify must not block
+#: every answer, or a deployment without documentation packs becomes an agent
+#: that can never finish a sentence. "I could not check" and "I checked and you
+#: are wrong" are different answers and the hook has to be able to tell them
+#: apart -- which is the whole reason these are separate codes rather than a
+#: boolean.
+EXIT_VERIFY_UNAVAILABLE = 6
 
 
 def preflight() -> str | None:
@@ -982,6 +1000,120 @@ def _pack_index(args) -> int:
     return 0
 
 
+def _verify(args) -> int:
+    """Check a draft answer against the installed packs. Exit 2 if contradicted.
+
+    WHY THIS IS A CLI COMMAND AND NOT ONLY AN MCP TOOL
+
+    `docs_verify` has existed as an MCP tool for a while, and the problem it was
+    built for -- a model answering from memory with zero tool calls, wrong 100%
+    of the time on contract claims -- is still open, because nothing makes the
+    model call it. Every client has a way to run a SHELL COMMAND when the model
+    finishes and to block on its exit code; almost none of them can be made to
+    call a *tool* at that moment. So the enforcement point that exists everywhere
+    is a command, and until this command existed, verify-after could not be
+    forced in any client at all.
+
+    Exit codes are the interface, and they carry the whole contract:
+
+      0  nothing contradicted -- the draft stands. Also when the packs are
+         silent about every identifier in it: "no authority here" is not an
+         error, and a verifier that fails a draft for mentioning something it
+         does not know would be worse than none.
+      2  the documentation contradicts the draft. Block, and hand back what it
+         said.
+      6  could not check. NOT 2, deliberately: a deployment with no packs
+         installed must not become an agent that can never finish a sentence.
+
+    Only `contradicted` blocks. `confirmed` and `unstated` never do -- the tool
+    exists to correct, not to replace, and an answer is allowed to be about
+    something other than the fact it happens to mention.
+    """
+    try:
+        cfg = Config.load(args.config)
+    except (ConfigError, OSError) as exc:
+        # OSError, not just ConfigError: a missing file raises
+        # FileNotFoundError, and `main` catches the pair for exactly this
+        # reason. Catching only ConfigError here meant a wrong --config path
+        # escaped as a traceback -- and an unhandled exception exits 1, which a
+        # hook reads as neither "clean" nor "blocked" but as a crash.
+        print(f"config error: {exc}", file=sys.stderr)
+        return EXIT_VERIFY_UNAVAILABLE
+
+    text = args.text or ""
+    if args.text_file:
+        try:
+            # `-` is stdin, which is how a hook pipes a transcript in without a
+            # temporary file -- and a temporary file holding a model's entire
+            # answer is one more thing to leak and to clean up.
+            if str(args.text_file) == "-":
+                text = sys.stdin.read()
+            else:
+                text = Path(args.text_file).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"could not read {args.text_file}: {exc}", file=sys.stderr)
+            return EXIT_VERIFY_UNAVAILABLE
+    if not text.strip():
+        # An empty draft is not a contradiction. A hook firing on a turn that
+        # produced nothing (a tool-only turn, an interrupted one) must not block.
+        print("nothing to verify", file=sys.stderr)
+        return 0
+
+    packs_dir = cfg.packs_dir
+    paths = sorted(packs_dir.glob(f"*{registry.PACK_SUFFIX}")) \
+        if packs_dir.is_dir() else []
+    if not paths:
+        print(f"no documentation packs installed in {packs_dir}; "
+              f"cannot check this draft", file=sys.stderr)
+        return EXIT_VERIFY_UNAVAILABLE
+
+    try:
+        opened = store_packs.open_packs(paths)
+    except Exception as exc:                      # noqa: BLE001
+        print(f"could not open the installed packs: {exc}", file=sys.stderr)
+        return EXIT_VERIFY_UNAVAILABLE
+    try:
+        findings = store_packs.verify_text(opened, text, limit=args.limit)
+    except Exception as exc:                      # noqa: BLE001
+        print(f"could not check the draft: {exc}", file=sys.stderr)
+        return EXIT_VERIFY_UNAVAILABLE
+    finally:
+        store_packs.close_packs(opened)
+
+    contradicted = [f for f in findings
+                    if str(f.get("status", "")).lower() == "contradicted"]
+
+    if args.json:
+        print(json.dumps({"contradicted": contradicted,
+                          "findings": findings}, default=str))
+
+    if not contradicted:
+        # Silent on success unless asked. A hook that prints something on every
+        # turn trains the reader to ignore it.
+        if not args.quiet:
+            print(f"verified against {len(paths)} pack(s): no contradictions",
+                  file=sys.stderr)
+        return 0
+
+    # Stderr, because that is what a blocking hook hands back to the model --
+    # and phrased as an instruction, since the reader is a model that has just
+    # finished an answer and has to decide what to do about it.
+    lines = [f"The documentation contradicts {len(contradicted)} claim(s) in "
+             f"your draft. Correct these, or say the requirement is not "
+             f"documented -- do not restate them from memory:"]
+    for f in contradicted[:10]:
+        subject = f.get("symbol") or f.get("name") or "?"
+        field = f.get("field") or "?"
+        said = f.get("stated") or f.get("claim") or "?"
+        documented = f.get("documented") or f.get("value") or "?"
+        source = f.get("source") or f.get("doc_path") or ""
+        lines.append(f"  - {subject} {field}: you said {said!r}; the "
+                     f"documentation says {documented!r}"
+                     + (f" [{source}]" if source else ""))
+    print("\n".join(lines), file=sys.stderr)
+    return EXIT_VERIFY_CONTRADICTED
+
+
 def _pack(args) -> int:
     return {
         "build": _pack_build, "list": _pack_list, "install": _pack_install,
@@ -1049,6 +1181,29 @@ def main(argv: list[str] | None = None) -> int:
 
     p_status = sub.add_parser("status", help="Show per-repo index freshness")
     p_status.add_argument("--config", required=True, type=Path)
+
+    p_verify = sub.add_parser(
+        "verify",
+        help="Check a draft answer against the packs; exit 2 if contradicted",
+        description=(
+            "The enforcement point for verify-after. Every agent client can run "
+            "a shell command when the model finishes and block on its exit code; "
+            "almost none can be made to call an MCP tool at that moment. Exit 0 "
+            "means the draft stands, 2 means the documentation contradicts it "
+            "(with the contradictions on stderr, which a blocking hook hands "
+            "back to the model), and 6 means it could not be checked -- no "
+            "packs, or unreadable ones -- which deliberately does NOT block."))
+    p_verify.add_argument("--config", required=True, type=Path)
+    p_verify.add_argument(
+        "--text-file", type=Path,
+        help="File holding the draft. Use - to read stdin (what a hook pipes).")
+    p_verify.add_argument("--text", help="The draft inline, for a quick check")
+    p_verify.add_argument("--limit", type=int, default=40,
+                          help="How many identifiers to resolve (default 40)")
+    p_verify.add_argument("--json", action="store_true",
+                          help="Emit the findings as JSON on stdout")
+    p_verify.add_argument("--quiet", action="store_true",
+                          help="Say nothing when the draft is clean")
 
     p_resolve = sub.add_parser(
         "resolve", help="Re-resolve includes and rebuild the dependency graph")
@@ -1152,6 +1307,13 @@ def main(argv: list[str] | None = None) -> int:
         except (BuildError, RegistryError, GitError) as exc:
             print(f"pack error: {exc}", file=sys.stderr)
             return EXIT_PACK
+
+    # Handled BEFORE the shared Config.load below, and that is not tidiness:
+    # that load returns 2 on a bad config, and 2 is this command's "the
+    # documentation contradicts you". A typo in a path would block every answer
+    # the agent tried to give, for ever, with a message about documentation.
+    if args.command == "verify":
+        return _verify(args)
 
     try:
         cfg = Config.load(args.config)

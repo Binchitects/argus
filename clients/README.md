@@ -116,6 +116,57 @@ to Authelia and answers with a login redirect that reads as a 401.
 `claude-code/add.sh <http|stdio>`. Not executed here; `claude` is not installed
 on the machine this was written on. Check it with `claude mcp list`.
 
+### Forcing verify-after
+
+`claude-code/verify-after.sh` is a `Stop` hook that checks the model's answer
+against the documentation packs **before the turn is allowed to end**, and hands
+back anything the documentation contradicts. Install it with:
+
+```bash
+cp clients/claude-code/verify-after.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/verify-after.sh
+```
+
+then add to `~/.claude/settings.json`, merging with whatever is there:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command",
+                     "command": "~/.claude/hooks/verify-after.sh" } ] }
+    ]
+  }
+}
+```
+
+This exists because of one measured failure. A model reviewing kernel code
+answered in 2.2 seconds with **zero tool calls**, naming `wcscpy_s` (user-mode),
+`<string.h>` (user-mode) and `ucrt.lib` (user-mode) — a real function, a real
+header, a real library, and the wrong answer to a question about kernel code.
+Telling the model to verify does not work; `SERVER_INSTRUCTIONS` already says to,
+and this is the model that ignored it. The hook puts the check outside the
+model's judgement.
+
+It calls `argus verify`, which is `docs_verify` with an exit code — hooks are
+shell commands and cannot call an MCP tool, so a command is the only interface
+that works. **Exit 2 is the only blocking outcome**, and only a genuine
+contradiction produces it. Exit 6 means "could not check" — no packs installed,
+or unreadable ones — and does **not** block, because a deployment without
+documentation packs must not become an agent that can never finish a sentence.
+Anything unexpected also fails open, for the same reason.
+
+Only the *last* assistant message is checked, so a claim the model already
+corrected in a later turn never blocks. A turn that produced no prose — a
+tool-only turn, an interrupted one — is nothing to check and never blocks.
+
+**Not executed against a real Claude Code**, like `add.sh` above: the hook
+protocol (stdin JSON, exit 2 blocks, stderr is the reason) is from
+[Anthropic's hooks reference](https://code.claude.com/docs/en/hooks), and the
+transcript shape is the part to verify against your own version. The script
+fails open when the transcript does not look as expected, so a version that
+renames a field stops checking rather than blocking every answer.
+
 ## Continue
 
 Merge `continue/config.example.yaml` into `~/.continue/config.yaml`. The HTTP
