@@ -247,3 +247,72 @@ class TestTruncation:
         """Content-Length is optional; absence must not fail the build."""
         _serve(monkeypatch, _zip_bytes({"a.html": "x"}))
         assert build.fetch_archive(ArchiveSource(), tmp_path / "work")
+
+
+def test_a_refetch_removes_files_the_new_archive_no_longer_has(monkeypatch, tmp_path):
+    """A second fetch must not leave the previous release's pages behind.
+
+    The archive path re-downloads every time, so an operator refreshing a
+    documentation pack gets the new release -- but extraction writes INTO the
+    existing work directory and nothing clears it first. A page that the
+    upstream release DELETED therefore stays on disk and is indexed as though
+    it were still published, and the pack reports the new version while
+    containing pages that no longer exist. Documentation that has been removed
+    upstream is exactly the documentation a reader must not be handed, because
+    nothing on the page says it is gone.
+
+    cppreference and the SQLite docs are both archive sources, so this is the
+    path every refresh of them takes.
+    """
+    work = tmp_path / "work"
+
+    _serve(monkeypatch, _zip_bytes({"index.html": "v1", "removed.html": "gone in v2"}))
+    build.fetch_archive(ArchiveSource(), work)
+    assert (work / "removed.html").is_file()
+
+    _serve(monkeypatch, _zip_bytes({"index.html": "v2"}))
+    build.fetch_archive(ArchiveSource(), work)
+
+    assert (work / "index.html").read_text(encoding="utf-8") == "v2"
+    assert not (work / "removed.html").exists(), \
+        "a page deleted upstream survived the refetch and would be indexed"
+
+
+def test_a_refetch_keeps_the_provenance_stamp(monkeypatch, tmp_path):
+    """Clearing the tree must not clear the stamp that states where it came
+    from -- `_resolve_source_commit` reads it, and without it a rebuild refuses
+    to start."""
+    work = tmp_path / "work"
+    payload = _zip_bytes({"index.html": "v1"})
+    _serve(monkeypatch, payload)
+    build.fetch_archive(ArchiveSource(), work)
+
+    _serve(monkeypatch, payload)
+    stamp = build.fetch_archive(ArchiveSource(), work)
+
+    assert (work / build.ARCHIVE_STAMP).read_text(encoding="utf-8").strip() == stamp
+    assert stamp == "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def test_a_failed_refetch_leaves_the_previous_tree_intact(monkeypatch, tmp_path):
+    """Why the clear happens AFTER verification rather than before.
+
+    Refreshing a corpus re-downloads hundreds of megabytes over a link that can
+    drop. If the tree were cleared up front, a truncated transfer would destroy
+    the working corpus and then fail, leaving the operator with neither the new
+    release nor the old one -- and the incremental-rebuild path, which reads
+    this tree, would have nothing to rebuild from.
+    """
+    work = tmp_path / "work"
+    _serve(monkeypatch, _zip_bytes({"index.html": "v1", "kept.html": "still here"}))
+    build.fetch_archive(ArchiveSource(), work)
+
+    # A source that declares a digest this payload does not have: the fetch is
+    # rejected before anything is extracted.
+    src = ArchiveSource(archive_sha256="ab" * 32)
+    _serve(monkeypatch, _zip_bytes({"index.html": "v2"}))
+    with pytest.raises(build.BuildError, match="digest mismatch"):
+        build.fetch_archive(src, work)
+
+    assert (work / "index.html").read_text(encoding="utf-8") == "v1"
+    assert (work / "kept.html").is_file(), "a rejected refetch destroyed the tree"

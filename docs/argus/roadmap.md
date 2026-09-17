@@ -13,7 +13,7 @@ earlier than one sorted by "what would be nice".
 | proven | unproven |
 |---|---|
 | 11 packs, 0 unresolved symbols, 11/11 answered through the real agent | ~~`semantic_search` never run on real data~~ — **done: 76,636 vectors, 3 exact / 3 partial / 0 wrong** |
-| 5/10 → 10/10 (`qwen3.6:27b`), 5/10 → 9/10 (`qwen3.6:35b`) | pack freshness — archives have no update path |
+| 5/10 → 10/10 (`qwen3.6:27b`), 5/10 → 9/10 (`qwen3.6:35b`) | ~~pack freshness — archives have no update path~~ — **done: `pack update` against a published index, and an archive refetch no longer keeps pages upstream deleted** |
 | Container healthy, 7/7 acceptance, 741 tests | recall under a narrow ACL allowlist |
 | ACL enforced structurally and audited | anything beyond a single machine |
 
@@ -111,9 +111,9 @@ sits at the end of this milestone rather than inside the server.
 | item | why | today |
 |---|---|---|
 | Incremental pack rebuild — **DONE** | was 44 min to reproduce a byte-identical file | `content_sha` per document; automatic when a usable pack sits at the destination. Measured: wdk 205,848 chunks in **26 s**, win32 478,762 in **74 s** |
-| `pack update` for archive sources | assumes a git remote | broken by design |
+| `pack update` for archive sources — **DONE** | assumed a git remote | the registry index path (`pack update --index-url`) works for both source kinds, and it is now tested end to end: install v1, index says v2, assert v2 — including that a FAILED update leaves the working pack working |
+| Metrics endpoint — **DONE** | audit rows existed with no operational view | `/admin/metrics` on Argus, scraped by Prometheus, with four alert rules; the admin console's Overview reads the same snapshot |
 | Webhook-driven indexing | freshness is interval-polled | `index_status` exists to *admit* staleness |
-| Metrics endpoint | audit rows exist, no operational view | KPIs are CLI-only |
 
 **Incremental rebuild landed, and carries one trap worth knowing.**
 `content_sha` covers the DOCUMENT, so an adapter that derives symbols

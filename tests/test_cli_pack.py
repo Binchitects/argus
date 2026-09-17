@@ -14,7 +14,7 @@ import pytest
 
 from argus import embed as embed_module
 from argus.cli import EXIT_PACK, main
-from argus.packs import build
+from argus.packs import build, registry
 from argus.packs.sources.python_docs import PythonDocs
 from argus.packs.sources.react_docs import ReactDocs
 
@@ -257,3 +257,216 @@ def test_packs_dir_can_come_from_a_config_file(good_pack, tmp_path, capsys):
     )
     assert run("pack", "install", good_pack, "--config", config) == 0
     assert (tmp_path / "mypacks" / "react.arguspack").is_file()
+
+
+# --- update --------------------------------------------------------------------
+#
+# `argus pack update --index-url ...` compares installed packs against a
+# published index and installs the newer ones. Every part of it was tested
+# separately -- `fetch_index`, `install`, the checksum check -- and the command
+# that puts them together was not tested at all, which is the shape that lets a
+# release path rot quietly. A pack an operator cannot update is a pack they
+# rebuild by hand, and a hand-rebuilt pack is one nobody rebuilds.
+#
+# The property that matters most here is not "it installs the new one". It is
+# that a FAILED update leaves the working pack working: updating is the one
+# operation in this file that can destroy something that currently works.
+
+
+def build_version(out_dir, version: str):
+    """A second build of the same source at a different version."""
+    return build.build_pack(
+        ReactDocs(), work_dir=FIXTURES / "react",
+        out_path=out_dir / "react.arguspack",
+        version=version, embed_fn=fake_embed, source_commit=COMMIT,
+    )
+
+
+def index_for(monkeypatch, entry):
+    """Point `pack update` at an index of our choosing, without a network."""
+    monkeypatch.setattr(registry, "fetch_index",
+                        lambda url, **kw: [entry] if entry else [])
+
+
+def entry_for(pack: "Path", version: str, *, sha256: str | None = None):
+    return registry.IndexEntry(
+        name="react", version=version, url=str(pack),
+        sha256=sha256 or hashlib.sha256(pack.read_bytes()).hexdigest(),
+        size_bytes=pack.stat().st_size, license="CC-BY-4.0")
+
+
+def test_update_installs_a_newer_version(tmp_path, good_pack, dest, monkeypatch, capsys):
+    assert run("pack", "install", good_pack, "--packs-dir", dest) == 0
+    newer = build_version(tmp_path / "v2", "2.0.0")
+    index_for(monkeypatch, entry_for(newer, "2.0.0"))
+
+    assert run("pack", "update", "--index-url", "https://example.invalid/i.json",
+               "--packs-dir", dest) == 0
+    out = capsys.readouterr().out
+    assert "1.0.0 -> 2.0.0" in out, out
+
+    listed = [p for p in registry.list_installed(dest) if p.name == "react"]
+    assert [p.version for p in listed] == ["2.0.0"]
+
+
+def test_update_leaves_a_current_pack_byte_identical(dest, good_pack, monkeypatch, capsys):
+    """The common case. It must not re-download, and it must not rewrite the
+    file -- a no-op update that touches the file would invalidate every open
+    handle and every cache keyed on it."""
+    assert run("pack", "install", good_pack, "--packs-dir", dest) == 0
+    before = (dest / "react.arguspack").read_bytes()
+    capsys.readouterr()
+    index_for(monkeypatch, entry_for(good_pack, "1.0.0"))
+
+    assert run("pack", "update", "--index-url", "https://example.invalid/i.json",
+               "--packs-dir", dest) == 0
+    assert "is current" in capsys.readouterr().out
+    assert (dest / "react.arguspack").read_bytes() == before
+
+
+def test_a_checksum_mismatch_keeps_the_working_pack(tmp_path, good_pack, dest,
+                                                    monkeypatch, capsys):
+    """The one that matters. An update that can destroy a working pack while
+    failing is worse than no update at all, and the failure has to be visible:
+    exit non-zero, and the old pack still installed and readable."""
+    assert run("pack", "install", good_pack, "--packs-dir", dest) == 0
+    before = (dest / "react.arguspack").read_bytes()
+
+    newer = build_version(tmp_path / "v2", "2.0.0")
+    # An index that promises a digest this file does not have -- a corrupted
+    # upload, or an index built against a different artifact.
+    index_for(monkeypatch, entry_for(newer, "2.0.0", sha256="ab" * 32))
+    capsys.readouterr()
+
+    # It must not report success. `main` converts the raised RegistryError into
+    # this code rather than a traceback; either is a failure, but a script
+    # checking $? needs the code.
+    assert run("pack", "update", "--index-url", "https://example.invalid/i.json",
+               "--packs-dir", dest) != 0
+
+    assert (dest / "react.arguspack").read_bytes() == before, \
+        "a failed update replaced the working pack"
+    listed = [p for p in registry.list_installed(dest) if p.name == "react"]
+    assert [p.version for p in listed] == ["1.0.0"]
+    assert not [f for f in dest.iterdir() if f.name.startswith(".incoming")], \
+        "a failed update left its staging file behind"
+
+
+def test_a_pack_missing_from_the_index_is_left_alone(good_pack, dest, monkeypatch, capsys):
+    """Not every pack comes from the published index -- a locally built one has
+    no entry, and removing or failing on it would make the command unusable for
+    exactly the operator who built their own."""
+    assert run("pack", "install", good_pack, "--packs-dir", dest) == 0
+    capsys.readouterr()
+    index_for(monkeypatch, None)
+
+    assert run("pack", "update", "--index-url", "https://example.invalid/i.json",
+               "--packs-dir", dest) == 0
+    assert "not in the index" in capsys.readouterr().out
+    assert (dest / "react.arguspack").is_file()
+
+
+def test_update_with_a_name_that_is_not_installed_fails(dest, monkeypatch):
+    """`--name` naming nothing is a typo or a wrong --packs-dir, and reporting
+    "0 packs updated" for either hides it."""
+    index_for(monkeypatch, None)
+    assert run("pack", "update", "nosuchpack",
+               "--index-url", "https://example.invalid/i.json",
+               "--packs-dir", dest) == EXIT_PACK
+
+
+# --- index ---------------------------------------------------------------------
+#
+# The producer for `--index-url`. Without it the update path had no producer at
+# all: an operator had to hand-write a JSON file with a MANDATORY checksum and
+# an absolute URL, from a format that existed only in `fetch_index`'s parsing
+# code. A release step whose first move is hand-writing that is one that gets
+# done wrong once and abandoned.
+
+
+def test_index_publishes_the_fields_update_needs(tmp_path, good_pack, dest, capsys):
+    assert run("pack", "install", good_pack, "--packs-dir", dest) == 0
+    out = tmp_path / "index.json"
+    capsys.readouterr()
+
+    assert run("pack", "index", "--out", out,
+               "--base-url", "https://packs.example.org/",
+               "--packs-dir", dest) == 0
+
+    import json
+    body = json.loads(out.read_text(encoding="utf-8"))
+    assert body["schema"] == 1
+    entry = body["packs"][0]
+    assert entry["name"] == "react"
+    assert entry["version"] == "1.0.0"
+    assert entry["url"] == "https://packs.example.org/react.arguspack"
+    assert entry["sha256"] == hashlib.sha256(good_pack.read_bytes()).hexdigest(), \
+        "the published checksum is not the artifact's"
+    assert entry["size_bytes"] == good_pack.stat().st_size
+    assert entry["license"] == "CC-BY-4.0"
+
+
+def test_a_trailing_slash_on_the_base_url_does_not_double_up(tmp_path, good_pack,
+                                                             dest, capsys):
+    """`https://host/packs/` and `https://host/packs` are the same place, and a
+    doubled slash is a 404 on some servers and not others -- the kind of thing
+    that works on the machine it was written on."""
+    assert run("pack", "install", good_pack, "--packs-dir", dest) == 0
+    out = tmp_path / "index.json"
+    assert run("pack", "index", "--out", out, "--base-url",
+               "https://packs.example.org/", "--packs-dir", dest) == 0
+    import json
+    assert json.loads(out.read_text())["packs"][0]["url"] == \
+        "https://packs.example.org/react.arguspack"
+
+
+def test_the_published_index_round_trips_through_fetch_index(tmp_path, good_pack,
+                                                             dest, capsys):
+    """The producer and the consumer have to agree. They are separate functions
+    reading and writing the same format, which is exactly the pair that drifts
+    apart unnoticed."""
+    import json
+    assert run("pack", "install", good_pack, "--packs-dir", dest) == 0
+    out = tmp_path / "index.json"
+    assert run("pack", "index", "--out", out, "--base-url",
+               "https://packs.example.org", "--packs-dir", dest) == 0
+
+    import httpx
+    body = json.loads(out.read_text())
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=body)))
+    entries = registry.fetch_index("https://packs.example.org/index.json",
+                                   client=client)
+    assert [e.name for e in entries] == ["react"]
+    assert entries[0].sha256 == hashlib.sha256(good_pack.read_bytes()).hexdigest()
+
+
+def test_index_skips_a_file_that_is_not_a_pack(tmp_path, good_pack, dest,
+                                               capsys):
+    """A stray file in the packs directory must not become a published entry.
+    An entry pointing at something uninstallable fails on the CONSUMER's
+    machine, where the cause is far harder to see than it is here."""
+    import json
+    assert run("pack", "install", good_pack, "--packs-dir", dest) == 0
+    (dest / "junk.arguspack").write_bytes(b"this is not a pack at all")
+    out = tmp_path / "index.json"
+    capsys.readouterr()
+
+    assert run("pack", "index", "--out", out, "--base-url",
+               "https://packs.example.org", "--packs-dir", dest) == 0
+
+    body = json.loads(out.read_text())
+    assert [e["name"] for e in body["packs"]] == ["react"]
+    assert body["skipped"] and body["skipped"][0]["file"] == "junk.arguspack"
+    assert "junk.arguspack" in capsys.readouterr().err
+
+
+def test_index_filters_by_name(tmp_path, good_pack, dest, capsys):
+    """One directory can hold several packs, and a release usually publishes a
+    chosen subset rather than whatever happens to be there."""
+    import json
+    assert run("pack", "install", good_pack, "--packs-dir", dest) == 0
+    out = tmp_path / "index.json"
+    assert run("pack", "index", "python", "--out", out, "--base-url",
+               "https://packs.example.org", "--packs-dir", dest) == 0
+    assert json.loads(out.read_text())["packs"] == []

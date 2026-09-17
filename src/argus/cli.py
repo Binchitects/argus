@@ -944,10 +944,49 @@ def _pack_update(args) -> int:
     return 0
 
 
+def _pack_index(args) -> int:
+    """Write the index that `pack update` consumes.
+
+    Without this the update path had no producer: `--index-url` pointed at a
+    file an operator had to hand-write, checksum and all, from a format
+    documented nowhere. This is the other half.
+    """
+    dest = _packs_dir(args)
+    out = Path(args.out)
+    try:
+        index = registry.write_index(dest, base_url=args.base_url, name=args.name)
+    except OSError as exc:
+        print(f"could not read {dest}: {exc}", file=sys.stderr)
+        return EXIT_PACK
+
+    if not index["packs"]:
+        # Not an error exit: "there is nothing to publish yet" is a legitimate
+        # answer to a build script, and a failure here would break a pipeline
+        # on the run before the first pack exists. It does say so loudly,
+        # because an index published empty silently un-publishes every pack.
+        print(f"no packs found in {dest}"
+              + (f" named {args.name!r}" if args.name else ""), file=sys.stderr)
+    # `skipped` is not part of the format `fetch_index` reads, and it is kept in
+    # the file anyway: a pack that fails to parse is silently absent from the
+    # published index otherwise, and "the update did not offer it" is a much
+    # harder thing to diagnose than reading the reason here.
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+
+    print(f"wrote {out}: {len(index['packs'])} pack(s) from {dest}")
+    for entry in index["packs"]:
+        print(f"  {entry['name']} {entry['version']}  "
+              f"{entry['size_bytes'] / (1024 * 1024):.1f} MB  {entry['url']}")
+    for skipped in index["skipped"]:
+        print(f"  SKIPPED {skipped['file']}: {skipped['reason']}", file=sys.stderr)
+    return 0
+
+
 def _pack(args) -> int:
     return {
         "build": _pack_build, "list": _pack_list, "install": _pack_install,
         "info": _pack_info, "remove": _pack_remove, "update": _pack_update,
+        "index": _pack_index,
     }[args.pack_command](args)
 
 
@@ -1087,6 +1126,18 @@ def main(argv: list[str] | None = None) -> int:
     p_pupdate.add_argument("name", nargs="?", help="Only this pack (default: all)")
     p_pupdate.add_argument("--index-url", required=True, help="Published pack index JSON")
     _where(p_pupdate)
+
+    p_pindex = pack_sub.add_parser(
+        "index", help="Write the published index that `pack update` reads")
+    p_pindex.add_argument(
+        "--out", required=True, type=Path, help="Index JSON file to write")
+    p_pindex.add_argument(
+        "--base-url", required=True,
+        help=("Where the packs will be SERVED from -- the URL a consumer will "
+              "fetch them at, not the path they sit at here. Each entry's url "
+              "is this joined with the pack's filename."))
+    p_pindex.add_argument("name", nargs="?", help="Only this pack (default: all)")
+    _where(p_pindex)
 
     args = parser.parse_args(argv)
 

@@ -217,6 +217,90 @@ def fetch_index(url: str, *, client: httpx.Client | None = None) -> list[IndexEn
     return entries
 
 
+def write_index(dest_dir: Path, *, base_url: str, name: str | None = None) -> dict:
+    """Build the published index `fetch_index` reads, from a directory of packs.
+
+    THE MISSING HALF OF `pack update`
+
+    `pack update --index-url URL` has worked for a while, and until this
+    function existed nothing could produce the URL's contents. The index format
+    is not obvious from the outside -- `sha256` is mandatory because a download
+    that cannot be verified must not be installed, and `url` has to be the
+    address a *consumer* can reach, which is not the path the file happens to
+    sit at on the machine that built it -- so the documented advice amounted to
+    "hand-write this JSON correctly". A release path whose first step is
+    hand-writing a file with a mandatory checksum is one that gets done wrong
+    once and abandoned.
+
+    `base_url` is where the packs will be served from, and each entry's `url`
+    is that base joined with the pack's filename. The digest is computed here
+    rather than read from the file, so the index cannot claim a checksum the
+    artifact does not have -- which is the failure the mandatory checksum
+    exists to catch.
+
+    Only packs whose metadata parses are listed. A file that is not a pack, or
+    whose metadata is unreadable, is skipped rather than published: an index
+    entry pointing at something uninstallable fails on the consumer's machine,
+    where the cause is much harder to see.
+
+    Filtered by `name` when given, so one directory holding several versions
+    can publish exactly the ones intended.
+    """
+    dest_dir = Path(dest_dir)
+    base = base_url.rstrip("/")
+    entries: list[dict] = []
+    skipped: list[tuple[str, str]] = []
+
+    for path in sorted(dest_dir.glob(f"*{PACK_SUFFIX}")):
+        try:
+            with pack_format.open_pack(path) as conn:
+                meta = pack_format.read_meta(conn)
+        except Exception as exc:                  # noqa: BLE001
+            skipped.append((path.name, f"{type(exc).__name__}: {exc}"[:120]))
+            continue
+
+        entry_name = meta.get("source_name", "")
+        if name is not None and entry_name != name:
+            continue
+        if not entry_name:
+            skipped.append((path.name, "pack records no source_name"))
+            continue
+
+        digest = sha256_file(path)
+        entries.append({
+            "name": entry_name,
+            "version": meta.get("pack_version", ""),
+            "url": f"{base}/{path.name}" if base else path.name,
+            "sha256": digest,
+            "size_bytes": path.stat().st_size,
+            "license": meta.get("license", ""),
+            # Not read by `fetch_index`, and included anyway: this file is what
+            # an operator publishes, and the two facts a reader needs to honour
+            # a licence are who wrote it and where it came from. A consumer
+            # that ignores them is no worse off; one that shows them needs them
+            # to be present.
+            "attribution": meta.get("attribution", ""),
+            "source_commit": meta.get("source_commit", ""),
+        })
+
+    return {"schema": 1, "packs": entries, "skipped": [
+        {"file": f, "reason": r} for f, r in skipped]}
+
+
+def sha256_file(path: Path) -> str:
+    """Hex SHA-256 of a file, read in blocks.
+
+    A pack is hundreds of megabytes, so this streams it: slurping the whole
+    artifact to hash it would be the largest allocation in the release path,
+    for no benefit. Same block size the downloader uses, for the same reason.
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(_DOWNLOAD_CHUNK), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def _stage(
     url_or_path: str | Path, staging: Path, *, client: httpx.Client | None,
 ) -> str:

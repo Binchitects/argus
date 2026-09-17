@@ -58,6 +58,58 @@ argus pack remove python --packs-dir ~/.argus/packs
 argus pack update --index-url https://example.org/packs/index.json --packs-dir ~/.argus/packs
 ```
 
+`update` compares every installed pack against a published index and installs
+the newer ones. A pack that is not in the index — a locally built one, say —
+is left alone and reported, rather than removed or failed on. A pack whose
+download fails its checksum leaves the **working pack in place**: updating is
+the one operation here that can destroy something that currently works, so the
+new artifact is verified before the old one is replaced.
+
+## Publishing an index
+
+`update` reads a JSON index, and `pack index` writes one:
+
+```bash
+argus pack build --source python --work-dir /tmp/cpython \
+  --out /srv/packs/python-3.13.arguspack --version 3.13 --fetch
+argus pack index --packs-dir /srv/packs \
+  --base-url https://packs.example.org \
+  --out /srv/packs/index.json
+```
+
+Then serve that directory over HTTP and point `--index-url` at the file. The
+index looks like this:
+
+```json
+{
+  "schema": 1,
+  "packs": [
+    {
+      "name": "python",
+      "version": "3.13",
+      "url": "https://packs.example.org/python-3.13.arguspack",
+      "sha256": "1f0c…",
+      "size_bytes": 41234567,
+      "license": "PSF-2.0",
+      "attribution": "…",
+      "source_commit": "…"
+    }
+  ]
+}
+```
+
+`--base-url` is where the packs will be **served from**, not where they sit on
+the machine that built them; each entry's `url` is that base joined with the
+pack's filename. The checksum is computed from the artifact at publish time, so
+an index cannot claim a digest the file does not have — which is the failure the
+mandatory checksum exists to catch. A file in the directory that is not a
+readable pack is skipped and named in a `skipped` list rather than published,
+because an entry pointing at something uninstallable fails on the *consumer's*
+machine, where the cause is much harder to see.
+
+`pack index` also takes a pack name to publish a subset, for a directory that
+holds several versions.
+
 ## Building a pack
 
 Requires Ollama running with the pinned embedding model pulled:

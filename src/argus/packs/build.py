@@ -190,6 +190,36 @@ def fetch_archive(source: Source, dest: Path) -> str:
         )
 
     try:
+        # CLEAR FIRST. `extractall` writes INTO the tree, so a second fetch over
+        # an existing work directory leaves every file the new release dropped
+        # exactly where it was -- and the rebuilt pack then reports the new
+        # version while still serving pages that upstream has deleted. Nothing
+        # on such a page says it is gone, which makes it worse than a missing
+        # one: the reader has no way to tell.
+        #
+        # Only files that came from the archive are at risk, and the whole tree
+        # is the archive's own extraction target -- the build reads nothing else
+        # from here -- so clearing it wholesale is correct rather than
+        # convenient. The stamp is rewritten below from this fetch's digest, so
+        # nothing that has to survive does not.
+        #
+        # `archive`, skipped below, is this fetch's own download, sitting in
+        # `dest` so the final state is written by one extraction rather than
+        # two moves. Deleting it here would delete the thing being extracted.
+        #
+        # This runs AFTER the digest and length checks on purpose: a download
+        # that fails verification must leave the previous tree untouched, and
+        # clearing first would destroy the working corpus to punish a truncated
+        # transfer.
+        if dest.is_dir():
+            for stale in dest.iterdir():
+                if stale == archive:
+                    continue
+                if stale.is_dir() and not stale.is_symlink():
+                    shutil.rmtree(stale, ignore_errors=True)
+                else:
+                    stale.unlink(missing_ok=True)
+
         if zipfile.is_zipfile(archive):
             with zipfile.ZipFile(archive) as zf:
                 _safe_members(zf.namelist(), "zip")
