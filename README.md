@@ -2,7 +2,10 @@
 
 **Your local LLM already knows how to code. It does not know your codebase, and it invents API facts with total confidence. Argus fixes both — on your own hardware, with nothing leaving your network.**
 
-Argus is a self-hosted code index and documentation server for [Hermes Agent](https://github.com/NousResearch/hermes-agent) + [Ollama](https://ollama.com). It mirrors every repository from your GitLab, extracts a symbol and dependency graph, serves twelve documentation packs, and enforces each developer's real GitLab permissions in SQL.
+There are **two things in this repository**, and either works without the other:
+
+- **The stack** ([`stack/`](stack/)) — a complete self-hosted LLM service: a GPU engine, a chat UI, an API gateway with a key and a budget per person, single sign-on, an admin console, dashboards and alerts. Argus is part of it.
+- **Argus** ([`src/argus/`](src/)) — the code index and documentation server. It mirrors your GitLab, extracts a symbol and dependency graph, serves knowledge packs, and enforces each developer's real GitLab permissions **in SQL**. It also runs standalone, without any of the stack.
 
 ---
 
@@ -38,10 +41,6 @@ And it gets *faster*: `35b`'s median response fell from **5.5 s to 2.4 s** with 
 
 ## Quick start
 
-There are **two things here**, and either works without the other: the **stack**
-in [`stack/`](stack/) — the whole self-hosted LLM service, Argus included — and
-**Argus** itself in [`src/argus/`](src/), which also runs on its own.
-
 ```bash
 git clone https://github.com/Binchitects/argus && cd argus
 
@@ -69,7 +68,7 @@ python scripts/smoke_test.py --url https://argus.llm.localhost/mcp --token <deve
   [PASS] auth rejects bad token        434.1 ms  denied
   [PASS] mcp handshake                1454.2 ms  protocol 2025-11-25
   [PASS] server instructions                     1803 chars
-  [PASS] tools registered               20.3 ms  16 tools
+  [PASS] tools registered               20.3 ms  17 tools
   [PASS] packs answer                   47.3 ms  FltRegisterFilter -> APC_LEVEL
   [PASS] private index                  86.2 ms  12 repo(s) visible to this token
 
@@ -81,9 +80,10 @@ python scripts/smoke_test.py --url https://argus.llm.localhost/mcp --token <deve
 | directory | what it is | entry point |
 |---|---|---|
 | [`stack/`](stack/) | **The deployment.** Compose file, per-service config, env samples, operational scripts | [`stack/README.md`](stack/README.md) |
-| [`src/argus/`](src/argus/) | **The Argus package** — the MCP code index and documentation server. Installable on its own | [`docs/argus/`](docs/argus/) |
-| [`tests/`](tests/) | The Argus suite — 928 tests, no Docker required | `pytest` |
-| [`docs/`](docs/) | **All documentation**, split into `docs/argus/` and `docs/stack/` | [`docs/`](docs/) |
+| [`src/argus/`](src/argus/) | **The Argus package** — the MCP code index and documentation server. Installable and runnable on its own | [`docs/argus/`](docs/argus/) |
+| [`packs/`](packs/) | **Nine built knowledge packs**, 1.6 GB — prose, API symbols and embeddings in one SQLite file each. Three more are parked in `packs/disabled/` | [`docs/argus/knowledge-packs.md`](docs/argus/knowledge-packs.md) |
+| [`tests/`](tests/) | The Argus suite — **1,085 tests**, no Docker required | `pytest` |
+| [`docs/`](docs/) | **All documentation**, split into [`docs/stack/`](docs/stack/) and [`docs/argus/`](docs/argus/) | [`docs/`](docs/) |
 | [`clients/`](clients/) | **Copy-pasteable configs** for DeepSeek Harness, Qwen Code, Claude Code, Continue and any generic MCP client, each marked with whether it was actually executed | [`clients/README.md`](clients/README.md) |
 | [`scripts/`](scripts/) | Repository tooling: release, packaging, the Hermes integrations, and the test GitLab the stack's fixtures use | [`scripts/release.sh`](scripts/release.sh) |
 | [`evals/`](evals/) | The measurement harness behind every number in this README | [`evals/README.md`](evals/README.md) |
@@ -101,12 +101,18 @@ Full walkthrough: **[docs/argus/clients.md](docs/argus/clients.md)**.
 
 ---
 
-## Deploying the stack — read this part
+# The stack
 
 `stack/` is a complete self-hosted LLM service: a GPU inference engine, a chat
 UI, an API gateway with a key and a budget per person, single sign-on, an admin
-panel and dashboards. **The whole deployment is one `.env` file and
+console and dashboards. **The whole deployment is one `.env` file and
 `docker compose up`.** There is no setup script.
+
+**24 services** are enabled by the default profile set, with 15 profiles to
+choose from — `argus` adds the code index, `embed` adds Ollama, `tracing` adds
+Langfuse, and `logging` (Loki + Promtail) is **on by default**.
+
+## Deploying the stack — read this part
 
 ### Three steps
 
@@ -263,7 +269,7 @@ Each of these used to be a script you had to run in the right order.
 
 | address | what | sign-in |
 |---|---|---|
-| `https://admin.llm.localhost` | people, API keys, credit, the Model card, indexing | SSO; the console needs `admins` |
+| `https://admin.llm.localhost` | people, API keys, credit, the Model card, Indexing, Explore | SSO; the console needs `admins` |
 | `https://chat.llm.localhost` | Open WebUI, with Argus as a tool | SSO |
 | `https://grafana.llm.localhost` | dashboards | SSO |
 | `https://gateway.llm.localhost/v1` | OpenAI-compatible API for tools | **the person's own API key** |
@@ -283,7 +289,7 @@ themselves; **curl, Python, Node and every SDK on another machine do not** — r
 
 ### Connecting tools to the API
 
-Create the person in the admin panel; it shows their API key once. Every
+Create the person in the admin console; it shows their API key once. Every
 OpenAI-compatible tool needs the same four things:
 
 | setting | value |
@@ -340,7 +346,7 @@ NODE_EXTRA_CA_CERTS="/path/to/stack/config/traefik/certs/tls.crt" dsh web
 ```
 
 Then add a provider with base URL `https://gateway.llm.localhost/v1` and the
-person's key from the admin panel. (The wrapper form above does the same thing
+person's key from the admin console. (The wrapper form above does the same thing
 without exporting anything permanent.)
 
 ```bash
@@ -411,7 +417,9 @@ Qwen Code: the `mcpServers` block above. Any other MCP client: the same URL and 
    `ARGUS_GITLAB_CA_CERT=/etc/argus/tls/gitlab-ca.pem` (drop the PEM in
    `config/argus/tls/` first), or `ARGUS_GITLAB_VERIFY=false` when no CA file
    exists anywhere.
-4. `make up`, then start an index run from the admin panel's **Indexing** card.
+4. `make up`, then start an index run from the admin console's **Indexing** card.
+   After that it keeps itself current — see [Keeping the index
+   current](#keeping-the-index-current).
 
 ### GitLab on a private CA
 
@@ -539,6 +547,25 @@ PY
 A `401` names the reason. Anything else means the identity resolved and the
 problem is elsewhere.
 
+### The admin console
+
+`https://admin.llm.localhost` is the operator's view of the whole deployment, and
+it needs the `admins` group. It has a sidebar: **Overview** (index freshness and
+service health), **People** (search, pagination, per-person pages, API keys,
+credit, CSV export), **Model** (what is running, and the exact `.env` block to
+switch it), **Indexing** (start a run and watch it), **Explore** and
+**Settings** (theme).
+
+Two guards exist because the panel got them wrong first: it will not delete the
+account you are signed in as — which it did to the live administrator during
+testing — and it will not delete the last admin.
+
+The panel **shows** the steps for switching a model rather than performing them.
+Performing them would need the Docker socket, and a socket in a web app is root
+on the host for anyone who reaches it.
+
+Details, and what it deliberately leaves alone: [docs/stack/ADMIN-PANEL.md](docs/stack/ADMIN-PANEL.md).
+
 ### Customizing
 
 Everything is a value in `.env`. Change it, then run `docker compose up -d`: compose
@@ -555,11 +582,11 @@ recreates exactly the containers the change affects.
 | domain | `LLM_DOMAIN` | certificate and single sign-on follow; check with `./scripts/domain-check.sh --old <previous>` |
 | reachable from the network | `BIND_ADDRESS=0.0.0.0` | default `127.0.0.1` is this machine only |
 | ports | `TRAEFIK_HTTP_PORT`, `TRAEFIK_HTTPS_PORT` | |
-| which services run | `COMPOSE_PROFILES` | `argus` code index, `tracing` Langfuse, `cadvisor`, `dcgm`. `logging` (Loki + Promtail) is **on by default** — remove it to stop collecting logs |
-| GPU / CPU power cap | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | empty restores the hardware default |
+| which services run | `COMPOSE_PROFILES` | `argus` code index, `embed` Ollama, `tracing` Langfuse, `cadvisor`, `dcgm`. `logging` (Loki + Promtail) is **on by default** — remove it to stop collecting logs |
+| GPU / CPU power cap | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | empty restores the hardware default; see [Measured](#measured) for what these do and do not buy |
 | CPU threads and ceilings | `LLAMACPP_THREADS`, `LLAMACPP_CPUS`, `OLLAMA_CPUS`, `POSTGRES_CPUS` | threads = physical cores; ceilings must sum under the core count |
 | engine RAM ceiling | `LLAMACPP_MEM_LIMIT` | e.g. `56g`; `0` = none |
-| default credit per person | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | per person in the admin panel |
+| default credit per person | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | per person in the admin console |
 | a different llama.cpp build | `LLAMACPP_ENGINE_URL`, `LLAMACPP_ENGINE_SHA256` | a release tarball; empty = the image's own server |
 | vLLM instead of llama.cpp | `COMPOSE_PROFILES` (`vllm` instead of `llamacpp`), the `VLLM_*` values with `VLLM_SERVED_MODEL_NAME` equal to `MODEL_NAME`, `ENGINE_API_BASE=http://vllm:8000/v1` | exactly one engine profile at a time; **not re-tested since the compose-only change** — the shipped samples are llama.cpp |
 | gated Hugging Face repos | `HF_TOKEN` | |
@@ -572,15 +599,12 @@ Config files, for what `.env` does not cover: alert rules in
 
 ### Switching the model
 
-The admin panel's **Model** card (admins only) shows what is running and, for each
+The admin console's **Model** card (admins only) shows what is running and, for each
 sample, the exact `.env` block to paste and the command. Every model setting sits
 between `# >>> MODEL` and `# <<< MODEL`; replace that block, keep your own
 `LLAMACPP_MODEL_DIR`, and run `docker compose up -d`. A model not yet on disk is
 downloaded first. The engine, gateway and Open WebUI all take the name from
 `MODEL_NAME`, so they cannot disagree.
-
-The panel only shows the steps. Performing them would need the Docker socket, and
-a socket in a web app is root on the host for anyone who reaches it.
 
 ### Measured
 
@@ -644,6 +668,19 @@ core runs flat out. Capping power did:
 | samples at or above 90 °C | 17% | **0%** |
 | decode, one person / each of two | 20.4 / 12.2 tok/s | 20.2 / 11.8 tok/s |
 
+**The caps are not what limits Flash-Next on the 3090, and raising them is not a
+speed-up.** Measured directly: `GPU_POWER_LIMIT_W` 150 → 350 changed decode by
+nothing (21.25 → 21.5 tok/s, n=4 each) — the card never drew more than 169 W peak
+or 134 W average at 22–38% SM utilisation, so it is not power-limited.
+`CPU_POWER_LIMIT_W` 125 → 253 bought +2% (inside the run-to-run spread) for
+**+43 °C** of package temperature. Both are best left at the values in `.env`.
+The same measurement rules out the other obvious levers: moving expert layers to
+the GPU (`N_CPU_MOE` 42 → 40) changed nothing and spent 2.2 GB of VRAM, and
+raising `-ub` to 2048 lifted prompt processing only 8.5% while costing 7% of
+decode. On this hardware the engine is at its documented number — **20.9 tok/s
+warm against 21.7 in the table below** — and the limit is that a 94 GB model is
+running on 61 GB of RAM.
+
 **MTP does not help Qwen3.8-Flash-Next here.** Four alternating runs, same build:
 off 20.3 / 12.2 tok/s (one / each of two), on 19.9 / 11.6. Each drafted token routes to
 different experts in system RAM, so verification multiplies the slow part. Mainline
@@ -660,6 +697,12 @@ generating. Its CPU-side weights are about 76 GB, so ~20 GB of experts are paged
 from NVMe on demand — 28 MB/s of reads and ~480 major page faults per second while
 decoding, against 14 when idle. More physical RAM removes that; no setting can pin
 more than you have. `--mlock` or `--no-mmap` on a model larger than RAM fails to load.
+
+Warm and settled, none of it is on disk: measured at steady state, decode reads
+**0 MB from disk per token and takes 0 major page faults per second**. The paging
+appears when the cache is cold — a fresh load, or another workload taking the RAM
+back — and costs about 20% of decode throughput. `tensor ... lazy read enabled` in
+the engine log is `mmap` working as intended, not a file left on disk.
 
 ### The traps
 
@@ -746,7 +789,7 @@ python3 scripts/functional-test.py
 ```
 
 `acceptance.py` checks wiring, and that `.env` and every sample resolve completely.
-`functional-test.py` does what people do, for real: creates a person in the panel,
+`functional-test.py` does what people do, for real: creates a person in the console,
 signs them in, uses their key, proves a credit limit binds and a rotated key dies,
 signs into Grafana and Open WebUI with the right roles, and confirms a chat is billed
 to whoever typed it — 43 checks. `domain-check.sh` proves the running stack answers
@@ -766,12 +809,22 @@ Three settings, none optional, each of which silently degrades the index:
 
 Argus's semantic layer also needs an embedding provider. Ollama is in the compose
 file under the `embed` profile; without it there is nowhere for vectors to come
-from, whichever database stores them.
+from, whichever database stores them. The embedder is the latency users feel, so
+it is worth a GPU: measured warm, GPU embedding is **94 ms → 5 ms** median per
+embed, 18×, for 849 MB of VRAM.
 
+---
+
+# Argus
+
+Argus is the code index and documentation server. It mirrors your GitLab, extracts
+a symbol and dependency graph, serves knowledge packs, and enforces each
+developer's real GitLab permissions in SQL. It is GPL v3 and runs standalone
+(`pip install ".[dev]"`) or as part of the stack.
 
 ## What your agent gets
 
-**Your private code**, access-controlled per developer:
+**Your private code**, access-controlled per developer — 11 tools:
 
 | Tool | Answers |
 |---|---|
@@ -782,9 +835,10 @@ from, whichever database stores them.
 | `which_repo` | *"Which repo do I change for X?"* — from a description, a symbol, a stack trace, or a diff |
 | `repo_map` · `impact_of` | *"What breaks if I change this?"* — from resolved `#include` edges |
 | `code_contracts` | Every in-house symbol a file references, with its definition |
-| `get_file` · `index_status` | Access-checked fetch; per-repo freshness |
+| `get_file` · `index_status` | Access-checked fetch; per-repo freshness, one row per branch |
+| `overview` | *"What is this repository?"* — its README, its layout, its key symbols. The one to call first in a codebase you have never seen |
 
-**Public documentation**, no access control because there is nothing to gate:
+**Public documentation**, no access control because there is nothing to gate — 6 tools:
 
 | Tool | Answers |
 |---|---|
@@ -794,43 +848,124 @@ from, whichever database stores them.
 | `docs_contracts` | Paste a file → header, library, DLL and IRQL of every API it calls |
 | `docs_verify` | Check a draft you already wrote; reports only contradictions |
 
----
+**17 tools in total**, and every one of them is contract-tested against a live
+server — see [Checking it](#checking-it-1).
 
-## Twelve knowledge packs, 1.80 GB, zero unresolved symbols
+## Keeping the index current
+
+Three things keep the index fresh, and the first two are independent:
+
+- **A poll.** The serve process runs a periodic pass, and the engine exports
+  `argus_index_age_seconds` per repository. An `ArgusIndexStale` alert fires when
+  a repository goes stale, and the admin console's Overview shows the same
+  numbers, so "the agent cannot find it" and "it is not in the index" stop
+  looking alike.
+- **A push webhook.** `POST /hook/gitlab` takes a GitLab push event and indexes
+  the repository that changed, gated by its own `ARGUS_WEBHOOK_TOKEN` (unset =
+  the route does not exist). A push during a pass is queued rather than dropped
+  and drained one repository per pass; an overfull queue collapses into one full
+  pass. Events it has no use for are acknowledged rather than refused, because
+  GitLab disables a webhook that keeps failing. The poll stays on as the floor.
+- **`argus index`** by hand, from the CLI or the console's Indexing card.
+
+**Indexing is embedding now.** `argus index` embeds as it goes, so the poller and
+the webhook produce code that `semantic_search` can actually see. Before that they
+did not, and nothing said so.
+
+### More than one branch
+
+A repository often has long-lived release branches alongside the trunk — `main`
+plus `v1`, `v2`, `v3`. Argus indexes the refs you name, and a developer who asks
+without naming one gets trunk; naming a branch gets that branch. An unindexed
+branch is refused **by name, listing the branches that are indexed**, rather than
+answered from the wrong ref.
+
+There is a trap here worth knowing, because it was silent: indexing a second
+branch puts a shared header in the index once per ref, and the include resolver
+used to see two identical paths, refuse to choose, and record `ambiguous` — which
+emptied the cross-repo graph for the **whole estate**, 2 edges to 0, with nothing
+reporting a problem. Resolution now prefers the branch the include came from, as a
+preference and not a filter. The cold fixture lifecycle indexes trunk *and* a
+release branch and asserts the graph survived.
+
+Configuration and behaviour: [docs/argus/branches.md](docs/argus/branches.md).
+
+### Reading what the code does
+
+The doc comment above every definition is now extracted, stored, and led into the
+embedded text. It was always available — `files.content` holds the whole file and
+`symbols.line` locates the symbol inside it — and had never been read, which is
+why a capability question could return a plausible wrong answer:
+
+> *"what reclaims keys whose time to live has elapsed"*
+
+Ranking on names alone returns `expire_slave_keys`. Ranking with the doc comment
+returns `active_expire_cycle`, which is the answer. The mirror question flips the
+same way. Symbols with no doc comment score identically either way, so this is
+the comment doing the work rather than a shifted baseline.
+
+### Checking a draft before the agent finishes
+
+`docs_verify` was an MCP tool, and that was the problem: every client can run a
+shell command when the model finishes and block on its exit code; almost none can
+be made to call a *tool* at that moment. `argus verify` is the same check with an
+exit code:
+
+| exit | meaning |
+|---|---|
+| `0` | clean |
+| **`2`** | **contradicted — blocking** |
+| `6` | could not check — deliberately **not** blocking |
+
+Everything except a contradiction fails open, because a deployment without packs
+would otherwise become an agent that cannot finish a sentence.
+[`clients/claude-code/verify-after.sh`](clients/claude-code/verify-after.sh) wires
+it into a Claude Code `Stop` hook.
+
+## Nine knowledge packs, 1.6 GB, zero unresolved symbols
 
 ```mermaid
 xychart-beta
     title "Documented symbols per pack (thousands)"
     x-axis ["dotnet", "win32", "wdk", "cpp", "python", "scripting", "cppreference"]
     y-axis "Symbols (k)" 0 --> 220
-    bar [215.3, 87.3, 38.0, 37.3, 18.0, 9.3, 5.4]
+    bar [215.3, 87.2, 37.9, 37.3, 18.8, 9.3, 5.4]
 ```
 
-| pack | Documents | Chunks | Symbols | Size |
-|---|---|---|---|---|
-| `win32` — Windows SDK + samples | 71,663 | 530,559 | 87,297 | 786.2 MB |
-| `wdk` — driver DDI + samples | 28,176 | 245,727 | 38,041 | 358.6 MB |
-| `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,305 | 174.7 MB |
-| `cppreference` — C++ standard library | 6,640 | 68,891 | 5,406 | 124.9 MB |
-| `dotnet` — .NET BCL + MS NuGet packages | 11,013 | 140,661 | **215,269** | 236.4 MB |
-| `scripting` — PowerShell, cmd, Unix | 9,302 | 46,027 | 9,302 | 70.2 MB |
-| `python` — 3.13 | 516 | 13,164 | 18,027 | 28.5 MB |
-| `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 24.8 MB |
-| `sqlite` — SQL, pragmas, FTS5 | 837 | 8,987 | 36 | 18.3 MB |
-| `react` — react.dev | 222 | 4,755 | 125 | 9.1 MB |
-| `algorithms` — TheAlgorithms/C++ | 371 | 2,001 | 370 | 4.3 MB |
-| `system-design` — the Primer | 9 | 442 | 8 | 1.3 MB |
-| **total** | **139,895** | **1,180,766** | **394,545** | **1.80 GB** |
+| pack | Documents | Chunks | Symbols | Size | Licence |
+|---|---|---|---|---|---|
+| `win32` — Windows SDK + samples | 65,906 | 478,762 | 87,206 | 696.6 MB | CC-BY-4.0 |
+| `wdk` — driver DDI + samples | 25,903 | 205,848 | 37,938 | 291.1 MB | CC-BY-4.0 |
+| `dotnet` — .NET BCL + MS NuGet packages | 11,013 | 140,661 | **215,269** | 236.4 MB | CC-BY-4.0 |
+| `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,325 | 180.0 MB | CC-BY-4.0 |
+| `cppreference` — C++ standard library | 6,640 | 68,891 | 5,406 | 125.6 MB | CC-BY-SA-3.0 |
+| `scripting` — PowerShell, cmd, Unix | 9,310 | 46,052 | 9,310 | 70.9 MB | CC-BY-4.0 |
+| `python` — 3.13 | 540 | 13,751 | 18,778 | 31.8 MB | PSF-2.0 |
+| `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 25.0 MB | CC-BY-4.0 |
+| `sqlite` — SQL, pragmas, FTS5 | 837 | 8,987 | 36 | 18.4 MB | public domain |
+| **total** | **132,033** | **1,100,423** | **412,779** | **1.6 GB** | |
 
-A pack is **one SQLite file** — prose, API symbols and embeddings. Build once, publish, install everywhere:
+Three more are built and parked in `packs/disabled/` (`algorithms`, `react`,
+`system-design`) — small corpora that were not worth the shelf space. Every pack
+reports **0 unresolved symbols**, which is the cheapest quality signal in the
+build: a pack that builds, installs and lists without complaint can still contain
+nothing.
+
+A pack is **one SQLite file** — prose, API symbols and embeddings. Build once,
+publish, install everywhere:
 
 ```bash
 argus pack install https://your-host/wdk.arguspack --sha256 <digest>
 ```
 
-A digest mismatch is refused and leaves **zero files behind**. All twelve answer correctly through the real `hermes -z` CLI — the whole chain, not a reimplementation.
+A digest mismatch is refused and leaves **zero files behind**. All of them answer
+correctly through the real `hermes -z` CLI — the whole chain, not a
+reimplementation.
 
----
+**Installing them is a separate step from having them.** A fresh deployment has
+no packs, so the six `docs_*` tools have nothing to answer from until you install
+some; the contract suite reports exactly that as `NOT COVERED` rather than
+counting it as passing.
 
 ## Why not just embed everything?
 
@@ -848,11 +983,9 @@ Argus inverts the priority:
 
 Queries to the lexical layer are **prose, not FTS5 expressions.** Every term is quoted as a phrase before it reaches FTS5, so `what is a mutex?` and `std::atomic_exchange` both work — a question mark and a `:` used to be syntax errors. The trade is that FTS5 operators (`AND`, `star*`, `NEAR`) are searched for as literal words. That is the right default for a tool whose caller is a language model.
 
-Embeddings cover **public symbol signatures, scope and path — never function bodies.** A C++ body embeds mostly to "generic control flow"; its signature plus its path is what carries intent. That is ~70–90k vectors instead of ~600k.
+Embeddings cover **public symbol signatures, scope, path and doc comment — never function bodies.** A C++ body embeds mostly to "generic control flow"; its signature plus its path is what carries intent. That is ~70–90k vectors instead of ~600k.
 
 And in C/C++ the `#include` graph **is** the cross-repo dependency graph — recoverable with no build system, no `compile_commands.json`, and no compiler.
-
----
 
 ## Architecture
 
@@ -862,16 +995,18 @@ flowchart LR
         R1[(repos)]
     end
     subgraph HOST["Index host — one Linux box"]
-        MIR["mirror"] --> PAR["parse<br/><i>ctags · includes</i>"] --> STO[("SQLite<br/>FTS5 · sqlite-vec")]
+        MIR["mirror"] --> PAR["parse<br/><i>ctags · includes · doc comments</i>"] --> STO[("SQLite<br/>FTS5 · sqlite-vec")]
         STO --> MCP["MCP server"]
         ACL["acl<br/><i>PAT → repo allowlist</i>"] --> MCP
-        PK[("11 knowledge packs")] --> MCP
+        PK[("9 knowledge packs")] --> MCP
+        HOOK["webhook · poll"] --> MIR
     end
     subgraph DEV["Developer workstation"]
-        HER["Hermes Agent"]
+        HER["Hermes · Qwen Code · Claude Code"]
         OLL["Ollama<br/><i>qwen3.6 27b / 35b</i>"]
     end
     GL -->|service token<br/>reads every repo| MIR
+    GL -->|push event| HOOK
     MCP -->|TLS · per-dev token| HER
     OLL -->|inference| HER
     HER -.->|developer PAT| ACL
@@ -892,7 +1027,9 @@ def find_symbol(allowed_repo_ids, conn, name, kind=None, limit=50): ...
 
 A reflection test walks the module and fails on any function that does not take it first with no default. **It fails on code that does not exist yet** — which is the point. Security bugs of this class come from a new code path six months later that simply never called the check. Encoding it in the signature turns a runtime vulnerability into an import-time error.
 
----
+The index-explorer queries are the deliberate exception: they are unfiltered by
+design, so they live in `store/explore.py` apart from the access-scoped ones, with
+a test asserting no MCP tool module imports them.
 
 ## Measured
 
@@ -907,8 +1044,9 @@ Everything here is measured on real corpora, not estimated. Full detail in [docs
 | `docs_search`, 17.9k chunks | **88.6 ms** |
 | `docs_search`, 364.8k chunks | **460 ms** |
 | **query embedding (CPU Ollama)** | **2,254 ms** |
+| **query embedding (GPU Ollama)** | **5 ms** median, 18× |
 
-5.2× cost for 20.4× the corpus — sublinear. **The embedder sets the latency users feel, not the index.** A GPU is the single biggest improvement available.
+5.2× cost for 20.4× the corpus — sublinear. **The embedder sets the latency users feel, not the index** — which is why it now runs on the GPU, and why that was the single biggest improvement available.
 
 ### Scale
 
@@ -920,11 +1058,15 @@ Everything here is measured on real corpora, not estimated. Full detail in [docs
 
 Suffix matching gets *better* with scale. `which_repo` stayed flat only because an indexed `basename` column replaced a full scan — before that, p95 was 15.5 ms and rising linearly.
 
+The same discipline applies to an estate run: **47 repositories, 55,603 files,
+1,491,167 symbols, 37.8 minutes, zero failures or timeouts.**
+
 ### Engineering
 
 | | |
 |---|---|
-| tests | **741 passing**, 0 skipped |
+| tests | **1,085 passing**, 1 skipped |
+| MCP tools, contract-tested against a live server | **17** |
 | hollow tests found by targeted revert | **9** |
 | bugs whose failure mode was a *plausible success* | **6** |
 
@@ -934,19 +1076,60 @@ The six worst bugs shared one signature: **they produced a plausible success rat
 
 That discipline extends to the benchmarks. The model comparison above found **three defects in its own harness** before its numbers were trusted — a 401 that read as 0/10, a grading rule that fired on a correct answer, and a re-grade that manufactured a failure from a truncated record. All three are written up rather than quietly fixed, because each would have published as a finding.
 
----
+## Checking it
+
+The suite runs without Docker:
+
+```bash
+pytest                                     # 1,085 tests
+```
+
+Two checks need a live server, and both are worth more than the unit suite for
+the failures they catch:
+
+```bash
+python scripts/smoke_test.py --url https://argus.llm.localhost/mcp --token <PAT>
+```
+
+```bash
+./scripts/test-gitlab/run.sh               # up, seed, verify, tear down
+```
+
+`run.sh` boots a throwaway GitLab, seeds three private projects plus a release
+branch and two developers with disjoint access, and proves the whole chain: that
+the service token sees every project, that each developer's allowlist is exactly
+their own, that the project nobody is a member of appears in no answer, that the
+cross-repo graph survives a second branch, and that unqualified questions answer
+from trunk. **18/18** on the ACL and index checks, then **52/52** tool-contract
+checks. It tears the fixture down afterwards — including when it fails, because
+the run that leaves it up is precisely the one nobody comes back to.
+
+The contract suite takes the tool list **from the server** rather than a hardcoded
+count, calls every tool over StreamableHTTP with real GitLab tokens, checks each
+result's declared shape, and asserts no structured field names a repository the
+caller cannot read. Tools the fixture cannot exercise — the six `docs_*` tools,
+because installing a pack needs a real documentation checkout — print as
+**NOT COVERED** rather than counting as passing.
 
 ## Status
 
 | Phase | | |
 |---|---|---|
 | 1 — Indexer | ctags, includes, SQLite | ✅ |
-| 2 — MCP server | ACL, 8 private tools | ✅ |
+| 2 — MCP server | ACL, 11 private tools | ✅ |
 | 3 — Cross-repo | include resolution, `repo_map`, `which_repo` | ✅ |
-| 4 — Semantic layer | selective embeddings, `semantic_search` | ✅ |
-| 5 — Knowledge packs | 11 packs, 6 doc tools, `argus pack` | ✅ |
+| 4 — Semantic layer | selective embeddings, `semantic_search`, doc comments | ✅ |
+| 5 — Knowledge packs | 9 packs, 6 doc tools, `argus pack` | ✅ |
+| 6 — Operational | freshness metrics, push webhook, branches, `argus verify` | ✅ |
 
-**928 tests**, passing locally.
+**1,085 tests**, passing locally, plus the live contract suite above.
+
+What is not yet proven is tracked honestly in
+[docs/argus/roadmap.md](docs/argus/roadmap.md).
+
+---
+
+## Documentation
 
 Everything is under [`docs/`](docs/), split by which half of the repository it
 describes.
@@ -956,8 +1139,9 @@ describes.
 - **[docs/stack/ARCHITECTURE.md](docs/stack/ARCHITECTURE.md)** — every service, how a request flows through them, and what each failure looks like
 - **[docs/stack/CONFIGURATION.md](docs/stack/CONFIGURATION.md)** — every `.env` variable and every file under `config/`
 - **[docs/stack/AUTHENTICATION.md](docs/stack/AUTHENTICATION.md)** — who signs in where, and how identity reaches each service
-- **[docs/stack/ADMIN-PANEL.md](docs/stack/ADMIN-PANEL.md)** — the admin console: accounts, keys, credit, the Model and Indexing cards
+- **[docs/stack/ADMIN-PANEL.md](docs/stack/ADMIN-PANEL.md)** — the admin console: accounts, keys, credit, the Model and Indexing cards, Explore
 - **[docs/stack/ARGUS.md](docs/stack/ARGUS.md)** — Argus inside the stack: the per-person ACL, private CAs, password mode, the audit stream
+- **[docs/stack/CPU-TEMPERATURE.md](docs/stack/CPU-TEMPERATURE.md)** — how CPU temperature reaches the dashboards, and why Windows needed its own path
 - **[docs/stack/HERMES.md](docs/stack/HERMES.md)** — pointing Hermes at the model and at Argus
 - **[docs/stack/TESTING.md](docs/stack/TESTING.md)** — what the suite covers, what a green run skips, and the tests still missing
 
@@ -965,8 +1149,11 @@ describes.
 
 - **[docs/argus/clients.md](docs/argus/clients.md)** — connecting an MCP client, and the reference client
 - **[docs/argus/knowledge-packs.md](docs/argus/knowledge-packs.md)** — building and publishing packs
-- **[docs/argus/backup-and-restore.md](docs/argus/backup-and-restore.md)** — what is worth keeping and how to get it back
+- **[docs/argus/branches.md](docs/argus/branches.md)** — indexing more than one branch, and the trap that made it silent
 - **[docs/argus/pgvector-backend.md](docs/argus/pgvector-backend.md)** — the optional Postgres backend for symbol embeddings, and what it measures
+- **[docs/argus/backup-and-restore.md](docs/argus/backup-and-restore.md)** — what is worth keeping and how to get it back
+- **[docs/argus/kpis.md](docs/argus/kpis.md)** — the health indicators `argus kpi` prints
+- **[docs/argus/verification-report.md](docs/argus/verification-report.md)** — the last cold fixture run, kept as evidence
 - **[docs/argus/roadmap.md](docs/argus/roadmap.md)** — what is not yet proven
 - **[evals/](evals/)** — every benchmark in this README, reproducible
 
@@ -976,4 +1163,4 @@ describes.
 
 Argus is **GPL v3** — see [LICENSE](LICENSE).
 
-Knowledge packs carry their own upstream licences, which are *not* GPL and vary per pack: CC-BY-4.0 for the Microsoft documentation, CC-BY-SA-3.0 for cppreference, PSF-2.0 for Python, MIT for the algorithms corpus, public domain for SQLite. `argus pack info <name>` prints each in full, and that output is how you meet the redistribution obligation.
+Knowledge packs carry their own upstream licences, which are *not* GPL and vary per pack: CC-BY-4.0 for the Microsoft documentation, CC-BY-SA-3.0 for cppreference, PSF-2.0 for Python, public domain for SQLite. `argus pack info <name>` prints each in full, and that output is how you meet the redistribution obligation.
