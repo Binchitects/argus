@@ -582,6 +582,7 @@ NAV_ITEMS = (
     ("monitoring", "/monitoring", "Monitoring", "M3 3v18h18M19 9l-5 5-4-4-3 3"),
     # --- configuration ------------------------------------------------------
     ("settings",   "/settings",   "Settings",   "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.18V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 7.26 19.4l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.09 14H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 8.74l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 10 4.6V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 2.74 1.18l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 10V10a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"),
+    ("packs",      "/packs",      "Knowledge packs", "M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5z"),
 )
 
 #: How many of NAV_ITEMS are "operations" rather than "configuration".
@@ -1027,6 +1028,168 @@ _INDEX_EXIT = {
 }
 
 
+#: Argus exit codes for the pack surface, so the console says what a failure
+#: MEANS rather than only that one happened.
+_PACK_EXIT = {
+    0: "finished cleanly",
+    1: "failed — the log above names why",
+}
+
+
+def packs_summary() -> dict:
+    """Installed knowledge packs, as Argus sees them.
+
+    Argus owns this list. The console does not read the packs directory
+    itself, and must not: the directory lives in the Argus container, and a
+    second opinion about what is installed is a bug waiting for the two to
+    disagree.
+    """
+    if not (ARGUS_URL and ARGUS_ADMIN_TOKEN):
+        return {"configured": False}
+    try:
+        data = _argus("/admin/packs")
+        return {"configured": True, "ok": True, **(data or {})}
+    except Exception as exc:                  # noqa: BLE001 - a tile is never
+        return {"configured": True, "ok": False,       # worth a 500 page
+                "error": f"{type(exc).__name__}: {exc}"[:200]}
+
+
+def _mb(n) -> str:
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return "?"
+    return f"{n / 1048576:.1f} MB" if n < 1024 ** 3 else f"{n / 1024 ** 3:.2f} GB"
+
+
+def _pack_row(pack: dict) -> str:
+    """One installed pack.
+
+    An incompatible pack is shown, not hidden. It still serves docs_lookup and
+    lexical search -- only semantic search refuses it -- so removing it from
+    the list would take away a working tool and say nothing.
+    """
+    name = str(pack.get("name") or "")
+    warn = ""
+    if not pack.get("compatible", True):
+        warn = (f'<div class="dim" style="color:#e0a030">'
+                f'{_h(str(pack.get("incompatible_reason") or "incompatible embedding model"))}'
+                f'<br>lookup and text search still work; semantic search does not</div>')
+    remove = (f'<form method="post" action="/admin/packs" style="display:inline">'
+              f'<input type="hidden" name="action" value="remove">'
+              f'<input type="hidden" name="name" value="{_h(name)}">'
+              f'<button class="btn danger" type="submit"'
+              f' onclick="return confirm(\'Remove {_h(name)} from Argus?\')">'
+              f'Remove</button></form>')
+    return (f'<tr><td><b>{_h(name)}</b>{warn}</td>'
+            f'<td>{_h(str(pack.get("version") or "—"))}</td>'
+            f'<td class="dim">{_h(str(pack.get("model") or "—"))}'
+            f'{"/" + _h(str(pack.get("dim"))) if pack.get("dim") else ""}</td>'
+            f'<td style="text-align:right">{_h(_mb(pack.get("size_bytes")))}</td>'
+            f'<td class="dim">{_h(str(pack.get("license") or "—"))}</td>'
+            f'<td>{remove}</td></tr>')
+
+
+def packs_card(is_admin: bool = False) -> str:
+    """The installed packs, plus install / update / remove.
+
+    Three things this deliberately does NOT do. It does not list what is
+    AVAILABLE -- that needs a published index, and inventing one here would be
+    the console guessing at somebody else's release process. It does not
+    install from a file upload: a pack is up to a gigabyte and the console
+    proxies every byte, so a URL is the honest interface. And it does not
+    reimplement any of it -- every action is one call into Argus, which owns
+    the directory, the checksum and the atomic rename.
+    """
+    if not is_admin:
+        return ""
+    if not (ARGUS_URL and ARGUS_ADMIN_TOKEN):
+        return ('<div class="card"><h2>Knowledge packs</h2>'
+                '<p class="dim" style="margin:0">Argus is not configured on this '
+                'deployment: <code>ARGUS_ADMIN_TOKEN</code> is unset, so there is '
+                'nothing to list and nothing to install into.</p></div>')
+
+    s = packs_summary()
+    if not s.get("ok"):
+        return ('<div class="card"><h2>Knowledge packs</h2>'
+                f'<div class="msg bad">Argus did not answer: {_h(str(s.get("error")))}'
+                '</div></div>')
+
+    packs = s.get("packs") or []
+    job = s.get("job") or {}
+    index_url = str(s.get("index_url") or "")
+    running = job.get("state") == "running"
+
+    total = sum(int(p.get("size_bytes") or 0) for p in packs)
+    incompatible = sum(1 for p in packs if not p.get("compatible", True))
+    tiles = (_tile("Packs installed", str(len(packs)),
+                   f"{_mb(total)} on disk" if packs else "none yet")
+             + (_tile("Incompatible", str(incompatible),
+                      "semantic search refuses them") if incompatible else ""))
+
+    if running:
+        status = (f'<div class="msg">{_h(str(job.get("action") or "working").title())} '
+                  f'<b>{_h(str(job.get("target") or ""))}</b> — started '
+                  f'{_h(_rel_time(job.get("started")))}. This page refreshes every 5s.</div>')
+    elif job.get("finished"):
+        rc = job.get("returncode")
+        cls = "msg" if rc == 0 else "msg bad"
+        status = (f'<div class="{cls}">Last pack operation finished '
+                  f'{_h(_rel_time(job.get("finished")))} — '
+                  f'{_h(_PACK_EXIT.get(rc, f"unrecognised exit code {rc}"))}</div>')
+    else:
+        status = ('<p class="dim" style="margin:0 0 12px">No pack operation has been '
+                  'run from here since Argus last restarted.</p>')
+
+    # The log stays after the job ends, for the same reason the indexing log
+    # does: "exit 1" with no reason is the state that gets reported as broken.
+    tail_text = "\n".join(job.get("tail") or [])
+    log_text = tail_text[-6000:] if len(tail_text) > 6000 else tail_text
+    log = (f'<pre style="max-height:280px;overflow:auto;background:#111;color:#ddd;'
+           f'padding:10px;border-radius:6px;font-size:12px;white-space:pre-wrap">'
+           f'{_h(log_text)}</pre>') if log_text else ""
+
+    disabled = " disabled" if running else ""
+    table = (
+        '<table style="width:100%;border-collapse:collapse">'
+        '<thead><tr><th style="text-align:left">Pack</th><th style="text-align:left">Version</th>'
+        '<th style="text-align:left">Embedding</th><th style="text-align:right">Size</th>'
+        '<th style="text-align:left">Licence</th><th></th></tr></thead><tbody>'
+        + "".join(_pack_row(p) for p in packs)
+        + '</tbody></table>')
+
+    install_form = (
+        f'<form method="post" action="/admin/packs" style="margin:12px 0">'
+        f'<input type="hidden" name="action" value="install">'
+        f'<input name="source" placeholder="https://…/win32.arguspack" '
+        f'style="min-width:340px"{disabled}> '
+        f'<input name="sha256" placeholder="sha256 (recommended)" '
+        f'style="min-width:260px"{disabled}> '
+        f'<button class="btn" type="submit"{disabled}>Install pack</button>'
+        f'<p class="dim" style="margin:6px 0 0">A URL or a path inside the Argus '
+        f'container. A digest mismatch is refused and leaves zero files behind; '
+        f'without one the pack is installed on trust. The download happens in '
+        f'Argus, so a large pack does not wait on this page.</p></form>')
+
+    update_form = (
+        f'<form method="post" action="/admin/packs" style="margin:12px 0">'
+        f'<input type="hidden" name="action" value="update">'
+        f'<button class="btn" type="submit"{disabled}>Update all packs</button>'
+        + (f'<p class="dim" style="margin:6px 0 0">From '
+           f'<code>{_h(index_url)}</code>. Packs whose version is already current '
+           f'are left alone.</p>' if index_url else
+           '<p class="dim" style="margin:6px 0 0">No pack index is configured. Set '
+           '<code>ARGUS_PACK_INDEX_URL</code> on the argus service to the published '
+           'index JSON and this button starts working.</p>')
+        + '</form>')
+
+    return ('<div class="card"><h2>Knowledge packs</h2>'
+            '<p class="dim" style="margin:0 0 12px">Public documentation corpora — prose, '
+            'API symbols and embeddings in one file each. Installing one is what makes the '
+            'six <code>docs_*</code> tools able to answer.</p>'
+            + tiles + status + table + log + install_form + update_form + '</div>')
+
+
 ENV_SAMPLES_DIR = os.environ.get("ENV_SAMPLES_DIR", "/env-samples")
 _BLOCK = re.compile(r"^# >>> MODEL.*?^# <<< MODEL[^\n]*$", re.M | re.S)
 
@@ -1414,6 +1577,15 @@ def model_view(request: Request, who: Caller) -> Response:
             + model_card())
     return page(request, "Model", body, who.label, True, _flash(request),
                 active="model", crumbs="<b>Model</b>")
+
+
+def packs_view(request: Request, who: Caller) -> Response:
+    body = ('<h1 class="page">Knowledge packs</h1>'
+            '<p class="lede">Documentation corpora installed for every agent, and the '
+            'version of each.</p>'
+            + packs_card(is_admin=True))
+    return page(request, "Knowledge packs", body, who.label, True, _flash(request),
+                active="packs", crumbs="<b>Knowledge packs</b>")
 
 
 def indexing_view(request: Request, who: Caller) -> Response:
@@ -1887,6 +2059,50 @@ async def admin_reset(request: Request) -> Response:
                         + (RELOAD_NOTE if WARN_RELOAD else ""))
 
 
+async def admin_packs(request: Request) -> Response:
+    """Install, update or remove a knowledge pack.
+
+    One endpoint and an `action` field rather than three paths, because all
+    three share their guard, their target and their redirect, and three near-
+    identical handlers is how the three drift apart.
+    """
+    who = _require_admin(request)
+    if who is None:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    if not (ARGUS_URL and ARGUS_ADMIN_TOKEN):
+        return _back(err="Packs are not configured: ARGUS_ADMIN_TOKEN is unset.",
+                     to="/packs")
+    form = await request.form()
+    action = str(form.get("action") or "").strip()
+    payload: dict = {"name": str(form.get("name") or "").strip()}
+    if action == "install":
+        payload["source"] = str(form.get("source") or "").strip()
+        payload["sha256"] = str(form.get("sha256") or "").strip()
+        if not payload["source"]:
+            return _back(err="Give a pack URL or a path inside the Argus container.",
+                         to="/packs")
+    elif action not in ("update", "remove"):
+        return _back(err=f"Unknown pack action {action!r}.", to="/packs")
+
+    try:
+        _argus(f"/admin/packs/{action}", payload)
+    except urllib.error.HTTPError as exc:
+        # Argus states the reason in the body, and its wording is better than
+        # anything reconstructed here -- it knows whether the index is
+        # unconfigured, the name is unknown, or another job holds the slot.
+        try:
+            detail = json.loads(exc.read().decode()).get("error") or f"HTTP {exc.code}"
+        except Exception:                                      # noqa: BLE001
+            detail = f"HTTP {exc.code}"
+        return _back(err=f"Argus refused: {detail}", to="/packs")
+    except Exception as exc:                                   # noqa: BLE001
+        return _back(err=f"Could not reach Argus: {repr(exc)[:120]}", to="/packs")
+
+    said = {"install": "Installing", "update": "Updating packs",
+            "remove": f"Removed {payload['name']}"}[action]
+    return _back(msg=f"{said}. This page shows progress.", to="/packs")
+
+
 async def admin_index(request: Request) -> Response:
     """Start an index pass across every repo, optionally at extra branches."""
     who = _require_admin(request)
@@ -2094,6 +2310,11 @@ async def model_page(request: Request) -> Response:
     return model_view(request, who) if who else _forbidden()
 
 
+async def packs_page(request: Request) -> Response:
+    who = _require_admin(request)
+    return packs_view(request, who) if who else _forbidden()
+
+
 async def indexing_page(request: Request) -> Response:
     who = _require_admin(request)
     return indexing_view(request, who) if who else _forbidden()
@@ -2141,6 +2362,7 @@ app = Starlette(routes=[
     Route("/people/{username}", person_page, methods=["GET"]),
     Route("/model", model_page, methods=["GET"]),
     Route("/indexing", indexing_page, methods=["GET"]),
+    Route("/packs", packs_page, methods=["GET"]),
     Route("/explore", explore_page, methods=["GET"]),
     Route("/monitoring", monitoring_page, methods=["GET"]),
     Route("/settings", settings_page, methods=["GET"]),
@@ -2153,4 +2375,5 @@ app = Starlette(routes=[
     Route("/admin/budget", admin_budget, methods=["POST"]),
     Route("/admin/delete", admin_delete, methods=["POST"]),
     Route("/admin/index", admin_index, methods=["POST"]),
+    Route("/admin/packs", admin_packs, methods=["POST"]),
 ], on_startup=[_start_directory_sync])

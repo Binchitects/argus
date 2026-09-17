@@ -471,6 +471,79 @@ check("Nothing is indexed yet" not in broken,
 # ever read, so the build passed no matter what those checks said. A guard that
 # cannot fail is worse than no guard, because it is believed.
 
+# --- the Packs card ---------------------------------------------------------
+
+
+def packs(payload, *, is_admin=True):
+    panel._argus = lambda path, body=None: payload
+    return panel.packs_card(is_admin=is_admin)
+
+
+PACKS = [
+    {"name": "win32", "version": "1.1", "model": "nomic-embed-text", "dim": "768",
+     "size_bytes": 726 * 1024 * 1024, "license": "CC-BY-4.0", "commit": "abc",
+     "compatible": True, "incompatible_reason": ""},
+    {"name": "sqlite", "version": "1.0", "model": "nomic-embed-text", "dim": "768",
+     "size_bytes": 18 * 1024 * 1024, "license": "public-domain", "commit": "def",
+     "compatible": True, "incompatible_reason": ""},
+]
+PACK_JOB = {"state": "idle", "action": None, "target": None, "started": None,
+            "finished": 1_700_000_000.0, "returncode": 0, "tail": ["installed win32 1.1"]}
+
+html = packs({"packs": PACKS, "job": PACK_JOB, "index_url": "", "packs_dir": "/p"})
+check("win32" in html and "1.1" in html, "the installed pack and its version are not listed")
+check("sqlite" in html and "public-domain" in html, "a pack row lost its licence")
+check("726.0 MB" in html, "the pack size is not shown")
+check("2" in html, "the count of installed packs is missing")
+
+# The log survives the job, for the same reason the indexing log does: "exit 1"
+# with the reason thrown away is the state that gets reported as broken.
+check("installed win32 1.1" in html, "the pack job log is not shown")
+
+# An incompatible pack still serves lookup and lexical search, so hiding it
+# would remove a working tool and say nothing about why.
+bad = packs({"packs": [dict(PACKS[0], compatible=False,
+                            incompatible_reason="built with mxbai-embed-large")],
+             "job": PACK_JOB, "index_url": "", "packs_dir": "/p"})
+check("mxbai-embed-large" in bad, "an incompatible pack is listed without saying why")
+check("lookup and text search still work" in bad,
+      "an incompatible pack does not say what still works")
+
+# Update must be offered only when there is an index to update FROM, and must
+# name the variable to set when there is not.
+no_index = packs({"packs": PACKS, "job": PACK_JOB, "index_url": "", "packs_dir": "/p"})
+check("ARGUS_PACK_INDEX_URL" in no_index,
+      "no index configured, and the card does not name the variable that fixes it")
+with_index = packs({"packs": PACKS, "job": PACK_JOB,
+                    "index_url": "https://example.invalid/index.json",
+                    "packs_dir": "/p"})
+check("Update all packs" in with_index, "the update button is missing when an index exists")
+check("example.invalid" in with_index, "the update form does not say which index it uses")
+
+# A running job disables the buttons: two installs into one directory race on
+# the final rename, and Argus refuses the second anyway.
+running = packs({"packs": PACKS, "index_url": "",
+                 "job": dict(PACK_JOB, state="running", action="install",
+                             target="https://x/win32.arguspack", finished=None),
+                 "packs_dir": "/p"})
+check("disabled" in running, "the forms stay enabled while a pack job is running")
+
+# A failed job has to say so, with its return code.
+failed = packs({"packs": [], "index_url": "",
+                "job": dict(PACK_JOB, returncode=1, tail=["failed: checksum mismatch"]),
+                "packs_dir": "/p"})
+check("checksum mismatch" in failed, "a failed pack job hides its reason")
+
+# Argus unreachable is a state of its own, not an empty pack list.
+panel._argus = lambda path, body=None: (_ for _ in ()).throw(RuntimeError("boom"))
+unreachable = panel.packs_card(is_admin=True)
+check("did not answer" in unreachable,
+      "an unreachable Argus renders as an empty registry rather than an error")
+
+# Non-admins get nothing at all -- the card names every pack in the estate.
+check(packs({"packs": PACKS, "job": PACK_JOB, "index_url": "", "packs_dir": "/p"},
+            is_admin=False) == "", "a non-admin is shown the packs card")
+
 if FAILURES:
     for line in FAILURES:
         print(f"FAIL: {line}")

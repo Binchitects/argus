@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -21,6 +22,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .. import access, acl, auditlog
 from ..config import Config
+from ..packs import registry
+from ..packs.registry import RegistryError
 from ..store import explore, writes
 from ..store.db import connect, connect_audit, connect_readonly, migrate
 from .errors import unauthorized
@@ -540,6 +543,20 @@ _index_job: dict = {"state": "idle", "branches": [], "started": None,
                     "pending_full": False}
 _index_lock = threading.Lock()
 
+#: One pack operation at a time, for the same reason as the index run: two
+#: installs into one directory race on the final rename, and the loser leaves a
+#: half-written `.incoming-*.tmp` where the registry will list it.
+#:
+#: `tail` is the progress the console shows. A pack is hundreds of MB, so this
+#: cannot be a synchronous request -- the console's client gives up after ten
+#: seconds -- and a button that does nothing visible for ten minutes is worse
+#: than no button. Deliberately the same shape as `_index_job`: one way this
+#: codebase reports a long job.
+_pack_job: dict = {"state": "idle", "action": None, "target": None,
+                   "started": None, "finished": None, "returncode": None,
+                   "tail": []}
+_pack_lock = threading.Lock()
+
 #: Seconds between automatic index passes. 0 -- the default -- means only a
 #: person pressing the button ever reindexes.
 DEFAULT_INDEX_INTERVAL = 0
@@ -786,6 +803,123 @@ def _enqueue_webhook(repo: str, cfg_path: str) -> dict:
     return {"status": "started", "repo": repo, "queued": 0}
 
 
+def pack_index_url() -> str:
+    """Where `pack update` looks when the console does not name an index.
+
+    Unset -- the default -- is a deployment that installs packs by hand, and
+    the console then offers install and remove but not update. Same discipline
+    as the webhook token: an unconfigured feature is absent rather than
+    present and broken.
+    """
+    return os.environ.get("ARGUS_PACK_INDEX_URL", "").strip()
+
+
+def pack_rows(packs_dir) -> list[dict]:
+    """Installed packs, as the console shows them.
+
+    `list_installed` never raises for an unreadable pack, and that matters
+    here: a corrupt file in the directory is the thing an operator came to
+    this page to find, so dropping it from the list would hide exactly the
+    case the page exists for.
+    """
+    out = []
+    for pack in registry.list_installed(Path(packs_dir)):
+        out.append({
+            "name": pack.name,
+            "version": pack.version,
+            "model": pack.embedding_model,
+            "dim": pack.embedding_dim,
+            "size_bytes": pack.size_bytes,
+            "license": pack.license,
+            "commit": pack.source_commit,
+            "compatible": pack.compatible,
+            "incompatible_reason": pack.incompatible_reason,
+        })
+    out.sort(key=lambda row: row["name"])
+    return out
+
+
+def _start_pack_job(cfg, action: str, **params) -> bool:
+    """Claim the single pack slot and run in the background.
+
+    Returns False when something is already in flight, having started nothing.
+    Claim and state change happen under one lock, so two people pressing
+    install at the same moment cannot both believe they won.
+    """
+    with _pack_lock:
+        if _pack_job["state"] == "running":
+            return False
+        _pack_job.update(state="running", action=action,
+                         target=str(params.get("source") or params.get("name") or ""),
+                         started=time.time(), finished=None,
+                         returncode=None, tail=[])
+    threading.Thread(target=_run_pack_job, args=(cfg, action, params),
+                     daemon=True).start()
+    return True
+
+
+def _run_pack_job(cfg, action: str, params: dict) -> None:
+    """Install, update or remove, reporting as it goes."""
+    dest = Path(cfg.packs_dir)
+
+    def say(line: str) -> None:
+        with _pack_lock:
+            _pack_job["tail"] = (_pack_job["tail"] + [line])[-40:]
+
+    rc = 0
+    try:
+        if action == "install":
+            source = str(params.get("source") or "").strip()
+            if not source:
+                raise RegistryError("no pack URL or path given")
+            sha = str(params.get("sha256") or "").strip() or None
+            say(f"fetching {source}")
+            pack = registry.install(source, dest_dir=dest, expected_sha256=sha)
+            say(f"installed {pack.name} {pack.version} "
+                f"({pack.size_bytes / 1048576:.1f} MB)")
+            if not pack.compatible:
+                say(f"warning: {pack.incompatible_reason}")
+        elif action == "update":
+            url = str(params.get("index_url") or "").strip() or pack_index_url()
+            if not url:
+                raise RegistryError(
+                    "no pack index configured; set ARGUS_PACK_INDEX_URL or give one here")
+            available = {e.name: e for e in registry.fetch_index(url)}
+            installed = registry.list_installed(dest)
+            wanted = str(params.get("name") or "").strip()
+            if wanted:
+                installed = [p for p in installed if p.name == wanted]
+                if not installed:
+                    raise RegistryError(f"no installed pack named {wanted!r}")
+            updated = 0
+            for pack in installed:
+                entry = available.get(pack.name)
+                if entry is None:
+                    say(f"{pack.name}: not in the index, leaving alone")
+                    continue
+                if entry.version == pack.version:
+                    say(f"{pack.name}: {pack.version} is current")
+                    continue
+                say(f"{pack.name}: {pack.version} -> {entry.version}, downloading")
+                registry.install(entry.url, dest_dir=dest,
+                                 expected_sha256=entry.sha256)
+                updated += 1
+            say(f"{updated} pack(s) updated")
+        elif action == "remove":
+            name = str(params.get("name") or "").strip()
+            if not registry.remove(name, dest):
+                raise RegistryError(f"no installed pack named {name!r}")
+            say(f"removed {name}")
+        else:
+            raise RegistryError(f"unknown action {action!r}")
+    except Exception as exc:            # noqa: BLE001 - a job reports, never raises
+        rc = 1
+        say(f"failed: {type(exc).__name__}: {exc}")
+    finally:
+        with _pack_lock:
+            _pack_job.update(state="idle", finished=time.time(), returncode=rc)
+
+
 def _register_webhook_route(server, cfg) -> None:
     """`POST /hook/gitlab` -- index the repository a push just changed.
 
@@ -976,6 +1110,94 @@ def _register_admin_routes(server, cfg) -> None:
                                  "repos": [], "symbols": {"rows": [], "capped": False},
                                  "files": {"rows": [], "capped": False}})
         return JSONResponse(out)
+
+    @server.custom_route(ADMIN_PREFIX + "packs", methods=["GET"])
+    async def admin_packs(request: Request) -> Response:
+        """What knowledge packs are installed, and what the last job did.
+
+        Read-only. The three actions below it change the packs directory, and
+        all three need write access to a path the MCP surface never touches --
+        so they live under the admin prefix, which is the operator credential,
+        and not on any tool.
+        """
+        if not _authorised(request):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        with _pack_lock:
+            job = dict(_pack_job)
+        try:
+            packs = pack_rows(cfg.packs_dir)
+        except Exception as exc:            # noqa: BLE001
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"[:200],
+                                 "packs": [], "job": job})
+        return JSONResponse({"packs": packs, "job": job,
+                             "index_url": pack_index_url(),
+                             "packs_dir": str(cfg.packs_dir)})
+
+    @server.custom_route(ADMIN_PREFIX + "packs/install", methods=["POST"])
+    async def admin_packs_install(request: Request) -> Response:
+        if not _authorised(request):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        try:
+            body = await request.json()
+        except Exception:            # noqa: BLE001
+            body = {}
+        source = str(body.get("source") or "").strip()
+        if not source:
+            return JSONResponse({"error": "a pack URL or path is required"},
+                                status_code=400)
+        if not _start_pack_job(cfg, "install", source=source,
+                               sha256=body.get("sha256")):
+            return JSONResponse({"error": "another pack operation is running"},
+                                status_code=409)
+        return JSONResponse({"status": "started", "action": "install",
+                             "source": source})
+
+    @server.custom_route(ADMIN_PREFIX + "packs/update", methods=["POST"])
+    async def admin_packs_update(request: Request) -> Response:
+        if not _authorised(request):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        try:
+            body = await request.json()
+        except Exception:            # noqa: BLE001
+            body = {}
+        if not (str(body.get("index_url") or "").strip() or pack_index_url()):
+            return JSONResponse(
+                {"error": "no pack index configured; set ARGUS_PACK_INDEX_URL "
+                          "on the argus service, or give one with the request"},
+                status_code=400)
+        if not _start_pack_job(cfg, "update", name=body.get("name"),
+                               index_url=body.get("index_url")):
+            return JSONResponse({"error": "another pack operation is running"},
+                                status_code=409)
+        return JSONResponse({"status": "started", "action": "update",
+                             "name": body.get("name") or ""})
+
+    @server.custom_route(ADMIN_PREFIX + "packs/remove", methods=["POST"])
+    async def admin_packs_remove(request: Request) -> Response:
+        """Removal is immediate, not a job: it is one unlink, not a download."""
+        if not _authorised(request):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        try:
+            body = await request.json()
+        except Exception:            # noqa: BLE001
+            body = {}
+        name = str(body.get("name") or "").strip()
+        if not name:
+            return JSONResponse({"error": "a pack name is required"},
+                                status_code=400)
+        with _pack_lock:
+            if _pack_job["state"] == "running":
+                return JSONResponse(
+                    {"error": "a pack operation is running; wait for it to finish"},
+                    status_code=409)
+        try:
+            if not registry.remove(name, Path(cfg.packs_dir)):
+                return JSONResponse({"error": f"no installed pack named {name!r}"},
+                                    status_code=404)
+        except Exception as exc:            # noqa: BLE001
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"[:200]},
+                                status_code=500)
+        return JSONResponse({"status": "removed", "name": name})
 
     @server.custom_route(ADMIN_PREFIX + "index/status", methods=["GET"])
     async def admin_index_status(request: Request) -> Response:

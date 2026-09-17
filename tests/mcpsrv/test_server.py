@@ -417,3 +417,166 @@ def test_the_childs_output_is_mirrored_to_the_server_log(admin_cfg, monkeypatch,
         time.sleep(0.01)
     assert '"event": "index_end"' in out, "the audit line never reached stdout"
     assert "root/eal-core: up to date" in out
+
+
+# --- the admin pack surface ------------------------------------------------
+#
+# The console's Packs page reads all four of these. Install and update are
+# jobs rather than request/response for the same reason the index run is: a
+# pack is hundreds of MB, and the console's own client gives up after ten
+# seconds. Remove is NOT a job -- it is one unlink, and a job would invent a
+# progress bar for something that has no duration.
+
+
+def _wait_for_pack_job(timeout: float = 10.0) -> dict:
+    deadline = time.time() + timeout
+    while True:
+        with server_mod._pack_lock:
+            job = dict(server_mod._pack_job)
+        if job["state"] == "idle":
+            return job
+        if time.time() > deadline:
+            raise AssertionError(f"pack job never finished: {job}")
+
+
+@pytest.fixture(autouse=True)
+def _reset_pack_job():
+    """The job is module state, so a failed test must not leak into the next."""
+    with server_mod._pack_lock:
+        server_mod._pack_job.update(state="idle", action=None, target=None,
+                                    started=None, finished=None,
+                                    returncode=None, tail=[])
+    yield
+
+
+def test_packs_lists_an_empty_registry_rather_than_erroring(admin_cfg):
+    """No packs is the normal state of a fresh deployment, not a fault."""
+    client = _admin_client(admin_cfg)
+    r = client.get("/admin/packs", headers={"x-argus-admin-token": "admin-secret"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["packs"] == []
+    assert body["job"]["state"] == "idle"
+    assert "packs_dir" in body
+
+
+def test_packs_needs_the_admin_token(admin_cfg):
+    client = _admin_client(admin_cfg)
+    assert client.get("/admin/packs").status_code == 403
+    assert client.get("/admin/packs",
+                      headers={"x-argus-admin-token": "wrong"}).status_code == 403
+
+
+def test_pack_install_without_a_source_is_a_400(admin_cfg):
+    client = _admin_client(admin_cfg)
+    r = client.post("/admin/packs/install", json={},
+                    headers={"x-argus-admin-token": "admin-secret"})
+    assert r.status_code == 400
+
+
+def test_pack_install_runs_as_a_job_and_reports_what_landed(admin_cfg, monkeypatch):
+    """The panel needs the pack's NAME and VERSION back, not just "ok" -- the
+    list it renders is the registry, and the job tail is the only place the
+    install's outcome is stated."""
+    from argus.packs.registry import InstalledPack
+    from pathlib import Path as _P
+
+    def fake_install(source, *, dest_dir, expected_sha256=None, client=None):
+        return InstalledPack(
+            name="win32-demo", version="1.1", path=_P(dest_dir) / "win32-demo.arguspack",
+            embedding_model="nomic-embed-text", embedding_dim="768",
+            size_bytes=726 * 1024 * 1024, license="CC-BY-4.0", attribution="",
+            source_commit="abc123", compatible=True)
+
+    monkeypatch.setattr(server_mod.registry, "install", fake_install)
+    client = _admin_client(admin_cfg)
+    r = client.post("/admin/packs/install",
+                    json={"source": "https://example.invalid/win32.arguspack",
+                          "sha256": "deadbeef"},
+                    headers={"x-argus-admin-token": "admin-secret"})
+    assert r.status_code == 200 and r.json()["status"] == "started"
+
+    job = _wait_for_pack_job()
+    assert job["returncode"] == 0, job["tail"]
+    assert job["action"] == "install"
+    assert any("installed win32-demo 1.1" in line for line in job["tail"])
+
+
+def test_pack_install_reports_a_checksum_mismatch_as_a_failed_job(admin_cfg, monkeypatch):
+    """A refusal has to surface as a job result, not as a 500 or a silent
+    no-op: the console polls the job and shows the tail."""
+    from argus.packs.registry import RegistryError
+
+    def boom(*a, **k):
+        raise RegistryError("checksum mismatch for x: expected aa, got bb")
+
+    monkeypatch.setattr(server_mod.registry, "install", boom)
+    client = _admin_client(admin_cfg)
+    client.post("/admin/packs/install", json={"source": "x"},
+                headers={"x-argus-admin-token": "admin-secret"})
+    job = _wait_for_pack_job()
+    assert job["returncode"] == 1
+    assert any("checksum mismatch" in line for line in job["tail"])
+
+
+def test_pack_update_without_an_index_is_refused_before_starting(admin_cfg, monkeypatch):
+    """Unconfigured update is absent, not present-and-broken. The refusal names
+    the variable to set."""
+    monkeypatch.delenv("ARGUS_PACK_INDEX_URL", raising=False)
+    client = _admin_client(admin_cfg)
+    r = client.post("/admin/packs/update", json={},
+                    headers={"x-argus-admin-token": "admin-secret"})
+    assert r.status_code == 400
+    assert "ARGUS_PACK_INDEX_URL" in r.json()["error"]
+    with server_mod._pack_lock:
+        assert server_mod._pack_job["state"] == "idle", "nothing should have started"
+
+
+def test_pack_update_reports_which_packs_moved(admin_cfg, monkeypatch):
+    from argus.packs.registry import IndexEntry, InstalledPack
+    from pathlib import Path as _P
+
+    monkeypatch.setenv("ARGUS_PACK_INDEX_URL", "https://example.invalid/index.json")
+    monkeypatch.setattr(server_mod.registry, "list_installed", lambda d: [
+        InstalledPack(name="sqlite", version="1.0", path=_P(d) / "sqlite.arguspack",
+                      embedding_model="nomic-embed-text", embedding_dim="768",
+                      size_bytes=1, license="", attribution="", source_commit="",
+                      compatible=True),
+        InstalledPack(name="python", version="3.14", path=_P(d) / "python.arguspack",
+                      embedding_model="nomic-embed-text", embedding_dim="768",
+                      size_bytes=1, license="", attribution="", source_commit="",
+                      compatible=True)])
+    monkeypatch.setattr(server_mod.registry, "fetch_index", lambda url: [
+        IndexEntry(name="sqlite", version="1.1", url="https://x/sqlite.arguspack",
+                   sha256="aa", size_bytes=1, license=""),
+        IndexEntry(name="python", version="3.14", url="https://x/python.arguspack",
+                   sha256="bb", size_bytes=1, license="")])
+    installed = []
+    monkeypatch.setattr(server_mod.registry, "install",
+                        lambda url, **k: installed.append(url))
+
+    client = _admin_client(admin_cfg)
+    client.post("/admin/packs/update", json={},
+                headers={"x-argus-admin-token": "admin-secret"})
+    job = _wait_for_pack_job()
+    assert job["returncode"] == 0, job["tail"]
+    assert installed == ["https://x/sqlite.arguspack"], "only the stale one"
+    assert any("python: 3.14 is current" in line for line in job["tail"])
+    assert any("sqlite: 1.0 -> 1.1" in line for line in job["tail"])
+
+
+def test_pack_remove_is_immediate_and_404s_on_an_unknown_name(admin_cfg, monkeypatch):
+    monkeypatch.setattr(server_mod.registry, "remove", lambda name, dest: name == "sqlite")
+    client = _admin_client(admin_cfg)
+    ok = client.post("/admin/packs/remove", json={"name": "sqlite"},
+                     headers={"x-argus-admin-token": "admin-secret"})
+    assert ok.status_code == 200 and ok.json()["status"] == "removed"
+    missing = client.post("/admin/packs/remove", json={"name": "nope"},
+                          headers={"x-argus-admin-token": "admin-secret"})
+    assert missing.status_code == 404
+
+
+def test_pack_actions_need_the_admin_token(admin_cfg):
+    client = _admin_client(admin_cfg)
+    for path in ("/admin/packs/install", "/admin/packs/update", "/admin/packs/remove"):
+        assert client.post(path, json={"source": "x", "name": "x"}).status_code == 403

@@ -553,12 +553,29 @@ problem is elsewhere.
 it needs the `admins` group. It has a sidebar: **Overview** (index freshness and
 service health), **People** (search, pagination, per-person pages, API keys,
 credit, CSV export), **Model** (what is running, and the exact `.env` block to
-switch it), **Indexing** (start a run and watch it), **Explore** and
+switch it), **Indexing** (start a run and watch it), **Explore**,
+**Knowledge packs** (what is installed, and install / update / remove) and
 **Settings** (theme).
 
 Two guards exist because the panel got them wrong first: it will not delete the
 account you are signed in as — which it did to the live administrator during
 testing — and it will not delete the last admin.
+
+**Knowledge packs** lists every pack Argus has installed with its version,
+embedding model, size and licence, and offers the three things you would
+otherwise ssh in for: install from a URL, update from a published index, and
+remove. An **incompatible** pack is shown rather than hidden, with the reason —
+it still serves `docs_lookup` and lexical search, and only semantic search
+refuses it, so removing it from the list would take away a working tool and say
+nothing. Install and update run as **jobs in Argus**, not as requests: a pack is
+up to a gigabyte and the console's client gives up after ten seconds, so the
+page polls and the log stays on screen after the job ends. Update needs
+`ARGUS_PACK_INDEX_URL` set on the argus service; without it the button says so
+and names the variable rather than failing.
+
+The console deliberately does **not** list what is *available* to install. That
+needs a published index, and inventing one here would be the console guessing at
+somebody else's release process.
 
 The panel **shows** the steps for switching a model rather than performing them.
 Performing them would need the Docker socket, and a socket in a web app is root
@@ -590,6 +607,7 @@ recreates exactly the containers the change affects.
 | a different llama.cpp build | `LLAMACPP_ENGINE_URL`, `LLAMACPP_ENGINE_SHA256` | a release tarball; empty = the image's own server |
 | vLLM instead of llama.cpp | `COMPOSE_PROFILES` (`vllm` instead of `llamacpp`), the `VLLM_*` values with `VLLM_SERVED_MODEL_NAME` equal to `MODEL_NAME`, `ENGINE_API_BASE=http://vllm:8000/v1` | exactly one engine profile at a time; **not re-tested since the compose-only change** — the shipped samples are llama.cpp |
 | gated Hugging Face repos | `HF_TOKEN` | |
+| updating knowledge packs | `ARGUS_PACK_INDEX_URL` | the published index JSON the console's **Update** button reads. Unset = install and remove still work and Update is absent, not broken |
 | backups | `BACKUP_DIR`, `BACKUP_COPY_DIR`, `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`, `BACKUP_TIME` | `./scripts/backup.sh` takes a complete, verified backup (pg_dumpall, SQLite online copies, config with secrets); `sudo ./scripts/backup.sh --install-timer` runs it daily; `--restore --from <dir>` puts it back; `BACKUP_COPY_DIR` keeps a verified second copy on another disk |
 
 Config files, for what `.env` does not cover: alert rules in
