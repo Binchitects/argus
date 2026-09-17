@@ -566,14 +566,26 @@ nav.side .me .who{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 #: ordinary people, and `count` is filled in per request where a number is
 #: useful at a glance -- the sidebar is where "how many people" belongs, not a
 #: tile you have to scroll to.
+#: The sidebar, in two groups. `_OPS` is where the split falls.
+#:
+#: The tuple used to carry a fifth field that looked like "admins only" and was
+#: never read -- `_nav` drops it and gates the whole sidebar on `admin`
+#: instead. A dead field that looks like a permission is worse than no field:
+#: the next person to add a page sets it to True and believes something.
 NAV_ITEMS = (
-    ("overview",   "/",           "Overview",   "M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z", False),
-    ("people",     "/people",     "People",     "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8M22 21v-2a4 4 0 0 0-3-3.9", True),
-    ("model",      "/model",      "Model",      "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5", False),
-    ("indexing",   "/indexing",   "Indexing",   "M21 12a9 9 0 1 1-6.2-8.6M22 4v6h-6", False),
-    ("monitoring", "/monitoring", "Monitoring", "M3 3v18h18M19 9l-5 5-4-4-3 3", False),
-    ("settings",   "/settings",   "Settings",   "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.18V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 7.26 19.4l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.09 14H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 8.74l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 10 4.6V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 2.74 1.18l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 10V10a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z", True),
+    # --- operations: what is running, what is in it, who is using it --------
+    ("overview",   "/",           "Overview",   "M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z"),
+    ("people",     "/people",     "People",     "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8M22 21v-2a4 4 0 0 0-3-3.9"),
+    ("model",      "/model",      "Model",      "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"),
+    ("indexing",   "/indexing",   "Indexing",   "M21 12a9 9 0 1 1-6.2-8.6M22 4v6h-6"),
+    ("explore",    "/explore",    "Explore",    "M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16zM21 21l-4.35-4.35"),
+    ("monitoring", "/monitoring", "Monitoring", "M3 3v18h18M19 9l-5 5-4-4-3 3"),
+    # --- configuration ------------------------------------------------------
+    ("settings",   "/settings",   "Settings",   "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.18V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 7.26 19.4l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.09 14H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 8.74l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 10 4.6V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 2.74 1.18l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 10V10a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"),
 )
+
+#: How many of NAV_ITEMS are "operations" rather than "configuration".
+_OPS = 6
 
 THEMES = ("system", "dark", "light")
 
@@ -605,9 +617,9 @@ def _nav(active: str, admin: bool, counts: dict[str, str]) -> str:
         return ('<div class="group">Your account</div>'
                 + item("profile", "/profile", "Your account",
                        "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8"))
-    primary = "".join(item(*i[:4]) for i in NAV_ITEMS[:5])
+    primary = "".join(item(*i) for i in NAV_ITEMS[:_OPS])
     extra = ('<div class="group">Configuration</div>'
-             + "".join(item(*i[:4]) for i in NAV_ITEMS[5:]))
+             + "".join(item(*i) for i in NAV_ITEMS[_OPS:]))
     return ('<div class="group">Operations</div>' + primary + extra)
 
 
@@ -1412,6 +1424,146 @@ def indexing_view(request: Request, who: Caller) -> Response:
                 active="indexing", crumbs="<b>Indexing</b>")
 
 
+def explore_view(request: Request, who: Caller) -> Response:
+    """Search what the index actually holds, across the whole estate.
+
+    WHY THIS PAGE EXISTS
+
+    When a tool returns nothing, an operator cannot tell which of four things
+    happened: the symbol is not in the code, it is named differently, it is
+    private so the caller's allowlist hid it, or the file was never indexed at
+    all. Every one of those looks identical from the chat window, and they have
+    four different fixes. This page answers which one it is, for the estate
+    rather than for one caller.
+
+    It reads Argus's `/admin/explore`, which is deliberately NOT
+    access-filtered -- the admin token is the estate-wide operator credential.
+    The console is the only caller; the queries live in their own module so
+    they cannot be reached from a tool path.
+    """
+    q = (request.query_params.get("q") or "").strip()
+    repo = (request.query_params.get("repo") or "").strip()
+
+    try:
+        data = _argus(f"/admin/explore?q={urllib.parse.quote(q)}"
+                      f"&repo={urllib.parse.quote(repo)}&limit=50")
+    except Exception as exc:                                   # noqa: BLE001
+        return page(request, "Explore",
+                    '<h1 class="page">Explore</h1>'
+                    '<p class="lede">What the index actually holds.</p>'
+                    f'<div class="msg bad">Argus did not answer: '
+                    f'{_h(f"{type(exc).__name__}: {exc}"[:200])}</div>',
+                    who.label, True, _flash(request), active="explore",
+                    crumbs="<b>Explore</b>")
+
+    if data.get("error"):
+        # Argus answers 200 with the error in the body when the index cannot be
+        # read, because "the index is unreadable" is not "the request was
+        # wrong". Rendering that as an empty page is indistinguishable from an
+        # empty index -- which is exactly how a row_factory bug in the route was
+        # found: an operator concluding nothing was indexed while it held
+        # seventy symbols.
+        return page(request, "Explore",
+                    '<h1 class="page">Explore</h1>'
+                    '<p class="lede">What the index actually holds.</p>'
+                    f'<div class="msg bad"><strong>Argus could not read the '
+                    f'index.</strong><br>{_h(str(data["error"])[:200])}</div>',
+                    who.label, True, _flash(request), active="explore",
+                    crumbs="<b>Explore</b>")
+
+    repos = data.get("repos") or []
+    symbols = (data.get("symbols") or {}).get("rows") or []
+    files = (data.get("files") or {}).get("rows") or []
+    sym_capped = (data.get("symbols") or {}).get("capped")
+    file_capped = (data.get("files") or {}).get("capped")
+
+    options = ['<option value="">every repository</option>'] + [
+        f'<option value="{_h(r["path_with_namespace"])}"'
+        f'{" selected" if r["path_with_namespace"] == repo else ""}>'
+        f'{_h(r["path_with_namespace"])} ({r.get("symbols", 0)} symbols)</option>'
+        for r in repos]
+    form = (
+        '<form class="row" method="get" action="/explore" style="margin:0 0 16px">'
+        f'<input name="q" value="{_h(q)}" placeholder="symbol or path fragment" '
+        f'style="min-width:260px">'
+        f'<select name="repo">{"".join(options)}</select>'
+        '<button class="btn" type="submit">Search</button></form>')
+
+    if not q and not repo:
+        hint = ('<div class="card"><h2>What this is for</h2>'
+                '<p class="dim" style="margin:0">When a tool returns nothing, '
+                'four different things look identical from the chat window: the '
+                'symbol is not in the code, it is named differently, it is '
+                'private, or the file was never indexed. Search here and the '
+                'answer is one of the four.</p></div>')
+        body = ('<h1 class="page">Explore</h1>'
+                '<p class="lede">What the index actually holds.</p>'
+                + form + _explore_repos(repos) + hint)
+        return page(request, "Explore", body, who.label, True, _flash(request),
+                    active="explore", crumbs="<b>Explore</b>")
+
+    sym_rows = "".join(
+        f'<tr><td><strong>{_h(s.get("name") or "")}</strong>'
+        f'{" <span class=badge>public</span>" if s.get("is_public") else " <span class=dim>private</span>"}'
+        f'<div class="dim">{_h(s.get("signature") or "")}</div></td>'
+        f'<td>{_h(s.get("kind") or "")}<div class="dim">{_h(s.get("scope") or "")}</div></td>'
+        f'<td>{_h(s.get("path_with_namespace") or "")}'
+        f'<div class="dim">{_h(s.get("path") or "")}:{_h(str(s.get("line") or ""))}</div></td>'
+        f'</tr>' for s in symbols) or (
+        '<tr><td colspan="3"><div class="empty">No symbol matches that.</div></td></tr>')
+    file_rows = "".join(
+        f'<tr><td>{_h(f.get("path") or "")}</td>'
+        f'<td>{_h(f.get("lang") or "—")}</td>'
+        f'<td>{"<span class=bad>" + str(f.get("symbols")) + "</span>" if not f.get("symbols") else str(f.get("symbols"))}</td>'
+        f'<td>{_h(f.get("path_with_namespace") or "")}</td></tr>'
+        for f in files) or (
+        '<tr><td colspan="4"><div class="empty">No file matches that.</div></td></tr>')
+
+    # A list that silently stops at the limit reads as "that is all there is",
+    # which is how an operator concludes a symbol is absent.
+    sym_more = ('<p class="dim">More symbols match than are shown — narrow the '
+                'search.</p>' if sym_capped else "")
+    file_more = ('<p class="dim">More files match than are shown — narrow the '
+                 'search.</p>' if file_capped else "")
+
+    body = ('<h1 class="page">Explore</h1>'
+            '<p class="lede">What the index actually holds'
+            + (f' — <b>{_h(repo)}</b>' if repo else '') + '.</p>'
+            + form
+            + '<div class="card"><h2>Symbols</h2>'
+            + f'<table><thead><tr><th>Name</th><th>Kind</th><th>Where</th></tr>'
+              f'</thead><tbody>{sym_rows}</tbody></table>' + sym_more + '</div>'
+            + '<div class="card"><h2>Files</h2>'
+            + '<p class="dim" style="margin:0 0 8px">A file with <b>0</b> symbols '
+              'is one the extractor did not recognise — the difference between '
+              '“the agent cannot find it” and “it is not in the index”.</p>'
+            + f'<table><thead><tr><th>Path</th><th>Lang</th><th>Symbols</th>'
+              f'<th>Repository</th></tr></thead><tbody>{file_rows}</tbody></table>'
+            + file_more + '</div>')
+    return page(request, "Explore", body, who.label, True, _flash(request),
+                active="explore", crumbs="<b>Explore</b>")
+
+
+def _explore_repos(repos: list) -> str:
+    """Every indexed repository, so the starting point is visible rather than
+    something the operator has to guess a name to discover."""
+    rows = "".join(
+        f'<tr><td><a class="plain" href="/explore?repo='
+        f'{urllib.parse.quote(r["path_with_namespace"])}">'
+        f'<strong>{_h(r["path_with_namespace"])}</strong></a>'
+        f'<div class="dim">{_h(r.get("branch") or "")}'
+        f'{" (default)" if r.get("branch") == r.get("default_branch") else ""}</div></td>'
+        f'<td>{r.get("files", 0)}</td><td>{r.get("symbols", 0)}</td>'
+        f'<td>{r.get("public_symbols", 0)}</td>'
+        f'<td>{_h(_rel_time(r.get("last_run_at")))}</td></tr>'
+        for r in repos) or (
+        '<tr><td colspan="5"><div class="empty">Nothing is indexed yet.</div></td></tr>')
+    return ('<div class="card"><h2>Repositories</h2>'
+            '<table><thead><tr><th>Repository</th><th>Files</th><th>Symbols</th>'
+            '<th>Public</th><th>Last pass</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>')
+
+
 def monitoring_view(request: Request, who: Caller) -> Response:
     links = [
         ("Grafana", GRAFANA_URL, "dashboards: usage, GPU, logs, Argus, indexing"),
@@ -1568,7 +1720,8 @@ def _pop(token: str) -> str:
 #: taken on /people must return to /people -- landing on the overview after
 #: every button is the kind of thing that makes a console feel unfinished.
 _RETURN = {"overview": "/", "people": "/people", "model": "/model",
-           "indexing": "/indexing", "monitoring": "/monitoring",
+           "indexing": "/indexing", "explore": "/explore",
+           "monitoring": "/monitoring",
            "settings": "/settings"}
 
 
@@ -1946,6 +2099,11 @@ async def indexing_page(request: Request) -> Response:
     return indexing_view(request, who) if who else _forbidden()
 
 
+async def explore_page(request: Request) -> Response:
+    who = _require_admin(request)
+    return explore_view(request, who) if who else _forbidden()
+
+
 async def monitoring_page(request: Request) -> Response:
     who = _require_admin(request)
     return monitoring_view(request, who) if who else _forbidden()
@@ -1983,6 +2141,7 @@ app = Starlette(routes=[
     Route("/people/{username}", person_page, methods=["GET"]),
     Route("/model", model_page, methods=["GET"]),
     Route("/indexing", indexing_page, methods=["GET"]),
+    Route("/explore", explore_page, methods=["GET"]),
     Route("/monitoring", monitoring_page, methods=["GET"]),
     Route("/settings", settings_page, methods=["GET"]),
     Route("/export/people.csv", export_people, methods=["GET"]),

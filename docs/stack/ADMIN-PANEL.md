@@ -10,6 +10,7 @@ the `admins` group get a console with a sidebar:
 | **People** | every account joined across Authelia and LiteLLM — search, paged, credit, keys, CSV export |
 | **Model** | what is serving and what it was configured with, plus the thinking-level presets |
 | **Indexing** | the Argus code index: coverage, per-repo freshness, run log, the reindexing cadence, and the button |
+| **Explore** | search what the index actually holds — symbols by name fragment, files by path, across the whole estate |
 | **Monitoring** | service health and links out to Grafana, Prometheus and the MCP endpoint |
 | **Settings** | the effective configuration, read-only |
 
@@ -26,6 +27,22 @@ it rather than computing freshness itself, so the tile, the Grafana line and the
 is a bug waiting for somebody to change a threshold. The same page says whether
 automatic reindexing is on, because a console that shows a working index next to
 a stack that never reindexes is worse than showing nothing.
+
+**Explore** exists for the question an operator asks when a tool returns nothing
+and they cannot tell why. From the chat window, four different things look
+identical: the symbol is not in the code, it is named differently, it is private
+so the caller's allowlist hid it, or the file was never indexed at all. Each has
+a different fix. Search a name fragment and the answer is one of the four —
+along with the file list, where a file showing **0 symbols** is the difference
+between "the agent cannot find it" and "it is not in the index".
+
+It reads Argus's `/admin/explore`, which is deliberately **not** access-filtered:
+the admin token is the estate-wide operator credential, and its holder can
+already see everything the index contains. Those queries live in their own
+module rather than beside the sixteen access-scoped ones, and a test asserts no
+tool module imports them — an unfiltered query reachable from a tool path would
+void every ACL guarantee in this project, and nothing else in the suite would
+notice.
 
 Runs under the `auth` profile, because without Authelia it has no way to know
 who is asking and no reason to exist.

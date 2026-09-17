@@ -394,6 +394,75 @@ check("Queued from GitLab pushes" in queued, "the queue is not explained")
 webhook_run = with_hook(webhook=True, state="running", trigger="webhook")
 check("a GitLab push" in webhook_run, "a webhook-started run is not identified")
 
+# --- the index explorer -------------------------------------------------------
+#
+# The page that answers "why did the agent not find it?" -- a question with four
+# possible answers (not in the code, named differently, private, never indexed)
+# that all look identical from the chat window. Every one of them needs the page
+# to say which one it is.
+
+
+def explore(payload, query=""):
+    panel._argus = lambda path, body=None: payload
+    from starlette.requests import Request as _R
+    scope = {"type": "http", "method": "GET", "path": "/explore",
+             "query_string": query.encode(), "headers": []}
+    return panel.explore_view(_R(scope), _Who("admin", "a@b.c")).body.decode()
+
+
+EMPTY_EXPLORE = {"repos": [], "symbols": {"rows": [], "capped": False},
+                 "files": {"rows": [], "capped": False}}
+
+blank = explore(EMPTY_EXPLORE)
+check("What this is for" in blank,
+      "the empty page does not explain what it is for")
+check("Nothing is indexed yet" in blank,
+      "an index with no repositories does not say so")
+
+with_repo = explore({
+    "repos": [{"path_with_namespace": "g/alpha", "branch": "main",
+               "default_branch": "main", "files": 8, "symbols": 70,
+               "public_symbols": 68, "last_run_at": 1_700_000_000}],
+    "symbols": {"rows": [], "capped": False}, "files": {"rows": [], "capped": False}})
+check("g/alpha" in with_repo and "70" in with_repo,
+      "the repository list does not show what the index holds")
+
+# A file indexed with ZERO symbols is the case worth surfacing: it is the
+# difference between "the agent cannot find it" and "it is not in the index".
+zero = explore({
+    "repos": [],
+    "symbols": {"rows": [], "capped": False},
+    "files": {"rows": [{"path": "notes.unknown", "lang": "", "symbols": 0,
+                        "path_with_namespace": "g/alpha"}], "capped": False}},
+    query="q=notes")
+check("notes.unknown" in zero, "a matching file is not listed")
+check("the extractor did not recognise" in zero,
+      "a file with no symbols is not explained")
+
+# Truncation must be stated. A list that silently stops at the limit reads as
+# "that is all there is", which is how an operator concludes a symbol is absent.
+capped = explore({
+    "repos": [],
+    "symbols": {"rows": [{"name": "DecodeFrame", "kind": "function",
+                          "is_public": 1, "path": "src/decoder.c", "line": 3,
+                          "path_with_namespace": "g/alpha"}], "capped": True},
+    "files": {"rows": [], "capped": True}}, query="q=Decode")
+check("DecodeFrame" in capped, "a symbol result is not shown")
+check("More symbols match than are shown" in capped, "symbol truncation is silent")
+check("More files match than are shown" in capped, "file truncation is silent")
+
+# An error in the payload must be RENDERED, not rendered as an empty page. This
+# is not hypothetical: the route answered 200 with "cannot convert dictionary
+# update sequence" next to empty lists, and the console drew "Nothing is indexed
+# yet" while the index held seventy symbols.
+broken = explore({"error": "TypeError: cannot convert dictionary update sequence",
+                  "repos": [], "symbols": {"rows": [], "capped": False},
+                  "files": {"rows": [], "capped": False}})
+check("could not read the" in broken and "TypeError" in broken,
+      "an unreadable index is drawn as an empty index")
+check("Nothing is indexed yet" not in broken,
+      "the empty-index message is shown for a read failure")
+
 # --- the summary has to be the LAST thing in this file -----------------------
 #
 # It used to sit two thirds of the way down, just after the Indexing-card

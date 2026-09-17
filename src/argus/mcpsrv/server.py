@@ -21,7 +21,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .. import access, acl, auditlog
 from ..config import Config
-from ..store import writes
+from ..store import explore, writes
 from ..store.db import connect, connect_audit, connect_readonly, migrate
 from .errors import unauthorized
 from . import metrics
@@ -896,6 +896,63 @@ def _register_admin_routes(server, cfg) -> None:
             # watches instead.
             body = metrics.render_error(exc)
         return Response(body, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+    @server.custom_route(ADMIN_PREFIX + "explore", methods=["GET"])
+    async def admin_explore(request: Request) -> Response:
+        """Browse what the index actually holds. Operator surface, read-only.
+
+        Answers the question an operator asks when a tool returns nothing and
+        they cannot tell why: is the symbol absent, named differently, private,
+        or never indexed at all? `find_symbol` answers for one caller and one
+        exact name; this answers for the estate and a fragment.
+
+        NOT access-filtered, deliberately and by design: the admin token is the
+        estate-wide operator credential and its holder can already see
+        everything the index contains -- `/admin/metrics` names every repository
+        too. The queries live in `store/explore.py` rather than `store/queries.py`
+        precisely so they cannot be reached from a tool path, where the missing
+        allowlist would be a hole rather than a decision.
+        """
+        if not _authorised(request):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        q = (request.query_params.get("q") or "").strip()
+        repo = (request.query_params.get("repo") or "").strip()
+        try:
+            limit = int(request.query_params.get("limit") or explore.DEFAULT_LIMIT)
+        except ValueError:
+            limit = explore.DEFAULT_LIMIT
+        try:
+            conn = connect_readonly(cfg.index.db_path)
+            try:
+                # NOT `row_factory = None`. The status route below clears it
+                # because it reads its rows positionally; these queries build
+                # dicts from them, and clearing it makes every row a plain tuple,
+                # which raises "cannot convert dictionary update sequence" and
+                # produced an empty page indistinguishable from an empty index.
+                # `connect_readonly` sets sqlite3.Row for exactly this reason.
+                out = {
+                    "repos": explore.repos(conn),
+                    "symbols": explore.symbols(conn, pattern=q, repo=repo,
+                                               limit=limit),
+                    "files": explore.files(conn, pattern=q, repo=repo,
+                                           limit=limit),
+                    "query": q, "repo": repo,
+                }
+            finally:
+                conn.close()
+        except Exception as exc:     # noqa: BLE001
+            # A 200 with the error in it, like the metrics route: the operator
+            # asked a question and the answer is "the index cannot be read",
+            # which is not the same as the request being wrong.
+            #
+            # The console MUST render this. An error field nobody displays, next
+            # to empty lists, is indistinguishable from an empty index -- which
+            # is exactly how the bug above was found, by an operator concluding
+            # the index was empty while it held seventy symbols.
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"[:200],
+                                 "repos": [], "symbols": {"rows": [], "capped": False},
+                                 "files": {"rows": [], "capped": False}})
+        return JSONResponse(out)
 
     @server.custom_route(ADMIN_PREFIX + "index/status", methods=["GET"])
     async def admin_index_status(request: Request) -> Response:

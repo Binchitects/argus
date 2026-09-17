@@ -113,6 +113,7 @@ sits at the end of this milestone rather than inside the server.
 | Incremental pack rebuild — **DONE** | was 44 min to reproduce a byte-identical file | `content_sha` per document; automatic when a usable pack sits at the destination. Measured: wdk 205,848 chunks in **26 s**, win32 478,762 in **74 s** |
 | `pack update` for archive sources — **DONE** | assumed a git remote | the registry index path (`pack update --index-url`) works for both source kinds, and it is now tested end to end: install v1, index says v2, assert v2 — including that a FAILED update leaves the working pack working |
 | Metrics endpoint — **DONE** | audit rows existed with no operational view | `/admin/metrics` on Argus, scraped by Prometheus, with four alert rules; the admin console's Overview reads the same snapshot |
+| Index explorer — **DONE** | a tool returning nothing gave no way to tell "not in the code" from "not indexed" | the console's Explore page searches symbols by fragment and files by path across the estate, reading `/admin/explore`. The unfiltered queries live in `store/explore.py`, and a test asserts no tool module imports them |
 | Webhook-driven indexing — **DONE** | freshness was interval-polled, so a push sat unindexed for up to 15 minutes | `POST /hook/gitlab`, gated by its own `ARGUS_WEBHOOK_TOKEN`; a push during a pass is queued rather than dropped, the queue drains one repository per pass, and an overfull queue collapses into one full pass. The poll stays as the floor |
 
 **Incremental rebuild landed, and carries one trap worth knowing.**
