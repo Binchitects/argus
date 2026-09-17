@@ -247,10 +247,21 @@ class _MicrosoftApiRef:
 #:
 #: `req.max-support` carries a maximum rather than a minimum, and is populated
 #: on six pages, so it earns no field.
+#:
+#: The two framework versions are here for the driver reference, where they are
+#: the version axis that matters: a WDF driver targets a KMDF or UMDF release,
+#: not an OS build, and `WdfDriverCreate` carries no `target-min-winverclnt` at
+#: all. They are inert for sdk-api, whose values for both keys are empty on
+#: every page. Measured on the driver reference: 1,752 pages carry one where
+#: 11,275 carry an OS floor, taking version coverage from 44% to 49%. The
+#: remaining pages have neither upstream -- 12,779 of them are ordinary
+#: function, struct and enum pages whose metadata Microsoft never filled in.
 _OS_FIELDS = (
     ("Minimum client", "req.target-min-winverclnt"),
     ("Minimum server", "req.target-min-winversvr"),
     ("Redistributable", "req.redist"),
+    ("Minimum KMDF", "req.kmdf-ver"),
+    ("Minimum UMDF", "req.umdf-ver"),
 )
 
 

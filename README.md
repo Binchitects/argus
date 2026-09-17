@@ -81,8 +81,8 @@ python scripts/smoke_test.py --url https://argus.llm.localhost/mcp --token <deve
 |---|---|---|
 | [`stack/`](stack/) | **The deployment.** Compose file, per-service config, env samples, operational scripts | [`stack/README.md`](stack/README.md) |
 | [`src/argus/`](src/argus/) | **The Argus package** — the MCP code index and documentation server. Installable and runnable on its own | [`docs/argus/`](docs/argus/) |
-| [`packs/`](packs/) | **Nine built knowledge packs**, 1.6 GB — prose, API symbols and embeddings in one SQLite file each. Three more are parked in `packs/disabled/` | [`docs/argus/knowledge-packs.md`](docs/argus/knowledge-packs.md) |
-| [`tests/`](tests/) | The Argus suite — **1,085 tests**, no Docker required | `pytest` |
+| [`packs/`](packs/) | **Nine built knowledge packs**, 1.66 GB — prose, API symbols and embeddings in one SQLite file each. Three more are parked in `packs/disabled/` | [`docs/argus/knowledge-packs.md`](docs/argus/knowledge-packs.md) |
+| [`tests/`](tests/) | The Argus suite — **1,091 tests**, no Docker required | `pytest` |
 | [`docs/`](docs/) | **All documentation**, split into [`docs/stack/`](docs/stack/) and [`docs/argus/`](docs/argus/) | [`docs/`](docs/) |
 | [`clients/`](clients/) | **Copy-pasteable configs** for DeepSeek Harness, Qwen Code, Claude Code, Continue and any generic MCP client, each marked with whether it was actually executed | [`clients/README.md`](clients/README.md) |
 | [`scripts/`](scripts/) | Repository tooling: release, packaging, the Hermes integrations, and the test GitLab the stack's fixtures use | [`scripts/release.sh`](scripts/release.sh) |
@@ -922,7 +922,7 @@ would otherwise become an agent that cannot finish a sentence.
 [`clients/claude-code/verify-after.sh`](clients/claude-code/verify-after.sh) wires
 it into a Claude Code `Stop` hook.
 
-## Nine knowledge packs, 1.6 GB, zero unresolved symbols
+## Nine knowledge packs, 1.66 GB, zero unresolved symbols
 
 ```mermaid
 xychart-beta
@@ -934,8 +934,8 @@ xychart-beta
 
 | pack | Documents | Chunks | Symbols | Size | Licence |
 |---|---|---|---|---|---|
-| `win32` — Windows SDK + samples | 65,906 | 478,762 | 87,206 | 696.6 MB | CC-BY-4.0 |
-| `wdk` — driver DDI + samples | 25,903 | 205,848 | 37,938 | 291.1 MB | CC-BY-4.0 |
+| `win32` — Windows SDK API reference | 65,906 | 478,788 | 87,206 | 715.7 MB | CC-BY-4.0 |
+| `wdk` — driver DDI reference | 25,903 | 205,848 | 37,938 | 292.5 MB | CC-BY-4.0 |
 | `dotnet` — .NET BCL + MS NuGet packages | 11,013 | 140,661 | **215,269** | 236.4 MB | CC-BY-4.0 |
 | `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,325 | 180.0 MB | CC-BY-4.0 |
 | `cppreference` — C++ standard library | 6,640 | 68,891 | 5,406 | 125.6 MB | CC-BY-SA-3.0 |
@@ -943,7 +943,7 @@ xychart-beta
 | `python` — 3.13 | 540 | 13,751 | 18,778 | 31.8 MB | PSF-2.0 |
 | `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 25.0 MB | CC-BY-4.0 |
 | `sqlite` — SQL, pragmas, FTS5 | 837 | 8,987 | 36 | 18.4 MB | public domain |
-| **total** | **132,033** | **1,100,423** | **412,779** | **1.6 GB** | |
+| **total** | **132,033** | **1,100,449** | **412,779** | **1.66 GB** | |
 
 ### Which Windows an API needs
 
@@ -980,6 +980,15 @@ in the source all along; the adapter parsed those keys and dropped them, so
 every pack built before this knew an API's `.lib` and not its floor. Asked
 `docs_search` for *"minimum supported client Windows 11"*, the pack now answers
 with `wldp.h`, `windows.graphics.display.interop.h` and `appxpackaging.h`.
+
+The driver pack gets the same treatment **18,880 of 37,938 symbols (50%)**,
+skewed the other way — drivers target current Windows, so Windows 10 is its
+commonest floor at 4,585 and Windows 11 at 1,713. It also carries the two
+framework versions, which are the version axis that actually matters to a WDF
+driver: **1,770 symbols state a KMDF or UMDF release and no OS at all**, which
+is the only floor pages like `WdfDriverCreate` give you. The remaining pages
+have no version metadata upstream — 12,779 of them are ordinary function,
+struct and enum pages Microsoft never filled the fields in for.
 
 Three more are built and parked in `packs/disabled/` (`algorithms`, `react`,
 `system-design`) — small corpora that were not worth the shelf space. Every pack
@@ -1101,7 +1110,7 @@ The same discipline applies to an estate run: **47 repositories, 55,603 files,
 
 | | |
 |---|---|
-| tests | **1,085 passing**, 1 skipped |
+| tests | **1,091 passing**, 1 skipped |
 | MCP tools, contract-tested against a live server | **17** |
 | hollow tests found by targeted revert | **9** |
 | bugs whose failure mode was a *plausible success* | **6** |
@@ -1117,7 +1126,7 @@ That discipline extends to the benchmarks. The model comparison above found **th
 The suite runs without Docker:
 
 ```bash
-pytest                                     # 1,085 tests
+pytest                                     # 1,091 tests
 ```
 
 Two checks need a live server, and both are worth more than the unit suite for
@@ -1158,7 +1167,7 @@ because installing a pack needs a real documentation checkout — print as
 | 5 — Knowledge packs | 9 packs, 6 doc tools, `argus pack` | ✅ |
 | 6 — Operational | freshness metrics, push webhook, branches, `argus verify` | ✅ |
 
-**1,085 tests**, passing locally, plus the live contract suite above.
+**1,091 tests**, passing locally, plus the live contract suite above.
 
 What is not yet proven is tracked honestly in
 [docs/argus/roadmap.md](docs/argus/roadmap.md).

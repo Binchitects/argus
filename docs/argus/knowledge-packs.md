@@ -38,7 +38,7 @@ Library: Kernel32.lib
 DLL: Kernel32.dll
 ```
 
-It is populated on **52,506 of sdk-api's 65,908 pages** and **25,418 of the
+It is populated on **52,506 of sdk-api's 65,908 pages** and **11,275 of the
 driver reference's 25,903**, across 285 distinct values running from Windows
 2000 Professional to Windows 11 24H2 and Server 2025.
 
@@ -49,6 +49,15 @@ knowing about a Windows API. With the field captured, `docs_lookup` answers
 "what does this need" and `docs_search` can be asked what arrived in a given
 release — neither of which was answerable from the pack before, because the
 adapter parsed these keys and then dropped them.
+
+The driver reference needs a second axis. A WDF driver targets a KMDF or UMDF
+release rather than an OS build, and pages like `WdfDriverCreate` state no OS
+at all, so `req.kmdf-ver` and `req.umdf-ver` travel with the OS fields and are
+what those pages have instead. Measured on the built pack: of 37,938 symbols,
+11,275 state an OS floor, 1,770 state a framework version and no OS, and 12,779
+are ordinary function, struct and enum pages with neither — a gap in
+Microsoft's own metadata rather than in the parse. sdk-api is unaffected: its
+values for both framework keys are empty on every page.
 
 `req.redist` travels with them where it exists (2,893 pages), because a
 redistributable is a different kind of requirement from an OS version: the

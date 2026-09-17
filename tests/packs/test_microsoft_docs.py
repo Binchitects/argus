@@ -345,6 +345,23 @@ class TestOsRequirements:
         syms = {s.name: s for s in WdkDdi().iter_symbols(tmp_path)}
         assert "Minimum client: Windows 10" in syms["ExAllocatePool2"].signature
 
+    def test_the_driver_framework_version_is_carried(self):
+        """A WDF driver targets a KMDF or UMDF release rather than an OS build,
+        and `WdfDriverCreate` carries no target-min-winverclnt at all -- so on
+        those pages the framework version is the only floor stated. 1,752 of
+        the driver reference's 25,903 pages are in that position."""
+        from argus.packs.sources.microsoft_docs import _requirement_line
+
+        line = _requirement_line({
+            "req.kmdf-ver": "1.0", "req.umdf-ver": "1.11",
+            "req.header": "wudfddi_types.h",
+        })
+
+        contract = line.split(" -- ", 1)[0]
+        assert contract.startswith("Minimum KMDF: 1.0")
+        assert "Minimum UMDF: 1.11" in contract
+        assert "Header: wudfddi_types.h" in contract
+
 
 class TestPageLede:
     """cpp-docs frontmatter descriptions are title echoes, so the symbol
