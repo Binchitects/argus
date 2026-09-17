@@ -595,3 +595,79 @@ def test_a_bare_platform_name_does_not_reach_into_another_repo(tmp_path):
         assert all(r["resolved_repo_id"] is None for r in rows),             "a platform header reached into another repository"
     finally:
         db.close()
+
+
+def test_a_second_branch_does_not_make_a_shared_header_ambiguous(tmp_path):
+    """The same project at two refs is ONE answer, not two competing ones.
+
+    A project indexed at several branches appears in `repos` once per ref, so a
+    shared header is in the index once per ref. The resolver's tiebreak saw two
+    files with identical paths and gave up -- `ambiguous` -- so every cross-repo
+    edge INTO a multi-branch project vanished. Measured on the fixture:
+    indexing one release branch took its cross-repo graph from 2 edges to 0,
+    silently, with nothing anywhere reporting a problem. An estate that indexes
+    a release branch would lose its dependency graph for the whole estate.
+    """
+    from argus.resolve import Resolution, resolve_includes
+    from argus.store import writes
+    from argus.store.db import open_db
+
+    conn = open_db(tmp_path / "i.db")
+    lib_main = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/lib",
+                                  default_branch="main", http_url="x")
+    lib_v2 = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/lib",
+                                default_branch="main", http_url="x", branch="v2")
+    app = writes.upsert_repo(conn, gitlab_id=2, path_with_namespace="g/app",
+                             default_branch="main", http_url="x")
+
+    def add(repo_id, path, content, sha):
+        fid = writes.upsert_file(conn, repo_id=repo_id, path=path, lang="c",
+                                 size=len(content), blob_sha=sha, content=content)
+        conn.execute("INSERT INTO includes (repo_id, file_id, raw, is_angle)"
+                     " VALUES (?, ?, 'lib/api.h', 0)", (repo_id, fid))
+        conn.commit()
+        return fid
+
+    add(lib_main, "include/lib/api.h", "#pragma once\n", "m1")
+    add(lib_v2, "include/lib/api.h", "#pragma once // v2\n", "m2")
+    add(app, "src/use.c", '#include "lib/api.h"\n', "a1")
+
+    counts = resolve_includes(conn)
+    row = conn.execute(
+        "SELECT resolved_repo_id, resolution FROM includes i JOIN repos r"
+        "  ON r.id = i.repo_id WHERE r.path_with_namespace = 'g/app'").fetchone()
+    assert row["resolution"] == Resolution.RESOLVED, \
+        f"a header shared by two branches of one project was {row['resolution']}"
+    assert row["resolved_repo_id"] == lib_main, \
+        "an include from trunk resolved to a release branch"
+    assert counts[Resolution.AMBIGUOUS] == 0
+    conn.close()
+
+
+def test_a_header_only_on_another_branch_is_still_found(tmp_path):
+    """A preference, not a filter. A file that exists only on another branch is
+    still the answer, and refusing it would lose a real edge to gain tidiness."""
+    from argus.resolve import Resolution, resolve_includes
+    from argus.store import writes
+    from argus.store.db import open_db
+
+    conn = open_db(tmp_path / "i.db")
+    lib_v2 = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/lib",
+                                default_branch="main", http_url="x", branch="v2")
+    app = writes.upsert_repo(conn, gitlab_id=2, path_with_namespace="g/app",
+                             default_branch="main", http_url="x")
+
+    fid = writes.upsert_file(conn, repo_id=lib_v2, path="include/lib/api.h",
+                             lang="c", size=10, blob_sha="m", content="#pragma once\n")
+    conn.commit()
+    fid2 = writes.upsert_file(conn, repo_id=app, path="src/use.c", lang="c",
+                              size=10, blob_sha="a", content='#include "lib/api.h"\n')
+    conn.execute("INSERT INTO includes (repo_id, file_id, raw, is_angle)"
+                 " VALUES (?, ?, 'lib/api.h', 0)", (app, fid2))
+    conn.commit()
+
+    resolve_includes(conn)
+    row = conn.execute("SELECT resolution FROM includes WHERE repo_id = ?",
+                       (app,)).fetchone()
+    assert row["resolution"] == Resolution.RESOLVED
+    conn.close()

@@ -79,6 +79,15 @@ def resolve_includes(conn: sqlite3.Connection) -> dict[str, int]:
     }
     repo_names = set(repo_names_by_id.values())
 
+    # Which ref each repository ROW is. A project indexed at several branches
+    # appears once per ref, so the same header is in this index more than once
+    # and the resolver has to be told those are the same answer at different
+    # refs rather than two competing ones. See _resolve_one.
+    branch_of_repo = {
+        row["id"]: row["branch"]
+        for row in conn.execute("SELECT id, branch FROM repos")
+    }
+
     # Bundled copies of other indexed repos, found by filename cluster rather
     # than by name or by content. See find_vendored_dirs: a copy is usually
     # modified, so hashing misses it, and the directory is often not named
@@ -100,7 +109,8 @@ def resolve_includes(conn: sqlite3.Connection) -> dict[str, int]:
 
     for inc in includes:
         match, state = _resolve_one(inc, index, by_repo_path,
-                                    repo_names, repo_names_by_id, vendored_dirs)
+                                    repo_names, repo_names_by_id, vendored_dirs,
+                                    branch_of_repo)
         counts[state] += 1
         updates.append((
             match[0] if match else None,
@@ -303,8 +313,10 @@ def _is_system_header(raw: str) -> bool:
 
 def _resolve_one(inc, index, by_repo_path, repo_names=frozenset(),
                  repo_names_by_id=None,
-                 vendored_dirs=frozenset()) -> tuple[FileRow | None, str]:
+                 vendored_dirs=frozenset(),
+                 branch_of_repo=None) -> tuple[FileRow | None, str]:
     repo_names_by_id = repo_names_by_id or {}
+    branch_of_repo = branch_of_repo or {}
     raw = inc["raw"].strip()
 
     # C semantics: a quoted include is looked for beside the including file
@@ -372,6 +384,24 @@ def _resolve_one(inc, index, by_repo_path, repo_names=frozenset(),
         # edge. All it can suppress is a cross-repo claim, and for these names
         # a cross-repo claim is what is wrong.
         return None, Resolution.EXTERNAL
+
+    # Prefer the branch the include came from.
+    #
+    # A project indexed at several refs puts the SAME header in the index once
+    # per ref, and the tiebreak below then sees two equally plausible files with
+    # identical paths and gives up -- so every cross-repo edge into a
+    # multi-branch project disappears. Measured: indexing one release branch on
+    # the fixture took its cross-repo graph from 2 edges to 0, silently, with
+    # `resolution` flipping to "ambiguous" for every include of the shared
+    # header.
+    #
+    # A preference, not a filter: a header that exists only on another branch is
+    # still the answer, and refusing it would lose a real edge to gain tidiness.
+    if branch_of_repo:
+        want = branch_of_repo.get(inc["repo_id"])
+        same_branch = [c for c in candidates if branch_of_repo.get(c[1]) == want]
+        if same_branch:
+            candidates = same_branch
 
     if len(candidates) == 1:
         return candidates[0], Resolution.RESOLVED

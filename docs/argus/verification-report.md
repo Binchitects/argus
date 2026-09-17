@@ -1,13 +1,13 @@
 # Argus end-to-end verification
 
 Run against a real GitLab CE at `http://host.docker.internal:8929`.
-**16/16 checks passed.**
+**18/18 checks passed.**
 
 ## Index measurements
 
 | Metric | Value |
 |---|---|
-| Full index wall-clock | 1.7s |
+| Full index wall-clock | 1.6s |
 | repos | 4 |
 | files | 11 |
 | symbols | 101 |
@@ -20,8 +20,10 @@ Run against a real GitLab CE at `http://host.docker.internal:8929`.
 |---|---|---|
 | service token enumerates every seeded private project | PASS | expected ['driver-shim', 'eal-core', 'etl-decoder'], saw ['driver-shim', 'eal-core', 'etl-decoder'] |
 | a NON-admin token sees fewer projects (membership=false caveat is real) | PASS | admin saw 3, dev_alpha saw 1 |
-| index run completed | PASS | 1.7s |
-| the release branch was indexed alongside trunk | PASS | 1.2s |
+| index run completed | PASS | 1.6s |
+| the release branch was indexed alongside trunk | PASS | 1.3s |
+| the cross-repo graph survived indexing a second branch | PASS | 2 edge(s); a shared header indexed at two refs must resolve |
+| no include was left ambiguous by the second branch | PASS | 0 ambiguous include(s) |
 | the vector index was built, so semantic_search can be verified | PASS | 0.6s |
 | symbols were extracted | PASS |  |
 | cross-repo includes were recorded | PASS |  |

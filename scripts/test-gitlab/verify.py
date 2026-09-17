@@ -149,6 +149,32 @@ def main() -> int:
     check("the release branch was indexed alongside trunk",
           proc.returncode == 0, f"{branch_elapsed:.1f}s")
 
+    # The cross-repo graph, which a second branch must not break. This is the
+    # check that would have caught the bug it was written after: a project
+    # indexed at two refs puts a shared header in the index twice, the include
+    # resolver saw two equally plausible files and gave up, and every edge into
+    # that project disappeared -- `ambiguous` for every include of the header,
+    # with nothing anywhere reporting a problem. Measured: 2 edges became 0.
+    print("\n== Cross-repo graph ==")
+    # Its own read-only connection: `conn` is opened further down, for the
+    # counts, and reaching for it here would be an UnboundLocalError at the
+    # exact moment this check is supposed to report on the graph.
+    edges_conn = connect_readonly(cfg.index.db_path)
+    try:
+        edges = edges_conn.execute(
+            "SELECT COUNT(*) AS n FROM repo_deps").fetchone()["n"]
+        ambiguous = edges_conn.execute(
+            "SELECT COUNT(*) AS n FROM includes WHERE resolution = 'ambiguous'"
+        ).fetchone()["n"]
+    finally:
+        edges_conn.close()
+    check("the cross-repo graph survived indexing a second branch", edges > 0,
+          f"{edges} edge(s); a shared header indexed at two refs must resolve")
+    # The symptom, named separately: the resolver recording `ambiguous` for a
+    # header that exists at two refs is what emptied the graph above.
+    check("no include was left ambiguous by the second branch", ambiguous == 0,
+          f"{ambiguous} ambiguous include(s)")
+
     # ------------------------------------------------------- embed it ------
     # Without this the vector half of the index is EMPTY, and `semantic_search`
     # answers "The index is unavailable; do not retry this query." -- an honest
