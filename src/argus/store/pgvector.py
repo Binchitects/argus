@@ -113,10 +113,18 @@ def ensure_schema(conn, dim: int) -> None:
               embed_text text    NOT NULL,
               model      text    NOT NULL,
               dim        integer NOT NULL,
+              text_version text,
               embedding  vector({dim}) NOT NULL,
               bits       bit({dim})    NOT NULL,
               updated_at timestamptz NOT NULL DEFAULT now()
             )""")
+        # Existing tables predate the column, and CREATE TABLE IF NOT EXISTS
+        # does not add it. Written as its own idempotent statement for the same
+        # reason the sqlite side has a migration: a mirror that is missing the
+        # column keeps serving vectors built from text this build would no
+        # longer write, and nothing about the model or the dimension says so.
+        cur.execute("ALTER TABLE symbol_embeddings"
+                    " ADD COLUMN IF NOT EXISTS text_version text")
         # The ACL predicate, and the delete path when a repo goes away.
         cur.execute("CREATE INDEX IF NOT EXISTS idx_symemb_repo"
                     " ON symbol_embeddings (repo_id)")
@@ -131,21 +139,30 @@ def ensure_schema(conn, dim: int) -> None:
                     " ON symbol_embeddings USING hnsw (bits bit_hamming_ops)")
 
 
-def upsert(conn, rows: Iterable[tuple[int, int, str, str, int, Sequence[float]]]) -> int:
-    """Insert or replace embeddings. `rows` is (symbol_id, repo_id, text, model, dim, vec)."""
+def upsert(conn,
+           rows: Iterable[tuple[int, int, str, str, int, str, Sequence[float]]]
+           ) -> int:
+    """Insert or replace embeddings.
+
+    `rows` is (symbol_id, repo_id, text, model, dim, text_version, vec) -- the
+    version included so this mirror cannot disagree with the sqlite side about
+    which vectors are current.
+    """
     n = 0
     with conn.cursor() as cur:
-        for symbol_id, repo_id, text, model, dim, vec in rows:
+        for symbol_id, repo_id, text, model, dim, text_version, vec in rows:
             cur.execute(
                 "INSERT INTO symbol_embeddings"
-                " (symbol_id, repo_id, embed_text, model, dim, embedding, bits)"
-                " VALUES (%s,%s,%s,%s,%s,%s::vector,%s::bit varying)"
+                " (symbol_id, repo_id, embed_text, model, dim, text_version,"
+                "  embedding, bits)"
+                " VALUES (%s,%s,%s,%s,%s,%s,%s::vector,%s::bit varying)"
                 " ON CONFLICT (symbol_id) DO UPDATE SET"
                 "   repo_id=EXCLUDED.repo_id, embed_text=EXCLUDED.embed_text,"
                 "   model=EXCLUDED.model, dim=EXCLUDED.dim,"
+                "   text_version=EXCLUDED.text_version,"
                 "   embedding=EXCLUDED.embedding, bits=EXCLUDED.bits,"
                 "   updated_at=now()",
-                (symbol_id, repo_id, text, model, dim,
+                (symbol_id, repo_id, text, model, dim, text_version,
                  _vec_literal(vec), _bit_literal(vec)))
             n += 1
     return n

@@ -29,6 +29,7 @@ from .packs.sources import SOURCES
 from .resolve import resolve_includes
 from .store import packs as store_packs
 from .store import queries, writes
+from .worker import contract_is_stale
 from .store.db import open_db
 from .store.graph import rebuild_repo_deps
 from .worker import index_repo
@@ -111,7 +112,14 @@ def _index_branch(conn, cfg: Config, project, branch: str,
     started = time.time()
     try:
         sha = head_sha(mirror_dir, branch)
-        if sha == old:
+        # "Same commit" is not "nothing to do". The extractor may have changed
+        # since these symbols were written, and this shortcut runs BEFORE
+        # index_repo -- so a stale contract has to hold it open, or the
+        # re-extraction inside index_repo is never reached. That is not
+        # theoretical: it is why adding the doc column produced zero docs across
+        # an unchanged repository, with the forcing logic in the worker working
+        # perfectly and never being called.
+        if sha == old and not contract_is_stale(conn, repo_id):
             # index_repo is the only other writer of last-run state, and this
             # path never calls it. Without this, a repo polled every hour for
             # six months and correctly up to date every time reported a
@@ -409,6 +417,24 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
         print(f"repos: {len(projects)} seen, {empty_repos} empty (nothing to "
               f"index), {len(projects) - empty_repos} indexed")
 
+    # Embed what was just indexed. THE INDEX PASS IS THE ONLY THING THAT RUNS
+    # ON A SCHEDULE, so if this does not happen here it does not happen: the
+    # poller and the push webhook both run `argus index`, and until this existed
+    # nothing in the stack ever ran `argus embed` at all. The index grew and the
+    # vectors did not, so semantic_search answered from whatever was embedded
+    # the last time somebody ran the command by hand -- silently, because a
+    # symbol with no vector looks exactly like a symbol that does not match.
+    #
+    # Incremental by construction: `build_symbol_embeddings` skips symbols that
+    # already have a current vector, so a pass that changed one file embeds one
+    # file's worth.
+    #
+    # A failure here must NOT fail the pass. Indexing is the primary function
+    # and embedding needs a second service: an estate with no Ollama still has a
+    # perfectly good lexical index, and exiting non-zero would report that as a
+    # broken run.
+    embedded = _embed_after_index(cfg, limit=_embed_per_pass() or None)
+
     # Exit codes 2/3/4 are already claimed (config, gitlab, preflight/resolve);
     # use a distinct code so a cron job can tell "ran, but a repo is
     # unhealthy" apart from those startup/run failures.
@@ -416,7 +442,8 @@ def _index(cfg: Config, only: str | None, reset_retries: bool = False,
     auditlog.index_end(returncode=returncode,
                        duration_ms=round((time.time() - run_started) * 1000, 1),
                        repos=len(projects), failed=failed_repos,
-                       up_to_date=up_to_date, empty=empty_repos)
+                       up_to_date=up_to_date, empty=empty_repos,
+                       embedded=embedded)
     return returncode
 
 
@@ -790,6 +817,56 @@ def _describe(pack) -> str:
     size_mb = pack.size_bytes / (1024 * 1024)
     return (f"{pack.name:<16} {pack.version:<10} {pack.embedding_model:<20} "
             f"{size_mb:>8.1f} MB  {pack.license}{flag}")
+
+
+#: How many symbols ONE index pass will embed. `0` means no limit.
+#:
+#: The walk and the embedding have different natural sizes: an index pass over
+#: a large estate is bounded by `repo_time_budget_seconds` per repo, while
+#: embedding the same estate from cold is hours of work on a CPU. A pass should
+#: finish the walk and report; the remainder is embedded by the next pass, and
+#: `argus embed` does the whole corpus on demand. 2000 is about three minutes on
+#: the measured CPU rate and about ten seconds on the GPU.
+DEFAULT_EMBED_PER_PASS = 2000
+
+
+def _embed_per_pass() -> int:
+    """Read per call, not at import, like every other setting here."""
+    try:
+        return int(os.environ.get("ARGUS_EMBED_PER_PASS", DEFAULT_EMBED_PER_PASS))
+    except ValueError:
+        return DEFAULT_EMBED_PER_PASS
+
+
+def _embed_after_index(cfg: Config, *, limit: int | None) -> int:
+    """Embed whatever this pass made stale. Returns how many. Never raises.
+
+    Bounded by `limit`, because the walk and the embedding have different
+    natural sizes: a first index of a large estate should finish the walk and
+    report, not sit embedding for hours afterwards. Whatever is left is picked
+    up by the next pass, and `argus embed` does the whole corpus on demand.
+    """
+    from . import semantic
+    from .store.db import open_db
+
+    conn = None
+    try:
+        conn = open_db(cfg.index.db_path)
+        return semantic.build_symbol_embeddings(conn, limit=limit)
+    except EmbeddingUnavailable as exc:
+        # The one expected failure, and it is not the index's fault.
+        print(f"indexed, but embedding is unavailable: {exc}", file=sys.stderr)
+        return 0
+    except Exception as exc:                      # noqa: BLE001
+        # Includes sqlite-vec missing, a corrupt embedding table, an Ollama
+        # answering with the wrong dimension. None of it makes the INDEX wrong,
+        # and a traceback here would discard a pass that already succeeded.
+        print(f"indexed, but embedding failed: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 0
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _embed(cfg: Config, limit: int | None) -> int:

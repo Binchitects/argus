@@ -188,6 +188,32 @@ object inside alone.
 
 ---
 
+## What changed for agents: `doc` and `overview`
+
+Two additions an agent should be told about, because both change how it should
+search rather than what it can reach.
+
+**Symbol results now carry `doc`.** Argus reads each symbol's doc comment and
+uses it to match and to answer, so `semantic_search` finds a function by what it
+DOES rather than by what it is named. Every symbol-level result (`find_symbol`,
+`semantic_search`, `code_contracts`, the Explore page) includes it. An agent
+should read `doc` before choosing between two plausible results — on a fixture
+built to be falsifiable, ranking on names alone returned the wrong function and
+ranking with the doc returned the right one, for both directions of the same
+question.
+
+**`overview` describes what each repository IS** — README, layout, languages,
+the public symbols somebody documented, and cross-repo dependencies in both
+directions. Call it first in an unfamiliar estate, or on any question spanning
+several repositories. Names alone are not an architecture, and without this an
+agent's first move is guessing symbol names.
+
+Both are in the server's own `instructions`, which every MCP client forwards to
+the model, so clients that do nothing special still get the guidance. If your
+client lets you add system context, repeating those two habits is worthwhile.
+
+---
+
 ## What a client has to get right to be worth connecting
 
 **Pass the server's `instructions` through to the model.** Argus returns 1,803

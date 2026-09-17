@@ -1,0 +1,15 @@
+-- Which version of `semantic.embed_text_for` produced a stored vector.
+--
+-- Same problem as `symbols_sha`, one layer up. A vector was considered current
+-- if a row existed with the same model and dimension -- which answers "was this
+-- embedded by this model" and cannot answer "was this embedded from the text we
+-- would build today". So adding the doc comment to the embedded text would have
+-- left every existing vector exactly as it was, and the improvement would reach
+-- only symbols whose file was later edited: the same half-migrated estate the
+-- doc column itself needed a contract version to avoid.
+--
+-- NULL on existing rows, which cannot equal a version, so every vector is
+-- rebuilt once on the next `argus embed`. That pass is incremental and
+-- resumable -- it embeds what is stale and stops -- so the cost is bounded by
+-- the corpus and shows progress like any other run.
+ALTER TABLE symbol_embeddings ADD COLUMN text_version TEXT;

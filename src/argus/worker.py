@@ -8,6 +8,7 @@ from .config import IndexConfig
 from .gitlab import Project
 from .mirror import Change, blob_shas, changes_since
 from .parse import ctags, filters
+from .parse import docs as parse_docs
 from .parse.includes import extract_includes
 from .store import writes
 
@@ -56,6 +57,15 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # re-created upstream) routes to the full-reindex path and self-heals;
     # making it fatal would strand the repo forever, since last_indexed_sha
     # would stay stale and every later run would fail identically.
+    #
+    # A stale extractor version forces the same full listing, for the same kind
+    # of reason: every file's symbol rows may be from a different extractor, and
+    # a git diff cannot see that. `_already_current` then skips everything
+    # already carrying the current stamp, so the cost is one tree walk per repo
+    # and re-extraction only of what actually needs it -- and an interrupted
+    # pass resumes rather than starting over.
+    if old_sha is not None and contract_is_stale(conn, repo_id):
+        old_sha = None
     full_reindex, changes = changes_since(mirror_path, old_sha, new_sha)
     shas = blob_shas(mirror_path, new_sha)
 
@@ -279,6 +289,13 @@ def index_repo(conn, index_cfg: IndexConfig, project: Project,
     # partial coverage forever even after the repo fully recovers.
     writes.record_run_state(conn, repo_id, timed_out=result.timed_out,
                             symbols_failed=result.symbols_failed, ts=int(now()))
+    # Only when this pass actually finished the walk. A timed-out pass has
+    # re-extracted some files and not others, and recording the version here
+    # would strand the rest until somebody happened to edit them -- exactly the
+    # failure the version exists to prevent. Left unrecorded, the next pass
+    # lists again and skips what it already did.
+    if not result.timed_out and not result.symbols_failed:
+        record_contract(conn, repo_id)
     return result
 
 
@@ -309,6 +326,66 @@ def _cap_retries(conn, repo_id: int, failed_paths: list[str], now) -> list[str]:
     return retryable
 
 
+def _symbols_stamp(blob_sha: str) -> str:
+    """What `files.symbols_sha` holds for a file whose symbols are current.
+
+    The blob sha alone answers "were these symbols extracted from this revision
+    of the file", which is right for a content change and wrong for an extractor
+    change. The contract version is prefixed so that improving what a symbol row
+    contains invalidates every row automatically: rows written before the prefix
+    existed are a bare sha, cannot equal a prefixed stamp, and are re-extracted
+    on the next pass. See `ctags.SYMBOL_CONTRACT_VERSION`.
+    """
+    return f"{ctags.SYMBOL_CONTRACT_VERSION}:{blob_sha}"
+
+
+#: Where the index records which extractor built a repository's symbol rows.
+#: Keyed BY REPO, not once for the whole index.
+#:
+#: A single global key looked obviously right and was wrong in a way that took a
+#: live run to see: `record_contract` fires at the end of each repository's pass,
+#: so the FIRST repository to finish marked the whole index current and every
+#: repository after it took the "up to date" shortcut. One repo re-extracted,
+#: the rest did not, and the run reported success.
+#:
+#: Per repo also gets the partial cases right for free: `--repo X` leaves the
+#: other keys alone, and a repository whose pass is cut short keeps its old key
+#: and is re-listed next time.
+def contract_key(repo_id: int) -> str:
+    return f"symbol_contract:{repo_id}"
+
+
+def contract_is_stale(conn, repo_id: int) -> bool:
+    """Have this repository's symbol rows been built by the current extractor?
+
+    The stamp makes an individual file look stale, but nothing ever LOOKS at a
+    file nobody has committed to: a pass works from a git diff, and an unchanged
+    file is not in it. So the version also has to be recorded somewhere a pass
+    consults unconditionally, which is what `argus_meta` is for.
+
+    A repository with no record at all is stale by definition -- it was built
+    before the version was tracked.
+    """
+    row = conn.execute("SELECT value FROM argus_meta WHERE key = ?",
+                       (contract_key(repo_id),)).fetchone()
+    return row is None or row["value"] != ctags.SYMBOL_CONTRACT_VERSION
+
+
+def record_contract(conn, repo_id: int) -> None:
+    """Note that this repository's symbol rows are now from the current extractor.
+
+    Called only after a pass that was not cut short. A pass that timed out has
+    re-extracted some files and not others, and recording the version there
+    would strand the rest until somebody happened to edit them -- which is the
+    failure this whole mechanism exists to prevent.
+    """
+    conn.execute(
+        "INSERT INTO argus_meta (key, value) VALUES (?, ?)"
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (contract_key(repo_id), ctags.SYMBOL_CONTRACT_VERSION))
+    conn.commit()
+
+
 def _already_current(conn, repo_id: int, path: str, blob_sha: str) -> bool:
     """True when this exact blob is stored AND its symbols were extracted from it.
 
@@ -321,9 +398,6 @@ def _already_current(conn, repo_id: int, path: str, blob_sha: str) -> bool:
     .c, macro-only header) never satisfied it and was redone every pass,
     while a file whose fresh extraction failed could still satisfy it using
     symbol rows left over from an older revision.
-
-    Keep the existing parameter name — this replaces the body only, so every
-    existing call site stays valid.
     """
     if not blob_sha:
         return False
@@ -333,7 +407,40 @@ def _already_current(conn, repo_id: int, path: str, blob_sha: str) -> bool:
     ).fetchone()
     if row is None:
         return False
-    return row["blob_sha"] == blob_sha and row["symbols_sha"] == blob_sha
+    return (row["blob_sha"] == blob_sha
+            and row["symbols_sha"] == _symbols_stamp(blob_sha))
+
+
+def _with_docs(tree: Path, path: str, symbols: list[dict]) -> list[dict]:
+    """Attach each symbol's doc comment. Returns the same list, mutated.
+
+    Read from the WORKTREE, not from `files.content`: the file is right there,
+    the line numbers ctags reported are its line numbers, and reading the stored
+    copy would be a second trip through SQLite for bytes this pass has already
+    touched. It also means a file too large to store still gets its symbols
+    documented.
+
+    A read failure is not an error here. ctags already reported on this path if
+    it could not be opened, and a file that vanished between the ctags batch and
+    this read is a race the next pass resolves -- refusing to write its symbols
+    over a missing comment would be the worse answer.
+    """
+    if not symbols:
+        return symbols
+    try:
+        text = (tree / path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return symbols
+    lines = text.splitlines()
+    for symbol in symbols:
+        try:
+            symbol["doc"] = parse_docs.for_symbol(
+                lines, int(symbol["line"]), symbol.get("language"))
+        except Exception:                     # noqa: BLE001
+            # A doc comment is a nice-to-have and the symbols are not: a bug in
+            # this walk must never cost the file its symbol rows.
+            symbol["doc"] = ""
+    return symbols
 
 
 def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
@@ -414,8 +521,9 @@ def _apply_symbols(conn, repo_id: int, tree: Path, paths: list[str],
         # An empty list here is a real answer -- ctags opened the file and
         # found nothing taggable -- so it is stamped complete, which is the
         # whole point of tracking coverage separately from the symbol map.
-        writes.replace_symbols(conn, repo_id, row["id"], batch.symbols.get(path, []),
-                               shas.get(path, ""))
+        symbols = _with_docs(tree, path, batch.symbols.get(path, []))
+        writes.replace_symbols(conn, repo_id, row["id"], symbols,
+                               _symbols_stamp(shas.get(path, "")))
 
     # Drop whatever these still carry from an older revision: their content
     # row was already updated in place, so surviving symbol rows describe a

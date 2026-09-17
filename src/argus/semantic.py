@@ -54,15 +54,22 @@ CREATE VIRTUAL TABLE IF NOT EXISTS vec_symbols_i8 USING vec0(
 #: signature is required because name alone ("Init", "Run") carries almost no
 #: retrievable intent -- it is the argument and return types that distinguish
 #: forty functions called Init.
+#:
+#: A signature OR a doc comment satisfies it. Requiring the signature would now
+#: exclude exactly the symbols the doc column was added for: a documented
+#: function with no parsed signature has MORE retrievable intent than a
+#: signature-only one, not less.
 _CANDIDATES = """
-SELECT s.id, s.repo_id, s.name, s.kind, s.signature, s.scope, f.path
+SELECT s.id, s.repo_id, s.name, s.kind, s.signature, s.scope, f.path, s.doc
   FROM symbols s
   JOIN files f ON f.id = s.file_id
  WHERE s.is_public = 1
-   AND s.signature IS NOT NULL AND s.signature <> ''
+   AND ((s.signature IS NOT NULL AND s.signature <> '')
+        OR (s.doc IS NOT NULL AND s.doc <> ''))
    AND NOT EXISTS (
        SELECT 1 FROM symbol_embeddings e
         WHERE e.symbol_id = s.id AND e.model = ? AND e.dim = ?
+          AND e.text_version = ?
    )
 """
 
@@ -79,15 +86,41 @@ def ensure_vec_tables(conn: sqlite3.Connection) -> None:
     conn.execute(_CREATE_VEC_I8)
 
 
+#: Bump when `embed_text_for` produces different text for the same symbol.
+#:
+#: A vector was considered current if a row existed with the same model and
+#: dimension, which answers "was this embedded by this model" and cannot answer
+#: "was this embedded from the text we would build today". Without this, adding
+#: the doc comment to the embedded text would leave every existing vector
+#: untouched and reach only the symbols whose file was edited afterwards.
+EMBED_TEXT_VERSION = "2"
+
+
 def embed_text_for(name: str, kind: str, signature: str, scope: str,
-                   path: str) -> str:
+                   path: str, doc: str = "") -> str:
     """The text that stands in for a symbol.
+
+    THE DOC COMMENT IS THE POINT.
+
+    Without it this string was a name, a kind, a signature and a path -- what the
+    symbol IS CALLED, and nothing about what it DOES. A question phrased the way
+    a person asks it ("what expires keys past their TTL") could therefore only
+    match vocabulary, and on a real corpus that returned `expireSlaveKeys` where
+    `activeExpireCycle` was the answer: same file, both plausible names, and only
+    the sentence above each one tells them apart.
+
+    The doc leads, right after `kind name`, because it is the part that carries
+    meaning; the signature and path follow as supporting evidence. Ordering is
+    not nothing -- an embedding is a single vector over the whole string, and the
+    text a reader would call the description should not be the tail of it.
 
     Path included because it carries domain vocabulary the signature does not:
     ``media/decode/h265.c`` tells a search for "video decoding" far more than
     ``static int Parse(Ctx*, Buf*)`` ever will.
     """
     parts = [f"{kind} {name}".strip()]
+    if doc:
+        parts.append(doc)
     if scope:
         parts.append(f"in {scope}")
     if signature:
@@ -100,7 +133,7 @@ def embed_text_for(name: str, kind: str, signature: str, scope: str,
 def _pending(conn: sqlite3.Connection, model: str, dim: int,
              limit: int | None) -> list[tuple]:
     sql = _CANDIDATES + (" LIMIT ?" if limit else "")
-    args = [model, dim] + ([limit] if limit else [])
+    args = [model, dim, EMBED_TEXT_VERSION] + ([limit] if limit else [])
     return conn.execute(sql, args).fetchall()
 
 
@@ -120,13 +153,18 @@ def build_symbol_embeddings(
     model, dim = embed_module.EMBED_MODEL, embed_module.EMBED_DIM
 
     ensure_vec_tables(conn)
+    # Before the early return below, so orphans are cleaned on a run that has
+    # nothing to embed -- which is the common case, and the only one an
+    # operator is likely to run after noticing the index has grown.
+    prune_orphans(conn)
     rows = _pending(conn, model, dim, limit)
     if not rows:
         return 0
 
     done = 0
     for batch in _batched(rows, EMBED_FLUSH):
-        texts = [embed_text_for(r[2], r[3], r[4], r[5], r[6]) for r in batch]
+        texts = [embed_text_for(r[2], r[3], r[4], r[5], r[6], r[7] or "")
+                 for r in batch]
         vectors = embed_fn(texts)
         if len(vectors) != len(batch):
             raise ValueError(
@@ -136,9 +174,9 @@ def build_symbol_embeddings(
         for (symbol_id, repo_id, *_), text, vector in zip(batch, texts, vectors):
             conn.execute(
                 "INSERT OR REPLACE INTO symbol_embeddings"
-                " (symbol_id, repo_id, embed_text, model, dim)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (symbol_id, repo_id, text, model, dim),
+                " (symbol_id, repo_id, embed_text, model, dim, text_version)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (symbol_id, repo_id, text, model, dim, EMBED_TEXT_VERSION),
             )
             # DELETE first: vec0 has no upsert, and a re-embedded symbol must
             # not end up with two vectors, which would let one symbol occupy
@@ -160,18 +198,61 @@ def build_symbol_embeddings(
     return done
 
 
+def prune_orphans(conn: sqlite3.Connection) -> int:
+    """Drop vectors whose symbol no longer exists. Returns how many.
+
+    THE VEC TABLES HAVE NO FOREIGN KEY, and cannot: a `vec0` virtual table is
+    outside SQLite's referential machinery. `symbol_embeddings` cascades from
+    `symbols`, so re-indexing a file -- which deletes its symbol rows and writes
+    new ones with NEW ids -- quietly removes the embedding row and leaves the
+    vector behind, in both `vec_symbols_bin` and `vec_symbols_i8`, for ever.
+
+    Two things go wrong, and the second is worse. The tables grow with every
+    re-index of every changed file, without bound. And the coarse KNN stage
+    ranks over them, so an orphan can occupy one of the k slots and be discarded
+    by the ACL re-check afterwards -- the search returns fewer real results than
+    it asked for, for reasons nothing in the result explains. Found on the
+    reference stack as 10 vectors for 6 embeddings after a handful of re-indexes.
+
+    Read-then-delete rather than a `NOT IN` subquery: vec0 supports deletes by
+    primary key and its support for arbitrary predicates is its own question,
+    while the id set here is one integer per embedded symbol.
+    """
+    live = {row[0] for row in conn.execute("SELECT symbol_id FROM symbol_embeddings")}
+    dropped = 0
+    for table in ("vec_symbols_bin", "vec_symbols_i8"):
+        try:
+            present = [row[0] for row in conn.execute(f"SELECT symbol_id FROM {table}")]
+        except sqlite3.OperationalError:
+            continue
+        orphans = [sid for sid in present if sid not in live]
+        for symbol_id in orphans:
+            conn.execute(f"DELETE FROM {table} WHERE symbol_id = ?", (symbol_id,))
+            dropped += 1
+    if dropped:
+        conn.commit()
+    return dropped
+
+
 def _batched(rows: Sequence[tuple], size: int) -> Iterator[Sequence[tuple]]:
     for start in range(0, len(rows), size):
         yield rows[start:start + size]
 
 
 def stale_count(conn: sqlite3.Connection) -> int:
-    """Symbols embedded under a different model or dimension.
+    """Symbols whose stored vector is no longer what this build would produce.
 
-    Reported rather than silently rebuilt: re-embedding a large corpus is
-    hours of CPU, and it should be a decision rather than a surprise.
+    A different model, a different dimension, OR a different version of the
+    embedded text. The third case is the easy one to forget: the model and the
+    dimension are unchanged when `embed_text_for` gains a field, so a check on
+    those two alone reports a corpus as fully current while every vector in it
+    came from text this build would no longer write.
+
+    Reported rather than silently rebuilt: re-embedding a large corpus is hours
+    of work, and it should be a decision rather than a surprise.
     """
     return conn.execute(
-        "SELECT count(*) FROM symbol_embeddings WHERE model <> ? OR dim <> ?",
-        (embed_module.EMBED_MODEL, embed_module.EMBED_DIM),
+        "SELECT count(*) FROM symbol_embeddings"
+        " WHERE model <> ? OR dim <> ? OR text_version IS NOT ?",
+        (embed_module.EMBED_MODEL, embed_module.EMBED_DIM, EMBED_TEXT_VERSION),
     ).fetchone()[0]

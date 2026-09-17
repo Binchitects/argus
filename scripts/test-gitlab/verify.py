@@ -131,6 +131,24 @@ def main() -> int:
         print(proc.stderr[-2000:], file=sys.stderr)
     check("index run completed", proc.returncode == 0, f"{elapsed:.1f}s")
 
+    # ------------------------------------------------- a second branch -----
+    # One project is indexed at TWO refs, which is the only way to verify that
+    # an unqualified question answers from trunk rather than from whichever
+    # branch happened to be indexed last -- the failure that makes a developer
+    # working on a release branch act on code that is not the code they have.
+    print("\n== Indexing the release branch ==")
+    t0 = time.time()
+    proc = subprocess.run(
+        [sys.executable, "-m", "argus.cli", "index", "--config",
+         str(WORK / "config.yaml"), "--branch", "v2"],
+        capture_output=True, text=True, cwd=ROOT, timeout=1800,
+    )
+    branch_elapsed = time.time() - t0
+    if proc.returncode != 0:
+        print(proc.stderr[-1500:], file=sys.stderr)
+    check("the release branch was indexed alongside trunk",
+          proc.returncode == 0, f"{branch_elapsed:.1f}s")
+
     # ------------------------------------------------------- embed it ------
     # Without this the vector half of the index is EMPTY, and `semantic_search`
     # answers "The index is unavailable; do not retry this query." -- an honest
@@ -184,8 +202,13 @@ def main() -> int:
             for rid in ident.allowed_repo_ids
         ]
         print(f"  {username} -> {names}")
+        # A SET of project names, not a list of repo rows. The allowlist is a
+        # set of `repos` ids, and a project indexed at two branches has two
+        # rows -- both of which that developer is entitled to. Comparing to a
+        # one-element list would report "got ['eal-core', 'eal-core']" as a
+        # leak, which is the opposite of what it is.
         check(f"{username}'s allowlist is exactly their one project",
-              names == [u["member_of"]], f"got {names}")
+              set(names) == {u["member_of"]}, f"got {sorted(set(names))}")
 
     alpha, beta = idents["dev_alpha"], idents["dev_beta"]
     check("the two developers' allowlists are disjoint",

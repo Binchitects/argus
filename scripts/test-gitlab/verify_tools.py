@@ -145,6 +145,11 @@ CONTRACTS: dict[str, dict] = {
     "code_contracts":  {"args": lambda c: {"source": _SOURCE_TEXT},   "kind": list,
                         "may_refuse": True},
 
+    # The estate's own description. Takes no repository, so there is nothing to
+    # refuse and nothing to be denied -- every caller is entitled to a view of
+    # what they can see, even when that view is empty.
+    "overview":        {"args": lambda c: {},                       "kind": dict},
+
     # The packs tools. Nothing is installed in this fixture, and building a pack
     # needs a checkout of a real documentation repository, so the happy path is
     # not exercised here. What IS asserted is the no-packs contract: they must
@@ -573,6 +578,70 @@ async def main_async() -> int:
                   "; ".join(f"{u}: {v}" for u, v in leaked.items()) if leaked
                   else f"alpha={sorted(seen_by.get('dev_alpha', set()))} "
                        f"beta={sorted(seen_by.get('dev_beta', set()))}")
+
+        print("\n== branch-agnostic behaviour ==")
+        # One project is indexed at trunk AND at `v2`, which is the only way to
+        # verify this. `scope_to_branch(None)` means each project's DEFAULT
+        # branch, so an unqualified question answers from trunk; naming a branch
+        # selects it; and a branch nobody indexed must SAY so, because an empty
+        # list reads as "no such symbol" and is indistinguishable from one.
+        alpha = per_user["dev_alpha"]
+
+        async def acall(tool, args):
+            from mcp import ClientSession
+            from mcp.client.streamable_http import streamablehttp_client
+            async with streamablehttp_client(
+                f"{BASE}/mcp",
+                headers={"Authorization": f"Bearer {users['dev_alpha']['token']}"}
+            ) as (r, w, _):
+                async with ClientSession(r, w) as session:
+                    await session.initialize()
+                    res = await session.call_tool(tool, args)
+                    sc = getattr(res, "structuredContent", None)
+                    if isinstance(sc, dict) and "result" in sc:
+                        return {"err": bool(res.isError), "data": sc["result"]}
+                    return {"err": bool(res.isError),
+                            "text": " ".join(getattr(c, "text", "") for c in res.content)}
+
+        trunk = await acall("find_symbol", {"name": "DecodeFrame"})
+        v2 = await acall("find_symbol", {"name": "DecodeFrame", "branch": "v2"})
+        trunk_docs = "\n".join(r.get("doc") or "" for r in (trunk.get("data") or []))
+        v2_docs = "\n".join(r.get("doc") or "" for r in (v2.get("data") or []))
+        check("an unqualified question answers from trunk, not from a branch",
+              trunk_docs and "ON THE V2 BRANCH" not in trunk_docs, trunk_docs[:80])
+        check("naming the branch returns that branch's content",
+              "ON THE V2 BRANCH" in v2_docs, v2_docs[:80])
+
+        only_v2 = await acall("find_symbol", {"name": "DecodeFrameV2"})
+        check("a branch-only symbol is absent from an unqualified question",
+              not (only_v2.get("data") or []), f"{only_v2.get('data')}")
+        named = await acall("find_symbol", {"name": "DecodeFrameV2", "branch": "v2"})
+        check("naming the branch finds the branch-only symbol",
+              [r.get("name") for r in (named.get("data") or [])] == ["DecodeFrameV2"])
+
+        missing = await acall("find_symbol", {"name": "DecodeFrame",
+                                             "branch": "release/9"})
+        text = missing.get("text") or ""
+        check("an unindexed branch names the branches that ARE indexed",
+              missing["err"] and "not indexed" in text
+              and "main" in text and "v2" in text, text[:110])
+
+        sem_v2 = await acall("semantic_search",
+                             {"query": "decode a frame using the hardware path",
+                              "branch": "v2"})
+        sem_names = [r.get("name") for r in (sem_v2.get("data") or [])]
+        check("semantic search is branch-scoped too",
+              "DecodeFrameV2" in sem_names, f"{sem_names}")
+        sem_trunk = await acall("semantic_search",
+                                {"query": "decode a frame using the hardware path"})
+        check("an unqualified semantic search does not return branch content",
+              "DecodeFrameV2" not in [r.get("name") for r in (sem_trunk.get("data") or [])])
+
+        listed = {(r.get("path_with_namespace"), r.get("branch"))
+                  for r in (alpha["calls"]["index_status"]["payload"] or [])}
+        check("index_status reports one row per (repo, branch)",
+              ("root/eal-core", "v2") in listed
+              and ("root/eal-core", "main") in listed, f"{sorted(listed)}")
 
         print("\n== the project with no members stays invisible ==")
         for name in sorted(CONTRACTS):

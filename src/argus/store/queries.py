@@ -145,6 +145,7 @@ def symbol_contracts(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
             "line": row["line"],
             "signature": row["signature"],
             "scope": row["scope"],
+            "doc": row["doc"],
             "is_public": bool(row["is_public"]),
             "mentions": counts[name],
         })
@@ -165,7 +166,7 @@ def find_symbol(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
         marks = ",".join("?" for _ in chunk)
         sql = (
             "SELECT s.repo_id, r.path_with_namespace, f.path, s.name, s.kind,"
-            "       s.line, s.end_line, s.signature, s.scope, s.is_public"
+            "       s.line, s.end_line, s.signature, s.scope, s.is_public, s.doc"
             "  FROM symbols s"
             "  JOIN files f ON f.id = s.file_id"
             "  JOIN repos r ON r.id = s.repo_id"
@@ -1111,7 +1112,7 @@ def _hydrate_semantic(conn, ids, by_id: dict) -> list[dict]:
     rows = conn.execute(
         f"SELECT s.id AS symbol_id, s.repo_id, r.path_with_namespace,"
         f"       f.path, s.name, s.kind, s.signature, s.scope,"
-        f"       s.line, s.end_line, s.is_public"
+        f"       s.line, s.end_line, s.is_public, s.doc"
         f"  FROM symbols s"
         f"  JOIN files f ON f.id = s.file_id"
         f"  JOIN repos r ON r.id = s.repo_id"
@@ -1123,3 +1124,199 @@ def _hydrate_semantic(conn, ids, by_id: dict) -> list[dict]:
            for row in rows]
     out.sort(key=lambda r: -r["score"])
     return out
+
+
+# --- application knowledge ----------------------------------------------------
+#
+# The index has always known what the code is CALLED. It could not say what a
+# repository IS, so an agent asking "what does this estate contain" had to infer
+# it from a list of symbol names -- and a list of names is not an architecture.
+#
+# Everything below is assembled from data already indexed. No new extraction and
+# no new storage: the README is a file like any other, the layout is the paths of
+# the files, the abstractions are the public symbols that were worth
+# documenting, and how the repositories fit together is `repo_deps`, which is
+# the one graph in this index that is genuinely resolved rather than guessed.
+
+#: How much of a README to return. Enough to state what a project is for --
+#: the first screen of a README is written to do exactly that -- and short
+#: enough that an overview of twenty repositories is still an overview.
+README_CHARS = 1200
+
+#: Directories deeper than this are collapsed into their top-level ancestor:
+#: `src/decoder/h265/arm64/` is noise in a layout, `src/` is the fact.
+MAX_DIRS = 12
+
+#: Documented public symbols per repository. These are the candidate
+#: abstractions: a symbol somebody wrote a comment for is one somebody thought
+#: a reader would need explained.
+MAX_KEY_SYMBOLS = 15
+
+#: How many repositories an estate-wide overview describes before it stops
+#: being an overview. Two hundred repositories is a listing; the cap is what
+#: keeps this answerable in one response, and `truncated` says it applied.
+MAX_OVERVIEW_REPOS = 40
+
+
+def _readme_for(conn: sqlite3.Connection, repo_id: int) -> str:
+    """The repository's README text, if it has one indexed.
+
+    Matched case-insensitively on the basename and preferring the shallowest
+    path, because a repository can contain several READMEs and the one at the
+    root is the one that describes the project rather than a subdirectory.
+    """
+    row = conn.execute(
+        "SELECT path, content FROM files"
+        " WHERE repo_id = ? AND lower(path) LIKE '%readme%'"
+        "   AND path NOT LIKE '%/%/%'"
+        " ORDER BY length(path), path LIMIT 1", (repo_id,)).fetchone()
+    if row is None or not row["content"]:
+        return ""
+    text = row["content"].strip()
+    return text[:README_CHARS] + ("…" if len(text) > README_CHARS else "")
+
+
+#: How a file at the repository root is labelled in a layout. Not a real path,
+#: so it can never collide with a directory named like one.
+_ROOT = "(root)"
+
+
+def _layout(conn: sqlite3.Connection, repo_id: int) -> list[dict]:
+    """Files per top-level directory, which is what a repository looks like."""
+    counts: dict[str, int] = {}
+    for row in conn.execute(
+            "SELECT path FROM files WHERE repo_id = ? AND is_vendored = 0",
+            (repo_id,)):
+        top = row["path"].split("/", 1)[0] if "/" in row["path"] else _ROOT
+        counts[top] = counts.get(top, 0) + 1
+    # Most files first, then the root's own files, then alphabetical. The root
+    # is ranked deliberately rather than by name: "(" sorts before every letter,
+    # so an accidental tie-break put it first anyway, and a layout whose order
+    # depends on an ASCII value is one that changes when a directory is renamed.
+    ordered = sorted(counts.items(),
+                     key=lambda kv: (-kv[1], 0 if kv[0] == _ROOT else 1, kv[0]))
+    return [{"path": name, "files": n} for name, n in ordered[:MAX_DIRS]]
+
+
+def _key_symbols(conn: sqlite3.Connection, repo_ids: Sequence[int],
+                 limit: int = MAX_KEY_SYMBOLS) -> list[dict]:
+    """The documented public symbols: the abstractions somebody explained.
+
+    A doc comment is the filter, not a ranking. It is the one signal in this
+    index that a person decided a name was not enough, which is a far better
+    proxy for "this matters" than any count this could compute -- and it makes
+    the overview say something the symbol list does not.
+    """
+    marks, ids = _placeholders(repo_ids)
+    if not ids:
+        return []
+    rows = conn.execute(
+        f"SELECT s.name, s.kind, s.signature, s.doc, f.path, r.path_with_namespace,"
+        f"       s.repo_id"
+        f"  FROM symbols s"
+        f"  JOIN files f ON f.id = s.file_id"
+        f"  JOIN repos r ON r.id = s.repo_id"
+        f" WHERE s.repo_id IN ({marks}) AND s.is_public = 1"
+        f"   AND s.doc IS NOT NULL AND s.doc <> ''"
+        f" ORDER BY r.path_with_namespace, f.path, s.line"
+        f" LIMIT ?", (*ids, limit)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def repo_overview(allowed_repo_ids: Sequence[int], conn: sqlite3.Connection,
+                  repo: str | None = None) -> dict:
+    """What this estate contains: per repository, what it IS.
+
+    Answers the question an agent has before it can ask a useful one. Given only
+    `find_symbol` and `search_code`, a newcomer's first move is to guess names
+    and read whatever comes back; this is the page that says "this repository
+    handles decoding, that one ships the ETL pipeline, and the third depends on
+    both" so the guessing starts from somewhere.
+
+    `repo` narrows to one repository by path_with_namespace. Without it, every
+    repository the caller may see is described -- capped, because an estate with
+    two hundred repositories is not an overview, it is a listing.
+
+    Scoped to `allowed_repo_ids` like everything else here: a repository the
+    caller cannot read does not appear, and neither does an edge to one.
+    """
+    marks, ids = _placeholders(allowed_repo_ids)
+    if not ids:
+        # `{}`, not `{"repos": []}`, to match `repo_map`. "You may see nothing"
+        # and "there is nothing" are different answers, and a caller that
+        # cannot tell them apart reports an empty estate to somebody who
+        # simply has no access to any of it.
+        return {}
+    # The placeholder STRING, not the id list. `IN ({ids})` renders as
+    # `IN ([1, 2])`, which SQLite reads as a column reference and reports as
+    # "no such column: 1" -- a message about the wrong thing entirely.
+    where = f" WHERE r.id IN ({marks})"
+    params: list = list(ids)
+    if repo:
+        where += " AND r.path_with_namespace = ?"
+        params.append(repo)
+
+    # One more than the cap, so "there are more" is a fact rather than a guess.
+    cap = "" if repo else f" LIMIT {MAX_OVERVIEW_REPOS + 1}"
+    rows = conn.execute(
+        f"SELECT r.id AS repo_id, r.path_with_namespace, r.branch,"
+        f"       r.default_branch, r.last_run_at, r.last_indexed_at,"
+        f"       (SELECT COUNT(*) FROM files f WHERE f.repo_id = r.id) AS files,"
+        f"       (SELECT COUNT(*) FROM symbols s WHERE s.repo_id = r.id) AS symbols,"
+        f"       (SELECT COUNT(*) FROM symbols s WHERE s.repo_id = r.id"
+        f"         AND s.is_public = 1) AS public_symbols,"
+        f"       (SELECT COUNT(*) FROM symbols s WHERE s.repo_id = r.id"
+        f"         AND s.doc IS NOT NULL AND s.doc <> '') AS documented_symbols"
+        f"  FROM repos r{where}"
+        f" ORDER BY r.path_with_namespace, r.branch{cap}", params).fetchall()
+    truncated = len(rows) > MAX_OVERVIEW_REPOS
+    rows = rows[:MAX_OVERVIEW_REPOS]
+
+    allowed = set(ids)
+    out = []
+    for row in rows:
+        repo_id = row["repo_id"]
+        item = dict(row)
+        item["readme"] = _readme_for(conn, repo_id)
+        item["layout"] = _layout(conn, repo_id)
+        item["langs"] = [
+            {"lang": r["lang"] or "?", "files": r["n"]}
+            for r in conn.execute(
+                "SELECT lang, COUNT(*) AS n FROM files WHERE repo_id = ?"
+                " GROUP BY lang ORDER BY n DESC LIMIT 8", (repo_id,))]
+        # The dependency edges, both directions, with anything outside the
+        # allowlist dropped entirely rather than counted -- "depends on 1 repo
+        # you cannot see" is itself a disclosure, and repo_map already made this
+        # decision for the single-repo case.
+        item["depends_on"] = [
+            {"repo": r["path_with_namespace"], "weight": r["weight"]}
+            for r in conn.execute(
+                "SELECT r.path_with_namespace, d.weight FROM repo_deps d"
+                "  JOIN repos r ON r.id = d.to_repo_id"
+                " WHERE d.from_repo_id = ? AND d.to_repo_id IN"
+                f" ({','.join('?' for _ in ids)})"
+                " ORDER BY d.weight DESC LIMIT 10", (repo_id, *ids))]
+        item["depended_on_by"] = [
+            {"repo": r["path_with_namespace"], "weight": r["weight"]}
+            for r in conn.execute(
+                "SELECT r.path_with_namespace, d.weight FROM repo_deps d"
+                "  JOIN repos r ON r.id = d.from_repo_id"
+                " WHERE d.to_repo_id = ? AND d.from_repo_id IN"
+                f" ({','.join('?' for _ in ids)})"
+                " ORDER BY d.weight DESC LIMIT 10", (repo_id, *ids))]
+        out.append(item)
+
+    # Key symbols for the repositories actually being described, so a one-repo
+    # overview is not diluted by an estate-wide list.
+    described = [item["repo_id"] for item in out]
+    keys = _key_symbols(conn, described)
+    by_repo: dict[int, list] = {}
+    for symbol in keys:
+        by_repo.setdefault(symbol["repo_id"], []).append(symbol)
+    for item in out:
+        item["key_symbols"] = by_repo.get(item["repo_id"], [])
+
+    # Stated rather than silent: an estate larger than the cap is the normal
+    # case, and a list of forty that does not say so reads as "there are forty".
+    return {"repos": out, "truncated": truncated, "shown": len(out)}
+

@@ -562,6 +562,15 @@ async def index_status_impl(db_path: Path | str, identity: acl.Identity) -> list
     return [dict(row) for row in rows]
 
 
+async def overview_impl(db_path: Path | str, identity: acl.Identity,
+                        repo: str | None = None) -> dict[str, Any]:
+    """What the estate contains, scoped to what the caller may see."""
+    return await run_readonly(
+        db_path,
+        lambda conn: queries.repo_overview(identity.allowed_repo_ids, conn, repo),
+    )
+
+
 async def repo_map_impl(db_path: Path | str, identity: acl.Identity,
                         repo_id: int,
                         notices: access.MemberDirectory | None = None) -> dict[str, Any]:
@@ -1032,6 +1041,21 @@ _GET_FILE_DESC = (
     "so do not treat a failure here as proof a repo doesn't exist."
 )
 
+_OVERVIEW_DESC = (
+    "Describe what this organisation's repositories ARE -- the estate's shape "
+    "before you know any names. Call this FIRST in an unfamiliar codebase, or "
+    "when a question spans several repositories and you do not yet know which. "
+    "Each repository comes back with its README excerpt (what the project is "
+    "for), its top-level layout, the languages in it, the public symbols "
+    "somebody DOCUMENTED (the abstractions a reader needs explained), and the "
+    "cross-repo dependencies resolved from #include edges, in both directions. "
+    "Names alone are not an architecture: without this, the first move in a new "
+    "estate is guessing symbol names and reading whatever comes back. Scoped to "
+    "the repositories you may see; a repository you cannot read is absent, and "
+    "so is an edge to one. Pass `repo` to describe a single repository in the "
+    "same detail."
+)
+
 _REPO_MAP_DESC = (
     "Show which repos a given repo depends on, and which depend on it, based "
     "on resolved #include edges across the repos you have access to. Use it "
@@ -1218,6 +1242,14 @@ def register_tools(server: FastMCP, cfg: Config) -> None:
         return await _with_audit(
             db_path, "index_status", identity, {},
             lambda: index_status_impl(db_path, identity),
+        )
+
+    @server.tool(name="overview", description=_OVERVIEW_DESC)
+    async def overview(repo: str | None = None, *, ctx: Context) -> dict[str, Any]:
+        identity = _identity(ctx)
+        return await _with_audit(
+            db_path, "overview", identity, {"repo": repo},
+            lambda: overview_impl(db_path, identity, repo),
         )
 
     @server.tool(name="repo_map", description=_REPO_MAP_DESC)

@@ -153,7 +153,7 @@ def index_repo(*, repo: str, branch: str, outcome: str,
 
 def index_end(*, returncode: int, duration_ms: float, repos: int,
               failed: int, up_to_date: int, reason: str | None = None,
-              empty: int = 0) -> None:
+              empty: int = 0, embedded: int = 0) -> None:
     """The pass is over. `returncode` is the process exit code the caller sees.
 
     Emitted for EVERY outcome, including the ones that never reach a
@@ -177,6 +177,12 @@ def index_end(*, returncode: int, duration_ms: float, repos: int,
         # Enumerated but with no refs: an empty repository. Not a failure, and
         # not something to subtract from a health percentage either.
         "empty": empty,
+        # Vectors written by this pass. The index and its vectors are separate
+        # stores that can drift -- the index growing while the vectors do not is
+        # invisible, because a symbol with no vector looks exactly like a symbol
+        # that does not match -- so a pass reports what it embedded rather than
+        # leaving the two to be compared by hand.
+        "embedded": embedded,
         # Set only on the early exits, where "repos" is 0 and the code alone
         # does not say which of several preconditions was not met.
         "reason": reason,

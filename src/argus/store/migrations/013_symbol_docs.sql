@@ -1,0 +1,29 @@
+-- The doc comment attached to a symbol: what it DOES, not what it is called.
+--
+-- `semantic_search` embedded a symbol's kind, name, signature, scope and path --
+-- the name and the shape, and nothing about behaviour. So a question phrased the
+-- way a person asks it ("what expires keys past its TTL") could only match
+-- vocabulary, and on a real corpus that returned `expireSlaveKeys` where
+-- `activeExpireCycle` was the answer: same file, both plausible names, and the
+-- only thing distinguishing them is the sentence above each one.
+--
+-- That sentence was already in the index. `files.content` holds the entire file
+-- and `symbols.line` locates the symbol within it, so the comment immediately
+-- above a definition has been sitting in this database unread since the first
+-- version. This column is where it goes once read.
+--
+-- NULL, not empty string: "this symbol has no documentation" and "the extractor
+-- has not read this file since the column existed" are different states, and
+-- only the second one is worth re-indexing for.
+ALTER TABLE symbols ADD COLUMN doc TEXT;
+
+-- No backfill, and deliberately no `UPDATE files SET symbols_sha = NULL` here.
+-- The re-extraction is handled generally by the extractor contract version in
+-- `worker._symbols_stamp`: rows written before that stamp existed hold a bare
+-- blob sha, which cannot equal the prefixed stamp the worker now compares
+-- against, so every file is re-parsed on the next pass and this column fills in
+-- across the whole estate rather than only where a file happens to change.
+--
+-- Clearing the gate here as well would have worked, and would have taught
+-- nobody: the next change to what a symbol row contains would need the same
+-- manual step again, in a migration, with nothing at the write path to say so.

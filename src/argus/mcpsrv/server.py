@@ -392,7 +392,30 @@ re-enters generation, where a prior like "initialisation routine means
 PASSIVE_LEVEL" competes with the fact and often wins; copying does not.
 
 Otherwise use retrieved documentation to correct yourself, not to replace what
-you already know: where these tools are silent, your own answer stands."""
+you already know: where these tools are silent, your own answer stands.
+
+ORIENT YOURSELF BEFORE GUESSING NAMES.
+
+In an unfamiliar codebase, or on any question that spans more than one
+repository, call `overview` first. It describes what each repository IS -- its
+README, its layout, the abstractions somebody documented, and the cross-repo
+dependencies -- so the rest of your search starts from somewhere instead of
+from a guessed symbol name. Names alone are not an architecture.
+
+FINDING CODE BY WHAT IT DOES.
+
+When you need something and do not know what it is called -- "what reclaims
+keys whose time to live has elapsed", "where do we retry uploads" --
+`semantic_search` is the tool. It matches on meaning, and since the index reads
+each symbol's doc comment, it matches on what a function DOES rather than on
+what it is named. Read the `doc` field on every result before choosing: it is
+the sentence that says whether the symbol is the one you want, and it is
+returned for exactly that reason. Measured: for a question phrased this way,
+ranking on names alone returns the WRONG function and ranking with the doc
+returns the right one.
+
+Each result also carries `kind`, `signature`, `scope`, `path` and the
+repository, which is how you tell where a hit belongs in the application."""
 
 
 class _ArgusFastMCP(FastMCP):

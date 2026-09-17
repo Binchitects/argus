@@ -21,6 +21,23 @@ PRIVATE_SCOPES = frozenset({"detail", "internal", "impl", "anonymous"})
 # 600s is generous even for a large real batch of files in one repo.
 CTAGS_TIMEOUT_SECONDS = 600
 
+#: Bump this whenever a symbol ROW means something different from what it meant
+#: before -- a new field, a different extractor, a changed comment convention.
+#:
+#: `files.symbols_sha` is the gate that decides whether a file's symbols need
+#: re-extracting, and it was compared against the file's blob sha alone. That
+#: answers "were the symbols extracted from THIS revision of the file", which is
+#: the right question for a content change and the wrong one for an extractor
+#: change: improve the extractor and every file still looks current, so nothing
+#: is re-parsed and the improvement reaches only files that happen to be edited
+#: afterwards. Adding the doc column would have reached a real estate over
+#: months, half-documented, with no way to tell which half.
+#:
+#: Composed into the stamp by `worker._symbols_stamp`, so bumping this
+#: re-extracts everything on the next pass with no migration and no manual step.
+#: Version 1 is the implicit value on any row written before the stamp existed.
+SYMBOL_CONTRACT_VERSION = "2"
+
 CTAGS_ARGS = [
     "--output-format=json",
     # n=line, K=long kind, S=signature, s=scope, e=end line,
@@ -188,6 +205,12 @@ def extract_symbols(root: Path, rel_paths: list[str]) -> SymbolBatch:
             "signature": entry.get("signature"),
             "scope": scope,
             "is_public": int(is_public_symbol(path, scope, bool(entry.get("file", False)))),
+            # ctags reports the language it parsed the file as, which is the
+            # right answer for choosing a comment syntax and is not derivable
+            # from the extension: `.h` is C or C++ depending on the contents,
+            # and `.m` is Objective-C or MATLAB. Carried through rather than
+            # guessed from the suffix later.
+            "language": entry.get("language") or None,
         })
 
     if proc.returncode == 0:

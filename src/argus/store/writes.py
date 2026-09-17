@@ -189,11 +189,13 @@ def replace_symbols(conn: sqlite3.Connection, repo_id: int, file_id: int,
     conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
     conn.executemany(
         "INSERT INTO symbols"
-        " (repo_id, file_id, name, kind, line, end_line, signature, scope, is_public)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " (repo_id, file_id, name, kind, line, end_line, signature, scope,"
+        "  is_public, doc)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             (repo_id, file_id, s["name"], s["kind"], s["line"], s.get("end_line"),
-             s.get("signature"), s.get("scope"), int(s.get("is_public", 0)))
+             s.get("signature"), s.get("scope"), int(s.get("is_public", 0)),
+             s.get("doc") or None)
             for s in symbols
         ],
     )

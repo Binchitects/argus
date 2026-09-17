@@ -504,7 +504,7 @@ def test_tools_list_descriptions_are_load_bearing(two_repo_cfg):
     assert set(by_name) == {
         "find_symbol", "find_references", "search_code", "get_file", "index_status",
         "docs_lookup", "docs_search", "docs_get", "docs_verify", "docs_find", "docs_contracts", "code_contracts",
-        "repo_map", "which_repo", "impact_of", "semantic_search",
+        "repo_map", "which_repo", "impact_of", "semantic_search", "overview",
     }
     # The distinction the model has to make: semantic_search is for questions
     # with no identifier in them. A description that does not say so leaves it

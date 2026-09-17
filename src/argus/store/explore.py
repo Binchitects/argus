@@ -94,7 +94,8 @@ def symbols(conn: sqlite3.Connection, *, pattern: str = "", repo: str = "",
     # that silently stops at the limit reads as "that is all there is".
     rows = conn.execute(
         "SELECT s.name, s.kind, s.scope, s.signature, s.line, s.end_line,"
-        "       s.is_public, f.path, f.lang, r.path_with_namespace, r.branch,"
+        "       s.is_public, s.doc, f.path, f.lang,"
+        "       r.path_with_namespace, r.branch,"
         "       s.repo_id"
         "  FROM symbols s"
         "  JOIN files f ON f.id = s.file_id"

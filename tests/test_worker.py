@@ -560,7 +560,7 @@ def test_partial_ctags_batch_leaves_the_uncovered_path_incomplete(env, monkeypat
 
     # decoder.h was covered by the same batch and must still be complete.
     hdr = _symbols_sha_row(conn, repo_id, "decoder.h")
-    assert hdr["symbols_sha"] == hdr["blob_sha"]
+    assert hdr["symbols_sha"] == worker._symbols_stamp(hdr["blob_sha"])
 
     # Upstream has NOT changed, so only the retry queue can bring decoder.c
     # back on the next pass.
@@ -570,7 +570,7 @@ def test_partial_ctags_batch_leaves_the_uncovered_path_incomplete(env, monkeypat
         " WHERE f.repo_id = ? AND f.path = 'decoder.c'", (repo_id,))}
     assert "DecodeFrame" in names
     row = _symbols_sha_row(conn, repo_id, "decoder.c")
-    assert row["symbols_sha"] == row["blob_sha"]
+    assert row["symbols_sha"] == worker._symbols_stamp(row["blob_sha"])
 
 
 def test_healthy_root_file_survives_a_subdirectory_namesake_failing(env, monkeypatch):
@@ -601,7 +601,7 @@ def test_healthy_root_file_survives_a_subdirectory_namesake_failing(env, monkeyp
     monkeypatch.undo()
 
     row = _symbols_sha_row(conn, repo_id, "main.c")
-    assert row["symbols_sha"] == row["blob_sha"], (
+    assert row["symbols_sha"] == worker._symbols_stamp(row["blob_sha"]), (
         "the root main.c was blamed for sub/main.c's diagnostic and lost its"
         " completion marker"
     )
@@ -614,7 +614,10 @@ def test_healthy_root_file_survives_a_subdirectory_namesake_failing(env, monkeyp
 
     # The file ctags actually named is still handled as a real failure.
     sub = _symbols_sha_row(conn, repo_id, "sub/main.c")
-    assert sub["symbols_sha"] != sub["blob_sha"]
+    # Not `!= blob_sha`: since the stamp gained a contract-version prefix, a
+    # SUCCESSFUL row also differs from the bare blob sha, so that assertion
+    # would now pass for exactly the case this test exists to rule out.
+    assert sub["symbols_sha"] != worker._symbols_stamp(sub["blob_sha"])
     assert "sub/main.c" in _queued_paths(conn, repo_id)
     assert _attempts(conn, repo_id, "sub/main.c") == 1
 
@@ -955,7 +958,7 @@ def test_unattributable_batch_failure_does_not_burn_the_retry_budget(env, monkey
     # decoder.c produced tags every pass and must still be complete --
     # this fix must not make genuinely covered files worse off.
     dec = _symbols_sha_row(conn, repo_id, "decoder.c")
-    assert dec["symbols_sha"] == dec["blob_sha"]
+    assert dec["symbols_sha"] == worker._symbols_stamp(dec["blob_sha"])
 
 
 def test_failure_inside_upsert_does_not_desync_fts(env, monkeypatch):
@@ -1077,3 +1080,218 @@ def test_clean_pass_clears_previously_set_last_run_timed_out_flag(env):
     row = conn.execute("SELECT last_run_timed_out FROM repos WHERE id = ?",
                        (repo_id,)).fetchone()
     assert row["last_run_timed_out"] == 0
+
+
+def test_an_extractor_change_re_extracts_every_file(env, monkeypatch):
+    """The gate must notice a change in what a symbol ROW contains, not only a
+    change in the file.
+
+    `symbols_sha` was compared against the blob sha alone, which answers "were
+    these symbols extracted from this revision of the file" -- right for a
+    content change, wrong for an extractor change. Improve the extractor and
+    every file still looks current, so nothing is re-parsed and the improvement
+    reaches only the files somebody happens to edit afterwards.
+
+    That is not hypothetical: adding the doc column would have reached a real
+    estate over months, half-documented, with no way to tell which half. The
+    contract version is prefixed into the stamp so bumping it invalidates every
+    row on the next pass, with no migration and no manual step.
+    """
+    conn, cfg, project, repo_id, _, _ = env
+    _run(env)
+
+    from argus import worker
+    from argus.parse import ctags
+
+    blob = conn.execute("SELECT blob_sha FROM files WHERE path = 'decoder.c'"
+                        ).fetchone()["blob_sha"]
+    assert worker._already_current(conn, repo_id, "decoder.c", blob) is True
+
+    # Same file, same blob, different extractor.
+    monkeypatch.setattr(ctags, "SYMBOL_CONTRACT_VERSION", "999",
+                        raising=False)
+    monkeypatch.setattr(worker.ctags, "SYMBOL_CONTRACT_VERSION", "999")
+    assert worker._already_current(conn, repo_id, "decoder.c", blob) is False, \
+        "an extractor change did not invalidate the stored symbols"
+
+
+def test_rows_written_before_the_stamp_existed_are_re_extracted(env):
+    """A bare blob sha is what every row held before the contract version was
+    introduced. It cannot equal a prefixed stamp, so an existing index
+    re-extracts itself rather than staying as it was."""
+    conn, cfg, project, repo_id, _, _ = env
+    _run(env)
+    from argus import worker
+
+    blob = conn.execute("SELECT blob_sha FROM files WHERE path = 'decoder.c'"
+                        ).fetchone()["blob_sha"]
+    conn.execute("UPDATE files SET symbols_sha = ? WHERE path = 'decoder.c'", (blob,))
+    conn.commit()
+    assert worker._already_current(conn, repo_id, "decoder.c", blob) is False
+
+
+def test_the_stamp_is_stable_within_a_version(env):
+    """The common path must not re-extract. A stamp that changed between reads
+    would make every pass redo every file, which is the livelock the gate
+    exists to prevent."""
+    conn, cfg, project, repo_id, _, _ = env
+    _run(env)
+    from argus import worker
+
+    blob = conn.execute("SELECT blob_sha FROM files WHERE path = 'decoder.c'"
+                        ).fetchone()["blob_sha"]
+    assert worker._symbols_stamp(blob) == worker._symbols_stamp(blob)
+    assert worker._already_current(conn, repo_id, "decoder.c", blob) is True
+    _run(env)
+    assert worker._already_current(conn, repo_id, "decoder.c", blob) is True
+
+
+def test_a_stale_contract_forces_a_pass_to_look_at_unchanged_files(env):
+    """The stamp alone is not enough, and this is why.
+
+    `_already_current` makes an individual file look stale, but a pass works
+    from a git DIFF -- and a file nobody has committed to is not in it. So
+    nothing ever looks. Without the recorded version, bumping the extractor
+    reaches only the files edited afterwards: the doc column arriving across a
+    real estate over months, half-documented with no way to tell which half.
+
+    An index with no record at all is stale by definition -- it was built before
+    the version was tracked.
+    """
+    conn, cfg, project, repo_id, _, _ = env
+    from argus import worker
+
+    # Freshly migrated, nothing recorded yet: stale.
+    assert worker.contract_is_stale(conn, repo_id) is True
+
+    worker.record_contract(conn, repo_id)
+    assert worker.contract_is_stale(conn, repo_id) is False
+
+    # A pass that finished records it; a later commit does not make it stale.
+    _run(env)
+    assert worker.contract_is_stale(conn, repo_id) is False
+
+
+def test_a_stale_contract_re_extracts_without_a_commit(env, monkeypatch):
+    """The end-to-end version: an unchanged tree, a bumped extractor, and the
+    symbol rows come back re-extracted."""
+    conn, cfg, project, repo_id, _, _ = env
+    from argus import worker
+    from argus.parse import ctags
+
+    _run(env)
+    assert worker.contract_is_stale(conn, repo_id) is False
+
+    # Same files, same commits -- only the extractor is different.
+    monkeypatch.setattr(worker.ctags, "SYMBOL_CONTRACT_VERSION", "999")
+    assert worker.contract_is_stale(conn, repo_id) is True
+
+    before = conn.execute("SELECT symbols_sha FROM files WHERE path = 'decoder.c'"
+                          ).fetchone()["symbols_sha"]
+    _run(env)                       # no new commit; nothing in the git diff
+    after = conn.execute("SELECT symbols_sha FROM files WHERE path = 'decoder.c'"
+                         ).fetchone()["symbols_sha"]
+    assert after != before, "an unchanged file was not re-extracted"
+    assert after.startswith("999:"), after
+
+
+def test_a_timed_out_pass_does_not_record_the_contract(env, monkeypatch):
+    """Recording it after a pass that was cut short would strand every file the
+    pass did not reach -- until somebody happened to edit them, which is exactly
+    the failure the whole mechanism exists to prevent.
+
+    Driven through the pass rather than by calling the recorder, because the
+    guard being tested is the condition around the call, not the call itself.
+    """
+    conn, cfg, project, repo_id, m, _ = env
+    from argus import worker
+
+    recorded: list[str] = []
+    monkeypatch.setattr(worker, "record_contract",
+                        lambda c, r: recorded.append("called"))
+    # The repository is already at HEAD, so this pass has work to do only if the
+    # contract is stale -- force that, then cut the pass short.
+    monkeypatch.setattr(worker, "contract_is_stale", lambda c, r: True)
+    # A zero time budget makes the pass stop before it reaches any file, which
+    # is the same shape as a timeout on a large estate.
+    cfg_short = IndexConfig(data_dir=cfg.data_dir, db_path=cfg.db_path,
+                            repo_time_budget_seconds=0)
+    _run(env)
+    recorded.clear()
+    m2 = mirror.ensure_mirror(cfg_short, project, clone_url=str(env[5]))
+    sha = mirror.head_sha(m2, "main")
+    tree = mirror.sync_worktree(cfg_short, project.gitlab_id, m2, sha)
+    result = worker.index_repo(conn, cfg_short, project, m2, tree, sha, None)
+    assert result.timed_out is True, "the pass did not time out as set up"
+    assert recorded == [], "a timed-out pass recorded the contract version"
+
+
+def test_one_repo_finishing_does_not_unlock_the_others(env, monkeypatch):
+    """The bug a live run found, and the reason the key is per repo.
+
+    `record_contract` fires at the end of each repository's pass. With ONE
+    global key, the first repository to finish marked the whole index current
+    and every repository after it took the "up to date" shortcut: one repo
+    re-extracted, the rest did not, and the run reported success. Measured on
+    the reference stack -- driver-shim stamped, eal-core and etl-decoder both
+    "up to date", zero docs anywhere.
+    """
+    conn, cfg, project, repo_id, _, _ = env
+    from argus import worker
+
+    other = repo_id + 1000
+    assert worker.contract_is_stale(conn, repo_id) is True
+    assert worker.contract_is_stale(conn, other) is True
+
+    worker.record_contract(conn, repo_id)
+    assert worker.contract_is_stale(conn, repo_id) is False
+    assert worker.contract_is_stale(conn, other) is True, \
+        "recording one repository's contract cleared another's"
+
+
+def test_re_indexing_does_not_leave_orphaned_vectors(env, monkeypatch):
+    """The vec tables have no foreign key and cannot have one.
+
+    `symbol_embeddings` cascades from `symbols`, so re-indexing a file deletes
+    its symbol rows, writes new ones with NEW ids, and leaves the vectors behind
+    in `vec_symbols_bin` and `vec_symbols_i8` for ever. Found on the reference
+    stack as 10 vectors for 6 embeddings after a handful of re-indexes.
+
+    The growth is the lesser problem. The coarse KNN stage ranks over those
+    rows, so an orphan occupies one of the k slots and is then discarded by the
+    ACL re-check -- the search returns fewer real results than it asked for,
+    with nothing in the response explaining why.
+    """
+    import sqlite3
+    import pytest as _pytest
+    from argus import semantic
+
+    conn, cfg, project, repo_id, _, _ = env
+    try:
+        semantic.ensure_vec_tables(conn)
+    except Exception as exc:                          # noqa: BLE001
+        _pytest.skip(f"sqlite-vec unavailable here: {exc}")
+
+    _run(env)
+    ids = [r["id"] for r in conn.execute("SELECT id FROM symbols")]
+    if not ids:
+        _pytest.skip("this fixture's symbols do not survive extraction")
+    for sid in ids:
+        conn.execute("INSERT OR REPLACE INTO symbol_embeddings"
+                     " (symbol_id, repo_id, embed_text, model, dim, text_version)"
+                     " VALUES (?, ?, 't', 'm', 1, '2')", (sid, repo_id))
+    conn.execute("DELETE FROM symbol_embeddings")     # what a cascade leaves
+    conn.commit()
+
+    # Simulate a re-index: symbol rows replaced, embeddings cascaded away, the
+    # vec rows still pointing at ids that no longer exist.
+    for sid in ids[:1]:
+        conn.execute("INSERT OR REPLACE INTO vec_symbols_bin"
+                     " (symbol_id, embedding) VALUES (?, vec_bit(?))",
+                     (sid, semantic.to_bits([0.0] * semantic.embed_module.EMBED_DIM)))
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) FROM vec_symbols_bin").fetchone()[0] == 1
+
+    dropped = semantic.prune_orphans(conn)
+    assert dropped >= 1, "an orphaned vector survived"
+    assert conn.execute("SELECT COUNT(*) FROM vec_symbols_bin").fetchone()[0] == 0

@@ -378,6 +378,59 @@ is unaffected. Loki keeps logs for 14 days (`config/loki/loki-config.yml`).
 
 ---
 
+## What the code does, not what it is called
+
+Argus indexes each symbol's **doc comment** — the sentence above a definition —
+and uses it both to match and to answer.
+
+It did not always. The embedded text was a symbol's kind, name, signature, scope
+and path: what it is *called*, and nothing about what it *does*. So a question
+phrased the way a person asks it could only match vocabulary. Measured on a real
+corpus: asked "what expires keys past their TTL", semantic search returned
+`expireSlaveKeys` — which contains the words "expire" and "keys" and does
+something else entirely. The routine that actually reclaims expired keys has
+neither word in its name.
+
+The sentence was in the index the whole time. `files.content` holds the entire
+file and each symbol records the line it starts on, so the comment above a
+definition had been in the database, unread, since the first version. Argus now
+reads it into `symbols.doc`, leads the embedded text with it, and returns it on
+every symbol-level result.
+
+Verified on a fixture built to be falsifiable — two functions with equally
+plausible names and opposite documentation:
+
+| question | matching on names | matching with the doc |
+|---|---|---|
+| "what reclaims keys whose time to live has elapsed" | the wrong one | **the right one** |
+| "propagate an expiry decision to a replica" | the wrong one | **the right one** |
+
+Symbols with no doc comment score identically either way, so the doc only adds
+where somebody wrote one. Two things worth knowing: a doc comment that says what
+a function does **not** do is evidence for the thing it negates, and the embedded
+text carries its own version (`EMBED_TEXT_VERSION`) so that changing what goes
+into a vector rebuilds the vectors rather than only the symbols edited next.
+
+Re-index to pick this up on an existing deployment. Adding the column bumps the
+symbol-extractor contract version, so the **first pass re-parses every file**
+once and then reports `embedded: N` — the index pass now embeds what it indexed,
+which is what keeps `semantic_search` current on a stack where nobody runs
+`argus embed` by hand. See [Indexing on push](#indexing-on-push) for why that
+mattered.
+
+### Asking what you have
+
+For "what do you have that does X", use `semantic_search`: it matches on meaning
+and every result carries the symbol's `doc`, which is the sentence that tells
+you whether it is the one you want. Read it before choosing.
+
+In an unfamiliar estate, call `overview` first. It describes what each repository
+**is** — its README, its layout, the abstractions somebody documented, and the
+cross-repo dependencies — so searching starts from somewhere instead of from a
+guessed name. A list of symbol names is not an architecture.
+
+---
+
 ## Is the index still telling the truth?
 
 Every alert rule in this stack answers a question about the machine: is the GPU

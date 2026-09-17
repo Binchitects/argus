@@ -1099,3 +1099,58 @@ def test_an_empty_repository_is_reported_not_silently_dropped(
         conn.close()
     assert [r[0] for r in rows] == [], \
         "the empty repository got a row and will now alert as stale forever"
+
+
+# --- indexing embeds ------------------------------------------------------------
+#
+# The index pass is the ONLY thing that runs on a schedule. The poller and the
+# push webhook both run `argus index`, and until this existed nothing in the
+# stack ran `argus embed` at all -- so the index grew, the vectors did not, and
+# semantic_search answered from whatever was embedded the last time somebody ran
+# the command by hand. Silently: a symbol with no vector looks exactly like a
+# symbol that does not match.
+
+
+def test_indexing_also_embeds_what_it_indexed(config_file, fake_projects, monkeypatch):
+    from argus import cli as cli_mod
+    from argus import semantic
+
+    calls = []
+    monkeypatch.setattr(semantic, "build_symbol_embeddings",
+                        lambda conn, **kw: calls.append(kw) or 7)
+    monkeypatch.setattr(cli_mod.auditlog, "index_end",
+                        lambda **kw: calls.append(kw))
+
+    assert cli_mod.main(["index", "--config", str(config_file)]) == 0
+    assert calls and "limit" in calls[0], \
+        "argus index finished without embedding anything"
+    assert calls[1]["embedded"] == 7, \
+        "the pass did not report how many vectors it wrote"
+
+
+def test_an_embedding_failure_does_not_fail_the_index(config_file, fake_projects,
+                                                      monkeypatch, capsys):
+    """Indexing is the primary function and embedding needs a second service.
+    An estate with no Ollama still has a perfectly good lexical index, and
+    exiting non-zero would report that as a broken run."""
+    from argus import cli as cli_mod
+    from argus import semantic
+
+    def explode(conn, **kw):
+        raise RuntimeError("ollama went away")
+
+    monkeypatch.setattr(semantic, "build_symbol_embeddings", explode)
+    assert cli_mod.main(["index", "--config", str(config_file)]) == 0
+    assert "embedding failed" in capsys.readouterr().err
+
+
+def test_the_per_pass_embed_limit_is_read_per_call(monkeypatch):
+    """Not at import: that is the bug WAIT_SECONDS had in the seed script, where
+    a value captured at import ignored every later change."""
+    from argus import cli as cli_mod
+    monkeypatch.setenv("ARGUS_EMBED_PER_PASS", "50")
+    assert cli_mod._embed_per_pass() == 50
+    monkeypatch.setenv("ARGUS_EMBED_PER_PASS", "0")
+    assert cli_mod._embed_per_pass() == 0
+    monkeypatch.setenv("ARGUS_EMBED_PER_PASS", "not a number")
+    assert cli_mod._embed_per_pass() == cli_mod.DEFAULT_EMBED_PER_PASS

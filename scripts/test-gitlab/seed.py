@@ -28,6 +28,41 @@ import time
 import httpx
 
 GITLAB = "http://localhost:8929"
+
+#: A second ref for ONE project, so branch-agnostic behaviour is verifiable.
+#:
+#: Trunk and this branch share a symbol name with DIFFERENT documentation, and
+#: this branch alone defines a symbol trunk has never heard of. That makes every
+#: branch claim falsifiable: an unqualified question must answer from trunk and
+#: must not find the branch-only symbol; naming the branch must find it; and an
+#: unindexed branch must say so rather than returning an empty list that reads
+#: as "no such symbol".
+RELEASE_BRANCH = "v2"
+
+#: The branch-only source. `DecodeFrameV2` exists nowhere else, and the doc on
+#: the shared `DecodeFrame` says which branch it came from -- so a result can be
+#: traced back to the ref that answered.
+RELEASE_DECODER_C = (
+    '#include "eal/decoder.h"\n'
+    "\n"
+    "static int HelperOnly(int x) { return x + 1; }\n"
+    "\n"
+    "/**\n"
+    " * V2 ONLY: decode one frame using the hardware path.\n"
+    " *\n"
+    " * Added on the release branch and absent from trunk, which is what makes\n"
+    " * a branch-agnostic query falsifiable.\n"
+    " */\n"
+    "int DecodeFrameV2(const char* buf, int len) { return HelperOnly(len); }\n"
+    "\n"
+    "/**\n"
+    " * Decode one frame from a caller-owned buffer.\n"
+    " *\n"
+    " * ON THE V2 BRANCH this description says so, which is how a result can be\n"
+    " * traced back to the branch that answered.\n"
+    " */\n"
+    "int DecodeFrame(const char* buf, int len) { return HelperOnly(len); }\n"
+)
 CONTAINER = "argus-test-gitlab"
 OUT = pathlib.Path(__file__).parent / "seeded.json"
 
@@ -46,8 +81,59 @@ PROJECTS = {
         ),
         "src/decoder.c": (
             '#include "eal/decoder.h"\n'
+            "\n"
             "static int HelperOnly(int x) { return x + 1; }\n"
+            "\n"
+            "/**\n"
+            " * Decode one frame from a caller-owned buffer.\n"
+            " *\n"
+            " * Reads exactly len bytes and never advances the caller's pointer, so\n"
+            " * the same buffer can be handed to the next stage unchanged.\n"
+            " */\n"
             "int DecodeFrame(const char* buf, int len) { return HelperOnly(len); }\n"
+            "\n"
+            "/*\n"
+            " * The two functions below exist to be told apart by their DOCUMENTATION\n"
+            " * and nothing else, and they are a transcription of a real failure.\n"
+            " *\n"
+            " * On a real corpus, asked \"what expires keys past their TTL\", semantic\n"
+            " * search returned expire_slave_keys -- which contains the words \"expire\"\n"
+            " * and \"keys\" and does something else entirely. The routine that actually\n"
+            " * reclaims expired keys has neither word in its name. With only a name,\n"
+            " * a signature and a path to embed, the index could not tell them apart,\n"
+            " * because the one thing that does is the sentence above each one.\n"
+            " *\n"
+            " * Which is why they are here: if the doc comment ever stops being\n"
+            " * extracted or stops being embedded, this fixture goes back to returning\n"
+            " * the wrong function and the suite says so, instead of quietly reverting\n"
+            " * to matching vocabulary.\n"
+            " *\n"
+            " * The second one's doc deliberately describes REPLICATION and never says\n"
+            " * what it does not do. The first version read \"it is NOT the routine that\n"
+            " * reclaims expired keys\", and that negation pulled it to within 0.0002\n"
+            " * of the right answer -- an embedding of a sentence lands near the thing\n"
+            " * the sentence is about, negation included. Worth knowing generally:\n"
+            " * documenting what a function does not do is not neutral, it is\n"
+            " * evidence for the opposite.\n"
+            " */\n"
+            "\n"
+            "/**\n"
+            " * Reclaim keys whose time to live has elapsed.\n"
+            " *\n"
+            " * Walks the expiration index in bounded steps so a large keyspace does\n"
+            " * not stall the caller, and frees each key it finds. The name says\n"
+            " * nothing about any of that, deliberately.\n"
+            " */\n"
+            "int active_expire_cycle(int budget) { return budget; }\n"
+            "\n"
+            "/**\n"
+            " * Forward a decision to a follower.\n"
+            " *\n"
+            " * Serialises the command and appends it to the replication stream so\n"
+            " * the replica applies it in order; the decision itself was made by\n"
+            " * the caller, before this was called.\n"
+            " */\n"
+            "int expire_slave_keys(int budget) { return budget; }\n"
         ),
     },
     "etl-decoder": {
@@ -180,6 +266,29 @@ def main() -> int:
                              "commit_message": f"add {path}"}),
                 f"add {path}")
         print(f"  seeded {len(files)} files")
+
+    # --- a second ref, on one project -------------------------------------
+    #
+    # Re-run safe: an existing branch is reused and its file rewritten, so this
+    # works both on a fresh instance and on one that was seeded before this
+    # existed. That matters because the project loop above deliberately SKIPS
+    # file creation for a project it is reusing, which is exactly how a new
+    # fixture file silently fails to appear on a re-seed.
+    releasable = project_ids.get("eal-core")
+    if releasable:
+        r = c.post(f"/projects/{releasable}/repository/branches",
+                   json={"branch": RELEASE_BRANCH, "ref": "main"})
+        if r.status_code in (200, 201):
+            print(f"created branch {RELEASE_BRANCH} on eal-core")
+        elif r.status_code == 400 and "already exists" in r.text:
+            print(f"reusing existing branch {RELEASE_BRANCH} on eal-core")
+        else:
+            _ok(r, f"create branch {RELEASE_BRANCH}")
+        _ok(c.put(
+            f"/projects/{releasable}/repository/files/src%2Fdecoder.c",
+            json={"branch": RELEASE_BRANCH, "content": RELEASE_DECODER_C,
+                  "commit_message": "release: hardware decode path"}),
+            f"write the {RELEASE_BRANCH} decoder")
 
     # --- developers, each scoped to exactly one project -------------------
     users: dict[str, dict] = {}

@@ -151,6 +151,11 @@ def _minimal_args_for(name, conn, target_repo_id):
                 " VALUES (?, vec_int8(?))", (symbol_id, to_int8(vector)))
         conn.commit()
         return {"query_vec": _basis_vector(target_repo_id, EMBED_DIM)}
+    if name == "repo_overview":
+        # `repo=None` is the estate-wide form, which is the one that has to be
+        # allowlist-filtered: with a repo name the caller has already named
+        # something, and the WHERE clause still requires it to be permitted.
+        return {}
     if name == "scope_to_branch":
         # No extra arguments: branch=None means "each project's default
         # branch", and the two fixture repos are both on their default. The
@@ -1181,3 +1186,97 @@ def test_impact_of_excludes_a_repo_outside_the_allowlist(impact_db):
         assert queries.impact_of([rid + 999], conn, rid, "include/a.h") == {}
     finally:
         conn.close()
+
+
+# --- application knowledge -----------------------------------------------------
+#
+# The index has always known what the code is CALLED. `repo_overview` is what
+# lets an agent ask what a repository IS, so its first move in an unfamiliar
+# estate is not guessing symbol names.
+
+
+def test_overview_says_what_each_repository_is(tmp_path):
+    conn = open_db(tmp_path / "i.db")
+    rid = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/decoder",
+                             default_branch="main", http_url="https://x/d")
+    fid = writes.upsert_file(conn, repo_id=rid, path="README.md", lang="Markdown",
+                             size=40, blob_sha="r1",
+                             content="# Decoder\n\nH.265 frame decoding for the pipeline.\n")
+    writes.upsert_file(conn, repo_id=rid, path="src/decoder.c", lang="c",
+                       size=20, blob_sha="c1", content="int x;")
+    writes.upsert_file(conn, repo_id=rid, path="test/decoder_test.c", lang="c",
+                       size=20, blob_sha="c2", content="int y;")
+    sym = conn.execute("SELECT id FROM files WHERE path = 'src/decoder.c'").fetchone()["id"]
+    writes.replace_symbols(conn, rid, sym, [
+        {"name": "DecodeFrame", "kind": "function", "line": 1, "end_line": 1,
+         "signature": "int (const char*, int)", "scope": None, "is_public": 1,
+         "doc": "Decode one frame from a caller-owned buffer."},
+        {"name": "Helper", "kind": "function", "line": 2, "end_line": 2,
+         "signature": "int (int)", "scope": None, "is_public": 1, "doc": ""},
+    ], "c1")
+    conn.commit()
+
+    out = queries.repo_overview([rid], conn)
+    assert out["truncated"] is False
+    repo = out["repos"][0]
+    assert repo["path_with_namespace"] == "g/decoder"
+    assert "H.265 frame decoding" in repo["readme"], repo["readme"]
+    assert repo["files"] == 3
+    # The layout is the top-level directories, which is what a repository
+    # looks like at a glance; `src/decoder/h265/arm64/` is noise, `src/` is not.
+    assert [d["path"] for d in repo["layout"]] == ["(root)", "src", "test"], \
+        "all three hold one file, so the root leads and the rest are alphabetical"
+    # Documented public symbols only: the abstraction somebody explained.
+    assert [s["name"] for s in repo["key_symbols"]] == ["DecodeFrame"]
+    assert repo["key_symbols"][0]["doc"].startswith("Decode one frame")
+    conn.close()
+
+
+def test_overview_prefers_the_root_readme(tmp_path):
+    """A repository can hold several READMEs, and the one that describes the
+    project is at the root rather than inside a subdirectory."""
+    conn = open_db(tmp_path / "i.db")
+    rid = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/x",
+                             default_branch="main", http_url="https://x/x")
+    writes.upsert_file(conn, repo_id=rid, path="docs/vendor/README.md", lang="Markdown",
+                       size=10, blob_sha="a", content="# vendored thing")
+    writes.upsert_file(conn, repo_id=rid, path="README.md", lang="Markdown",
+                       size=10, blob_sha="b", content="# the actual project")
+    conn.commit()
+    out = queries.repo_overview([rid], conn)
+    assert out["repos"][0]["readme"] == "# the actual project"
+    conn.close()
+
+
+def test_overview_drops_dependency_edges_to_repos_you_cannot_see(tmp_path):
+    """`repo_deps` is a global graph. An edge to a repo outside the allowlist is
+    dropped rather than counted -- "depends on 1 repo you cannot see" is itself
+    a disclosure, which is the decision repo_map already made for one repo."""
+    conn = open_db(tmp_path / "i.db")
+    mine = writes.upsert_repo(conn, gitlab_id=1, path_with_namespace="g/mine",
+                              default_branch="main", http_url="https://x/m")
+    hidden = writes.upsert_repo(conn, gitlab_id=2, path_with_namespace="g/hidden",
+                                default_branch="main", http_url="https://x/h")
+    conn.execute("INSERT INTO repo_deps (from_repo_id, to_repo_id, weight)"
+                 " VALUES (?, ?, 7)", (mine, hidden))
+    conn.commit()
+
+    out = queries.repo_overview([mine], conn)
+    repo = out["repos"][0]
+    assert repo["depends_on"] == [], "a hidden repository was disclosed as an edge"
+    conn.close()
+
+
+def test_overview_says_when_it_truncated(tmp_path):
+    """A list of forty that does not say it is a list of forty reads as "there
+    are forty"."""
+    conn = open_db(tmp_path / "i.db")
+    ids = []
+    for i in range(queries.MAX_OVERVIEW_REPOS + 3):
+        ids.append(writes.upsert_repo(conn, gitlab_id=i, path_with_namespace=f"g/r{i:03d}",
+                                      default_branch="main", http_url="https://x"))
+    conn.commit()
+    out = queries.repo_overview(ids, conn)
+    assert out["truncated"] is True
+    assert out["shown"] == queries.MAX_OVERVIEW_REPOS
+    conn.close()

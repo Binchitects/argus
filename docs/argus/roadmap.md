@@ -130,6 +130,68 @@ sits at the end of this milestone rather than inside the server.
 
 ---
 
+## Milestone 3.5 — what the code DOES, not what it is called
+
+The measured failure this closes: asked "what expires keys past their TTL",
+`semantic_search` returned `expireSlaveKeys` where `activeExpireCycle` was the
+answer. Same file, both plausible names, identical signatures, and the only
+thing distinguishing them is the sentence above each one saying what it does.
+
+That sentence was already in the index. `files.content` holds the entire file
+and `symbols.line` locates the symbol inside it, so the comment immediately
+above a definition had been sitting in the database, unread, since the first
+version. `argus.parse.docs` reads it; `symbols.doc` stores it; the embedded text
+leads with it; and every symbol-level result returns it.
+
+**Measured, on a fixture built to be falsifiable** — two functions with equally
+plausible names and opposite documentation, asked the natural question:
+
+| query | ranking on name + signature | ranking with the doc |
+|---|---|---|
+| "what reclaims keys whose time to live has elapsed" | `expire_slave_keys` 0.616 **(wrong)** | `active_expire_cycle` 0.703 **(right)** |
+| "propagate an expiry decision to a replica" | `active_expire_cycle` 0.564 **(wrong)** | `expire_slave_keys` 0.680 **(right)** |
+
+The ranking flips on both. Symbols with no doc comment score identically before
+and after (+0.0000), so the doc only adds where somebody wrote one.
+
+**Two traps worth recording.** A negation is evidence for the thing it negates:
+the first version of the fixture said the wrong function "is NOT the routine
+that reclaims expired keys", and that clause pulled it to within 0.0002 of the
+right answer. Documenting what a function does *not* do is not neutral.
+
+And the embedded text needed its own version (`EMBED_TEXT_VERSION`), because a
+vector was considered current if a row existed with the same model and
+dimension -- which cannot notice that the TEXT changed. Without it, adding the
+doc to the embedded text would have rebuilt nothing and reached only the symbols
+whose file was edited afterwards.
+
+### What an agent gets now
+
+- **`overview`** -- what each repository IS: README, layout, languages,
+  documented abstractions, and cross-repo dependencies in both directions.
+  Names alone are not an architecture.
+- **`semantic_search`** with a `doc` on every result, so a capability question
+  ("what do you have that does X") is answerable by reading rather than by
+  guessing which of two similar names is the one.
+- The server instructions say to orient with `overview` first and to read `doc`
+  before choosing a result.
+
+### Branch-agnostic, verified rather than assumed
+
+One project is indexed at trunk **and** at a release branch, with a
+branch-only symbol and different documentation for a shared name. Verified
+over MCP, and now part of `scripts/test-gitlab/verify_tools.py`:
+
+- an unqualified question answers from **trunk**, and cannot see the branch-only
+  symbol;
+- naming the branch returns that branch's content;
+- an **unindexed** branch raises `UnknownBranch` naming the branches that ARE
+  indexed, rather than returning an empty list that reads as "no such symbol";
+- `semantic_search` is branch-scoped in both directions;
+- `index_status` reports one row per (repo, branch).
+
+---
+
 ## Milestone 3 — operations
 
 | item | why | today |
