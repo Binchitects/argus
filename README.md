@@ -81,7 +81,7 @@ python scripts/smoke_test.py --url https://argus.llm.localhost/mcp --token <deve
 |---|---|---|
 | [`stack/`](stack/) | **The deployment.** Compose file, per-service config, env samples, operational scripts | [`stack/README.md`](stack/README.md) |
 | [`src/argus/`](src/argus/) | **The Argus package** — the MCP code index and documentation server. Installable and runnable on its own | [`docs/argus/`](docs/argus/) |
-| [`packs/`](packs/) | **Nine built knowledge packs**, 1.67 GB — prose, API symbols and embeddings in one SQLite file each. Three more are parked in `packs/disabled/` | [`docs/argus/knowledge-packs.md`](docs/argus/knowledge-packs.md) |
+| [`packs/`](packs/) | **Eleven built knowledge packs**, 1.87 GB — prose, API symbols and embeddings in one SQLite file each. Three more are parked in `packs/disabled/` | [`docs/argus/knowledge-packs.md`](docs/argus/knowledge-packs.md) |
 | [`tests/`](tests/) | The Argus suite — **1,091 tests**, no Docker required | `pytest` |
 | [`docs/`](docs/) | **All documentation**, split into [`docs/stack/`](docs/stack/) and [`docs/argus/`](docs/argus/) | [`docs/`](docs/) |
 | [`clients/`](clients/) | **Copy-pasteable configs** for DeepSeek Harness, Qwen Code, Claude Code, Continue and any generic MCP client, each marked with whether it was actually executed | [`clients/README.md`](clients/README.md) |
@@ -922,7 +922,7 @@ would otherwise become an agent that cannot finish a sentence.
 [`clients/claude-code/verify-after.sh`](clients/claude-code/verify-after.sh) wires
 it into a Claude Code `Stop` hook.
 
-## Nine knowledge packs, 1.67 GB, zero unresolved symbols
+## Eleven knowledge packs, 1.87 GB, zero unresolved symbols
 
 ```mermaid
 xychart-beta
@@ -938,12 +938,26 @@ xychart-beta
 | `wdk` — driver DDI reference | 25,903 | 205,848 | 37,938 | 292.5 MB | CC-BY-4.0 |
 | `dotnet` — .NET BCL + MS NuGet packages | 11,013 | 140,661 | **215,269** | 236.4 MB | CC-BY-4.0 |
 | `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,325 | 180.0 MB | CC-BY-4.0 |
+| `win32-samples` — Microsoft desktop samples | 5,801 | 67,714 | 139 | 136.2 MB | MIT |
 | `cppreference` — C++ standard library | 6,640 | 68,891 | 5,406 | 125.6 MB | CC-BY-SA-3.0 |
+| `wdk-samples` — Microsoft driver samples | 2,273 | 39,879 | 104 | 76.8 MB | MS-PL |
 | `scripting` — PowerShell, cmd, Unix | 9,310 | 46,052 | 9,310 | 70.9 MB | CC-BY-4.0 |
 | `python` — 3.13 | 540 | 13,751 | 18,778 | 31.8 MB | PSF-2.0 |
 | `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 25.0 MB | CC-BY-4.0 |
 | `sqlite` — SQL, pragmas, FTS5 | 837 | 8,987 | 36 | 18.4 MB | public domain |
-| **total** | **132,033** | **1,100,449** | **443,815** | **1.67 GB** | |
+| **total** | **140,107** | **1,208,042** | **444,058** | **1.87 GB** | |
+
+The two `-samples` packs are the other half of a question the reference half
+answers badly. `win32` and `wdk` say what an API *does*; the samples say what
+calling it looks like in a working program. They are separate files rather
+than folded into the references so that a deployment can install either half.
+
+**Scope a search to reach them.** Unscoped, a query like *"sample that creates
+a device object"* returns reference pages — the reference matches the question's
+wording better than code does. With `lang="wdk-samples"` the same query returns
+`general/SimpleMediaSource - Device.c`, `bluetooth/bthecho` and `usb/umdf2_fx2`,
+which is what was asked for. The tool description names the installed sources
+for exactly this reason.
 
 ### Which Windows an API needs
 
