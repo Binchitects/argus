@@ -37,7 +37,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-HOOK = ROOT / "clients" / "claude-code" / "verify-after.sh"
+# A single literal, not joined parts: `tests/test_dockerfile.py` scans for
+# path strings to check the image's test stage carries every file the
+# suite reads, and a path assembled from pieces is invisible to it --
+# which is how this hook reached `docker build` and failed there with
+# exit 127 instead of failing on the developer's machine.
+HOOK = ROOT / "clients/claude-code/verify-after.sh"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("bash") is None, reason="the hook is a bash script")

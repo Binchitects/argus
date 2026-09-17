@@ -87,6 +87,11 @@ COPY stack/deploy/seed-presets.py ./stack/deploy/
 # fifth one fails on the developer's own machine and names the line to add.
 COPY stack/scripts/acceptance.py ./stack/scripts/
 
+# And the verify-after hook, which `tests/test_claude_hook.py` runs. It is a
+# shell script rather than python, and the test stage has bash -- the tests
+# exercise the exit-code mapping, which is the whole contract.
+COPY clients/claude-code/verify-after.sh ./clients/claude-code/
+
 RUN python -m pytest -q \
  && { echo "suite: passed"; \
       echo "ctags: $(ctags --version | head -1)"; \

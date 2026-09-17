@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import shutil
 from collections.abc import Sequence
 from urllib.parse import quote
 import stat
@@ -331,12 +332,47 @@ def _diff_changes(mirror: Path, old_sha: str, new_sha: str) -> list[Change]:
 def sync_worktree(index_cfg: IndexConfig, gitlab_id: int,
                   mirror: Path, sha: str, branch: str | None = None) -> Path:
     tree = tree_path(index_cfg, gitlab_id, branch)
+    # A directory that EXISTS is not the same as a usable worktree, and the
+    # difference is a permanent stuck state. `tree.exists()` was the only test
+    # here, so a tree whose `.git` link no longer resolves -- the mirror
+    # re-cloned, the worktree admin directory pruned, the container recreated
+    # mid-run -- took the `checkout` branch, failed, and could never reach the
+    # `worktree add` branch that would have rebuilt it. Every pass then wrote
+    # `last_run_error`, so ArgusIndexErrored fired for that repository for
+    # ever, over a directory that only needed deleting. An alert that cannot
+    # clear is worse than no alert: it is what teaches people to ignore the
+    # ones that can. Observed live, on root/eal-core, as
+    #   fatal: not a git repository: /var/lib/argus/mirrors/1.git/worktrees/main
+    if tree.exists() and not _is_worktree(tree):
+        shutil.rmtree(tree, ignore_errors=True)
     if tree.exists():
         _git(tree, "checkout", "--force", "--detach", sha)
     else:
         tree.parent.mkdir(parents=True, exist_ok=True)
+        # Before adding: an admin entry whose tree was deleted above still
+        # names this path, and git refuses to add over one.
+        try:
+            _git(mirror, "worktree", "prune")
+        except GitError:
+            # A failed prune is not a reason to refuse the add -- `--force` on
+            # the add covers the same ground.
+            pass
         _git(mirror, "worktree", "add", "--force", "--detach", str(tree), sha)
     return tree
+
+
+def _is_worktree(tree: Path) -> bool:
+    """Does this directory resolve to a git working tree?
+
+    `rev-parse --git-dir`, not a check for a `.git` entry: a linked worktree's
+    `.git` is a FILE holding a path, and the path it names can be gone while the
+    file remains. That is precisely the state that used to be unrecoverable.
+    """
+    try:
+        _git(tree, "rev-parse", "--git-dir")
+        return True
+    except GitError:
+        return False
 
 
 def blob_shas(mirror: Path, sha: str) -> dict[str, str]:

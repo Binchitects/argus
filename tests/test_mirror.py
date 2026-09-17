@@ -320,3 +320,46 @@ def test_an_unchanged_url_is_left_alone(cfg, project, origin):
     before = (m / "config").read_bytes()
     mirror.ensure_mirror(cfg, project, clone_url=str(origin))
     assert (m / "config").read_bytes() == before
+
+
+def test_a_broken_worktree_is_rebuilt_rather_than_failing_for_ever(cfg, project, origin):
+    """The permanent stuck state, and why it matters more than it looks.
+
+    `sync_worktree` tested only whether the tree's PATH existed. A tree whose
+    `.git` link no longer resolves -- the mirror re-cloned, the worktree admin
+    directory pruned, the container recreated mid-run -- therefore took the
+    `checkout` branch, failed, and could never reach the `worktree add` branch
+    that would have rebuilt it. Every pass then wrote `last_run_error` and
+    ArgusIndexErrored fired for that repository for ever, over a directory that
+    only needed deleting. An alert that cannot clear is what teaches people to
+    ignore the ones that can.
+    """
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+    assert (tree / "a.c").is_file()
+
+    # Break it the way the real failure looked: the directory survives, the
+    # git dir it points at does not.
+    gitlink = tree / ".git"
+    assert gitlink.is_file(), "a linked worktree keeps .git as a file"
+    (cfg.data_dir / "mirrors" / f"{project.gitlab_id}.git" / "worktrees").rename(
+        cfg.data_dir / "mirrors" / f"{project.gitlab_id}.git" / "worktrees-moved")
+
+    again = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+    assert again == tree
+    assert (again / "a.c").is_file(), \
+        "a broken worktree was not rebuilt, so the repository can never index again"
+
+
+def test_a_good_worktree_is_reused_not_rebuilt(cfg, project, origin):
+    """The recovery must not cost a full re-checkout on the common path: the
+    whole point of a worktree is that the second pass is cheap."""
+    m = mirror.ensure_mirror(cfg, project, clone_url=str(origin))
+    sha = mirror.head_sha(m, "main")
+    tree = mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+
+    marker = tree / "untracked-marker"
+    marker.write_text("still here")
+    mirror.sync_worktree(cfg, project.gitlab_id, m, sha)
+    assert marker.is_file(), "a usable worktree was torn down and rebuilt"

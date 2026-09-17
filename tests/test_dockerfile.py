@@ -37,10 +37,33 @@ DOCKERFILE = ROOT / "Dockerfile"
 COPIED_WHOLESALE = ("tests/", "src/argus/")
 
 #: A path literal in a test that points into the repository but outside the
-#: package -- `stack/...`, `scripts/...`. Deliberately only these two trees:
-#: `tests/` travels with the suite and `src/argus/` is the package itself.
-_PATH_LITERAL = re.compile(
-    r"""["']((?:stack|scripts)/[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+)["']""")
+#: package.
+#:
+#: The first version of this scan listed `stack/` and `scripts/` by hand, and
+#: missed the third tree: `clients/claude-code/verify-after.sh`, which the hook
+#: test runs and which therefore stopped `docker build` with exit 127. A guard
+#: that enumerates the trees it checks has exactly the failure mode it exists to
+#: prevent, one level up. So the trees are DISCOVERED from the repository root
+#: instead of named -- a new top-level directory is covered the day it appears.
+_IGNORED_TREES = {
+    "tests",      # copied wholesale
+    "src",        # the package, copied wholesale
+    ".git", "dist", "backups", "node_modules", "__pycache__",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", "work", "packs",
+}
+
+
+def _trees() -> list[str]:
+    return sorted(
+        entry.name for entry in ROOT.iterdir()
+        if entry.is_dir() and entry.name not in _IGNORED_TREES
+        and not entry.name.startswith("."))
+
+
+def _pattern() -> re.Pattern[str]:
+    trees = "|".join(re.escape(t) for t in _trees())
+    return re.compile(
+        rf"""["']((?:{trees})/[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+)["']""")
 
 
 def stage_text() -> str:
@@ -81,7 +104,7 @@ def referenced_stack_files() -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     for module in sorted((ROOT / "tests").rglob("*.py")):
         text = module.read_text(encoding="utf-8", errors="replace")
-        for match in _PATH_LITERAL.finditer(text):
+        for match in _pattern().finditer(text):
             path = match.group(1)
             if not (ROOT / path).exists():
                 # A path that is not in the repository is not a file the image
