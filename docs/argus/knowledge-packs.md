@@ -63,6 +63,25 @@ values for both framework keys are empty on every page.
 redistributable is a different kind of requirement from an OS version: the
 API is there, and something else has to be installed first.
 
+### An interface method has two names, and only one was indexed
+
+45% of the reference is COM methods. Their pages are titled `IFoo::Bar
+(header.h)` and their UIDs spell the same entity `module.IFoo.Bar`. The
+adapter indexed the UID form and — because the title regex wanted a kind word
+("function", "method", "structure") that a COM title does not carry — never
+the documented one. `docs_lookup("IFoo::Bar")` returned nothing at all:
+29,557 symbols in the win32 pack were unreachable by the name Microsoft
+documents, C++ writes, and every compiler error quotes.
+
+That is the worst shape a miss can take here. The server's instructions read
+an empty result as "not documented" and forbid answering from memory, so the
+caller does not get a wrong answer — it gets a refusal, and the more carefully
+it follows instructions the more convincing the refusal is.
+
+Both spellings are indexed now, which is most of the win32 pack's growth from
+87,206 symbols to 118,242. It was found by
+[the Windows-version evaluation](../../evals/README.md), not by a user.
+
 One detail worth keeping in mind if you change the contract format: 253 of
 those 52,506 values contain a semicolon — `Windows 10, version 1809 (10.0;
 Build 17763)`. `docs_contracts` splits the field on `;` and reads only the keys

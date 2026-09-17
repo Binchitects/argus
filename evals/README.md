@@ -46,6 +46,35 @@ arms would be wrong together.
 
 ---
 
+## Does a pack know which Windows an API needs?
+
+```bash
+python evals/run_windows_versions.py <packs_dir>
+python evals/run_windows_versions.py --ablate <sdk-api checkout>
+```
+
+52 questions whose answers are read out of the sdk-api front matter —
+`req.target-min-winverclnt`, `req.target-min-winversvr` and the two driver
+framework versions — so the expected answer is what Microsoft publishes rather
+than what anyone remembers.
+
+`--ablate` is the part that makes it an experiment rather than a smoke test: it
+builds the same pages twice, once with the current adapter and once with
+`_OS_FIELDS` emptied, so the only thing that moves is the metadata. Measured
+that way, **7/52 -> 51/52**.
+
+The question types are picked to be *wrong-answerable*, not merely hard. The
+sequel traps catch `CreateFile3` (Windows 11 24H2) against `ICEnroll2` (Windows
+XP) — the number in the name implies the opposite of the floor in both
+directions — and 21 of the 52 name a COM method, which is where the run found a
+defect: see the `::` note in [knowledge-packs.md](../docs/argus/knowledge-packs.md).
+
+Keep the `control-header` questions. They are the regression arm: they were
+answerable before any of this, and a version gain that cost them would not be a
+gain.
+
+---
+
 ## Comparing models against your Argus setup
 
 `run_model_bench.py` scores any Ollama model twice — alone, then with Argus —

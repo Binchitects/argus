@@ -65,6 +65,43 @@ def test_the_ansi_and_wide_names_are_both_looked_up(tmp_path):
     assert {"MessageBox", "MessageBoxA", "MessageBoxW"} <= names
 
 
+def test_an_interface_method_is_findable_by_its_documented_name(tmp_path):
+    """45% of the reference's pages are COM methods, titled "IFoo::Bar
+    (header.h)" -- a qualified name and a parenthesised header, with no kind
+    word for the title regex to anchor on. The UID spells the same entity with
+    a dot, and only the dot form was indexed, so the spelling Microsoft
+    documents -- and that every compiler error quotes -- answered nothing at
+    all. Silence is the worst shape a miss can take here: the server's own
+    instructions read it as "undocumented" and forbid answering from memory."""
+    page = """---
+UID: NF:mfcaptureengine.IMFCaptureSource.GetMirrorState
+title: IMFCaptureSource::GetMirrorState (mfcaptureengine.h)
+description: Gets the mirror state.
+req.target-min-winverclnt: Windows 8 [desktop apps only]
+req.header: mfcaptureengine.h
+---
+
+## -description
+
+Gets the mirror state.
+"""
+    _write(tmp_path,
+           "sdk-api-src/content/mfcaptureengine/"
+           "nf-mfcaptureengine-imfcapturesource-getmirrorstate.md", page)
+
+    names = {s.name for s in Win32Api().iter_symbols(tmp_path)}
+    assert "IMFCaptureSource.GetMirrorState" in names, "the UID spelling"
+    assert "IMFCaptureSource::GetMirrorState" in names, "the documented spelling"
+
+
+def test_a_plain_function_gets_no_scope_operator(tmp_path):
+    """The "::" alias comes from the UID having a dot, so a function must not
+    grow one -- indexing "CreateFileW::" would be a lookup key nobody types."""
+    _write(tmp_path, "sdk-api-src/content/winuser/nf-winuser-messagebox.md", SDK_PAGE)
+    names = {s.name for s in Win32Api().iter_symbols(tmp_path)}
+    assert not any("::" in n for n in names), sorted(names)
+
+
 def test_the_signature_is_the_requirements_not_a_code_example(tmp_path):
     """These pages carry no prototype -- the published site generates one from
     the parameter sections, and the only fenced block is a usage example.

@@ -53,6 +53,12 @@ _TITLE_NAME = re.compile(
     r"^([A-Za-z_][\w:]*)\s+(?:function|macro|structure|struct|enumeration|"
     r"interface|callback|union|method|routine|ioctl)\b")
 
+#: A COM method's title is "IMFCaptureSource::GetMirrorState
+#: (mfcaptureengine.h)" -- a qualified name and a parenthesised header, with no
+#: kind word for `_TITLE_NAME` to anchor on. That regex therefore never matched
+#: one, and 29,465 of the reference's pages (45%) are interface methods.
+_TITLE_QUALIFIED = re.compile(r"^([A-Za-z_]\w*(?:::[A-Za-z_]\w*)+)\s*\(")
+
 #: UID prefix -> kind. Microsoft's own two-letter scheme; spelled out because
 #: "NF" in a retrieved result tells a reader nothing.
 _UID_KINDS = {
@@ -227,7 +233,7 @@ class _MicrosoftApiRef:
             # real compiler errors; MessageBox is the macro. A pack that
             # indexes only the UID name cannot answer a lookup for either of
             # the names a developer actually pasted.
-            for alias in _aliases(meta):
+            for alias in _aliases(meta, symbol):
                 if alias in seen:
                     continue
                 seen.add(alias)
@@ -387,19 +393,33 @@ def _requirement_line(meta: dict) -> str:
     return f"{contract} -- {description}" if contract else description
 
 
-def _aliases(meta: dict) -> list[str]:
+def _aliases(meta: dict, symbol: str = "") -> list[str]:
     """Alternate spellings of the entity, from api_name/f1_keywords.
 
     Filtered to bare identifiers: f1_keywords also carries header-qualified
     forms ("winuser/MessageBoxW") whose slash half is a file, not a symbol, and
     indexing those as names would make `docs_lookup` answer for things nobody
     calls.
+
+    ``symbol`` is the name the UID spelled, needed because two of the three
+    ways a reader arrives at an interface method are not in the front matter
+    at all. See the two cases below.
     """
     out: list[str] = []
     title = str(meta.get("title") or "")
-    named = _TITLE_NAME.match(title)
+    named = _TITLE_NAME.match(title) or _TITLE_QUALIFIED.match(title)
     if named:
-        out.append(named.group(1))
+        out.append(named.group(1).rstrip(":"))
+    # An interface method is stored the way the UID spells it -- with a dot,
+    # "IMFCaptureSource.GetMirrorState" -- while Microsoft documents it, C++
+    # writes it and every compiler error quotes it as "::". Only the dot form
+    # was indexed, so docs_lookup("IMFCaptureSource::GetMirrorState") answered
+    # nothing at all: measured, 29,557 symbols in the win32 pack are interface
+    # methods and exactly 1 carried a "::" anywhere in its name. That is the
+    # worst shape a miss can take here, because the server's own instructions
+    # read silence as "undocumented" and forbid answering from memory.
+    if "." in symbol:
+        out.append(symbol.replace(".", "::", 1))
     for key in ("api_name", "f1_keywords"):
         value = meta.get(key)
         if isinstance(value, list):

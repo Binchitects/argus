@@ -81,7 +81,7 @@ python scripts/smoke_test.py --url https://argus.llm.localhost/mcp --token <deve
 |---|---|---|
 | [`stack/`](stack/) | **The deployment.** Compose file, per-service config, env samples, operational scripts | [`stack/README.md`](stack/README.md) |
 | [`src/argus/`](src/argus/) | **The Argus package** — the MCP code index and documentation server. Installable and runnable on its own | [`docs/argus/`](docs/argus/) |
-| [`packs/`](packs/) | **Nine built knowledge packs**, 1.66 GB — prose, API symbols and embeddings in one SQLite file each. Three more are parked in `packs/disabled/` | [`docs/argus/knowledge-packs.md`](docs/argus/knowledge-packs.md) |
+| [`packs/`](packs/) | **Nine built knowledge packs**, 1.67 GB — prose, API symbols and embeddings in one SQLite file each. Three more are parked in `packs/disabled/` | [`docs/argus/knowledge-packs.md`](docs/argus/knowledge-packs.md) |
 | [`tests/`](tests/) | The Argus suite — **1,091 tests**, no Docker required | `pytest` |
 | [`docs/`](docs/) | **All documentation**, split into [`docs/stack/`](docs/stack/) and [`docs/argus/`](docs/argus/) | [`docs/`](docs/) |
 | [`clients/`](clients/) | **Copy-pasteable configs** for DeepSeek Harness, Qwen Code, Claude Code, Continue and any generic MCP client, each marked with whether it was actually executed | [`clients/README.md`](clients/README.md) |
@@ -922,7 +922,7 @@ would otherwise become an agent that cannot finish a sentence.
 [`clients/claude-code/verify-after.sh`](clients/claude-code/verify-after.sh) wires
 it into a Claude Code `Stop` hook.
 
-## Nine knowledge packs, 1.66 GB, zero unresolved symbols
+## Nine knowledge packs, 1.67 GB, zero unresolved symbols
 
 ```mermaid
 xychart-beta
@@ -934,7 +934,7 @@ xychart-beta
 
 | pack | Documents | Chunks | Symbols | Size | Licence |
 |---|---|---|---|---|---|
-| `win32` — Windows SDK API reference | 65,906 | 478,788 | 87,206 | 715.7 MB | CC-BY-4.0 |
+| `win32` — Windows SDK API reference | 65,906 | 478,788 | 118,242 | 726.1 MB | CC-BY-4.0 |
 | `wdk` — driver DDI reference | 25,903 | 205,848 | 37,938 | 292.5 MB | CC-BY-4.0 |
 | `dotnet` — .NET BCL + MS NuGet packages | 11,013 | 140,661 | **215,269** | 236.4 MB | CC-BY-4.0 |
 | `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,325 | 180.0 MB | CC-BY-4.0 |
@@ -943,7 +943,7 @@ xychart-beta
 | `python` — 3.13 | 540 | 13,751 | 18,778 | 31.8 MB | PSF-2.0 |
 | `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 25.0 MB | CC-BY-4.0 |
 | `sqlite` — SQL, pragmas, FTS5 | 837 | 8,987 | 36 | 18.4 MB | public domain |
-| **total** | **132,033** | **1,100,449** | **412,779** | **1.66 GB** | |
+| **total** | **132,033** | **1,100,449** | **443,815** | **1.67 GB** | |
 
 ### Which Windows an API needs
 
@@ -959,19 +959,43 @@ Library: Kernel32.lib
 DLL: Kernel32.dll
 ```
 
-**72,206 of the win32 pack's 87,206 symbols** carry one — 282 distinct values,
-running from Windows 2000 Professional to Windows 11 24H2 and Server 2025:
+**97,175 of the win32 pack's 118,242 symbols** carry one, running from Windows
+2000 Professional to Windows 11 24H2 and Server 2025:
 
 | the oldest OS it runs on | symbols |
 |---|---|
-| Windows 2000 | 17,501 |
-| Windows XP | 15,655 |
-| Windows Vista | 18,669 |
-| Windows 7 | 6,491 |
-| Windows 8 | 5,126 |
-| Windows 10 | 3,431 |
-| Windows 11 | 218 |
-| none supported | 5,115 |
+| Windows 2000 | 22,463 |
+| Windows XP | 20,461 |
+| Windows Vista | 25,890 |
+| Windows 7 | 9,215 |
+| Windows 8 | 7,362 |
+| Windows 10 | 4,602 |
+| Windows 11 | 271 |
+| none supported | 6,911 |
+
+**Measured, not asserted.** A grounded question set —
+[`evals/questions-windows-versions.json`](evals/questions-windows-versions.json),
+52 questions whose answers are read out of Microsoft's own front matter — goes
+from **7/52 to 51/52** against a rebuild of the same pages. The
+`control-header` arm, which never needed the version field, is 6/6 in *both*
+arms, so the added line cost the existing answers nothing. Reproduce with
+`python evals/run_windows_versions.py --ablate <sdk-api checkout>`.
+
+The six question types are chosen to be wrong-answerable rather than merely
+hard: the sequel traps alone catch `CreateFile3` (Windows 11 24H2) against
+`ICEnroll2` (Windows XP), where the number in the name says the opposite of
+the floor in both directions.
+
+That run also found a defect the version work did not cause but did expose.
+**45% of the reference is COM methods**, titled `IFoo::Bar (header.h)` — a
+qualified name with no kind word after it, which the title regex required. The
+UID spells the same entity with a dot, so only the dot form was ever indexed
+and `docs_lookup("IFoo::Bar")` answered *nothing* — 29,557 symbols unreachable
+by the name Microsoft documents and every compiler error quotes. Silence is
+the worst shape a miss can take here, because the server's instructions read
+it as "undocumented" and forbid answering from memory. The documented spelling
+is now indexed alongside the UID's, which is why the pack went from 87,206
+symbols to 118,242.
 
 This is the one requirement a header name cannot imply. `fileapi.h` says where
 a function is declared, not whether the machine it has to run on exports it —
