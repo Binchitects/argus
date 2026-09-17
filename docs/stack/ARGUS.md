@@ -362,6 +362,46 @@ seconds instead of waiting out a full interval. A fresh drop-in deployment with
 an empty named volume indexes itself rather than sitting empty for fifteen
 minutes while the console insists everything is fine.
 
+### Indexing on push
+
+The poll is the floor, not the mechanism. With it alone a push sits unindexed
+for up to fifteen minutes, and every answer in that window comes from the
+previous commit with nothing saying so — the same failure as a stopped index,
+just smaller and more frequent. Set `ARGUS_WEBHOOK_TOKEN` and point a GitLab
+push webhook at Argus and the change is indexed in seconds:
+
+```
+URL:          https://argus.<domain>/hook/gitlab
+Secret token: <the value of ARGUS_WEBHOOK_TOKEN>
+Trigger:      Push events
+```
+
+GitLab sends the secret back in `X-Gitlab-Token`; Argus compares it in constant
+time and answers `202`. With `ARGUS_WEBHOOK_TOKEN` unset the route **does not
+exist at all**, so an unconfigured deployment has no unauthenticated way to make
+the indexer run. It is a separate secret from `ARGUS_ADMIN_TOKEN` on purpose:
+this one is stored in GitLab's own configuration, so it is the lower-privilege
+credential. Leaking it lets somebody cause an index pass; leaking the admin
+token lets them read the estate.
+
+A push that arrives while a pass is running is **queued**, not dropped — on a
+busy estate that is the normal case, and dropping it would mean the change waits
+for the next poll, which is exactly the latency the webhook exists to remove.
+The queue drains one repository per finished pass, so the passes never contend
+for the same SQLite write lock, and the same repository asked for twice is
+queued once. Past 25 queued repositories the backlog collapses into a single
+full pass, because indexing everything once is cheaper than working through the
+list. The Indexing page shows the queue, and each pass says whether a person,
+the schedule or a webhook started it.
+
+Deliveries Argus has no use for are still **acknowledged** — a tag push, an
+issue, a branch deletion. GitLab treats a non-2xx as a failed delivery, retries
+with backoff and eventually disables the webhook, so answering `400` to a tag
+push would cost the operator their webhook over a non-problem.
+
+The poll stays on. It is what covers a missed delivery, a webhook nobody
+configured, and a repository no webhook fires for.
+
 **The index is measured, and it alerts.** `GET /admin/metrics` on port 7700
 exports, per repository and branch:
 

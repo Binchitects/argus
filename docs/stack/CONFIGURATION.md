@@ -394,6 +394,7 @@ name as well as position.
 | `ARGUS_OLLAMA_URL` | `http://ollama:11434` | without this Argus falls back to `localhost:11434`, which inside a container is the container itself |
 | `ARGUS_INDEX_INTERVAL` | `900` | seconds between automatic index passes. **`0` turns automatic reindexing off**, and then the index only advances when somebody presses *Index all repos* in the console |
 | `ARGUS_INDEX_STALE_AFTER` | `3600` | seconds without a successful pass before a repository counts as stale. Feeds `argus_index_stale`, the `ArgusIndexStale` alert and the number on the console's Overview. Default is 4 × the interval above |
+| `ARGUS_WEBHOOK_TOKEN` | empty | the GitLab push webhook's secret. **Empty means the webhook route does not exist at all.** Set it here and put the same value in GitLab's webhook configuration; see [ARGUS.md](ARGUS.md#indexing-on-push). Deliberately not the admin token — this one is stored in GitLab, so it is the lower-privilege credential |
 
 `ARGUS_INDEX_INTERVAL` is the setting that makes the rest of the freshness
 story work. Before it existed the stack had alert rules, a stale metric and a

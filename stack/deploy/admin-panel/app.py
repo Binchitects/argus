@@ -882,9 +882,14 @@ def indexing_card(is_admin: bool = False) -> str:
         # `trigger` is why the run exists. Without it the page could not tell
         # an automatic pass from somebody else having pressed the button, and
         # "why is this running?" is the first question a surprised operator
-        # asks.
-        who_started = ("the schedule" if job.get("trigger") == "schedule"
-                       else "this console")
+        # asks. A webhook pass says so, because "something changed in GitLab"
+        # and "somebody pressed the button" are different answers and the
+        # operator is usually looking at this page precisely because they did
+        # not expect a run.
+        who_started = {"schedule": "the schedule",
+                       "webhook": "a GitLab push",
+                       "manual": "this console"}.get(job.get("trigger"),
+                                                     "this console")
         status = (f'<div class="msg">Indexing '
                   f'<b>{_h(", ".join(job.get("branches") or []) or "default branches")}</b>'
                   f' — {_h(mode)}, started by {_h(who_started)} '
@@ -907,15 +912,33 @@ def indexing_card(is_admin: bool = False) -> str:
     # leave the operator to work out from the presence or absence of a cron
     # job that was never installed.
     interval = st.get("interval") or 0
+    webhook = bool(st.get("webhook"))
+    push_note = (" It also indexes a repository the moment GitLab reports a push."
+                 if webhook else
+                 " Configure <code>ARGUS_WEBHOOK_TOKEN</code> and a GitLab push "
+                 "webhook to index a change immediately instead of waiting for "
+                 "the next pass.")
     if interval > 0:
         schedule = (f'<p class="dim" style="margin:0 0 10px">Reindexes itself every '
-                    f'<b>{_h(_duration(interval))}</b>. The button below starts a pass '
-                    f'now; it is not required to keep the index current.</p>')
+                    f'<b>{_h(_duration(interval))}</b>.{push_note} The button below '
+                    f'starts a pass now; it is not required to keep the index '
+                    f'current.</p>')
     else:
         schedule = ('<p class="dim" style="margin:0 0 10px"><b>Automatic reindexing is '
                     'off.</b> The index only advances when somebody presses the button '
                     'below, so every answer is served from whenever that last happened. '
                     'Set <code>ARGUS_INDEX_INTERVAL</code> to change this.</p>')
+
+    # Work a webhook asked for while a pass was running. Shown because the
+    # alternative is an operator watching a run finish and wondering why another
+    # one immediately started.
+    pending = st.get("pending") or []
+    if pending:
+        queue_note = (f'<div class="msg">Queued from GitLab pushes: '
+                      f'<b>{_h(", ".join(pending[:8]))}</b>'
+                      f'{" and " + str(len(pending) - 8) + " more" if len(pending) > 8 else ""}'
+                      f' — these are indexed when the current pass finishes.</div>')
+        schedule = queue_note + schedule
 
     # Exit 3 is the one code with an action attached, and it is the one an
     # operator is most likely to hit on a fresh deployment: it means "use a

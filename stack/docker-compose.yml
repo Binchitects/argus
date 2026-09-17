@@ -1226,6 +1226,20 @@ services:
       # the prefix is not exempted from bearer auth, i.e. the surface does not
       # exist. Generate one and share it with the admin panel only.
       ARGUS_ADMIN_TOKEN: ${ARGUS_ADMIN_TOKEN:-}
+      # The GitLab push webhook's secret, configured on the webhook itself in
+      # GitLab and sent back as X-Gitlab-Token. Unset -- the default -- means
+      # the route does not exist at all, so an unconfigured deployment has no
+      # unauthenticated way to make the indexer run.
+      #
+      # Deliberately NOT the admin token: this one is stored in GitLab and
+      # travels through GitLab's own configuration, so it is the lower
+      # privilege credential. Leaking it lets somebody cause an index pass;
+      # leaking the admin token lets them read the estate.
+      #
+      # It is the accelerator, not the mechanism. ARGUS_INDEX_INTERVAL is what
+      # guarantees freshness -- a missed delivery, a webhook nobody configured,
+      # and a repository no webhook fires for are all still covered by the poll.
+      ARGUS_WEBHOOK_TOKEN: ${ARGUS_WEBHOOK_TOKEN:-}
       # Open WebUI's credential. With it, Argus answers for the person signed
       # into chat -- their GitLab membership, read with the read-only service
       # token; no admin or sudo. Empty = chat cannot use Argus.

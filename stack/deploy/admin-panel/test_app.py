@@ -362,6 +362,38 @@ check("the schedule" in with_interval(900, state="running", trigger="schedule"),
 check("this console" in with_interval(900, state="running", trigger="manual"),
       "a manual run is indistinguishable from a scheduled one")
 
+# --- the push webhook is visible where the cadence is ------------------------
+#
+# "Reindexes every 15 minutes" reads very differently depending on whether a
+# push also arrives immediately, and the console cannot see whether Argus has a
+# webhook secret -- it is Argus's setting, not the panel's. So the server tells
+# it, rather than the panel guessing from its own environment.
+
+
+def with_hook(*, webhook, interval=900, pending=None, **kw):
+    payload = status(**kw)
+    payload["interval"] = interval
+    payload["webhook"] = webhook
+    payload["pending"] = pending or []
+    return card(payload)
+
+
+check("reports a push" in with_hook(webhook=True),
+      "the page does not say pushes are indexed immediately")
+check("ARGUS_WEBHOOK_TOKEN" in with_hook(webhook=False),
+      "the page does not name the setting that enables push indexing")
+
+# A queued run must be visible, or an operator watching one pass finish and
+# another start has no way to know why.
+queued = with_hook(webhook=True, pending=["g/a", "g/b"])
+check("g/a" in queued and "g/b" in queued, "queued repositories are not shown")
+check("Queued from GitLab pushes" in queued, "the queue is not explained")
+
+# A webhook-started run says so: "something changed in GitLab" and "somebody
+# pressed the button" are different answers to "why is this running?".
+webhook_run = with_hook(webhook=True, state="running", trigger="webhook")
+check("a GitLab push" in webhook_run, "a webhook-started run is not identified")
+
 # --- the summary has to be the LAST thing in this file -----------------------
 #
 # It used to sit two thirds of the way down, just after the Indexing-card

@@ -47,6 +47,32 @@ USERS_FILE_ENV = "ARGUS_AUTHELIA_USERS_FILE"
 _PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-host", "x-real-ip")
 ADMIN_TOKEN_ENV = "ARGUS_ADMIN_TOKEN"
 
+#: Where GitLab posts a push event. NOT under ADMIN_PREFIX on purpose: that
+#: prefix is gated by the admin token, which the admin console holds and which
+#: must not be handed to GitLab. A webhook secret is a lower-privilege thing --
+#: leaking it lets somebody cause an index pass, not read the estate -- so it
+#: gets its own value.
+WEBHOOK_PATH = "/hook/gitlab"
+WEBHOOK_TOKEN_ENV = "ARGUS_WEBHOOK_TOKEN"
+
+#: GitLab's own header for the secret token configured on the webhook.
+WEBHOOK_HEADER = "x-gitlab-token"
+
+#: How many repositories may be waiting to be indexed before the queue is
+#: collapsed into one full pass. A force-push across a large estate, or a
+#: misconfigured webhook firing on every branch, can enqueue faster than a pass
+#: drains; past this point indexing everything once is both cheaper and more
+#: correct than indexing each thing in turn.
+WEBHOOK_QUEUE_LIMIT = 25
+
+
+def webhook_token() -> str:
+    return os.environ.get(WEBHOOK_TOKEN_ENV, "").strip()
+
+
+def _webhook_enabled() -> bool:
+    return bool(webhook_token())
+
 
 def _admin_token() -> str:
     return os.environ.get(ADMIN_TOKEN_ENV, "").strip()
@@ -283,7 +309,8 @@ class BearerAuthMiddleware:
         # exempted only while that credential is configured. Unset, the prefix
         # is gated like everything else and the routes do not exist anyway.
         if (scope["type"] != "http" or _path == HEALTHZ_PATH
-                or (_admin_enabled() and _path.startswith(ADMIN_PREFIX))):
+                or (_admin_enabled() and _path.startswith(ADMIN_PREFIX))
+                or (_webhook_enabled() and _path == WEBHOOK_PATH)):
             await self.app(scope, receive, send)
             return
 
@@ -454,6 +481,12 @@ def create_app(
     if _admin_enabled():
         _register_admin_routes(server, cfg)
 
+    # The GitLab push webhook. Registered only when a secret is configured --
+    # same discipline as the admin surface: unset means the route does not
+    # exist, rather than existing and accepting anything that finds it.
+    if _webhook_enabled():
+        _register_webhook_route(server, cfg)
+
     # Periodic reindexing. Deliberately NOT gated on the admin token: keeping
     # the index current is a core function, not an operator convenience, and a
     # deployment that never reindexes serves yesterday's answers no matter who
@@ -474,7 +507,14 @@ def create_app(
 #: would spend the run blocking each other while appearing to progress.
 _index_job: dict = {"state": "idle", "branches": [], "started": None,
                     "finished": None, "returncode": None, "tail": [],
-                    "trigger": None}
+                    "trigger": None,
+                    # Repositories a webhook asked for while a pass was running.
+                    # A list, not a set, so the order they arrived is the order
+                    # they are drained and the panel can show it.
+                    "pending": [],
+                    # Set when the queue overflowed: the next pass covers
+                    # everything instead of working through the backlog.
+                    "pending_full": False}
 _index_lock = threading.Lock()
 
 #: Seconds between automatic index passes. 0 -- the default -- means only a
@@ -590,7 +630,7 @@ def _scheduler(cfg, cfg_path: str) -> None:
 
 
 def _run_index(cfg_path: str, branches: list[str],
-               allow_partial: bool = False) -> None:
+               allow_partial: bool = False, only: str | None = None) -> None:
     """Run `argus index` as a CHILD PROCESS, never in this one.
 
     create_app's contract is that the server never writes index data -- it
@@ -610,6 +650,12 @@ def _run_index(cfg_path: str, branches: list[str],
     argv = [sys.executable, "-m", "argus.cli", "index", "--config", cfg_path]
     for b in branches:
         argv += ["--branch", b]
+    if only:
+        # A webhook names the repository that changed. Indexing the whole estate
+        # because one file moved is the difference between a pass that finishes
+        # in seconds and one that finishes in half an hour -- and the poll is
+        # what refreshes everything else, on its own schedule.
+        argv += ["--repo", only]
     if allow_partial:
         # The panel's opt-in for "index what the token can see". Without a way
         # to pass this, a refusal told the operator to re-run with a flag they
@@ -636,6 +682,160 @@ def _run_index(cfg_path: str, branches: list[str],
             _index_job["tail"] = [f"failed to start: {exc!r}"]
     with _index_lock:
         _index_job.update(state="idle", finished=time.time(), returncode=rc)
+    _drain_pending(cfg_path)
+
+
+def _drain_pending(cfg_path: str) -> None:
+    """Start the next queued pass, if a webhook asked for one while this ran.
+
+    WHY A QUEUE AND NOT A DROP
+
+    A push webhook that arrives during a pass is the normal case on a busy
+    estate, not the exception. Dropping it means the change it reported waits
+    for the next poll -- which is exactly the latency the webhook exists to
+    remove -- and the operator has no way to tell that it happened.
+
+    WHY ONE AT A TIME, AND A CEILING
+
+    Each pass is a separate `argus index` child, so starting all of them at once
+    is starting N processes that would immediately serialise on the same SQLite
+    write lock. Draining one per completion keeps the queue flat and the log
+    readable. If the queue passes `WEBHOOK_QUEUE_LIMIT` -- a force-push across a
+    big estate, or a webhook configured for every branch -- the backlog is
+    collapsed into one full pass instead, because indexing everything once is
+    both cheaper and more correct than working through the list.
+
+    Failures to start are not retried here. The poll is the floor that
+    guarantees freshness; this is only ever an accelerator.
+    """
+    with _index_lock:
+        if _index_job["state"] == "running":
+            return
+        full = bool(_index_job.get("pending_full"))
+        pending = list(_index_job.get("pending") or [])
+        if not full and not pending:
+            return
+        _index_job["pending"] = []
+        _index_job["pending_full"] = False
+        only = None if full else pending.pop(0)
+        # Everything not started now goes back on the queue for the next drain.
+        if pending:
+            _index_job["pending"] = pending
+        _index_job.update(state="running", branches=[], allow_partial=False,
+                          trigger="webhook", started=time.time(),
+                          finished=None, returncode=None, tail=[])
+    auditlog.index_webhook(repo=only or "*", queued=len(pending))
+    threading.Thread(target=_run_index, args=(cfg_path, [], False, only),
+                     daemon=True).start()
+
+
+def _enqueue_webhook(repo: str, cfg_path: str) -> dict:
+    """Accept a repository for indexing, now or as soon as the current pass ends.
+
+    Returns what was decided, so the caller can report it to GitLab and the
+    tests can assert on it rather than on timing.
+    """
+    with _index_lock:
+        if _index_job["state"] == "running":
+            pending = list(_index_job.get("pending") or [])
+            if repo in pending:
+                # A branch push and a tag push to the same project arrive as two
+                # events. Indexing it twice is waste, and the queue is drained
+                # one at a time, so the duplicate would cost a whole pass.
+                return {"status": "already_queued", "repo": repo,
+                        "queued": len(pending)}
+            pending.append(repo)
+            if len(pending) > WEBHOOK_QUEUE_LIMIT:
+                _index_job["pending"] = []
+                _index_job["pending_full"] = True
+                auditlog.index_webhook(repo=repo, collapsed=len(pending))
+                return {"status": "collapsed_to_full_pass", "repo": repo,
+                        "queued": 0}
+            _index_job["pending"] = pending
+            auditlog.index_webhook(repo=repo, queued=len(pending))
+            return {"status": "queued", "repo": repo, "queued": len(pending)}
+        _index_job.update(state="running", branches=[], allow_partial=False,
+                          trigger="webhook", started=time.time(),
+                          finished=None, returncode=None, tail=[])
+    auditlog.index_webhook(repo=repo, started=True)
+    threading.Thread(target=_run_index, args=(cfg_path, [], False, repo),
+                     daemon=True).start()
+    return {"status": "started", "repo": repo, "queued": 0}
+
+
+def _register_webhook_route(server, cfg) -> None:
+    """`POST /hook/gitlab` -- index the repository a push just changed.
+
+    WHAT THIS REPLACES
+
+    Freshness was interval-polled: `ARGUS_INDEX_INTERVAL` defaults to 900s, so
+    a push sat unindexed for up to fifteen minutes and every answer in that
+    window came from the previous commit with nothing saying so. The poll is
+    still the floor -- it is what covers a missed delivery, a webhook nobody
+    configured, and a repository the webhook does not fire for -- and this is
+    the accelerator in front of it.
+
+    WHY IT IS NOT UNDER /admin/
+
+    The admin token is held by the console and grants the estate-wide operator
+    surface. A webhook secret is configured in GitLab and travels through
+    GitLab's own storage, so it is the lower-privilege credential and it gets
+    its own value: leaking it lets somebody cause an index pass, which is
+    recoverable, rather than read the estate, which is not.
+
+    FAIL CLOSED, and answer 401 without saying which half was wrong -- an
+    attacker learning "the token is right but the shape is wrong" is an
+    attacker learning something.
+
+    Always answers 2xx for a delivery it accepts, even when it did nothing with
+    it. GitLab treats a non-2xx as a failed delivery and retries with backoff,
+    then disables the webhook; a `push` to a branch Argus does not index is not
+    an error and must not cost the operator their webhook.
+    """
+    cfg_path = _cfg_path(cfg)
+
+    @server.custom_route(WEBHOOK_PATH, methods=["POST"])
+    async def gitlab_hook(request: Request) -> Response:
+        supplied = request.headers.get(WEBHOOK_HEADER, "")
+        # compare_digest, like the admin token: a plain == leaks the secret a
+        # byte at a time to anyone who can time the response.
+        if not supplied or not hmac.compare_digest(supplied, webhook_token()):
+            auditlog.denied(reason="webhook_token_rejected", path=WEBHOOK_PATH,
+                            detail=f"header {WEBHOOK_HEADER} missing or wrong")
+            return JSONResponse({"error": "forbidden"}, status_code=401)
+
+        try:
+            body = await request.json()
+        except Exception:            # noqa: BLE001
+            return JSONResponse({"error": "body is not JSON"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "body is not an object"}, status_code=400)
+
+        kind = body.get("object_kind") or request.headers.get("x-gitlab-event", "")
+        if kind and str(kind).lower() not in ("push", "push hook"):
+            # A tag push, an issue, a pipeline: not this endpoint's business.
+            # Answered 200 so GitLab does not retry or disable the webhook.
+            return JSONResponse({"status": "ignored", "event": str(kind)})
+
+        project = body.get("project") or {}
+        repo = ((project.get("path_with_namespace") if isinstance(project, dict)
+                 else "") or "").strip()
+        if not repo:
+            # A push event with no project is a malformed delivery, not a
+            # repository we failed to find -- say so rather than indexing
+            # everything on a guess.
+            return JSONResponse({"error": "no project.path_with_namespace"},
+                                status_code=400)
+
+        # The deletion flag: a branch deletion is a push event, and there is
+        # nothing to index for a ref that no longer exists. The pass would
+        # otherwise spend its time reconciling a repository that did not change.
+        if body.get("after") and set(str(body["after"])) == {"0"}:
+            return JSONResponse({"status": "ignored", "reason": "ref deleted",
+                                 "repo": repo})
+
+        decision = _enqueue_webhook(repo, cfg_path)
+        return JSONResponse(decision, status_code=202)
 
 
 def _register_admin_routes(server, cfg) -> None:
@@ -748,5 +948,11 @@ def _register_admin_routes(server, cfg) -> None:
         # not from the console's own environment: the console has no way to
         # know it otherwise, and a settings page reading a stale copy of a
         # value is worse than one that does not show it.
+        #
+        # `webhook` for the same reason. The console cannot see whether Argus
+        # has a webhook secret, and "reindexes every 15 minutes" reads very
+        # differently depending on whether pushes also arrive immediately.
         return JSONResponse({"job": job, "repos": rows, "index": summary,
-                             "interval": index_interval()})
+                             "interval": index_interval(),
+                             "webhook": _webhook_enabled(),
+                             "pending": list(job.get("pending") or [])})

@@ -183,6 +183,28 @@ def index_end(*, returncode: int, duration_ms: float, repos: int,
     })
 
 
+def index_webhook(*, repo: str, started: bool = False, queued: int = 0,
+                  collapsed: int = 0) -> None:
+    """A push webhook asked for a repository to be indexed.
+
+    One event per decision rather than one per request, so "the webhook is
+    firing but nothing is being indexed" is answerable from the log: a
+    `queued` with no `started` after it means passes are not completing, and a
+    `collapsed` means the queue overflowed and the next pass covers everything
+    instead. `repo` is `*` for a full pass.
+    """
+    fields: dict = {"event": "index_webhook", "repo": repo}
+    if started:
+        fields["outcome"] = "started"
+    elif collapsed:
+        fields["outcome"] = "collapsed"
+        fields["collapsed_from"] = collapsed
+    else:
+        fields["outcome"] = "queued"
+        fields["queued"] = queued
+    _emit(fields)
+
+
 def index_scheduled(*, interval: int, first_pass_in: float | None = None,
                     reason: str | None = None, skipped: str | None = None) -> None:
     """The automatic reindex timer, saying what it decided.
