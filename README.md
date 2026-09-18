@@ -952,7 +952,7 @@ xychart-beta
 
 | pack | Documents | Chunks | Symbols | Size | Licence |
 |---|---|---|---|---|---|
-| `win32` — Windows SDK API reference | 65,906 | 478,788 | 118,242 | 726.1 MB | CC-BY-4.0 |
+| [`win32`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32.arguspack) — Windows SDK API reference | 65,906 | 478,788 | 118,242 | 726.1 MB | CC-BY-4.0 |
 | `wdk` — driver DDI reference | 25,903 | 205,848 | 37,938 | 292.5 MB | CC-BY-4.0 |
 | `dotnet` — .NET BCL + MS NuGet packages | 11,013 | 140,661 | **215,269** | 236.4 MB | CC-BY-4.0 |
 | `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,325 | 180.0 MB | CC-BY-4.0 |
@@ -964,6 +964,35 @@ xychart-beta
 | `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 25.0 MB | CC-BY-4.0 |
 | `sqlite` — SQL, pragmas, FTS5 | 837 | 8,987 | 36 | 18.4 MB | public domain |
 | **total** | **140,107** | **1,208,042** | **444,058** | **1.87 GB** | |
+
+### Downloading a pack
+
+The Windows packs are published to a public Hugging Face bucket —
+**[`Binchitects/argus-packs`](https://huggingface.co/buckets/Binchitects/argus-packs)**.
+Install one straight from it, with the digest so a truncated download is
+refused rather than installed:
+
+```bash
+argus pack install \
+  https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32.arguspack \
+  --sha256 9d81767392f46b4239efd18aaed41de8043167b68a2150743a023d6bb25988d8
+```
+
+| pack | published | size | sha256 |
+|---|---|---|---|
+| [`win32`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32.arguspack) | ✅ | 761,376,768 B | `9d81767392f46b4239efd18aaed41de8043167b68a2150743a023d6bb25988d8` |
+| [`wdk`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/wdk.arguspack) | ✅ | 306,757,632 B | `691c20c8df242fe4b06f2683afe84456c66e3dd2537ec0c8ffdf336f9ebdbf4d` |
+| [`win32-samples`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32-samples.arguspack) | ✅ | 142,811,136 B | `e7a80a83d0d918fefdea1725707ce1076afbc39cd06130a766274b8741ba0b17` |
+| [`wdk-samples`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/wdk-samples.arguspack) | ✅ | 80,523,264 B | `786c4a8b38091715cb1c4ec22c87ab1f7784d6c01fe60c7a9cfeca6d3ef063c1` |
+
+The other seven are built and served locally but **not published yet** — there
+is no link for them, and the table above is the whole published set rather than
+a subset of a larger one. A bucket is not versioned, so re-uploading a pack
+replaces it in place with no history to roll back to.
+
+The same digest list, generated from the built files rather than typed, is in
+[`packs/README.md`](packs/README.md) — copy that one if you are publishing a
+mirror.
 
 The two `-samples` packs are the other half of a question the reference half
 answers badly. `win32` and `wdk` say what an API *does*; the samples say what
