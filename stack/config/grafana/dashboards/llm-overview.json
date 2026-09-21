@@ -264,7 +264,7 @@
     },
     {
       "type": "stat",
-      "title": "Cache hit rate",
+      "title": "Prompt cache hit",
       "datasource": {
         "type": "postgres",
         "uid": "litellm-db"
@@ -284,7 +284,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(100.0*count(*) FILTER (WHERE cache_hit = 'True')/NULLIF(count(*),0),0) AS \"Cache\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
+          "rawSql": "SELECT COALESCE(round(100.0*sum(coalesce((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0))/NULLIF(sum(coalesce(prompt_tokens,0)),0),1),0) AS \"Cache\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
         }
       ],
       "fieldConfig": {
@@ -317,7 +317,8 @@
         "textMode": "auto",
         "graphMode": "none",
         "colorMode": "value"
-      }
+      },
+      "description": "Share of prompt tokens served from the engine's prefix cache. (The gateway's response cache is off unless a request asks for it.)"
     },
     {
       "type": "stat",
@@ -436,7 +437,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Token throughput",
+      "title": "Token throughput: cached input, uncached input, output",
       "datasource": {
         "type": "postgres",
         "uid": "litellm-db"
@@ -457,7 +458,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), COALESCE(sum(prompt_tokens),0) AS \"prompt\", COALESCE(sum(completion_tokens),0) AS \"completion\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), COALESCE(sum(greatest(coalesce(prompt_tokens,0) - coalesce((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0),0)),0) AS \"input, cache miss\", COALESCE(sum(coalesce((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0)),0) AS \"input, cache hit\", COALESCE(sum(completion_tokens),0) AS \"output\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {

@@ -583,6 +583,20 @@ on the host for anyone who reaches it.
 
 Details, and what it deliberately leaves alone: [docs/stack/ADMIN-PANEL.md](docs/stack/ADMIN-PANEL.md).
 
+### Tokens and cost
+
+Every request is priced by the gateway from three values in `.env`, per 1M tokens,
+the way DeepSeek bills: prompt tokens the engine had to process
+(`PRICE_INPUT_PER_MTOK`), prompt tokens served from its prefix cache — a resent
+conversation or system prompt — (`PRICE_CACHED_INPUT_PER_MTOK`), and generated tokens
+(`PRICE_OUTPUT_PER_MTOK`). Checked against the spend log: an identical request
+resent, with 84 of its 88 prompt tokens cached, cost 40% less, to the digit.
+
+Grafana's **Usage by person** has a *Tokens and cost* section: cache-miss input,
+cache-hit input, hit rate, output and cost in total, per person, and over time.
+**LLM Overview** splits token throughput the same way. Credit limits in the admin
+panel are in the same currency.
+
 ### Customizing
 
 Everything is a value in `.env`. Change it, then run `docker compose up -d`: compose
@@ -603,6 +617,10 @@ recreates exactly the containers the change affects.
 | GPU / CPU power cap | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | empty restores the hardware default; see [Measured](#measured) for what these do and do not buy |
 | CPU threads and ceilings | `LLAMACPP_THREADS`, `LLAMACPP_CPUS`, `OLLAMA_CPUS`, `POSTGRES_CPUS` | threads = physical cores; ceilings must sum under the core count |
 | engine RAM ceiling | `LLAMACPP_MEM_LIMIT` | e.g. `56g`; `0` = none |
+| pin the model in RAM | `LLAMACPP_MLOCK`, `LLAMACPP_PRELOAD`, `LLAMACPP_RAM_RESERVE_GB` | `auto` pins when the weights fit; see RAM |
+| host swappiness | `HOST_SWAPPINESS` | empty = system default |
+| prices | `PRICE_INPUT_PER_MTOK`, `PRICE_CACHED_INPUT_PER_MTOK`, `PRICE_OUTPUT_PER_MTOK` | per 1M tokens; cache hits priced separately (DeepSeek-style) |
+| the admin's email | `ADMIN_EMAIL` | Authelia's admin and Open WebUI's first administrator |
 | default credit per person | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | per person in the admin console |
 | a different llama.cpp build | `LLAMACPP_ENGINE_URL`, `LLAMACPP_ENGINE_SHA256` | a release tarball; empty = the image's own server |
 | vLLM instead of llama.cpp | `COMPOSE_PROFILES` (`vllm` instead of `llamacpp`), the `VLLM_*` values with `VLLM_SERVED_MODEL_NAME` equal to `MODEL_NAME`, `ENGINE_API_BASE=http://vllm:8000/v1` | exactly one engine profile at a time; **not re-tested since the compose-only change** — the shipped samples are llama.cpp |
@@ -708,19 +726,39 @@ that build measured the same within noise with MTP off.
 
 ### RAM
 
-The model uses **all** of it, just not as "used". The engine memory-maps the GGUF, so
-the weights sit in the page cache, which `free` reports under `buff/cache`. With
-Flash-Next on this 61 GB machine: 58 GB of page cache holds the model while
-generating. Its CPU-side weights are about 76 GB, so ~20 GB of experts are paged in
-from NVMe on demand — 28 MB/s of reads and ~480 major page faults per second while
-decoding, against 14 when idle. More physical RAM removes that; no setting can pin
-more than you have. `--mlock` or `--no-mmap` on a model larger than RAM fails to load.
+**Pinning.** `LLAMACPP_MLOCK=auto` (the default in every sample) pins the weights in
+RAM with `--mlock` whenever they live in system RAM and fit beside
+`LLAMACPP_RAM_RESERVE_GB`. Pinned, nothing is ever read from disk again. The engine
+log says what it decided and why, with the numbers, for example:
 
-Warm and settled, none of it is on disk: measured at steady state, decode reads
-**0 MB from disk per token and takes 0 major page faults per second**. The paging
-appears when the cache is cold — a fresh load, or another workload taking the RAM
-back — and costs about 20% of decode throughput. `tensor ... lazy read enabled` in
-the engine log is `mmap` working as intended, not a file left on disk.
+```
+memory: pinning 52 GB of weights in RAM (--mlock); 76 GB left for the rest
+memory: weights run on the GPU; nothing in RAM to pin
+memory: NOT pinning -- model 87 GB exceeds RAM 61 GB minus the 8 GB reserve; ...
+```
+
+Pinning is not forced when the model is larger than RAM, because it cannot work:
+the kernel would thrash or kill something to honour it. For Qwen3.8-Flash-Next that
+means **96 GB+ of RAM to pin it**; the 27B runs entirely on the GPU and has nothing to
+pin. `LLAMACPP_PRELOAD=auto` reads a model that fits into the page cache before
+serving, at full sequential disk speed, rather than during the first requests.
+
+**When the model is larger than RAM** (Flash-Next on 64 GB), the weights page in from
+NVMe on demand. RAM is still fully used — as page cache, which `free` reports under
+`buff/cache`, not `used`. Measured on a 61 GB machine under two users, the paging
+fades as the cache settles, and decode speed never suffered:
+
+| after start | NVMe reads | major page faults | decode, one / each of two |
+|---|---|---|---|
+| ~5 min | 24 MB/s | 524/s | 19.9 / 11.9 tok/s |
+| ~12 min | 10 MB/s | 251/s | 19.9 / 11.9 tok/s |
+| ~20 min | 6 MB/s | 198/s | 21.2 / 12.6 tok/s |
+
+**Swap.** `HOST_SWAPPINESS` sets the host's `vm.swappiness` (the power-limits service
+applies it and restores the original when cleared). Measured: 60 and 150 made no
+difference here — the improvement above is the cache warming — so the samples leave
+the system default. Idle services' memory goes to swap on its own (5.4 GB after 20
+minutes), which is what gives the model the room.
 
 ### The traps
 

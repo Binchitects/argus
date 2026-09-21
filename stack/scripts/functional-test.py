@@ -170,8 +170,9 @@ def main():
     admin = Browser()
     rec("admin", "admin signs in at the portal", admin.login("admin", admin_pw))
     code, body, _, _ = admin.req(u("admin"))
-    rec("admin", "panel console renders for an admin", code == 200 and "Add a person" in body, f"HTTP {code}")
-    rec("admin", "admin sees the indexing card", "<h2>Indexing</h2>" in body)
+    rec("admin", "the console opens on the admin Overview", code == 200 and '<h1 class="page">Overview</h1>' in body, f"HTTP {code}")
+    code_i, body_i = admin.req(u("admin", "/indexing"))[:2]
+    rec("admin", "admin reaches the Indexing page", code_i == 200 and "<h2>Indexing</h2>" in body_i, f"HTTP {code_i}")
     samples = len(re.findall(r"<details", body))
     shipped = len(list((ROOT / "env-samples").glob("*.env")))
     rec("admin", "admin sees the Model card with every env-sample", "<h2>Model</h2>" in body and samples == shipped,
@@ -199,9 +200,12 @@ def main():
         time.sleep(1)
     rec("person", "panel-created person can sign in with the shown password", ok)
     code, body, _, _ = person.req(u("admin"))
-    rec("person", "panel shows them their own usage", code == 200 and "Your usage" in body, f"HTTP {code}")
-    rec("person", "no admin console, no indexing card, no Model card",
-        "Add a person" not in body and "<h2>Indexing</h2>" not in body and "<h2>Model</h2>" not in body)
+    rec("person", "the console shows them their own account", code == 200 and "Your API keys" in body, f"HTTP {code}")
+    rec("person", "no admin Overview, no indexing card, no Model card",
+        '<h1 class="page">Overview</h1>' not in body and "<h2>Indexing</h2>" not in body and "<h2>Model</h2>" not in body)
+    for page_path in ("/people", "/indexing", "/model", "/packs"):
+        code_p = person.req(u("admin", page_path), follow=False)[0]
+        rec("person", f"admin page {page_path} is refused", code_p == 403, f"HTTP {code_p}")
     rec("person", "no other people listed", "admin@" not in body)
     for path, fields in (("/admin/create", {"username": "x" + who, "email": "x" + email}),
                          ("/admin/rotate", {"email": email}), ("/admin/reset", {"username": "admin"}),
@@ -273,7 +277,12 @@ def main():
         code, body, _, _ = person.req(u("chat", "/api/models"), headers=hdr)
         models = [m.get("id") for m in json.loads(body).get("data", [])] if code == 200 else []
         rec("sso", "Open WebUI lists the stack's models", bool(models), ", ".join(models[:4]))
-        rec("sso", "Open WebUI lists only the real model (no aliases, no Arena Model)", models == [MODEL], ", ".join(models))
+        # The served model, plus one per-chat thinking preset per THINKING_PRESETS entry
+        # (deploy/seed-presets.py) -- and nothing else: no aliases, no Arena Model.
+        presets = [lvl.split(":")[0].strip().lower() for lvl in (env("THINKING_PRESETS") or "").split(",") if lvl.strip()] \
+            if "llamacpp" in env("COMPOSE_PROFILES") else []
+        expected = [MODEL] + [f"{MODEL}-think-{lvl}".replace("/", "-").lower() for lvl in presets]
+        rec("sso", "Open WebUI lists the real model and its thinking presets, nothing else", sorted(models) == sorted(expected), ", ".join(models))
         model = MODEL
         code, body, _, _ = person.req(u("chat", "/api/chat/completions"),
                                       {"model": model, "stream": False, "max_tokens": 400,
@@ -296,6 +305,21 @@ def main():
             break
         time.sleep(5)
     rec("usage", "API-key requests are logged under the person", bool(rows), f"{len(rows)} spend rows")
+    # Every logged request must be priced exactly as .env says: cache-miss input,
+    # cache-hit input and output at their own per-1M-token prices.
+    price = {k: float(env(k) or d) / 1e6 for k, d in (("PRICE_INPUT_PER_MTOK", "0.20"),
+             ("PRICE_CACHED_INPUT_PER_MTOK", "0.02"), ("PRICE_OUTPUT_PER_MTOK", "0.80"))}
+    wrong = []
+    for r in rows:
+        usage = ((r.get("metadata") or {}).get("usage_object") or {})
+        cached = int(((usage.get("prompt_tokens_details") or {}).get("cached_tokens")) or 0)
+        prompt, out = int(r.get("prompt_tokens") or 0), int(r.get("completion_tokens") or 0)
+        expected = (prompt - cached) * price["PRICE_INPUT_PER_MTOK"] + cached * price["PRICE_CACHED_INPUT_PER_MTOK"] \
+            + out * price["PRICE_OUTPUT_PER_MTOK"]
+        if prompt and abs(float(r.get("spend") or 0) - expected) > 1e-9:
+            wrong.append((prompt, cached, out, r.get("spend"), expected))
+    rec("usage", "each request is priced from .env: cache miss, cache hit, output", bool(rows) and not wrong,
+        f"{len(rows)} checked" if not wrong else f"mismatch {wrong[:1]}")
     if webui_ok:
         code, logs = litellm("/spend/logs?summarize=false")
         chat_rows = [r for r in (logs if isinstance(logs, list) else []) if r.get("end_user") == email]

@@ -31,8 +31,14 @@ model_list:
       model: os.environ/ENGINE_MODEL
       api_base: os.environ/ENGINE_API_BASE
       api_key: os.environ/ENGINE_API_KEY
-      input_cost_per_token: 0.0000002
-      output_cost_per_token: 0.0000008
+      # Prices from .env, per 1M tokens, converted to per-token at startup --
+      # DeepSeek-style: a prompt token served from the engine's prefix cache
+      # (a resent conversation, a system prompt) is priced separately from one
+      # the engine had to process. LiteLLM reads the cached count from the
+      # response's usage.prompt_tokens_details.cached_tokens.
+      input_cost_per_token: ${MODEL_COST_INPUT_TOKEN}
+      cache_read_input_token_cost: ${MODEL_COST_CACHED_INPUT_TOKEN}
+      output_cost_per_token: ${MODEL_COST_OUTPUT_TOKEN}
       # ------------------------------------------------------- reasoning
       # How hard the model thinks before it answers. These are the ENGINE's
       # chat-template variables, not OpenAI's `reasoning_effort`.
@@ -88,8 +94,8 @@ litellm_settings:
   # price. For a purely local vLLM deployment the "cost" is notional -- what it
   # actually bounds is tokens -- but it is still the lever that stops one
   # person consuming the whole GPU for a month, and it is what the dashboards
-  # sum. Set input_cost_per_token/output_cost_per_token on a model to make the
-  # figure mean money.
+  # sum. Set PRICE_INPUT_PER_MTOK, PRICE_CACHED_INPUT_PER_MTOK and
+  # PRICE_OUTPUT_PER_MTOK in .env to make the figure mean money.
   #
   # 0 would block every request rather than allow unlimited, so the default is
   # a real number. Raise per-person in the admin panel (Credit).

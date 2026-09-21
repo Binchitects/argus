@@ -137,7 +137,13 @@ O=$(grep -E '^OPENWEBUI_OIDC_CLIENT_SECRET=' .env | cut -d= -f2-)
 L=$(grep -E '^LANGFUSE_OIDC_CLIENT_SECRET=' .env | cut -d= -f2-)
 flow grafana    "https://grafana.$DOM/login/generic_oauth"        "openid profile email groups" "$G"
 flow open-webui "https://chat.$DOM/oauth/oidc/callback"           "openid profile email groups" "$O"
-flow langfuse   "https://traces.$DOM/api/auth/callback/custom"    "openid email profile"        "$L"
+# Langfuse is the `tracing` profile. Without it there is no app and no secret in
+# .env (auth-init registers a placeholder), so there is nothing to sign in to.
+if [[ ",$(grep -E '^COMPOSE_PROFILES=' .env | cut -d= -f2-)," == *",tracing,"* ]]; then
+  flow langfuse   "https://traces.$DOM/api/auth/callback/custom"    "openid email profile"        "$L"
+else
+  printf '  \033[90m%-10s\033[0m %s\n' SKIP "langfuse (tracing profile off)"
+fi
 
 # ---------------------------------------------------------------------------
 echo
