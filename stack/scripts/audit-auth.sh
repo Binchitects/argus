@@ -21,6 +21,7 @@ JAR="$(mktemp)"
 
 RES=(--ssl-no-revoke --cacert "$CA")
 for h in auth chat grafana traces api gateway metrics alerts; do RES+=(--resolve "$h.$DOM:443:127.0.0.1"); done
+RES+=(--resolve "$DOM:443:127.0.0.1")   # the new app, at the bare domain
 
 green() { printf '  \033[32m%-10s\033[0m %s\n' "$1" "$2"; }
 red()   { printf '  \033[31m%-10s\033[0m %s\n' "$1" "$2"; }
@@ -183,5 +184,15 @@ for pair in "metrics:/-/healthy" "alerts:/-/healthy"; do
     [ "$c" = "200" ] && green OK "$h -> 200 (session accepted)" || red FAIL "$h -> $c"
   fi
 done
+echo
+echo "6. The app at the bare domain (enterprise-solution)"
+if docker ps --format '{{.Names}}' | grep -qx app; then
+  c=$(curl -s -o /dev/null -w '%{http_code}' "${RES[@]}" -H 'Accept: text/html' "https://$DOM/api/info")
+  [ "$c" = "302" ] && green OK "anonymous -> 302 to portal" || red FAIL "anonymous -> $c"
+  c=$(curl -s -o /dev/null -w '%{http_code}' "${RES[@]}" -b "$JAR" "https://$DOM/api/info")
+  [ "$c" = "200" ] && green OK "with a session -> 200" || red FAIL "with a session -> $c"
+else
+  printf '  \033[90m%-10s\033[0m %s\n' SKIP "app (not running)"
+fi
 rm -f "$JAR"
 echo

@@ -120,6 +120,11 @@ access_control:
     - domain: 'admin.{{ env "LLM_DOMAIN" }}'
       policy: 'one_factor'
 
+    # The new app at the bare domain (enterprise-solution). Any signed-in
+    # person, like the admin panel; the app decides what each person may see.
+    - domain: '{{ env "LLM_DOMAIN" }}'
+      policy: 'one_factor'
+
     # Everything that ships with no authentication of its own.
     - domain:
         - 'metrics.{{ env "LLM_DOMAIN" }}'

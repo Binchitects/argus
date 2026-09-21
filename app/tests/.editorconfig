@@ -1,0 +1,4 @@
+[*.cs]
+# Test names read as sentences (Liveness_is_ok); xUnit fixtures are "...Collection" by convention.
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1711.severity = none

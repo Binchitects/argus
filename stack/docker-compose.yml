@@ -1496,6 +1496,44 @@ services:
   # It holds the LiteLLM master key and writes Authelia's user database, which
   # is why it publishes no port and is reachable only through the proxy.
   # ============================================================================
+  app:
+    # The new all-in-one app (enterprise-solution branch, docs/enterprise/PLAN.md)
+    # at the bare domain. The legacy services keep their subdomains next to it
+    # and leave one phase at a time.
+    image: llmservice-app:latest
+    build:
+      context: ${LLM_APP_DIR:-../app}
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+    container_name: app
+    # Same profile as postgres: the app keeps its own database on that instance.
+    profiles: ["gateway"]
+    restart: unless-stopped
+    networks: [llm-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Parts, not a connection string: see app/src/Llm.Api/DatabaseSettings.cs.
+      Database__Host: postgres
+      Database__Name: llmapp
+      Database__Username: ${LLM_PG_USER:-llmservice}
+      Database__Password: ${LLM_PG_PASSWORD:?set LLM_PG_PASSWORD}
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *default-logging
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.app.loadbalancer.server.port=8080"
+      - "traefik.http.routers.app.rule=Host(`${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.service=app"
+      # Until phase 1 gives the app its own sign-in, Authelia guards it.
+      - "traefik.http.routers.app.middlewares=sso-chain@file"
+
   admin-panel:
     # Explicit for the same reason as identity-proxy above: derive this from
     # the project name and the image stops travelling with the bundle.
