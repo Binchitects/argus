@@ -18,9 +18,14 @@ if (!builder.Environment.IsDevelopment())
 }
 
 var connectionString = DatabaseSettings.ConnectionString(builder.Configuration);
-builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
+builder.Services.AddDbContext<AppDbContext>(o =>
+{
+    o.UseNpgsql(connectionString);
+    o.UseOpenIddict<Guid>();
+});
 builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>("database", tags: ["ready"]);
 builder.Services.AddProblemDetails();
+builder.AddAppIdentity();
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
     // The app publishes no port; the only way in is Traefik on the internal
@@ -36,11 +41,17 @@ app.UseForwardedHeaders();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseSecurityHeaders();
+app.UseCsrfGuard();
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions { OnPrepareResponse = StaticCaching.Apply });
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapHealthChecks("/healthz", new HealthCheckOptions { Predicate = _ => false });
 app.MapHealthChecks("/readyz", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") });
+
+app.MapAppIdentity();
 
 var api = app.MapGroup("/api");
 api.MapGet("/info", () => AppInfo.Current);
@@ -51,6 +62,7 @@ app.MapFallbackToFile("index.html", new StaticFileOptions { OnPrepareResponse = 
 if (app.Configuration.GetValue("Database:MigrateOnStartup", true))
 {
     await StartupDatabase.MigrateAsync(app.Services, app.Logger, app.Lifetime.ApplicationStopping);
+    await app.BootstrapIdentityAsync();
 }
 
 await app.RunAsync();

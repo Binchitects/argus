@@ -4,11 +4,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Isopoh.Cryptography.Argon2" Version="2.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.12" />
+    <PackageReference Include="Novell.Directory.Ldap.NETStandard" Version="4.0.0" />
+    <PackageReference Include="OpenIddict.AspNetCore" Version="7.7.1" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <PackageReference Include="zxcvbn-core" Version="7.0.92" />
   </ItemGroup>
 
   <ItemGroup>
