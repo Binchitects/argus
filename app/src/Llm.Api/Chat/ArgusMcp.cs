@@ -39,17 +39,17 @@ public sealed class ArgusSession(HttpClient http, Uri endpoint, string token, st
 /// answers as JSON or as SSE. Argus accepts the chat token only from inside the
 /// network, with the person's email beside it, exactly as Open WebUI calls it.
 /// </summary>
-public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOptions<ChatOptions> chat)
+public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat)
 {
     public const string Protocol = "2025-06-18";
     public const string EmailHeader = "x-openwebui-user-email";
 
-    public bool Enabled => argus.Value.Deployed && !string.IsNullOrWhiteSpace(argus.Value.Url) && !string.IsNullOrWhiteSpace(chat.Value.ArgusChatToken);
+    public bool Enabled => argus.Value.Deployed && !string.IsNullOrWhiteSpace(argus.Value.Url) && !string.IsNullOrWhiteSpace(chat.CurrentValue.ArgusChatToken);
 
     public async Task<ArgusSession> ConnectAsync(string email, CancellationToken ct)
     {
         var endpoint = new Uri(argus.Value.Url.TrimEnd('/') + "/mcp");
-        var token = chat.Value.ArgusChatToken!;
+        var token = chat.CurrentValue.ArgusChatToken!;
         using var req = Build(endpoint, token, email, null, null, new JsonObject
         {
             ["jsonrpc"] = "2.0", ["id"] = 1, ["method"] = "initialize",

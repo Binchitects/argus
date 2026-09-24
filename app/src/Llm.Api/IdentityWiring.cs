@@ -193,6 +193,12 @@ public static class IdentityWiring
             }
         });
 
+        services.Configure<ThrottleOptions>(config.GetSection("Throttle"));
+        services.Configure<Settings.BrandingOptions>(config.GetSection("Branding"));
+        services.Configure<Settings.SettingsFileOptions>(config.GetSection("Settings"));
+        services.AddSingleton<Settings.SettingsAtStart>();
+        services.AddSingleton<Settings.IAppRestarter, Settings.AppRestarter>();
+        services.AddScoped<Settings.SettingsService>();
         services.AddSingleton<LoginThrottle>();
         services.AddSingleton<ILdapDirectory, LdapDirectory>();
         services.AddSingleton<LdapSync>();
@@ -302,6 +308,7 @@ public static class IdentityWiring
         Dashboards.DashboardEndpoints.MapDashboards(app);
         Dashboards.UsageEndpoints.MapUsage(app);
         Operations.OperationsEndpoints.MapOperations(app);
+        Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
     }
 

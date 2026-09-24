@@ -37,17 +37,21 @@ public static class AdminEndpoints
             return await WithPerson(id, people, async u => { await people.DeleteAsync(actor, u); return Results.NoContent(); });
         });
         admin.MapGet("/audit", AuditAsync);
-        admin.MapGet("/sign-in", (IOptions<LdapOptions> ldap) => Results.Ok(new
+        admin.MapGet("/sign-in", (IOptionsMonitor<LdapOptions> monitor) =>
         {
-            ldap = ldap.Value.Enabled,
-            ldapUrl = ldap.Value.Enabled ? ldap.Value.Url : null,
-            adminGroup = ldap.Value.AdminGroup,
-            requiredGroup = ldap.Value.RequiredGroup,
-            syncMinutes = ldap.Value.SyncInterval.TotalMinutes,
-        }));
-        admin.MapPost("/ldap/sync", async (IOptions<LdapOptions> ldap, LdapSync sync, Audit audit) =>
+            var ldap = monitor.CurrentValue;
+            return Results.Ok(new
+            {
+                ldap = ldap.Enabled,
+                ldapUrl = ldap.Enabled ? ldap.Url : null,
+                adminGroup = ldap.AdminGroup,
+                requiredGroup = ldap.RequiredGroup,
+                syncMinutes = ldap.SyncInterval.TotalMinutes,
+            });
+        });
+        admin.MapPost("/ldap/sync", async (IOptionsMonitor<LdapOptions> ldap, LdapSync sync, Audit audit) =>
         {
-            if (!ldap.Value.Enabled)
+            if (!ldap.CurrentValue.Enabled)
             {
                 return AuthEndpoints.Problem(400, "off", "LDAP is not configured.");
             }

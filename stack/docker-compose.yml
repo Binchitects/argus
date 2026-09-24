@@ -365,6 +365,7 @@ services:
     volumes:
       - ${LLM_CONFIG_DIR:-./config}/authelia:/config
       - ${LLM_CONFIG_DIR:-./config}/traefik/auth:/traefik-auth
+      - ${LLM_CONFIG_DIR:-./config}/app:/app-settings
     command:
       - |
         set -e
@@ -377,6 +378,9 @@ services:
         mkdir -p /config/directory
         chmod 755 /config/directory
         chown -R "$$APP_UID:$$APP_GID" /config/directory
+        # The Settings page writes pending .env changes here (scripts/apply-settings.sh applies them).
+        chmod 700 /app-settings
+        chown -R "$$APP_UID:$$APP_GID" /app-settings
         if [ -f /config/users.yml ]; then chown "$$APP_UID:$$APP_GID" /config/users.yml; fi
         if [ "$$owner" != "$$APP_UID:$$APP_GID" ]; then
           echo "auth-init: note: config/ belongs to $$owner but the app runs as $$APP_UID:$$APP_GID."
@@ -771,7 +775,7 @@ services:
       -c ${MODEL_CONTEXT:-32768}
       -t ${LLAMACPP_THREADS:-8}
       -ngl ${LLAMACPP_N_GPU_LAYERS:-99}
-      --n-cpu-moe ${LLAMACPP_N_CPU_MOE:-48}
+      --n-cpu-moe ${LLAMACPP_N_CPU_MOE:-0}
       --cache-type-k ${LLAMACPP_KV_TYPE:-q8_0}
       --cache-type-v ${LLAMACPP_KV_TYPE:-q8_0}
       --parallel ${LLAMACPP_PARALLEL:-1}
@@ -1414,6 +1418,56 @@ services:
       Argus__GitlabUsername: ${ARGUS_GITLAB_USERNAME:-}
       # The chat's credential at Argus's MCP endpoint (with each person's email beside it).
       Chat__ArgusChatToken: ${ARGUS_CHAT_CLIENT_TOKEN:-}
+      # Every .env value the Settings page can change, as the stack has it now
+      # (defaults as compose applies them). Secrets only say whether they are set.
+      # Held in step with app/src/Llm.Api/Settings/SettingsCatalog.cs by a test.
+      StackEnv__PRICE_INPUT_PER_MTOK: ${PRICE_INPUT_PER_MTOK:-0.20}
+      StackEnv__PRICE_CACHED_INPUT_PER_MTOK: ${PRICE_CACHED_INPUT_PER_MTOK:-0.02}
+      StackEnv__PRICE_OUTPUT_PER_MTOK: ${PRICE_OUTPUT_PER_MTOK:-0.80}
+      StackEnv__LITELLM_DEFAULT_USER_BUDGET: ${LITELLM_DEFAULT_USER_BUDGET:-50}
+      StackEnv__LITELLM_BUDGET_DURATION: ${LITELLM_BUDGET_DURATION:-1mo}
+      StackEnv__MODEL_NAME: ${MODEL_NAME:-}
+      StackEnv__MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
+      StackEnv__MODEL_MAX_OUTPUT: ${MODEL_MAX_OUTPUT:-32768}
+      StackEnv__MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-xhigh}
+      StackEnv__MODEL_ENABLE_THINKING: ${MODEL_ENABLE_THINKING:-true}
+      StackEnv__THINKING_PRESETS: ${THINKING_PRESETS:-xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking}
+      StackEnv__LLAMACPP_MODEL_FILE: ${LLAMACPP_MODEL_FILE:-}
+      StackEnv__LLAMACPP_HF_REPO: ${LLAMACPP_HF_REPO:-}
+      StackEnv__LLAMACPP_HF_FILES: ${LLAMACPP_HF_FILES:-}
+      StackEnv__LLAMACPP_N_GPU_LAYERS: ${LLAMACPP_N_GPU_LAYERS:-99}
+      StackEnv__LLAMACPP_N_CPU_MOE: ${LLAMACPP_N_CPU_MOE:-0}
+      StackEnv__LLAMACPP_KV_TYPE: ${LLAMACPP_KV_TYPE:-q8_0}
+      StackEnv__LLAMACPP_PARALLEL: ${LLAMACPP_PARALLEL:-1}
+      StackEnv__LLAMACPP_MTP_DRAFT_MAX: ${LLAMACPP_MTP_DRAFT_MAX:-0}
+      StackEnv__LLAMACPP_EXTRA_ARGS: ${LLAMACPP_EXTRA_ARGS:-}
+      StackEnv__LLAMACPP_THREADS: ${LLAMACPP_THREADS:-8}
+      StackEnv__LLAMACPP_CPUS: ${LLAMACPP_CPUS:-16}
+      StackEnv__LLAMACPP_MEM_LIMIT: ${LLAMACPP_MEM_LIMIT:-0}
+      StackEnv__LLAMACPP_MLOCK: ${LLAMACPP_MLOCK:-auto}
+      StackEnv__LLAMACPP_PRELOAD: ${LLAMACPP_PRELOAD:-auto}
+      StackEnv__LLAMACPP_RAM_RESERVE_GB: ${LLAMACPP_RAM_RESERVE_GB:-8}
+      StackEnv__GPU_POWER_LIMIT_W: ${GPU_POWER_LIMIT_W:-}
+      StackEnv__CPU_POWER_LIMIT_W: ${CPU_POWER_LIMIT_W:-}
+      StackEnv__HOST_SWAPPINESS: ${HOST_SWAPPINESS:-}
+      StackEnv__OLLAMA_CPUS: ${OLLAMA_CPUS:-2}
+      StackEnv__POSTGRES_CPUS: ${POSTGRES_CPUS:-3}
+      StackEnv__ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
+      StackEnv__ARGUS_GITLAB_TOKEN_SET: ${ARGUS_GITLAB_TOKEN:+yes}
+      StackEnv__ARGUS_GITLAB_AUTH: ${ARGUS_GITLAB_AUTH:-}
+      StackEnv__ARGUS_GITLAB_USERNAME: ${ARGUS_GITLAB_USERNAME:-}
+      StackEnv__ARGUS_GITLAB_PASSWORD_SET: ${ARGUS_GITLAB_PASSWORD:+yes}
+      StackEnv__ARGUS_GITLAB_CA_CERT: ${ARGUS_GITLAB_CA_CERT:-}
+      StackEnv__ARGUS_GITLAB_VERIFY: ${ARGUS_GITLAB_VERIFY:-}
+      StackEnv__HF_TOKEN_SET: ${HF_TOKEN:+yes}
+      StackEnv__COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+      StackEnv__PROMETHEUS_RETENTION_TIME: ${PROMETHEUS_RETENTION_TIME:-30d}
+      StackEnv__PROMETHEUS_RETENTION_SIZE: ${PROMETHEUS_RETENTION_SIZE:-20GB}
+      StackEnv__BACKUP_DIR: ${BACKUP_DIR:-./backups}
+      StackEnv__BACKUP_COPY_DIR: ${BACKUP_COPY_DIR:-}
+      StackEnv__BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      StackEnv__BACKUP_INCLUDE_LOGS: ${BACKUP_INCLUDE_LOGS:-1}
+      StackEnv__BACKUP_TIME: ${BACKUP_TIME:-03:30}
     volumes:
       - ${LLM_CONFIG_DIR:-./config}/authelia/directory:/directory
       - ${LLM_CONFIG_DIR:-./config}/authelia:/legacy:ro
@@ -1421,6 +1475,8 @@ services:
       - ${LLM_CONFIG_DIR:-./config}/grafana/dashboards:/dashboards:ro
       # The shipped deployments the Model page offers to switch to.
       - ${LLM_ENV_SAMPLES_DIR:-./env-samples}:/env-samples:ro
+      # The Settings page's pending .env changes, for scripts/apply-settings.sh.
+      - ${LLM_CONFIG_DIR:-./config}/app:/settings
     read_only: true
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]

@@ -11,33 +11,54 @@ namespace Llm.Api.Ldap;
 /// directory, or from the sign-in group, is disabled: their sessions end and
 /// their API keys are blocked. They come back if the directory lets them again.
 /// </summary>
-public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptions<LdapOptions> options, ILogger<LdapSync> logger) : BackgroundService
+public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonitor<LdapOptions> options, ILogger<LdapSync> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!options.Value.Enabled)
+        // The settings can change at any time (the Settings page): they are read
+        // again every round, and a change wakes the loop so it applies at once.
+        var warnedInsecure = false;
+        while (!stoppingToken.IsCancellationRequested)
         {
-            return;
-        }
-        if (options.Value.IgnoreCertificateErrors)
-        {
-            LogInsecure(logger);
-        }
-        using var timer = new PeriodicTimer(options.Value.SyncInterval);
-        do
-        {
+            var o = options.CurrentValue;
+            if (o.Enabled)
+            {
+                if (o.IgnoreCertificateErrors && !warnedInsecure)
+                {
+                    LogInsecure(logger);
+                }
+                warnedInsecure = o.IgnoreCertificateErrors;
+                try
+                {
+                    var (checkedCount, disabled) = await RunOnceAsync(stoppingToken);
+                    LogSynced(logger, checkedCount, disabled);
+                }
+                catch (LdapUnavailableException ex)
+                {
+                    // Never disable anyone because the directory is down.
+                    LogUnavailable(logger, ex.Message);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
+            }
+            using var changed = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            using var subscription = options.OnChange((_, _) => changed.Cancel());
             try
             {
-                var (checkedCount, disabled) = await RunOnceAsync(stoppingToken);
-                LogSynced(logger, checkedCount, disabled);
+                var wait = o.Enabled ? (o.SyncInterval < TimeSpan.FromMinutes(1) ? TimeSpan.FromMinutes(1) : o.SyncInterval) : Timeout.InfiniteTimeSpan;
+                await Task.Delay(wait, changed.Token);
             }
-            catch (LdapUnavailableException ex)
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
             {
-                // Never disable anyone because the directory is down.
-                LogUnavailable(logger, ex.Message);
+                // The settings changed: go round again with the new ones.
+            }
+            catch (OperationCanceledException)
+            {
+                return;
             }
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
     public async Task<(int Checked, int Disabled)> RunOnceAsync(CancellationToken ct = default)

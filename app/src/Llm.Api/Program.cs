@@ -35,7 +35,13 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
     o.KnownProxies.Clear();
 });
 
+// Settings saved in the app (the Settings page) are configuration too, and win
+// over the environment: added after Build so nothing is read before they are.
+var savedSettings = new Llm.Api.Settings.DatabaseConfigurationSource(connectionString, builder.Configuration["Auth:DataKey"]);
+builder.Services.AddSingleton(savedSettings.Provider);
+
 var app = builder.Build();
+((IConfigurationBuilder)app.Configuration).Add(savedSettings);
 
 app.UseForwardedHeaders();
 app.UseExceptionHandler();
@@ -54,7 +60,18 @@ app.MapHealthChecks("/readyz", new HealthCheckOptions { Predicate = c => c.Tags.
 app.MapAppIdentity();
 
 var api = app.MapGroup("/api");
-api.MapGet("/info", () => AppInfo.Current);
+// Public: the sign-in page shows the name, headline and where to get help.
+api.MapGet("/info", (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settings.BrandingOptions> branding) =>
+{
+    var b = branding.CurrentValue;
+    return new
+    {
+        name = string.IsNullOrWhiteSpace(b.ProductName) ? AppInfo.Current.Name : b.ProductName,
+        version = AppInfo.Current.Version,
+        signInHeadline = b.SignInHeadline,
+        supportContact = string.IsNullOrWhiteSpace(b.SupportContact) ? null : b.SupportContact,
+    };
+});
 // Unknown API paths are a 404, never the single-page app's index.html.
 api.MapFallback(() => Results.NotFound());
 app.MapFallbackToFile("index.html", new StaticFileOptions { OnPrepareResponse = StaticCaching.Apply });
@@ -62,8 +79,12 @@ app.MapFallbackToFile("index.html", new StaticFileOptions { OnPrepareResponse = 
 if (app.Configuration.GetValue("Database:MigrateOnStartup", true))
 {
     await StartupDatabase.MigrateAsync(app.Services, app.Logger, app.Lifetime.ApplicationStopping);
+    // On a first start the settings table did not exist when the source first read it.
+    savedSettings.Provider.Reload();
     await app.BootstrapIdentityAsync();
 }
+// What the restart-bound settings were at start, to tell whether a restart is due.
+app.Services.GetRequiredService<Llm.Api.Settings.SettingsAtStart>();
 
 await app.RunAsync();
 return 0;

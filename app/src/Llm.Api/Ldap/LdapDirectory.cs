@@ -23,11 +23,65 @@ public interface ILdapDirectory
 
 public sealed class LdapUnavailableException(string message, Exception inner) : Exception(message, inner);
 
-public sealed class LdapDirectory(IOptions<LdapOptions> options) : ILdapDirectory
+/// <summary>A result of <see cref="LdapDirectory.TestAsync"/>: whether the settings work, in words.</summary>
+public sealed record LdapTestResult(bool Ok, string Message);
+
+public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapDirectory
 {
-    private readonly LdapOptions _o = options.Value;
+    // Read on every use: a change saved in the Settings page applies at once.
+    private LdapOptions _o => options.CurrentValue;
 
     public bool Enabled => _o.Enabled;
+
+    /// <summary>
+    /// Connects and binds with these settings (saved or not), then counts the people
+    /// below the user base: what an admin needs to know before saving them.
+    /// </summary>
+    public static async Task<LdapTestResult> TestAsync(LdapOptions o, CancellationToken ct = default)
+    {
+        if (!o.Enabled)
+        {
+            return new(false, "No directory server is set.");
+        }
+        if (!Uri.TryCreate(o.Url, UriKind.Absolute, out var uri) || (uri.Scheme != "ldap" && uri.Scheme != "ldaps"))
+        {
+            return new(false, $"{o.Url} is not an ldap:// or ldaps:// address.");
+        }
+        var directory = new LdapDirectory(new FixedMonitor(o));
+        try
+        {
+            var found = await directory.WithServiceAsync(async conn =>
+            {
+                var filter = string.Format(System.Globalization.CultureInfo.InvariantCulture, o.UserFilter, "*");
+                return (await SearchAsync(conn, o.UserBaseDn, LdapConnection.ScopeSub, filter, ct)).Count;
+            });
+            var who = string.IsNullOrEmpty(o.BindDn) ? "anonymously" : $"as {o.BindDn}";
+            return found == 0
+                ? new(false, $"Connected and signed in {who}, but found nobody below \"{o.UserBaseDn}\". Check where people are.")
+                : new(true, $"Connected and signed in {who}. Found {found} {(found == 1 ? "person" : "people")} below \"{o.UserBaseDn}\".");
+        }
+        catch (LdapUnavailableException ex)
+        {
+            return new(false, ex.InnerException is LdapException { ResultCode: LdapException.InvalidCredentials }
+                ? "The server refused the service account: check its DN and password."
+                : ex.Message);
+        }
+        catch (LdapException ex)
+        {
+            return new(false, $"The directory answered: {ex.LdapErrorMessage ?? ex.Message}");
+        }
+        catch (Exception ex) when (ex is System.Net.Sockets.SocketException or IOException or TimeoutException)
+        {
+            return new(false, $"Could not reach {o.Url}: {ex.Message}");
+        }
+    }
+
+    private sealed class FixedMonitor(LdapOptions value) : IOptionsMonitor<LdapOptions>
+    {
+        public LdapOptions CurrentValue => value;
+        public LdapOptions Get(string? name) => value;
+        public IDisposable? OnChange(Action<LdapOptions, string?> listener) => null;
+    }
 
     public async Task<LdapPerson?> AuthenticateAsync(string login, string password, CancellationToken ct = default)
     {

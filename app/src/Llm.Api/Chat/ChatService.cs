@@ -20,7 +20,7 @@ public sealed partial class ChatService(
     AppDbContext db,
     GatewayChat gateway,
     ArgusMcp argus,
-    IOptions<ChatOptions> chat,
+    IOptionsMonitor<ChatOptions> chat,
     IOptions<StackOptions> stack,
     ILogger<ChatService> logger)
 {
@@ -68,7 +68,7 @@ public sealed partial class ChatService(
                 request["chat_template_kwargs"] = kwargs;
             }
             // No tools on the last allowed round: the model must answer with what it has.
-            if (tools is { Count: > 0 } && round < chat.Value.MaxToolRounds)
+            if (tools is { Count: > 0 } && round < chat.CurrentValue.MaxToolRounds)
             {
                 request["tools"] = tools.DeepClone();
             }

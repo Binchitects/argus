@@ -256,23 +256,29 @@ public static class ChatEndpoints
         await http.Response.WriteAsJsonAsync(new { status = code, error = message });
     }
 
-    private static async Task<IResult> UploadAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<ChatOptions> options)
+    private static async Task<IResult> UploadAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> monitor)
     {
+        var options = monitor.CurrentValue;
         var me = await Me(p, users);
+        // The setting, not Kestrel's 30 MB default, decides the size (plus room for the form around the file).
+        if (request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+        {
+            limit.MaxRequestBodySize = options.MaxUploadBytes + 1024 * 1024;
+        }
         if (!request.HasFormContentType || (await request.ReadFormAsync()).Files is not { Count: 1 } files)
         {
             return AuthEndpoints.Problem(400, "file", "Send exactly one file.");
         }
         var file = files[0];
-        if (file.Length > options.Value.MaxUploadBytes)
+        if (file.Length > options.MaxUploadBytes)
         {
-            return AuthEndpoints.Problem(413, "too_large", $"{file.FileName} is larger than {options.Value.MaxUploadBytes / 1024 / 1024} MB.");
+            return AuthEndpoints.Problem(413, "too_large", $"{file.FileName} is larger than {options.MaxUploadBytes / 1024 / 1024} MB.");
         }
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms);
         try
         {
-            var (text, truncated) = Attachments.Extract(file.FileName, file.ContentType ?? "", ms.ToArray(), options.Value.MaxAttachmentChars);
+            var (text, truncated) = Attachments.Extract(file.FileName, file.ContentType ?? "", ms.ToArray(), options.MaxAttachmentChars);
             var a = new ChatAttachment
             {
                 UserId = me.Id, FileName = Path.GetFileName(file.FileName), ContentType = file.ContentType ?? "application/octet-stream",

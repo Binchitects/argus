@@ -145,6 +145,32 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
         ["Ldap:RequiredGroup"] = "llm-users",
     };
 
+    [Fact]
+    public async Task The_directory_can_be_set_up_in_the_Settings_page_tested_first_and_used_at_once()
+    {
+        // An app started with no directory at all.
+        await using var fresh = app.Create(app.ConnectionStringFor("ldapset_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Auth:DataKey"] = "ldap-settings-data-key" });
+        var admin = await new TestBrowser(fresh).SignedInAsync("admin", AppFixture.AdminPassword);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await new TestBrowser(fresh).LoginAsync("alice", "alice-directory-pw")).StatusCode);
+
+        var form = Settings(ldap.Url).Where(kv => kv.Key.StartsWith("Ldap:", StringComparison.Ordinal)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        var wrong = new Dictionary<string, string?>(form) { ["Ldap:BindPassword"] = "not-the-password" };
+        var refused = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-test", wrong));
+        Assert.False(refused.GetProperty("ok").GetBoolean());
+        Assert.Contains("service account", refused.GetProperty("message").GetString(), StringComparison.Ordinal);
+        var tested = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-test", form));
+        Assert.True(tested.GetProperty("ok").GetBoolean(), tested.GetProperty("message").GetString());
+
+        var changes = form.Select(kv => new { key = kv.Key, value = kv.Value }).ToArray();
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes }));
+        // No restart: the next sign-in uses the directory.
+        var alice = await new TestBrowser(fresh).SignedInAsync("alice", "alice-directory-pw");
+        var me = await alice.JsonAsync(await alice.GetAsync("/api/auth/me"));
+        Assert.Equal("ldap", me.GetProperty("source").GetString());
+        Assert.True(me.GetProperty("isAdmin").GetBoolean());
+    }
+
     private async Task<WebApplicationFactory<Program>> AppAsync()
     {
         await Gate.WaitAsync();

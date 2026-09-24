@@ -77,3 +77,8 @@ config/authelia/directory/*
 !config/authelia/directory/.gitkeep
 config/ca/*.crt
 config/ca/*.pem
+
+# The Settings page's pending .env changes (can hold a secret)
+config/app/pending.env
+config/app/pending.env.tmp
+config/app/applied-*
