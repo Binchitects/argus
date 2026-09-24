@@ -83,7 +83,9 @@ account** afterwards).
 
 Your account page has your API key (make a new one there; the old one stops at
 once), your spend and credit, two-factor sign-in (scan a QR code; you get ten
-one-time recovery codes), and your password.
+one-time recovery codes), and your password. Changing your password or turning
+two-factor sign-in on or off signs you out on every other device; this one
+stays signed in. Opening two-factor setup and cancelling changes nothing.
 
 ### As a machine client of the engine API
 

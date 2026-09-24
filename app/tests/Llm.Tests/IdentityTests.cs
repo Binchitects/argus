@@ -272,7 +272,15 @@ public sealed class IdentityTests(AppFixture app)
         var key = setup.GetProperty("sharedKey").GetString()!;
         Assert.StartsWith("otpauth://totp/llm.test:", setup.GetProperty("uri").GetString(), StringComparison.Ordinal);
         await StatusAssert.Is(HttpStatusCode.BadRequest, await person.PostAsync("/api/account/2fa/enable", new { code = "000000" }));
+        // Opening setup changes nothing yet: the person's other sessions stay.
+        var elsewhere = await Browser().SignedInAsync(email, password);
+        await person.PostAsync("/api/account/2fa/setup");
+        await StatusAssert.Is(HttpStatusCode.OK, await elsewhere.GetAsync("/api/auth/me"));
+        key = (await person.JsonAsync(await person.PostAsync("/api/account/2fa/setup"))).GetProperty("sharedKey").GetString()!;
         var enabled = await person.JsonAsync(await person.PostAsync("/api/account/2fa/enable", new { code = Totp.Code(key) }));
+        // Turning it on does end them; this session stays.
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await elsewhere.GetAsync("/api/auth/me"));
+        await StatusAssert.Is(HttpStatusCode.OK, await person.GetAsync("/api/auth/me"));
         var recovery = enabled.GetProperty("recoveryCodes").EnumerateArray().Select(c => c.GetString()!).ToList();
         Assert.Equal(10, recovery.Count);
 
@@ -392,11 +400,14 @@ public sealed class SessionCapTests(AppFixture app)
     [Fact]
     public async Task Refreshing_a_session_does_not_restart_the_twelve_hour_cap()
     {
-        var b = new TestBrowser(app.Factory);
-        await b.SignedInAsync("admin", AppFixture.AdminPassword);
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = "capcheck", email = "capcheck@example.test" }));
+        var password = made.GetProperty("password").GetString()!;
+        var b = await new TestBrowser(app.Factory).SignedInAsync("capcheck", password);
         var before = (await b.JsonAsync(await b.GetAsync("/api/auth/me"))).GetProperty("signedInAt").GetInt64();
         await Task.Delay(1500);
-        await StatusAssert.Is(System.Net.HttpStatusCode.OK, await b.PostAsync("/api/account/2fa/setup")); // refreshes the session
+        // Changing the password rotates the stamp and refreshes this session.
+        await StatusAssert.Is(System.Net.HttpStatusCode.NoContent, await b.PostAsync("/api/account/password", new { current = password, next = "a brand new passphrase for the cap" }));
         var after = await b.JsonAsync(await b.GetAsync("/api/auth/me"));
         Assert.Equal(before, after.GetProperty("signedInAt").GetInt64());
         Assert.True(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - before >= 1);

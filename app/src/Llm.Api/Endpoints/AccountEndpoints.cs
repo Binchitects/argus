@@ -50,17 +50,21 @@ public static class AccountEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> SetupTwoFactorAsync(ClaimsPrincipal p, UserManager<AppUser> users, SignInManager<AppUser> signIn,
-        Microsoft.Extensions.Options.IOptions<AuthOptions> auth)
+    private static async Task<IResult> SetupTwoFactorAsync(ClaimsPrincipal p, UserManager<AppUser> users, IUserStore<AppUser> store,
+        Microsoft.Extensions.Options.IOptions<AuthOptions> auth, CancellationToken ct)
     {
         var user = (await users.GetUserAsync(p))!;
         if (user.TwoFactorEnabled)
         {
             return AuthEndpoints.Problem(409, "enabled", "Two-factor sign-in is already on. Turn it off first to set up a new device.");
         }
-        // A new key rotates the security stamp; keep this session (other sessions end).
-        await users.ResetAuthenticatorKeyAsync(user);
-        await signIn.RefreshSignInAsync(user);
+        // A key for the device being set up. It protects nothing until two-factor is
+        // turned on, so it leaves the security stamp alone: opening setup and
+        // cancelling must not sign the person out elsewhere. Turning it on rotates
+        // the stamp (SetTwoFactorEnabledAsync), and other sessions end then.
+        // (ResetAuthenticatorKeyAsync would rotate it now.)
+        await ((IUserAuthenticatorKeyStore<AppUser>)store).SetAuthenticatorKeyAsync(user, users.GenerateNewAuthenticatorKey(), ct);
+        await users.UpdateAsync(user);
         var key = (await users.GetAuthenticatorKeyAsync(user))!;
         var issuer = Uri.EscapeDataString(auth.Value.Domain);
         var uri = string.Create(CultureInfo.InvariantCulture,
