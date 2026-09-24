@@ -242,6 +242,7 @@ public static class IdentityWiring
             c.Timeout = o.RequestTimeout;
         });
         services.AddSingleton<Chat.ChatKey>();
+        services.AddSingleton<Chat.ChatModels>();
         services.AddHttpClient<Chat.ArgusMcp>(c => c.Timeout = TimeSpan.FromMinutes(2));
         services.AddScoped<Chat.ChatService>();
     }

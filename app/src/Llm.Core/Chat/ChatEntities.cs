@@ -8,6 +8,19 @@ public sealed class Conversation
     /// <summary>Thinking level for this chat ("low", "xhigh", "off"...); null = the deployment's default.</summary>
     public string? Thinking { get; set; }
     public bool UseArgus { get; set; } = true;
+    /// <summary>The model this chat talks to; null = the deployment's default.</summary>
+    public string? Model { get; set; }
+    /// <summary>The person's own instructions for this chat, sent after the app's system prompt.</summary>
+    public string? SystemPrompt { get; set; }
+    public double? Temperature { get; set; }
+    public double? TopP { get; set; }
+    public int? MaxTokens { get; set; }
+    /// <summary>
+    /// The last message of the branch on screen. Messages form a tree (an edited
+    /// question or a regenerated answer is a sibling); the conversation shown and
+    /// sent to the model is the path from the root to this leaf.
+    /// </summary>
+    public Guid? CurrentLeafId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];
@@ -29,6 +42,9 @@ public sealed class ChatMessage
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid ConversationId { get; set; }
+    /// <summary>The message before this one on its branch; null for a first question.</summary>
+    public Guid? ParentId { get; set; }
+    /// <summary>Order of creation in the conversation, across branches.</summary>
     public int Sequence { get; set; }
     public required string Role { get; set; }
     public string Content { get; set; } = "";
@@ -42,12 +58,18 @@ public sealed class ChatMessage
     public int? PromptTokens { get; set; }
     public int? CachedTokens { get; set; }
     public int? CompletionTokens { get; set; }
+    /// <summary>Assistant: how long the model thought before answering. Tool: how long the tool took.</summary>
+    public int? ThinkingMs { get; set; }
+    public int? DurationMs { get; set; }
     public MessageStatus Status { get; set; }
     public string? Error { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-/// <summary>A file someone attached: only its extracted text is kept, never the file.</summary>
+/// <summary>
+/// A file someone attached. For text, code and PDFs only the extracted text is
+/// kept, never the file; an image is kept as it is (the model looks at it).
+/// </summary>
 public sealed class ChatAttachment
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
@@ -57,5 +79,8 @@ public sealed class ChatAttachment
     public long Size { get; set; }
     public required string Text { get; set; }
     public bool Truncated { get; set; }
+    /// <summary>"text" (Text holds it) or "image" (Data holds it).</summary>
+    public string Kind { get; set; } = "text";
+    public byte[]? Data { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

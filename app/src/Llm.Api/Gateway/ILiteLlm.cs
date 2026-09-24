@@ -3,6 +3,14 @@ namespace Llm.Api.Gateway;
 /// <summary>A person's standing at the gateway. Spend and budget are in the gateway's currency units.</summary>
 public sealed record GatewayUser(string UserId, decimal Spend, decimal? Budget);
 
+/// <summary>
+/// A model the gateway serves, with what it can do. Unknown capabilities (LiteLLM's
+/// null) are taken as: tools and thinking yes (the engine's template decides),
+/// vision no (a model needs a projector to see, and says so when it has one).
+/// Prices are per million tokens.
+/// </summary>
+public sealed record GatewayModel(string Name, int? Context, int? MaxOutput, bool Vision, bool Tools, bool Thinking, decimal? InputPerMtok, decimal? CachedInputPerMtok, decimal? OutputPerMtok);
+
 /// <summary>A key as the gateway lists it: the hashed token (never the key itself), alias, spend and state.</summary>
 public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt);
 
@@ -27,6 +35,9 @@ public interface ILiteLlm
     Task SetBlockedAsync(IEnumerable<string> tokens, bool blocked, CancellationToken ct = default);
     Task<IReadOnlyDictionary<string, GatewayUser>> UsersAsync(CancellationToken ct = default);
     Task DeleteUserAsync(string email, CancellationToken ct = default);
+
+    /// <summary>The models the gateway serves (/model/info).</summary>
+    Task<IReadOnlyList<GatewayModel>> ModelsAsync(CancellationToken ct = default);
 }
 
 public sealed class GatewayException(string message, int? status = null, Exception? inner = null) : Exception(message, inner)

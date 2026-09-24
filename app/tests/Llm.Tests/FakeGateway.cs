@@ -92,6 +92,16 @@ public sealed class FakeGateway : ILiteLlm
         return Task.FromResult(all);
     }
 
+    /// <summary>What /model/info lists; tests change it to try a second model or one that can see.</summary>
+    public List<GatewayModel> Models { get; } =
+        [new("Qwen3.8-Flash-Next", 32768, 8192, Vision: false, Tools: true, Thinking: true, 0.20m, 0.02m, 0.80m)];
+
+    public Task<IReadOnlyList<GatewayModel>> ModelsAsync(CancellationToken ct = default)
+    {
+        Check();
+        return Task.FromResult<IReadOnlyList<GatewayModel>>([.. Models]);
+    }
+
     public Task DeleteUserAsync(string email, CancellationToken ct = default)
     {
         Check();

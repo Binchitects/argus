@@ -43,6 +43,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.ToTable("conversations");
             e.Property(c => c.Title).HasMaxLength(200);
             e.Property(c => c.Thinking).HasMaxLength(20);
+            e.Property(c => c.Model).HasMaxLength(200);
+            e.Property(c => c.SystemPrompt).HasMaxLength(20000);
             e.HasIndex(c => new { c.UserId, c.UpdatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(c => c.Messages).WithOne().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
@@ -55,12 +57,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.ToolName).HasMaxLength(200);
             e.Property(m => m.Model).HasMaxLength(200);
             e.HasIndex(m => new { m.ConversationId, m.Sequence }).IsUnique();
+            e.HasIndex(m => new { m.ConversationId, m.ParentId });
         });
         builder.Entity<ChatAttachment>(e =>
         {
             e.ToTable("chat_attachments");
             e.Property(a => a.FileName).HasMaxLength(260);
             e.Property(a => a.ContentType).HasMaxLength(200);
+            e.Property(a => a.Kind).HasMaxLength(20);
             e.HasIndex(a => a.UserId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
         });

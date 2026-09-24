@@ -62,8 +62,8 @@ public sealed class ChatTests(AppFixture app)
         var (b, email) = await PersonAsync();
         var id = await NewChatAsync(b, new { thinking = "low", useArgus = false });
         var events = await SendAsync(b, id, "How do I rotate logs?\nMore detail here.");
-        Assert.Equal(["title", "assistant", "reasoning", "content", "content", "usage", "done"], Types(events));
-        Assert.Equal("How do I rotate logs?", events[0].GetProperty("title").GetString());
+        Assert.Equal(["question", "title", "assistant", "reasoning", "thought", "content", "content", "usage", "done"], Types(events));
+        Assert.Equal("How do I rotate logs?", events[1].GetProperty("title").GetString());
 
         var (body, headers) = app.Model.Requests.Last();
         Assert.Equal(email, body["user"]!.GetValue<string>());
@@ -83,6 +83,11 @@ public sealed class ChatTests(AppFixture app)
         Assert.Equal("Thinking about it.", msgs[1].GetProperty("reasoning").GetString());
         Assert.Equal(40, msgs[1].GetProperty("cachedTokens").GetInt32());
         Assert.Equal("complete", msgs[1].GetProperty("status").GetString());
+        // The answer hangs off the question, and is what the chat shows.
+        Assert.Equal(msgs[0].GetProperty("id").GetGuid(), msgs[1].GetProperty("parentId").GetGuid());
+        Assert.Equal(msgs[1].GetProperty("id").GetGuid(), conv.GetProperty("currentLeafId").GetGuid());
+        Assert.True(msgs[1].GetProperty("thinkingMs").GetInt32() >= 0);
+        Assert.True(msgs[1].GetProperty("durationMs").GetInt32() >= 0);
     }
 
     [Fact]
@@ -104,9 +109,10 @@ public sealed class ChatTests(AppFixture app)
         var (b, email) = await PersonAsync();
         var id = await NewChatAsync(b);
         var events = await SendAsync(b, id, "Where is ParseHeader? [tool]");
-        Assert.Equal(["title", "assistant", "usage", "tool_call", "tool_result", "assistant", "content", "usage", "done"], Types(events));
+        Assert.Equal(["question", "title", "assistant", "usage", "tool_call", "tool_result", "assistant", "content", "usage", "done"], Types(events));
         var result = events.Single(e => e.GetProperty("type").GetString() == "tool_result");
         Assert.Contains("src/parse.c:10", result.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.True(result.GetProperty("durationMs").GetInt32() >= 0);
         Assert.False(result.GetProperty("noAccess").GetBoolean());
 
         // Argus saw the chat token and this person's email, in one session.
@@ -213,7 +219,7 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Regenerate_replaces_the_last_answer()
+    public async Task Regenerate_adds_an_answer_beside_the_old_one()
     {
         var (b, _) = await PersonAsync();
         var id = await NewChatAsync(b, new { useArgus = false });
@@ -221,9 +227,16 @@ public sealed class ChatTests(AppFixture app)
         var before = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().Last().GetProperty("id").GetGuid();
         var events = await SendAsync(b, id, "", path: "regenerate");
         Assert.Contains("done", Types(events));
-        var msgs = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().ToList();
-        Assert.Equal(["user", "assistant"], msgs.Select(m => m.GetProperty("role").GetString()));
-        Assert.NotEqual(before, msgs[1].GetProperty("id").GetGuid());
+        var conv = await ConversationAsync(b, id);
+        var msgs = conv.GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(["user", "assistant", "assistant"], msgs.Select(m => m.GetProperty("role").GetString()));
+        // Both answers hang off the question; the new one is on screen.
+        Assert.Equal(msgs[1].GetProperty("parentId").GetGuid(), msgs[2].GetProperty("parentId").GetGuid());
+        Assert.Equal(before, msgs[1].GetProperty("id").GetGuid());
+        Assert.Equal(msgs[2].GetProperty("id").GetGuid(), conv.GetProperty("currentLeafId").GetGuid());
+        // The next question builds on the new answer only.
+        await SendAsync(b, id, "next");
+        Assert.Equal(["system", "user", "assistant", "user"], app.Model.Requests.Last().Body["messages"]!.AsArray().Select(m => m!["role"]!.GetValue<string>()));
     }
 
     [Fact]

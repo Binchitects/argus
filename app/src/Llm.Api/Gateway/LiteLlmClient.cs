@@ -67,6 +67,31 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         return res?["key"]?.GetValue<string>() is { Length: > 0 } key ? key : throw new GatewayException("The gateway created no key.");
     }
 
+    public async Task<IReadOnlyList<GatewayModel>> ModelsAsync(CancellationToken ct = default)
+    {
+        var res = await SendAsync(HttpMethod.Get, "/model/info", null, ct);
+        var models = new List<GatewayModel>();
+        foreach (var row in (res?["data"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            if (row["model_name"]?.GetValue<string>() is not { Length: > 0 } name || models.Any(m => m.Name == name))
+            {
+                continue;
+            }
+            var info = row["model_info"] as JsonObject;
+            if (info?["mode"]?.GetValue<string>() is { } mode && mode != "chat")
+            {
+                continue; // embeddings and the like are not for the chat
+            }
+            int? Int(string k) => info?[k] is JsonValue v && v.TryGetValue<long>(out var n) ? (int)Math.Min(n, int.MaxValue) : null;
+            bool? Flag(string k) => info?[k] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : null;
+            decimal? PerMtok(string k) => info?[k] is JsonValue v && v.TryGetValue<decimal>(out var d) ? d * 1_000_000m : null;
+            models.Add(new GatewayModel(name, Int("max_input_tokens"), Int("max_output_tokens"),
+                Flag("supports_vision") ?? false, Flag("supports_function_calling") ?? true, Flag("supports_reasoning") ?? true,
+                PerMtok("input_cost_per_token"), PerMtok("cache_read_input_token_cost"), PerMtok("output_cost_per_token")));
+        }
+        return models;
+    }
+
     public async Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
     {
         var res = await SendAsync(HttpMethod.Get, $"/key/list?user_id={Uri.EscapeDataString(email)}&return_full_object=true", null, ct);

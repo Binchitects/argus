@@ -1,8 +1,9 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Llm.Api.Operations;
+using Llm.Api.Gateway;
 using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
@@ -11,27 +12,37 @@ using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Chat;
 
+/// <summary>For one answer only: another model or thinking level than the chat's (retry with…).</summary>
+public sealed record AnswerOverrides(string? Model = null, string? Thinking = null);
+
 /// <summary>
-/// One answer to the last user message of a conversation: the model streams,
-/// calls Argus's tools as the person when it wants to, and every turn is saved
-/// as it completes. Events go to the browser as they happen (see ChatEndpoints).
+/// One answer to a question in a conversation. The conversation is a tree: the
+/// model reads the path from the first message to the question, streams, calls
+/// Argus's tools as the person when it wants to, and every step is saved as a
+/// child of the one before, so the answer is its own branch. Events go to the
+/// browser as they happen (see ChatEndpoints).
 /// </summary>
 public sealed partial class ChatService(
     AppDbContext db,
     GatewayChat gateway,
     ArgusMcp argus,
+    ChatModels models,
     IOptionsMonitor<ChatOptions> chat,
-    IOptions<StackOptions> stack,
     ILogger<ChatService> logger)
 {
-    public async Task AnswerAsync(AppUser user, Conversation conversation, Func<object, Task> emit, CancellationToken ct)
+    /// <summary>An image counts as this many characters of the context budget (roughly 1,000 tokens).</summary>
+    private const int ImageWeight = 3_500;
+
+    public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {
         var email = user.Email!.ToLowerInvariant();
-        var model = stack.Value.ModelName ?? "default";
+        var model = await models.ResolveAsync(overrides.Model ?? conversation.Model, ct);
+        var modelName = model?.Name ?? "default";
+        var thinking = overrides.Thinking ?? conversation.Thinking;
 
         ArgusSession? session = null;
         JsonArray? tools = null;
-        if (conversation.UseArgus && argus.Enabled)
+        if (conversation.UseArgus && argus.Enabled && model?.Tools != false)
         {
             try
             {
@@ -45,25 +56,43 @@ public sealed partial class ChatService(
             }
         }
 
-        var messages = await BuildHistoryAsync(conversation, session?.Instructions, ct);
+        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, session?.Instructions, ct);
+        if (imagesDropped)
+        {
+            await emit(new { type = "notice", kind = "no_vision", text = $"{modelName} cannot see images, so it got their names only. Choose a model that can see to ask about them." });
+        }
         var next = await db.ChatMessages.Where(m => m.ConversationId == conversation.Id).MaxAsync(m => (int?)m.Sequence, ct) ?? 0;
+        var parent = question.Id;
 
         for (var round = 0; ; round++)
         {
-            var msg = new ChatMessage { ConversationId = conversation.Id, Role = "assistant", Sequence = ++next, Model = model };
+            var msg = new ChatMessage { ConversationId = conversation.Id, ParentId = parent, Role = "assistant", Sequence = ++next, Model = modelName };
             db.ChatMessages.Add(msg);
-            await emit(new { type = "assistant", id = msg.Id });
+            conversation.CurrentLeafId = msg.Id;
+            await emit(new { type = "assistant", id = msg.Id, parentId = parent, model = modelName });
 
             var request = new JsonObject
             {
-                ["model"] = model,
+                ["model"] = modelName,
                 ["messages"] = messages.DeepClone(),
                 ["stream"] = true,
                 ["stream_options"] = new JsonObject { ["include_usage"] = true },
                 // Enforcement: the end-user budget binds on this field (see deploy/identity-proxy).
                 ["user"] = email,
             };
-            if (ThinkingPresets.TemplateKwargs(conversation.Thinking) is { } kwargs)
+            if (conversation.Temperature is { } temperature)
+            {
+                request["temperature"] = temperature;
+            }
+            if (conversation.TopP is { } topP)
+            {
+                request["top_p"] = topP;
+            }
+            if (conversation.MaxTokens is { } maxTokens)
+            {
+                request["max_tokens"] = maxTokens;
+            }
+            if (ThinkingPresets.TemplateKwargs(thinking) is { } kwargs)
             {
                 request["chat_template_kwargs"] = kwargs;
             }
@@ -76,6 +105,23 @@ public sealed partial class ChatService(
             var content = new StringBuilder();
             var reasoning = new StringBuilder();
             var calls = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
+            var clock = Stopwatch.StartNew();
+            TimeSpan? thoughtFrom = null;
+            void EndThinking()
+            {
+                if (thoughtFrom is { } from && msg.ThinkingMs is null)
+                {
+                    msg.ThinkingMs = (int)(clock.Elapsed - from).TotalMilliseconds;
+                }
+            }
+            void Keep(MessageStatus status)
+            {
+                EndThinking();
+                msg.Content = content.ToString();
+                msg.Reasoning = reasoning.Length > 0 ? reasoning.ToString() : null;
+                msg.Status = status;
+                msg.DurationMs = (int)clock.Elapsed.TotalMilliseconds;
+            }
             try
             {
                 await foreach (var e in gateway.StreamAsync(request, email, ct))
@@ -83,14 +129,21 @@ public sealed partial class ChatService(
                     switch (e)
                     {
                         case ReasoningDelta r:
+                            thoughtFrom ??= clock.Elapsed;
                             reasoning.Append(r.Text);
                             await emit(new { type = "reasoning", text = r.Text });
                             break;
                         case ContentDelta c:
+                            if (thoughtFrom is not null && msg.ThinkingMs is null)
+                            {
+                                EndThinking();
+                                await emit(new { type = "thought", ms = msg.ThinkingMs });
+                            }
                             content.Append(c.Text);
                             await emit(new { type = "content", text = c.Text });
                             break;
                         case ToolCallDelta t:
+                            EndThinking();
                             var slot = calls.TryGetValue(t.Index, out var existing) ? existing : (null, null, new StringBuilder());
                             calls[t.Index] = (t.Id ?? slot.Id, t.Name ?? slot.Name, slot.Args.Append(t.Arguments));
                             break;
@@ -103,26 +156,25 @@ public sealed partial class ChatService(
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 // Stop: keep what arrived. The request is gone, so save without its token.
-                msg.Content = content.ToString();
-                msg.Reasoning = reasoning.Length > 0 ? reasoning.ToString() : null;
-                msg.Status = MessageStatus.Stopped;
+                Keep(MessageStatus.Stopped);
                 await FinishAsync(conversation, CancellationToken.None);
                 return;
             }
             catch (ChatGatewayException ex)
             {
-                msg.Content = content.ToString();
-                msg.Reasoning = reasoning.Length > 0 ? reasoning.ToString() : null;
-                msg.Status = MessageStatus.Failed;
+                Keep(MessageStatus.Failed);
                 msg.Error = ex.Message;
                 await FinishAsync(conversation, CancellationToken.None);
                 await emit(new { type = "error", message = ex.Message });
                 return;
             }
 
-            msg.Content = content.ToString();
-            msg.Reasoning = reasoning.Length > 0 ? reasoning.ToString() : null;
-            await emit(new { type = "usage", prompt = msg.PromptTokens, cached = msg.CachedTokens, completion = msg.CompletionTokens });
+            Keep(MessageStatus.Complete);
+            await emit(new
+            {
+                type = "usage", prompt = msg.PromptTokens, cached = msg.CachedTokens, completion = msg.CompletionTokens,
+                thinkingMs = msg.ThinkingMs, durationMs = msg.DurationMs,
+            });
 
             if (calls.Count == 0 || session is null)
             {
@@ -141,6 +193,7 @@ public sealed partial class ChatService(
             msg.ToolCallsJson = toolCalls.ToJsonString();
             await db.SaveChangesAsync(ct);
             messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = msg.Content, ["tool_calls"] = toolCalls.DeepClone() });
+            parent = msg.Id;
 
             foreach (var call in toolCalls.OfType<JsonObject>())
             {
@@ -150,6 +203,7 @@ public sealed partial class ChatService(
                 await emit(new { type = "tool_call", id, name, arguments = rawArgs });
                 string text;
                 bool isError;
+                var took = Stopwatch.StartNew();
                 try
                 {
                     var args = JsonNode.Parse(rawArgs.Length == 0 ? "{}" : rawArgs) as JsonObject ?? [];
@@ -168,14 +222,17 @@ public sealed partial class ChatService(
                     await FinishAsync(conversation, CancellationToken.None);
                     return;
                 }
-                db.ChatMessages.Add(new ChatMessage
+                var result = new ChatMessage
                 {
-                    ConversationId = conversation.Id, Role = "tool", Sequence = ++next, ToolCallId = id, ToolName = name,
-                    Content = text, Status = isError ? MessageStatus.Failed : MessageStatus.Complete,
-                });
+                    ConversationId = conversation.Id, ParentId = parent, Role = "tool", Sequence = ++next, ToolCallId = id, ToolName = name,
+                    Content = text, Status = isError ? MessageStatus.Failed : MessageStatus.Complete, DurationMs = (int)took.Elapsed.TotalMilliseconds,
+                };
+                db.ChatMessages.Add(result);
+                conversation.CurrentLeafId = result.Id;
+                parent = result.Id;
                 await db.SaveChangesAsync(ct);
                 messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = text });
-                await emit(new { type = "tool_result", id, name, text, isError, noAccess = ArgusMcp.IsNoAccess(text) });
+                await emit(new { type = "tool_result", id, messageId = result.Id, name, text, isError, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs });
             }
         }
     }
@@ -186,38 +243,90 @@ public sealed partial class ChatService(
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>The conversation as the model reads it, trimmed from the oldest end to fit its context.</summary>
-    private async Task<JsonArray> BuildHistoryAsync(Conversation conversation, string? argusInstructions, CancellationToken ct)
+    /// <summary>The messages from the first one down to <paramref name="leaf"/>, following parents.</summary>
+    public static List<ChatMessage> PathTo(IReadOnlyDictionary<Guid, ChatMessage> byId, Guid? leaf)
     {
-        var stored = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).OrderBy(m => m.Sequence).ToListAsync(ct);
+        var path = new List<ChatMessage>();
+        var seen = new HashSet<Guid>();
+        for (var id = leaf; id is { } current && byId.TryGetValue(current, out var m) && seen.Add(current); id = m.ParentId)
+        {
+            path.Add(m);
+        }
+        path.Reverse();
+        return path;
+    }
+
+    /// <summary>
+    /// The branch as the model reads it, trimmed from the oldest end to fit its context.
+    /// Images go as pictures to a model that can see, and as their names to one that cannot.
+    /// </summary>
+    private async Task<(JsonArray Messages, bool ImagesDropped)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string? argusInstructions, CancellationToken ct)
+    {
+        var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
+        all[question.Id] = question;
+        var stored = PathTo(all, question.Id);
         var attachmentIds = stored.SelectMany(m => ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => attachmentIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
+        var vision = model?.Vision == true;
+        var imagesDropped = false;
 
-        var turns = new List<JsonObject>();
+        var turns = new List<(JsonObject Turn, long Weight)>();
         foreach (var m in stored)
         {
             switch (m.Role)
             {
                 case "user":
                     var text = new StringBuilder(m.Content);
+                    var images = new List<ChatAttachment>();
                     foreach (var id in ParseIds(m.AttachmentsJson))
                     {
-                        if (files.TryGetValue(id, out var f))
+                        if (!files.TryGetValue(id, out var f))
                         {
-                            text.Append("\n\n<attachment name=\"").Append(f.FileName.Replace("\"", "'", StringComparison.Ordinal)).Append("\">\n")
-                                .Append(f.Text).Append(f.Truncated ? "\n[truncated]" : "").Append("\n</attachment>");
+                            continue;
                         }
+                        if (f.Kind == "image")
+                        {
+                            if (vision && f.Data is not null)
+                            {
+                                images.Add(f);
+                            }
+                            else
+                            {
+                                text.Append("\n\n[image attached: ").Append(f.FileName).Append(" (this model cannot see images)]");
+                                imagesDropped |= m.Id == question.Id;
+                            }
+                            continue;
+                        }
+                        text.Append("\n\n<attachment name=\"").Append(f.FileName.Replace("\"", "'", StringComparison.Ordinal)).Append("\">\n")
+                            .Append(f.Text).Append(f.Truncated ? "\n[truncated]" : "").Append("\n</attachment>");
                     }
-                    turns.Add(new JsonObject { ["role"] = "user", ["content"] = text.ToString() });
+                    if (images.Count == 0)
+                    {
+                        turns.Add((new JsonObject { ["role"] = "user", ["content"] = text.ToString() }, text.Length));
+                    }
+                    else
+                    {
+                        var parts = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = text.ToString() });
+                        foreach (var img in images)
+                        {
+                            parts.Add(new JsonObject
+                            {
+                                ["type"] = "image_url",
+                                ["image_url"] = new JsonObject { ["url"] = $"data:{img.ContentType};base64,{Convert.ToBase64String(img.Data!)}" },
+                            });
+                        }
+                        turns.Add((new JsonObject { ["role"] = "user", ["content"] = parts }, text.Length + (long)images.Count * ImageWeight));
+                    }
                     break;
                 case "assistant" when m.ToolCallsJson is not null:
-                    turns.Add(new JsonObject { ["role"] = "assistant", ["content"] = m.Content, ["tool_calls"] = JsonNode.Parse(m.ToolCallsJson) });
+                    var withCalls = new JsonObject { ["role"] = "assistant", ["content"] = m.Content, ["tool_calls"] = JsonNode.Parse(m.ToolCallsJson) };
+                    turns.Add((withCalls, withCalls.ToJsonString().Length));
                     break;
                 case "assistant" when m.Content.Length > 0:
-                    turns.Add(new JsonObject { ["role"] = "assistant", ["content"] = m.Content });
+                    turns.Add((new JsonObject { ["role"] = "assistant", ["content"] = m.Content }, m.Content.Length));
                     break;
                 case "tool":
-                    turns.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = m.ToolCallId, ["content"] = m.Content });
+                    turns.Add((new JsonObject { ["role"] = "tool", ["tool_call_id"] = m.ToolCallId, ["content"] = m.Content }, m.Content.Length));
                     break;
             }
         }
@@ -227,18 +336,22 @@ public sealed partial class ChatService(
         {
             system += "\n\n" + argusInstructions;
         }
+        if (!string.IsNullOrWhiteSpace(conversation.SystemPrompt))
+        {
+            system += "\n\nThe person's instructions for this conversation:\n" + conversation.SystemPrompt.Trim();
+        }
 
         // Rough, and on the safe side: ~3.5 characters a token for English and code.
-        var context = int.TryParse(stack.Value.ModelContext, out var c) ? c : 32768;
-        var output = int.TryParse(stack.Value.ModelMaxOutput, out var o) ? o : 8192;
+        var context = model?.Context ?? 32768;
+        var output = conversation.MaxTokens ?? model?.MaxOutput ?? 8192;
         var budgetChars = (long)Math.Max(4096, context - output - 1024) * 7 / 2 - system.Length;
         var dropped = 0;
-        while (turns.Count > 1 && turns.Sum(t => (long)t.ToJsonString().Length) > budgetChars)
+        while (turns.Count > 1 && turns.Sum(t => t.Weight) > budgetChars)
         {
             turns.RemoveAt(0);
             dropped++;
             // Never start on a tool answer or a tool request whose answers were cut.
-            while (turns.Count > 1 && turns[0]["role"]!.GetValue<string>() != "user")
+            while (turns.Count > 1 && turns[0].Turn["role"]!.GetValue<string>() != "user")
             {
                 turns.RemoveAt(0);
                 dropped++;
@@ -249,7 +362,7 @@ public sealed partial class ChatService(
             LogTrimmed(logger, conversation.Id, dropped);
         }
 
-        return [new JsonObject { ["role"] = "system", ["content"] = system }, .. turns];
+        return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped);
     }
 
     public static IEnumerable<Guid> ParseIds(string? json) =>

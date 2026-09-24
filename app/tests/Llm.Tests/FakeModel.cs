@@ -31,7 +31,11 @@ public sealed class FakeModel : HttpMessageHandler
         var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!.AsObject();
         Requests.Enqueue((body, request.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase)));
         var messages = body["messages"]!.AsArray();
-        var lastUser = messages.Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        // A question with pictures comes as parts; its text is the text part.
+        var lastUserContent = messages.Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!;
+        var lastUser = lastUserContent is JsonArray parts
+            ? string.Concat(parts.OfType<JsonObject>().Where(x => x["type"]?.GetValue<string>() == "text").Select(x => x["text"]!.GetValue<string>()))
+            : lastUserContent.GetValue<string>();
         var toolAnswered = messages.Last()!["role"]!.GetValue<string>() == "tool";
 
         if (lastUser.Contains("[budget]", StringComparison.Ordinal))
