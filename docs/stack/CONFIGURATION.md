@@ -37,7 +37,7 @@ explains most surprises:
 |---|---|---|
 | **compose interpolation** — `docker compose` substitutes `${X}` while reading the file | `LLM_DOMAIN`, `BIND_ADDRESS`, every `${...}` inside `docker-compose.yml` | happens on the **host**, at `up` time. Changing `.env` then means `docker compose up -d` to recreate the containers that used it |
 | **container environment** — a service's `environment:` block | `ARGUS_GITLAB_URL`, `GF_SERVER_ROOT_URL` | read by the process at start. `.env` → compose → container |
-| **config-file rendering** — a service rewrites a file at startup | `${MODEL_NAME}` in `config/litellm/config.yaml`; `{{ env "LLM_DOMAIN" }}` in `config/authelia/configuration.template.yml` | LiteLLM does not expand variables in its own config, so its entrypoint renders them; Authelia's `template` filter expands them in-process |
+| **config-file rendering** — a service rewrites a file at startup | `${MODEL_NAME}` in `config/litellm/config.yaml` | LiteLLM does not expand variables in its own config, so its entrypoint renders them |
 
 Two consequences:
 
@@ -65,8 +65,8 @@ healthy.
 **`LLM_DOMAIN`** *(default `llm.localhost`)* — the parent domain. Every service
 is `https://<name>.<LLM_DOMAIN>` and the certificate covers the domain and
 `*.<domain>`, so this one value moves the entire stack. `tls-init` notices a
-change and regenerates the certificate; Authelia expands it into its access
-rules at startup.
+change and regenerates the certificate; the app derives its session cookie, OIDC
+issuer, client redirect URIs and forwardAuth rules from it at startup.
 
 `.localhost` is reserved (RFC 6761) and resolves to loopback without any DNS or
 `/etc/hosts` entry, which is why it is the default. A name that does not resolve
@@ -91,7 +91,7 @@ against this compose file, so the defaults keep a checkout self-contained.
 
 | variable | default | what it points at |
 |---|---|---|
-| `LLM_CONFIG_DIR` | `./config` | Authelia, Traefik, LiteLLM, Prometheus, Grafana, Loki, Postgres, Argus — every committed config file |
+| `LLM_CONFIG_DIR` | `./config` | the app (Argus directory), Traefik, LiteLLM, Prometheus, Grafana, Loki, Postgres, Argus — every committed config file |
 | `LLM_DEPLOY_DIR` | `./deploy` | the build contexts and the exporter sources |
 | `LLM_MODELS_DIR` | `./models` | the bind mount at `/models`, and the default for `LLAMACPP_MODEL_DIR` |
 | `LLM_ENV_SAMPLES_DIR` | `./env-samples` | read by the admin panel's Model card |
@@ -236,7 +236,7 @@ raises, while the same value sent as `reasoning_effort` is dropped.
 rather than at 3 a.m. as a container that cannot find its weights.
 
 `LLAMACPP_API_KEY` is unusual: the engine listens on `api.<domain>` behind
-Authelia, and Traefik adds `Authorization: Bearer <key>` with the
+the app's forwardAuth, and Traefik adds `Authorization: Bearer <key>` with the
 label-defined `llamacpp-key@docker` middleware. Callers authenticate as
 themselves; the engine key never leaves the stack.
 
@@ -311,7 +311,8 @@ rotating it.
 
 | variable | generate with | notes |
 |---|---|---|
-| `AUTHELIA_ADMIN_PASSWORD` | 12+ characters | the `admin` account in the Authelia portal |
+| `ADMIN_PASSWORD` | a few unrelated words, or `openssl rand -hex 24` | the first admin's password, used on the very first start only; change it in the app afterwards. (An install from before the app may still have `AUTHELIA_ADMIN_PASSWORD`; it is read as a fallback.) |
+| `APP_DATA_KEY` | `openssl rand -hex 32` | **never change after first start**: encrypts the app's session and OIDC signing keys in its database |
 | `PROXY_AUTH_USER` | — (a username) | basic-auth user for the internal services when the `auth` profile is **off** |
 | `PROXY_AUTH_PASSWORD` | `openssl rand -hex 32` | the matching password |
 | `LLAMACPP_API_KEY` | `openssl rand -hex 32` | the engine's own key, injected by Traefik |
@@ -320,10 +321,6 @@ rotating it.
 | `LLM_PG_PASSWORD` | `openssl rand -hex 32` | the Postgres password; also the default for ClickHouse and MinIO |
 | `WEBUI_SECRET_KEY` | `openssl rand -hex 32` | Open WebUI's session signing key |
 | `GRAFANA_ADMIN_PASSWORD` | `openssl rand -hex 32` | Grafana's local admin |
-| `AUTHELIA_SESSION_SECRET` | `openssl rand -hex 32` | signs session cookies |
-| `AUTHELIA_STORAGE_ENCRYPTION_KEY` | `openssl rand -hex 32` | **never change after first start** — Authelia refuses to start against a database encrypted with a different key, by design: the alternative is silently failing to decrypt every TOTP secret |
-| `AUTHELIA_JWT_SECRET` | `openssl rand -hex 32` | identity-validation tokens |
-| `AUTHELIA_OIDC_HMAC_SECRET` | `openssl rand -hex 32` | signs OIDC tokens |
 | `GRAFANA_OIDC_CLIENT_SECRET` | `openssl rand -hex 32` | Grafana's OIDC client |
 | `OPENWEBUI_OIDC_CLIENT_SECRET` | `openssl rand -hex 32` | Open WebUI's OIDC client |
 | `API_OIDC_CLIENT_SECRET` | `openssl rand -hex 32` | the `client_credentials` client machine callers use |
@@ -331,18 +328,20 @@ rotating it.
 | `ARGUS_CHAT_CLIENT_TOKEN` | `openssl rand -hex 32` | lets Open WebUI use Argus per person |
 
 **Rotating a `*_OIDC_CLIENT_SECRET` invalidates that app's existing sessions**
-until it re-registers, which `auth-init` does on the next `up`.
+until both sides have the new value: `docker compose up -d` recreates the app
+(which re-registers the client) and the service together.
 
 ### The three that must not change
 
-`LITELLM_SALT_KEY`, `AUTHELIA_STORAGE_ENCRYPTION_KEY` — and by extension
-anything already written into `postgres-data`. Both encrypt data at rest:
+`LITELLM_SALT_KEY`, `APP_DATA_KEY` — and by extension anything already written
+into `postgres-data`. Both encrypt data at rest:
 
 * `LITELLM_SALT_KEY` encrypts the per-person keys stored in Postgres. Change it
   and every existing key stops being readable.
-* `AUTHELIA_STORAGE_ENCRYPTION_KEY` encrypts TOTP secrets and OIDC grants.
-  `auth-init` **detects** a mismatch and refuses to start rather than letting
-  Authelia come up and fail every 2FA check.
+* `APP_DATA_KEY` encrypts the app's key ring: the keys that protect sessions,
+  two-factor secrets and the OIDC signing key. The app **detects** a mismatch and
+  refuses to start, naming the setting, rather than making new keys (which would
+  sign everyone out and break single sign-on).
 
 ### Secrets outside the SECRETS block
 
@@ -372,7 +371,7 @@ name as well as position.
 | `PROTECTED_CHAIN` | `sso-chain@file` | the middleware chain on the unauthenticated internals. Use `protected-chain@file` when the `auth` profile is off |
 | `PROMETHEUS_RETENTION_TIME` | `30d` | how long metrics are kept |
 | `PROMETHEUS_RETENTION_SIZE` | `20GB` | and how much disk they may take. Whichever hits first |
-| `ADMIN_GROUP` | `admins` | the Authelia group whose members get the admin console |
+| `ADMIN_GROUP` | `admins` | the group name the app gives admins in OIDC and forwardAuth; Grafana, Open WebUI and the admin panel map it to their admin role |
 | `HF_TOKEN` | empty | only needed for gated Hugging Face repositories |
 
 ---
@@ -449,7 +448,7 @@ One backup is one directory, `BACKUP_DIR/<date>_<time>/`:
 * `postgres.sql.gz` — a `pg_dumpall` of the gateway database (people, API keys,
   budgets, spend), taken **from the running server** so it is consistent.
 * `volumes/<name>.tar.gz` — every other named volume. SQLite databases inside
-  them (chat history, Grafana, Authelia sessions, the Argus index and audit) are
+  them (chat history, Grafana, the Argus index and audit) are
   copied through SQLite's own online backup, so a write in progress cannot tear
   them.
 * `config/` — `.env`, every compose file in `COMPOSE_FILE`, and `config/`.
@@ -476,9 +475,8 @@ overwritten in meaning if you set them independently.
 | `LHM_URL` | `http://host.docker.internal:8085/data.json` — one of three sources `cpu-temp-exporter` tries, in order: Linux `/sys/class/hwmon`, then LibreHardwareMonitor, then ACPI thermal zones. It exists because node-exporter's `node_hwmon_temp_celsius` has **zero series** on a Windows/WSL2 host — the kernel exposes no thermal sensors — and `windows_exporter` has no core-temperature collector at all |
 | `COMPOSE_PROJECT_NAME` (in Traefik) | `@COMPOSE_PROJECT_NAME@` in `traefik.yml`, replaced by `sed` at startup |
 | `POSTGRES_USER` / `POSTGRES_DB` | `LLM_PG_USER` / `llmservice` |
-| `OAUTH_ADMIN_ROLES` | `ADMIN_GROUP` (default `admins`) — the Authelia group that becomes a Grafana/Open WebUI admin |
-| `OAUTH_ALLOWED_ROLES` | `*` — any Authelia user may sign in; authorisation comes from the group claim |
-| `AUTHELIA_NTP_DISABLE_STARTUP_CHECK` | `"true"` — Authelia starts without reaching an NTP server, so a host with no internet is not a failed start |
+| `OAUTH_ADMIN_ROLES` | `ADMIN_GROUP` (default `admins`) — the app's group that becomes an Open WebUI admin |
+| `OAUTH_ALLOWED_ROLES` | `*` — anyone the app signs in may use chat; authorisation comes from the group claim |
 | `OFFLINE_MODE`, `CHECKPOINT_DISABLE`, `LITELLM_LOCAL_MODEL_COST_MAP` | LiteLLM does not phone home and uses its bundled model cost map instead of fetching one |
 | `GF_PLUGINS_PREINSTALL_DISABLED`, `GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES` | Grafana neither preinstalls nor checks for plugins over the network |
 
@@ -494,8 +492,8 @@ for what each brings up; this is the short reference:
 |---|---|
 | *(none needed)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `grafana`, `node-exporter`, `power-limits`, `open-webui` |
 | `proxy` | `traefik` |
-| `auth` | `authelia`, `auth-init`, `redis`, `admin-panel` |
-| `gateway` | `litellm`, `postgres`, `redis`, `identity-proxy` |
+| `auth` | `auth-init`, `redis`, `admin-panel` |
+| `gateway` | `app`, `litellm`, `postgres`, `redis`, `identity-proxy` |
 | `llamacpp` | `llamacpp`, `model-init` |
 | `vllm` | `vllm` |
 | `multi-model` | `vllm-secondary` |
@@ -539,9 +537,8 @@ place to go for behaviour the `.env` does not expose.
 | file | what it configures |
 |---|---|
 | `traefik/traefik.yml` | static config: entrypoints, the Docker and file providers, the project-scoping constraint, Prometheus metrics, access-log filters. **Cannot read the environment** — `@COMPOSE_PROJECT_NAME@` is substituted at startup |
-| `traefik/dynamic/middlewares.yml` | the middleware chains: `internal-auth` (basic auth), `security-headers`, `compress` (which never compresses SSE), `default-chain`, `protected-chain`, `authelia` (forwardAuth), `sso-chain` |
+| `traefik/dynamic/middlewares.yml` | the middleware chains: `internal-auth` (basic auth), `security-headers`, `compress` (which never compresses SSE), `default-chain`, `protected-chain`, `app-auth` (forwardAuth to the app), `sso-chain` |
 | `traefik/dynamic/tls.yml` | the certificate store and TLS options: minimum version TLS 1.2, and a restricted cipher list |
-| `authelia/configuration.template.yml` | Authelia's whole configuration with `{{ env "LLM_DOMAIN" }}` placeholders: session cookies, access-control rules per hostname, OIDC claims policies, regulation (brute-force) settings |
 | `litellm/config.yaml` | the model list and its advertised window, router retries and timeout, the default per-person budget, the Redis cache policy (`mode: default_off`), and `user_header_mappings` — the mapping that makes chat spend and API spend one number |
 | `prometheus/prometheus.yml` | the 15 scrape jobs and their intervals |
 | `prometheus/rules/*.yml` | alerting rules: `hardware.yml` (9), `llm.yml` (7), `stack.yml` (5), `argus.yml` (4). `slo.yml` holds two more written out but **commented off** — an SLO alert needs a target somebody agreed to, and shipping guesses produces alarms nobody owns |
@@ -560,18 +557,17 @@ place to go for behaviour the `.env` does not expose.
 
 | file | written by | when |
 |---|---|---|
-| `authelia/clients.yml` | `auth-init` | every `up`. Client secrets are **hashed**, which is why it cannot be committed |
-| `authelia/users.yml` | `auth-init` (if absent), then the admin panel | when the config changes or a person is added |
 | `traefik/auth/users.htpasswd` | `auth-init` | every `up`, from `PROXY_AUTH_USER`/`PROXY_AUTH_PASSWORD` |
 | `traefik/certs/tls.crt`, `bundle.crt` | `tls-init` | every `up`. Copies for host-side tools; the private key never leaves the volume |
 | `prometheus/secrets/llamacpp.token` | `prometheus-secrets` | every `up` |
-| `authelia/directory/users.yml` | the admin panel | on every account change, plus a 30 s background sync. The **hash-free** copy of the account list that Argus mounts (`config/authelia/directory` → `/authelia`): usernames, emails and display names only, so `users.yml` itself can stay mode 600 with its password hashes. The directory is kept in the tree with a `.gitkeep`; only its contents are ignored |
+| `authelia/directory/users.yml` | the app | at start and on every change to a person. What Argus mounts (`config/authelia/directory` → `/authelia`): usernames, emails and display names only, never passwords. The directory keeps its old name so Argus needs no change; it is kept in the tree with a `.gitkeep` and only its contents are ignored |
 
 ### The `stack/deploy/` directory
 
 | path | what it is |
 |---|---|
-| `stack/deploy/admin-panel/` | the admin panel: `app.py`, its Dockerfile and `entrypoint.sh` (which runs it as whatever uid owns `config/authelia`, and creates the account-list directory). Provisioning, credit, key rotation, the Model card |
+| `stack/deploy/admin-panel/` | the admin panel: `app.py`, its Dockerfile and `entrypoint.sh` (which runs it as whatever uid owns `config/authelia`). The Model card, Indexing, Packs and Explore; its people pages now redirect to the app |
+| `app/` (repository root) | the app: sign-in, OIDC, forwardAuth, people, API keys. See [app/README.md](../../app/README.md) |
 | `stack/deploy/identity-proxy/` | turns Open WebUI's forwarded identity header into the `user` field LiteLLM enforces budgets against |
 | `stack/deploy/cpu-temp-exporter/` | a small exporter for CPU package temperature, which NVML does not report |
 | `stack/deploy/argus-local.yml` | an **override**: reuse an existing Argus index and pack estate instead of the named volume. Requires `ARGUS_HOME` |

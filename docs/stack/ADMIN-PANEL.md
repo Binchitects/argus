@@ -1,21 +1,20 @@
 # Admin panel
 
-`https://admin.<LLM_DOMAIN>` — two faces behind one sign-in. Everyone sees their
-own account: what they have spent, their keys, and a password form. Members of
-the `admins` group get a console with a sidebar:
+`https://admin.<LLM_DOMAIN>` — the console for the parts that have not moved into
+the app yet. Members of the `admins` group get a sidebar:
 
 | section | what is there |
 |---|---|
 | **Overview** | services reachable from the container, totals, who is at or past their credit, and whether the code index is current |
-| **People** | every account joined across Authelia and LiteLLM — search, paged, credit, keys, CSV export |
+| **People** | moved to the app: the link opens **Admin → People** there |
 | **Model** | what is serving and what it was configured with, plus the thinking-level presets |
 | **Indexing** | the Argus code index: coverage, per-repo freshness, run log, the reindexing cadence, and the button |
 | **Explore** | search what the index actually holds — symbols by name fragment, files by path, across the whole estate |
 | **Monitoring** | service health and links out to Grafana, Prometheus and the MCP endpoint |
 | **Settings** | the effective configuration, read-only |
 
-A person's own page is `/people/<username>`, which is also where the per-account
-actions live: set credit, issue a key, reset a password, delete the account.
+A person's own page and the per-account actions (credit, keys, passwords,
+deleting) are in the app now; see below.
 
 The Overview's **Code index** tile is the one number here whose failure is
 invisible everywhere else on the page: the services are all green and the
@@ -44,13 +43,13 @@ tool module imports them — an unfiltered query reachable from a tool path woul
 void every ACL guarantee in this project, and nothing else in the suite would
 notice.
 
-Runs under the `auth` profile, because without Authelia it has no way to know
-who is asking and no reason to exist.
+Runs under the `auth` profile, behind the app's forwardAuth: without it the panel
+has no way to know who is asking.
 
 ## What it deliberately does not do
 
-**No Docker socket.** This container holds the LiteLLM master key and writes
-Authelia's account file; mounting the socket would also give it the host. So
+**No Docker socket.** This container holds the LiteLLM master key; mounting the
+socket would also give it the host. So
 "is Prometheus up" is answered by an HTTP probe from inside `llm-net`, not by
 inspecting containers — and the Overview says so rather than implying more.
 
@@ -68,11 +67,11 @@ the page it would take to undo.
 
 ## Who is who
 
-Authelia decides, not the panel. Traefik sends every request through
-forward-auth first and Authelia answers with `Remote-User`, `Remote-Email` and
+The app decides, not the panel. Traefik sends every request through
+forward-auth first and the app answers with `Remote-User`, `Remote-Email` and
 `Remote-Groups`. The panel reads those and nothing else.
 
-**Traefik overwrites those headers** from Authelia's response, so a browser
+**Traefik overwrites those headers** from the app's response, so a browser
 cannot forge them — whatever a client sends is replaced before the panel sees
 it. That guarantee only covers traffic arriving through the proxy, so
 `REQUIRE_FORWARDED=1` closes the rest: a request with no `X-Forwarded-Host` did
@@ -89,79 +88,22 @@ Verified rather than assumed:
 | through the proxy, `Remote-Groups: admins` | full console |
 | non-admin POST to any `/admin/*` route | 403, nothing written |
 
-The access-control rule in Authelia is `one_factor` for any signed-in person.
-Admin gating happens **inside** the app so a non-admin gets a useful page
-instead of a 403.
+The app lets any signed-in person reach the panel. Admin gating happens
+**inside** the panel, so a non-admin gets a useful page instead of a 403.
 
-## What it changes
+## People, keys and passwords moved to the app
 
-| action | where it lands |
-|---|---|
-| create a person | Authelia `users.yml` + LiteLLM internal user + end user + API key |
-| set credit | LiteLLM `max_budget` on both the internal user and the end user |
-| new API key | old keys deleted, then one minted |
-| reset password | `users.yml` only |
-| change own password | `users.yml`, after verifying the current password |
+Creating people, credit, API keys, password resets and deleting accounts now
+happen in the app at `https://<LLM_DOMAIN>` (**Admin → People**, and **Your
+account** for each person); see [AUTHENTICATION](AUTHENTICATION.md). The panel's
+own pages for those (`/`, `/profile`, `/people`, `/people/<name>`, the password
+form and the `/admin/create|rotate|reset|budget|delete` actions) answer with a
+redirect to the matching page in the app, so old bookmarks keep working.
 
-**Both LiteLLM records matter.** The internal user attributes spend; the *end
-user* is what makes a ceiling actually bind on the chat path, where everyone
-shares one gateway key. Setting only the first tracks a budget without
-enforcing it — see `stack/deploy/identity-proxy/app.py` for the measurement behind
-that.
-
-**Revoke happens before mint**, not after. The other order leaves a window where
-the old key still works alongside the new one, which is the opposite of what
-"revoke" means.
-
-**Changing your own password asks for the current one** even though Authelia has
-already authenticated the session. A live session is not proof that the person
-at the keyboard knows the password; without the check, an unlocked laptop is
-enough to lock the owner out of their own account.
-
-## Password hashes
-
-argon2id with Authelia's own parameters — `m=65536, t=3, p=4`, 32-byte hash,
-16-byte salt. Entries the panel writes are indistinguishable from ones written
-by the `auth-init` service.
-
-This is worth verifying if the parameters ever change, because a mismatch is
-accepted when written and rejected at login — a failure nobody notices until
-someone cannot sign in:
-
-```bash
-docker run --rm authelia/authelia:4.39 authelia crypto hash validate \
-  '<hash from users.yml>' --password '<the password>'
-```
-
-### Authelia has to re-read the file, and on Docker Desktop it will not
-
-Authelia is configured `watch: true`, and on a normal Linux host that is enough.
-**On Docker Desktop it is not.** `users.yml` sits on a Windows bind mount,
-inotify events do not cross that boundary, and Authelia never learns the file
-changed. The symptom is a user who exists in the file and cannot sign in.
-
-Measured, and the two log lines are what distinguish the cases:
-
-```
-before restart:  error="user not found"   ... "which usually indicates they do not exist"
-after restart:   "Unsuccessful 1FA authentication attempt by user 'logintest'"
-```
-
-The second means Authelia *knows* the user and only rejected the password. So
-the account was fine all along; Authelia simply had a stale copy of the file.
-
-Neither `os.replace()` nor an in-place rewrite makes the watch fire, so no write
-strategy fixes it. After creating a user or resetting a password on such a host:
-
-```bash
-docker compose restart authelia
-```
-
-The panel appends that instruction to every message that writes `users.yml`.
-Set `WARN_RELOAD=0` on a host where the watch does work to drop the note.
-
-Each write leaves a `users.yml.bak`, and the new file is written to a temp path
-and moved into place so Authelia never reads a half-written database.
+The panel no longer writes any account file: its `config/authelia` mount is
+read-only. What remains here until phase 2 of the plan
+([docs/enterprise/PLAN.md](../enterprise/PLAN.md)) moves them too: the Model
+card, Indexing, Packs, Explore, Monitoring and Settings.
 
 ## Monitoring
 
@@ -197,8 +139,5 @@ because the panel calls the gateway per request rather than at boot.
 
 ## Secrets it holds
 
-The LiteLLM master key, and write access to Authelia's user database. It
-publishes no port — Traefik is the only route in — and runs as a non-root user.
-Generated passwords and API keys are shown **once**, in the redirect message
-after the action. There is no way to read a key back afterwards; issue a new one
-instead.
+The LiteLLM master key. It publishes no port — Traefik is the only route in —
+and runs as a non-root user.

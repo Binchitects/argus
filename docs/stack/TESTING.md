@@ -39,7 +39,7 @@ Each of the 32 services against the nine test entry points, by name:
 | covered | service | by |
 |---|---|---|
 | ✅ | argus | acceptance, e2e-check, health, domain-check |
-| ✅ | authelia | acceptance, functional-test, health, audit-auth |
+| ✅ | app (sign-in, OIDC, forwardAuth, people) | app tests (xUnit, Vitest, Playwright), acceptance, functional-test, health, domain-check, audit-auth |
 | ✅ | open-webui | acceptance, e2e-check, functional-test, health, domain-check, audit-auth |
 | ✅ | litellm | acceptance, e2e-check, functional-test, health |
 | ✅ | grafana | acceptance, functional-test, health, domain-check, audit-auth |
@@ -147,10 +147,10 @@ emitted), `dcgm-exporter`, `promtail` (a log line reaches Loki), `langfuse-worke
 | test | status |
 |---|---|
 | S3.1 | OIDC discovery + real code exchange per client, claims correct | exists |
-| S3.2 | forwardAuth allows/bypasses/denies per hostname per the access rules | **partial** — the happy path is covered; the **deny** cases are not |
+| S3.2 | forwardAuth allows/bypasses/denies per hostname per the access rules | exists — `ForwardAuthTests` (every host, member vs admin, machine token, unknown and look-alike hosts) and `audit-auth.sh` steps 3-5 |
 | S3.3 | `PROTECTED_CHAIN=protected-chain@file` (basic auth, `auth` profile off) | **missing** |
-| S3.4 | `config/authelia/directory/users.yml` is hash-free and Argus can read it while `users.yml` stays 0600 | **missing** — verified by hand once |
-| S3.5 | rotating `AUTHELIA_STORAGE_ENCRYPTION_KEY` makes `auth-init` refuse to start | **missing** — the guard exists, untested |
+| S3.4 | `config/authelia/directory/users.yml` is hash-free and Argus can read it | exists — `IdentityTests.The_directory_for_argus_lists_people_without_passwords` |
+| S3.5 | a changed `APP_DATA_KEY` makes the app refuse to start instead of resetting its keys | exists — `KeyRingTests` |
 
 ### S4 — Gateway *(good)*
 
@@ -324,7 +324,7 @@ variable:
 | test | asserts |
 |---|---|
 | C3.1 | DeepSeek Harness reaches the API with `NODE_EXTRA_CA_CERTS` set before launch. **Verified, and re-verified on v2.1.2** — `dsh --profile headless` with `NODE_EXTRA_CA_CERTS` and `--patch` called `mcp__argus__find_symbol`, got `root/eal-core` back, and Argus logged `tool=find_symbol user=dev_alpha outcome=ok`. The variable is read at process start, so it cannot be set afterwards. Config: `clients/deepseek-harness/` |
-| C3.2 | Qwen Code connects to Argus, calls a tool and completes. **Now verified** on v2.1.2 with qwen 0.23.3, against the stack's own gateway (`--auth-type openai --openai-base-url https://gateway.<domain>/v1`) rather than a cloud key: it called `find_symbol`, distinguished the definition in `src/decoder.c` from the declaration in `include/eal/decoder.h`, and Argus logged `user=dev_alpha outcome=ok`. Two things had to be learned: `--trust` is required in a headless run or every call waits for confirmation, and the gateway host is `gateway.<domain>` — `api.<domain>` routes to Authelia and answers with a login redirect that reads as a 401. Config: `clients/qwen-code/` |
+| C3.2 | Qwen Code connects to Argus, calls a tool and completes. **Now verified** on v2.1.2 with qwen 0.23.3, against the stack's own gateway (`--auth-type openai --openai-base-url https://gateway.<domain>/v1`) rather than a cloud key: it called `find_symbol`, distinguished the definition in `src/decoder.c` from the declaration in `include/eal/decoder.h`, and Argus logged `user=dev_alpha outcome=ok`. Two things had to be learned: `--trust` is required in a headless run or every call waits for confirmation, and the gateway host is `gateway.<domain>` — `api.<domain>` routes to the sign-in and answers with a login redirect that reads as a 401. Config: `clients/qwen-code/` |
 | C3.3 | Hermes connects, lists tools and completes (see `docs/HERMES.md`) |
 | C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik, and Open WebUI's MCP client lists 16 tools |
 | C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `scripts/test-gitlab/` exists to answer. **Verified and now automated** against a real GitLab CE by `./scripts/test-gitlab/run.sh`, which is one command from a cold start: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. `verify_tools.py` extends it to **all sixteen MCP tools over the wire**, checks each result's declared shape, and asserts that no structured field names a repository the caller cannot read |
@@ -340,7 +340,7 @@ The only layer nothing touches. Minimum viable set, headless (Playwright):
 | C4.3 | a chat in Open WebUI renders a streamed answer incrementally |
 | C4.4 | the Argus tool appears in the tool picker for a non-admin |
 | C4.5 | all nine Grafana dashboards render with data, no "datasource not found" |
-| C4.6 | sign-out ends the session at Authelia and the app |
+| C4.6 | sign-out ends the session at the app and every service that trusts it |
 
 ### C5 — Recovery from the client's point of view
 

@@ -23,7 +23,7 @@ make up
 preflight is worth the extra second: if this checkout has MOVED since the stack
 was last started, Docker has already created empty directories at the old
 absolute paths and the containers bind to those instead. Nothing errors -- you
-get Authelia crash-looping on a missing config, Alertmanager on a missing
+get Traefik starting with no routes, Alertmanager on a missing
 `alertmanager.yml`, the temperature exporter on a missing `exporter.py` and
 Traefik exiting 127, four unrelated-looking failures that all name files which
 plainly exist on disk. The preflight says "the containers were created from

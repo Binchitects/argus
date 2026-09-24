@@ -40,10 +40,11 @@ New migration:
 
 ```bash
 cd web
-# against the deployed stack (signs in through Authelia):
+# against the deployed stack (E2E_PASSWORD = ADMIN_PASSWORD in .env):
 E2E_BASE_URL=https://llm.localhost E2E_PASSWORD=<admin password> npm run e2e
-# against a bare app container, as CI does:
-E2E_BASE_URL=http://localhost:8080 npm run e2e
+# against a bare app container, as CI does (.github/workflows/app.yml): the app
+# serves HTTPS itself with a throwaway certificate, because sessions use Secure cookies
+E2E_BASE_URL=https://llm.localhost:8443 E2E_PASSWORD=<its Auth__AdminPassword> npm run e2e
 ```
 
 `npx playwright install chromium` fetches the test browser. Where that download is

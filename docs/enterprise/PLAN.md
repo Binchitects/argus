@@ -50,7 +50,7 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 0 done** (`enterprise-p0`). Next: Phase 1.
+Status: **Phase 1 done** (`enterprise-p1`). Next: Phase 2.
 
 ### Phase 0 — Foundations  *(S)*
 - Solution skeleton: `Llm.Api`, `Llm.Core`, test projects, `web/` (React).
@@ -75,6 +75,12 @@ the admin panel.
 - Rate limits, lockout, audit log of sign-ins and admin actions.
 - **Done when:** the auth audit and the functional test's person and admin checks pass with
   Authelia off; LDAP is tested against a real OpenLDAP container.
+- **Result:** Authelia and its secrets are gone; the app imports an Authelia install's people
+  once, with their passwords. `identity-proxy` stays for now: it maps the chat user onto
+  LiteLLM's budget field, which is a gateway concern and moves with the chat in phase 3.
+  Tests: 87 backend (real Postgres and OpenLDAP), 13 UI, 20 browser; the live stack and a
+  from-zero deploy both pass functional 54/54, acceptance 33/0, the auth audit and the
+  domain check.
 
 ### Phase 2 — Admin, usage and cost  *(M)*
 Replaces: the rest of the admin panel and the "Usage by person" dashboard.

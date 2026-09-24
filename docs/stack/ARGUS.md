@@ -103,7 +103,7 @@ See [clients/README.md](../../clients/README.md#forcing-verify-after).
 
 ## Authentication
 
-**Argus does not use Authelia.** Every caller presents their own GitLab
+**Argus does not use the app's sign-in.** Every caller presents their own GitLab
 personal access token as a bearer token, and Argus uses that token to decide
 which repositories they may see. Replacing it with an SSO session would erase
 the per-caller identity that the ACL depends on, so the Traefik route applies

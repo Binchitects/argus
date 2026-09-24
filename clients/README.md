@@ -109,7 +109,7 @@ qwen --auth-type openai \
 ```
 
 The gateway host is `gateway.<domain>` -- **not** `api.<domain>`, which routes
-to Authelia and answers with a login redirect that reads as a 401.
+to the app's sign-in and answers with a login redirect that reads as a 401.
 
 ## Claude Code
 

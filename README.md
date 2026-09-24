@@ -146,7 +146,7 @@ make up
 preflight earns its second: if this checkout has MOVED since the stack last
 started, Docker keeps the containers on the **old** absolute paths and has
 already created empty directories there to satisfy them, so nothing errors.
-What you get instead is Authelia crash-looping on a missing config,
+What you get instead is Traefik starting with no routes,
 Alertmanager on a missing `alertmanager.yml`, the temperature exporter on a
 missing `exporter.py` and Traefik exiting 127 — four unrelated-looking failures
 that name files which plainly exist on disk. The preflight names the move.
@@ -157,8 +157,8 @@ docker logs -f model-init
 ```
 
 The first start downloads the model, checks every file against the SHA-256 that
-Hugging Face publishes, then starts the engine. Open `https://admin.llm.localhost`
-and sign in as `admin` with `AUTHELIA_ADMIN_PASSWORD` from `.env`. The browser warns
+Hugging Face publishes, then starts the engine. Open `https://llm.localhost`
+and sign in as `admin` with `ADMIN_PASSWORD` from `.env`. The browser warns
 once about the self-signed certificate; accept it.
 
 **Adding a setup** for another model or card is one file: copy the closest sample,
@@ -249,7 +249,8 @@ Each of these used to be a script you had to run in the right order.
 | service | does, from `.env` |
 |---|---|
 | `tls-init` | generates the self-signed certificate for `LLM_DOMAIN` and `*.LLM_DOMAIN`, keeps it, regenerates it if the domain changes |
-| `auth-init` | builds Authelia's OIDC key and clients, the admin account, and Traefik's basic-auth; refuses to start Authelia against a database encrypted with another key |
+| `auth-init` | builds Traefik's basic-auth file and hands the app the directory it writes for Argus |
+| `app` (at start) | creates its database, the first admin from `ADMIN_PASSWORD`, and the OIDC clients from the `*_OIDC_CLIENT_SECRET` values; imports an Authelia install's people once |
 | `model-init` | downloads and verifies the model; fails with the path in the message if a file is missing |
 | `prometheus-secrets` | gives Prometheus the engine's scrape token |
 | `power-limits` | applies `GPU_POWER_LIMIT_W` and `CPU_POWER_LIMIT_W`, and re-applies them after a reboot |
@@ -269,18 +270,18 @@ Each of these used to be a script you had to run in the right order.
 
 | address | what | sign-in |
 |---|---|---|
-| `https://admin.llm.localhost` | people, API keys, credit, the Model card, Indexing, Explore | SSO; the console needs `admins` |
+| `https://llm.localhost` | **the app**: sign-in for everything, people, API keys, credit, 2FA, audit log | its own sign-in; Admin needs `admins` |
+| `https://admin.llm.localhost` | the Model card, Indexing, Packs, Explore (moving into the app) | SSO; the console needs `admins` |
 | `https://chat.llm.localhost` | Open WebUI, with Argus as a tool | SSO |
 | `https://grafana.llm.localhost` | dashboards | SSO |
 | `https://gateway.llm.localhost/v1` | OpenAI-compatible API for tools | **the person's own API key** |
 | `https://argus.llm.localhost/mcp` | Argus MCP server (profile `argus`) | **the person's own GitLab token** |
 | `https://metrics.llm.localhost` · `alerts.` | Prometheus, Alertmanager | SSO, `admins` only |
-| `https://auth.llm.localhost` | login portal | — |
 
 Sign in as `admin` with the password from `.env`:
 
 ```bash
-grep AUTHELIA_ADMIN_PASSWORD .env
+grep ADMIN_PASSWORD .env
 ```
 
 Replace `llm.localhost` with your `LLM_DOMAIN`. Browsers resolve `*.localhost` by
@@ -620,7 +621,8 @@ recreates exactly the containers the change affects.
 | pin the model in RAM | `LLAMACPP_MLOCK`, `LLAMACPP_PRELOAD`, `LLAMACPP_RAM_RESERVE_GB` | `auto` pins when the weights fit; see RAM |
 | host swappiness | `HOST_SWAPPINESS` | empty = system default |
 | prices | `PRICE_INPUT_PER_MTOK`, `PRICE_CACHED_INPUT_PER_MTOK`, `PRICE_OUTPUT_PER_MTOK` | per 1M tokens; cache hits priced separately (DeepSeek-style) |
-| the admin's email | `ADMIN_EMAIL` | Authelia's admin and Open WebUI's first administrator |
+| the admin's email | `ADMIN_EMAIL` | the app's first admin and Open WebUI's administrator |
+| company directory | `LDAP_URL`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_USER_BASE_DN`, `LDAP_ADMIN_GROUP`, `LDAP_REQUIRED_GROUP` | LDAP or Active Directory sign-in next to local accounts; see [AUTHENTICATION](docs/stack/AUTHENTICATION.md) |
 | default credit per person | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | per person in the admin console |
 | a different llama.cpp build | `LLAMACPP_ENGINE_URL`, `LLAMACPP_ENGINE_SHA256` | a release tarball; empty = the image's own server |
 | vLLM instead of llama.cpp | `COMPOSE_PROFILES` (`vllm` instead of `llamacpp`), the `VLLM_*` values with `VLLM_SERVED_MODEL_NAME` equal to `MODEL_NAME`, `ENGINE_API_BASE=http://vllm:8000/v1` | exactly one engine profile at a time; **not re-tested since the compose-only change** — the shipped samples are llama.cpp |
@@ -630,8 +632,8 @@ recreates exactly the containers the change affects.
 
 Config files, for what `.env` does not cover: alert rules in
 `stack/config/prometheus/rules/`, dashboards in `stack/config/grafana/dashboards/`
-(edit the files; UI edits are overwritten), access rules in
-`stack/config/authelia/configuration.template.yml`.
+(edit the files; UI edits are overwritten). Who may reach which service is
+decided by the app; see [AUTHENTICATION](docs/stack/AUTHENTICATION.md).
 
 ### Switching the model
 
@@ -774,10 +776,11 @@ empty directories. Mount it from `/etc/fstab` with `x-systemd.before=docker.serv
 UUID=<uuid>  /mnt/data  ntfs3  defaults,nofail,x-systemd.before=docker.service,uid=1000,gid=1000  0 0
 ```
 
-**Never change `LITELLM_SALT_KEY` or `AUTHELIA_STORAGE_ENCRYPTION_KEY` after the first
-start.** Both encrypt stored data. Authelia's key encrypts its session database, and
-`auth-init` stops it with the command to reset that volume; LiteLLM's key encrypts
-credentials it stores in its database, which become unreadable.
+**Never change `LITELLM_SALT_KEY` or `APP_DATA_KEY` after the first start.** Both
+encrypt stored data. `APP_DATA_KEY` encrypts the app's session and OIDC signing
+keys, and the app refuses to start with a different one rather than sign everyone
+out; LiteLLM's key encrypts credentials it stores in its database, which become
+unreadable.
 
 **A long paste stalls the other person.** A 28,500-token paste took 97 s to process,
 and a short question sent 2 s later waited 95 s behind it: the engine processes one

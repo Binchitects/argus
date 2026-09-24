@@ -1,101 +1,90 @@
 # Authentication
 
-Every externally reachable component authenticates against a single identity
-provider: **Authelia**. There is one user database, one login, one place to
-revoke access.
+Everything reachable from outside authenticates against one identity provider:
+**the app** at `https://<LLM_DOMAIN>`. There is one list of people, one sign-in,
+one place to revoke access. People are local accounts, or come from the company
+directory (LDAP / Active Directory), or both.
 
 ---
 
 ## The one thing to understand first
 
-**A static API key cannot "be" SSO.** Single sign-on is a browser flow — a
-redirect to a login page, a form, a session cookie. A Python `openai` client, a
-cron job, or LiteLLM calling vLLM has no browser and cannot complete it.
+**A static API key cannot "be" single sign-on.** Sign-on is a browser flow: a
+redirect, a form, a session cookie. A Python `openai` client, a cron job, or
+LiteLLM calling the engine has no browser and cannot complete it.
 
-So the stack does not try to force browsers and machines down the same path.
-Instead, **both get their credentials from the same issuer**:
+So browsers and programs get different credentials from the same issuer:
 
 | Caller | Mechanism | Credential |
 |---|---|---|
-| Human, in a browser | OIDC / forwardAuth | Session cookie, 12 h |
-| Machine, in code | OAuth2 client-credentials | Access token, short-lived |
+| A person, in a browser | the app's session, or OIDC for Grafana / chat / Langfuse | session cookie: 1 h idle, 12 h at most |
+| A person's tools (Qwen Code, IDEs, scripts) | their API key at the gateway | `sk-...` key, spend tracked per person |
+| A machine client of the engine API | OAuth2 client credentials | access token, 1 h |
 
-The static keys (`VLLM_API_KEY`, `LITELLM_MASTER_KEY`) still exist, but they are
-now **internal implementation details**. They are injected by the proxy after
-authentication and never leave the Docker network. Presenting one from outside
-is rejected.
-
----
-
-## Three enforcement paths
-
-### 1. forwardAuth — services with no login of their own
-
-Traefik asks Authelia about every request before it reaches the backend.
-Authelia answers `200` (allow), or `302` (send the browser to the portal).
-
-Covers: Prometheus, Alertmanager, Loki, cAdvisor, node-exporter, GPU exporter
-and the MinIO console. (The Traefik dashboard is disabled entirely — this
-Traefik is a plain reverse proxy.)
-
-Restricted to the `admins` group. Note that a subject-restricted rule does not
-*deny* on mismatch, it simply does not match — so there must be **no permissive
-catch-all rule beneath it**, or any authenticated user falls through into it.
-`default_policy: deny` covers everything not listed.
-
-### 2. OIDC — apps with their own login screen
-
-Grafana, Open WebUI and Langfuse delegate their own sign-in to Authelia. These
-get a real *identity*, not just a gate: Authelia's `admins` group maps to
-Grafana's `Admin` role automatically.
-
-### 3. Bearer authz — the vLLM API
-
-`api.llm.localhost` accepts an OAuth2 access token issued by Authelia, carrying
-the special `authelia.bearer.authz` scope. A browser hitting `/docs` instead gets the normal
-login redirect, so the Swagger UI still works interactively.
-
-After Authelia authorises the caller, a Traefik middleware **replaces** the
-`Authorization` header with the service's internal static key:
-
-```
-client ──Bearer <authelia token>──▶ Traefik ──▶ Authelia: is this valid?
-                                      │              │ 200
-                                      ▼              ▼
-                              swap header for the internal key
-                                      │
-                                      ▼
-                                    vLLM (sees its own --api-key)
-```
-
-Middleware order is significant — Authelia must inspect the original header
-*before* it is overwritten.
+The static keys (`LLAMACPP_API_KEY`, `LITELLM_MASTER_KEY`) still exist, but only
+as internal details: the proxy injects them after authentication and they never
+leave the Docker network.
 
 ---
+
+## Four enforcement paths
+
+### 1. The app's own sign-in
+
+`https://<LLM_DOMAIN>/login`. Username (or email) and password, then a 6-digit
+code for people who turned on two-factor sign-in. The session cookie is scoped
+to the domain, so it covers every `*.<LLM_DOMAIN>` service at once.
+
+### 2. OIDC: apps with their own sign-in screen
+
+Grafana, Open WebUI and Langfuse send people to the app and get back an
+identity: username, name, email, and groups. The `admins` group becomes
+Grafana's Admin role and Open WebUI's admin role; everyone is in `users`.
+Roles are rebuilt at every token refresh, so a demotion reaches the apps without
+anyone signing out.
+
+Issuer: `https://<LLM_DOMAIN>/`; discovery at
+`/.well-known/openid-configuration`.
+
+### 3. forwardAuth: services with no sign-in of their own
+
+Traefik asks the app (`/api/authz/forward-auth`) before every request to:
+
+| Host | Who gets in |
+|---|---|
+| `metrics.`, `alerts.`, `logs.`, `cadvisor.`, `node.`, `gpu.`, `s3.`, and the engines' `/metrics` | admins only |
+| `admin.` (the admin panel) | anyone signed in; the panel limits what they see |
+| `api.` (the engine) | a machine token with the `api` scope, or anyone signed in (for `/docs`) |
+| any other host | nobody |
+
+A browser without a session is sent to sign in and comes back afterwards
+(`302`); a program gets `401`; someone signed in without the right role gets
+`403`. On success the app adds `Remote-User`, `Remote-Groups`, `Remote-Email`
+and `Remote-Name`; Traefik overwrites any that a browser sent, so they cannot
+be forged.
 
 ### 4. The gateway authenticates itself
 
-`gateway.llm.localhost` (LiteLLM) is deliberately **not** behind Authelia and
-gets **no credential injection**. LiteLLM validates its own virtual keys, so the
-caller's key must reach it untouched — injecting a master key would attribute
-every request to one identity and destroy per-user usage tracking.
-
-That is the route developers and SDK clients use. It is still only reachable
-through Traefik over TLS; LiteLLM is the authenticator rather than Authelia.
+`gateway.<LLM_DOMAIN>` (LiteLLM) is deliberately **not** behind forwardAuth and
+gets no credential injection. LiteLLM checks each person's own key, which is
+what ties spend to the person; injecting the master key would put every
+request under one identity. It is still reachable only through Traefik over TLS.
 
 ---
 
 ## Using it
 
-### As a human
+### As a person
 
-Go to any service over HTTPS. You are redirected to
-**https://auth.llm.localhost**, log in once, and the session cookie is scoped to
-`llm.localhost`, so it covers every `*.llm.localhost` hostname.
+Open `https://<LLM_DOMAIN>`. The first admin is `admin`, with the password in
+`ADMIN_PASSWORD` (used once, on the very first start; change it under **Your
+account** afterwards).
 
-Default account: `admin`. The password is `AUTHELIA_ADMIN_PASSWORD` in `.env`.
+Your account page has your API key (make a new one there; the old one stops at
+once), your spend and credit, two-factor sign-in (scan a QR code; you get ten
+one-time recovery codes), and your password.
 
-### As a machine
+### As a machine client of the engine API
 
 ```bash
 export TOKEN=$(./scripts/get-token.sh)
@@ -105,284 +94,198 @@ export TOKEN=$(./scripts/get-token.sh)
 curl https://api.llm.localhost/v1/chat/completions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"model":"default","messages":[{"role":"user","content":"hi"}]}'
 ```
 
-With the OpenAI SDK:
-
-```python
-import subprocess
-from openai import OpenAI
-
-token = subprocess.check_output(["./scripts/get-token.sh"], text=True).strip()
-client = OpenAI(base_url="https://api.llm.localhost/v1", api_key=token)
-print(client.chat.completions.create(
-    model="default",
-    messages=[{"role": "user", "content": "hi"}],
-).choices[0].message.content)
-```
-
-Tokens expire. Fetch a new one rather than caching it indefinitely — that is the
-entire point of replacing a static key.
-
-The token is requested with the OAuth2 `resource` parameter, not
-`audience`. Authelia matches an `audience` value by EXACT string, so a
-token minted for `https://api.<domain>` is refused at
-`https://api.<domain>/v1/models` -- every real endpoint 401s while the
-token itself introspects as active and correctly scoped. `resource`
-(RFC 8707) has prefix semantics, so one token covers the whole origin.
-`get-token.sh` handles this; if you build the request yourself, do not
-swap the parameter back.
-
-For the gateway, ask for the matching audience:
-
-```bash
-export TOKEN=$(./scripts/get-token.sh --audience gateway)
-```
+Tokens expire after an hour. Fetch a new one rather than caching it; that is the
+point of replacing a static key. Tools that belong to a person should use that
+person's API key at the gateway instead, so their usage is attributed to them.
 
 ---
 
-## Managing users
+## Managing people
 
-**Use the admin panel** at `https://admin.<LLM_DOMAIN>`. Signed in as an admin you
-can add a person (a password and an API key are generated and shown once), set
-their credit, issue a new key (the old one stops working), and reset a password.
-Everyone else who signs in sees only their own usage and a password form.
+**Admin → People** in the app. Signed in as an admin you can:
 
-The account list is `config/authelia/users.yml`. The `auth-init` service creates
-it on the very first start with a single `admin` account whose password is
-`AUTHELIA_ADMIN_PASSWORD`, and never touches it again; after that the panel owns
-it. Passwords are argon2id hashes; the plaintext is never written to disk.
+- add a person (a password and an API key are generated and shown once),
+- set their credit (empty = unlimited), make a new API key, reset their password
+  or their two-factor sign-in,
+- make them an admin, disable them (signed out within a minute, API keys
+  blocked), sign them out everywhere, or delete them.
 
-Groups: `admins` reaches everything including the infrastructure endpoints
-(metrics, alerts, logs); `users` gets chat, Grafana and their own panel page.
+You cannot remove the last admin, or disable, demote or delete yourself.
+Every sign-in and every change is in **Admin → Audit log**, with who, whom and
+from which address.
 
-**There is no delete button.** To remove someone, delete their block from
-`config/authelia/users.yml` (Authelia reloads it within a minute) and delete their
-gateway user and keys:
+The username must equal the person's GitLab username: Argus uses it to answer
+with their own repository access.
 
-```bash
-curl -X POST https://gateway.<LLM_DOMAIN>/user/delete -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' -d '{"user_ids":["alice@example.com"]}'
-```
+### From Authelia
 
-**On Linux** Authelia watches `users.yml` and a change is live within a minute.
-**On Docker Desktop (Windows) it is not:** inotify events do not cross its bind
-mounts, so run `docker compose restart authelia` after adding someone.
-
-### Password only (`one_factor`), by decision
-
-Every surface uses `one_factor`: username and password. Two-factor was shipped
-once and removed at the operator's request. To require TOTP again for a surface,
-change its `policy` to `two_factor` in `config/authelia/configuration.template.yml`
-and each person enrols a device from the portal (with no SMTP configured, the
-enrolment link is written to `/data/notification.txt` inside the authelia
-container).
-
-**Keep `api.` and `gateway.` at `one_factor` even then.** Authelia treats a
-`client_credentials` token as 1FA by definition, so requiring a second factor
-there denies every machine caller while looking like a hardening win.
-
-`configuration.template.yml` is loaded by Authelia directly -- there is no
-generated `configuration.yml` any more -- so an edit takes effect on the next
-`docker compose up -d authelia`.
+An install that ran Authelia keeps its people: on its first start the app
+imports `config/authelia/users.yml` once, with roles, and everyone signs in with
+their old password (it is re-hashed at that first sign-in). Grafana and Langfuse
+link the existing accounts by email.
 
 ---
 
-## What is deliberately NOT behind SSO
+## The company directory (LDAP / Active Directory)
 
-**Internal service-to-service traffic.** Prometheus scraping `vllm:8000/metrics`,
-LiteLLM calling `vllm:8000`, Promtail shipping to Loki — these travel over the
-Docker network and never touch Traefik. Forcing them through SSO would mean
-every exporter implementing OAuth2 for no security gain, since the network is
-already isolated.
+Off while `LDAP_URL` is empty. Set these in `.env`:
 
-**Nothing else is published.** Every service port mapping has been removed;
-only Traefik's :80 and :443 exist. There is no way to reach a backend without
-passing through the proxy, and therefore no way to bypass authentication from
-outside the Docker network.
+| Setting | Example |
+|---|---|
+| `LDAP_URL` | `ldaps://dc1.example.com:636`, or `ldap://ldap.example.com` with `LDAP_STARTTLS=true` |
+| `LDAP_BIND_DN` / `LDAP_BIND_PASSWORD` | a **read-only** service account that can search people and groups |
+| `LDAP_USER_BASE_DN` | `OU=Staff,DC=example,DC=com` |
+| `LDAP_GROUP_BASE_DN` | only for directories without `memberOf` (OpenLDAP without the overlay) |
+| `LDAP_ADMIN_GROUP` | `llm-admins`: members are admins here |
+| `LDAP_REQUIRED_GROUP` | `llm-users`: only members may sign in (empty = anyone the search finds) |
+| `LDAP_SYNC_INTERVAL` | `00:15:00` |
 
-The trade-off is that CLI tools must resolve `*.llm.localhost` — run
-`scripts/setup-hosts` once. Health checks that need no credentials probe from
-*inside* the network instead (`scripts/health.sh` uses a container on
-`llm-net`).
+People sign in with their directory name (`uid` or `sAMAccountName`) or email.
+The app searches for them with the service account, then checks the password by
+binding as them. On the first sign-in it creates them, gives them an API key,
+and sets their role from the admin group. The directory stays in charge of
+their name, email, role and password; the app does not let those be changed
+here.
+
+Every `LDAP_SYNC_INTERVAL` the app re-reads every directory person. Anyone who
+left the directory, or the required group, is disabled: signed out, API keys
+blocked. They are enabled again if they come back. **Admin → Sign-in → Check the
+directory now** runs the same check at once. When the directory cannot be
+reached, nobody is changed.
+
+Safeguards: an empty password is refused before the directory sees it (many
+servers treat it as an anonymous bind and say yes); sign-in names are escaped,
+so `*` or `)(` cannot change the search; a directory entry never takes over a
+local account of the same name or email; an entry without an email cannot sign
+in. `LDAP_INSECURE_SKIP_VERIFY=true` turns off the certificate check and is for
+testing only; the app logs a warning while it is on.
+
+Local accounts keep working next to the directory: keep at least one local admin
+as a way in if the directory is down.
 
 ---
 
-## Files
+## What protects the sign-in
 
-| Path | What it is | In git? |
-|---|---|---|
-| `config/authelia/configuration.template.yml` | Policies, session, access rules; Authelia fills in the domain | yes |
-| `config/authelia/clients.yml` | OIDC clients + signing key | **no** — rebuilt by `auth-init` on every start |
-| `config/authelia/users.yml` | Users and password hashes | **no** — created once by `auth-init`, then the panel's |
-| `config/authelia/directory/users.yml` | Username → email, no hashes; what Argus reads | **no** — kept in step with `users.yml` by the admin panel |
-| `config/authelia/secrets/` | OIDC RSA private key | **no** — generated once by `auth-init` |
-| `scripts/get-token.sh` | Machine-client token helper | yes |
+| Protection | Setting |
+|---|---|
+| Password strength | zxcvbn score 3 or more (rejects `Password1!`, accepts a few unrelated words); your own names count against it |
+| Guessing one account | 5 failures for one name from one address in 10 minutes ban that pair for 12 hours; colleagues behind the same NAT are unaffected |
+| Password spraying | 50 failures from one address in 10 minutes ban the address for 1 hour |
+| Guessing from many addresses | 10 failures on an account lock it for 15 minutes, counted atomically so parallel guesses cannot slip past |
+| Floods | 120 sign-in requests per minute per address |
+| Sessions | 1 hour idle, 12 hours absolute (no action extends that), 30 days with "keep me signed in"; re-checked against the account every minute |
+| Cross-site requests | every state change needs an `X-Requested-With` header, which another site cannot send |
+| Answers | a wrong password and an unknown name get the same answer |
+| Keys at rest | the session and OIDC signing keys are stored in the database, encrypted with `APP_DATA_KEY` |
 
-The client secrets themselves live in `.env` (`*_OIDC_CLIENT_SECRET`); `auth-init`
-hashes them into `clients.yml`, so the apps and Authelia can never disagree.
+**`APP_DATA_KEY` never changes after the first start.** If it is lost or
+changed, the app refuses to start and says so, rather than quietly making new
+keys (which would sign everyone out and break single sign-on). Keep it with your
+other secrets.
+
+---
+
+## What is deliberately NOT behind sign-in
+
+**Internal service-to-service traffic.** Prometheus scraping, LiteLLM calling
+the engine, Promtail shipping to Loki: these travel over the Docker network and
+never touch Traefik. The network is already isolated.
+
+**Nothing else is published.** Only Traefik's :80 and :443 exist. There is no
+way to reach a backend without passing through the proxy, and therefore no way
+to bypass authentication from outside the Docker network.
+
+---
+
+## Files and settings
+
+| What | Where |
+|---|---|
+| People, roles, 2FA, audit log, OIDC clients and keys | the app's `llmapp` database on the shared Postgres |
+| OIDC client secrets | `.env` (`*_OIDC_CLIENT_SECRET`); the app registers the clients from them on every start |
+| Who is who for Argus (username → email, no passwords) | `config/authelia/directory/users.yml`, written by the app |
+| Basic auth for `PROTECTED_CHAIN=protected-chain@file` | `config/traefik/auth/users.htpasswd`, from `PROXY_AUTH_*` |
+| Machine-client token helper | `scripts/get-token.sh` |
+
+The app runs as `LLM_UID:LLM_GID` (the owner of `stack/config`), so the files it
+writes stay yours.
 
 ---
 
 ## Auditing it
 
-`scripts/audit-auth.sh` performs a **real** login and a full authorization-code
-exchange for every client, then decodes the resulting ID token and reports the
-claims actually delivered. It needs no browser, so it catches in seconds what
-otherwise takes three round-trips of clicking:
-
 ```bash
 ./scripts/audit-auth.sh
 ```
 
-It checks, in order: first-factor login; the authorization-code flow and claims
-per OIDC client; the machine client-credentials grant plus authorised and
-unauthorised API access; that forwardAuth denies anonymous requests; and that
-the same requests succeed with a session cookie.
-
-Run it after any change to `configuration.template.yml`, `.env` secrets, or an app's
-OAuth settings.
+It signs in for real and runs the full authorization-code exchange for every
+client, printing the claims that arrive; checks that a used code and a wrong
+client secret are refused and an unknown redirect is never followed; gets a
+machine token and uses it (and a forged one); checks forwardAuth anonymous and
+signed in; and checks the CSRF guard, the security headers and the session
+cookie flags. It exits non-zero when anything fails. Run it after changing
+`.env` secrets or an app's OAuth settings.
 
 ---
 
 ## Troubleshooting
 
-**`OAuthCallback`, `invalid_client`, or every app suddenly failing at once.**
-Almost always **secret drift**: `clients.yml` was regenerated with fresh client
-secrets, but the app containers still hold the values baked in when they were
-created. Nothing in the config looks wrong, and an audit that reads `.env` will
-happily pass while every real login fails.
+**Every app fails at once with `invalid_client`.** Almost always **secret
+drift**: a secret changed in `.env` but an app container still holds the old
+value. `audit-auth.sh` step 0 compares each container with `.env`; if it reports
+STALE, `docker compose up -d` recreates it.
 
-`clients.yml` is rebuilt from `.env` on every start, so the usual cause now is a
-secret changed in `.env` while an app container kept the old value.
-`scripts/audit-auth.sh` step 0 compares each container's secret against `.env`.
-If it reports STALE, `docker compose up -d` recreates the apps with the new value.
+**The app will not start: "The stored sign-in keys cannot be decrypted".**
+`APP_DATA_KEY` differs from the value of the first start. Put the old value
+back. (Only if it is truly lost: stop the app, delete the rows of the
+`DataProtectionKeys` table and the `oidc.%` rows of `settings` in the `llmapp`
+database, and start it. Everyone signs in again.)
 
-**`No email found in user object` (or the app complains a claim is missing).**
-Authelia keeps `email`, `name` and `groups` in the **userinfo endpoint** by
-default and issues a deliberately minimal ID token. Clients that read claims
-straight off the ID token — NextAuth, which Langfuse uses — then fail. The fix
-is a claims policy that puts them in the ID token as well:
+**Someone cannot sign in.** Look them up in **Admin → Audit log**: it says
+whether it was a wrong password, a lock, a ban, a disabled account, or (for the
+directory) not being in the sign-in group. A locked person can wait 15 minutes
+or be given a new password.
 
-```yaml
-identity_providers:
-  oidc:
-    claims_policies:
-      with_profile:
-        id_token: ['email', 'email_verified', 'name', 'preferred_username', 'groups']
-```
-
-and `claims_policy: 'with_profile'` on each client. `auth-init` does this for
-the three app clients. Verify with `./scripts/audit-auth.sh`, which
-prints the claims that actually arrive.
-
-**Login redirects to a consent screen every time.** Expected for third-party
-clients, pointless for first-party apps you own. The generated clients use
-`consent_mode: 'implicit'` so the scopes are pre-approved.
-
-
-
-**Changing config appears to do nothing.** Authelia does **not** hot-reload
-`configuration.template.yml` or `clients.yml` — only `users.yml` is watched. Restart it:
-
-```bash
-docker compose up -d --force-recreate authelia
-```
+**Directory sign-ins answer "cannot be reached".** The app could not bind with
+the service account: wrong `LDAP_URL`, a firewall, a certificate the app does not
+trust (for `ldaps://` or StartTLS), or a wrong `LDAP_BIND_DN` / password.
+Local accounts still work.
 
 **A service is unreachable through the proxy after a config change.** Traefik
 labels are baked in at container creation. Changing `PROTECTED_CHAIN` or any
-label requires recreating the affected containers, not just Traefik:
+label requires recreating the affected containers: `docker compose up -d`.
 
-```bash
-docker compose up -d
-```
+**Traefik returns 404 for a service that is running.** Traefik does not route to
+a container whose health check is failing. `docker compose ps` shows it as
+`starting` or `unhealthy`.
 
-**Traefik returns 404 for a service that is running.** Traefik refuses to route
-containers whose Docker healthcheck is not passing. Check with
-`docker compose ps` — a service stuck in `starting` or `unhealthy` will not be
-routed. This is intended behaviour, not a bug.
+**Grafana: `user already exists` after signing in.** A local Grafana account has
+the same login. This is why `GRAFANA_ADMIN_USER` is `localadmin` and not
+`admin`: keep the two namespaces apart.
 
-**`invalid_client` from the token endpoint.** Either the `api` client is not
-registered in the *running* Authelia instance (restart it), or
-`API_OIDC_CLIENT_SECRET` in `.env` does not match the hash in `clients.yml`.
-`docker compose up -d authelia` reruns `auth-init`, which rebuilds the hash from `.env`.
-
-**`invalid_client` at the token exchange, after the user already logged in.**
-The login itself succeeded and Authelia issued a code; the *client* failed to
-authenticate when redeeming it. Almost always a `token_endpoint_auth_method`
-mismatch, not a wrong secret. Isolate it with a deliberately bogus code:
-
-```bash
-curl -u 'CLIENT_ID:SECRET' -d 'grant_type=authorization_code&code=bogus&redirect_uri=https://x/y' https://auth.llm.localhost/api/oidc/token
-```
-
-`invalid_grant` means client authentication **worked** (only the code was bad) —
-the method is right. `invalid_client` means it did not. All three apps here
-(Grafana, Open WebUI via authlib, Langfuse) send HTTP Basic, so every client is
-registered as `client_secret_basic`.
-
-**Grafana: `user already exists` after a successful OAuth login.** The OAuth
-half worked — Authelia authenticated you and Grafana received the userinfo. It
-then failed trying to *provision* the user, because a **local** account with the
-same login already existed. Grafana deliberately refuses to attach an OIDC
-identity to a pre-existing local account, since that would let anyone who
-registers a matching username at the IdP inherit a local admin.
-
-This is why `GRAFANA_ADMIN_USER` is `localadmin` rather than `admin`: Authelia's
-default user is `admin`, and identical names collide. Keep the two namespaces
-distinct. If you hit it after the fact, rename the local account and reset
-Grafana's database (dashboards and datasources are provisioned from files, so
-nothing is lost):
-
-```bash
-docker compose stop grafana && docker compose rm -f grafana
-```
-
-```bash
-docker volume rm llmservice_grafana-data && docker compose up -d grafana
-```
-
-The same collision applies to any app where you created a local account *before*
-enabling SSO. Open WebUI and Langfuse are unaffected here only because their
-data was wiped, so the first OIDC login provisions the account cleanly.
-
-**`redirect_uri does not match` / login bounces immediately.** This fails at the
-*authorization* step, before you even see the login form — the opposite end of
-the flow from the Grafana case above. The app is building a callback URL from
-its own base-URL setting, and that must be the **proxy hostname**, not the
-direct port:
+**`redirect_uri` rejected, or the sign-in bounces at once.** The app builds its
+callback from its own base-URL setting, which must be the proxy hostname:
 
 | App | Setting | Must be |
 |---|---|---|
-| Grafana | `GF_SERVER_ROOT_URL` | `https://grafana.llm.localhost/` |
-| Open WebUI | `OPENID_REDIRECT_URI` | `https://chat.llm.localhost/oauth/oidc/callback` |
-| Langfuse | `NEXTAUTH_URL` | `https://traces.llm.localhost` |
-
-Langfuse is the easy one to miss: NextAuth derives the redirect from
-`NEXTAUTH_URL`, which defaults to the direct `http://localhost:3002`.
-
-Preflight all three without clicking through a browser — an anonymous GET to the
-authorization endpoint returns **302 to the login portal** when `client_id` and
-`redirect_uri` are accepted, and a 400 when they are not:
-
-```bash
-curl -o /dev/null -w '%{http_code}
-' -G --data-urlencode 'client_id=langfuse' --data-urlencode 'redirect_uri=https://traces.llm.localhost/api/auth/callback/custom' --data-urlencode 'response_type=code' --data-urlencode 'scope=openid email profile' https://auth.llm.localhost/api/oidc/authorization
-```
-
-Note the consequence: setting these to the proxy hostname means the **direct
-ports no longer work for interactive login**. Use the hostnames.
+| Grafana | `GF_SERVER_ROOT_URL` | `https://grafana.<LLM_DOMAIN>/` |
+| Open WebUI | `OPENID_REDIRECT_URI` | `https://chat.<LLM_DOMAIN>/oauth/oidc/callback` |
+| Langfuse | `NEXTAUTH_URL` | `https://traces.<LLM_DOMAIN>` |
 
 **Browser certificate warnings.** Expected once per browser: the certificate is
 self-signed (generated by `tls-init`). Accept it; it does not change on restart.
 
-**`curl` fails with a TLS error on Windows.** Windows `curl` uses the schannel
-backend, which cannot check revocation for a self-signed certificate. Add
-`--ssl-no-revoke --cacert config/traefik/certs/tls.crt`. Also note `*.localhost`
-does not resolve in CLI tools, hence `--resolve host:443:127.0.0.1`.
+**`curl` fails with a TLS error on Windows.** Windows `curl` cannot check
+revocation for a self-signed certificate. Add
+`--ssl-no-revoke --cacert config/traefik/certs/tls.crt`. `*.localhost` does not
+resolve in CLI tools either, hence `--resolve host:443:127.0.0.1`.
 
 ---
 
-## Turning SSO off
+## Turning forwardAuth off
 
-Set `PROTECTED_CHAIN=protected-chain@file` in `.env` and drop `auth` from
-`COMPOSE_PROFILES`, then `docker compose up -d`. The stack falls back to the
-basic-auth credentials in `PROXY_AUTH_USER` / `PROXY_AUTH_PASSWORD`, and the API
-returns to accepting its static key directly.
+Set `PROTECTED_CHAIN=protected-chain@file` in `.env` and `docker compose up -d`.
+The services with no sign-in of their own then use the basic-auth credentials in
+`PROXY_AUTH_USER` / `PROXY_AUTH_PASSWORD` instead. The app, Grafana, chat and the
+gateway keep their own sign-in.
