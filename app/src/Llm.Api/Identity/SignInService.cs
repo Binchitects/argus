@@ -263,15 +263,13 @@ public sealed partial class SignInService(
     {
         var max = users.Options.Lockout.MaxFailedAccessAttempts;
         var until = DateTimeOffset.UtcNow + users.Options.Lockout.DefaultLockoutTimeSpan;
-        var locked = await db.Users
-            .Where(u => u.Id == user.Id && u.LockoutEnabled && u.AccessFailedCount + 1 >= max)
-            .ExecuteUpdateAsync(set => set.SetProperty(u => u.AccessFailedCount, 0).SetProperty(u => u.LockoutEnd, until));
-        if (locked == 0)
-        {
-            await db.Users.Where(u => u.Id == user.Id && u.LockoutEnabled)
-                .ExecuteUpdateAsync(set => set.SetProperty(u => u.AccessFailedCount, u => u.AccessFailedCount + 1));
-        }
-        return locked > 0;
+        // ONE statement: every SET sees the same row, and Postgres re-reads the row
+        // under its lock when two of these meet. Two statements (check, then
+        // increment) let two guesses at 8 both skip the lock and land on 10 unlocked.
+        await db.Users.Where(u => u.Id == user.Id && u.LockoutEnabled).ExecuteUpdateAsync(set => set
+            .SetProperty(u => u.LockoutEnd, u => u.AccessFailedCount + 1 >= max ? until : u.LockoutEnd)
+            .SetProperty(u => u.AccessFailedCount, u => u.AccessFailedCount + 1 >= max ? 0 : u.AccessFailedCount + 1));
+        return await db.Users.AnyAsync(u => u.Id == user.Id && u.LockoutEnd == until);
     }
 
     public async Task SignOutAsync()

@@ -26,13 +26,31 @@ public sealed class AppFixture : IAsyncLifetime
 
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
     public FakeGateway Gateway { get; } = new();
+    public FakeArgus Argus { get; } = new();
     public string AppConnectionString { get; private set; } = "";
+    /// <summary>The real dashboard files, found by walking up to the repository.</summary>
+    public static string DashboardsPath { get; } = FindDashboards();
+
+    private static string FindDashboards()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "stack", "config", "grafana", "dashboards");
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        throw new DirectoryNotFoundException("stack/config/grafana/dashboards not found above the test binaries.");
+    }
+
     public string DirectoryPath => Path.Combine(_webRoot, "..", Path.GetFileName(_webRoot) + "-directory", "users.yml");
 
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
         AppConnectionString = ConnectionStringFor("llmapp_test");
+        await LitellmSeed.CreateAsync(_postgres.GetConnectionString(), "litellm_test");
         Directory.CreateDirectory(Path.Combine(_webRoot, "assets"));
         await File.WriteAllTextAsync(Path.Combine(_webRoot, "index.html"), IndexHtml);
         await File.WriteAllTextAsync(Path.Combine(_webRoot, "assets", "app-abc123.js"), "console.log(1)");
@@ -56,12 +74,28 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Auth:DirectoryFile", DirectoryPath);
             b.UseSetting("Oidc:GrafanaSecret", GrafanaSecret);
             b.UseSetting("Oidc:ApiSecret", ApiSecret);
+            b.UseSetting("Dashboards:Path", DashboardsPath);
+            b.UseSetting("Dashboards:SqlDatabase", "litellm_test");
+            b.UseSetting("Dashboards:StatementTimeout", "00:00:03");
+            b.UseSetting("Argus:Url", "http://argus:7700");
+            b.UseSetting("Argus:AdminToken", FakeArgus.Token);
+            b.UseSetting("Stack:EnvSamplesDir", Path.Combine(DashboardsPath, "..", "..", "..", "env-samples"));
+            b.UseSetting("Stack:ModelName", "Qwen3.8-Flash-Next");
+            b.UseSetting("Stack:PriceInputPerMtok", "0.20");
+            // Nothing listens here: probes are refused at once instead of waiting on DNS.
+            b.UseSetting("Stack:LiteLlmProbeUrl", "http://127.0.0.1:9");
+            b.UseSetting("Stack:PrometheusUrl", "http://127.0.0.1:9");
+            b.UseSetting("Stack:GrafanaProbeUrl", "http://127.0.0.1:9");
             foreach (var (k, v) in settings ?? new Dictionary<string, string?>())
             {
                 b.UseSetting(k, v);
             }
             b.UseEnvironment("Production");
-            b.ConfigureTestServices(s => s.AddSingleton(gateway));
+            b.ConfigureTestServices(s =>
+            {
+                s.AddSingleton(gateway);
+                s.AddHttpClient<Llm.Api.Operations.ArgusAdmin>().ConfigurePrimaryHttpMessageHandler(() => Argus);
+            });
         });
 
     public async Task DisposeAsync()

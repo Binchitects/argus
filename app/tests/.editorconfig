@@ -6,3 +6,5 @@ dotnet_diagnostic.CA1711.severity = none
 dotnet_diagnostic.CA1822.severity = none
 # RFC 6238 (TOTP) is defined on HMAC-SHA1; the tests compute authenticator codes with it.
 dotnet_diagnostic.CA5350.severity = none
+# Inline arrays in test data read better than static fields.
+dotnet_diagnostic.CA1861.severity = none

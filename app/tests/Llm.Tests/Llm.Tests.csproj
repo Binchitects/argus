@@ -23,4 +23,8 @@
     <ProjectReference Include="..\..\src\Llm.Core\Llm.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Resources/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

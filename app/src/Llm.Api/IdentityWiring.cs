@@ -204,6 +204,15 @@ public static class IdentityWiring
         services.AddScoped<PersonClaims>();
         services.AddScoped<IdentityBootstrap>();
         services.AddScoped<OidcClients>();
+
+        services.Configure<Dashboards.DashboardOptions>(config.GetSection("Dashboards"));
+        services.AddSingleton<Dashboards.DashboardStore>();
+        services.AddSingleton<Dashboards.SqlDatasource>();
+
+        services.Configure<Operations.StackOptions>(config.GetSection("Stack"));
+        services.Configure<Operations.ArgusOptions>(config.GetSection("Argus"));
+        services.AddHttpClient("probe", c => c.Timeout = TimeSpan.FromSeconds(3));
+        services.AddHttpClient<Operations.ArgusAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
     }
 
     /// <summary>
@@ -265,6 +274,9 @@ public static class IdentityWiring
         app.MapAdmin();
         app.MapForwardAuth();
         app.MapOidc();
+        Dashboards.DashboardEndpoints.MapDashboards(app);
+        Dashboards.UsageEndpoints.MapUsage(app);
+        Operations.OperationsEndpoints.MapOperations(app);
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

@@ -2,7 +2,8 @@
 # Run the .NET SDK without installing it: ./dn build, ./dn test, ./dn ef ...
 # Runs as the calling user (no root-owned files), shares the NuGet cache
 # between runs, and uses the host network so Testcontainers' mapped ports
-# on localhost are reachable from the tests.
+# on localhost are reachable from the tests. The whole repository is mounted:
+# the tests read the real dashboard files in stack/config/grafana/dashboards.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 cache="${DN_CACHE:-$HOME/.cache/llm-app-dotnet}"
@@ -12,5 +13,5 @@ exec docker run --rm -i $([ -t 0 ] && echo -t) \
   -e HOME=/home/dev -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 \
   -e TESTCONTAINERS_RYUK_DISABLED="${TESTCONTAINERS_RYUK_DISABLED:-false}" \
   -v "$cache:/home/dev" -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$here:/src" -w /src --network host \
+  -v "$(dirname "$here"):/repo" -w /repo/app --network host \
   mcr.microsoft.com/dotnet/sdk:10.0 dotnet "$@"
