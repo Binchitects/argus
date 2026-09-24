@@ -1412,6 +1412,8 @@ services:
       Argus__GitlabUrl: ${ARGUS_GITLAB_URL:-}
       Argus__GitlabAuth: ${ARGUS_GITLAB_AUTH:-}
       Argus__GitlabUsername: ${ARGUS_GITLAB_USERNAME:-}
+      # The chat's credential at Argus's MCP endpoint (with each person's email beside it).
+      Chat__ArgusChatToken: ${ARGUS_CHAT_CLIENT_TOKEN:-}
     volumes:
       - ${LLM_CONFIG_DIR:-./config}/authelia/directory:/directory
       - ${LLM_CONFIG_DIR:-./config}/authelia:/legacy:ro

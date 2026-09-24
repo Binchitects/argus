@@ -19,9 +19,32 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 }
 
 /// <summary>Streams a chat completion from LiteLLM and turns its SSE lines into events.</summary>
-public sealed class GatewayChat(HttpClient http)
+public sealed class GatewayChat(HttpClient http, ChatKey key)
 {
     public async IAsyncEnumerable<StreamEvent> StreamAsync(JsonObject request, string personEmail, [EnumeratorCancellation] CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            HttpResponseMessage? res;
+            try
+            {
+                res = await OpenAsync(request, personEmail, ct);
+            }
+            catch (ChatGatewayException ex) when (ex.Status == 401 && attempt == 1)
+            {
+                // The chat key was removed at the gateway: make a new one and try once more.
+                await key.ForgetAsync(ct);
+                continue;
+            }
+            await foreach (var e in ReadAsync(res, ct))
+            {
+                yield return e;
+            }
+            yield break;
+        }
+    }
+
+    private async Task<HttpResponseMessage> OpenAsync(JsonObject request, string personEmail, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/chat/completions", UriKind.Relative))
         {
@@ -31,6 +54,14 @@ public sealed class GatewayChat(HttpClient http)
         // field, set by the caller): the same two signals identity-proxy gives chat.
         req.Headers.Add("X-OpenWebUI-User-Email", personEmail);
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        try
+        {
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await key.GetAsync(ct));
+        }
+        catch (Gateway.GatewayException ex)
+        {
+            throw new ChatGatewayException("The model gateway is not reachable right now: " + ex.Message);
+        }
 
         HttpResponseMessage res;
         try
@@ -41,12 +72,20 @@ public sealed class GatewayChat(HttpClient http)
         {
             throw new ChatGatewayException("The model gateway is not reachable right now.", null) { Data = { ["inner"] = ex.Message } };
         }
-        using (res)
+        if (!res.IsSuccessStatusCode)
         {
-            if (!res.IsSuccessStatusCode)
+            using (res)
             {
                 throw new ChatGatewayException(Explain(await res.Content.ReadAsStringAsync(ct), (int)res.StatusCode), (int)res.StatusCode);
             }
+        }
+        return res;
+    }
+
+    private static async IAsyncEnumerable<StreamEvent> ReadAsync(HttpResponseMessage res, [EnumeratorCancellation] CancellationToken ct)
+    {
+        using (res)
+        {
             using var reader = new StreamReader(await res.Content.ReadAsStreamAsync(ct), Encoding.UTF8);
             while (await reader.ReadLineAsync(ct) is { } line)
             {

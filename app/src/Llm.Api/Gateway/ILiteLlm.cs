@@ -19,6 +19,9 @@ public interface ILiteLlm
     Task SetBudgetAsync(string email, decimal? budget, CancellationToken ct = default);
 
     Task<string> GenerateKeyAsync(string email, string keyAlias, CancellationToken ct = default);
+
+    /// <summary>A key that belongs to no person (the chat's): spend is attributed by the request's `user`.</summary>
+    Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default);
     Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default);
     Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default);
     Task SetBlockedAsync(IEnumerable<string> tokens, bool blocked, CancellationToken ct = default);

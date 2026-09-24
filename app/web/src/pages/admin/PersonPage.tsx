@@ -152,6 +152,9 @@ export function PersonPage() {
             <button className="button secondary">Set credit</button>
           </form>
         </div>
+        <p className="muted">A new credit applies to the API key at once and to chat within about a minute (the gateway caches it).</p>
+        <div className="actions">
+        </div>
       </section>
 
       {!self && (

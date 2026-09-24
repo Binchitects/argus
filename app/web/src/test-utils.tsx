@@ -24,7 +24,7 @@ export const admin: Me = {
 }
 export const member: Me = { ...admin, id: 'm1', userName: 'mo', displayName: 'Mo Member', email: 'mo@example.test', isAdmin: false }
 
-type Handler = (body: unknown, init: RequestInit) => { status?: number; json?: unknown }
+type Handler = (body: unknown, init: RequestInit) => { status?: number; json?: unknown; events?: object[]; hang?: boolean }
 export interface Call { method: string; path: string; body: unknown; headers: Record<string, string> }
 
 /**
@@ -46,7 +46,18 @@ export function fakeBackend(me: Me | null, routes: Record<string, Handler> = {})
     calls.push({ method, path: url.pathname + url.search, body, headers: (init.headers ?? {}) as Record<string, string> })
     const handler = all[`${method} ${url.pathname}`]
     if (!handler) return new Response('{"status":"not_found"}', { status: 404 })
-    const { status = 200, json } = handler(body, init)
+    const { status = 200, json, events, hang } = handler(body, init)
+    if (events) {
+      // Server-sent events, one per chunk; `hang` keeps the stream open until aborted.
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const e of events) controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(e)}\n\n`))
+          if (!hang) controller.close()
+          init.signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')))
+        },
+      })
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }
     return new Response(status === 204 ? null : JSON.stringify(json ?? {}), { status })
   })
   return calls

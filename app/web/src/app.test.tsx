@@ -43,9 +43,9 @@ describe('app shell', () => {
 
   it('points a not-yet-native area to the service that covers it today', async () => {
     fakeBackend(member)
-    renderApp('/chat')
-    expect(await screen.findByRole('status')).toHaveTextContent('moves here in phase 3')
-    expect(screen.getByRole('link', { name: 'Open Open WebUI' })).toHaveAttribute('href', `http://chat.${window.location.host}/`)
+    renderApp('/dashboards')
+    expect(await screen.findByRole('status')).toHaveTextContent('moves here in phase 5')
+    expect(screen.getByRole('link', { name: 'Open Grafana' })).toHaveAttribute('href', `http://grafana.${window.location.host}/`)
   })
 
   it('shows not found for unknown pages', async () => {

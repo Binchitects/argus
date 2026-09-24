@@ -25,6 +25,8 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Home /> },
       { path: '/account', element: <Account /> },
+      { path: '/chat', lazy: async () => ({ Component: (await import('./chat/ChatPage')).ChatPage }) },
+      { path: '/chat/:id', lazy: async () => ({ Component: (await import('./chat/ChatPage')).ChatPage }) },
       { path: '/usage', lazy: async () => ({ Component: (await import('./pages/Usage')).Usage }) },
       {
         path: '/admin',

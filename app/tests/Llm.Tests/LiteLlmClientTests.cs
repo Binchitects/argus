@@ -11,11 +11,24 @@ public sealed class LiteLlmClientTests
     {
         public List<(string Path, JsonElement Body)> Calls { get; } = [];
 
+        /// <summary>What /end_user/info answers: null = 404 (no such end user).</summary>
+        public string? EndUser { get; set; } = """{"user_id":"p@example.test","budget_id":"b-1"}""";
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var body = request.Content is null ? default : JsonDocument.Parse(await request.Content.ReadAsStringAsync(ct)).RootElement;
             Calls.Add((request.RequestUri!.PathAndQuery, body));
-            var answer = request.RequestUri.AbsolutePath == "/key/generate" ? """{"key":"sk-new"}""" : "{}";
+            if (request.RequestUri.AbsolutePath == "/end_user/info" && EndUser is null)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("""{"error":{"message":"does not exist"}}""") };
+            }
+            var answer = request.RequestUri.AbsolutePath switch
+            {
+                "/key/generate" => """{"key":"sk-new"}""",
+                "/end_user/info" => EndUser!,
+                "/budget/new" => """{"budget_id":"b-new"}""",
+                _ => "{}",
+            };
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(answer) };
         }
     }
@@ -37,13 +50,48 @@ public sealed class LiteLlmClientTests
         Assert.Equal("p@example.test", body.GetProperty("user_id").GetString());
     }
 
+    private static List<string> Paths(Recorder r) => [.. r.Calls.Select(c => c.Path.Split('?')[0])];
+
     [Fact]
-    public async Task A_budget_binds_on_both_the_key_path_and_the_chat_path()
+    public async Task A_budget_changes_the_end_users_budget_where_it_is_kept()
     {
         var (client, recorder) = Create();
+        await client.SetBudgetAsync("p@example.test", 0m);
+        Assert.Equal(["/user/update", "/end_user/info", "/budget/update"], Paths(recorder));
+        var update = recorder.Calls.Last().Body;
+        Assert.Equal(("b-1", 0m), (update.GetProperty("budget_id").GetString(), update.GetProperty("max_budget").GetDecimal()));
+    }
+
+    [Fact]
+    public async Task A_person_unknown_to_the_chat_path_is_created_with_the_budget()
+    {
+        var (client, recorder) = Create();
+        recorder.EndUser = null;
         await client.SetBudgetAsync("p@example.test", 7.5m);
-        Assert.Equal(["/user/update", "/end_user/update"], recorder.Calls.Select(c => c.Path));
-        Assert.All(recorder.Calls, c => Assert.Equal(7.5m, c.Body.GetProperty("max_budget").GetDecimal()));
+        Assert.Equal(["/user/update", "/end_user/info", "/end_user/new"], Paths(recorder));
+        Assert.Equal(7.5m, recorder.Calls.Last().Body.GetProperty("max_budget").GetDecimal());
+    }
+
+    [Fact]
+    public async Task A_person_without_a_budget_gets_one_linked()
+    {
+        var (client, recorder) = Create();
+        recorder.EndUser = """{"user_id":"p@example.test","budget_id":null}""";
+        await client.SetBudgetAsync("p@example.test", 3m);
+        Assert.Equal(["/user/update", "/end_user/info", "/budget/new", "/end_user/update"], Paths(recorder));
+        Assert.Equal("b-new", recorder.Calls.Last().Body.GetProperty("budget_id").GetString());
+    }
+
+    [Fact]
+    public async Task Unlimited_clears_the_limit_and_creates_nothing_new()
+    {
+        var (client, recorder) = Create();
+        await client.SetBudgetAsync("p@example.test", null);
+        Assert.Equal(JsonValueKind.Null, recorder.Calls.Last().Body.GetProperty("max_budget").ValueKind);
+        recorder.Calls.Clear();
+        recorder.EndUser = """{"user_id":"p@example.test","budget_id":null}""";
+        await client.SetBudgetAsync("p@example.test", null);
+        Assert.Equal(["/user/update", "/end_user/info"], Paths(recorder));
     }
 
     [Fact]

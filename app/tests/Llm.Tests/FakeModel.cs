@@ -19,8 +19,15 @@ public sealed class FakeModel : HttpMessageHandler
 {
     public ConcurrentQueue<(JsonObject Body, Dictionary<string, string> Headers)> Requests { get; } = new();
 
+    /// <summary>Keys the gateway no longer knows: requests with them get 401.</summary>
+    public ConcurrentDictionary<string, bool> RevokedKeys { get; } = new();
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        if (request.Headers.Authorization?.Parameter is { } key && RevokedKeys.ContainsKey(key))
+        {
+            return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":{"message":"Authentication Error, Invalid proxy server token passed."}}""") };
+        }
         var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!.AsObject();
         Requests.Enqueue((body, request.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase)));
         var messages = body["messages"]!.AsArray();

@@ -30,14 +30,26 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
 
     public async Task SetBudgetAsync(string email, decimal? budget, CancellationToken ct = default)
     {
+        // The API-key path: the internal user's ceiling.
         await SendAsync(HttpMethod.Post, "/user/update", new JsonObject { ["user_id"] = email, ["max_budget"] = budget }, ct);
-        // The end-user record is what makes a ceiling bind on the chat path,
-        // where everyone shares one gateway key (see deploy/identity-proxy).
-        var endUser = new JsonObject { ["user_id"] = email, ["max_budget"] = budget };
-        var updated = await SendAsync(HttpMethod.Post, "/end_user/update", endUser, ct, allowStatus: [400, 404]);
-        if (updated is null)
+
+        // The chat path: the end user's ceiling, which lives in LiteLLM's budget table.
+        // /end_user/update answers 200 and IGNORES max_budget (measured: the stored
+        // limit stayed at 5 after "setting" 0), so the limit is changed where it is kept.
+        var info = await SendAsync(HttpMethod.Get, $"/end_user/info?end_user_id={Uri.EscapeDataString(email)}", null, ct, allowStatus: [400, 404]);
+        if (info is null)
         {
             await SendAsync(HttpMethod.Post, "/end_user/new", new JsonObject { ["user_id"] = email, ["max_budget"] = budget }, ct);
+        }
+        else if (Str(info.AsObject(), "budget_id") is { Length: > 0 } budgetId)
+        {
+            await SendAsync(HttpMethod.Post, "/budget/update", new JsonObject { ["budget_id"] = budgetId, ["max_budget"] = budget }, ct);
+        }
+        else if (budget is not null)
+        {
+            var created = await SendAsync(HttpMethod.Post, "/budget/new", new JsonObject { ["max_budget"] = budget }, ct);
+            var newId = created?["budget_id"]?.GetValue<string>() ?? throw new GatewayException("The gateway created no budget.");
+            await SendAsync(HttpMethod.Post, "/end_user/update", new JsonObject { ["user_id"] = email, ["budget_id"] = newId }, ct);
         }
     }
 
@@ -47,6 +59,12 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         return res?["key"]?.GetValue<string>() is { Length: > 0 } key
             ? key
             : throw new GatewayException("The gateway created no key.");
+    }
+
+    public async Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default)
+    {
+        var res = await SendAsync(HttpMethod.Post, "/key/generate", new JsonObject { ["key_alias"] = keyAlias, ["metadata"] = new JsonObject { ["purpose"] = "the app's chat; spend is billed to each request's user" } }, ct);
+        return res?["key"]?.GetValue<string>() is { Length: > 0 } key ? key : throw new GatewayException("The gateway created no key.");
     }
 
     public async Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
@@ -120,7 +138,12 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         await DeleteKeysAsync((await KeysAsync(email, ct)).Select(k => k.Token), ct);
         var ids = new JsonObject { ["user_ids"] = new JsonArray(JsonValue.Create(email)) };
         await SendAsync(HttpMethod.Post, "/user/delete", ids, ct, allowStatus: [400, 404]);
+        var endUser = await SendAsync(HttpMethod.Get, $"/end_user/info?end_user_id={Uri.EscapeDataString(email)}", null, ct, allowStatus: [400, 404]);
         await SendAsync(HttpMethod.Post, "/end_user/delete", new JsonObject { ["user_ids"] = new JsonArray(JsonValue.Create(email)) }, ct, allowStatus: [400, 404]);
+        if (endUser is JsonObject eu && Str(eu, "budget_id") is { Length: > 0 } budgetId)
+        {
+            await SendAsync(HttpMethod.Post, "/budget/delete", new JsonObject { ["id"] = budgetId }, ct, allowStatus: [400, 404]);
+        }
     }
 
     /// <returns>The parsed body, or null when the status was one of <paramref name="allowStatus"/>.</returns>

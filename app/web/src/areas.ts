@@ -20,6 +20,7 @@ export const areas: Area[] = [
     summary: 'Talk to the model, with Argus answering from your code.',
     phase: 3,
     legacy: { subdomain: 'chat', name: 'Open WebUI' },
+    native: true,
   },
   {
     path: '/usage',

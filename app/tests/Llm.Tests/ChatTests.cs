@@ -68,7 +68,9 @@ public sealed class ChatTests(AppFixture app)
         var (body, headers) = app.Model.Requests.Last();
         Assert.Equal(email, body["user"]!.GetValue<string>());
         Assert.Equal(email, headers["X-OpenWebUI-User-Email"]);
-        Assert.Equal("Bearer sk-master-for-tests", headers["Authorization"]);
+        // The chat's own key (alias "chat"), never the master key.
+        Assert.StartsWith("Bearer sk-chat-", headers["Authorization"], StringComparison.Ordinal);
+        Assert.Contains(headers["Authorization"][7..], app.Gateway.ServiceKeys);
         Assert.Equal("low", body["chat_template_kwargs"]!["reasoning_effort"]!.GetValue<string>());
         Assert.True(body["stream_options"]!["include_usage"]!.GetValue<bool>());
         Assert.Null(body["tools"]);
@@ -322,6 +324,21 @@ public sealed class ChatTests(AppFixture app)
         Assert.Empty((await b.JsonAsync(await b.GetAsync("/api/chat/conversations?q=nothing-like-it"))).EnumerateArray());
         await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.DeleteAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative)));
         await StatusAssert.Is(HttpStatusCode.NotFound, await b.GetAsync($"/api/chat/conversations/{id}"));
+    }
+
+    [Fact]
+    public async Task A_chat_key_deleted_at_the_gateway_is_replaced_on_the_fly()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        await SendAsync(b, id, "first");
+        var oldKey = app.Model.Requests.Last().Headers["Authorization"][7..];
+        app.Model.RevokedKeys[oldKey] = true;
+        var events = await SendAsync(b, id, "second");
+        Assert.Contains("done", Types(events));
+        var newKey = app.Model.Requests.Last().Headers["Authorization"][7..];
+        Assert.NotEqual(oldKey, newKey);
+        Assert.StartsWith("sk-chat-", newKey, StringComparison.Ordinal);
     }
 
     [Theory]

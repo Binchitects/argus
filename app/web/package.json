@@ -17,6 +17,7 @@
     "@tanstack/react-query": "^5.103.2",
     "dompurify": "^3.4.16",
     "echarts": "^6.1.0",
+    "highlight.js": "^11.12.0",
     "marked": "^18.0.14",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",

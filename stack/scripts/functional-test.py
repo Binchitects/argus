@@ -129,6 +129,20 @@ def chat(key, text="Reply with the single word: pong", max_tokens=400):
                          "max_tokens": max_tokens})
 
 
+def app_chat(browser, text="Reply with the single word: pong"):
+    """One question in the app's chat, as the signed-in person: ("answered" | the error sentence, conversation id)."""
+    code, conv = browser.app("POST", "/api/chat/conversations", {"thinking": "off", "useArgus": False})
+    if code != 201:
+        return f"HTTP {code}", None
+    code, body, _, _ = browser.req(u("", f"/api/chat/conversations/{conv['id']}/messages"), {"content": text},
+                                   headers={"X-Requested-With": "functional-test"}, timeout=300)
+    events = [json.loads(l[6:]) for l in body.split("\n") if l.startswith("data: ")] if code == 200 else []
+    last = next((e for e in reversed(events) if e.get("type") in ("done", "error")), None)
+    if last is None:
+        return f"HTTP {code}", conv["id"]
+    return ("answered" if last["type"] == "done" else last["message"]), conv["id"]
+
+
 def litellm(path, payload=None, method=None):
     b = Browser()
     code, body, _, _ = b.req(u("gateway", path), payload, method=method,
@@ -293,6 +307,13 @@ def main():
             if code == 200 else False
         rec("sso", "a chat in Open WebUI gets an answer", webui_ok, f"HTTP {code}")
 
+    result, conv_id = app_chat(person)
+    rec("chat", "a chat in the app gets an answer", result == "answered", result)
+    code, conv = person.app("GET", f"/api/chat/conversations/{conv_id}") if conv_id else (0, {})
+    answer = next((m for m in reversed(conv.get("messages", [])) if m.get("role") == "assistant"), {})
+    rec("chat", "the app saves the chat with its answer and token counts",
+        bool(answer.get("content")) and (answer.get("completionTokens") or 0) > 0, f"HTTP {code}")
+
     # ------------------------------------------------------------ attribution
     print("\n5. Usage is attributed to the person")
     seen = {}
@@ -329,6 +350,16 @@ def main():
     logged_cost = sum(float(r.get("spend") or 0) for r in rows)
     rec("usage", "the person's own usage page shows their requests and cost", code == 200 and (t.get("requests") or 0) >= len(rows) > 0
         and mine_cost >= logged_cost - 1e-9, f"{t.get('requests')} requests, ${mine_cost:.6f} (logged ${logged_cost:.6f})")
+    rows_chat = []
+    for _ in range(24):
+        code, logs = litellm("/spend/logs?summarize=false")
+        rows_chat = [r for r in (logs if isinstance(logs, list) else [])
+                     if r.get("end_user") == email and (r.get("metadata") or {}).get("user_api_key_alias") == "chat"]
+        if rows_chat:
+            break
+        time.sleep(5)
+    rec("usage", "the app's chat is billed to the person, under its own key (not the master key)", bool(rows_chat),
+        f"{len(rows_chat)} rows with key alias 'chat' and end_user={email}")
     if webui_ok:
         code, logs = litellm("/spend/logs?summarize=false")
         chat_rows = [r for r in (logs if isinstance(logs, list) else []) if r.get("end_user") == email]
@@ -346,6 +377,14 @@ def main():
         time.sleep(4)
     rec("budget", "at credit 0 the person's key is refused", code_key in (400, 401, 403, 429),
         f"HTTP {code_key}: {body[:90] if code_key != 200 else 'still answering'}")
+    # The chat path's limit is cached by the gateway for about a minute.
+    chat_result = "not tried"
+    for _ in range(25):
+        chat_result, _ = app_chat(person)
+        if chat_result != "answered":
+            break
+        time.sleep(6)
+    rec("budget", "at credit 0 the app's chat is refused, and says why", "credit" in chat_result, chat_result[:90])
     admin.app("PUT", f"/api/admin/people/{pid}/budget", {"budget": 5})
     code_back = None
     for _ in range(30):
@@ -354,6 +393,12 @@ def main():
             break
         time.sleep(4)
     rec("budget", "raising the credit again restores access", code_back == 200, f"HTTP {code_back}")
+    for _ in range(25):
+        chat_result, _ = app_chat(person)
+        if chat_result == "answered":
+            break
+        time.sleep(6)
+    rec("budget", "raising the credit again restores the app's chat", chat_result == "answered", chat_result[:90])
 
     # --------------------------------------------------------------- rotation
     print("\n7. Key rotation and password resets")

@@ -45,6 +45,19 @@ public sealed class FakeGateway : ILiteLlm
         return Task.FromResult(secret);
     }
 
+    public List<string> ServiceKeys { get; } = [];
+
+    public Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default)
+    {
+        Check();
+        var secret = $"sk-{keyAlias}-" + Guid.NewGuid().ToString("N")[..12];
+        lock (ServiceKeys)
+        {
+            ServiceKeys.Add(secret);
+        }
+        return Task.FromResult(secret);
+    }
+
     public Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
     {
         Check();

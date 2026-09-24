@@ -234,11 +234,8 @@ public static class IdentityWiring
             c.BaseAddress = new Uri(o.GatewayUrl);
             // A long answer, with thinking, can take minutes; the stream itself is the progress.
             c.Timeout = o.RequestTimeout;
-            if (sp.GetRequiredService<IOptions<LiteLlmOptions>>().Value.MasterKey is { Length: > 0 } key)
-            {
-                c.DefaultRequestHeaders.Authorization = new("Bearer", key);
-            }
         });
+        services.AddSingleton<Chat.ChatKey>();
         services.AddHttpClient<Chat.ArgusMcp>(c => c.Timeout = TimeSpan.FromMinutes(2));
         services.AddScoped<Chat.ChatService>();
     }
