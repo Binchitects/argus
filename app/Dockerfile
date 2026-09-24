@@ -5,7 +5,8 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
-RUN npm run build
+ARG NO_MINIFY=
+RUN NO_MINIFY=$NO_MINIFY npm run build
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api
 ARG APP_VERSION=0.0.0

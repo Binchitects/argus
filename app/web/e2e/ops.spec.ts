@@ -40,7 +40,7 @@ test('my own usage', async ({ page }) => {
   await page.goto('/usage')
   await page.getByRole('tab', { name: 'Mine' }).click()
   await expect(page.getByLabel('Input, cache hit')).toBeVisible()
-  await expect(page.getByLabel('Cost')).toHaveText(/^\$/)
+  await expect(page.getByLabel('Cost', { exact: true })).toHaveText(/^\$/)
 })
 
 for (const [path, heading] of [

@@ -24,7 +24,7 @@ export const admin: Me = {
 }
 export const member: Me = { ...admin, id: 'm1', userName: 'mo', displayName: 'Mo Member', email: 'mo@example.test', isAdmin: false }
 
-type Handler = (body: unknown, init: RequestInit) => { status?: number; json?: unknown; events?: object[]; hang?: boolean }
+type Handler = (body: unknown, init: RequestInit) => { status?: number; json?: unknown; events?: object[]; hang?: boolean; offline?: boolean }
 export interface Call { method: string; path: string; body: unknown; headers: Record<string, string> }
 
 /**
@@ -46,7 +46,9 @@ export function fakeBackend(me: Me | null, routes: Record<string, Handler> = {})
     calls.push({ method, path: url.pathname + url.search, body, headers: (init.headers ?? {}) as Record<string, string> })
     const handler = all[`${method} ${url.pathname}`]
     if (!handler) return new Response('{"status":"not_found"}', { status: 404 })
-    const { status = 200, json, events, hang } = handler(body, init)
+    const { status = 200, json, events, hang, offline } = handler(body, init)
+    // What fetch does when the request never gets an answer (network down, TLS failure).
+    if (offline) throw new TypeError('Failed to fetch')
     if (events) {
       // Server-sent events, one per chunk; `hang` keeps the stream open until aborted.
       const stream = new ReadableStream<Uint8Array>({

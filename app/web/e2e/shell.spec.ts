@@ -29,9 +29,9 @@ test('navigation moves between areas and deep links survive a reload', async ({ 
 })
 
 test('an area that is not native yet links to the service that covers it', async ({ page, baseURL }) => {
-  await page.goto('/chat')
+  await page.goto('/dashboards')
   const host = new URL(baseURL!).host
-  await expect(page.getByRole('link', { name: 'Open Open WebUI' })).toHaveAttribute('href', new RegExp(`//chat\\.${host.replace(/\./g, '\\.')}/$`))
+  await expect(page.getByRole('link', { name: 'Open Grafana' })).toHaveAttribute('href', new RegExp(`//grafana\\.${host.replace(/\./g, '\\.')}/$`))
 })
 
 test('unknown pages say so', async ({ page }) => {

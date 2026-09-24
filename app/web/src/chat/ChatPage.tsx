@@ -43,6 +43,10 @@ export function ChatPage() {
   return (
     <div className="chat-layout">
       <aside className={`chat-list${listOpen ? ' open' : ''}`} aria-label="Chats">
+        {/* On a phone the open list covers the page, its opener included. */}
+        <button type="button" className="link chat-list-close" onClick={() => setListOpen(false)}>
+          Hide chats
+        </button>
         <button type="button" className="button" onClick={() => { setFresh((n) => n + 1); setAdopted(null); navigate('/chat'); setListOpen(false) }}>
           New chat
         </button>
@@ -59,8 +63,8 @@ export function ChatPage() {
         </ul>
       </aside>
       <section className="chat-main">
-        <button type="button" className="link chat-list-toggle" onClick={() => setListOpen(!listOpen)} aria-expanded={listOpen}>
-          {listOpen ? 'Hide chats' : 'Chats'}
+        <button type="button" className="link chat-list-toggle" onClick={() => setListOpen(true)} aria-expanded={listOpen}>
+          Chats
         </button>
         {config.data ? (
           <Thread
@@ -97,8 +101,16 @@ function Thread({ id, config, onChanged, onAdopt }: { id?: string; config: ChatC
   const [error, setError] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
+  const liveRef = useRef<Message[] | null>(null)
+  useEffect(() => {
+    liveRef.current = live
+  }, [live])
 
-  useEffect(() => bottom.current?.scrollIntoView?.({ block: 'end' }), [messages.length, streaming])
+  // Braces matter: newer Chrome returns a Promise from scrollIntoView, and an effect
+  // that returns anything but a function crashes React on cleanup (measured).
+  useEffect(() => {
+    bottom.current?.scrollIntoView?.({ block: 'end' })
+  }, [messages.length, streaming])
 
   const onEvent = useCallback((e: ChatEvent) => {
     setLive((ms) => {
@@ -146,31 +158,56 @@ function Thread({ id, config, onChanged, onAdopt }: { id?: string; config: ChatC
     if (e.type === 'notice') setNotices((n) => [...n, { kind: e.kind, text: e.text }])
   }, [])
 
+  /** Answers; false when the question never reached the server, so it is not saved. */
   const run = useCallback(
-    async (conversationId: string, path: string, body: object, start: Message[]) => {
+    async (conversationId: string, path: string, body: object, start: Message[]): Promise<boolean> => {
       setLive(start)
       setStreaming(true)
       setError(null)
       setNotices([])
       const controller = new AbortController()
       abort.current = controller
+      let stopped = false
+      let received = false
       try {
-        await streamChat(`/api/chat/conversations/${conversationId}/${path}`, body, onEvent, controller.signal)
+        await streamChat(`/api/chat/conversations/${conversationId}/${path}`, body, (e) => {
+          received = true
+          onEvent(e)
+        }, controller.signal)
       } catch (err) {
-        if (!(err instanceof DOMException && err.name === 'AbortError')) setError(err instanceof ApiError ? err.message : 'The answer was interrupted.')
+        stopped = err instanceof DOMException && err.name === 'AbortError'
+        if (!stopped) {
+          setError(err instanceof ApiError ? err.message
+            : received ? 'The answer was interrupted.'
+            : 'The message did not reach the server. It is back in the box below: send it again.')
+        }
       } finally {
         setStreaming(false)
         abort.current = null
+        if (stopped) {
+          setLive((ms) => ms?.map((m, i) => (i === ms.length - 1 && m.role === 'assistant' ? { ...m, status: 'stopped' } : m)) ?? ms)
+        }
         onChanged()
-        // The server's copy is the truth: ids, statuses, and what a stop kept.
-        await queryClient.invalidateQueries({ queryKey: ['chat', 'conversation', conversationId] })
-        setLive(null)
+        // The server's copy is the truth: ids, statuses, and what a stop kept. After
+        // a stop the server saves a moment AFTER the stream ends, so wait until its
+        // copy has the last answer before replacing what is on screen.
+        const lastId = [...(liveRef.current ?? [])].reverse().find((m) => m.role === 'assistant')?.id
+        for (let i = 0; i < 20; i++) {
+          await queryClient.invalidateQueries({ queryKey: ['chat', 'conversation', conversationId] })
+          const saved = queryClient.getQueryData<Conversation>(['chat', 'conversation', conversationId])
+          if (!lastId || saved?.messages.some((m) => m.id === lastId)) {
+            setLive(null)
+            break
+          }
+          await new Promise((r) => setTimeout(r, 300))
+        }
       }
+      return received || stopped
     },
     [onEvent, onChanged, queryClient],
   )
 
-  const send = async (text: string, files: Attachment[]) => {
+  const send = async (text: string, files: Attachment[]): Promise<boolean> => {
     let conversationId = id
     if (!conversationId) {
       try {
@@ -180,11 +217,11 @@ function Thread({ id, config, onChanged, onAdopt }: { id?: string; config: ChatC
         onAdopt(created.id)
         navigate(`/chat/${created.id}`, { replace: true })
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'The chat could not be created.')
-        return
+        setError(err instanceof ApiError ? err.message : 'The chat could not be created. Check the connection and send again.')
+        return false
       }
     }
-    await run(conversationId, 'messages', { content: text, attachments: files.map((f) => f.id) }, [
+    return run(conversationId, 'messages', { content: text, attachments: files.map((f) => f.id) }, [
       ...messages,
       { ...blank(`local-${Date.now()}`, 'user', text), attachments: files },
     ])
@@ -291,7 +328,7 @@ function Thread({ id, config, onChanged, onAdopt }: { id?: string; config: ChatC
   )
 }
 
-function Composer({ streaming, onSend, onStop }: { streaming: boolean; onSend: (text: string, files: Attachment[]) => Promise<void>; onStop: () => void }) {
+function Composer({ streaming, onSend, onStop }: { streaming: boolean; onSend: (text: string, files: Attachment[]) => Promise<boolean>; onStop: () => void }) {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<Attachment[]>([])
   const [uploading, setUploading] = useState(0)
@@ -312,7 +349,11 @@ function Composer({ streaming, onSend, onStop }: { streaming: boolean; onSend: (
     const f = files
     setText('')
     setFiles([])
-    await onSend(t, f)
+    // Not sent (the server never had it): give it back rather than lose it.
+    if (!(await onSend(t, f))) {
+      setText((now) => now || t)
+      setFiles((now) => (now.length ? now : f))
+    }
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {

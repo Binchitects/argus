@@ -92,6 +92,35 @@ describe('chat', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('You have used all your credit.')
   })
 
+  it('a message that never reached the server is given back, not lost', async () => {
+    fakeBackend(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'POST /api/chat/conversations': () => ({ status: 201, json: conversation }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation }),
+      'POST /api/chat/conversations/c1/messages': () => ({ offline: true }),
+    })
+    renderApp('/chat')
+    await ask('is anyone there')
+    expect(await screen.findByRole('alert')).toHaveTextContent('did not reach the server')
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('is anyone there'))
+    expect(screen.queryByText('is anyone there', { selector: '.turn *' })).not.toBeInTheDocument()
+  })
+
+  it('a refused message is given back with the reason', async () => {
+    fakeBackend(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'POST /api/chat/conversations': () => ({ status: 201, json: conversation }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation }),
+      'POST /api/chat/conversations/c1/messages': () => ({ status: 409, json: { status: 'busy', error: 'This chat is already answering. Stop it first, or wait.' } }),
+    })
+    renderApp('/chat')
+    await ask('again')
+    expect(await screen.findByRole('alert')).toHaveTextContent('already answering')
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('again'))
+  })
+
   it('stop ends the stream and gives the composer back', async () => {
     backend([{ type: 'assistant', id: 'a1' }, { type: 'content', text: 'partial answer' }], [m('user', { content: 'long one' }), m('assistant', { content: 'partial answer', status: 'stopped' })], true)
     renderApp('/chat')

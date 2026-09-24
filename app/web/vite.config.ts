@@ -7,6 +7,7 @@ const api = process.env.API_URL ?? 'http://localhost:5080'
 
 export default defineConfig({
   plugins: [react()],
+  build: { minify: process.env.NO_MINIFY ? false : 'oxc' },
   server: {
     proxy: { '/api': api, '/healthz': api, '/readyz': api },
   },

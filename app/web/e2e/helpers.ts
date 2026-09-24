@@ -7,7 +7,10 @@ import type { Page } from '@playwright/test'
  */
 export function watchConsole(page: Page): string[] {
   const errors: string[] = []
-  page.on('console', (m) => m.type() === 'error' && !m.text().includes('401') && !m.text().includes('ERR_CERT_VERIFIER_CHANGED') && errors.push(m.text()))
+  page.on('console', (m) => {
+    if (m.type() !== 'error' || m.text().includes('401') || m.text().includes('ERR_CERT_VERIFIER_CHANGED')) return
+    errors.push(`${m.text()} (${m.location().url || 'no url'})`)
+  })
   page.on('pageerror', (e) => errors.push(e.message))
   return errors
 }
