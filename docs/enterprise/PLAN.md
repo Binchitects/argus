@@ -7,12 +7,14 @@ becomes `main`.
 ## Target
 
 ```
-https://llm.<domain>
-└── app  (ASP.NET Core, .NET 10 LTS — one container)
-    ├── React frontend (Vite + TypeScript), served by the backend
-    │     chat · dashboards · usage & cost · admin · Argus
+https://llm.<domain>        Traefik: /api, /connect, /.well-known → app; the rest → web
+├── web  (React 19 + TypeScript, Radix + Tailwind; static files on nginx — one container)
+│     chat · dashboards · usage & cost · admin · settings · Argus
+└── app  (ASP.NET Core, .NET 10 LTS — one container, the API)
     ├── Identity: ASP.NET Identity + OpenIddict (own OIDC provider)
     │     local accounts + LDAP / Active Directory · TOTP 2FA · API keys
+    ├── Chat: conversations, tools (Argus, sandbox, …), assistants, knowledge
+    ├── Settings: every setting typed, validated, audited, stored in the database
     ├── Dashboards: panel queries run server-side (Postgres, Prometheus, Loki)
     ├── Argus: code index, MCP server, GitLab read-only sync, packs
     └── /v1 reverse proxy (YARP) → LiteLLM, authorised by the caller's key
@@ -34,6 +36,8 @@ swaps must never take the app down, and vice versa.
 | Alerts | Prometheus rules stay; the app shows firing alerts and history. Alertmanager stays as plumbing. |
 | Repo | Work happens under `app/` on this branch. The final reorganisation happens once everything is green. |
 | Stack | .NET 10 LTS, EF Core + Npgsql, OpenIddict, YARP, xUnit + Testcontainers; React 19 + Vite + TypeScript, TanStack Query, ECharts, Vitest, Playwright. |
+| Frontend | Rewritten from zero as its own container (`web`, in `app/frontend/`): Radix primitives + Tailwind with our own components (the shadcn/ui approach), light and dark themes, self-hosted fonts and icons (air-gapped installs), accessibility checked with axe in every browser test. The first UI (`app/web`, served by the API) stays at `llm.<domain>` until the new one matches it; meanwhile the new one runs at `next.<domain>`. |
+| Settings | Everything is configurable in the app. A setting applies at once when its service can take it live; otherwise the app saves it and shows the one command to apply it (still no Docker socket). Phase 6 makes those live too. |
 
 ## How "fully tested" is enforced
 
@@ -50,8 +54,9 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 3 built and tested; waiting for your sign-off** ([checklist](PHASE3-CHECKLIST.md)).
-Then Open WebUI goes and `enterprise-p3` is tagged. Next: Phase 4.
+Status: **Phase 3 backend done; the web is being rewritten (3A–3F).** The first chat UI
+and its [checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
+at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
 
 ### Phase 0 — Foundations  *(S)*
 - Solution skeleton: `Llm.Api`, `Llm.Core`, test projects, `web/` (React).
@@ -122,6 +127,93 @@ Replaces: Open WebUI (it runs at `chat.<domain>` until this phase is accepted).
   - On the live stack: functional 61/61, acceptance 33/0, auth audit, domain
     check, and dashboards 34/34.
   - Open WebUI stays at `chat.<domain>` until the checklist is signed.
+  - A from-zero deploy (sample `.env`, generated secrets, empty volumes) passes the
+    same suites: functional 61/61, acceptance 33/0, auth audit, domain check,
+    dashboards 34/34, browser 50/50.
+
+Phases 3A–3F rebuild the web from zero as its own container and extend the chat.
+Each is deployed at `next.<domain>` and tested before the next starts.
+
+### Phase 3A — The new web: container, design system, shell  *(M)*
+- `app/frontend/`: Vite + React 19 + TypeScript, built into its own image (Alpine +
+  nginx, non-root, the same security headers as the API, immutable `/assets`, SPA
+  fallback, health check). Traefik serves it at `next.<domain>`, with `/api`,
+  `/connect` and `/.well-known` going to the app.
+- Design system: colour, type, spacing and radius tokens; light, dark and system
+  themes; components on Radix (button, inputs, select, combobox, checkbox, switch,
+  dialog, sheet, menus, popover, tooltip, tabs, toasts, badge, card, avatar,
+  skeleton, empty state, data table on TanStack Table, command palette, forms on
+  react-hook-form + zod); Lucide icons; the Inter font, bundled.
+- Shell: collapsible sidebar by role, breadcrumbs, command palette (Ctrl/⌘ K), user
+  menu (theme, account, sign out), phone layout, error and not-found pages, session
+  expiry handled.
+- Pages: sign-in (password, 2FA, directory), account (profile, password, 2FA, API key),
+  home.
+- **Done when:** those pages work at `next.<domain>`; Vitest, Playwright (desktop and
+  phone, both themes) and axe (no serious or critical violations) pass; CI builds and
+  tests the new image.
+
+### Phase 3B — Admin, usage and settings  *(L)*
+- Every admin page rebuilt: overview, people (table with search, filters, bulk
+  actions, a detail panel), audit log (filters, export), sign-in and directory, model,
+  indexing, packs, explore, monitoring. Usage (everyone and mine) on the chart
+  components, keeping the validated palette and the table view.
+- **Settings registry** in the API: every setting has a name, type, default,
+  validation, description, group, whether it is secret, and how it applies (live, or
+  restart of which service). Values live in the database; `.env` gives the defaults
+  and the bootstrap. Secrets are write-only. Every change is audited.
+- Settings page: grouped and searchable, validated forms, "changed from default",
+  history, and for restart-bound settings a "pending" banner with the exact command.
+  Live from the start: credit defaults, sign-in and session policy, the directory
+  (LDAP), thinking presets, chat limits, tools, branding (name, logo, accent colour).
+- **Done when:** the old admin and usage browser tests pass against the new pages,
+  dashboards stay 34/34, and each setting is tested from save to effect.
+
+### Phase 3C — Chat, the rich core  *(L)*
+- Layout: chat list, thread, composer, and a **Files** panel like Claude's: every
+  attachment and every file written in the chat, with a viewer (highlighting, copy,
+  download).
+- Model picker (from the gateway, with what each model can do: vision, tools,
+  thinking, context), thinking level, and per-chat system prompt and parameters.
+- Thinking shown live with its duration and tokens, then folded.
+- Tool calls as cards: arguments, status, time, output; Argus results rendered for
+  what they are (symbols, files and line ranges linking to GitLab, highlighted
+  excerpts) and the no-access notice.
+- Code blocks: language, copy, wrap, line numbers, collapse when long, download, open
+  in the Files panel. Markdown with tables and maths (KaTeX, bundled).
+- Attachments: drag and drop, paste, several at once, progress; images with
+  thumbnails and a full-size preview, sent to models that can see; PDFs and text
+  previewed.
+- Edit a sent message (a new branch, with arrows between branches), retry with another
+  model or thinking level, stop, copy, tokens and cost per answer.
+- **Done when:** the chat's browser tests pass on the new web against the real model
+  and the test GitLab; then `llm.<domain>` switches to the new web and `app/web` is
+  deleted.
+
+### Phase 3D — Tools  *(L)*
+- A tool registry in the API (built-in tools and MCP servers); admins choose which
+  exist and who may use them; a tool picker per chat; "ask before running" per tool.
+- Built-in: Argus, calculator, date and time, reading attached files in parts, a
+  **Python sandbox** (its own container: no network, read-only root, CPU, memory and
+  time limits; files it writes appear in the Files panel), and optional web fetch and
+  search (off by default; allow-list; air-gapped installs leave it off).
+- **Done when:** each tool is tested end to end, and the sandbox has escape tests
+  (network, filesystem, time and memory limits).
+
+### Phase 3E — Assistants and knowledge  *(L)*
+- Assistants: a name, icon, instructions, model, thinking level, tools and knowledge;
+  private, shared with groups, or with everyone.
+- Knowledge bases: documents chunked and embedded once (pgvector), searched as a tool,
+  with citations back to the document and page; access per base.
+- **Done when:** a retrieval eval on a fixture corpus meets its bar, and access rules
+  are tested.
+
+### Phase 3F — Organise and share  *(M)*
+- Folders, pins, tags, archive and bulk actions; read-only share links inside the
+  organisation (revocable); export as Markdown or JSON.
+- The sign-off checklist rewritten for the new web.
+- **Done when:** you sign it off; then Open WebUI is removed and `enterprise-p3` is
+  tagged.
 
 ### Phase 4 — Argus in .NET  *(XL)*
 Replaces: the Python Argus (about 47k lines including tests).
@@ -142,7 +234,19 @@ Replaces: Grafana.
 - **Done when:** the panel audit (every panel query run on legacy and new) matches, and
   Grafana is removed.
 
-### Phase 6 — Cutover  *(S)*
+### Phase 6 — Every setting live  *(M)*
+Makes the settings that still need "run this command" apply from the app, without
+giving any web container the Docker socket.
+- Prices and model routes through LiteLLM's database-backed model API.
+- The engine: a small supervisor inside the engine container restarts llama.cpp with
+  new arguments or a new model when the app asks over the internal network
+  (authenticated, validated, audited). llama.cpp's router mode is evaluated for
+  switching models without a restart.
+- What is left (compose profiles, host limits) is listed with its reason.
+- **Done when:** changing each setting in the app takes effect without a shell, and a
+  test proves it for each.
+
+### Phase 7 — Cutover  *(S)*
 - Delete the legacy services and their config; reorganise the repo around the app.
 - Rewrite the README and docs; one `.env` sample per hardware setup still works.
 - Full from-zero deploy plus every test suite; tag a major release; merge to `main`.

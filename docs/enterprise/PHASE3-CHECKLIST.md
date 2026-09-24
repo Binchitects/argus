@@ -1,5 +1,9 @@
 # Phase 3 sign-off: chat in the app
 
+> **Superseded.** The web is being rewritten (phases 3A–3F in the [plan](PLAN.md)); this
+> checklist will be rewritten for the new web in 3F. Kept for the list of Open WebUI
+> features, all of which are now in scope.
+
 Open WebUI is removed only after you sign this off ([plan](PLAN.md), phase 3).
 Try each item at `https://<LLM_DOMAIN>/chat`. Tick it, or write what is wrong
 next to it.
