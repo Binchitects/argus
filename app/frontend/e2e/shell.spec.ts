@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { expectAccessible, screenshot, setTheme, watchConsole } from './helpers.ts'
+import { expectAccessible, expectTheme, withTheme, screenshot, watchConsole } from './helpers.ts'
 
 test('home: signed in, the admin sees the system summary, no console errors', async ({ page }, info) => {
   const errors = watchConsole(page)
@@ -16,8 +16,9 @@ for (const theme of ['light', 'dark'] as const) {
   for (const path of ['/', '/account', '/design', '/admin/people', '/no-such-page']) {
     test(`${path} is accessible in the ${theme} theme`, async ({ page }, info) => {
       const errors = watchConsole(page)
+      await withTheme(page, theme)
       await page.goto(path)
-      await setTheme(page, theme)
+      await expectTheme(page, theme)
       await page.getByRole('heading', { level: 1 }).first().waitFor()
       await expectAccessible(page, info, `${path}-${theme}`)
       await screenshot(page, info, `${path.replace(/\//g, '_') || 'home'}-${theme}`)

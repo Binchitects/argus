@@ -5,6 +5,12 @@ Everything an operator does happens in the app at `https://<LLM_DOMAIN>`. The
 for everyone. (The old admin panel at `https://admin.<LLM_DOMAIN>` is gone; that
 address redirects each old page to its place here, so bookmarks keep working.)
 
+The new web at `https://next.<LLM_DOMAIN>` has the same pages, rebuilt ([plan](../enterprise/PLAN.md), 3B):
+people in a table with filters, bulk actions and a detail page; the audit log
+with filters and export; the Settings page, which edits everything; and the
+Model page's **Switch to this model**. It replaces the pages below when the chat
+is rebuilt too (3C).
+
 Sign-in, people, the company directory and 2FA are in
 [AUTHENTICATION.md](AUTHENTICATION.md), and the chat in [CHAT.md](CHAT.md). This
 page covers the rest.
@@ -20,7 +26,7 @@ page covers the rest.
 | **Packs** | Installed knowledge packs, with incompatible ones shown and why; install from a URL (with its SHA-256), update from the published index, remove. |
 | **Explore** | What the index actually holds: search symbols and paths across the estate. For "a tool found nothing: is it absent, named differently, or never indexed?". |
 | **Monitoring** | Live probes of the gateway, Prometheus, Grafana and Argus, and links to the tools that are not in the app yet. |
-| **Settings** | The effective configuration, read-only, from an allow-list of names. |
+| **Settings** | The effective configuration, read-only, from an allow-list of names. In the new web (`next.<domain>`) it is editable: every setting, applied at once, by a restart, or with one host command. See [SETTINGS.md](SETTINGS.md). |
 | **Audit log** | Every sign-in and every change to people or the index, with who, whom and from where. |
 | **Sign-in** | Local accounts and the company directory; "Check the directory now". |
 

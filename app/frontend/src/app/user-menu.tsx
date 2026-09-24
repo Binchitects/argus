@@ -1,4 +1,5 @@
-import { LogOut, Monitor, Moon, Palette, Sun, UserRound } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { LifeBuoy, LogOut, Monitor, Moon, Palette, Sun, UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Avatar } from '@/components/ui/avatar'
 import {
@@ -14,7 +15,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import type { Me } from '@/lib/api'
+import { infoQuery, supportHref, type Me } from '@/lib/api'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { useSignOut } from './use-sign-out'
 
@@ -22,6 +23,8 @@ export function UserMenu({ me }: { me: Me }) {
   const navigate = useNavigate()
   const signOut = useSignOut()
   const { preference, setPreference } = useTheme()
+  const support = useQuery(infoQuery).data?.supportContact
+  const supportLink = support ? supportHref(support) : null
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="rounded-full outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`Account menu for ${me.displayName}`}>
@@ -54,6 +57,11 @@ export function UserMenu({ me }: { me: Me }) {
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        {support && (
+          <DropdownMenuItem onSelect={() => supportLink && window.open(supportLink, '_blank', 'noopener')} disabled={!supportLink}>
+            <LifeBuoy /> {supportLink ? 'Get help' : `Help: ${support}`}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => void signOut()}>
           <LogOut /> Sign out

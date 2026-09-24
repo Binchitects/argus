@@ -22,6 +22,11 @@ nothing to run in the right order. `env-samples/` holds complete, measured
 deployments; `env-samples/README.md` explains how to add one for another model
 or card.
 
+**Most of it can also be changed in the app** (Admin → Settings): the app's own
+settings apply at once or after a restart the app does itself, and `.env`
+values are saved as pending and applied with `./scripts/apply-settings.sh`.
+See [SETTINGS.md](SETTINGS.md).
+
 **Nothing in `.env` is a secret that ships.** The samples ship no values in the
 SECRETS block on purpose — a sample in a public repository would give every
 deployment the same passwords.

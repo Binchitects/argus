@@ -14,6 +14,7 @@ import {
 } from '@tanstack/react-table'
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, Columns3, Search } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { ScrollRegion } from '@/components/app/scroll-region'
 import { cn } from '@/lib/utils'
 import { Button } from './button'
 import { Checkbox } from './checkbox'
@@ -158,7 +159,7 @@ export function DataTable<T>({
         </section>
       )}
 
-      <div className="overflow-x-auto rounded-xl border bg-card shadow-xs">
+      <ScrollRegion label={`${noun[0]!.toUpperCase()}${noun.slice(1)}, table`} className="rounded-xl border bg-card shadow-xs">
         <table className="w-full caption-bottom text-sm">
           <caption className="sr-only">{noun}</caption>
           <thead className="border-b bg-muted/40">
@@ -212,7 +213,7 @@ export function DataTable<T>({
             )}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
 
       {total > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">

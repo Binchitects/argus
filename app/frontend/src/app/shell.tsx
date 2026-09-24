@@ -43,6 +43,12 @@ function SignedIn({ me }: { me: Me }) {
   const sections = visibleNavigation(me.isAdmin)
   const name = info.data?.name ?? 'LLM Service'
 
+  const location = useLocation()
+  const pageTitle = findNavItem(location.pathname)?.title
+  useEffect(() => {
+    document.title = pageTitle && location.pathname !== '/' ? `${pageTitle} · ${name}` : name
+  }, [pageTitle, name, location.pathname])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey)) {

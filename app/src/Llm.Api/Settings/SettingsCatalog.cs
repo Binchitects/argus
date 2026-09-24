@@ -104,6 +104,17 @@ public static class SettingsCatalog
             { Pattern = @"[\w.-]+/[\w.-]+", PatternHelp = "owner/repository", Impact = "A missing model downloads before the engine starts (see docker logs model-init)." },
         new("LLAMACPP_HF_FILES", Model, "Files to download", "Space-separated paths in that repository; SHA-256 checked.", SettingType.Text, SettingScope.Stack),
 
+        new("LLAMACPP_MODEL_DIR", Model, "Model directory", "The host folder with the GGUF files. Put it on NVMe: the weights are read on demand.", SettingType.Text, SettingScope.Stack)
+            { Optional = false, Dangerous = true, Impact = Engine1 },
+        new("LLAMACPP_MTP_HEAD", Model, "Draft head file", "A separate multi-token-prediction head in the model directory. Empty: the model's own.", SettingType.Text, SettingScope.Stack)
+            { Pattern = @"[^/\s]+\.gguf", PatternHelp = "a file name ending in .gguf", Impact = Engine1 },
+        new("LLAMACPP_MTP_ARGS", Engine, "Draft flags", "Extra llama-server flags for the draft.", SettingType.Text, SettingScope.Stack) { Dangerous = true, Impact = Engine1 },
+        new("LLAMACPP_ENGINE_URL", Engine, "Engine build", "A llama.cpp release tarball to run instead of the stock server. Empty: the stock image.", SettingType.Url, SettingScope.Stack)
+            { Pattern = @"https://\S+", PatternHelp = "an https:// address", Dangerous = true, Impact = Engine1 },
+        new("LLAMACPP_ENGINE_SHA256", Engine, "Engine build checksum", "SHA-256 of that tarball; the engine refuses a download that does not match.", SettingType.Text, SettingScope.Stack)
+            { Pattern = "[0-9a-f]{64}", PatternHelp = "64 hexadecimal characters", Impact = Engine1 },
+        new("ENGINE_API_BASE", Engine, "Gateway's backend", "Where the gateway sends requests: http://llamacpp:8080/v1, or http://vllm:8000/v1 for vLLM.", SettingType.Url, SettingScope.Stack)
+            { Optional = false, Pattern = @"https?://\S+", PatternHelp = "http(s)://…", Dangerous = true, Impact = "The gateway restarts." },
         new("LLAMACPP_N_GPU_LAYERS", Engine, "Layers on the GPU", "99 puts every layer on the GPU.", SettingType.WholeNumber, SettingScope.Stack) { Min = 0, Max = 999, Impact = Engine1 },
         new("LLAMACPP_N_CPU_MOE", Engine, "MoE layers in system RAM", "Layers whose experts stay in RAM. Raise it if loading runs out of GPU memory; 0 for dense models.", SettingType.WholeNumber, SettingScope.Stack)
             { Min = 0, Max = 999, Impact = Engine1 },

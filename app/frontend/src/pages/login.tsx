@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, ShieldCheck } from 'lucide-react'
-import { useState } from 'react'
+import { KeyRound, LifeBuoy, ShieldCheck } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useSearchParams } from 'react-router'
 import { z } from 'zod'
@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { api, errorMessage, infoQuery, meQuery } from '@/lib/api'
+import { api, errorMessage, infoQuery, meQuery, supportHref } from '@/lib/api'
 
 type Answer = { status: 'ok'; redirect: string } | { status: '2fa' }
 
@@ -30,6 +30,9 @@ export function LoginPage() {
   const [step, setStep] = useState<'password' | '2fa'>('password')
   const [remember, setRemember] = useState(false)
   const name = info.data?.name ?? 'LLM Service'
+  useEffect(() => {
+    document.title = `Sign in · ${name}`
+  }, [name])
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -39,7 +42,7 @@ export function LoginPage() {
           <img src="/favicon.svg" alt="" className="size-8 rounded-md" /> {name}
         </div>
         <div className="relative mt-auto max-w-md">
-          <p className="text-2xl leading-snug font-semibold">Your organisation's model, code search and usage, in one place.</p>
+          {info.data?.signInHeadline && <p className="text-2xl leading-snug font-semibold">{info.data.signInHeadline}</p>}
           <p className="mt-3 text-white/70">One sign-in for the chat, the dashboards and every tool that trusts it.</p>
         </div>
       </aside>
@@ -53,6 +56,7 @@ export function LoginPage() {
           ) : (
             <CodeStep redirect={redirect} remember={remember} onBack={() => setStep('password')} />
           )}
+          {info.data?.supportContact && <Support contact={info.data.supportContact} />}
         </div>
       </main>
     </div>
@@ -150,5 +154,21 @@ function CodeStep({ redirect, remember, onBack }: { redirect: string; remember: 
         </Button>
       </div>
     </form>
+  )
+}
+
+function Support({ contact }: { contact: string }) {
+  const href = supportHref(contact)
+  return (
+    <p className="mt-8 flex items-center gap-1.5 text-sm text-muted-foreground">
+      <LifeBuoy className="size-4" aria-hidden="true" /> Trouble signing in?{' '}
+      {href ? (
+        <a href={href} className="font-medium text-primary-ink underline-offset-4 hover:underline">
+          {contact}
+        </a>
+      ) : (
+        <span className="font-medium text-foreground">{contact}</span>
+      )}
+    </p>
   )
 }

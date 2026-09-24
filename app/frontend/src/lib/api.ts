@@ -1,6 +1,16 @@
 export interface AppInfo {
   name: string
   version: string
+  /** Branding (Settings page). */
+  signInHeadline?: string | null
+  supportContact?: string | null
+}
+
+/** A support contact as a link: an email address becomes mailto:, a web address stays. */
+export function supportHref(contact: string): string | null {
+  if (/^https?:\/\//i.test(contact)) return contact
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) return `mailto:${contact}`
+  return null
 }
 
 export interface Me {
@@ -18,12 +28,21 @@ export interface Me {
 export class ApiError extends Error {
   readonly http: number
   readonly status: string
+  /** The whole answer, for errors that carry more (the Settings page's per-field errors). */
+  readonly data: unknown
 
-  constructor(http: number, status: string, message: string) {
+  constructor(http: number, status: string, message: string, data?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.http = http
     this.status = status
+    this.data = data
+  }
+
+  /** Per-field messages ({"Ldap:Url": "..."}), when the answer has them. */
+  get fieldErrors(): Record<string, string> | undefined {
+    const e = (this.data as { errors?: unknown } | undefined)?.errors
+    return e && typeof e === 'object' ? (e as Record<string, string>) : undefined
   }
 }
 
@@ -55,7 +74,7 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
   const data = text ? safeJson(text) : undefined
   if (!res.ok) {
     const d = (data ?? {}) as { status?: string; error?: string; title?: string }
-    throw new ApiError(res.status, d.status ?? String(res.status), d.error ?? d.title ?? `Request failed (HTTP ${res.status}).`)
+    throw new ApiError(res.status, d.status ?? String(res.status), d.error ?? d.title ?? `Request failed (HTTP ${res.status}).`, data)
   }
   return data as T
 }

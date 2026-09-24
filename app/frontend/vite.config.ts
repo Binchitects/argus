@@ -22,6 +22,7 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/, priority: 3 },
+            { name: 'charts', test: /node_modules[\\/](echarts|zrender|marked|dompurify)[\\/]/, priority: 2 },
             { name: 'forms', test: /node_modules[\\/](zod|react-hook-form|@hookform)[\\/]/, priority: 2 },
             { name: 'ui', test: /node_modules[\\/](@radix-ui|radix-ui|@floating-ui|react-remove-scroll|react-style-singleton|use-sidecar|aria-hidden|cmdk|sonner|lucide-react|tailwind-merge|clsx|class-variance-authority)[\\/]/, priority: 1 },
           ],

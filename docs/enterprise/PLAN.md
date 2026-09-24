@@ -54,7 +54,7 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 3A done** (the new web's foundation, at `next.<domain>`). Next: 3B. The first chat UI
+Status: **Phase 3B done** (admin, usage and every setting in the new web, at `next.<domain>`). Next: 3C. The first chat UI
 and its [checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
 at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
 
@@ -192,6 +192,36 @@ Each is deployed at `next.<domain>` and tested before the next starts.
   (LDAP), thinking presets, chat limits, tools, branding (name, logo, accent colour).
 - **Done when:** the old admin and usage browser tests pass against the new pages,
   dashboards stay 34/34, and each setting is tested from save to effect.
+- **Result:** every admin page is rebuilt, along with usage (the dashboard engine's
+  panels on the new charts). The Settings page edits 78 settings in 11 groups
+  ([SETTINGS.md](../stack/SETTINGS.md)).
+  - **How settings are stored:** the app's own settings are saved in the database
+    as a configuration source that wins over the environment; secrets are
+    AES-GCM encrypted under `APP_DATA_KEY`.
+  - **At once:** the directory (with a connection test on unsaved values), chat
+    limits, sign-in lockouts and branding.
+  - **After a restart:** session lifetimes. The app restarts itself (no Docker
+    socket).
+  - **`.env` values:** saved as pending and applied by
+    `scripts/apply-settings.sh`. The script accepts only names compose passes to
+    the app, re-checks values, shows the diff (never a secret), asks, and keeps a
+    backup.
+  - **Model page:** switches to a shipped deployment in one click plus that one
+    command.
+  - **Found on the way:**
+    - The engine's `--n-cpu-moe` default (48) disagreed with the memory
+      planner's (0); both are now 0.
+    - Chat uploads over 30 MB failed in Kestrel whatever the limit said; the
+      endpoint now raises the limit to the setting.
+  - **Tests:**
+    - 173 backend, including the directory set up in the page against a real
+      OpenLDAP and used without a restart, and compose kept in step with the
+      catalog.
+    - 57 UI and 98 browser (axe on every admin page in both themes, no page
+      overflow on a phone, a person from added to deleted, a live setting and a
+      pending one).
+    - The browser suite also passes in a rehearsal of the CI job, without a
+      gateway.
 
 ### Phase 3C — Chat, the rich core  *(L)*
 - Layout: chat list, thread, composer, and a **Files** panel like Claude's: every

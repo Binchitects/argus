@@ -29,9 +29,15 @@ export async function expectAccessible(page: Page, info: TestInfo, label: string
   expect(bad.map((v) => `${v.id}: ${v.help} (${v.nodes.map((n) => n.target.join(' ')).slice(0, 3).join(' | ')})`), `accessibility of ${label}`).toEqual([])
 }
 
-export async function setTheme(page: Page, theme: 'light' | 'dark') {
-  await page.evaluate((t) => localStorage.setItem('theme', t), theme)
-  await page.reload()
+/**
+ * The theme for every page this test opens, set before any page loads: no reload
+ * in the middle of a page's requests.
+ */
+export async function withTheme(page: Page, theme: 'light' | 'dark') {
+  await page.addInitScript((t) => localStorage.setItem('theme', t), theme)
+}
+
+export async function expectTheme(page: Page, theme: 'light' | 'dark') {
   await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*dark)/)
 }
 
