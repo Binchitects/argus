@@ -5,6 +5,14 @@ import { watchConsole } from './helpers.ts'
 // Without one (CI), only the "no gateway" behaviour is checked.
 const live = process.env.E2E_CHAT === '1'
 
+/** On a phone the list of chats is folded behind "Chats". True when it was. */
+async function openListOnPhone(page: Page): Promise<boolean> {
+  const toggle = page.getByRole('button', { name: 'Chats', exact: true })
+  if (!(await toggle.isVisible())) return false
+  await toggle.click()
+  return true
+}
+
 async function ask(page: Page, text: string) {
   await page.getByRole('textbox', { name: 'Message' }).fill(text)
   await page.getByRole('textbox', { name: 'Message' }).press('Enter')
@@ -18,6 +26,7 @@ test.describe('chat without a model', () => {
     await ask(page, 'hello there')
     await expect(page.getByRole('alert')).toContainText(/not reachable|could not answer/)
     await expect(page).toHaveURL(/\/chat\/[0-9a-f-]{36}$/)
+    await openListOnPhone(page)
     await expect(page.getByRole('link', { name: 'hello there' })).toBeVisible()
   })
 })
@@ -98,9 +107,7 @@ test.describe('chat with the model', () => {
     const name = `Renamed ${Date.now()}`
     await title.fill(name)
     await title.blur()
-    // On a phone the list is folded away behind "Chats".
-    const phone = await page.getByRole('button', { name: 'Chats', exact: true }).isVisible()
-    if (phone) await page.getByRole('button', { name: 'Chats', exact: true }).click()
+    const phone = await openListOnPhone(page)
     await page.getByRole('searchbox', { name: 'Search chats' }).fill(name)
     await expect(page.getByRole('link', { name })).toBeVisible()
     if (phone) await page.getByRole('button', { name: 'Hide chats' }).click()
