@@ -22,12 +22,14 @@ test.describe('chat without a model', () => {
   test.skip(live, 'only where no gateway answers')
 
   test('sending says the model cannot be reached, and the chat is kept', async ({ page }) => {
+    // Unique: every project and retry shares one database.
+    const text = `hello there ${Date.now()}`
     await page.goto('/chat')
-    await ask(page, 'hello there')
+    await ask(page, text)
     await expect(page.getByRole('alert')).toContainText(/not reachable|could not answer/)
     await expect(page).toHaveURL(/\/chat\/[0-9a-f-]{36}$/)
     await openListOnPhone(page)
-    await expect(page.getByRole('link', { name: 'hello there' })).toBeVisible()
+    await expect(page.getByRole('link', { name: text })).toBeVisible()
   })
 })
 
