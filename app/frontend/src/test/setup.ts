@@ -31,3 +31,4 @@ Element.prototype.scrollIntoView = function () {
   return Promise.resolve() as unknown as void
 }
 vi.stubGlobal('scrollTo', () => {})
+Element.prototype.scrollTo ??= function () {} as Element['scrollTo']

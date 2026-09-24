@@ -153,3 +153,163 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ------------------------------------------------------------------ answers --
+ * A model's answer: readable line length and rhythm, tables that scroll inside
+ * themselves, inline code distinct from prose.
+ */
+@layer components {
+  .md {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+  }
+  .md :where(p, ul, ol, blockquote, table, pre.md-nested-code) {
+    margin: 0.75em 0;
+  }
+  .md > div > :first-child {
+    margin-top: 0;
+  }
+  .md :where(h1, h2, h3, h4) {
+    margin: 1.4em 0 0.5em;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .md h1 {
+    font-size: 1.35em;
+  }
+  .md h2 {
+    font-size: 1.2em;
+  }
+  .md h3 {
+    font-size: 1.05em;
+  }
+  .md :where(ul, ol) {
+    padding-left: 1.4em;
+  }
+  .md ul {
+    list-style: disc;
+  }
+  .md ol {
+    list-style: decimal;
+  }
+  .md li + li {
+    margin-top: 0.25em;
+  }
+  .md li > :where(p, ul, ol) {
+    margin: 0.25em 0;
+  }
+  .md a {
+    color: var(--primary-ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .md blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 1em;
+    color: var(--muted-foreground);
+  }
+  .md hr {
+    margin: 1.5em 0;
+    border-color: var(--border);
+  }
+  .md :not(pre) > code {
+    border-radius: 0.3rem;
+    background: var(--muted);
+    padding: 0.1em 0.35em;
+    font-size: 0.86em;
+  }
+  .md table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .md :where(th, td) {
+    border: 1px solid var(--border);
+    padding: 0.4em 0.75em;
+    text-align: left;
+  }
+  .md th {
+    background: var(--muted);
+    font-weight: 600;
+  }
+  .md pre.md-nested-code {
+    overflow-x: auto;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    background: color-mix(in oklch, var(--muted) 40%, transparent);
+    padding: 0.75rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+  .md .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25em 0;
+  }
+
+  /* Syntax colours: GitHub-like, as tokens so the dark theme has its own. */
+  .hljs {
+    color: var(--foreground);
+  }
+  .hljs-comment,
+  .hljs-quote {
+    color: var(--hl-comment);
+    font-style: italic;
+  }
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-built_in,
+  .hljs-meta .hljs-keyword {
+    color: var(--hl-keyword);
+  }
+  .hljs-string,
+  .hljs-regexp,
+  .hljs-addition,
+  .hljs-attr .hljs-string {
+    color: var(--hl-string);
+  }
+  .hljs-number,
+  .hljs-literal,
+  .hljs-symbol,
+  .hljs-variable.language_ {
+    color: var(--hl-number);
+  }
+  .hljs-title,
+  .hljs-title.function_,
+  .hljs-section {
+    color: var(--hl-function);
+  }
+  .hljs-type,
+  .hljs-title.class_,
+  .hljs-attr,
+  .hljs-attribute,
+  .hljs-property {
+    color: var(--hl-type);
+  }
+  .hljs-deletion {
+    color: var(--destructive-ink);
+  }
+  .hljs-meta {
+    color: var(--hl-comment);
+  }
+}
+
+:root {
+  --hl-comment: oklch(0.52 0.02 255);
+  --hl-keyword: oklch(0.5 0.19 20);
+  --hl-string: oklch(0.42 0.12 250);
+  --hl-number: oklch(0.47 0.14 260);
+  --hl-function: oklch(0.45 0.15 300);
+  --hl-type: oklch(0.47 0.13 50);
+}
+.dark {
+  --hl-comment: oklch(0.68 0.02 255);
+  --hl-keyword: oklch(0.74 0.14 20);
+  --hl-string: oklch(0.8 0.08 240);
+  --hl-number: oklch(0.8 0.1 250);
+  --hl-function: oklch(0.8 0.1 300);
+  --hl-type: oklch(0.8 0.11 60);
+}

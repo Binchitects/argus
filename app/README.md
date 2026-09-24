@@ -1,16 +1,15 @@
 # App
 
-The all-in-one app at `https://<LLM_DOMAIN>`: ASP.NET Core (.NET 10) backend serving a
-React frontend. Plan and phases: [docs/enterprise/PLAN.md](../docs/enterprise/PLAN.md).
+The app at `https://<LLM_DOMAIN>`: an ASP.NET Core (.NET 10) API and a React web,
+two images behind one address. Plan and phases: [docs/enterprise/PLAN.md](../docs/enterprise/PLAN.md).
 
 ```
 app/
-  src/Llm.Api      web host: endpoints, health, security headers, serves the UI
+  src/Llm.Api      the API: endpoints, health, security headers (no pages)
   src/Llm.Core     domain and data (EF Core, Postgres)
   tests/Llm.Tests  xUnit; integration tests run a real Postgres via Testcontainers
-  web/             the first UI, served by the API; replaced by frontend/ (plan 3C)
-  frontend/        the new web, its own image (Alpine + nginx); see frontend/README.md
-  Dockerfile       UI build -> API publish -> chiseled runtime (non-root, no shell)
+  frontend/        the web, its own image (Alpine + nginx); see frontend/README.md
+  Dockerfile       the API: publish -> chiseled runtime (non-root, no shell)
   dn               runs the .NET SDK in Docker, so nothing needs installing
 ```
 
@@ -23,13 +22,12 @@ database on the shared Postgres and applies migrations at startup.
 ## Develop
 
 ```bash
-./dn test                       # backend: build + all tests (needs Docker)
-cd web && npm ci && npm test    # frontend unit tests
+./dn test                            # backend: build + all tests (needs Docker)
+cd frontend && npm ci && npm test    # the web's unit tests
 npm run typecheck && npm run lint && npm run build
 ```
 
-Local UI development: run the API (`./dn run --project src/Llm.Api` with
-`ConnectionStrings__App` set) and `npm run dev` in `web/`; Vite forwards `/api` to it.
+Local UI development: see [frontend/README.md](frontend/README.md).
 
 New migration:
 
@@ -40,13 +38,14 @@ New migration:
 ## End-to-end tests
 
 ```bash
-cd web
-# against the deployed stack (E2E_PASSWORD = ADMIN_PASSWORD in .env):
-E2E_BASE_URL=https://llm.localhost E2E_PASSWORD=<admin password> npm run e2e
-# against a bare app container, as CI does (.github/workflows/app.yml): the app
-# serves HTTPS itself with a throwaway certificate, because sessions use Secure cookies
-E2E_BASE_URL=https://llm.localhost:8443 E2E_PASSWORD=<its Auth__AdminPassword> npm run e2e
+cd frontend
+# against the deployed stack (E2E_PASSWORD = ADMIN_PASSWORD in .env);
+# E2E_CHAT=1 adds the chat against the real model
+E2E_PASSWORD=<admin password> npm run e2e
 ```
+
+CI (`.github/workflows/app.yml`) runs the same suite against the two images
+behind Traefik, with no model gateway (`E2E_NO_GATEWAY=1`).
 
 `npx playwright install chromium` fetches the test browser. Where that download is
 blocked, add `E2E_CHANNEL=chrome` to use the installed Google Chrome instead.

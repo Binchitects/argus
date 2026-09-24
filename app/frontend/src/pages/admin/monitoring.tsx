@@ -4,7 +4,8 @@ import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { api } from '@/lib/api'
-import { serviceUrl, type Probe } from './ops-api'
+import { serviceUrl } from '@/app/nav'
+import type { Probe } from './ops-api'
 import { ServiceList } from './services'
 
 export function MonitoringPage() {
@@ -13,7 +14,7 @@ export function MonitoringPage() {
     ['Grafana', serviceUrl('grafana'), 'The dashboards not in the app yet: engine, GPU, host, logs, Argus.'],
     ['Prometheus', serviceUrl('metrics'), 'Raw metrics and alert rules.'],
     ['Alertmanager', serviceUrl('alerts'), 'Firing alerts.'],
-    ['Argus MCP', `${serviceUrl('argus')}/mcp`, 'The code index, for agents.'],
+    ['Argus MCP', `${serviceUrl('argus')}mcp`, 'The code index, for agents.'],
   ]
   return (
     <>

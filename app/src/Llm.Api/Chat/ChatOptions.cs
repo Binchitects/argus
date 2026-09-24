@@ -11,6 +11,9 @@ public sealed class ChatOptions
     public long MaxUploadBytes { get; set; } = 20 * 1024 * 1024;
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromMinutes(15);
 
+    /// <summary>GitLab as people's browsers reach it, for links from Argus's answers; empty: ARGUS_GITLAB_URL.</summary>
+    public string? GitlabLinkUrl { get; set; }
+
     /// <summary>ARGUS_CHAT_CLIENT_TOKEN: the credential Argus accepts for the chat, with the person's email beside it.</summary>
     public string? ArgusChatToken { get; set; }
 }

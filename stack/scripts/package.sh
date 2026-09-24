@@ -134,7 +134,7 @@ mkdir -p "$PKG/config/traefik/dynamic" "$PKG/config/traefik/certs" "$PKG/config/
 # side and compose finds it at its default LLM_APP_DIR. Only tracked sources:
 # never bin/, obj/ or node_modules/, and not the tests, which the target never
 # runs (one of them holds a password hash made for the test).
-( cd "$ROOT/.." && git ls-files app ) | grep -vE '^app/(tests|web/e2e|frontend/e2e|frontend/ci)/' | while read -r f; do
+( cd "$ROOT/.." && git ls-files app ) | grep -vE '^app/(tests|frontend/e2e|frontend/ci)/' | while read -r f; do
   mkdir -p "$STAGE/$(dirname "$f")" && cp "$ROOT/../$f" "$STAGE/$f"
 done
 [[ -f "$STAGE/app/Dockerfile" ]] || { printf '  %sERROR: app/ sources missing from the package%s\n' "$red" "$off"; rm -rf "$STAGE"; exit 1; }

@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.StaticFiles;
-
 namespace Llm.Api;
 
 public static class SecurityHeaders
@@ -30,13 +28,4 @@ public static class SecurityHeaders
             });
             await next(context);
         });
-}
-
-public static class StaticCaching
-{
-    /// <summary>Vite fingerprints everything under /assets, so those never change; index.html always does.</summary>
-    public static void Apply(StaticFileResponseContext ctx) =>
-        ctx.Context.Response.Headers.CacheControl = ctx.Context.Request.Path.StartsWithSegments("/assets")
-            ? "public, max-age=31536000, immutable"
-            : "no-cache";
 }

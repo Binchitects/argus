@@ -26,7 +26,15 @@ export const admin: Me = {
 }
 export const member: Me = { ...admin, id: 'm1', userName: 'mo', displayName: 'Mo Member', email: 'mo@example.test', isAdmin: false }
 
-export type Handler = (body: unknown, init: RequestInit) => { status?: number; json?: unknown }
+export type Handler = (body: unknown, init: RequestInit) => {
+  status?: number
+  json?: unknown
+  /** Server-sent events, one per chunk; `hang` keeps the stream open until aborted. */
+  events?: object[]
+  hang?: boolean
+  /** What fetch does when the request never gets an answer. */
+  offline?: boolean
+}
 export interface Call {
   method: string
   path: string
@@ -59,7 +67,18 @@ export function fakeApi(me: Me | null, routes: Record<string, Handler> = {}) {
     calls.push({ method, path: url.pathname + url.search, body, headers: (init.headers ?? {}) as Record<string, string> })
     const handler = all[`${method} ${url.pathname}`]
     if (!handler) return new Response('{"status":"not_found"}', { status: 404 })
-    const { status = 200, json } = handler(body, init)
+    const { status = 200, json, events, hang, offline } = handler(body, init)
+    if (offline) throw new TypeError('Failed to fetch')
+    if (events) {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const e of events) controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(e)}\n\n`))
+          if (!hang) controller.close()
+          init.signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')))
+        },
+      })
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }
     return new Response(status === 204 ? null : JSON.stringify(json ?? {}), { status })
   })
   return calls

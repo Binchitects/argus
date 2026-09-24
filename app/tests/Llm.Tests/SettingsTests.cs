@@ -107,6 +107,24 @@ public sealed partial class SettingsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task The_chat_links_to_gitlab_where_browsers_reach_it()
+    {
+        // Argus may reach GitLab by an internal name that no browser can open.
+        var (f, _, _, _) = NewApp(new() { ["Argus:GitlabUrl"] = "http://gitlab.internal:8929/" });
+        await using var _f = f;
+        var admin = await Admin(f);
+        async Task<string?> Link() => (await admin.JsonAsync(await admin.GetAsync("/api/chat/config"))).GetProperty("gitlabUrl").GetString();
+        Assert.Equal("http://gitlab.internal:8929", await Link());
+
+        await StatusAssert.Is(HttpStatusCode.OK, await Save(admin, new { key = "Chat:GitlabLinkUrl", value = "https://gitlab.example.com/" }));
+        Assert.Equal("https://gitlab.example.com", await Link());
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await Save(admin, new { key = "Chat:GitlabLinkUrl", value = "javascript:alert(1)" }));
+
+        await StatusAssert.Is(HttpStatusCode.OK, await Save(admin, new { key = "Chat:GitlabLinkUrl", reset = true }));
+        Assert.Equal("http://gitlab.internal:8929", await Link());
+    }
+
+    [Fact]
     public async Task A_saved_value_wins_over_the_environment_and_the_page_says_what_it_overrides()
     {
         var (f, _, _, _) = NewApp();

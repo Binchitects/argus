@@ -16,7 +16,8 @@
       }
     ],
     "jsx-a11y/no-autofocus": "off",
-    "react/incompatible-library": "off"
+    "react/incompatible-library": "off",
+    "react/preserve-manual-memoization": "off"
   },
   "ignorePatterns": [
     "dist",

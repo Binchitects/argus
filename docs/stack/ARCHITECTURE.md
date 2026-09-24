@@ -53,8 +53,8 @@ with it (see §9).
 
 | hostname | service | auth in front of it |
 |---|---|---|
-| `<domain>` | the app: sign-in, OIDC, people, chat, usage and cost | none (it *is* the sign-in) |
-| `next.<domain>` | the new web (`web`, plan phases 3A–3C) while it is built; `/api`, `/connect` and `/.well-known` there go to the app | none (the app's own sign-in) |
+| `<domain>` | the web (`web`): chat, usage and cost, admin, settings; `/api`, `/connect` and `/.well-known` go to the app (sign-in, OIDC, the API) | none (the app *is* the sign-in) |
+| `next.<domain>` | a redirect to the same page on `<domain>` (the web's address while it was built) | none |
 | `chat.<domain>` | Open WebUI (until the app's chat is signed off) | OIDC (its own session) |
 | `admin.<domain>` | a redirect into the app's `/admin` (the old admin panel) | none |
 | `gateway.<domain>` | LiteLLM | none in front — LiteLLM checks each person's key |
@@ -373,7 +373,7 @@ clients cached `/model/info` and showed every alias as a separate model.
 
 | service | image | what it does |
 |---|---|---|
-| `web` | built from `app/frontend` (Alpine + nginx) | the new web: static files only, non-root, read-only, the same security headers as the app. Served at `next.<domain>` until it replaces the app's built-in UI (plan 3C) |
+| `web` | built from `app/frontend` (Alpine + nginx) | the web: static files only, non-root, read-only root, the same security headers as the API. The app itself serves only the API |
 | `open-webui` | `ghcr.io/open-webui/open-webui:main` | chat. OIDC login, forwards the person's identity to the gateway, and registers Argus as an MCP tool when `ARGUS_CHAT_CLIENT_TOKEN` is set |
 | `argus` | built from this repository (`target: server`) | MCP code-search server over the private GitLab index. Every answer is also written as a JSON audit line — who asked, which repositories were consulted, what was returned — which is what the Argus dashboard reads |
 

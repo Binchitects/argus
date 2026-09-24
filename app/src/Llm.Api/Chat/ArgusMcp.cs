@@ -22,15 +22,33 @@ public sealed class ArgusSession(HttpClient http, Uri endpoint, string token, st
         return result?["tools"] as JsonArray ?? [];
     }
 
-    /// <returns>The tool's text, and whether the tool reported an error.</returns>
+    /// <returns>The tool's answer, and whether the tool reported an error.</returns>
     public async Task<(string Text, bool IsError)> CallAsync(string name, JsonObject arguments, CancellationToken ct)
     {
         var result = await ArgusMcp.RequestAsync(http, endpoint, token, email, sessionId, protocol, Interlocked.Increment(ref _id), "tools/call",
             new JsonObject { ["name"] = name, ["arguments"] = arguments }, ct);
-        var text = string.Join("\n", (result?["content"] as JsonArray ?? []).OfType<JsonObject>()
+        var isError = result?["isError"]?.GetValue<bool>() == true;
+        return (isError ? TextOf(result) : StructuredOf(result) ?? TextOf(result), isError);
+    }
+
+    private static string TextOf(JsonNode? result) =>
+        string.Join("\n", (result?["content"] as JsonArray ?? []).OfType<JsonObject>()
             .Where(c => c["type"]?.GetValue<string>() == "text")
             .Select(c => c["text"]?.GetValue<string>() ?? ""));
-        return (text, result?["isError"]?.GetValue<bool>() == true);
+
+    /// <summary>
+    /// The answer as one JSON value. For a list, FastMCP's text is one block per
+    /// row, which joined is not JSON; its structuredContent is the list, wrapped
+    /// as {"result": …}. Compact, it also costs the model fewer tokens.
+    /// </summary>
+    private static string? StructuredOf(JsonNode? result)
+    {
+        if (result?["structuredContent"] is not JsonObject structured)
+        {
+            return null;
+        }
+        var value = structured.Count == 1 && structured.ContainsKey("result") ? structured["result"] : structured;
+        return value?.ToJsonString() ?? "null";
     }
 }
 

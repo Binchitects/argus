@@ -139,6 +139,8 @@ public static class SettingsCatalog
 
         new("ARGUS_GITLAB_URL", Argus, "GitLab address", "https://gitlab.example.com", SettingType.Url, SettingScope.Stack)
             { Pattern = @"https?://\S+", PatternHelp = "http(s)://…", Impact = "Argus restarts and reindexes." },
+        new("Chat:GitlabLinkUrl", Argus, "GitLab address for links", "Where people's browsers open GitLab, for the files and lines in Argus's answers. Empty: the GitLab address above. Set it when Argus reaches GitLab by an internal name.", SettingType.Url, SettingScope.Live)
+            { Pattern = @"https?://\S+", PatternHelp = "http(s)://…" },
         new("ARGUS_GITLAB_TOKEN", Argus, "Read-only token", "read_api and read_repository, for an account that is at least Reporter in every project to index. No admin needed.", SettingType.Secret, SettingScope.Stack)
             { Impact = "Argus restarts." },
         new("ARGUS_GITLAB_AUTH", Argus, "Sign in with", "Empty infers it: a username wins over a token.", SettingType.Choice, SettingScope.Stack) { Options = ["token", "password"] },

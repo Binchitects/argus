@@ -88,13 +88,20 @@ public sealed class FakeArgus : HttpMessageHandler
             "tools/list" => """{"tools":[{"name":"find_symbol","description":"Find where a symbol is defined","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}]}""",
             "tools/call" => p.GetProperty("arguments").GetProperty("name").GetString() == "SecretThing"
                 ? """{"content":[{"type":"text","text":"Nothing you have access to matches this, but it does exist in 1 repository you cannot read:\n- secret/vault (2 matches) -- maintainers: alice\nTell the person asking that they do not have access, and that they can ask a maintainer listed above to add them in GitLab with at least Reporter access. Argus picks the change up within 10 minutes."}],"isError":false}"""
-                : """{"content":[{"type":"text","text":"ParseHeader is defined in group/app src/parse.c:10"}],"isError":false}""",
+                // As FastMCP answers a list: one text block per row, and the list itself as structuredContent.
+                : """
+                  {"content":[{"type":"text","text":"{\n  \"path\": \"src/parse.c\"\n}"},{"type":"text","text":"{\n  \"path\": \"include/parse.h\"\n}"}],
+                   "structuredContent":{"result":[
+                     {"repo_id":1,"path_with_namespace":"group/app","path":"src/parse.c","name":"ParseHeader","kind":"function","line":10,"end_line":24,"signature":"int ParseHeader(const char *buf)","scope":null,"is_public":1,"doc":null},
+                     {"repo_id":1,"path_with_namespace":"group/app","path":"include/parse.h","name":"ParseHeader","kind":"prototype","line":3,"end_line":3,"signature":"int ParseHeader(const char *buf);","scope":null,"is_public":1,"doc":null}]},
+                   "isError":false}
+                  """,
             _ => throw new InvalidOperationException(method),
         };
         // Answer as SSE, as streamable HTTP servers may.
         var res = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent($"event: message\ndata: {{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{result}}}\n\n", Encoding.UTF8, "text/event-stream"),
+            Content = new StringContent($"event: message\ndata: {{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{result.ReplaceLineEndings("")}}}\n\n", Encoding.UTF8, "text/event-stream"),
         };
         if (method == "initialize")
         {

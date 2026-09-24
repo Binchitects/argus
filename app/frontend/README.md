@@ -3,14 +3,14 @@
 The web at `https://<LLM_DOMAIN>`: React 19 + TypeScript, built by Vite and served
 as static files by nginx in its own container (`web` in `stack/docker-compose.yml`).
 Traefik sends `/api`, `/connect` and `/.well-known` to the app and everything else
-here. While it is being built (plan phases 3A–3C) it runs at `https://next.<LLM_DOMAIN>`.
+here. The chat is described in [docs/stack/CHAT.md](../../docs/stack/CHAT.md).
 
 ```
 src/
   app/              shell, navigation, routes, command palette, providers
   components/ui/    the design system: Radix primitives + Tailwind, our own components
   components/app/   pieces shared by pages (page header, secrets shown once)
-  pages/            one file per page
+  pages/            one file per page; pages/chat/ is the chat (tree, live stream, markdown, files)
   lib/              API client, theme, formatting, command-palette matching
   styles/index.css  design tokens (light and dark) and base styles
 e2e/                Playwright: desktop and phone, both themes, axe accessibility
@@ -47,7 +47,8 @@ npm run typecheck && npm run lint && npm run build
 
 ```bash
 # against the deployed stack
-E2E_PASSWORD=<admin password> npm run e2e                 # https://next.llm.localhost
+E2E_PASSWORD=<admin password> npm run e2e                 # https://llm.localhost
+E2E_CHAT=1 E2E_PASSWORD=... npm run e2e                     # and the chat, against the real model
 E2E_BASE_URL=https://llm.example.com E2E_PASSWORD=... npm run e2e
 ```
 

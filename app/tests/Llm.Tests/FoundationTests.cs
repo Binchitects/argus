@@ -68,30 +68,18 @@ public sealed class FoundationTests(AppFixture app)
     [Theory]
     [InlineData("/")]
     [InlineData("/chat")]
-    [InlineData("/dashboards/usage")]
-    public async Task Page_routes_serve_the_app_shell_uncached(string path)
+    [InlineData("/assets/app-abc123.js")]
+    public async Task The_api_serves_no_pages(string path)
     {
+        // Pages are the web container's (app/frontend); a page path here is a mistake in routing.
         var res = await _client.GetAsync(new Uri(path, UriKind.Relative));
-        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        Assert.Equal(AppFixture.IndexHtml, await res.Content.ReadAsStringAsync());
-        Assert.Equal("no-cache", res.Headers.CacheControl?.ToString());
-    }
-
-    [Fact]
-    public async Task Fingerprinted_assets_are_cached_forever()
-    {
-        var res = await _client.GetAsync(new Uri("/assets/app-abc123.js", UriKind.Relative));
-        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        var cc = res.Headers.CacheControl!;
-        Assert.True(cc.Public);
-        Assert.Equal(TimeSpan.FromDays(365), cc.MaxAge);
-        Assert.Contains(cc.Extensions, e => e.Name == "immutable");
+        Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
     }
 
     [Fact]
     public async Task Security_headers_are_set()
     {
-        var res = await _client.GetAsync(new Uri("/", UriKind.Relative));
+        var res = await _client.GetAsync(new Uri("/api/info", UriKind.Relative));
         var csp = string.Join(";", res.Headers.GetValues("Content-Security-Policy"));
         Assert.Contains("script-src 'self'", csp, StringComparison.Ordinal);
         Assert.Contains("frame-ancestors 'none'", csp, StringComparison.Ordinal);

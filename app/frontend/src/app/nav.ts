@@ -22,10 +22,12 @@ export interface NavItem {
   icon: LucideIcon
   /** Words the command palette also matches. */
   keywords?: string[]
-  /** Built in this web already; otherwise the page points to the current app. */
+  /** Built already; otherwise the page says which phase brings it, and where the job is done meanwhile. */
   ready?: boolean
   /** The plan phase that builds it here. */
   phase?: string
+  /** The service that does this job until then (a subdomain of this one). */
+  elsewhere?: { name: string; subdomain: string }
 }
 
 export interface NavSection {
@@ -39,7 +41,7 @@ export const navigation: NavSection[] = [
     title: 'Workspace',
     items: [
       { title: 'Home', path: '/', icon: Home, ready: true },
-      { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'], phase: '3C' },
+      { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'], ready: true },
       { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'], ready: true },
     ],
   },
@@ -69,7 +71,7 @@ export const navigation: NavSection[] = [
     adminOnly: true,
     items: [
       { title: 'Monitoring', path: '/admin/monitoring', icon: Activity, keywords: ['prometheus', 'alerts', 'probes'], ready: true },
-      { title: 'Dashboards', path: '/dashboards', icon: LineChart, keywords: ['grafana', 'gpu', 'performance'], phase: '5' },
+      { title: 'Dashboards', path: '/dashboards', icon: LineChart, keywords: ['grafana', 'gpu', 'performance'], phase: '5', elsewhere: { name: 'Grafana', subdomain: 'grafana' } },
     ],
   },
 ]
@@ -86,11 +88,7 @@ export function findNavItem(pathname: string): NavItem | undefined {
     .sort((a, b) => b.path.length - a.path.length)[0]
 }
 
-/**
- * Where the current app serves a page while this web is being built at next.<domain>.
- * On the real domain (after the switch) it is this origin.
- */
-export function currentAppUrl(path: string, location: Pick<Location, 'protocol' | 'host'> = window.location): string {
-  const host = location.host.startsWith('next.') ? location.host.slice(5) : location.host
-  return `${location.protocol}//${host}${path}`
+/** https://grafana.llm.example.com/ from llm.example.com: a service beside this one. */
+export function serviceUrl(subdomain: string, location: Pick<Location, 'protocol' | 'host'> = window.location): string {
+  return `${location.protocol}//${subdomain}.${location.host}/`
 }

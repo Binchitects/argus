@@ -1,8 +1,8 @@
 name: App
 
-# The all-in-one app (app/, docs/enterprise/PLAN.md). Every push runs the
-# backend tests on a real Postgres, the web checks, and the browser tests
-# against the image that would ship.
+# The app (app/, docs/enterprise/PLAN.md): the API and the web. Every push runs
+# the backend tests on a real Postgres, the web's checks, and the browser tests
+# against the two images that would ship, behind Traefik.
 on:
   push:
     branches: [enterprise-solution]
@@ -25,19 +25,6 @@ jobs:
       # Testcontainers starts the production Postgres image through the runner's Docker.
       - run: dotnet test -c Release --no-build --logger "console;verbosity=normal"
 
-  web:
-    runs-on: ubuntu-latest
-    defaults: { run: { working-directory: app/web } }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: app/web/package-lock.json }
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
-
   frontend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: app/frontend } }
@@ -51,63 +38,9 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # The web and the API images behind Traefik with the production path split,
+  # in a real browser (desktop and phone, both themes, axe).
   e2e:
-    needs: [backend, web]
-    runs-on: ubuntu-latest
-    env:
-      E2E_PASSWORD: ci admin password for tests
-      E2E_BASE_URL: https://llm.localhost:8443
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build the image
-        run: docker build -t llm-app:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} app
-      # Sessions use Secure cookies, so the browser must reach the app over HTTPS,
-      # at a name under its domain. The app serves TLS itself here (no Traefik).
-      - name: Start Postgres and the app over HTTPS
-        run: |
-          echo "127.0.0.1 llm.localhost" | sudo tee -a /etc/hosts
-          mkdir -p certs
-          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=llm.localhost \
-            -addext "subjectAltName=DNS:llm.localhost,DNS:*.llm.localhost" -keyout certs/tls.key -out certs/tls.crt
-          chmod 644 certs/*
-          docker network create e2e
-          docker run -d --name postgres --network e2e -e POSTGRES_USER=app -e POSTGRES_PASSWORD=ci \
-            --health-cmd "pg_isready -U app" --health-interval 2s pgvector/pgvector:0.8.0-pg16
-          until [ "$(docker inspect -f '{{.State.Health.Status}}' postgres)" = healthy ]; do sleep 1; done
-          # The gateway's database, empty, with LiteLLM's real tables: the dashboards query it.
-          docker exec postgres psql -U app -d postgres -qc "create database litellm"
-          docker exec -i postgres psql -U app -d litellm -q < app/tests/Llm.Tests/Resources/litellm-schema.sql
-          # No gateway in CI: the tests also cover the app telling people it is unreachable.
-          docker run -d --name app --network e2e -p 8443:8443 --read-only --tmpfs /tmp -v "$PWD/certs:/certs:ro" \
-            -v "$PWD/stack/config/grafana/dashboards:/dashboards:ro" -v "$PWD/stack/env-samples:/env-samples:ro" \
-            -e ASPNETCORE_HTTP_PORTS=8080 -e ASPNETCORE_HTTPS_PORTS=8443 \
-            -e Kestrel__Certificates__Default__Path=/certs/tls.crt -e Kestrel__Certificates__Default__KeyPath=/certs/tls.key \
-            -e Database__Host=postgres -e Database__Username=app -e Database__Password=ci \
-            -e Auth__Domain=llm.localhost -e Auth__HttpsPort=8443 -e "Auth__AdminPassword=$E2E_PASSWORD" \
-            -e Auth__DataKey=ci-data-key -e Gateway__Url=http://127.0.0.1:9 llm-app:ci
-          for i in $(seq 1 60); do
-            [ "$(docker inspect -f '{{.State.Health.Status}}' app)" = healthy ] && exit 0; sleep 2
-          done
-          docker logs app; exit 1
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: app/web/package-lock.json }
-      - working-directory: app/web
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
-          npm run e2e
-      - name: The app logged no errors
-        run: |
-          if docker logs app 2>&1 | grep -E '"LogLevel":"(Error|Critical)"'; then exit 1; fi
-      - if: failure()
-        run: docker logs app
-      - if: failure()
-        uses: actions/upload-artifact@v4
-        with: { name: playwright-report, path: app/web/playwright-report }
-
-  # The new web (app/frontend, plan phases 3A-3C): its own image, behind Traefik
-  # with the production path split, against the app image.
-  frontend-e2e:
     needs: [backend, frontend]
     runs-on: ubuntu-latest
     env:
@@ -167,4 +100,4 @@ jobs:
         run: docker logs app; docker logs web; docker logs traefik
       - if: failure()
         uses: actions/upload-artifact@v4
-        with: { name: frontend-playwright-report, path: app/frontend/playwright-report }
+        with: { name: playwright-report, path: app/frontend/playwright-report }

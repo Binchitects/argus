@@ -15,7 +15,6 @@ namespace Llm.Tests;
 /// </summary>
 public sealed class AppFixture : IAsyncLifetime
 {
-    public const string IndexHtml = "<!doctype html><title>test shell</title><div id=\"root\"></div>";
     public const string Domain = "llm.test";
     public const string AdminPassword = "correct horse battery staple admin";
     public const string GrafanaSecret = "grafana-secret-for-tests";
@@ -52,9 +51,6 @@ public sealed class AppFixture : IAsyncLifetime
         await _postgres.StartAsync();
         AppConnectionString = ConnectionStringFor("llmapp_test");
         await LitellmSeed.CreateAsync(_postgres.GetConnectionString(), "litellm_test");
-        Directory.CreateDirectory(Path.Combine(_webRoot, "assets"));
-        await File.WriteAllTextAsync(Path.Combine(_webRoot, "index.html"), IndexHtml);
-        await File.WriteAllTextAsync(Path.Combine(_webRoot, "assets", "app-abc123.js"), "console.log(1)");
         Factory = Create(AppConnectionString, Gateway);
         _ = Factory.Server; // start the app now, so migration failures surface here
     }
@@ -67,7 +63,6 @@ public sealed class AppFixture : IAsyncLifetime
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("ConnectionStrings:App", connectionString);
-            b.UseSetting(WebHostDefaults.WebRootKey, _webRoot);
             b.UseSetting("Auth:Domain", Domain);
             b.UseSetting("Auth:AdminPassword", AdminPassword);
             b.UseSetting("Auth:AdminEmail", "admin@llm.test");

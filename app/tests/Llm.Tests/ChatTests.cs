@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -111,7 +112,10 @@ public sealed class ChatTests(AppFixture app)
         var events = await SendAsync(b, id, "Where is ParseHeader? [tool]");
         Assert.Equal(["question", "title", "assistant", "usage", "tool_call", "tool_result", "assistant", "content", "usage", "done"], Types(events));
         var result = events.Single(e => e.GetProperty("type").GetString() == "tool_result");
-        Assert.Contains("src/parse.c:10", result.GetProperty("text").GetString(), StringComparison.Ordinal);
+        // The rows as one JSON list (structuredContent), not FastMCP's text blocks run together.
+        var rows = JsonNode.Parse(result.GetProperty("text").GetString()!)!.AsArray();
+        Assert.Equal(["src/parse.c", "include/parse.h"], rows.Select(r => r!["path"]!.GetValue<string>()));
+        Assert.Equal(24, rows[0]!["end_line"]!.GetValue<int>());
         Assert.True(result.GetProperty("durationMs").GetInt32() >= 0);
         Assert.False(result.GetProperty("noAccess").GetBoolean());
 
@@ -127,6 +131,7 @@ public sealed class ChatTests(AppFixture app)
         var second = requests[1].Body["messages"]!.AsArray();
         Assert.Equal("tool", second.Last()!["role"]!.GetValue<string>());
         Assert.Equal("call_1", second.Last()!["tool_call_id"]!.GetValue<string>());
+        Assert.StartsWith("[{\"repo_id\":1,", second.Last()!["content"]!.GetValue<string>(), StringComparison.Ordinal);
 
         var msgs = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().ToList();
         Assert.Equal(["user", "assistant", "tool", "assistant"], msgs.Select(m => m.GetProperty("role").GetString()));

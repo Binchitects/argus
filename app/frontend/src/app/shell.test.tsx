@@ -76,9 +76,9 @@ describe('shell', () => {
 
   it('a page that is not rebuilt yet opens in the current app', async () => {
     fakeApi(admin)
-    renderApp('/chat')
+    renderApp('/dashboards')
     expect(await screen.findByText('Being rebuilt')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Open in the current app/ })).toHaveAttribute('href', `${window.location.protocol}//${window.location.host}/chat`)
+    expect(screen.getByRole('link', { name: /Open in Grafana/ })).toHaveAttribute('href', `${window.location.protocol}//grafana.${window.location.host}/`)
   })
 
   it('unknown pages say so', async () => {

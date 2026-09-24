@@ -270,8 +270,7 @@ Each of these used to be a script you had to run in the right order.
 
 | address | what | sign-in |
 |---|---|---|
-| `https://llm.localhost` | **the app**: sign-in for everything, **chat** (with Argus), usage and cost, people, API keys, credit, 2FA, the model, the code index, packs, audit log | its own sign-in; Admin needs `admins` |
-| `https://next.llm.localhost` | **the new web**, being rebuilt from zero ([plan](docs/enterprise/PLAN.md), 3A–3C); replaces the UI at `llm.localhost` when it has every page | the app's sign-in |
+| `https://llm.localhost` | **the app**: sign-in for everything, **chat** (models, thinking, branches, files, Argus), usage and cost, people, API keys, credit, 2FA, **every setting**, the model, the code index, packs, audit log | its own sign-in; Admin needs `admins` |
 | `https://chat.llm.localhost` | Open WebUI, with Argus as a tool, until the app's chat is signed off ([CHAT.md](docs/stack/CHAT.md)) | SSO |
 | `https://grafana.llm.localhost` | dashboards | SSO |
 | `https://gateway.llm.localhost/v1` | OpenAI-compatible API for tools | **the person's own API key** |

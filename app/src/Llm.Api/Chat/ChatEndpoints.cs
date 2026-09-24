@@ -69,7 +69,7 @@ public static class ChatEndpoints
             defaultThinking = string.Equals(stack.Value.ModelEnableThinking, "false", StringComparison.OrdinalIgnoreCase) ? "off" : stack.Value.ModelReasoningEffort,
             argus = argus.Enabled,
             // For links from Argus's answers to the code (Argus reads the same GitLab).
-            gitlabUrl = argus.Enabled ? argusOptions.Value.GitlabUrl?.TrimEnd('/') : null,
+            gitlabUrl = argus.Enabled ? (string.IsNullOrWhiteSpace(chat.CurrentValue.GitlabLinkUrl) ? argusOptions.Value.GitlabUrl : chat.CurrentValue.GitlabLinkUrl)?.TrimEnd('/') : null,
             maxUploadBytes = chat.CurrentValue.MaxUploadBytes,
             imageTypes = Attachments.ImageTypes,
         });

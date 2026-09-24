@@ -48,8 +48,6 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseSecurityHeaders();
 app.UseCsrfGuard();
-app.UseDefaultFiles();
-app.UseStaticFiles(new StaticFileOptions { OnPrepareResponse = StaticCaching.Apply });
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
@@ -72,9 +70,10 @@ api.MapGet("/info", (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settin
         supportContact = string.IsNullOrWhiteSpace(b.SupportContact) ? null : b.SupportContact,
     };
 });
-// Unknown API paths are a 404, never the single-page app's index.html.
 api.MapFallback(() => Results.NotFound());
-app.MapFallbackToFile("index.html", new StaticFileOptions { OnPrepareResponse = StaticCaching.Apply });
+// Pages come from the web container (app/frontend); Traefik sends only /api,
+// /connect and /.well-known here. Anything else that arrives is a plain 404.
+app.MapFallback(() => Results.NotFound());
 
 if (app.Configuration.GetValue("Database:MigrateOnStartup", true))
 {

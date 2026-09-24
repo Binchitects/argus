@@ -86,7 +86,7 @@ failed", not "everything passed".
 | G5 | **`preflight.sh` / `check_mounts.py` are manual** | only synthetic payloads I ran by hand; no test in the suite |
 | G6 | **`with-ca.sh` is manual** | the host-trust path for `dsh`, curl, python and git |
 | G7 | **Built images other than Argus and the app** | identity-proxy and the cpu-temp-exporter image have no build-time test |
-| G8 | ~~No browser tests for chat~~ **closed** | the app's chat runs in a real browser against the real model, desktop and phone: streaming, thinking, stop and regenerate, attachments, code copy, history, and Argus's no-access notice for a person without access (`app/web/e2e/chat.spec.ts`, [CHAT.md](CHAT.md)). Open WebUI itself stays untested and goes when the app's chat is signed off |
+| G8 | ~~No browser tests for chat~~ **closed** | the app's chat runs in a real browser against the real model, desktop and phone: streaming, thinking, stop and regenerate, attachments, code copy, history, and Argus's no-access notice for a person without access (`app/frontend/e2e/chat.spec.ts`, [CHAT.md](CHAT.md)). Open WebUI itself stays untested and goes when the app's chat is signed off |
 | G9 | **Two clients executed, three transcribed** | DSH and Qwen Code now run end to end and their configs are in `clients/`, marked as executed. Claude Code and Continue are written from their own documentation and marked as such; Hermes is unexercised; the OpenAI SDK has no test at all. The distinction is recorded per file in `clients/README.md` so a transcribed config is never mistaken for a verified one |
 | G10 | **No upgrade or rollback test** | changing `ARGUS_VERSION` or an image tag and rolling back is untested |
 | G11 | **Disaster recovery is untested** | restore onto a *clean host*, which is the actual scenario |
@@ -464,10 +464,9 @@ make smoke           # API surface
 ./scripts/functional-test.py   # the person-facing flows
 ./scripts/compare-dashboards.py  # the app's usage dashboards == Grafana's
 
-# the app in a real browser, against the deployed stack (in app/web)
+# the web in a real browser (in app/frontend): desktop and phone, both themes,
+# axe accessibility; E2E_CHAT=1 adds the chat against the real model
 E2E_PASSWORD=<admin password> E2E_CHAT=1 npm run e2e
-# the new web (in app/frontend): desktop and phone, both themes, axe accessibility
-E2E_PASSWORD=<admin password> npm run e2e     # https://next.llm.localhost
 # ... and Argus's per-person access, with the test GitLab up
 ./scripts/test-gitlab/run.sh --keep   # from the repo root
 E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 npm run e2e

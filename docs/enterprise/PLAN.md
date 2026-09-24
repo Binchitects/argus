@@ -36,7 +36,7 @@ swaps must never take the app down, and vice versa.
 | Alerts | Prometheus rules stay; the app shows firing alerts and history. Alertmanager stays as plumbing. |
 | Repo | Work happens under `app/` on this branch. The final reorganisation happens once everything is green. |
 | Stack | .NET 10 LTS, EF Core + Npgsql, OpenIddict, YARP, xUnit + Testcontainers; React 19 + Vite + TypeScript, TanStack Query, ECharts, Vitest, Playwright. |
-| Frontend | Rewritten from zero as its own container (`web`, in `app/frontend/`): Radix primitives + Tailwind with our own components (the shadcn/ui approach), light and dark themes, self-hosted fonts and icons (air-gapped installs), accessibility checked with axe in every browser test. The first UI (`app/web`, served by the API) stays at `llm.<domain>` until the new one matches it; meanwhile the new one runs at `next.<domain>`. |
+| Frontend | Rewritten from zero as its own container (`web`, in `app/frontend/`): Radix primitives + Tailwind with our own components (the shadcn/ui approach), light and dark themes, self-hosted fonts and icons (air-gapped installs), accessibility checked with axe in every browser test. It replaced the first UI (`app/web`, served by the API) at `llm.<domain>` in 3C; the API now serves no pages. |
 | Settings | Everything is configurable in the app. A setting applies at once when its service can take it live; otherwise the app saves it and shows the one command to apply it (still no Docker socket). Phase 6 makes those live too. |
 
 ## How "fully tested" is enforced
@@ -54,8 +54,9 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 3B done** (admin, usage and every setting in the new web, at `next.<domain>`). Next: 3C. The first chat UI
-and its [checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
+Status: **Phase 3C done**: the new web, with the rich chat, is the app at
+`llm.<domain>`. Next: 3D (tools). The first chat UI and its
+[checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
 at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
 
 ### Phase 0 — Foundations  *(S)*
@@ -132,7 +133,8 @@ Replaces: Open WebUI (it runs at `chat.<domain>` until this phase is accepted).
     dashboards 34/34, browser 50/50.
 
 Phases 3A–3F rebuild the web from zero as its own container and extend the chat.
-Each is deployed at `next.<domain>` and tested before the next starts.
+Each is deployed and tested before the next starts. Until 3C the new web ran
+at `next.<domain>`, which now redirects to `llm.<domain>`.
 
 ### Phase 3A — The new web: container, design system, shell  *(M)*
 - `app/frontend/`: Vite + React 19 + TypeScript, built into its own image (Alpine +
@@ -243,6 +245,53 @@ Each is deployed at `next.<domain>` and tested before the next starts.
 - **Done when:** the chat's browser tests pass on the new web against the real model
   and the test GitLab; then `llm.<domain>` switches to the new web and `app/web` is
   deleted.
+- **Result:** the chat is rebuilt ([CHAT.md](../stack/CHAT.md)), and the new web
+  is the app.
+  - **Backend:**
+    - A conversation is a tree: edits and answering again make branches, and
+      the model reads the branch on screen.
+    - Models, with what each can do and its prices, come from the gateway.
+    - Each chat has its own model, thinking level, instructions, temperature,
+      top-p and longest answer.
+    - Answering again can use another model or thinking level.
+    - Images are told by their bytes (never SVG) and sent to models that can
+      see.
+    - Answers record how long the model thought and took; tool calls record
+      their time.
+    - A migration made each of the 193 existing chats on this host one branch.
+  - **The page:**
+    - Model and thinking pickers, and thinking shown live then folded.
+    - Tool cards. Argus's answers show as places in the code, linking to the
+      line range in GitLab, with highlighted code and marked matches.
+    - Code blocks with language, copy, wrap, download, line numbers and
+      folding; Markdown with tables and KaTeX.
+    - A Files panel with attachments, files Argus read and code the model
+      wrote.
+    - Attachments by button, paste or drop, with progress.
+    - An image viewer (fit or actual size, arrows between images).
+    - Version arrows on edited questions and repeated answers; tokens and
+      cost under each answer.
+  - **The switchover:**
+    - Traefik sends `llm.<domain>` to the web, and `/api`, `/connect` and
+      `/.well-known` to the app.
+    - The API image has no UI stage and answers 404 for anything else.
+    - `next.<domain>` redirects to the same page.
+    - `app/web` and its CI jobs are deleted.
+  - **Found on the way:**
+    - Argus sends a list as one text block per row, which joined is not JSON.
+      The chat now takes its `structuredContent`, one compact JSON list, for
+      the model and the page.
+    - Argus may reach GitLab by an internal name, so links use a new live
+      setting, **GitLab address for links** (79 settings now).
+    - The tool card's argument names were below 4.5:1 contrast.
+  - **Tests:**
+    - 182 backend and 90 UI tests.
+    - 117 browser tests on the live stack with the real model (4 skipped: the
+      Argus fixture, and the no-gateway case). They include a chat with
+      Argus's answers and images, served by the browser itself, which runs in
+      CI too.
+    - The stack suites still pass: functional 61/61, acceptance 33/0 (4
+      skipped), auth audit, domain check, dashboards 34/34.
 
 ### Phase 3D — Tools  *(L)*
 - A tool registry in the API (built-in tools and MCP servers); admins choose which

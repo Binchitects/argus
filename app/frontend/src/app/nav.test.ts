@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { currentAppUrl, findNavItem } from './nav'
+import { findNavItem, serviceUrl } from './nav'
 
 describe('nav', () => {
   it('finds the page a path belongs to by the longest prefix', () => {
@@ -10,8 +10,8 @@ describe('nav', () => {
     expect(findNavItem('/nope')).toBeUndefined()
   })
 
-  it('points next.<domain> at the current app on the bare domain', () => {
-    expect(currentAppUrl('/admin/people', { protocol: 'https:', host: 'next.llm.example.com' })).toBe('https://llm.example.com/admin/people')
-    expect(currentAppUrl('/usage', { protocol: 'https:', host: 'llm.example.com:8443' })).toBe('https://llm.example.com:8443/usage')
+  it('links a service beside this one, keeping the port', () => {
+    expect(serviceUrl('grafana', { protocol: 'https:', host: 'llm.example.com' })).toBe('https://grafana.llm.example.com/')
+    expect(serviceUrl('grafana', { protocol: 'https:', host: 'llm.example.com:8443' })).toBe('https://grafana.llm.example.com:8443/')
   })
 })

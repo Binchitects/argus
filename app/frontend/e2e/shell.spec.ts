@@ -13,7 +13,7 @@ test('home: signed in, the admin sees the system summary, no console errors', as
 })
 
 for (const theme of ['light', 'dark'] as const) {
-  for (const path of ['/', '/account', '/design', '/admin/people', '/no-such-page']) {
+  for (const path of ['/', '/account', '/design', '/chat', '/no-such-page']) {
     test(`${path} is accessible in the ${theme} theme`, async ({ page }, info) => {
       const errors = watchConsole(page)
       await withTheme(page, theme)
@@ -47,20 +47,20 @@ test('navigation: the sidebar on desktop, a drawer on the phone', async ({ page,
     await expect(page.getByRole('complementary', { name: 'Sidebar' })).toBeHidden()
     await page.getByRole('button', { name: 'Open navigation' }).click()
     await page.getByRole('dialog').getByRole('link', { name: 'Your account' }).or(page.getByRole('dialog').getByRole('link', { name: 'Home' })).first().waitFor()
-    await page.getByRole('dialog').getByRole('link', { name: 'Chat' }).click()
+    await page.getByRole('dialog').getByRole('link', { name: 'Dashboards' }).click()
     await expect(page.getByRole('dialog')).toBeHidden()
   } else {
     const sidebar = page.getByRole('complementary', { name: 'Sidebar' })
-    await sidebar.getByRole('link', { name: 'Chat' }).click()
+    await sidebar.getByRole('link', { name: 'Dashboards' }).click()
     await page.getByRole('button', { name: 'Collapse sidebar' }).click()
-    await expect(sidebar.getByRole('link', { name: 'Chat' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Dashboards' })).toBeVisible()
     await page.reload()
     await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
     await page.getByRole('button', { name: 'Expand sidebar' }).click()
   }
-  await expect(page).toHaveURL(/\/chat$/)
+  await expect(page).toHaveURL(/\/dashboards$/)
   await expect(page.getByText('Being rebuilt')).toBeVisible()
-  await expect(page.getByRole('link', { name: /Open in the current app/ })).toHaveAttribute('href', /^https:\/\/llm\.localhost(:\d+)?\/chat$/)
+  await expect(page.getByRole('link', { name: /Open in Grafana/ })).toHaveAttribute('href', /^https:\/\/grafana\.llm\.localhost(:\d+)?\/$/)
 })
 
 test('no horizontal scrolling at any width', async ({ page }) => {

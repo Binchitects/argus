@@ -7,12 +7,6 @@ export const indexExit: Record<string, string> = {
   '-1': 'Argus could not start the run at all',
 }
 
-/** https://grafana.llm.example.com for "grafana" (next.<domain> pages point at the real one). */
-export function serviceUrl(sub: string, location: Pick<Location, 'protocol' | 'host'> = window.location): string {
-  const host = location.host.startsWith('next.') ? location.host.slice(5) : location.host
-  return `${location.protocol}//${sub}.${host}`
-}
-
 export interface Probe {
   name: string
   purpose: string
