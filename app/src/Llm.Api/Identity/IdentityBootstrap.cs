@@ -44,8 +44,19 @@ public sealed partial class IdentityBootstrap(
         {
             return;
         }
+        string text;
+        try
+        {
+            text = await File.ReadAllTextAsync(path, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // The app keeps starting; the file stays for a later start.
+            LogImportUnreadable(logger, path);
+            return;
+        }
         var doc = new DeserializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).IgnoreUnmatchedProperties().Build()
-            .Deserialize<LegacyFile>(await File.ReadAllTextAsync(path, ct));
+            .Deserialize<LegacyFile>(text);
         var imported = 0;
         foreach (var (name, entry) in doc?.Users ?? [])
         {
@@ -125,6 +136,9 @@ public sealed partial class IdentityBootstrap(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Imported {Count} people from {Path}")]
     private static partial void LogImported(ILogger logger, int count, string path);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Cannot read {Path} to import its people. Set LLM_UID/LLM_GID in .env to the owner of config/ (auth-init hands it over).")]
+    private static partial void LogImportUnreadable(ILogger logger, string path);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Not importing {UserName}: {Reason}")]
     private static partial void LogImportSkipped(ILogger logger, string userName, string reason);

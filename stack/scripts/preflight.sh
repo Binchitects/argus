@@ -14,7 +14,7 @@
 #                 root-owned directories there to satisfy them.
 #
 # The failure is silent and misdiagnoses itself as four unrelated problems --
-# Authelia "read-only file system", Alertmanager missing its alertmanager.yml,
+# the identity provider "read-only file system", Alertmanager missing its alertmanager.yml,
 # the temperature exporter missing exporter.py, Traefik exiting 127 -- every one
 # of which names a file that plainly exists on the host. The files exist. The
 # MOUNT points somewhere else.

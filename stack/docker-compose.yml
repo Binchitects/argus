@@ -64,7 +64,6 @@ volumes:
   clickhouse-data:
   clickhouse-logs:
   minio-data:
-  authelia-data:
 
 services:
 
@@ -268,12 +267,12 @@ services:
     networks:
       llm-net:
         # The OIDC token exchange is server-to-server: Grafana/Open WebUI/
-        # Langfuse call the issuer directly, not through the browser. Without
-        # this alias `auth.llm.localhost` does not resolve inside a container
-        # and every login fails at the token step. The alias points the name at
-        # Traefik, which terminates TLS with the same wildcard certificate.
+        # Langfuse call the issuer (the app, at the bare domain) directly, not
+        # through the browser. Without this alias the domain does not resolve
+        # inside a container and every login fails at the token step. The alias
+        # points the name at Traefik, which terminates TLS with the same certificate.
         aliases:
-          - auth.${LLM_DOMAIN:-llm.localhost}
+          - ${LLM_DOMAIN:-llm.localhost}
     ports:
       # BIND_ADDRESS existed in .env but was referenced nowhere, so a file that
       # said 127.0.0.1 published on 0.0.0.0 and the whole stack answered the
@@ -289,8 +288,8 @@ services:
       # empty and root-owned. If this checkout is on a volume that is not
       # mounted yet -- a removable disk, an automount that lost a race with
       # dockerd at boot -- `restart: unless-stopped` then brings the stack up
-      # against empty directories: Traefik with no routes, Authelia with no
-      # users, and stub dirs left squatting on the mountpoint so the real disk
+      # against empty directories: Traefik with no routes, the app with no
+      # config, and stub dirs left squatting on the mountpoint so the real disk
       # cannot mount there afterwards. Observed exactly that after a reboot.
       #
       # With create_host_path: false the container refuses to start instead.
@@ -331,36 +330,26 @@ services:
     logging: *default-logging
 
   # ============================================================================
-  # SINGLE SIGN-ON (profile: auth)
+  # SIGN-IN (profile: auth)
   #
-  # Two roles at once:
-  #   forwardAuth  Traefik asks Authelia about each request to the services that
-  #                have no login of their own, replacing basic-auth.
-  #   OIDC         Grafana, Open WebUI and Langfuse delegate their own login
-  #                screens here, so one identity covers everything.
-  #
+  # The app (below, at the bare domain) is the identity provider: people sign in
+  # there once, Grafana, Open WebUI and Langfuse sign in through it over OIDC,
+  # and Traefik asks it about every request to services that have no sign-in of
+  # their own (forwardAuth, see config/traefik/dynamic/middlewares.yml).
   # ============================================================================
 
-  # Builds everything Authelia and Traefik need from .env, then exits.
+  # Prepares files other services read, then exits. The Authelia image is used
+  # only as a toolbox (bcrypt), as tls-init does for certificates.
   #
-  # Work that used to be a host-side setup script, moved inside compose so a deployment is `docker compose up` and nothing
-  # else. Every input is a value in .env; nothing here asks a question.
+  #   traefik/auth/users.htpasswd  basic auth for protected-chain (PROXY_AUTH_*)
+  #   authelia/directory/          who is who for Argus, written by the app
   #
-  #   secrets/oidc.pem  OIDC signing key          generated once, then kept
-  #   users.yml         the admin account         only if absent: the admin
-  #                                               panel owns it afterwards
-  #   clients.yml       OIDC clients              rebuilt every start from the
-  #                                               *_OIDC_CLIENT_SECRET values
-  #   users.htpasswd    Traefik basic-auth        rebuilt from PROXY_AUTH_*
-  #
-  # It also refuses to let Authelia start against a database encrypted with a
-  # different AUTHELIA_STORAGE_ENCRYPTION_KEY -- the crash-loop you get from
-  # replacing .env while the authelia-data volume survives -- and says which
-  # volume to remove instead.
+  # The app runs as LLM_UID:LLM_GID. It must write directory/ and, once, read
+  # authelia/users.yml (the accounts of an Authelia install it imports), so both
+  # are handed to that user here.
   auth-init:
     image: authelia/authelia:4.39
     container_name: auth-init
-    # One-shot: the image's own healthcheck (for the long-running server) does not apply.
     healthcheck:
       disable: true
     profiles: [auth]
@@ -369,170 +358,31 @@ services:
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     environment:
-      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-llmservice}
-      AUTHELIA_ADMIN_PASSWORD: ${AUTHELIA_ADMIN_PASSWORD:?set AUTHELIA_ADMIN_PASSWORD in .env}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
-      AUTHELIA_STORAGE_ENCRYPTION_KEY: ${AUTHELIA_STORAGE_ENCRYPTION_KEY:?set AUTHELIA_STORAGE_ENCRYPTION_KEY in .env}
-      GRAFANA_OIDC_CLIENT_SECRET: ${GRAFANA_OIDC_CLIENT_SECRET:?set GRAFANA_OIDC_CLIENT_SECRET in .env}
-      OPENWEBUI_OIDC_CLIENT_SECRET: ${OPENWEBUI_OIDC_CLIENT_SECRET:?set OPENWEBUI_OIDC_CLIENT_SECRET in .env}
-      LANGFUSE_OIDC_CLIENT_SECRET: ${LANGFUSE_OIDC_CLIENT_SECRET:-unused-unless-tracing-profile}
-      API_OIDC_CLIENT_SECRET: ${API_OIDC_CLIENT_SECRET:?set API_OIDC_CLIENT_SECRET in .env}
       PROXY_AUTH_USER: ${PROXY_AUTH_USER:-admin}
       PROXY_AUTH_PASSWORD: ${PROXY_AUTH_PASSWORD:?set PROXY_AUTH_PASSWORD in .env}
+      APP_UID: ${LLM_UID:-1000}
+      APP_GID: ${LLM_GID:-1000}
     volumes:
       - ${LLM_CONFIG_DIR:-./config}/authelia:/config
       - ${LLM_CONFIG_DIR:-./config}/traefik/auth:/traefik-auth
-      - authelia-data:/data
     command:
       - |
         set -e
         owner=$$(stat -c %u:%g /config)
         hash() { authelia crypto hash generate "$$@" | sed 's/^Digest: //'; }
-
-        # A database written with another key cannot be decrypted; stop here, clearly.
-        want=$$(printf '%s' "$$AUTHELIA_STORAGE_ENCRYPTION_KEY" | sha256sum | cut -d' ' -f1)
-        if [ -f /data/db.sqlite3 ] && [ -f /data/.storage-key.sha256 ] && [ "$$(cat /data/.storage-key.sha256)" != "$$want" ]; then
-          echo "auth-init: AUTHELIA_STORAGE_ENCRYPTION_KEY differs from the key that encrypted the authelia-data volume."
-          echo "auth-init: that volume holds sessions only; accounts live in config/authelia/users.yml."
-          echo "auth-init: remove it with:  docker volume rm $${COMPOSE_PROJECT_NAME}_authelia-data"
-          exit 1
-        fi
-        printf '%s' "$$want" > /data/.storage-key.sha256
-
-        mkdir -p /config/secrets
-        if [ ! -s /config/secrets/oidc.pem ]; then
-          authelia crypto pair rsa generate --bits 4096 --directory /config/secrets \
-            --file.private-key oidc.pem --file.public-key oidc.pub.pem >/dev/null
-          echo "auth-init: generated the OIDC signing key"
-        fi
-
-        if [ ! -s /config/users.yml ]; then
-          ph=$$(hash argon2 --password "$$AUTHELIA_ADMIN_PASSWORD")
-          printf '%s\n' "# Authelia accounts. Passwords are argon2id hashes. Manage people from the admin panel." \
-            "users:" "  admin:" "    disabled: false" "    displayname: 'Administrator'" \
-            "    password: '$$ph'" "    email: '$$ADMIN_EMAIL'" "    groups:" "      - admins" > /config/users.yml
-          echo "auth-init: created users.yml with the admin account (password = AUTHELIA_ADMIN_PASSWORD)"
-        fi
-
-        D='{{ env "LLM_DOMAIN" }}'
-        client() {  # id name secret redirect scopes
-          echo "      - client_id: '$$1'"
-          echo "        client_name: '$$2'"
-          echo "        client_secret: '$$(hash pbkdf2 --variant sha512 --password "$$3")'"
-          echo "        public: false"
-          echo "        authorization_policy: 'one_factor'"
-          echo "        claims_policy: 'with_profile'"
-          echo "        consent_mode: 'implicit'"
-          echo "        require_pkce: false"
-          echo "        redirect_uris:"
-          echo "          - '$$4'"
-          echo "        scopes: $$5"
-          echo "        userinfo_signed_response_alg: 'none'"
-          echo "        token_endpoint_auth_method: 'client_secret_basic'"
-        }
-        {
-          echo "# GENERATED by the auth-init service from .env on every start. Do not edit."
-          echo "identity_providers:"
-          echo "  oidc:"
-          echo "    jwks:"
-          echo "      - key_id: 'main'"
-          echo "        algorithm: 'RS256'"
-          echo "        use: 'sig'"
-          echo "        key: |"
-          sed 's/^/          /' /config/secrets/oidc.pem
-          echo "    clients:"
-          client grafana Grafana "$$GRAFANA_OIDC_CLIENT_SECRET" "https://grafana.$$D/login/generic_oauth" "['openid', 'profile', 'groups', 'email']"
-          client open-webui "Open WebUI" "$$OPENWEBUI_OIDC_CLIENT_SECRET" "https://chat.$$D/oauth/oidc/callback" "['openid', 'profile', 'groups', 'email']"
-          client langfuse Langfuse "$$LANGFUSE_OIDC_CLIENT_SECRET" "https://traces.$$D/api/auth/callback/custom" "['openid', 'profile', 'email']"
-          echo "      - client_id: 'api'"
-          echo "        client_name: 'LLM API (machine clients)'"
-          echo "        client_secret: '$$(hash pbkdf2 --variant sha512 --password "$$API_OIDC_CLIENT_SECRET")'"
-          echo "        public: false"
-          echo "        authorization_policy: 'one_factor'"
-          echo "        require_pkce: false"
-          echo "        redirect_uris: []"
-          echo "        grant_types: ['client_credentials']"
-          echo "        scopes: ['authelia.bearer.authz']"
-          echo "        audience:"
-          echo "          - 'https://api.$$D'"
-          echo "          - 'https://gateway.$$D'"
-          echo "        token_endpoint_auth_method: 'client_secret_basic'"
-        } > /config/clients.yml.new
-        mv /config/clients.yml.new /config/clients.yml
-
         printf '%s:%s\n' "$$PROXY_AUTH_USER" "$$(hash bcrypt --password "$$PROXY_AUTH_PASSWORD")" > /traefik-auth/users.htpasswd
+        chmod 600 /traefik-auth/users.htpasswd
+        chown "$$owner" /traefik-auth/users.htpasswd 2>/dev/null || true
 
-        # Who is who, without password hashes, for Argus. The admin panel writes
-        # users.yml into it; the directory is created here so it has the right owner.
         mkdir -p /config/directory
-
-        chmod 600 /config/clients.yml /config/users.yml /config/secrets/oidc.pem /traefik-auth/users.htpasswd
-        if [ -f /config/users.yml.bak ]; then chmod 600 /config/users.yml.bak; fi
         chmod 755 /config/directory
-        chown -R "$$owner" /config/clients.yml /config/users.yml /config/secrets /config/directory /traefik-auth/users.htpasswd 2>/dev/null || true
-        if [ -f /config/users.yml.bak ]; then chown "$$owner" /config/users.yml.bak; fi
-        echo "auth-init: clients.yml and users.htpasswd rebuilt from .env"
-    logging: *default-logging
-
-  authelia:
-    image: authelia/authelia:4.39
-    container_name: authelia
-    profiles: [auth]
-    restart: unless-stopped
-    networks: [llm-net]
-    volumes:
-      # THE DIRECTORY, not three individual files.
-      #
-      # A single-file bind mount is pinned to the INODE it resolved at container
-      # start. Every writer of these files replaces them atomically -- the admin
-      # panel via os.replace, auth-init by writing a new file -- which produces
-      # a NEW inode, and Authelia then keeps reading the old one forever. It
-      # watches the path and sees no change because, from inside the container,
-      # nothing about its file changed.
-      #
-      # Observed: the panel's users.yml at inode 2497907 / 658 bytes while
-      # Authelia held inode 2496625 / 444 bytes. Users created in the panel
-      # could not log in, because Authelia had never seen them. The same applied
-      # to clients.yml and configuration.yml, so every regenerated file appeared
-      # to need a container restart -- it did, and this is why.
-      #
-      # Mounting the directory makes the path resolve fresh on each open, so a
-      # replaced file is picked up. Read-only still: nothing in the container
-      # writes here.
-      - ${LLM_CONFIG_DIR:-./config}/authelia:/config:ro
-      - authelia-data:/data
-    environment:
-      # Authelia merges these two files; clients.yml is generated because OIDC
-      # client secrets have to be stored as hashes.
-      X_AUTHELIA_CONFIG: /config/configuration.template.yml,/config/clients.yml
-      # Both files name the domain as {{ env "LLM_DOMAIN" }}; the template filter
-      # expands it at startup, so the domain lives in .env and nowhere else.
-      X_AUTHELIA_CONFIG_FILTERS: template
-      LLM_DOMAIN: ${LLM_DOMAIN:-llm.localhost}
-      AUTHELIA_SESSION_SECRET: ${AUTHELIA_SESSION_SECRET:?set AUTHELIA_SESSION_SECRET in .env}
-      AUTHELIA_STORAGE_ENCRYPTION_KEY: ${AUTHELIA_STORAGE_ENCRYPTION_KEY:?set AUTHELIA_STORAGE_ENCRYPTION_KEY in .env}
-      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET: ${AUTHELIA_JWT_SECRET:?set AUTHELIA_JWT_SECRET in .env}
-      AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET: ${AUTHELIA_OIDC_HMAC_SECRET:?set AUTHELIA_OIDC_HMAC_SECRET in .env}
-      # The startup clock check asks time.cloudflare.com, which an air-gapped
-      # host cannot reach. Keeping the clock right is the host's job (chrony,
-      # pointed at an internal NTP server there).
-      AUTHELIA_NTP_DISABLE_STARTUP_CHECK: "true"
-    depends_on:
-      redis:
-        condition: service_healthy
-      auth-init:
-        condition: service_completed_successfully
-    # No healthcheck override: the image ships /app/healthcheck.sh, and there is
-    # no `authelia health` subcommand in 4.39. Overriding it made the container
-    # permanently unhealthy, which in turn made Traefik refuse to route it.
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.authelia.loadbalancer.server.port=9091"
-      - "traefik.http.routers.authelia.rule=Host(`auth.${LLM_DOMAIN:-llm.localhost}`)"
-      - "traefik.http.routers.authelia.entrypoints=websecure"
-      - "traefik.http.routers.authelia.tls=true"
-      # The portal itself must never sit behind the auth middleware.
-      - "traefik.http.routers.authelia.middlewares=default-chain@file"
+        chown -R "$$APP_UID:$$APP_GID" /config/directory
+        if [ -f /config/users.yml ]; then chown "$$APP_UID:$$APP_GID" /config/users.yml; fi
+        if [ "$$owner" != "$$APP_UID:$$APP_GID" ]; then
+          echo "auth-init: note: config/ belongs to $$owner but the app runs as $$APP_UID:$$APP_GID."
+          echo "auth-init: set LLM_UID and LLM_GID in .env to $$owner to keep every file yours."
+        fi
+        echo "auth-init: users.htpasswd rebuilt; directory ready for the app"
     logging: *default-logging
 
   # ============================================================================
@@ -620,9 +470,9 @@ services:
       - "traefik.http.routers.vllm.entrypoints=websecure"
       - "traefik.http.routers.vllm.tls=true"
       - "traefik.http.routers.vllm.service=vllm"
-      # Credential swap: Authelia authenticates the caller, then Traefik
+      # Credential swap: the app (forwardAuth) authenticates the caller, then Traefik
       # replaces the Authorization header with vLLM's internal key before
-      # proxying. Middleware order is significant - Authelia must inspect
+      # proxying. Middleware order is significant - the app must inspect
       # the original header before it is overwritten.
       - "traefik.http.middlewares.vllm-key.headers.customrequestheaders.Authorization=Bearer ${VLLM_API_KEY:-${LLAMACPP_API_KEY}}"
       - "traefik.http.routers.vllm.middlewares=${PROTECTED_CHAIN:-protected-chain@file},vllm-key@docker"
@@ -1170,7 +1020,7 @@ services:
       - "traefik.http.routers.litellm.rule=Host(`gateway.${LLM_DOMAIN:-llm.localhost}`)"
       - "traefik.http.routers.litellm.entrypoints=websecure"
       - "traefik.http.routers.litellm.tls=true"
-      # NO Authelia and NO key injection here on purpose. LiteLLM validates its
+      # NO forwardAuth and NO key injection here on purpose. LiteLLM validates its
       # own virtual keys, so the caller's key must survive the proxy untouched -
       # injecting the master key would attribute every request to one identity
       # and destroy per-user usage tracking.
@@ -1403,7 +1253,7 @@ services:
       #   docker compose -f docker-compose.yml -f deploy/argus-local.yml up -d
       - argus-data:/var/lib/argus
       # The directory, not the file: a single-file mount pins an inode, and the
-      # admin panel replaces the file atomically (see authelia). Only the
+      # app replaces the file atomically. Only the
       # hash-free copy: Argus has no business reading password hashes.
       - ${LLM_CONFIG_DIR:-./config}/authelia/directory:/authelia:ro
       # The CAs to trust when calling GitLab (see tls-init): a GitLab behind a
@@ -1427,7 +1277,7 @@ services:
       - "traefik.http.routers.argus.rule=Host(`argus.${LLM_DOMAIN:-llm.localhost}`)"
       - "traefik.http.routers.argus.entrypoints=websecure"
       - "traefik.http.routers.argus.tls=true"
-      # No Authelia: Argus authenticates each caller with their own GitLab PAT
+      # No forwardAuth: Argus authenticates each caller with their own GitLab PAT
       # as a bearer token, and that token must reach it untouched - the same
       # reasoning as the LiteLLM gateway route.
       - "traefik.http.routers.argus.middlewares=default-chain@file"
@@ -1481,34 +1331,24 @@ services:
     logging: *default-logging
 
   # ============================================================================
-  # ADMIN PANEL (profile: auth -- it is meaningless without Authelia)
+  # THE APP (profile: gateway) -- https://<LLM_DOMAIN>
   #
-  # Self-service usage for everyone, plus a console for the `admins` group:
-  # create people, set credit, revoke and reissue API keys, reset passwords.
-  #
-  # Authelia decides who is who. Traefik runs every request through
-  # forward-auth first and OVERWRITES Remote-User / Remote-Email /
-  # Remote-Groups from Authelia's answer, so a browser cannot forge them.
-  # REQUIRE_FORWARDED closes the remaining gap: another container on llm-net
-  # could reach this one directly and set those headers itself, so a request
-  # arriving without X-Forwarded-Host is refused.
-  #
-  # It holds the LiteLLM master key and writes Authelia's user database, which
-  # is why it publishes no port and is reachable only through the proxy.
+  # The all-in-one app (docs/enterprise/PLAN.md): sign-in for everything (own
+  # accounts and LDAP / Active Directory, 2FA), the OIDC provider for Grafana,
+  # Open WebUI and Langfuse, Traefik's forwardAuth, people, API keys and credit.
+  # Its data lives in its own `llmapp` database on the shared Postgres.
   # ============================================================================
   app:
-    # The new all-in-one app (enterprise-solution branch, docs/enterprise/PLAN.md)
-    # at the bare domain. The legacy services keep their subdomains next to it
-    # and leave one phase at a time.
     image: llmservice-app:latest
     build:
       context: ${LLM_APP_DIR:-../app}
       args:
-        APP_VERSION: ${APP_VERSION:-0.1.0}
+        APP_VERSION: ${APP_VERSION:-0.2.0}
     container_name: app
-    # Same profile as postgres: the app keeps its own database on that instance.
     profiles: ["gateway"]
     restart: unless-stopped
+    # The owner of config/: the files the app writes stay yours (see auth-init).
+    user: "${LLM_UID:-1000}:${LLM_GID:-1000}"
     networks: [llm-net]
     depends_on:
       postgres:
@@ -1519,6 +1359,38 @@ services:
       Database__Name: llmapp
       Database__Username: ${LLM_PG_USER:-llmservice}
       Database__Password: ${LLM_PG_PASSWORD:?set LLM_PG_PASSWORD}
+      Auth__Domain: ${LLM_DOMAIN:-llm.localhost}
+      Auth__HttpsPort: ${TRAEFIK_HTTPS_PORT:-443}
+      Auth__AdminEmail: ${ADMIN_EMAIL:-admin@example.com}
+      # Sets the first admin's password when nobody exists yet; never afterwards.
+      Auth__AdminPassword: ${ADMIN_PASSWORD:-${AUTHELIA_ADMIN_PASSWORD:-}}
+      Auth__AdminGroup: ${ADMIN_GROUP:-admins}
+      # Encrypts the app's key ring (session and OIDC keys) in the database.
+      Auth__DataKey: ${APP_DATA_KEY:?set APP_DATA_KEY in .env (openssl rand -hex 32; never change it)}
+      # An Authelia install's accounts, imported once with their passwords.
+      Auth__ImportUsersFile: /legacy/users.yml
+      Auth__DirectoryFile: /directory/users.yml
+      Oidc__GrafanaSecret: ${GRAFANA_OIDC_CLIENT_SECRET:-}
+      Oidc__OpenWebUiSecret: ${OPENWEBUI_OIDC_CLIENT_SECRET:-}
+      Oidc__LangfuseSecret: ${LANGFUSE_OIDC_CLIENT_SECRET:-}
+      Oidc__ApiSecret: ${API_OIDC_CLIENT_SECRET:-}
+      Gateway__Url: http://litellm:4000
+      Gateway__MasterKey: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      # Company directory. Off while LDAP_URL is empty. See the .env samples.
+      Ldap__Url: ${LDAP_URL:-}
+      Ldap__StartTls: ${LDAP_STARTTLS:-false}
+      Ldap__IgnoreCertificateErrors: ${LDAP_INSECURE_SKIP_VERIFY:-false}
+      Ldap__BindDn: ${LDAP_BIND_DN:-}
+      Ldap__BindPassword: ${LDAP_BIND_PASSWORD:-}
+      Ldap__UserBaseDn: ${LDAP_USER_BASE_DN:-}
+      Ldap__UserFilter: ${LDAP_USER_FILTER:-(&(|(objectClass=person)(objectClass=inetOrgPerson))(|(uid={0})(sAMAccountName={0})(mail={0})))}
+      Ldap__GroupBaseDn: ${LDAP_GROUP_BASE_DN:-}
+      Ldap__AdminGroup: ${LDAP_ADMIN_GROUP:-}
+      Ldap__RequiredGroup: ${LDAP_REQUIRED_GROUP:-}
+      Ldap__SyncInterval: ${LDAP_SYNC_INTERVAL:-00:15:00}
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/authelia/directory:/directory
+      - ${LLM_CONFIG_DIR:-./config}/authelia:/legacy:ro
     read_only: true
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
@@ -1531,9 +1403,26 @@ services:
       - "traefik.http.routers.app.entrypoints=websecure"
       - "traefik.http.routers.app.tls=true"
       - "traefik.http.routers.app.service=app"
-      # Until phase 1 gives the app its own sign-in, Authelia guards it.
-      - "traefik.http.routers.app.middlewares=sso-chain@file"
+      # The app signs people in itself; it never sits behind forwardAuth.
+      - "traefik.http.routers.app.middlewares=default-chain@file"
 
+  # ============================================================================
+  # ADMIN PANEL (profile: auth)
+  #
+  # The model, indexing and packs pages, until phase 2 of the plan moves them
+  # into the app. People, API keys and passwords already live in the app; the
+  # panel sends those pages there (PEOPLE_URL).
+  #
+  # The app decides who is who. Traefik runs every request through
+  # forward-auth first and OVERWRITES Remote-User / Remote-Email /
+  # Remote-Groups from the app's answer, so a browser cannot forge them.
+  # REQUIRE_FORWARDED closes the remaining gap: another container on llm-net
+  # could reach this one directly and set those headers itself, so a request
+  # arriving without X-Forwarded-Host is refused.
+  #
+  # It holds the LiteLLM master key, which is why it publishes no port and is
+  # reachable only through the proxy.
+  # ============================================================================
   admin-panel:
     # Explicit for the same reason as identity-proxy above: derive this from
     # the project name and the image stops travelling with the bundle.
@@ -1567,7 +1456,8 @@ services:
       # Buttons through to the dashboards rather than a second place to build
       # charts. Grafana already has usage-by-user and the hardware views.
       GRAFANA_URL: https://grafana.${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}
-      AUTHELIA_URL: https://auth.${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}
+      # The app owns people, keys and passwords: the panel sends those pages there.
+      APP_URL: https://${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}
       # Probed by the console's Overview and Monitoring pages. Internal names
       # on purpose: the container reaches a container. Querying the PUBLIC
       # hostname from in here fails, because `grafana.<domain>` resolves to the
@@ -1575,19 +1465,12 @@ services:
       # URLError next to four green lights, which reads as Grafana being down.
       PROMETHEUS_URL: http://prometheus:9090
       GRAFANA_PROBE_URL: http://grafana:3000
-      AUTHELIA_PROBE_URL: http://authelia:9091
+      APP_PROBE_URL: http://app:8080/healthz
       REQUIRE_FORWARDED: "1"
     volumes:
-      # Read-write on purpose: creating a person and resetting a password both
-      # write users.yml. Authelia is configured to watch that file, and on a
-      # Linux host it reloads by itself. ON DOCKER DESKTOP IT DOES NOT -- the
-      # file sits on a Windows bind mount and inotify events do not cross it,
-      # so a new account exists in the file and still cannot sign in until
-      # `docker compose restart authelia`. Measured; no write strategy avoids
-      # it, so the panel prints the instruction instead. See docs/ADMIN-PANEL.md.
-      # The directory also holds secrets/, which is why only this one file's
-      # directory is mounted rather than the whole config tree.
-      - ${LLM_CONFIG_DIR:-./config}/authelia:/authelia
+      # Read-only: the panel no longer writes accounts (the app does). Its
+      # entrypoint runs as the owner of this directory.
+      - ${LLM_CONFIG_DIR:-./config}/authelia:/authelia:ro
       # The sample deployments the Model card offers to switch to (read-only).
       - ${LLM_ENV_SAMPLES_DIR:-./env-samples}:/env-samples:ro
     # NO depends_on, deliberately. `litellm` lives in the `gateway` profile and
@@ -1612,7 +1495,7 @@ services:
       - "traefik.http.routers.admin-panel.tls=true"
       - "traefik.http.routers.admin-panel.service=admin-panel"
       # Always the SSO chain, never PROTECTED_CHAIN: this panel has no login of
-      # its own and no authorisation without Authelia's Remote-Groups header.
+      # its own and no authorisation without the app's Remote-Groups header.
       - "traefik.http.routers.admin-panel.middlewares=sso-chain@file"
     logging: *default-logging
 
@@ -1729,10 +1612,10 @@ services:
       ENABLE_OLLAMA_API: "false"
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY}
       WEBUI_NAME: LLMService
-      # SSO is the only way in. chat.<domain> has no Authelia in front of it --
+      # SSO is the only way in. chat.<domain> has no forwardAuth in front of it --
       # Open WebUI signs people in itself, over OIDC -- and its own password
       # login and self-signup were both on, so anyone who could reach it could
-      # create an account Authelia never saw. The first account made that way
+      # create an account the app never saw. The first account made that way
       # (by e2e-check.py, with a password written in this repository) had become
       # the Open WebUI admin. First SSO sign-in still creates the account:
       # that is ENABLE_OAUTH_SIGNUP below; ENABLE_SIGNUP governs only the form.
@@ -1740,7 +1623,7 @@ services:
       ENABLE_LOGIN_FORM: "false"
       ENABLE_PASSWORD_AUTH: "false"
       DEFAULT_USER_ROLE: ${WEBUI_DEFAULT_ROLE:-user}
-      # Roles follow Authelia groups at every sign-in, as Grafana's do: members
+      # Roles follow the app's groups at every sign-in, as Grafana's do: members
       # of the admins group are Open WebUI admins, everyone else a user. Before,
       # the role was whatever the account got when it was created, so the real
       # admin was a plain user and nothing could correct it.
@@ -1749,11 +1632,11 @@ services:
       # keeps re-promoting it while it is the only one -- whatever its SSO groups
       # say. On a fresh install that was whoever opened chat first, admin or not.
       # So the stack creates the real admin itself at startup (only when no
-      # account exists yet), with the same email as Authelia's admin; that
+      # account exists yet), with the same email as the app's first admin; that
       # person's SSO login then merges into it (OAUTH_MERGE_ACCOUNTS_BY_EMAIL).
       # Password sign-in is disabled below, so this password is never usable.
       WEBUI_ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
-      WEBUI_ADMIN_PASSWORD: ${AUTHELIA_ADMIN_PASSWORD}
+      WEBUI_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-${AUTHELIA_ADMIN_PASSWORD:-}}
       WEBUI_ADMIN_NAME: Administrator
       OAUTH_ROLES_CLAIM: groups
       OAUTH_ALLOWED_ROLES: "*"
@@ -1766,11 +1649,11 @@ services:
       # volume, never from Hugging Face; no version check, no pip installs for
       # tools. Without it every start asked Hugging Face first.
       OFFLINE_MODE: "true"
-      # OIDC single sign-on through Authelia.
+      # Single sign-on through the app (OIDC).
       ENABLE_OAUTH_SIGNUP: "true"
       OAUTH_MERGE_ACCOUNTS_BY_EMAIL: "true"
-      OAUTH_PROVIDER_NAME: Authelia
-      OPENID_PROVIDER_URL: https://auth.${LLM_DOMAIN:-llm.localhost}/.well-known/openid-configuration
+      OAUTH_PROVIDER_NAME: LLM Service
+      OPENID_PROVIDER_URL: https://${LLM_DOMAIN:-llm.localhost}/.well-known/openid-configuration
       OAUTH_CLIENT_ID: open-webui
       OAUTH_CLIENT_SECRET: ${OPENWEBUI_OIDC_CLIENT_SECRET:-}
       OAUTH_SCOPES: openid email profile groups
@@ -1950,26 +1833,33 @@ services:
       GF_NEWS_NEWS_FEED_ENABLED: "false"
       GF_INSTALL_PLUGINS: ""
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/llm-overview.json
-      # OIDC single sign-on through Authelia. root_url must now be the proxy
+      # Single sign-on through the app (OIDC). root_url must be the proxy
       # hostname, because Grafana builds the OAuth redirect_uri from it.
       GF_SERVER_ROOT_URL: https://grafana.${LLM_DOMAIN:-llm.localhost}/
       GF_AUTH_GENERIC_OAUTH_ENABLED: "${GRAFANA_OIDC_ENABLED:-true}"
-      GF_AUTH_GENERIC_OAUTH_NAME: Authelia
+      GF_AUTH_GENERIC_OAUTH_NAME: LLM Service
       GF_AUTH_GENERIC_OAUTH_CLIENT_ID: grafana
       GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: ${GRAFANA_OIDC_CLIENT_SECRET:-}
       GF_AUTH_GENERIC_OAUTH_SCOPES: openid profile email groups
-      GF_AUTH_GENERIC_OAUTH_AUTH_URL: https://auth.${LLM_DOMAIN:-llm.localhost}/api/oidc/authorization
-      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: https://auth.${LLM_DOMAIN:-llm.localhost}/api/oidc/token
-      GF_AUTH_GENERIC_OAUTH_API_URL: https://auth.${LLM_DOMAIN:-llm.localhost}/api/oidc/userinfo
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: https://${LLM_DOMAIN:-llm.localhost}/connect/authorize
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: https://${LLM_DOMAIN:-llm.localhost}/connect/token
+      GF_AUTH_GENERIC_OAUTH_API_URL: https://${LLM_DOMAIN:-llm.localhost}/connect/userinfo
       GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH: preferred_username
       GF_AUTH_GENERIC_OAUTH_GROUPS_ATTRIBUTE_PATH: groups
       GF_AUTH_GENERIC_OAUTH_NAME_ATTRIBUTE_PATH: name
-      # Authelia group -> Grafana role. Members of `admins` get full access.
+      # The app's admin group -> Grafana role. Members of `admins` get full access.
       GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: "contains(groups[*], 'admins') && 'Admin' || 'Viewer'"
       GF_AUTH_GENERIC_OAUTH_USE_PKCE: "true"
+      # Match an existing Grafana account by email when its identity-provider
+      # id is new -- the case after moving from Authelia to the app, whose ids
+      # differ ("user already exists" and no sign-in, measured). Grafana calls
+      # this insecure for providers where people choose their own email; here
+      # the app owns every email (admins or the directory set it), the same
+      # trust Open WebUI's OAUTH_MERGE_ACCOUNTS_BY_EMAIL already places in it.
+      GF_AUTH_OAUTH_ALLOW_INSECURE_EMAIL_LOOKUP: "true"
       # Our CA is private, and Grafana uses the system trust store which we
       # cannot extend without rebuilding the image. This only affects the
-      # in-cluster call to Authelia over the Docker network.
+      # in-cluster call to the app over the Docker network.
       GF_AUTH_GENERIC_OAUTH_TLS_SKIP_VERIFY_INSECURE: "true"
       # Keep the local admin login available as a break-glass account.
       # The usage dashboards query the gateway's database directly, and
@@ -2313,7 +2203,7 @@ services:
     environment:
       <<: *langfuse-env
       # NextAuth derives the OAuth redirect_uri from this. It must be the proxy
-      # hostname registered in Authelia, not the direct port, or the
+      # hostname registered in the app, not the direct port, or the
       # authorization request is rejected for an invalid redirect_uri.
       NEXTAUTH_URL: https://traces.${LLM_DOMAIN:-llm.localhost}
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-}
@@ -2321,12 +2211,14 @@ services:
       LANGFUSE_INIT_ORG_NAME: LLMService
       LANGFUSE_INIT_PROJECT_ID: local
       LANGFUSE_INIT_PROJECT_NAME: Local
-      # OIDC single sign-on through Authelia (Langfuse calls it a custom provider).
+      # Single sign-on through the app (OIDC; Langfuse calls it a custom provider).
       AUTH_CUSTOM_CLIENT_ID: langfuse
       AUTH_CUSTOM_CLIENT_SECRET: ${LANGFUSE_OIDC_CLIENT_SECRET:-}
-      AUTH_CUSTOM_ISSUER: https://auth.${LLM_DOMAIN:-llm.localhost}
-      AUTH_CUSTOM_NAME: Authelia
+      AUTH_CUSTOM_ISSUER: https://${LLM_DOMAIN:-llm.localhost}/
+      AUTH_CUSTOM_NAME: LLM Service
       AUTH_CUSTOM_SCOPE: openid email profile
+      # Same reason as Grafana's email lookup: existing accounts keep working after a provider change.
+      AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING: "true"
       AUTH_DISABLE_USERNAME_PASSWORD: "false"
       # Node adds this to its trust store: the stack's generated certificate.
       NODE_EXTRA_CA_CERTS: /certs/tls.crt

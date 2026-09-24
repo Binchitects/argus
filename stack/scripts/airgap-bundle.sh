@@ -464,7 +464,7 @@ cp stack/.env.airgap stack/.env
 \`\`\`
 
 Then open \`https://admin.<LLM_DOMAIN>\` and sign in as \`admin\` with
-\`AUTHELIA_ADMIN_PASSWORD\` from the .env. The browser warns once about the
+\`ADMIN_PASSWORD\` from the .env. The browser warns once about the
 self-signed certificate; accept it.
 
 ## Secrets this bundle emptied ($(wc -l < "$secrets_list" | tr -d ' '))

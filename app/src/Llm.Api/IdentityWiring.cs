@@ -34,7 +34,12 @@ public static class IdentityWiring
         services.AddHttpContextAccessor();
         services.TryAddSingleton(TimeProvider.System);
 
-        services.AddDataProtection().PersistKeysToDbContext<AppDbContext>().SetApplicationName("llm-app");
+        var dataProtection = services.AddDataProtection().PersistKeysToDbContext<AppDbContext>().SetApplicationName("llm-app");
+        if (!string.IsNullOrEmpty(auth.DataKey))
+        {
+            var ringKey = KeyRingEncryptor.Derive(auth.DataKey);
+            dataProtection.AddKeyManagementOptions(o => o.XmlEncryptor = new KeyRingEncryptor(ringKey));
+        }
 
         services.AddIdentityCore<AppUser>(o =>
             {
@@ -159,19 +164,29 @@ public static class IdentityWiring
         services.AddRateLimiter(o =>
         {
             o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            // A flood guard only: guessing is stopped by LoginThrottle and account lockout.
+            // Generous, because a whole office signing in at 9:00 shares one NAT address.
             o.AddPolicy("sign-in", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1) }));
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1) }));
+            o.OnRejected = async (ctx, ct) =>
+            {
+                ctx.HttpContext.Response.Headers.RetryAfter = "60";
+                await ctx.HttpContext.Response.WriteAsJsonAsync(
+                    new { status = "rate_limited", error = "Too many requests from your address. Wait a minute and try again." }, ct);
+            };
             o.AddPolicy("token", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 300, Window = TimeSpan.FromMinutes(1) }));
         });
 
+        services.AddExceptionHandler<GatewayExceptionHandler>();
         services.AddHttpClient<ILiteLlm, LiteLlmClient>((sp, c) =>
         {
             var o = sp.GetRequiredService<IOptions<LiteLlmOptions>>().Value;
             c.BaseAddress = new Uri(o.Url);
-            c.Timeout = TimeSpan.FromSeconds(30);
+            // Admin calls are small; a gateway that needs longer is down for our purposes.
+            c.Timeout = TimeSpan.FromSeconds(10);
             if (!string.IsNullOrEmpty(o.MasterKey))
             {
                 c.DefaultRequestHeaders.Authorization = new("Bearer", o.MasterKey);
@@ -189,6 +204,38 @@ public static class IdentityWiring
         services.AddScoped<PersonClaims>();
         services.AddScoped<IdentityBootstrap>();
         services.AddScoped<OidcClients>();
+    }
+
+    /// <summary>
+    /// Refuses to start when stored keys cannot be read (APP_DATA_KEY changed or
+    /// lost). Data Protection would otherwise drop them and quietly make new ones:
+    /// everyone signed out, and the OIDC signing key unreadable.
+    /// </summary>
+    private static void CheckKeyRing(IServiceProvider services)
+    {
+        var keys = services.GetRequiredService<Microsoft.AspNetCore.DataProtection.KeyManagement.IKeyManager>();
+        foreach (var key in keys.GetAllKeys().Where(k => !k.IsRevoked && k.ExpirationDate > DateTimeOffset.UtcNow))
+        {
+            try
+            {
+                _ = key.Descriptor;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.Security.Cryptography.CryptographicException)
+            {
+                throw new InvalidOperationException(
+                    "The stored sign-in keys cannot be decrypted. APP_DATA_KEY in .env must be the value used at the first start " +
+                    "(it never changes). Restore it; removing it or making a new one signs everyone out and breaks single sign-on.", ex);
+            }
+        }
+        // Loads (or creates) the OIDC keys now rather than on the first request.
+        try
+        {
+            _ = services.GetRequiredService<IOptions<OpenIddictServerOptions>>().Value;
+        }
+        catch (System.Security.Cryptography.CryptographicException ex)
+        {
+            throw new InvalidOperationException("The OIDC signing key cannot be decrypted: APP_DATA_KEY differs from the first start.", ex);
+        }
     }
 
     /// <summary>
@@ -222,6 +269,7 @@ public static class IdentityWiring
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)
     {
+        CheckKeyRing(app.Services);
         await using var scope = app.Services.CreateAsyncScope();
         await scope.ServiceProvider.GetRequiredService<IdentityBootstrap>().RunAsync();
         await scope.ServiceProvider.GetRequiredService<OidcClients>().RunAsync();

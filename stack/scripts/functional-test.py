@@ -56,7 +56,8 @@ WEBUI = {}  # the test person's Open WebUI id and an admin token, for cleanup
 
 
 def u(host, path="/"):
-    return f"https://{host}.{DOM}{SUFFIX}{path}"
+    """host "" is the app itself, at the bare domain."""
+    return f"https://{host + '.' if host else ''}{DOM}{SUFFIX}{path}"
 
 
 def rec(area, name, ok, detail=""):
@@ -103,9 +104,17 @@ class Browser:
         return next((c.value for c in self.jar if c.name == name), None)
 
     def login(self, username, password):
-        code, body, _, _ = self.req(u("auth", "/api/firstfactor"),
-                                    {"username": username, "password": password, "keepMeLoggedIn": False})
-        return code == 200 and '"status":"OK"' in body.replace(" ", "")
+        code, body = self.app("POST", "/api/auth/login", {"userName": username, "password": password})
+        return code == 200 and body.get("status") == "ok"
+
+    def app(self, method, path, data=None):
+        """A call to the app's API as this browser: (status, parsed JSON or {})."""
+        code, body, _, _ = self.req(u("", path), data if data is not None or method == "GET" else {},
+                                    method=method, headers={"X-Requested-With": "functional-test", "Accept": "application/json"})
+        try:
+            return code, json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            return code, {}
 
 
 def api_key_call(key, path="/v1/models", payload=None, timeout=300):
@@ -127,13 +136,6 @@ def litellm(path, payload=None, method=None):
         return code, json.loads(body)
     except json.JSONDecodeError:
         return code, body
-
-
-def panel_secret(browser, resp_url):
-    """Follow the panel's show-once redirect and return the revealed text."""
-    code, body, _, _ = browser.req(resp_url)
-    m = re.search(r'class="msg[^"]*"[^>]*>(.*?)</div>', body, re.S)
-    return re.sub(r"<[^>]+>", " ", m.group(1)) if m else body
 
 
 def post_panel(browser, path, fields):
@@ -160,59 +162,61 @@ def main():
     ap.add_argument("--keep", action="store_true", help="do not delete the test person")
     args = ap.parse_args()
 
-    admin_pw = env("AUTHELIA_ADMIN_PASSWORD")
+    admin_pw = env("ADMIN_PASSWORD") or env("AUTHELIA_ADMIN_PASSWORD")
     who = f"ft{secrets.token_hex(3)}"
     email = f"{who}@example.test"
     print(f"domain {DOM}, test person {who} <{email}>\n")
 
     # ------------------------------------------------------------------ admin
-    print("1. Admin signs in and uses the panel")
+    print("1. Admin signs in to the app and manages people")
     admin = Browser()
-    rec("admin", "admin signs in at the portal", admin.login("admin", admin_pw))
-    code, body, _, _ = admin.req(u("admin"))
-    rec("admin", "the console opens on the admin Overview", code == 200 and '<h1 class="page">Overview</h1>' in body, f"HTTP {code}")
+    rec("admin", "admin signs in at the app", admin.login("admin", admin_pw))
+    code, me = admin.app("GET", "/api/auth/me")
+    rec("admin", "the app knows them as an admin", code == 200 and me.get("isAdmin") is True, f"HTTP {code}")
+    code, people = admin.app("GET", "/api/admin/people")
+    rec("admin", "admin lists people", code == 200 and any(p.get("userName") == "admin" for p in people.get("people", [])), f"HTTP {code}")
     code_i, body_i = admin.req(u("admin", "/indexing"))[:2]
-    rec("admin", "admin reaches the Indexing page", code_i == 200 and "<h2>Indexing</h2>" in body_i, f"HTTP {code_i}")
+    rec("admin", "admin reaches the panel's Indexing page", code_i == 200 and "<h2>Indexing</h2>" in body_i, f"HTTP {code_i}")
+    code_m, body = admin.req(u("admin", "/model"))[:2]
     samples = len(re.findall(r"<details", body))
     shipped = len(list((ROOT / "env-samples").glob("*.env")))
     rec("admin", "admin sees the Model card with every env-sample", "<h2>Model</h2>" in body and samples == shipped,
         f"{samples} of {shipped} samples")
     rec("admin", "the Model card names the running model", f"<strong>{MODEL}</strong>" in body, MODEL)
+    code, loc = admin.req(u("admin", "/people"), follow=False)[0], None
+    rec("admin", "the panel hands People over to the app", code == 303, f"HTTP {code}")
 
-    code, loc = post_panel(admin, "/admin/create", {"username": who, "email": email, "budget": "5"})
-    shown = panel_secret(admin, urllib.parse.urljoin(u("admin"), loc)) if loc else ""
-    pw = (re.search(r"password:\s*(\S+)", shown) or [None, ""])[1]
-    key = (re.search(r"API key:\s*(sk-\S+)", shown) or [None, ""])[1]
-    rec("admin", "create person returns a password and an API key", bool(pw and key), f"HTTP {code}")
-    code, again = admin.req(urllib.parse.urljoin(u("admin"), loc))[:2] if loc else (0, "")
-    rec("admin", "the one-time secret cannot be shown twice", key not in again)
+    code, made = admin.app("POST", "/api/admin/people", {"userName": who, "email": email, "budget": 5})
+    pw, key, pid = made.get("password") or "", made.get("apiKey") or "", made.get("id")
+    rec("admin", "create person returns a password and an API key", bool(pw and key), f"HTTP {code} {made.get('warning') or ''}")
+    code, again = admin.app("GET", f"/api/admin/people/{pid}")
+    rec("admin", "the one-time secrets cannot be shown twice", code == 200 and key not in json.dumps(again) and pw not in json.dumps(again))
     if not (pw and key):
-        return finish(who, email, args.keep)
+        return finish(admin, pid, email, args.keep)
 
     # ------------------------------------------------------------- new person
     print("\n2. The new person signs in and is NOT an admin")
     person = Browser()
-    ok = False
-    for _ in range(20):                      # Authelia reloads users.yml via its file watcher
-        if person.login(who, pw):
-            ok = True
-            break
-        time.sleep(1)
-    rec("person", "panel-created person can sign in with the shown password", ok)
-    code, body, _, _ = person.req(u("admin"))
-    rec("person", "the console shows them their own account", code == 200 and "Your API keys" in body, f"HTTP {code}")
-    rec("person", "no admin Overview, no indexing card, no Model card",
-        '<h1 class="page">Overview</h1>' not in body and "<h2>Indexing</h2>" not in body and "<h2>Model</h2>" not in body)
-    for page_path in ("/people", "/indexing", "/model", "/packs"):
+    rec("person", "the new person signs in with the shown password", person.login(who, pw))
+    code, own = person.app("GET", "/api/account/keys")
+    rec("person", "the app shows them their own key and credit", code == 200 and len(own.get("keys", [])) == 1 and own.get("budget") == 5,
+        f"HTTP {code}")
+    code, me = person.app("GET", "/api/auth/me")
+    rec("person", "the app knows them as a member", me.get("isAdmin") is False, f"HTTP {code}")
+    code = person.app("GET", "/api/admin/people")[0]
+    rec("person", "the people list is refused", code == 403, f"HTTP {code}")
+    for page_path in ("/indexing", "/model", "/packs"):
         code_p = person.req(u("admin", page_path), follow=False)[0]
-        rec("person", f"admin page {page_path} is refused", code_p == 403, f"HTTP {code_p}")
-    rec("person", "no other people listed", "admin@" not in body)
-    for path, fields in (("/admin/create", {"username": "x" + who, "email": "x" + email}),
-                         ("/admin/rotate", {"email": email}), ("/admin/reset", {"username": "admin"}),
-                         ("/admin/budget", {"email": email, "budget": "1000"}),
-                         ("/admin/index", {"branches": "main"})):
+        rec("person", f"panel page {page_path} is refused", code_p == 403, f"HTTP {code_p}")
+    for method, path, body in (("POST", "/api/admin/people", {"userName": "x" + who, "email": "x" + email}),
+                               ("POST", f"/api/admin/people/{pid}/key", {}),
+                               ("PUT", f"/api/admin/people/{pid}/budget", {"budget": 1000}),
+                               ("PATCH", f"/api/admin/people/{pid}", {"admin": True})):
+        code = person.app(method, path, body)[0]
+        rec("person", f"{method} {path.replace(str(pid), '<self>')} is refused", code == 403, f"HTTP {code}")
+    for path, fields in (("/admin/index", {"branches": "main"}), ("/admin/packs", {"action": "reload"})):
         code, _ = post_panel(person, path, fields)
-        rec("person", f"POST {path} is refused", code == 403, f"HTTP {code}")
+        rec("person", f"panel POST {path} is refused", code == 403, f"HTTP {code}")
     for host in ("metrics", "alerts"):
         code = person.req(u(host, "/-/healthy"), follow=False)[0]
         rec("person", f"{host} is refused to a non-admin", code in (401, 403), f"HTTP {code}")
@@ -328,7 +332,7 @@ def main():
 
     # ----------------------------------------------------------------- budget
     print("\n6. Credit limits bind")
-    post_panel(admin, "/admin/budget", {"email": email, "budget": "0"})
+    admin.app("PUT", f"/api/admin/people/{pid}/budget", {"budget": 0})
     code_key = None
     for _ in range(30):
         code_key, body = chat(key, max_tokens=64)
@@ -337,7 +341,7 @@ def main():
         time.sleep(4)
     rec("budget", "at credit 0 the person's key is refused", code_key in (400, 401, 403, 429),
         f"HTTP {code_key}: {body[:90] if code_key != 200 else 'still answering'}")
-    post_panel(admin, "/admin/budget", {"email": email, "budget": "5"})
+    admin.app("PUT", f"/api/admin/people/{pid}/budget", {"budget": 5})
     code_back = None
     for _ in range(30):
         code_back, _ = chat(key, max_tokens=64)
@@ -348,9 +352,8 @@ def main():
 
     # --------------------------------------------------------------- rotation
     print("\n7. Key rotation and password resets")
-    code, loc = post_panel(admin, "/admin/rotate", {"email": email})
-    shown = panel_secret(admin, urllib.parse.urljoin(u("admin"), loc)) if loc else ""
-    new_key = (re.search(r"New API key:\s*(sk-\S+)", shown) or [None, ""])[1]
+    code, rotated = admin.app("POST", f"/api/admin/people/{pid}/key")
+    new_key = rotated.get("apiKey") or ""
     rec("rotate", "rotate returns a new key", bool(new_key), f"HTTP {code}")
     old_code = None
     for _ in range(20):
@@ -362,50 +365,37 @@ def main():
     code, _ = api_key_call(new_key)
     rec("rotate", "the new key works", code == 200, f"HTTP {code}")
 
-    code, loc = post_panel(admin, "/admin/reset", {"username": who})
-    shown = panel_secret(admin, urllib.parse.urljoin(u("admin"), loc)) if loc else ""
-    pw2 = (re.search(r"New password for \S+:\s*(\S+)", shown) or [None, ""])[1]
+    code, reset = admin.app("POST", f"/api/admin/people/{pid}/password")
+    pw2 = reset.get("password") or ""
     rec("reset", "reset returns a new password", bool(pw2), f"HTTP {code}")
-    time.sleep(3)
     rec("reset", "the old password no longer signs in", not Browser().login(who, pw))
-    ok = any(Browser().login(who, pw2) or time.sleep(1) for _ in range(15))
-    rec("reset", "the new password signs in", ok)
+    rec("reset", "the new password signs in", Browser().login(who, pw2))
 
     person = Browser()
     person.login(who, pw2)
-    pw3 = "Functional-" + secrets.token_urlsafe(12)
-    code, loc = post_panel(person, "/password", {"current": pw2, "new": pw3})
-    ok = any(Browser().login(who, pw3) or time.sleep(1) for _ in range(15))
-    rec("reset", "a person can change their own password", ok, f"HTTP {code}")
-    code, loc = post_panel(person, "/password", {"current": "wrong-password", "new": "Another-" + pw3})
-    rec("reset", "changing it needs the current password", "incorrect" in urllib.parse.unquote(loc))
+    pw3 = "functional " + " ".join(secrets.token_hex(3) for _ in range(4))
+    code, _ = person.app("POST", "/api/account/password", {"current": pw2, "next": pw3})
+    rec("reset", "a person can change their own password", code == 204 and Browser().login(who, pw3), f"HTTP {code}")
+    code, answer = person.app("POST", "/api/account/password", {"current": "wrong-password", "next": "another " + pw3})
+    rec("reset", "changing it needs the current password", answer.get("status") == "incorrect", f"HTTP {code}")
 
-    return finish(who, email, args.keep)
+    return finish(admin, pid, email, args.keep)
 
 
-def finish(who, email, keep):
+def finish(admin, pid, email, keep):
     if not keep:
         print("\ncleanup")
-        codes = []
-        code, keys = litellm(f"/key/list?user_id={urllib.parse.quote(email)}&return_full_object=true")
-        toks = [k.get("token") for k in (keys.get("keys", []) if isinstance(keys, dict) else []) if isinstance(k, dict)]
-        if toks:
-            codes.append(litellm("/key/delete", {"keys": toks})[0])
-        codes.append(litellm("/user/delete", {"user_ids": [email]})[0])
-        codes.append(litellm("/end_user/delete", {"user_ids": [email]})[0])
-        # The panel has no delete action; remove the Authelia entry the same way
-        # the panel writes it, through its own container.
-        r = subprocess.run(["docker", "exec", "admin-panel", "python", "-c",
-                            "import app; u=app.load_users(); u.pop(%r, None); app.save_users(u)" % who],
-                           capture_output=True, text=True)
+        # Through the app: the person, their gateway user and their keys go together.
+        app_code = admin.app("DELETE", f"/api/admin/people/{pid}")[0] if pid else None
+        # Belt and braces for a run that stopped before the person existed in the app.
+        codes = [litellm("/user/delete", {"user_ids": [email]})[0], litellm("/end_user/delete", {"user_ids": [email]})[0]]
         # And the Open WebUI account its SSO sign-in created. Every run used to
         # leave one behind, which piled up as fake people in the chat admin.
         webui = None
         if WEBUI.get("person_id") and WEBUI.get("admin_token"):
             webui = Browser().req(u("chat", f"/api/v1/users/{WEBUI['person_id']}"), method="DELETE",
                                   headers={"Authorization": f"Bearer {WEBUI['admin_token']}"})[0]
-        print(f"  removed {who}: litellm {codes}, authelia exit {r.returncode} {r.stderr.strip()[:120]}, "
-              f"open-webui {webui}")
+        print(f"  removed {email}: app {app_code}, litellm {codes}, open-webui {webui}")
     failed = [r for r in RESULTS if not r[2]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")
     for area, name, _, detail in failed:

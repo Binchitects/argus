@@ -15,7 +15,15 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
 {
     public async Task EnsureUserAsync(string email, CancellationToken ct = default)
     {
-        var body = new JsonObject { ["user_id"] = email, ["user_email"] = email, ["user_role"] = "internal_user" };
+        var body = new JsonObject
+        {
+            ["user_id"] = email,
+            ["user_email"] = email,
+            ["user_role"] = "internal_user",
+            // LiteLLM otherwise mints a key of its own here: a live credential nobody
+            // was shown, next to the one we generate and hand over. Measured.
+            ["auto_create_key"] = false,
+        };
         // Already present is fine.
         await SendAsync(HttpMethod.Post, "/user/new", body, ct, allowStatus: [400, 409]);
     }
@@ -130,7 +138,12 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         }
         catch (HttpRequestException ex)
         {
-            throw new GatewayException($"The gateway is unreachable ({path}).", null, ex);
+            throw new GatewayException("The gateway is unreachable.", null, ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            // HttpClient reports its own timeout as a cancellation.
+            throw new GatewayException("The gateway did not answer in time.", null, ex);
         }
         using (res)
         {
@@ -140,7 +153,7 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
                 {
                     return null;
                 }
-                throw new GatewayException($"The gateway refused {path}: HTTP {(int)res.StatusCode}.", (int)res.StatusCode);
+                throw new GatewayException($"The gateway refused the request (HTTP {(int)res.StatusCode}).", (int)res.StatusCode);
             }
             var text = await res.Content.ReadAsStringAsync(ct);
             return text.Length == 0 ? new JsonObject() : JsonNode.Parse(text);

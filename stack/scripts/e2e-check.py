@@ -344,7 +344,7 @@ def main() -> int:
         # Open WebUI is SSO-only (ENABLE_PASSWORD_AUTH, ENABLE_SIGNUP off), so a
         # local signup is refused -- as it must be: when it was allowed, the
         # account this made became the Open WebUI admin, with the password
-        # above. functional-test.py covers the chat path through Authelia.
+        # above. functional-test.py covers the chat path through the app's sign-in.
         if exc.code == 403:
             print(f"  [{YELLOW}SKIP{OFF}] chat path: Open WebUI is SSO-only, no local signup "
                   f"-- functional-test.py covers chat attribution through SSO",

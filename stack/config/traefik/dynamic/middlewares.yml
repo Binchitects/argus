@@ -42,13 +42,14 @@ http:
           - security-headers
           - internal-auth
 
-    # Ask Authelia about every request before it reaches the backend. Authelia
-    # answers 200 (allow) or 401/302 (send the browser to the login portal).
-    authelia:
+    # Ask the app about every request before it reaches the backend. It
+    # answers 200 (allow, with who is calling), 302 (send the browser to sign
+    # in), 401 (a program without valid credentials) or 403 (not allowed).
+    app-auth:
       forwardAuth:
-        address: 'http://authelia:9091/api/authz/forward-auth'
-        # Authelia needs the original scheme/host/URI to decide which
-        # access_control rule applies and where to redirect back to.
+        address: 'http://app:8080/api/authz/forward-auth'
+        # The app needs the original scheme/host/URI to pick the rule for the
+        # host and to send the browser back where it was going.
         trustForwardHeader: true
         authResponseHeaders:
           - 'Remote-User'
@@ -62,4 +63,4 @@ http:
       chain:
         middlewares:
           - security-headers
-          - authelia
+          - app-auth

@@ -7,6 +7,10 @@
   --accent: #2f5bd3;
   --accent-text: #ffffff;
   --notice: #eef2fd;
+  --warn: #9a4d00;
+  --warn-bg: #fff3e0;
+  --danger: #b3261e;
+  --input: #ffffff;
   --radius: 10px;
   color-scheme: light;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -23,6 +27,10 @@
     --accent: #7c9cf5;
     --accent-text: #0d0f14;
     --notice: #1d2438;
+    --warn: #ffb870;
+    --warn-bg: #3a2a15;
+    --danger: #ff8a80;
+    --input: #16171a;
     color-scheme: dark;
   }
 }
@@ -33,7 +41,7 @@ a { color: var(--accent); }
 h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
 h2 { font-size: 1.05rem; margin: 0 0 0.35rem; }
 
-.shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
 .sidebar {
   background: var(--surface);
   border-right: 1px solid var(--border);
@@ -53,9 +61,11 @@ h2 { font-size: 1.05rem; margin: 0 0 0.35rem; }
 }
 .sidebar nav a:hover { background: var(--bg); }
 .sidebar nav a.active { background: var(--notice); color: var(--accent); font-weight: 600; }
-.version { margin-top: auto; color: var(--muted); font-size: 0.8rem; }
+.me { margin-top: auto; display: grid; gap: 0.25rem; }
+.me-name { color: var(--text); font-weight: 600; text-decoration: none; }
+.version { color: var(--muted); font-size: 0.8rem; margin: 0.25rem 0 0; }
 
-.content { padding: 2rem clamp(1rem, 4vw, 3rem); max-width: 1100px; width: 100%; }
+.content { padding: 2rem clamp(1rem, 4vw, 3rem); max-width: 1100px; width: 100%; min-width: 0; }
 .lede { color: var(--muted); margin: 0 0 1.5rem; }
 .muted { color: var(--muted); font-size: 0.85rem; margin: 0; }
 
@@ -75,10 +85,68 @@ h2 { font-size: 1.05rem; margin: 0 0 0.35rem; }
   font-weight: 600;
 }
 
+/* forms and controls */
+label { display: grid; gap: 0.3rem; font-weight: 550; font-size: 0.92rem; }
+label.check { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; }
+input:not([type='checkbox']) {
+  font: inherit; color: var(--text); background: var(--input);
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.65rem; width: 100%; min-width: 0;
+}
+input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button { font: inherit; cursor: pointer; }
+button:disabled { opacity: 0.6; cursor: default; }
+.button { border: 0; }
+.button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+.button.danger { background: var(--danger); color: #fff; }
+.button.small { padding: 0.25rem 0.6rem; font-size: 0.85rem; }
+.link { background: none; border: 0; padding: 0; color: var(--accent); text-align: left; }
+.error { color: var(--danger); margin: 0; overflow-wrap: anywhere; }
+.warn-text { color: var(--warn); margin: 0; overflow-wrap: anywhere; }
+.stack { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
+.row { display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; }
+.inline-form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; }
+.inline-form label { min-width: 10rem; }
+.grid-form { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: end; }
+.card h2 { margin-bottom: 0.75rem; }
+.card.danger { border-color: var(--danger); }
+.plain { list-style: none; padding: 0; margin: 0 0 0.75rem; display: grid; gap: 0.35rem; }
+.badge { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.05rem 0.45rem; border-radius: 99px; background: var(--notice); color: var(--accent); margin-left: 0.3rem; }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+code { font-family: ui-monospace, 'Cascadia Code', Menlo, monospace; font-size: 0.9em; overflow-wrap: anywhere; }
+
+.tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin: 1rem 0 1.25rem; }
+.tabs a { padding: 0.5rem 0.8rem; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs a.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+th, td { text-align: left; padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 0.82rem; }
+tr.failed td { color: var(--warn); }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1.25rem; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+
+.secret { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0; }
+.secret-label { font-weight: 600; }
+.secret code { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.3rem 0.5rem; }
+.notice.once { border: 1px solid var(--accent); }
+.codes { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: 0.35rem; }
+
+.login { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
+.login-card { width: min(100%, 380px); display: grid; gap: 1rem; padding: 1.75rem; }
+.login-card .button { width: 100%; padding: 0.65rem; }
+.loading { min-height: 100vh; }
+
 @media (max-width: 720px) {
-  .shell { grid-template-columns: 1fr; }
+  /* minmax(0, ...): a 1fr column never shrinks below its widest content, so a table would push the page sideways. */
+  .shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--border); padding: 0.75rem 1rem; }
   .sidebar ul { display: flex; flex-wrap: wrap; gap: 0.25rem; }
-  .version { margin-top: 0; }
+  .me { margin-top: 0; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+  .facts { grid-template-columns: 1fr; gap: 0.1rem; }
+  .facts dd { margin-bottom: 0.5rem; }
   .content { padding: 1.25rem 1rem; }
 }

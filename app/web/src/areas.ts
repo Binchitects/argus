@@ -7,6 +7,10 @@ export interface Area {
   phase: number
   /** Subdomain of the service that covers this area until then. */
   legacy: { subdomain: string; name: string }
+  /** Built into the app already. */
+  native?: boolean
+  /** Only shown to admins. */
+  adminOnly?: boolean
 }
 
 export const areas: Area[] = [
@@ -41,9 +45,11 @@ export const areas: Area[] = [
   {
     path: '/admin',
     title: 'Admin',
-    summary: 'People, sign-in (local and LDAP), API keys, prices and the model.',
+    summary: 'People, sign-in (local and LDAP), API keys, and the audit log.',
     phase: 1,
     legacy: { subdomain: 'admin', name: 'the admin panel' },
+    native: true,
+    adminOnly: true,
   },
 ]
 

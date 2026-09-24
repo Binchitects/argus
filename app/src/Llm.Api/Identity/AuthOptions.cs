@@ -24,6 +24,9 @@ public sealed class AuthOptions
     /// <summary>Hash-free list of people for Argus (email -> username), rewritten on every change.</summary>
     public string? DirectoryFile { get; set; }
 
+    /// <summary>APP_DATA_KEY: encrypts the key ring at rest. Never change it after the first start.</summary>
+    public string? DataKey { get; set; }
+
     public TimeSpan SessionIdle { get; set; } = TimeSpan.FromHours(1);
     public TimeSpan SessionMax { get; set; } = TimeSpan.FromHours(12);
     public TimeSpan RememberMe { get; set; } = TimeSpan.FromDays(30);

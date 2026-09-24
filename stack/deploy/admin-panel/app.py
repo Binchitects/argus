@@ -84,6 +84,11 @@ PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://prometheus:9090").rstr
 #: serving fine.
 GRAFANA_PROBE_URL = os.environ.get("GRAFANA_PROBE_URL", "http://grafana:3000").rstrip("/")
 AUTHELIA_PROBE_URL = os.environ.get("AUTHELIA_PROBE_URL", "http://authelia:9091").rstrip("/")
+# The app (https://<LLM_DOMAIN>) owns people, API keys and passwords now. With
+# APP_URL set the panel hands those pages to it and keeps the model, indexing
+# and packs pages until they move too (docs/enterprise/PLAN.md, phase 2).
+APP_URL = os.environ.get("APP_URL", "").rstrip("/")
+APP_PROBE_URL = os.environ.get("APP_PROBE_URL", "http://app:8080/healthz")
 #: Argus's operator control surface. Both must be set for the indexing card to
 #: appear: without the token the endpoint does not exist on Argus's side, so
 #: rendering a button that cannot work would only mislead.
@@ -315,6 +320,8 @@ def _sync_directory_forever(interval: float = 30.0) -> None:
 
 
 def _start_directory_sync() -> None:
+    if APP_URL:
+        return                    # the app writes the directory now; never overwrite it
     threading.Thread(target=_sync_directory_forever, name="directory-sync", daemon=True).start()
 
 
@@ -637,7 +644,8 @@ def page(request: Request, title: str, body: str, who: str, admin: bool,
                     the page that displayed a secret travels in the Referer.
     """
     theme = _theme(request)
-    logout = (f'<a class="chip" href="{_h(AUTHELIA_URL)}/logout'
+    logout = (f'<a class="chip" href="{_h(APP_URL)}/connect/logout">Sign out</a>' if APP_URL
+              else f'<a class="chip" href="{_h(AUTHELIA_URL)}/logout'
               f'?rd={urllib.parse.quote(f"https://admin.{DOMAIN}/")}">Sign out</a>'
               if AUTHELIA_URL else "")
     cycle = THEMES[(THEMES.index(theme) + 1) % len(THEMES)]
@@ -1327,7 +1335,8 @@ def _services() -> list[tuple[str, bool, str]]:
         ("Argus index", *_probe(ARGUS_URL.rstrip("/") + "/healthz")),
         ("Prometheus", *_probe(PROMETHEUS_URL + "/-/healthy")),
         ("Grafana", *_probe(GRAFANA_PROBE_URL + "/api/health")),
-        ("Authelia", *_probe(AUTHELIA_PROBE_URL + "/api/health")),
+        (("Sign-in (app)", *_probe(APP_PROBE_URL)) if APP_URL
+         else ("Authelia", *_probe(AUTHELIA_PROBE_URL + "/api/health"))),
     ]
 
 
@@ -1741,7 +1750,8 @@ def monitoring_view(request: Request, who: Caller) -> Response:
         ("Grafana", GRAFANA_URL, "dashboards: usage, GPU, logs, Argus, indexing"),
         ("Prometheus", PROMETHEUS_URL, "raw metrics and alert rules"),
         ("Argus MCP", f"https://argus.{DOMAIN}/mcp", "the code index, for agents"),
-        ("Authelia", AUTHELIA_URL, "the identity provider behind every login"),
+        (("LLM Service", APP_URL, "sign-in, people, API keys, audit log") if APP_URL
+         else ("Authelia", AUTHELIA_URL, "the identity provider behind every login")),
     ]
     rows = "".join(
         f'<div class="svc"><span class="name">{_h(n)}</span>'
@@ -2153,7 +2163,9 @@ async def admin_budget(request: Request) -> Response:
 
 
 async def healthz(_request: Request) -> Response:
-    checks = {"litellm": False, "users_file": os.path.exists(USERS_FILE)}
+    checks = {"litellm": False}
+    if not APP_URL:
+        checks["users_file"] = os.path.exists(USERS_FILE)
     try:
         api("/health/liveliness")
         checks["litellm"] = True
@@ -2377,3 +2389,27 @@ app = Starlette(routes=[
     Route("/admin/index", admin_index, methods=["POST"]),
     Route("/admin/packs", admin_packs, methods=["POST"]),
 ], on_startup=[_start_directory_sync])
+
+
+# Pages the app has taken over, and where each one lives there now.
+_HANDED_OVER = {
+    "/": "/", "/profile": "/account", "/password": "/account", "/people": "/admin",
+    "/export/people.csv": "/admin", "/admin/create": "/admin", "/admin/rotate": "/admin",
+    "/admin/reset": "/admin", "/admin/budget": "/admin", "/admin/delete": "/admin",
+}
+
+
+def _hand_over(inner):
+    """ASGI wrapper: with APP_URL set, people/profile/password pages redirect to the app."""
+    async def asgi(scope, receive, send):
+        if APP_URL and scope["type"] == "http":
+            path = scope["path"].rstrip("/") or "/"
+            target = _HANDED_OVER.get(path) or ("/admin" if path.startswith("/people/") else None)
+            if target is not None:
+                await RedirectResponse(APP_URL + target, status_code=303)(scope, receive, send)
+                return
+        await inner(scope, receive, send)
+    return asgi
+
+
+app = _hand_over(app)

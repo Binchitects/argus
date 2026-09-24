@@ -126,7 +126,8 @@ SUFFIX = "" if HTTPS_PORT == "443" else f":{HTTPS_PORT}"
 
 
 def url(host: str, path: str = "/") -> str:
-    return f"https://{host}.{DOMAIN}{SUFFIX}{path}"
+    """host "" is the app itself, at the bare domain."""
+    return f"https://{host + '.' if host else ''}{DOMAIN}{SUFFIX}{path}"
 
 
 def ctx() -> ssl.SSLContext:
@@ -159,30 +160,12 @@ def check_config() -> None:
            "PASS" if not placeholders else "FAIL",
            "" if not placeholders else ", ".join(placeholders[:5]))
 
-    # These files must agree with LLM_DOMAIN. A stale domain here is the failure
-    # that breaks SSO while every container still reports healthy. Authelia's
-    # two files name the domain only as {{ env "LLM_DOMAIN" }}, so ANY literal
-    # hostname in them is stale by definition.
-    for rel in ("config/authelia/configuration.template.yml", "config/authelia/clients.yml"):
-        p = ROOT / rel
-        if not p.exists():
-            record("config", f"{Path(rel).name} rendered", "SKIP", "not present")
-            continue
-        body = p.read_text(encoding="utf-8", errors="replace")
-        # Require at least one label: a bare ".localhost" is a fragment,
-        # not a hostname, and matching it produced a false failure.
-        stale = re.findall(r"[a-z0-9][a-z0-9.-]*\.localhost", body)
-        wrong = sorted({s for s in stale if not s.endswith(DOMAIN)})
-        record("config", f"{Path(rel).name} matches LLM_DOMAIN",
-               "PASS" if not wrong else "FAIL",
-               f"domain={DOMAIN}" if not wrong else f"stale: {wrong[:3]}")
-
     code, out = sh("docker", "compose", "config", "-q")
     record("config", "docker-compose.yml parses", "PASS" if code == 0 else "FAIL",
            "" if code == 0 else out.strip().splitlines()[-1][:90])
 
     # Traefik must not adopt containers from other compose projects: router
-    # names are global, so a neighbouring `authelia` router silently wins.
+    # names are global, so a neighbouring project's router silently wins.
     tf = (ROOT / "config/traefik/traefik.yml").read_text(encoding="utf-8", errors="replace")
     record("config", "Traefik discovery scoped to this project",
            "PASS" if "constraints:" in tf else "FAIL",
@@ -194,8 +177,8 @@ EXPECTED = {
     "": ["open-webui", "prometheus", "grafana", "alertmanager", "node-exporter", "power-limits"],
     "cadvisor": ["cadvisor"],
     "proxy": ["traefik"],
-    "gateway": ["litellm", "postgres", "redis"],
-    "auth": ["authelia"],
+    "gateway": ["litellm", "postgres", "redis", "app"],
+    "auth": ["admin-panel"],
     "smi": ["nvidia-smi-exporter"],
     "argus": ["argus"],
 }
@@ -264,8 +247,8 @@ ROUTES = [
     ("chat", "/", {200, 302}, ""),
     ("gateway", "/v1/models", {200, 401}, ""),
     ("grafana", "/", {200, 302}, ""),
-    ("auth", "/", {200, 302}, "auth"),
-    # Denied, and never 200: this request carries no session. Authelia answers
+    ("", "/readyz", {200}, "gateway"),
+    # Denied, and never 200: this request carries no session. The app answers
     # a browser (Accept: text/html, or curl's */*) with a 302 to the portal and
     # a bare client like this one with 401 -- both are refusals. A 200 would mean
     # forward-auth was bypassed and an anonymous caller reached a page that can
@@ -284,7 +267,7 @@ def check_routes() -> None:
 
     for host, path, allowed, profile in ROUTES:
         if profile and profile not in PROFILES:
-            record("routes", f"{host}.{DOMAIN}", "SKIP", f"profile {profile} off")
+            record("routes", f"{host + '.' if host else ''}{DOMAIN}", "SKIP", f"profile {profile} off")
             continue
         try:
             with get(url(host, path)) as r:
@@ -292,9 +275,9 @@ def check_routes() -> None:
         except urllib.error.HTTPError as exc:
             code = exc.code
         except Exception as exc:                       # TLS failure lands here
-            record("routes", f"{host}.{DOMAIN}", "FAIL", f"{type(exc).__name__}: {exc}"[:80])
+            record("routes", f"{host + '.' if host else ''}{DOMAIN}", "FAIL", f"{type(exc).__name__}: {exc}"[:80])
             continue
-        record("routes", f"{host}.{DOMAIN}", "PASS" if code in allowed else "FAIL",
+        record("routes", f"{host + '.' if host else ''}{DOMAIN}", "PASS" if code in allowed else "FAIL",
                f"HTTP {code} over TLS")
 
     # Plain HTTP must not serve content; it must redirect.
@@ -322,11 +305,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 # ------------------------------------------------------------ D. identity ---
 def check_identity() -> None:
     section("D. Identity provider")
-    if "auth" not in PROFILES:
-        record("identity", "Authelia", "SKIP", "auth profile off")
+    if "gateway" not in PROFILES:
+        record("identity", "the app", "SKIP", "gateway profile off")
         return
     try:
-        with get(url("auth", "/.well-known/openid-configuration")) as r:
+        with get(url("", "/.well-known/openid-configuration")) as r:
             doc = json.load(r)
     except Exception as exc:
         record("identity", "OIDC discovery document", "FAIL", str(exc)[:80])
@@ -335,7 +318,7 @@ def check_identity() -> None:
     issuer = doc.get("issuer", "")
     record("identity", "OIDC discovery document", "PASS",
            f"{len(doc.get('scopes_supported', []))} scopes")
-    # The issuer proves WHICH Authelia answered -- the check that would have
+    # The issuer proves WHICH identity provider answered -- the check that would have
     # caught a neighbouring project's router hijacking this hostname.
     record("identity", "issuer names this domain",
            "PASS" if DOMAIN in issuer else "FAIL", issuer[:70])
@@ -509,8 +492,8 @@ def check_operations() -> None:
 
     # The traps that used to need a setup script are now handled inside compose.
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8", errors="replace")
-    record("ops", "Authelia key/database mismatch is guarded",
-           "PASS" if "AUTHELIA_STORAGE_ENCRYPTION_KEY differs" in compose else "FAIL")
+    record("ops", "the app creates its own database on an existing Postgres",
+           "PASS" if (ROOT.parent / "app/src/Llm.Core/Data/DatabaseBootstrap.cs").exists() else "FAIL")
     record("ops", "model files are verified before the engine starts",
            "PASS" if "model-init:" in compose and "service_completed_successfully" in compose else "FAIL")
 

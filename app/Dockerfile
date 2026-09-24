@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # The whole app in one image: the React UI is built, then served by the API.
 
 FROM node:22-alpine AS web

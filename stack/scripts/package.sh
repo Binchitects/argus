@@ -4,7 +4,7 @@
 # What goes in: compose file, configuration templates, scripts, docs, and the
 # offline Argus image so a target host needs no build toolchain.
 #
-# What NEVER goes in: .env (every secret), generated TLS keys, the Authelia user
+# What NEVER goes in: .env (every secret), generated TLS keys, the imported user
 # database and OIDC clients, issued API keys, model weights, backups. The
 # archive is verified against a deny-list before it is written, and the build
 # FAILS rather than shipping a secret.
@@ -128,8 +128,7 @@ cp config/traefik/traefik.yml "$PKG/config/traefik/" 2>/dev/null
 cp config/traefik/dynamic/*.yml "$PKG/config/traefik/dynamic/" 2>/dev/null
 touch "$PKG/config/traefik/certs/.gitkeep" "$PKG/config/traefik/auth/.gitkeep"
 
-mkdir -p "$PKG/config/authelia"
-cp config/authelia/configuration.template.yml "$PKG/config/authelia/" 2>/dev/null
+mkdir -p "$PKG/config/authelia/directory"
 
 # ---------------------------------------------------------------------------
 if [[ $INCLUDE_IMAGE -eq 1 ]]; then

@@ -44,7 +44,7 @@ command -v openssl >/dev/null 2>&1 || die "openssl is not on PATH; it is the onl
 # rather than as "you skipped a step".
 is_external() {
   case "$1" in
-    ARGUS_GITLAB_TOKEN|ARGUS_GITLAB_PASSWORD|HF_TOKEN) return 0 ;;
+    ARGUS_GITLAB_TOKEN|ARGUS_GITLAB_PASSWORD|HF_TOKEN|LDAP_BIND_PASSWORD) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -56,7 +56,6 @@ is_external() {
 bytes_for() {
   case "$1" in
     LANGFUSE_ENCRYPTION_KEY)          echo 32 ;;
-    AUTHELIA_STORAGE_ENCRYPTION_KEY)  echo 32 ;;
     *)                                echo 24 ;;
   esac
 }

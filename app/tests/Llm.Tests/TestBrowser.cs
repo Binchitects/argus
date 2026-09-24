@@ -17,7 +17,8 @@ public sealed class TestBrowser
 
     public TestBrowser(WebApplicationFactory<Program> factory, string? ip = null)
     {
-        Ip = ip ?? $"10.0.{Interlocked.Increment(ref _next) / 250}.{_next % 250 + 1}";
+        var n = Interlocked.Increment(ref _next); // one read: parallel browsers must never share an address
+        Ip = ip ?? $"10.{n / 62500 % 250}.{n / 250 % 250}.{n % 250 + 1}";
         Http = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri($"https://{AppFixture.Domain}"),

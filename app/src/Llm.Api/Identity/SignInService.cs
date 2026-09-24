@@ -23,6 +23,7 @@ public enum SignInOutcome
 }
 
 public sealed partial class SignInService(
+    Llm.Core.Data.AppDbContext db,
     SignInManager<AppUser> signIn,
     UserManager<AppUser> users,
     ILdapDirectory ldap,
@@ -35,10 +36,45 @@ public sealed partial class SignInService(
 {
     private string? Ip => http.HttpContext?.Connection.RemoteIpAddress?.ToString();
 
+    /// <summary>
+    /// Two sign-ins of the same person at once (two devices, parallel scripts) both
+    /// update their row, and Identity's concurrency stamp fails one of them. The
+    /// loser retries against fresh data instead of answering 500.
+    /// </summary>
     public async Task<SignInOutcome> PasswordAsync(string login, string password, bool remember)
     {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await PasswordOnceAsync(login, password, remember);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < 5)
+            {
+                db.ChangeTracker.Clear();
+            }
+        }
+    }
+
+    public async Task<SignInOutcome> TwoFactorAsync(string code, bool recovery, bool remember)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await TwoFactorOnceAsync(code, recovery, remember);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < 5)
+            {
+                db.ChangeTracker.Clear();
+            }
+        }
+    }
+
+    private async Task<SignInOutcome> PasswordOnceAsync(string login, string password, bool remember)
+    {
         login = login.Trim();
-        if (throttle.IsBanned(Ip))
+        if (throttle.IsBanned(Ip, login))
         {
             await audit.WriteAsync("sign_in", login, success: false, detail: "address banned");
             return SignInOutcome.Banned;
@@ -47,14 +83,14 @@ public sealed partial class SignInService(
 
         if (user is not null && user.Source == UserSource.Local)
         {
-            var check = await signIn.CheckPasswordSignInAsync(user, password, lockoutOnFailure: true);
+            var check = await signIn.CheckPasswordSignInAsync(user, password, lockoutOnFailure: false);
             if (check.IsLockedOut)
             {
                 return await FailAsync(login, SignInOutcome.LockedOut, "account locked");
             }
             if (!check.Succeeded)
             {
-                return await FailAsync(login, SignInOutcome.Invalid, "wrong password");
+                return await FailAsync(login, await CountFailureAsync(user) ? SignInOutcome.LockedOut : SignInOutcome.Invalid, "wrong password");
             }
             if (user.IsDisabled)
             {
@@ -86,7 +122,7 @@ public sealed partial class SignInService(
         {
             if (user is not null)
             {
-                await users.AccessFailedAsync(user);
+                await CountFailureAsync(user);
             }
             return await FailAsync(login, SignInOutcome.Invalid, "directory refused");
         }
@@ -107,16 +143,16 @@ public sealed partial class SignInService(
         return await CompleteAsync(synced, remember, "ldap");
     }
 
-    public async Task<SignInOutcome> TwoFactorAsync(string code, bool recovery, bool remember)
+    private async Task<SignInOutcome> TwoFactorOnceAsync(string code, bool recovery, bool remember)
     {
-        if (throttle.IsBanned(Ip))
-        {
-            return SignInOutcome.Banned;
-        }
         var user = await signIn.GetTwoFactorAuthenticationUserAsync();
         if (user is null)
         {
             return SignInOutcome.Invalid; // the password step expired or never happened
+        }
+        if (throttle.IsBanned(Ip, user.UserName!))
+        {
+            return SignInOutcome.Banned;
         }
         // Authenticator codes are often typed as "123 456"; recovery codes contain a hyphen that is part of them.
         code = code.Replace(" ", "", StringComparison.Ordinal);
@@ -218,6 +254,26 @@ public sealed partial class SignInService(
         return (user, "");
     }
 
+    /// <summary>
+    /// One atomic UPDATE, not Identity's read-modify-write: parallel wrong guesses
+    /// would otherwise overwrite each other's count and never reach the lockout.
+    /// </summary>
+    /// <returns>True when this failure locked the account.</returns>
+    private async Task<bool> CountFailureAsync(AppUser user)
+    {
+        var max = users.Options.Lockout.MaxFailedAccessAttempts;
+        var until = DateTimeOffset.UtcNow + users.Options.Lockout.DefaultLockoutTimeSpan;
+        var locked = await db.Users
+            .Where(u => u.Id == user.Id && u.LockoutEnabled && u.AccessFailedCount + 1 >= max)
+            .ExecuteUpdateAsync(set => set.SetProperty(u => u.AccessFailedCount, 0).SetProperty(u => u.LockoutEnd, until));
+        if (locked == 0)
+        {
+            await db.Users.Where(u => u.Id == user.Id && u.LockoutEnabled)
+                .ExecuteUpdateAsync(set => set.SetProperty(u => u.AccessFailedCount, u => u.AccessFailedCount + 1));
+        }
+        return locked > 0;
+    }
+
     public async Task SignOutAsync()
     {
         var name = http.HttpContext?.User.Identity?.Name;
@@ -247,9 +303,14 @@ public sealed partial class SignInService(
 
     private async Task SignedInAsync(AppUser user, string method)
     {
-        throttle.Success(Ip);
-        user.LastSignInAt = DateTimeOffset.UtcNow;
-        await users.UpdateAsync(user);
+        throttle.Success(Ip, user.UserName!);
+        if (user.Email is not null)
+        {
+            throttle.Success(Ip, user.Email);
+        }
+        // A direct update: it must not race the concurrency stamp of a parallel sign-in.
+        var now = DateTimeOffset.UtcNow;
+        await db.Users.Where(u => u.Id == user.Id).ExecuteUpdateAsync(set => set.SetProperty(u => u.LastSignInAt, now));
         await audit.WriteAsync("sign_in", user.UserName, detail: method, actor: user);
     }
 
@@ -257,7 +318,7 @@ public sealed partial class SignInService(
     {
         if (countsAsGuess)
         {
-            throttle.Failure(Ip);
+            throttle.Failure(Ip, login);
         }
         await audit.WriteAsync("sign_in", login, success: false, detail: detail);
         return outcome;

@@ -10,7 +10,7 @@
     --cacert and ships with Windows 10+.
 
 .PARAMETER Direct
-    Test vLLM at api.<domain> instead of the gateway. Needs an Authelia token,
+    Test vLLM at api.<domain> instead of the gateway. Needs a token from scripts/get-token.sh,
     which is fetched automatically.
 
 .EXAMPLE
@@ -43,7 +43,7 @@ if ($Direct) {
     $model = $envMap['VLLM_SERVED_MODEL_NAME']; if (-not $model) { $model = 'default' }
 } else {
     # The gateway is the default: LiteLLM validates its own keys, so no
-    # Authelia session or token is involved.
+    # session or token is involved.
     $base = "https://gateway.$dom"
     $key = $envMap['LITELLM_MASTER_KEY']
     $model = 'local'

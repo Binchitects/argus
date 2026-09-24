@@ -241,6 +241,27 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    public async Task With_the_gateway_down_a_persons_key_page_says_so_instead_of_failing()
+    {
+        var admin = await Admin();
+        var (_, password, _, email) = await CreatePersonAsync(admin);
+        var person = await Browser().SignedInAsync(email, password);
+        app.Gateway.Down = true;
+        try
+        {
+            foreach (var res in new[] { await person.GetAsync("/api/account/keys"), await person.PostAsync("/api/account/keys/rotate") })
+            {
+                await StatusAssert.Is(HttpStatusCode.BadGateway, res);
+                Assert.Contains("gateway is not reachable", (await person.JsonAsync(res)).GetProperty("error").GetString(), StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            app.Gateway.Down = false;
+        }
+    }
+
+    [Fact]
     public async Task Two_factor_sign_in_with_an_authenticator_and_with_a_recovery_code()
     {
         var admin = await Admin();
@@ -277,15 +298,31 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Five_failures_from_one_address_ban_it_even_with_the_right_password()
+    public async Task Five_failures_ban_that_account_from_that_address_but_not_colleagues_behind_it()
     {
+        var admin = await Admin();
+        var (_, password, _, email) = await CreatePersonAsync(admin);
         var ip = "203.0.113.77";
         for (var i = 0; i < 5; i++)
         {
-            await StatusAssert.Is(HttpStatusCode.Unauthorized, await new TestBrowser(app.Factory, ip).LoginAsync("admin", "wrong " + i));
+            await StatusAssert.Is(HttpStatusCode.Unauthorized, await new TestBrowser(app.Factory, ip).LoginAsync(email, "wrong " + i));
+        }
+        await StatusAssert.Is(HttpStatusCode.TooManyRequests, await new TestBrowser(app.Factory, ip).LoginAsync(email, password));
+        // A colleague behind the same NAT is not affected, nor is the person from elsewhere.
+        await StatusAssert.Is(HttpStatusCode.OK, await new TestBrowser(app.Factory, ip).LoginAsync("admin", AppFixture.AdminPassword));
+        await StatusAssert.Is(HttpStatusCode.OK, await new TestBrowser(app.Factory, "203.0.113.78").LoginAsync(email, password));
+    }
+
+    [Fact]
+    public async Task Spraying_many_accounts_from_one_address_bans_the_address()
+    {
+        var ip = "198.51.100.9";
+        for (var i = 0; i < 50; i++)
+        {
+            await new TestBrowser(app.Factory, ip).LoginAsync($"spray-{i}", "Winter2026!");
         }
         await StatusAssert.Is(HttpStatusCode.TooManyRequests, await new TestBrowser(app.Factory, ip).LoginAsync("admin", AppFixture.AdminPassword));
-        await StatusAssert.Is(HttpStatusCode.OK, await new TestBrowser(app.Factory, "203.0.113.78").LoginAsync("admin", AppFixture.AdminPassword));
+        await StatusAssert.Is(HttpStatusCode.OK, await new TestBrowser(app.Factory, "198.51.100.10").LoginAsync("admin", AppFixture.AdminPassword));
     }
 
     [Fact]
@@ -363,5 +400,55 @@ public sealed class SessionCapTests(AppFixture app)
         var after = await b.JsonAsync(await b.GetAsync("/api/auth/me"));
         Assert.Equal(before, after.GetProperty("signedInAt").GetInt64());
         Assert.True(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - before >= 1);
+    }
+}
+
+[Collection(nameof(AppCollection))]
+public sealed class ConcurrentSignInTests(AppFixture app)
+{
+    [Fact]
+    public async Task Many_simultaneous_sign_ins_of_one_person_all_succeed()
+    {
+        var results = await Task.WhenAll(Enumerable.Range(0, 12).Select(_ => new TestBrowser(app.Factory).LoginAsync("admin", AppFixture.AdminPassword)));
+        Assert.All(results, r => Assert.Equal(System.Net.HttpStatusCode.OK, r.StatusCode));
+    }
+
+    [Fact]
+    public async Task Parallel_wrong_passwords_still_reach_the_lockout()
+    {
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "par" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var password = made.GetProperty("password").GetString()!;
+        // Ten guesses at once, each from its own address: the count must not lose any of them.
+        await Task.WhenAll(Enumerable.Range(0, 10).Select(i => new TestBrowser(app.Factory).LoginAsync(name, "wrong guess " + i)));
+        var res = await new TestBrowser(app.Factory).LoginAsync(name, password);
+        Assert.Equal(System.Net.HttpStatusCode.Locked, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Many_simultaneous_wrong_passwords_are_all_refused_cleanly()
+    {
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(i => new TestBrowser(app.Factory).LoginAsync("admin", "wrong in parallel " + i)));
+        Assert.All(results, r => Assert.Equal(System.Net.HttpStatusCode.Unauthorized, r.StatusCode));
+    }
+}
+
+[Collection(nameof(AppCollection))]
+public sealed class FloodGuardTests(AppFixture app)
+{
+    [Fact]
+    public async Task A_flood_of_sign_in_requests_gets_a_readable_429()
+    {
+        var ip = "192.0.2.200";
+        HttpResponseMessage last = null!;
+        for (var i = 0; i < 125; i++)
+        {
+            // Unknown names, each once: the per-account throttle never engages, only the flood guard.
+            last = await new TestBrowser(app.Factory, ip).LoginAsync($"flood-{i}", "x");
+        }
+        Assert.Equal(System.Net.HttpStatusCode.TooManyRequests, last.StatusCode);
+        Assert.Equal("60", last.Headers.RetryAfter?.ToString());
+        Assert.Contains("Wait a minute", await last.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 }
