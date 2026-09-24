@@ -14,12 +14,25 @@ public sealed class GatewayExceptionHandler : IExceptionHandler
         {
             return false;
         }
-        httpContext.Response.StatusCode = StatusCodes.Status502BadGateway;
-        await httpContext.Response.WriteAsJsonAsync(new
+        // The browser already went away (a reload, another page): nobody to tell,
+        // and writing to the closed connection would throw from the error handler.
+        if (httpContext.RequestAborted.IsCancellationRequested)
         {
-            status = "gateway",
-            error = "The model gateway is not reachable right now, so keys and credit cannot be shown or changed. " + gateway.Message,
-        }, cancellationToken);
+            return true;
+        }
+        httpContext.Response.StatusCode = StatusCodes.Status502BadGateway;
+        try
+        {
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                status = "gateway",
+                error = "The model gateway is not reachable right now, so keys and credit cannot be shown or changed. " + gateway.Message,
+            }, cancellationToken);
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            // It left while the answer was being written.
+        }
         return true;
     }
 }

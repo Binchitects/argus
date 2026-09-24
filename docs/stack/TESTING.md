@@ -466,6 +466,8 @@ make smoke           # API surface
 
 # the app in a real browser, against the deployed stack (in app/web)
 E2E_PASSWORD=<admin password> E2E_CHAT=1 npm run e2e
+# the new web (in app/frontend): desktop and phone, both themes, axe accessibility
+E2E_PASSWORD=<admin password> npm run e2e     # https://next.llm.localhost
 # ... and Argus's per-person access, with the test GitLab up
 ./scripts/test-gitlab/run.sh --keep   # from the repo root
 E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 npm run e2e

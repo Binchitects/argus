@@ -8,7 +8,8 @@ app/
   src/Llm.Api      web host: endpoints, health, security headers, serves the UI
   src/Llm.Core     domain and data (EF Core, Postgres)
   tests/Llm.Tests  xUnit; integration tests run a real Postgres via Testcontainers
-  web/             React + Vite + TypeScript; Vitest unit tests, Playwright e2e in web/e2e
+  web/             the first UI, served by the API; replaced by frontend/ (plan 3C)
+  frontend/        the new web, its own image (Alpine + nginx); see frontend/README.md
   Dockerfile       UI build -> API publish -> chiseled runtime (non-root, no shell)
   dn               runs the .NET SDK in Docker, so nothing needs installing
 ```

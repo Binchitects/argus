@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "react",
+    "typescript",
+    "oxc",
+    "jsx-a11y"
+  ],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "warn",
+    "react/only-export-components": [
+      "warn",
+      {
+        "allowConstantExport": true
+      }
+    ],
+    "jsx-a11y/no-autofocus": "off",
+    "react/incompatible-library": "off"
+  },
+  "ignorePatterns": [
+    "dist",
+    "test-results",
+    "playwright-report"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "src/components/ui/**",
+        "src/lib/**",
+        "src/app/providers.tsx"
+      ],
+      "rules": {
+        "react/only-export-components": "off"
+      }
+    }
+  ]
+}

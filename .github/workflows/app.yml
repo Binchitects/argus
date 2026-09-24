@@ -38,6 +38,19 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: app/frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: app/frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
   e2e:
     needs: [backend, web]
     runs-on: ubuntu-latest
@@ -91,3 +104,64 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@v4
         with: { name: playwright-report, path: app/web/playwright-report }
+
+  # The new web (app/frontend, plan phases 3A-3C): its own image, behind Traefik
+  # with the production path split, against the app image.
+  frontend-e2e:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    env:
+      E2E_PASSWORD: ci admin password for tests
+      E2E_BASE_URL: https://llm.localhost:8443
+      E2E_NO_GATEWAY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the images
+        run: |
+          docker build -t llm-app:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} app
+          docker build -t llm-web:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} app/frontend
+      - name: Start Postgres, the app, the web and Traefik
+        run: |
+          echo "127.0.0.1 llm.localhost" | sudo tee -a /etc/hosts
+          mkdir -p certs
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=llm.localhost \
+            -addext "subjectAltName=DNS:llm.localhost,DNS:*.llm.localhost" -keyout certs/tls.key -out certs/tls.crt
+          chmod 644 certs/*
+          docker network create e2e
+          docker run -d --name postgres --network e2e -e POSTGRES_USER=app -e POSTGRES_PASSWORD=ci \
+            --health-cmd "pg_isready -U app" --health-interval 2s pgvector/pgvector:0.8.0-pg16
+          until [ "$(docker inspect -f '{{.State.Health.Status}}' postgres)" = healthy ]; do sleep 1; done
+          docker exec postgres psql -U app -d postgres -qc "create database litellm"
+          docker exec -i postgres psql -U app -d litellm -q < app/tests/Llm.Tests/Resources/litellm-schema.sql
+          docker run -d --name app --network e2e --read-only --tmpfs /tmp \
+            -v "$PWD/stack/config/grafana/dashboards:/dashboards:ro" -v "$PWD/stack/env-samples:/env-samples:ro" \
+            -e Database__Host=postgres -e Database__Username=app -e Database__Password=ci \
+            -e Auth__Domain=llm.localhost -e Auth__HttpsPort=8443 -e "Auth__AdminPassword=$E2E_PASSWORD" \
+            -e Auth__DataKey=ci-data-key -e Gateway__Url=http://127.0.0.1:9 llm-app:ci
+          docker run -d --name web --network e2e --read-only --tmpfs /tmp --cap-drop ALL \
+            --security-opt no-new-privileges:true llm-web:ci
+          docker run -d --name traefik --network e2e -p 8443:8443 -v "$PWD/certs:/certs:ro" \
+            -v "$PWD/app/frontend/ci/traefik.yml:/etc/traefik/traefik.yml:ro" \
+            -v "$PWD/app/frontend/ci/routes.yml:/etc/traefik/routes.yml:ro" traefik:v3.6.7
+          for i in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' app)" = healthy ] && \
+            [ "$(docker inspect -f '{{.State.Health.Status}}' web)" = healthy ] && \
+            curl -sfk https://llm.localhost:8443/api/info >/dev/null && exit 0
+            sleep 2
+          done
+          docker logs app; docker logs web; docker logs traefik; exit 1
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: app/frontend/package-lock.json }
+      - working-directory: app/frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run e2e
+      - name: The app logged no errors
+        run: |
+          if docker logs app 2>&1 | grep -E '"LogLevel":"(Error|Critical)"'; then exit 1; fi
+      - if: failure()
+        run: docker logs app; docker logs web; docker logs traefik
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: frontend-playwright-report, path: app/frontend/playwright-report }

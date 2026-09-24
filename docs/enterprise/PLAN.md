@@ -54,7 +54,7 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 3 backend done; the web is being rewritten (3A–3F).** The first chat UI
+Status: **Phase 3A done** (the new web's foundation, at `next.<domain>`). Next: 3B. The first chat UI
 and its [checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
 at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
 
@@ -152,6 +152,30 @@ Each is deployed at `next.<domain>` and tested before the next starts.
 - **Done when:** those pages work at `next.<domain>`; Vitest, Playwright (desktop and
   phone, both themes) and axe (no serious or critical violations) pass; CI builds and
   tests the new image.
+- **Result:** `app/frontend` is built into the `web` image and served at `next.<domain>`.
+  - **The container:** Alpine's own nginx package (Docker Hub is unreachable here),
+    non-root, read-only root, the API's CSP. Fingerprinted assets are cached for a
+    year; a 404 never is.
+  - **The design system:** 26 component files (most on Radix), a `/design` gallery, light, dark and
+    system themes (applied before the first paint), bundled fonts and icons. Text
+    colours on tints were computed to 4.5:1 or better.
+  - **Pages:** the shell (sidebar, command palette ranked by title over keywords,
+    breadcrumbs, a phone drawer, session expiry), sign-in with 2FA, the account page,
+    and home. Pages not rebuilt yet say which phase brings them and open in the
+    current UI.
+  - **Load:** the first load is about 187 KB gzipped, in three cacheable parts; the form
+    libraries load only on the sign-in and account pages.
+  - **Found on the way:**
+    - The API logged two errors whenever a browser left during a gateway 502 (the
+      error handler wrote to the closed connection). It no longer does, and it is
+      tested.
+    - Sign-out didn't return to the sign-in page, because clearing the cache
+      dropped the query the shell watched. Fixed and tested.
+  - **Tests:** 29 UI and 42 browser (desktop and phone; axe on five pages in both
+    themes), 156 backend. They pass on the live stack and in a rehearsal of the new
+    CI job (the web and app images behind Traefik, no gateway). The stack suites
+    still pass: functional 61/61, auth audit, domain check, dashboards 34/34. So
+    does the current UI's browser suite (50, plus 4 skipped).
 
 ### Phase 3B — Admin, usage and settings  *(L)*
 - Every admin page rebuilt: overview, people (table with search, filters, bulk

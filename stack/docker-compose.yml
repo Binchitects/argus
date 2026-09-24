@@ -1445,6 +1445,38 @@ services:
       - "traefik.http.middlewares.admin-redirect.redirectregex.regex=^https?://admin\\.[^/]+(/(?:people|model|indexing|packs|explore|monitoring|settings)[^?]*)?.*$$"
       - "traefik.http.middlewares.admin-redirect.redirectregex.replacement=https://${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}/admin$${1}"
 
+  # The new web (plan phases 3A-3C): React, served as static files by nginx.
+  # While it is being built it lives at next.<domain>, next to the current UI;
+  # the API paths there go to the app, exactly as they will on the bare domain.
+  web:
+    image: llmservice-web:latest
+    build:
+      context: ${LLM_WEB_DIR:-../app/frontend}
+      args:
+        APP_VERSION: ${APP_VERSION:-0.2.0}
+    container_name: web
+    profiles: ["gateway"]
+    restart: unless-stopped
+    networks: [llm-net]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *default-logging
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.web.loadbalancer.server.port=8080"
+      - "traefik.http.routers.web-next.rule=Host(`next.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.web-next.entrypoints=websecure"
+      - "traefik.http.routers.web-next.tls=true"
+      - "traefik.http.routers.web-next.service=web"
+      - "traefik.http.routers.web-next.middlewares=default-chain@file"
+      - "traefik.http.routers.web-next-api.rule=Host(`next.${LLM_DOMAIN:-llm.localhost}`) && (PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`))"
+      - "traefik.http.routers.web-next-api.entrypoints=websecure"
+      - "traefik.http.routers.web-next-api.tls=true"
+      - "traefik.http.routers.web-next-api.service=app"
+      - "traefik.http.routers.web-next-api.middlewares=default-chain@file"
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui

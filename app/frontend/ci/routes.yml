@@ -1,0 +1,23 @@
+http:
+  routers:
+    api:
+      rule: "PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`)"
+      entryPoints: [websecure]
+      service: app
+      tls: {}
+    web:
+      rule: "PathPrefix(`/`)"
+      entryPoints: [websecure]
+      service: web
+      tls: {}
+  services:
+    app:
+      loadBalancer:
+        servers: [{ url: "http://app:8080" }]
+    web:
+      loadBalancer:
+        servers: [{ url: "http://web:8080" }]
+tls:
+  certificates:
+    - certFile: /certs/tls.crt
+      keyFile: /certs/tls.key
