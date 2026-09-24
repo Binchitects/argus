@@ -8,6 +8,9 @@ namespace Llm.Tests;
 public sealed class FakeArgus : HttpMessageHandler
 {
     public const string Token = "argus-admin-token-for-tests";
+    public const string ChatToken = "argus-chat-token-for-tests";
+    public const string Instructions = "Look things up in the organisation's code before answering.";
+    public bool McpDown { get; set; }
 
     public List<(string Method, string PathAndQuery, string? Token, JsonElement? Body)> Calls { get; } = [];
     public bool IndexRunning { get; set; }
@@ -17,6 +20,10 @@ public sealed class FakeArgus : HttpMessageHandler
         var body = request.Content is null ? (JsonElement?)null : JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellationToken)).RootElement;
         var token = request.Headers.TryGetValues("X-Argus-Admin-Token", out var v) ? v.Single() : null;
         var path = request.RequestUri!.AbsolutePath;
+        if (path == "/mcp")
+        {
+            return Mcp(request, body);
+        }
         Calls.Add((request.Method.Method, request.RequestUri.PathAndQuery, token, body));
         if (token != Token)
         {
@@ -51,4 +58,48 @@ public sealed class FakeArgus : HttpMessageHandler
 
     private static HttpResponseMessage Json(HttpStatusCode code, string json) =>
         new(code) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+
+    public List<(string Method, string? Email, string? Session, JsonElement? Params)> McpCalls { get; } = [];
+
+    /// <summary>Argus's MCP endpoint, as the chat sees it: the chat token, the person's email, a session.</summary>
+    private HttpResponseMessage Mcp(HttpRequestMessage request, JsonElement? body)
+    {
+        if (McpDown)
+        {
+            throw new HttpRequestException("connection refused (test)");
+        }
+        var auth = request.Headers.Authorization?.Parameter;
+        var email = request.Headers.TryGetValues("x-openwebui-user-email", out var e) ? e.Single() : null;
+        var session = request.Headers.TryGetValues("mcp-session-id", out var s) ? s.Single() : null;
+        var method = body!.Value.GetProperty("method").GetString()!;
+        McpCalls.Add((method, email, session, body.Value.TryGetProperty("params", out var p) ? p : null));
+        if (auth != ChatToken)
+        {
+            return Json(HttpStatusCode.Unauthorized, """{"error":"unknown token"}""");
+        }
+        if (method == "notifications/initialized")
+        {
+            return new HttpResponseMessage(HttpStatusCode.Accepted);
+        }
+        var id = body.Value.GetProperty("id").GetInt32();
+        string result = method switch
+        {
+            "initialize" => $$$"""{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"argus","version":"2.9.0"},"instructions":"{{{Instructions}}}"}""",
+            "tools/list" => """{"tools":[{"name":"find_symbol","description":"Find where a symbol is defined","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}]}""",
+            "tools/call" => p.GetProperty("arguments").GetProperty("name").GetString() == "SecretThing"
+                ? """{"content":[{"type":"text","text":"Nothing you have access to matches this, but it does exist in 1 repository you cannot read:\n- secret/vault (2 matches) -- maintainers: alice\nTell the person asking that they do not have access, and that they can ask a maintainer listed above to add them in GitLab with at least Reporter access. Argus picks the change up within 10 minutes."}],"isError":false}"""
+                : """{"content":[{"type":"text","text":"ParseHeader is defined in group/app src/parse.c:10"}],"isError":false}""",
+            _ => throw new InvalidOperationException(method),
+        };
+        // Answer as SSE, as streamable HTTP servers may.
+        var res = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent($"event: message\ndata: {{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{result}}}\n\n", Encoding.UTF8, "text/event-stream"),
+        };
+        if (method == "initialize")
+        {
+            res.Headers.Add("mcp-session-id", "session-" + email);
+        }
+        return res;
+    }
 }

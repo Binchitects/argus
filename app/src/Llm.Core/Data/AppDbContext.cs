@@ -1,3 +1,4 @@
+using Llm.Core.Chat;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -12,6 +13,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     /// <summary>Cookie, 2FA and OIDC key material survives restarts and is shared by every replica.</summary>
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -32,6 +36,33 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(u => u.DisplayName).HasMaxLength(200);
             e.Property(u => u.LdapDn).HasMaxLength(1000);
             e.HasIndex(u => u.NormalizedEmail).IsUnique();
+        });
+
+        builder.Entity<Conversation>(e =>
+        {
+            e.ToTable("conversations");
+            e.Property(c => c.Title).HasMaxLength(200);
+            e.Property(c => c.Thinking).HasMaxLength(20);
+            e.HasIndex(c => new { c.UserId, c.UpdatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(c => c.Messages).WithOne().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ChatMessage>(e =>
+        {
+            e.ToTable("chat_messages");
+            e.Property(m => m.Role).HasMaxLength(20);
+            e.Property(m => m.ToolCallId).HasMaxLength(200);
+            e.Property(m => m.ToolName).HasMaxLength(200);
+            e.Property(m => m.Model).HasMaxLength(200);
+            e.HasIndex(m => new { m.ConversationId, m.Sequence }).IsUnique();
+        });
+        builder.Entity<ChatAttachment>(e =>
+        {
+            e.ToTable("chat_attachments");
+            e.Property(a => a.FileName).HasMaxLength(260);
+            e.Property(a => a.ContentType).HasMaxLength(200);
+            e.HasIndex(a => a.UserId);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<AuditEvent>(e =>

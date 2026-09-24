@@ -219,6 +219,28 @@ public static class IdentityWiring
         });
         services.AddHttpClient("probe", c => c.Timeout = TimeSpan.FromSeconds(3));
         services.AddHttpClient<Operations.ArgusAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
+
+        services.Configure<Chat.ChatOptions>(config.GetSection("Chat"));
+        services.PostConfigure<Chat.ChatOptions>(o =>
+        {
+            if (config["Gateway:Url"] is { Length: > 0 } url && config["Chat:GatewayUrl"] is null)
+            {
+                o.GatewayUrl = url;
+            }
+        });
+        services.AddHttpClient<Chat.GatewayChat>((sp, c) =>
+        {
+            var o = sp.GetRequiredService<IOptions<Chat.ChatOptions>>().Value;
+            c.BaseAddress = new Uri(o.GatewayUrl);
+            // A long answer, with thinking, can take minutes; the stream itself is the progress.
+            c.Timeout = o.RequestTimeout;
+            if (sp.GetRequiredService<IOptions<LiteLlmOptions>>().Value.MasterKey is { Length: > 0 } key)
+            {
+                c.DefaultRequestHeaders.Authorization = new("Bearer", key);
+            }
+        });
+        services.AddHttpClient<Chat.ArgusMcp>(c => c.Timeout = TimeSpan.FromMinutes(2));
+        services.AddScoped<Chat.ChatService>();
     }
 
     /// <summary>
@@ -283,6 +305,7 @@ public static class IdentityWiring
         Dashboards.DashboardEndpoints.MapDashboards(app);
         Dashboards.UsageEndpoints.MapUsage(app);
         Operations.OperationsEndpoints.MapOperations(app);
+        Chat.ChatEndpoints.MapChat(app);
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

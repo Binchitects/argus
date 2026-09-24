@@ -27,6 +27,7 @@ public sealed class AppFixture : IAsyncLifetime
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
     public FakeGateway Gateway { get; } = new();
     public FakeArgus Argus { get; } = new();
+    public FakeModel Model { get; } = new();
     public string AppConnectionString { get; private set; } = "";
     /// <summary>The real dashboard files, found by walking up to the repository.</summary>
     public static string DashboardsPath { get; } = FindDashboards();
@@ -81,6 +82,11 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Argus:AdminToken", FakeArgus.Token);
             b.UseSetting("Stack:EnvSamplesDir", Path.Combine(DashboardsPath, "..", "..", "..", "env-samples"));
             b.UseSetting("Stack:ModelName", "Qwen3.8-Flash-Next");
+            b.UseSetting("Stack:ThinkingPresets", "xhigh:Deep think,low:Quick,off:No thinking");
+            b.UseSetting("Stack:ModelContext", "32768");
+            b.UseSetting("Stack:ModelMaxOutput", "8192");
+            b.UseSetting("Chat:ArgusChatToken", FakeArgus.ChatToken);
+            b.UseSetting("Gateway:MasterKey", "sk-master-for-tests");
             b.UseSetting("Stack:PriceInputPerMtok", "0.20");
             // Nothing listens here: probes are refused at once instead of waiting on DNS.
             b.UseSetting("Stack:LiteLlmProbeUrl", "http://127.0.0.1:9");
@@ -95,6 +101,8 @@ public sealed class AppFixture : IAsyncLifetime
             {
                 s.AddSingleton(gateway);
                 s.AddHttpClient<Llm.Api.Operations.ArgusAdmin>().ConfigurePrimaryHttpMessageHandler(() => Argus);
+                s.AddHttpClient<Llm.Api.Chat.ArgusMcp>().ConfigurePrimaryHttpMessageHandler(() => Argus);
+                s.AddHttpClient<Llm.Api.Chat.GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => Model);
             });
         });
 
