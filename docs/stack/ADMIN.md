@@ -6,7 +6,8 @@ for everyone. (The old admin panel at `https://admin.<LLM_DOMAIN>` is gone; that
 address redirects each old page to its place here, so bookmarks keep working.)
 
 Sign-in, people, the company directory and 2FA are in
-[AUTHENTICATION.md](AUTHENTICATION.md). This page covers the rest.
+[AUTHENTICATION.md](AUTHENTICATION.md), and the chat in [CHAT.md](CHAT.md). This
+page covers the rest.
 
 ## Admin
 

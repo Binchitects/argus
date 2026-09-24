@@ -50,7 +50,8 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 2 done** (`enterprise-p2`). Next: Phase 3.
+Status: **Phase 3 built and tested; waiting for your sign-off** ([checklist](PHASE3-CHECKLIST.md)).
+Then Open WebUI goes and `enterprise-p3` is tagged. Next: Phase 4.
 
 ### Phase 0 — Foundations  *(S)*
 - Solution skeleton: `Llm.Api`, `Llm.Core`, test projects, `web/` (React).
@@ -108,6 +109,19 @@ Replaces: Open WebUI (it runs at `chat.<domain>` until this phase is accepted).
 4. File upload.
 - **Done when:** Playwright covers chat flows and permissions, you sign off the
   feature checklist, and Open WebUI is removed.
+- **Result so far:** the chat is in the app ([CHAT.md](../stack/CHAT.md)). It
+  has streaming, thinking levels, stop and regenerate, attachments (text and
+  PDF), and searchable history. Argus is called over MCP as the person asking,
+  and the no-access notice names the repository and its maintainers.
+  - The chat bills through its own gateway key, aliased `chat`, to the person.
+    Their credit now really binds: LiteLLM ignores `max_budget` on
+    `/end_user/update`. Open WebUI had the same gap.
+  - Chats are private to their owner, admins included.
+  - Tests: 153 backend, 32 UI, 52 browser (desktop and phone, real model).
+    The browser tests include the no-access case against the test GitLab.
+  - On the live stack: functional 61/61, acceptance 33/0, auth audit, domain
+    check, and dashboards 34/34.
+  - Open WebUI stays at `chat.<domain>` until the checklist is signed.
 
 ### Phase 4 — Argus in .NET  *(XL)*
 Replaces: the Python Argus (about 47k lines including tests).

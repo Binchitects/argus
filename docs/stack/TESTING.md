@@ -86,7 +86,7 @@ failed", not "everything passed".
 | G5 | **`preflight.sh` / `check_mounts.py` are manual** | only synthetic payloads I ran by hand; no test in the suite |
 | G6 | **`with-ca.sh` is manual** | the host-trust path for `dsh`, curl, python and git |
 | G7 | **Built images other than Argus and the app** | identity-proxy and the cpu-temp-exporter image have no build-time test |
-| G8 | **No browser tests for chat** | the app's pages run in a real browser (Playwright, desktop and phone); Open WebUI's tool picker and token-by-token SSE are still untested until the chat moves into the app (phase 3) |
+| G8 | ~~No browser tests for chat~~ **closed** | the app's chat runs in a real browser against the real model, desktop and phone: streaming, thinking, stop and regenerate, attachments, code copy, history, and Argus's no-access notice for a person without access (`app/web/e2e/chat.spec.ts`, [CHAT.md](CHAT.md)). Open WebUI itself stays untested and goes when the app's chat is signed off |
 | G9 | **Two clients executed, three transcribed** | DSH and Qwen Code now run end to end and their configs are in `clients/`, marked as executed. Claude Code and Continue are written from their own documentation and marked as such; Hermes is unexercised; the OpenAI SDK has no test at all. The distinction is recorded per file in `clients/README.md` so a transcribed config is never mistaken for a verified one |
 | G10 | **No upgrade or rollback test** | changing `ARGUS_VERSION` or an image tag and rolling back is untested |
 | G11 | **Disaster recovery is untested** | restore onto a *clean host*, which is the actual scenario |
@@ -327,16 +327,17 @@ variable:
 | C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik, and Open WebUI's MCP client lists 16 tools |
 | C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `scripts/test-gitlab/` exists to answer. **Verified and now automated** against a real GitLab CE by `./scripts/test-gitlab/run.sh`, which is one command from a cold start: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. `verify_tools.py` extends it to **all sixteen MCP tools over the wire**, checks each result's declared shape, and asserts that no structured field names a repository the caller cannot read |
 
-### C4 — Browser *(G8, entirely missing)*
+### C4 — Browser *(G8, now covered by the app's Playwright suite)*
 
-The only layer nothing touches. Minimum viable set, headless (Playwright):
+The app's pages, chat included, run in Playwright on desktop and phone. The
+original minimum set, and where each item stands:
 
 | test | asserts |
 |---|---|
 | C4.1 | `https://admin.<domain>` follows the SSO redirect chain to the panel and back |
 | C4.2 | the self-signed certificate produces a warning that can be accepted, and the page then loads |
-| C4.3 | a chat in Open WebUI renders a streamed answer incrementally |
-| C4.4 | the Argus tool appears in the tool picker for a non-admin |
+| C4.3 | a chat renders a streamed answer incrementally: **done in the app's chat** (`chat.spec.ts`) |
+| C4.4 | Argus is offered to a non-admin: **done in the app's chat**, with the no-access notice for someone without access |
 | C4.5 | all nine Grafana dashboards render with data, no "datasource not found" |
 | C4.6 | sign-out ends the session at the app and every service that trusts it |
 
@@ -461,11 +462,35 @@ make smoke           # API surface
 ./scripts/audit-auth.sh
 ./scripts/acceptance.py        # note: SKIP is not PASS
 ./scripts/functional-test.py   # the person-facing flows
+./scripts/compare-dashboards.py  # the app's usage dashboards == Grafana's
+
+# the app in a real browser, against the deployed stack (in app/web)
+E2E_PASSWORD=<admin password> E2E_CHAT=1 npm run e2e
+# ... and Argus's per-person access, with the test GitLab up
+./scripts/test-gitlab/run.sh --keep   # from the repo root
+E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 npm run e2e
 
 # from inside the network
 docker run --rm --network llm-net -e MK=<master-key> \
   -v "$PWD/scripts:/s:ro" python:3.13-slim python /s/e2e-check.py
 ```
+
+For the Argus case the stack's Argus must index the test GitLab, and the
+fixture's `dev_beta` must be a person in the app. Keep a copy of `.env` first,
+because all of this is temporary:
+
+1. In `.env`, add `argus` to `COMPOSE_PROFILES`, and set
+   `ARGUS_GITLAB_URL=http://host.docker.internal:8929`,
+   `ARGUS_GITLAB_AUTH=token` and `ARGUS_GITLAB_TOKEN` to the fixture's token
+   from `scripts/test-gitlab/seeded.json` (not in git; it is a throwaway
+   instance). Then run `docker compose up -d` and wait for the first index.
+2. In the app, go to Admin → People and add `dev_beta` with the email
+   `dev_beta@argus.test`. Argus matches the chat user by that email.
+3. Afterwards:
+   - put the old `.env` back and run `docker compose up -d --remove-orphans`
+   - run `docker compose --profile argus rm -sf argus ollama`
+   - delete `dev_beta` from the app
+   - run `./scripts/test-gitlab/run.sh --down`
 
 **Read the SKIP lines.** A green `acceptance.py` on the default profiles has not
 exercised tracing, logging, cadvisor, dcgm, the second model or Ollama.

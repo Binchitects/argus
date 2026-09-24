@@ -270,8 +270,8 @@ Each of these used to be a script you had to run in the right order.
 
 | address | what | sign-in |
 |---|---|---|
-| `https://llm.localhost` | **the app**: sign-in for everything, usage and cost, people, API keys, credit, 2FA, the model, the code index, packs, audit log | its own sign-in; Admin needs `admins` |
-| `https://chat.llm.localhost` | Open WebUI, with Argus as a tool | SSO |
+| `https://llm.localhost` | **the app**: sign-in for everything, **chat** (with Argus), usage and cost, people, API keys, credit, 2FA, the model, the code index, packs, audit log | its own sign-in; Admin needs `admins` |
+| `https://chat.llm.localhost` | Open WebUI, with Argus as a tool, until the app's chat is signed off ([CHAT.md](docs/stack/CHAT.md)) | SSO |
 | `https://grafana.llm.localhost` | dashboards | SSO |
 | `https://gateway.llm.localhost/v1` | OpenAI-compatible API for tools | **the person's own API key** |
 | `https://argus.llm.localhost/mcp` | Argus MCP server (profile `argus`) | **the person's own GitLab token** |
