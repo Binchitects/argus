@@ -53,9 +53,10 @@ Traefik asks the app (`/api/authz/forward-auth`) before every request to:
 | Host | Who gets in |
 |---|---|
 | `metrics.`, `alerts.`, `logs.`, `cadvisor.`, `node.`, `gpu.`, `s3.`, and the engines' `/metrics` | admins only |
-| `admin.` (the admin panel) | anyone signed in; the panel limits what they see |
 | `api.` (the engine) | a machine token with the `api` scope, or anyone signed in (for `/docs`) |
 | any other host | nobody |
+
+(`admin.<LLM_DOMAIN>`, the old admin panel, is now only a redirect into the app.)
 
 A browser without a session is sent to sign in and comes back afterwards
 (`302`); a program gets `401`; someone signed in without the right role gets

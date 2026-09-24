@@ -50,7 +50,7 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 1 done** (`enterprise-p1`). Next: Phase 2.
+Status: **Phase 2 done** (`enterprise-p2`). Next: Phase 3.
 
 ### Phase 0 — Foundations  *(S)*
 - Solution skeleton: `Llm.Api`, `Llm.Core`, test projects, `web/` (React).
@@ -91,6 +91,13 @@ Replaces: the rest of the admin panel and the "Usage by person" dashboard.
   only on the server (the browser never sends raw SQL or PromQL).
 - **Done when:** a comparison test shows every usage panel matches the Grafana panel on the
   same data, and the admin-panel container is gone.
+- **Result:** the admin panel is gone (its address redirects page for page). The dashboard
+  engine runs the SQL panels of the provisioned files itself; `compare-dashboards.py` shows
+  34/34 panels identical to Grafana over 1, 7 and 30 days. Prices stay in `.env` (shown in
+  the app, edited there): LiteLLM reads them from its config at start, and editing them in
+  the app would need the same restart the Model page already describes. Everyone gets their
+  own usage page. Tests: 132 backend, 25 UI, 38 browser; the live stack and a from-zero
+  deploy pass functional 56/56, acceptance 33/0, the auth audit and the domain check.
 
 ### Phase 3 — Chat  *(L)*
 Replaces: Open WebUI (it runs at `chat.<domain>` until this phase is accepted).

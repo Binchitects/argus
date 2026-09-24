@@ -35,7 +35,7 @@ machine's network interface belong to Traefik:
 ```
 
 Nothing but Traefik has a `ports:` entry. The inference engines, the databases
-and the admin panel are reachable **only** from inside `llm-net`, which is why
+and the app's internal port are reachable **only** from inside `llm-net`, which is why
 the API gateway can be the single place that authenticates machine callers and
 counts their tokens.
 
@@ -55,7 +55,7 @@ with it (see §9).
 |---|---|---|
 | `<domain>` | the app: sign-in, OIDC, people | none (it *is* the sign-in) |
 | `chat.<domain>` | Open WebUI | OIDC (its own session) |
-| `admin.<domain>` | admin panel | forwardAuth to the app (`sso-chain`) |
+| `admin.<domain>` | a redirect into the app's `/admin` (the old admin panel) | none |
 | `gateway.<domain>` | LiteLLM | none in front — LiteLLM checks each person's key |
 | `api.<domain>` | llama.cpp **or** vLLM | forwardAuth (machine token), plus a key-injecting middleware |
 | `api2.<domain>` | vLLM secondary (`multi-model`) | none in front — no forwardAuth and **no key injection**, so the caller presents `VLLM_API_KEY` itself |
@@ -87,7 +87,7 @@ key always starts; everything else needs its profile named.
 |---|---|---|
 | *(always)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `grafana`, `node-exporter`, `power-limits`, `open-webui` | the minimum that is useful and cheap; TLS is not optional, and an LLM stack nobody can monitor is one nobody notices breaking |
 | `proxy` | `traefik` | the ingress. Separate so a machine can run the engines without 80/443 |
-| `auth` | `auth-init`, `redis`, `admin-panel` | the admin panel and the basic-auth fallback file |
+| `auth` | `auth-init`, `redis` | the basic-auth fallback file and the Argus directory |
 | `gateway` | `app`, `litellm`, `postgres`, `redis`, `identity-proxy` | the app (sign-in for everything), the API gateway, per-person keys and budgets |
 | `llamacpp` | `llamacpp`, `model-init` | one of the two engine choices |
 | `vllm` | `vllm` | the other engine. Mutually exclusive with `llamacpp` for the GPU |
@@ -169,7 +169,7 @@ exists because the alternative was worse. The full reference is
 
 ### 5.1 forwardAuth to the app, for services with no sign-in of their own
 
-Prometheus, Alertmanager, Loki, cAdvisor, the exporters and the admin panel have
+Prometheus, Alertmanager, Loki, cAdvisor and the exporters have
 no account system at all. Traefik asks the app about **every request** before
 it reaches them:
 
@@ -339,10 +339,9 @@ restart**, so nothing could ever trust it.
 
 | service | image | what it does |
 |---|---|---|
-| `app` | built from `app/` | the identity provider: sign-in (local and LDAP, 2FA), OIDC, forwardAuth, people, API keys and credit through LiteLLM, the audit log. Its own `llmapp` database; runs as `LLM_UID`, read-only root |
+| `app` | built from `app/` | the identity provider (sign-in, local and LDAP, 2FA, OIDC, forwardAuth), people, API keys and credit through LiteLLM, the audit log, usage and cost (the SQL dashboards, drawn by the app), and the admin area (model, Argus index and packs, services, settings). Its own `llmapp` database; runs as `LLM_UID`, read-only root |
 | `auth-init` | `authelia/authelia:4.39` (as a toolbox) | one-shot. Writes Traefik's `users.htpasswd` and hands the app the directory it writes for Argus |
 | `redis` | `redis:7-alpine` | LiteLLM's response and auth caches |
-| `admin-panel` | built from `stack/deploy/admin-panel/` | the Model card, Indexing, Packs, Explore. Its console is gated on the app's `Remote-Groups` header; its people pages redirect to the app |
 | `identity-proxy` | built from `stack/deploy/identity-proxy/` | turns Open WebUI's forwarded identity header into the `user` field LiteLLM enforces budgets against |
 
 ### 7.3 Inference

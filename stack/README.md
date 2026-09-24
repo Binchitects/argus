@@ -1,7 +1,7 @@
 # LLMService
 
 A self-hosted LLM service: GPU inference, a chat UI, an API gateway with a key and a
-budget per person, single sign-on, an admin panel and dashboards.
+budget per person, single sign-on, an admin area and dashboards.
 
 **Everything you need to deploy it is in the top-level README:
 [Deploying the stack](../README.md#deploying-the-stack--read-this-part).**

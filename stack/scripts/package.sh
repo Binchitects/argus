@@ -86,6 +86,10 @@ built_dirs="$(grep -oE '\$\{LLM_DEPLOY_DIR:-\./deploy\}/[A-Za-z0-9._-]+' docker-
 for d in $built_dirs; do
   if [[ -d "deploy/$d" ]]; then
     cp -r "deploy/$d" "$PKG/deploy/"
+  elif [[ -f "deploy/$d" ]]; then
+    # A single mounted file (seed-presets.py): directories were all this handled,
+    # so a mounted file failed the whole package as "does not exist".
+    cp "deploy/$d" "$PKG/deploy/"
   else
     printf '  %sERROR: compose wants deploy/%s but it does not exist%s\n' "$red" "$d" "$off"
     rm -rf "$STAGE"; exit 1

@@ -33,14 +33,14 @@ deployment the same passwords.
 
 ## Adding a new setup
 
-A setup is one file. The admin panel's Model card lists every `.env` in this
+A setup is one file. The app's **Admin → Model** page lists every `.env` in this
 directory automatically; there is nothing to register.
 
 1. **Copy the closest sample** and name it `<model>.<card>.env`, lowercase, e.g.
    `qwen3.8-27b.rtx4090.env`. Start from a MoE sample for a MoE model and a dense one
    for a dense model.
 
-2. **Edit the header.** The admin panel reads these five lines, so keep their
+2. **Edit the header.** The Model page reads these five lines, so keep their
    spelling:
 
    ```
@@ -52,7 +52,7 @@ directory automatically; there is nothing to register.
    ```
 
 3. **Edit only the MODEL block**, between `# >>> MODEL` and `# <<< MODEL`. Keep both
-   marker lines exactly: the Model card copies what is between them.
+   marker lines exactly: the Model page copies what is between them.
 
    | setting | how to choose it |
    |---|---|

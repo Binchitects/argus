@@ -17,7 +17,7 @@ Hermes' config lives at:
 ```yaml
 model:
   base_url: https://gateway.llm.localhost/v1
-  api_key: sk-...                 # YOUR key, from the admin panel
+  api_key: sk-...                 # YOUR key, from the app (Your account)
   name: local                     # or the served name, e.g. qwen3.8-27b
   context_length: 131072          # see "How much context you can have" below
 ```
@@ -28,7 +28,7 @@ bounded by nothing, which quietly defeats the per-person accounting the whole
 gateway exists for. Mint yours with:
 
 ```bash
-# create the person in the admin panel: it shows their key once
+# create the person under Admin → People: it shows their key once
 ```
 
 **Use the model's real name** (`MODEL_NAME` in `.env`, e.g. `Qwen3.8-Flash-Next`).

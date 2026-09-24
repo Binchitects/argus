@@ -366,7 +366,7 @@ was missing. An empty repository deliberately gets **no** `repos` row, because
 that table is what staleness is measured against and a repository that can never
 be indexed would alert forever.
 
-The admin panel's **Indexing** card reads the same run directly through Argus's
+The app's **Admin → Indexing** page reads the same run directly through Argus's
 admin endpoint, so it shows the live tail without waiting for Loki, and keeps
 that log on screen after the run ends. It also says whether automatic
 reindexing is on, in the units a person reads (`every 15 minutes`), because
@@ -447,14 +447,14 @@ Two things close that hole, and they only work together.
 rather than as a second container because both would write the same SQLite
 index, and `store.connect` sets no `busy_timeout`: the two would fail each other
 with `database is locked` and neither failure would say why. Sharing one
-`_index_lock` also means a scheduled pass is visible on the console's Indexing
+`_index_lock` also means a scheduled pass is visible on the app's Indexing
 page exactly like a manual one — progress, log and exit code — and it clears
 the staleness below the moment it finishes.
 
 If the index is found stale or empty at startup, the first pass runs after 30
 seconds instead of waiting out a full interval. A fresh drop-in deployment with
 an empty named volume indexes itself rather than sitting empty for fifteen
-minutes while the console insists everything is fine.
+minutes while the app insists everything is fine.
 
 ### Indexing on push
 
@@ -511,7 +511,7 @@ exports, per repository and branch:
 The endpoint is under `/admin/`, so it carries a credential — it names every
 repository in the estate, and an open endpoint for that is a map of the
 organisation handed to anything that can reach the port. The stack sends the
-same `ARGUS_ADMIN_TOKEN` the console uses, as a bearer token, because
+same `ARGUS_ADMIN_TOKEN` the app uses, as a bearer token, because
 Prometheus can only read a credential from a file
 (`authorization.credentials_file`). `prometheus-secrets` writes it out of
 `.env` on every `up`, so there is one secret to rotate rather than two.
@@ -524,9 +524,9 @@ returns 200 and `up` is still 1, which is why this watches
 and knows about nothing, which used to present as an empty table that looked
 like a fresh install).
 
-The console's **Overview** reads the same computation, so the tile, the Grafana
+The app's **Admin → Overview** reads the same computation, so the tile, the Grafana
 line and the alert cannot disagree; `CONTRIBUTING`-style threshold changes
-belong in `.env`, not in the console.
+belong in `.env`, not in the app.
 
 ---
 

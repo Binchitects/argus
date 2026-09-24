@@ -17,7 +17,8 @@ Every number here was measured against the tree, not estimated.
 | layer | entry point | asserts | needs |
 |---|---|---|---|
 | **Unit** | `pytest tests/` — **928 tests** | the Argus Python package: config, credentials, gitlab, mirror, tls, acl, access, resolve, worker, cli, packs, parse, store, mcpsrv, auditlog — plus `check_mounts.py`, the stack's preflight guard | nothing running; no Docker |
-| **Panel** | `python test_app.py` in the admin-panel image build | the Indexing card's rendered HTML: the run log, the per-repo table, exit-code meanings, the partial-enumeration opt-in, and that a non-admin gets no card | nothing running; no Docker |
+| **App** | `./dn test` (xUnit), `npm test` (Vitest) and `npm run e2e` (Playwright) in `app/`, and CI on every push | sign-in, OIDC, forwardAuth, LDAP against a real OpenLDAP, people and keys, the dashboard engine running every SQL panel against LiteLLM's real schema, the admin pages including Indexing's exit-code meanings and the partial-enumeration opt-in, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
+| **Dashboard parity** | `scripts/compare-dashboards.py` | every SQL panel queried in the app and in Grafana over the same range and interval gives the same rows | a running stack |
 | **Acceptance** | `scripts/acceptance.py` | 7 groups — `config`, `routes`, `identity`, `infra`, `obs`, `ops`, `e2e`. Routes answer, OIDC discovery documents exist, scraping works, datasources are healthy | a running stack |
 | **E2E** | `scripts/e2e-check.py` | from **inside** the network: the engine serves the model the gateway advertises, an API call is attributed to the key that made it, a chat is attributed to the same person, an over-budget person is refused | a running stack |
 | **Functional** | `scripts/functional-test.py` | 36 checks of what a *person* does: SSO sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, self-signup refusal, per-person billing on both surfaces | `auth`,`gateway` profiles |
@@ -47,7 +48,8 @@ Each of the 32 services against the nine test entry points, by name:
 | ✅ | langfuse | acceptance, health, audit-auth |
 | ✅ | prometheus, alertmanager, node-exporter, nvidia-smi-exporter, cadvisor, loki, redis, postgres, power-limits, clickhouse | acceptance/health only |
 | ✅ | llamacpp, vllm | e2e-check, health, smoke/bench |
-| ⚠️ | admin-panel, model-init, tls-init | one script each |
+| ✅ | app | app tests, CI, acceptance, functional-test, audit-auth, compare-dashboards |
+| ⚠️ | model-init, tls-init | one script each |
 | ❌ | **auth-init** | nothing |
 | ❌ | **identity-proxy** | nothing |
 | ❌ | **prometheus-secrets** | nothing |
@@ -83,8 +85,8 @@ failed", not "everything passed".
 | G4 | **The airgap round trip is manual** | bundle → transfer → `load.sh` was verified by hand once. Nothing keeps it working |
 | G5 | **`preflight.sh` / `check_mounts.py` are manual** | only synthetic payloads I ran by hand; no test in the suite |
 | G6 | **`with-ca.sh` is manual** | the host-trust path for `dsh`, curl, python and git |
-| G7 | **Built images other than Argus** | admin-panel, identity-proxy and the cpu-temp-exporter image have no build-time test |
-| G8 | **No browser tests at all** | `functional-test.py` is an HTTP client with a cookie jar. It proves the endpoints; it cannot prove JavaScript, rendering, the tool picker, or SSE delivered token-by-token |
+| G7 | **Built images other than Argus and the app** | identity-proxy and the cpu-temp-exporter image have no build-time test |
+| G8 | **No browser tests for chat** | the app's pages run in a real browser (Playwright, desktop and phone); Open WebUI's tool picker and token-by-token SSE are still untested until the chat moves into the app (phase 3) |
 | G9 | **Two clients executed, three transcribed** | DSH and Qwen Code now run end to end and their configs are in `clients/`, marked as executed. Claude Code and Continue are written from their own documentation and marked as such; Hermes is unexercised; the OpenAI SDK has no test at all. The distinction is recorded per file in `clients/README.md` so a transcribed config is never mistaken for a verified one |
 | G10 | **No upgrade or rollback test** | changing `ARGUS_VERSION` or an image tag and rolling back is untested |
 | G11 | **Disaster recovery is untested** | restore onto a *clean host*, which is the actual scenario |
@@ -183,12 +185,8 @@ whole estate, and its refusal says "re-run with `--allow-partial-enumeration`" �
 a flag the panel had no way to pass. The card now has an explicit opt-in,
 unchecked by default, and exit 3 points at it.
 
-`test_app.py` in the admin-panel image exists because the card is built by
-string concatenation with closures in it, and one of those closures rendered the
-repository list where the log should have been — plausible-looking and wrong.
-The check that catches it asserts on the HTML-*unescaped* text; the first
-version compared raw quotes and passed against the bug, which is its own small
-lesson about testing rendered output.
+The admin panel that had this card is gone; the app's Indexing page keeps the
+opt-in and the exit-code meanings, and its UI test asserts on both.
 
 **A whole tool was dead, and the suite said it was fine.** `impact_of` built its
 allowlist in a `TEMP TABLE`, but the server opens the index with

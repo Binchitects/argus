@@ -6,7 +6,7 @@ acceptance.py proves the stack is wired: routes answer, discovery documents
 exist, datasources are healthy. It does not prove the things people actually
 do work -- that someone an admin creates in the app can sign in, that their
 key reaches the model, that a budget really stops them, that a rotated key
-really dies, that a non-admin cannot reach the admin console or the metrics,
+really dies, that a non-admin cannot reach the admin area or the metrics,
 that Grafana and Open WebUI sign them in with the right role, that a chat in
 Open WebUI is billed to the person who typed it.
 

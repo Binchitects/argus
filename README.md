@@ -4,7 +4,7 @@
 
 There are **two things in this repository**, and either works without the other:
 
-- **The stack** ([`stack/`](stack/)) — a complete self-hosted LLM service: a GPU engine, a chat UI, an API gateway with a key and a budget per person, single sign-on, an admin console, dashboards and alerts. Argus is part of it.
+- **The stack** ([`stack/`](stack/)) — a complete self-hosted LLM service: a GPU engine, a chat UI, an API gateway with a key and a budget per person, single sign-on, an admin area, usage and cost dashboards, and alerts. Argus is part of it.
 - **Argus** ([`src/argus/`](src/)) — the code index and documentation server. It mirrors your GitLab, extracts a symbol and dependency graph, serves knowledge packs, and enforces each developer's real GitLab permissions **in SQL**. It also runs standalone, without any of the stack.
 
 ---
@@ -270,8 +270,7 @@ Each of these used to be a script you had to run in the right order.
 
 | address | what | sign-in |
 |---|---|---|
-| `https://llm.localhost` | **the app**: sign-in for everything, people, API keys, credit, 2FA, audit log | its own sign-in; Admin needs `admins` |
-| `https://admin.llm.localhost` | the Model card, Indexing, Packs, Explore (moving into the app) | SSO; the console needs `admins` |
+| `https://llm.localhost` | **the app**: sign-in for everything, usage and cost, people, API keys, credit, 2FA, the model, the code index, packs, audit log | its own sign-in; Admin needs `admins` |
 | `https://chat.llm.localhost` | Open WebUI, with Argus as a tool | SSO |
 | `https://grafana.llm.localhost` | dashboards | SSO |
 | `https://gateway.llm.localhost/v1` | OpenAI-compatible API for tools | **the person's own API key** |
@@ -290,7 +289,7 @@ themselves; **curl, Python, Node and every SDK on another machine do not** — r
 
 ### Connecting tools to the API
 
-Create the person in the admin console; it shows their API key once. Every
+Create the person under **Admin → People**; it shows their API key once. Every
 OpenAI-compatible tool needs the same four things:
 
 | setting | value |
@@ -347,7 +346,7 @@ NODE_EXTRA_CA_CERTS="/path/to/stack/config/traefik/certs/tls.crt" dsh web
 ```
 
 Then add a provider with base URL `https://gateway.llm.localhost/v1` and the
-person's key from the admin console. (The wrapper form above does the same thing
+person's key from **Admin → People**. (The wrapper form above does the same thing
 without exporting anything permanent.)
 
 ```bash
@@ -418,7 +417,7 @@ Qwen Code: the `mcpServers` block above. Any other MCP client: the same URL and 
    `ARGUS_GITLAB_CA_CERT=/etc/argus/tls/gitlab-ca.pem` (drop the PEM in
    `config/argus/tls/` first), or `ARGUS_GITLAB_VERIFY=false` when no CA file
    exists anywhere.
-4. `make up`, then start an index run from the admin console's **Indexing** card.
+4. `make up`, then start an index run from **Admin → Indexing**.
    After that it keeps itself current — see [Keeping the index
    current](#keeping-the-index-current).
 
@@ -529,7 +528,7 @@ To check a mapping without going through the UI, use the same path Open WebUI
 does — the chat token plus the email header:
 
 ```bash
-docker compose exec admin-panel python - <<'PY'
+docker compose exec identity-proxy python - <<'PY'
 import json, urllib.request
 tok = "<ARGUS_CHAT_CLIENT_TOKEN from .env>"
 req = urllib.request.Request("http://argus:7700/mcp",
@@ -548,41 +547,19 @@ PY
 A `401` names the reason. Anything else means the identity resolved and the
 problem is elsewhere.
 
-### The admin console
+### Admin, usage and cost
 
-`https://admin.llm.localhost` is the operator's view of the whole deployment, and
-it needs the `admins` group. It has a sidebar: **Overview** (index freshness and
-service health), **People** (search, pagination, per-person pages, API keys,
-credit, CSV export), **Model** (what is running, and the exact `.env` block to
-switch it), **Indexing** (start a run and watch it), **Explore**,
-**Knowledge packs** (what is installed, and install / update / remove) and
-**Settings** (theme).
+Everything an operator does is in the app at `https://llm.localhost`: **Admin**
+(admins only) has Overview, People, Model, Indexing, Packs, Explore, Monitoring,
+Settings, the audit log and sign-in settings; **Usage & cost** shows everyone's
+usage to admins and each person their own. The old `https://admin.llm.localhost`
+redirects there, page for page.
 
-Two guards exist because the panel got them wrong first: it will not delete the
-account you are signed in as — which it did to the live administrator during
-testing — and it will not delete the last admin.
+The Model page **shows** the steps for switching a model rather than performing
+them: performing them would need the Docker socket, and a socket in a web app is
+root on the host for anyone who reaches it.
 
-**Knowledge packs** lists every pack Argus has installed with its version,
-embedding model, size and licence, and offers the three things you would
-otherwise ssh in for: install from a URL, update from a published index, and
-remove. An **incompatible** pack is shown rather than hidden, with the reason —
-it still serves `docs_lookup` and lexical search, and only semantic search
-refuses it, so removing it from the list would take away a working tool and say
-nothing. Install and update run as **jobs in Argus**, not as requests: a pack is
-up to a gigabyte and the console's client gives up after ten seconds, so the
-page polls and the log stays on screen after the job ends. Update needs
-`ARGUS_PACK_INDEX_URL` set on the argus service; without it the button says so
-and names the variable rather than failing.
-
-The console deliberately does **not** list what is *available* to install. That
-needs a published index, and inventing one here would be the console guessing at
-somebody else's release process.
-
-The panel **shows** the steps for switching a model rather than performing them.
-Performing them would need the Docker socket, and a socket in a web app is root
-on the host for anyone who reaches it.
-
-Details, and what it deliberately leaves alone: [docs/stack/ADMIN-PANEL.md](docs/stack/ADMIN-PANEL.md).
+Details: [docs/stack/ADMIN.md](docs/stack/ADMIN.md).
 
 ### Tokens and cost
 
@@ -623,11 +600,11 @@ recreates exactly the containers the change affects.
 | prices | `PRICE_INPUT_PER_MTOK`, `PRICE_CACHED_INPUT_PER_MTOK`, `PRICE_OUTPUT_PER_MTOK` | per 1M tokens; cache hits priced separately (DeepSeek-style) |
 | the admin's email | `ADMIN_EMAIL` | the app's first admin and Open WebUI's administrator |
 | company directory | `LDAP_URL`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_USER_BASE_DN`, `LDAP_ADMIN_GROUP`, `LDAP_REQUIRED_GROUP` | LDAP or Active Directory sign-in next to local accounts; see [AUTHENTICATION](docs/stack/AUTHENTICATION.md) |
-| default credit per person | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | per person in the admin console |
+| default credit per person | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | per person under **Admin → People** |
 | a different llama.cpp build | `LLAMACPP_ENGINE_URL`, `LLAMACPP_ENGINE_SHA256` | a release tarball; empty = the image's own server |
 | vLLM instead of llama.cpp | `COMPOSE_PROFILES` (`vllm` instead of `llamacpp`), the `VLLM_*` values with `VLLM_SERVED_MODEL_NAME` equal to `MODEL_NAME`, `ENGINE_API_BASE=http://vllm:8000/v1` | exactly one engine profile at a time; **not re-tested since the compose-only change** — the shipped samples are llama.cpp |
 | gated Hugging Face repos | `HF_TOKEN` | |
-| updating knowledge packs | `ARGUS_PACK_INDEX_URL` | the published index JSON the console's **Update** button reads. Unset = install and remove still work and Update is absent, not broken |
+| updating knowledge packs | `ARGUS_PACK_INDEX_URL` | the published index JSON the **Update** button on **Admin → Packs** reads. Unset = install and remove still work and Update is absent, not broken |
 | backups | `BACKUP_DIR`, `BACKUP_COPY_DIR`, `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`, `BACKUP_TIME` | `./scripts/backup.sh` takes a complete, verified backup (pg_dumpall, SQLite online copies, config with secrets); `sudo ./scripts/backup.sh --install-timer` runs it daily; `--restore --from <dir>` puts it back; `BACKUP_COPY_DIR` keeps a verified second copy on another disk |
 
 Config files, for what `.env` does not cover: alert rules in
@@ -637,7 +614,7 @@ decided by the app; see [AUTHENTICATION](docs/stack/AUTHENTICATION.md).
 
 ### Switching the model
 
-The admin console's **Model** card (admins only) shows what is running and, for each
+**Admin → Model** shows what is running and, for each
 sample, the exact `.env` block to paste and the command. Every model setting sits
 between `# >>> MODEL` and `# <<< MODEL`; replace that block, keep your own
 `LLAMACPP_MODEL_DIR`, and run `docker compose up -d`. A model not yet on disk is
@@ -848,7 +825,7 @@ python3 scripts/functional-test.py
 ```
 
 `acceptance.py` checks wiring, and that `.env` and every sample resolve completely.
-`functional-test.py` does what people do, for real: creates a person in the console,
+`functional-test.py` does what people do, for real: creates a person in the app,
 signs them in, uses their key, proves a credit limit binds and a rotated key dies,
 signs into Grafana and Open WebUI with the right roles, and confirms a chat is billed
 to whoever typed it — 43 checks. `domain-check.sh` proves the running stack answers
@@ -916,7 +893,7 @@ Three things keep the index fresh, and the first two are independent:
 
 - **A poll.** The serve process runs a periodic pass, and the engine exports
   `argus_index_age_seconds` per repository. An `ArgusIndexStale` alert fires when
-  a repository goes stale, and the admin console's Overview shows the same
+  a repository goes stale, and **Admin → Overview** shows the same
   numbers, so "the agent cannot find it" and "it is not in the index" stop
   looking alike.
 - **A push webhook.** `POST /hook/gitlab` takes a GitLab push event and indexes
@@ -925,7 +902,7 @@ Three things keep the index fresh, and the first two are independent:
   and drained one repository per pass; an overfull queue collapses into one full
   pass. Events it has no use for are acknowledged rather than refused, because
   GitLab disables a webhook that keeps failing. The poll stays on as the floor.
-- **`argus index`** by hand, from the CLI or the console's Indexing card.
+- **`argus index`** by hand, from the CLI or **Admin → Indexing**.
 
 **Indexing is embedding now.** `argus index` embeds as it goes, so the poller and
 the webhook produce code that `semantic_search` can actually see. Before that they
@@ -1310,7 +1287,7 @@ describes.
 - **[docs/stack/ARCHITECTURE.md](docs/stack/ARCHITECTURE.md)** — every service, how a request flows through them, and what each failure looks like
 - **[docs/stack/CONFIGURATION.md](docs/stack/CONFIGURATION.md)** — every `.env` variable and every file under `config/`
 - **[docs/stack/AUTHENTICATION.md](docs/stack/AUTHENTICATION.md)** — who signs in where, and how identity reaches each service
-- **[docs/stack/ADMIN-PANEL.md](docs/stack/ADMIN-PANEL.md)** — the admin console: accounts, keys, credit, the Model and Indexing cards, Explore
+- **[docs/stack/ADMIN.md](docs/stack/ADMIN.md)** — the admin area and usage and cost: people, the model, the code index, packs, dashboards drawn by the app
 - **[docs/stack/ARGUS.md](docs/stack/ARGUS.md)** — Argus inside the stack: the per-person ACL, private CAs, password mode, the audit stream
 - **[docs/stack/CPU-TEMPERATURE.md](docs/stack/CPU-TEMPERATURE.md)** — how CPU temperature reaches the dashboards, and why Windows needed its own path
 - **[docs/stack/HERMES.md](docs/stack/HERMES.md)** — pointing Hermes at the model and at Argus

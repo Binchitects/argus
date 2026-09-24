@@ -27,7 +27,7 @@
 # rather than left to be discovered on a machine that cannot fix it:
 #
 #   1. Container images. Saved with `docker save`, restored with `docker load`.
-#      That includes the three images built locally (argus, admin-panel,
+#      That includes the images built locally (argus, the app,
 #      identity-proxy) -- shipping them is what lets the target run with no
 #      build context, no base images and no registry.
 #
@@ -479,7 +479,7 @@ from outside this deployment, and tells you which those are.
 ## What is already handled
 
 * **Every container image**, including the three built locally (argus,
-  admin-panel, identity-proxy). The target never builds and never pulls.
+  the app, identity-proxy). The target never builds and never pulls.
 * **Ollama's embedding model** is in \`.airgap/ollama-models.tar\` and \`load.sh\`
   restores it. It lives in a Docker volume, so it is easy to forget -- and
   without it \`docs_search\` cannot embed a query.

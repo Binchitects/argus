@@ -80,7 +80,7 @@ entire LAN.
 
 **`TRAEFIK_HTTP_PORT`** / **`TRAEFIK_HTTPS_PORT`** *(default `80` / `443`)* — the
 published host ports. Change them if something else owns 80/443; the URLs in
-the admin panel and the OIDC redirect URIs follow `TRAEFIK_HTTPS_PORT`
+the app's links and the OIDC redirect URIs follow `TRAEFIK_HTTPS_PORT`
 automatically.
 
 ### Where everything lives
@@ -94,7 +94,7 @@ against this compose file, so the defaults keep a checkout self-contained.
 | `LLM_CONFIG_DIR` | `./config` | the app (Argus directory), Traefik, LiteLLM, Prometheus, Grafana, Loki, Postgres, Argus — every committed config file |
 | `LLM_DEPLOY_DIR` | `./deploy` | the build contexts and the exporter sources |
 | `LLM_MODELS_DIR` | `./models` | the bind mount at `/models`, and the default for `LLAMACPP_MODEL_DIR` |
-| `LLM_ENV_SAMPLES_DIR` | `./env-samples` | read by the admin panel's Model card |
+| `LLM_ENV_SAMPLES_DIR` | `./env-samples` | read by the app's **Admin → Model** page |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Traefik's discovery and Promtail's log reading |
 | `HOST_DOCKER_DIR` | `/var/lib/docker` | Promtail's container logs, cAdvisor's view |
 | `HOST_ROOT` / `HOST_PROC` / `HOST_SYS` / `HOST_DEV_DISK` | `/`, `/proc`, `/sys`, `/dev/disk` | node-exporter and cAdvisor |
@@ -371,7 +371,7 @@ name as well as position.
 | `PROTECTED_CHAIN` | `sso-chain@file` | the middleware chain on the unauthenticated internals. Use `protected-chain@file` when the `auth` profile is off |
 | `PROMETHEUS_RETENTION_TIME` | `30d` | how long metrics are kept |
 | `PROMETHEUS_RETENTION_SIZE` | `20GB` | and how much disk they may take. Whichever hits first |
-| `ADMIN_GROUP` | `admins` | the group name the app gives admins in OIDC and forwardAuth; Grafana, Open WebUI and the admin panel map it to their admin role |
+| `ADMIN_GROUP` | `admins` | the group name the app gives admins in OIDC and forwardAuth; Grafana and Open WebUI map it to their admin role |
 | `HF_TOKEN` | empty | only needed for gated Hugging Face repositories |
 
 ---
@@ -391,8 +391,8 @@ name as well as position.
 | `ARGUS_EMBED_MODEL` | `nomic-embed-text` | Ollama model for query embeddings |
 | `ARGUS_EMBED_DIM` | `768` | its output dimension. Must match the model, or the pack vectors are unusable |
 | `ARGUS_OLLAMA_URL` | `http://ollama:11434` | without this Argus falls back to `localhost:11434`, which inside a container is the container itself |
-| `ARGUS_INDEX_INTERVAL` | `900` | seconds between automatic index passes. **`0` turns automatic reindexing off**, and then the index only advances when somebody presses *Index all repos* in the console |
-| `ARGUS_INDEX_STALE_AFTER` | `3600` | seconds without a successful pass before a repository counts as stale. Feeds `argus_index_stale`, the `ArgusIndexStale` alert and the number on the console's Overview. Default is 4 × the interval above |
+| `ARGUS_INDEX_INTERVAL` | `900` | seconds between automatic index passes. **`0` turns automatic reindexing off**, and then the index only advances when somebody presses **Index now** under **Admin → Indexing** |
+| `ARGUS_INDEX_STALE_AFTER` | `3600` | seconds without a successful pass before a repository counts as stale. Feeds `argus_index_stale`, the `ArgusIndexStale` alert and the number on **Admin → Overview**. Default is 4 × the interval above |
 | `ARGUS_WEBHOOK_TOKEN` | empty | the GitLab push webhook's secret. **Empty means the webhook route does not exist at all.** Set it here and put the same value in GitLab's webhook configuration; see [ARGUS.md](ARGUS.md#indexing-on-push). Deliberately not the admin token — this one is stored in GitLab, so it is the lower-privilege credential |
 
 `ARGUS_INDEX_INTERVAL` is the setting that makes the rest of the freshness
@@ -492,7 +492,7 @@ for what each brings up; this is the short reference:
 |---|---|
 | *(none needed)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `grafana`, `node-exporter`, `power-limits`, `open-webui` |
 | `proxy` | `traefik` |
-| `auth` | `auth-init`, `redis`, `admin-panel` |
+| `auth` | `auth-init`, `redis` |
 | `gateway` | `app`, `litellm`, `postgres`, `redis`, `identity-proxy` |
 | `llamacpp` | `llamacpp`, `model-init` |
 | `vllm` | `vllm` |
@@ -566,8 +566,7 @@ place to go for behaviour the `.env` does not expose.
 
 | path | what it is |
 |---|---|
-| `stack/deploy/admin-panel/` | the admin panel: `app.py`, its Dockerfile and `entrypoint.sh` (which runs it as whatever uid owns `config/authelia`). The Model card, Indexing, Packs and Explore; its people pages now redirect to the app |
-| `app/` (repository root) | the app: sign-in, OIDC, forwardAuth, people, API keys. See [app/README.md](../../app/README.md) |
+| `app/` (repository root) | the app: sign-in, OIDC, forwardAuth, people, API keys, usage and cost, the admin area. See [app/README.md](../../app/README.md) |
 | `stack/deploy/identity-proxy/` | turns Open WebUI's forwarded identity header into the `user` field LiteLLM enforces budgets against |
 | `stack/deploy/cpu-temp-exporter/` | a small exporter for CPU package temperature, which NVML does not report |
 | `stack/deploy/argus-local.yml` | an **override**: reuse an existing Argus index and pack estate instead of the named volume. Requires `ARGUS_HOME` |
