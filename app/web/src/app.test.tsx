@@ -37,7 +37,7 @@ describe('app shell', () => {
     fakeBackend(admin)
     renderApp('/')
     expect(await screen.findByRole('heading', { level: 1, name: 'Overview' })).toBeInTheDocument()
-    expect(screen.getByText('Here now')).toBeInTheDocument()
+    expect(screen.getAllByText('Here now')).toHaveLength(areas.filter((a) => a.native).length)
     expect(screen.getAllByText(/Arrives in phase \d/)).toHaveLength(areas.filter((a) => !a.native).length)
   })
 
@@ -106,7 +106,7 @@ describe('admin', () => {
       'GET /api/admin/people': () => ({ json: { warning: null, people: [person] } }),
       'POST /api/admin/people': () => ({ status: 201, json: { id: 'p2', password: 'pw-shown-once', apiKey: 'sk-shown-once', warning: null } }),
     })
-    renderApp('/admin')
+    renderApp('/admin/people')
     expect(await screen.findByRole('link', { name: 'Zoe' })).toHaveAttribute('href', '/admin/people/p1')
     expect(screen.getByText('2FA')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Add a person' }))

@@ -19,7 +19,12 @@ export function People() {
       <section className="card">
         <div className="row">
           <h2>People</h2>
-          <input type="search" placeholder="Search" aria-label="Search people" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <div className="row">
+            <input type="search" placeholder="Search" aria-label="Search people" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <a className="button small secondary" href="/api/admin/people.csv" download>
+              Export CSV
+            </a>
+          </div>
         </div>
         {people.data?.warning && <p className="warn-text">{people.data.warning}</p>}
         <ErrorText error={people.error} />

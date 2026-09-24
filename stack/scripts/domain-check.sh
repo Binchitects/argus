@@ -56,7 +56,7 @@ expect "" /readyz 200
 expect gateway /health/liveliness 200
 expect chat / "200|302"
 expect grafana /login 200
-expect admin / 302
+expect admin / 302   # the old admin panel address, redirected into the app
 expect metrics / 302
 expect alerts / 302
 expect api /v1/models "302|401"

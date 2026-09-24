@@ -10,8 +10,9 @@ of range. It also produces the baseline the app's native dashboards must match
     python3 scripts/audit-dashboards.py now-6h       # another window
     python3 scripts/audit-dashboards.py --json out.json
 
-It runs inside the admin-panel container (on llm-net, next to Grafana) so
-nothing is published; the Grafana admin credentials come from .env.
+It runs in a throwaway container of the stack's own Python image, on llm-net
+next to Grafana, so nothing is published; the Grafana admin credentials come
+from .env.
 Exit status: the number of queries that ERRORED. Empty panels are reported but
 do not fail: many are empty by design until the matching traffic exists.
 """
@@ -133,7 +134,7 @@ def main():
     r = subprocess.run(
         ["docker", "run", "--rm", "-i", "--network", "llm-net", "--entrypoint", "python",
          "-e", f"GU={env('GRAFANA_ADMIN_USER') or 'admin'}", "-e", f"GP={env('GRAFANA_ADMIN_PASSWORD')}",
-         "-e", f"WINDOW={window}", "-v", f"{dash}:/dash:ro", "llmservice-admin-panel:latest", "-"],
+         "-e", f"WINDOW={window}", "-v", f"{dash}:/dash:ro", "llmservice-identity-proxy:latest", "-"],
         input=INNER, capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(f"audit failed to run: {r.stderr.strip()[-400:]}")

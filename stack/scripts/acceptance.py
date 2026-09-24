@@ -178,7 +178,7 @@ EXPECTED = {
     "cadvisor": ["cadvisor"],
     "proxy": ["traefik"],
     "gateway": ["litellm", "postgres", "redis", "app"],
-    "auth": ["admin-panel"],
+    "auth": [],
     "smi": ["nvidia-smi-exporter"],
     "argus": ["argus"],
 }
@@ -248,12 +248,14 @@ ROUTES = [
     ("gateway", "/v1/models", {200, 401}, ""),
     ("grafana", "/", {200, 302}, ""),
     ("", "/readyz", {200}, "gateway"),
+    # The old admin panel address: a redirect into the app's /admin, for bookmarks.
+    # This client follows redirects, so it sees the app's page at the end (200).
+    ("admin", "/", {200, 302}, "gateway"),
     # Denied, and never 200: this request carries no session. The app answers
     # a browser (Accept: text/html, or curl's */*) with a 302 to the portal and
     # a bare client like this one with 401 -- both are refusals. A 200 would mean
     # forward-auth was bypassed and an anonymous caller reached a page that can
     # mint API keys, which is exactly the failure worth catching automatically.
-    ("admin", "/", {302, 401}, "auth"),
     ("argus", "/healthz", {200, 401}, "argus"),
 ]
 

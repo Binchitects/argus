@@ -158,6 +158,17 @@ public sealed class OperationsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_token_without_the_argus_profile_is_not_a_deployed_argus()
+    {
+        await using var noProfile = app.Create(app.ConnectionStringFor("noprof_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Stack:ComposeProfiles"] = "gateway,proxy,auth,llamacpp" });
+        var admin = await new TestBrowser(noProfile).SignedInAsync("admin", AppFixture.AdminPassword);
+        Assert.False((await admin.JsonAsync(await admin.GetAsync("/api/admin/argus/status"))).GetProperty("configured").GetBoolean());
+        var services = (await admin.JsonAsync(await admin.GetAsync("/api/admin/services"))).EnumerateArray();
+        Assert.DoesNotContain(services, s => s.GetProperty("name").GetString() == "Argus");
+    }
+
+    [Fact]
     public async Task Without_an_argus_token_the_pages_say_not_configured()
     {
         await using var bare = app.Create(app.ConnectionStringFor("noargus_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),

@@ -134,12 +134,15 @@ c=$(status -H "Authorization: Bearer $TOK" -H 'Accept: application/json' "https:
 # ---------------------------------------------------------------------------
 echo
 echo "4. forwardAuth-gated services, anonymous (must be denied)"
-for h in metrics alerts admin; do
+for h in metrics alerts; do
   loc=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "${RES[@]}" -H 'Accept: text/html' "https://$h.$DOM/-/healthy")
   [[ "$loc" == "302 $APP/login?rd="* ]] && green OK "$h -> 302 to sign in" || red FAIL "$h -> $loc"
 done
 c=$(status -H 'Accept: application/json' "https://metrics.$DOM/-/healthy")
 [ "$c" = "401" ] && green OK "a program without credentials -> 401" || red FAIL "metrics for a program -> $c"
+
+loc=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "${RES[@]}" "https://admin.$DOM/people?x=1")
+[[ "$loc" == "302 $APP:443/admin/people" || "$loc" == "302 $APP/admin/people" ]] && green OK "the old admin address redirects into the app" || red FAIL "admin. -> $loc"
 
 echo
 echo "5. Same services with the admin's session"

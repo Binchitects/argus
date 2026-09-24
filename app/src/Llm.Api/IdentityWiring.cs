@@ -211,6 +211,12 @@ public static class IdentityWiring
 
         services.Configure<Operations.StackOptions>(config.GetSection("Stack"));
         services.Configure<Operations.ArgusOptions>(config.GetSection("Argus"));
+        services.PostConfigure<Operations.ArgusOptions>(o =>
+        {
+            var profiles = config["Stack:ComposeProfiles"];
+            o.Deployed = string.IsNullOrWhiteSpace(profiles) ||
+                profiles.Split(',', StringSplitOptions.TrimEntries).Contains("argus", StringComparer.OrdinalIgnoreCase);
+        });
         services.AddHttpClient("probe", c => c.Timeout = TimeSpan.FromSeconds(3));
         services.AddHttpClient<Operations.ArgusAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
     }

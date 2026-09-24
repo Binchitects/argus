@@ -140,6 +140,56 @@ tr.failed td { color: var(--warn); }
 .login-card .button { width: 100%; padding: 0.65rem; }
 .loading { min-height: 100vh; }
 
+/* tiles */
+.tiles { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 0.9rem; display: grid; gap: 0.15rem; }
+.tile-label { color: var(--muted); font-size: 0.82rem; }
+.tile-value { font-size: 1.5rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* dashboards: Grafana's 24 columns; a grid row is ~30 px as in Grafana */
+.toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 99px; padding: 0.3rem 0.8rem; font-size: 0.88rem; }
+.chip.active { background: var(--notice); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.dash-grid { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 0.75rem; }
+.dash-cell { grid-column: span var(--w); min-height: calc(var(--h) * 30px); display: flex; min-width: 0; }
+.dash-cell > .panel { flex: 1; }
+.section-title { margin: 1rem 0 0; font-size: 1.1rem; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 0.9rem; min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.panel h3 { margin: 0; font-size: 0.95rem; }
+.panel-head { display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline; }
+.panel-stat .stat-value, .panel-gauge .stat-value { font-size: 1.9rem; font-weight: 650; font-variant-numeric: tabular-nums; margin: auto 0; }
+.panel .table-wrap { max-height: 360px; overflow: auto; }
+.markdown { font-size: 0.92rem; color: var(--text); }
+.markdown p { margin: 0 0 0.5rem; }
+.markdown code { background: var(--bg); padding: 0 0.25rem; border-radius: 4px; }
+.markdown pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); padding: 0.5rem; border-radius: 6px; }
+.skeleton { flex: 1; min-height: 60px; border-radius: 8px; background: linear-gradient(90deg, var(--bg), var(--border), var(--bg)); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+.chart { width: 100%; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.link.small { font-size: 0.82rem; }
+
+/* admin */
+.notice.warn { background: var(--warn-bg); color: var(--text); border-left: 3px solid var(--warn); }
+.services li { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
+.dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; align-self: center; }
+.dot.ok { background: #1a9e5c; }
+.dot.bad { background: var(--danger); }
+.sample { border-top: 1px solid var(--border); padding: 0.75rem 0; }
+.sample summary { cursor: pointer; }
+.code-block { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; font-size: 0.8rem; white-space: pre-wrap; overflow-x: auto; max-height: 420px; overflow-y: auto; }
+.code-block.log { max-height: 240px; }
+select { font: inherit; color: var(--text); background: var(--input); border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.6rem; }
+.tabs button { background: none; border: 0; padding: 0.5rem 0.8rem; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+td.actions { white-space: nowrap; display: flex; gap: 0.35rem; }
+
+@media (max-width: 900px) {
+  /* Narrower screens: half-width panels go full width, quarter-width ones become halves. */
+  .dash-cell { grid-column: span max(12, min(24, calc(var(--w) * 2))); }
+}
+
 @media (max-width: 720px) {
   /* minmax(0, ...): a 1fr column never shrinks below its widest content, so a table would push the page sideways. */
   .shell { grid-template-columns: minmax(0, 1fr); }
@@ -148,5 +198,7 @@ tr.failed td { color: var(--warn); }
   .me { margin-top: 0; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
   .facts { grid-template-columns: 1fr; gap: 0.1rem; }
   .facts dd { margin-bottom: 0.5rem; }
+  .dash-cell { grid-column: span 24; min-height: 0; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .content { padding: 1.25rem 1rem; }
 }

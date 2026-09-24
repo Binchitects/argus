@@ -27,6 +27,7 @@ export const areas: Area[] = [
     summary: 'Tokens (cache hit, cache miss, output) and cost, per person and over time.',
     phase: 2,
     legacy: { subdomain: 'grafana', name: 'Grafana' },
+    native: true,
   },
   {
     path: '/dashboards',
@@ -45,7 +46,7 @@ export const areas: Area[] = [
   {
     path: '/admin',
     title: 'Admin',
-    summary: 'People, sign-in (local and LDAP), API keys, and the audit log.',
+    summary: 'People, the model, the code index and packs, services, settings and the audit log.',
     phase: 1,
     legacy: { subdomain: 'admin', name: 'the admin panel' },
     native: true,

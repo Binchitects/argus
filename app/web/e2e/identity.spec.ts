@@ -30,7 +30,7 @@ test.describe('signed out', () => {
 
 test('an admin adds a person, who then signs in, is a member, and changes their password', async ({ page, browser, baseURL }) => {
   const name = 'e2e' + Math.random().toString(36).slice(2, 8)
-  await page.goto('/admin')
+  await page.goto('/admin/people')
   await page.getByRole('button', { name: 'Add a person' }).click()
   await page.getByLabel(/Username/).fill(name)
   await page.getByLabel('Email').fill(`${name}@example.test`)
@@ -64,7 +64,7 @@ test('an admin adds a person, who then signs in, is a member, and changes their 
   await page.getByRole('link', { name: `E2E ${name}` }).click()
   page.once('dialog', (d) => d.accept(name))
   await page.getByRole('button', { name: `Delete ${name}` }).click()
-  await expect(page).toHaveURL(/\/admin$/)
+  await expect(page).toHaveURL(/\/admin\/people$/)
   await expect(page.getByRole('link', { name: `E2E ${name}` })).toHaveCount(0)
 })
 

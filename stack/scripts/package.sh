@@ -2,7 +2,8 @@
 # Build a drop-in deployable archive of the stack.
 #
 # What goes in: compose file, configuration templates, scripts, docs, and the
-# offline Argus image so a target host needs no build toolchain.
+# offline Argus image so a target host needs no build toolchain, and the app's
+# sources (built on the target by `docker compose up`).
 #
 # What NEVER goes in: .env (every secret), generated TLS keys, the imported user
 # database and OIDC clients, issued API keys, model weights, backups. The
@@ -124,6 +125,16 @@ else
   done
 fi
 mkdir -p "$PKG/config/traefik/dynamic" "$PKG/config/traefik/certs" "$PKG/config/traefik/auth"
+# The app (sign-in, admin, dashboards) builds from ../app, so it goes NEXT TO
+# the stack folder in the archive: unzipped, llmservice/ and app/ sit side by
+# side and compose finds it at its default LLM_APP_DIR. Only tracked sources:
+# never bin/, obj/ or node_modules/, and not the tests, which the target never
+# runs (one of them holds a password hash made for the test).
+( cd "$ROOT/.." && git ls-files app ) | grep -vE '^app/(tests|web/e2e)/' | while read -r f; do
+  mkdir -p "$STAGE/$(dirname "$f")" && cp "$ROOT/../$f" "$STAGE/$f"
+done
+[[ -f "$STAGE/app/Dockerfile" ]] || { printf '  %sERROR: app/ sources missing from the package%s\n' "$red" "$off"; rm -rf "$STAGE"; exit 1; }
+
 cp config/traefik/traefik.yml "$PKG/config/traefik/" 2>/dev/null
 cp config/traefik/dynamic/*.yml "$PKG/config/traefik/dynamic/" 2>/dev/null
 touch "$PKG/config/traefik/certs/.gitkeep" "$PKG/config/traefik/auth/.gitkeep"
@@ -164,12 +175,12 @@ FAIL=0
 while IFS= read -r f; do
   # env-samples/*.env are templates with empty SECRETS and are meant to ship;
   # anything else matching these names carries real material.
-  case "${f#$PKG/}" in env-samples/*.env) continue ;; esac
+  case "${f#$STAGE/}" in llmservice/env-samples/*.env) continue ;; esac
   case "$f" in
     */.env|*/.env.*|*/users.yml|*/clients.yml|*.key|*.pem|*/api-keys.txt|*.htpasswd)
-      printf '  %sWOULD SHIP SECRET FILE: %s%s\n' "$red" "${f#$PKG/}" "$off"; FAIL=1 ;;
+      printf '  %sWOULD SHIP SECRET FILE: %s%s\n' "$red" "${f#$STAGE/}" "$off"; FAIL=1 ;;
   esac
-done < <(find "$PKG" -type f)
+done < <(find "$STAGE" -type f)
 
 # Content scan: real generated values look nothing like the placeholders.
 while IFS= read -r f; do
@@ -178,9 +189,9 @@ while IFS= read -r f; do
   # pattern minimum but is exactly what SHOULD ship in a template.
   if grep -vE 'change-me|example[.]com|your-|<[a-z-]+>' "$f" 2>/dev/null \
      | grep -qE '(sk-[A-Za-z0-9_-]{16,}|[$]argon2id[$]|BEGIN [A-Z ]*PRIVATE KEY)'; then
-    printf '  %sSECRET-LOOKING CONTENT: %s%s\n' "$red" "${f#$PKG/}" "$off"; FAIL=1
+    printf '  %sSECRET-LOOKING CONTENT: %s%s\n' "$red" "${f#$STAGE/}" "$off"; FAIL=1
   fi
-done < <(find "$PKG" -type f)
+done < <(find "$STAGE" -type f)
 
 if [[ $FAIL -ne 0 ]]; then
   printf '  %srefusing to package%s\n' "$red" "$off"
@@ -231,7 +242,7 @@ if [[ -f "$OUT" ]]; then
 fi
 echo
 say "The recipient runs:"
-say "  unzip llmservice-${VERSION}.zip && cd llmservice"
+say "  unzip llmservice-${VERSION}.zip && cd llmservice     # app/ unpacks next to it"
 say "  docker load < dist/argus-*.tar.gz"
 say "  ./scripts/install-requirements.sh   # or install-requirements.ps1"
 say "  cp env-samples/<model>.<gpu>.env .env   # then fill in SECRETS"

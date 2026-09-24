@@ -39,7 +39,7 @@ export function PersonPage() {
     mutationFn: () => api(`/api/admin/people/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'people'] })
-      navigate('/admin')
+      navigate('/admin/people')
     },
   })
 
@@ -53,7 +53,7 @@ export function PersonPage() {
   return (
     <div className="stack">
       <p>
-        <Link to="/admin">← People</Link>
+        <Link to="/admin/people">← People</Link>
       </p>
       <section className="card">
         <h2>

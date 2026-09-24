@@ -1,6 +1,18 @@
 import { NavLink, Outlet, useOutletContext } from 'react-router'
 import type { Me } from '../../api'
-import { legacyUrl, areas } from '../../areas'
+
+const tabs: [string, string][] = [
+  ['/admin', 'Overview'],
+  ['/admin/people', 'People'],
+  ['/admin/model', 'Model'],
+  ['/admin/indexing', 'Indexing'],
+  ['/admin/packs', 'Packs'],
+  ['/admin/explore', 'Explore'],
+  ['/admin/monitoring', 'Monitoring'],
+  ['/admin/settings', 'Settings'],
+  ['/admin/audit', 'Audit log'],
+  ['/admin/sign-in', 'Sign-in'],
+]
 
 export function AdminLayout() {
   const me = useOutletContext<Me>()
@@ -12,17 +24,15 @@ export function AdminLayout() {
       </>
     )
   }
-  const panel = legacyUrl(areas.find((a) => a.path === '/admin')!)
   return (
     <>
       <h1>Admin</h1>
       <nav className="tabs" aria-label="Admin">
-        <NavLink to="/admin" end>
-          People
-        </NavLink>
-        <NavLink to="/admin/audit">Audit log</NavLink>
-        <NavLink to="/admin/sign-in">Sign-in</NavLink>
-        <a href={panel}>Model, indexing, packs ↗</a>
+        {tabs.map(([to, label]) => (
+          <NavLink key={to} to={to} end={to === '/admin'}>
+            {label}
+          </NavLink>
+        ))}
       </nav>
       <Outlet context={me} />
     </>

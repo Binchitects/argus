@@ -4,7 +4,7 @@ Everything a person does with the stack, done for real, as two people.
 
 acceptance.py proves the stack is wired: routes answer, discovery documents
 exist, datasources are healthy. It does not prove the things people actually
-do work -- that someone an admin creates in the panel can sign in, that their
+do work -- that someone an admin creates in the app can sign in, that their
 key reaches the model, that a budget really stops them, that a rotated key
 really dies, that a non-admin cannot reach the admin console or the metrics,
 that Grafana and Open WebUI sign them in with the right role, that a chat in
@@ -21,6 +21,7 @@ Exit code is the number of failed checks.
 """
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import base64
 import http.cookiejar
 import json
@@ -138,12 +139,6 @@ def litellm(path, payload=None, method=None):
         return code, body
 
 
-def post_panel(browser, path, fields):
-    """POST a form without following, and return (status, Location)."""
-    code, body, headers, _ = browser.req(u("admin", path), fields, form=True, follow=False)
-    return code, headers.get("Location", "") if headers else ""
-
-
 def sso(browser, start_url, done_host):
     """Walk an OIDC login from the app's start URL to its callback, as a browser would."""
     url = start_url
@@ -175,16 +170,19 @@ def main():
     rec("admin", "the app knows them as an admin", code == 200 and me.get("isAdmin") is True, f"HTTP {code}")
     code, people = admin.app("GET", "/api/admin/people")
     rec("admin", "admin lists people", code == 200 and any(p.get("userName") == "admin" for p in people.get("people", [])), f"HTTP {code}")
-    code_i, body_i = admin.req(u("admin", "/indexing"))[:2]
-    rec("admin", "admin reaches the panel's Indexing page", code_i == 200 and "<h2>Indexing</h2>" in body_i, f"HTTP {code_i}")
-    code_m, body = admin.req(u("admin", "/model"))[:2]
-    samples = len(re.findall(r"<details", body))
+    code, model = admin.app("GET", "/api/admin/model")
+    samples = model.get("samples", []) if code == 200 else []
     shipped = len(list((ROOT / "env-samples").glob("*.env")))
-    rec("admin", "admin sees the Model card with every env-sample", "<h2>Model</h2>" in body and samples == shipped,
-        f"{samples} of {shipped} samples")
-    rec("admin", "the Model card names the running model", f"<strong>{MODEL}</strong>" in body, MODEL)
-    code, loc = admin.req(u("admin", "/people"), follow=False)[0], None
-    rec("admin", "the panel hands People over to the app", code == 303, f"HTTP {code}")
+    rec("admin", "the Model page lists every env-sample with its MODEL block",
+        len(samples) == shipped and all(x.get("block", "").startswith("# >>> MODEL") for x in samples),
+        f"{len(samples)} of {shipped} samples")
+    rec("admin", "the Model page names the running model", model.get("running", {}).get("name") == MODEL, MODEL)
+    code, overview = admin.app("GET", "/api/admin/overview")
+    down = [x["name"] for x in overview.get("services", []) if not x.get("ok")]
+    rec("admin", "the Overview reaches the gateway, Prometheus and Grafana", code == 200 and not down, f"down: {down}" if down else "")
+    code = admin.req(u("admin", "/model"), follow=False)[0]
+    loc = admin.req(u("admin", "/model"), follow=False)[2].get("Location", "")
+    rec("admin", "the old admin panel address sends bookmarks to the app", code == 302 and loc.endswith("/admin/model"), f"HTTP {code} {loc}")
 
     code, made = admin.app("POST", "/api/admin/people", {"userName": who, "email": email, "budget": 5})
     pw, key, pid = made.get("password") or "", made.get("apiKey") or "", made.get("id")
@@ -205,18 +203,17 @@ def main():
     rec("person", "the app knows them as a member", me.get("isAdmin") is False, f"HTTP {code}")
     code = person.app("GET", "/api/admin/people")[0]
     rec("person", "the people list is refused", code == 403, f"HTTP {code}")
-    for page_path in ("/indexing", "/model", "/packs"):
-        code_p = person.req(u("admin", page_path), follow=False)[0]
-        rec("person", f"panel page {page_path} is refused", code_p == 403, f"HTTP {code_p}")
+    for path in ("/api/admin/overview", "/api/admin/model", "/api/admin/settings", "/api/admin/argus/status",
+                 "/api/dashboards/usage-by-user"):
+        code = person.app("GET", path)[0]
+        rec("person", f"GET {path} is refused", code == 403, f"HTTP {code}")
     for method, path, body in (("POST", "/api/admin/people", {"userName": "x" + who, "email": "x" + email}),
                                ("POST", f"/api/admin/people/{pid}/key", {}),
                                ("PUT", f"/api/admin/people/{pid}/budget", {"budget": 1000}),
-                               ("PATCH", f"/api/admin/people/{pid}", {"admin": True})):
+                               ("PATCH", f"/api/admin/people/{pid}", {"admin": True}),
+                               ("POST", "/api/admin/argus/index", {"branches": []})):
         code = person.app(method, path, body)[0]
         rec("person", f"{method} {path.replace(str(pid), '<self>')} is refused", code == 403, f"HTTP {code}")
-    for path, fields in (("/admin/index", {"branches": "main"}), ("/admin/packs", {"action": "reload"})):
-        code, _ = post_panel(person, path, fields)
-        rec("person", f"panel POST {path} is refused", code == 403, f"HTTP {code}")
     for host in ("metrics", "alerts"):
         code = person.req(u(host, "/-/healthy"), follow=False)[0]
         rec("person", f"{host} is refused to a non-admin", code in (401, 403), f"HTTP {code}")
@@ -324,6 +321,14 @@ def main():
             wrong.append((prompt, cached, out, r.get("spend"), expected))
     rec("usage", "each request is priced from .env: cache miss, cache hit, output", bool(rows) and not wrong,
         f"{len(rows)} checked" if not wrong else f"mismatch {wrong[:1]}")
+    start = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    end = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    code, mine = person.app("GET", "/api/usage/me?" + urllib.parse.urlencode({"from": start, "to": end}))
+    t = mine.get("totals", {}) if code == 200 else {}
+    mine_cost = float(t.get("cost") or 0)
+    logged_cost = sum(float(r.get("spend") or 0) for r in rows)
+    rec("usage", "the person's own usage page shows their requests and cost", code == 200 and (t.get("requests") or 0) >= len(rows) > 0
+        and mine_cost >= logged_cost - 1e-9, f"{t.get('requests')} requests, ${mine_cost:.6f} (logged ${logged_cost:.6f})")
     if webui_ok:
         code, logs = litellm("/spend/logs?summarize=false")
         chat_rows = [r for r in (logs if isinstance(logs, list) else []) if r.get("end_user") == email]

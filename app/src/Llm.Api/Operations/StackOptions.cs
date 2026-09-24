@@ -36,5 +36,12 @@ public sealed class ArgusOptions
     public string? GitlabAuth { get; set; }
     public string? GitlabUsername { get; set; }
 
-    public bool Enabled => !string.IsNullOrWhiteSpace(Url) && !string.IsNullOrWhiteSpace(AdminToken);
+    /// <summary>False when the stack does not run Argus: set from COMPOSE_PROFILES at startup.</summary>
+    public bool Deployed { get; set; } = true;
+
+    /// <summary>
+    /// A token alone does not mean Argus runs: the .env one-liner fills ARGUS_ADMIN_TOKEN
+    /// for every install. Without the `argus` profile its pages say "not set up".
+    /// </summary>
+    public bool Enabled => Deployed && !string.IsNullOrWhiteSpace(Url) && !string.IsNullOrWhiteSpace(AdminToken);
 }

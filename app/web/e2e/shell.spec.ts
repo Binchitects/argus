@@ -40,7 +40,7 @@ test('unknown pages say so', async ({ page }) => {
 })
 
 test('no horizontal scrolling at any width', async ({ page }) => {
-  for (const path of ['/', '/admin', '/account', '/admin/audit']) {
+  for (const path of ['/', '/admin', '/admin/people', '/account', '/admin/audit', '/admin/model', '/usage']) {
     await page.goto(path)
     await page.getByRole('heading', { level: 1 }).first().waitFor()
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
