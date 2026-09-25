@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Every dashboard panel the app draws itself must give the same data as Grafana.
 
-For each SQL panel of the dashboards the app serves, the same time range and
-the same interval go to Grafana (/api/ds/query) and to the app
+For each panel of every dashboard (SQL, Prometheus and Loki alike), the same
+time range and the same interval go to Grafana (/api/ds/query) and to the app
 (/api/dashboards/<uid>/panels/<key>/query); the answers are normalised (rows
-sorted, Grafana's wide frames' null gaps dropped, times as epoch ms) and
-compared value for value.
+sorted, Grafana's wide frames' null gaps dropped, times as epoch ms, series by
+name, instant results by their labels, log lines by time and text) and
+compared value for value. Dashboard variables take their defaults, filled in
+as Grafana's page fills them (the /api/ds/query API does not).
 
-    python3 scripts/compare-dashboards.py            # last 30 days
-    python3 scripts/compare-dashboards.py 7d
+    python3 scripts/compare-dashboards.py            # SQL over 30 days, the rest over 6 hours
+    python3 scripts/compare-dashboards.py 7d 1h
 
 Signs in to the app as `admin` (ADMIN_PASSWORD, or AUTHELIA_ADMIN_PASSWORD on
 an install from before the app) and to Grafana as its local admin.
@@ -22,13 +24,14 @@ import ssl
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DASHBOARDS = ["usage-by-user", "llm-overview"]
 SQL_UID = "litellm-db"
+SCRAPE_MS = 15000  # Prometheus's timeInterval in Grafana: the finest step
 
 
 def env(key, default=""):
@@ -134,11 +137,94 @@ def app_norm(result):
     return sorted(rows, key=repr)
 
 
+def prom_escape(v):
+    return "".join("\\" + c if c in "\\^$*+?.()|{}[]" else c for c in v)
+
+
+def fill(expr, variables, chosen):
+    """A query with the dashboard's variables in it, as Grafana's page fills it before sending."""
+    import re
+    def value(v):
+        vals = chosen.get(v["name"], [])
+        if vals == ["$__all"]:
+            vals = v["options"]
+        several = v.get("multi") or v.get("includeAll")
+        if len(vals) == 1:
+            out = prom_escape(vals[0]) if several else vals[0]
+        else:
+            out = "(" + "|".join(prom_escape(x) for x in vals) + ")"
+        return out.replace("\\", "\\\\").replace('"', '\\"')
+    by = {v["name"]: v for v in variables}
+    return re.sub(r"\$\{(\w+)(?::\w+)?\}|\[\[(\w+)\]\]|\$([A-Za-z_]\w*)",
+                  lambda m: value(by[n]) if (n := m.group(1) or m.group(2) or m.group(3)) in by else m.group(0), expr)
+
+
+def label_key(labels):
+    return tuple(sorted((k, v) for k, v in (labels or {}).items()))
+
+
+def grafana_metrics(result, instant):
+    """Prometheus and Loki frames: series by display name, or instant values by labels, or log lines."""
+    out = {}
+    for fr in result.get("frames") or []:
+        fields = fr["schema"]["fields"]
+        values = fr["data"]["values"]
+        names = [f.get("name") for f in fields]
+        if "Line" in names:  # log lines
+            li, ti = names.index("Line"), names.index("tsNs") if "tsNs" in names else names.index("Time")
+            lines = out.setdefault("logs", set())
+            for t, line in zip(values[ti], values[li]):
+                lines.add((str(t), line))
+            continue
+        ti = next((i for i, f in enumerate(fields) if f.get("type") == "time"), None)
+        for i, f in enumerate(fields):
+            if i == ti or f.get("type") != "number":
+                continue
+            labels = f.get("labels") or {}
+            if instant:
+                out[label_key(labels)] = num(values[i][-1]) if values[i] else None
+                continue
+            name = (f.get("config") or {}).get("displayNameFromDS")
+            if not name:
+                rest = ", ".join(f'{k}="{v}"' for k, v in sorted(labels.items()) if k != "__name__")
+                name = labels.get("__name__", "") + ("{" + rest + "}" if rest else "")
+            pts = out.setdefault(name, set())
+            for t, v in zip(values[ti], values[i]):
+                if v is not None:
+                    pts.add((int(t), num(v)))
+    if "logs" in out:
+        return {"logs": sorted(out["logs"])}
+    return {k: (sorted(v) if isinstance(v, set) else v) for k, v in out.items() if not isinstance(v, set) or v}
+
+
+def app_metrics(result, instant):
+    if result.get("logs") is not None:
+        return {"logs": sorted((l["nanos"], l["line"]) for l in result["logs"])}
+    if instant and result.get("table"):
+        t = result["table"]
+        names = [c["name"] for c in t["columns"]]
+        out = {}
+        for r in t["rows"]:
+            labels = {n: v for n, v in zip(names, r) if n not in ("Time",) and not n.startswith("Value") and v is not None}
+            out[label_key(labels)] = num(r[-1])
+        return out
+    if instant:
+        return {}  # an instant query without the table format: compared as series below
+    out = {}
+    for s in result.get("series") or []:
+        # Series of the same name (a legend that does not tell them apart) are kept together, as on the Grafana side.
+        out.setdefault(s["name"], set()).update((int(p[0]), num(p[1])) for p in s["points"] if p[1] is not None)
+    return {k: sorted(v) for k, v in out.items() if v}
+
+
 def main():
     days = int((sys.argv[1] if len(sys.argv) > 1 else "30d").rstrip("d"))
-    to_ms = int(time.time() * 1000) // 60000 * 60000
+    hours = int((sys.argv[2] if len(sys.argv) > 2 else "6h").rstrip("h"))
+    to_ms = (int(time.time() * 1000) // 60000 - 1) * 60000
     from_ms = to_ms - days * 86400000
     interval = round_interval((to_ms - from_ms) / 400)
+    metrics_from_ms = to_ms - hours * 3600000
+    metrics_interval = max(round_interval((to_ms - metrics_from_ms) / 400), SCRAPE_MS)
 
     app = Client()
     password = env("ADMIN_PASSWORD") or env("AUTHELIA_ADMIN_PASSWORD")
@@ -152,14 +238,34 @@ def main():
 
     frm = datetime.fromtimestamp(from_ms / 1000, timezone.utc).isoformat()
     to = datetime.fromtimestamp(to_ms / 1000, timezone.utc).isoformat()
-    print(f"comparing over the last {days} days, interval {interval // 1000} s\n")
+    mfrm = datetime.fromtimestamp(metrics_from_ms / 1000, timezone.utc).isoformat()
+    print(f"comparing SQL panels over the last {days} days (interval {interval // 1000} s), "
+          f"Prometheus and Loki panels over the last {hours} hours (interval {metrics_interval // 1000} s)\n")
     bad = checked = 0
-    for uid in DASHBOARDS:
-        d = json.loads((ROOT / "config/grafana/dashboards" / f"{uid}.json").read_text(encoding="utf-8"))
+    for path in sorted((ROOT / "config/grafana/dashboards").glob("*.json")):
+        d = json.loads(path.read_text(encoding="utf-8"))
+        uid = d["uid"]
+        variables = []
+        if d.get("templating", {}).get("list"):
+            _, info = app.call(f"https://{DOM}{SUFFIX}/api/dashboards/{uid}", headers={"X-Requested-With": "compare"})
+            query = urllib.parse.urlencode({"from": mfrm, "to": to})
+            _, opts = app.call(f"https://{DOM}{SUFFIX}/api/dashboards/{uid}/variables?{query}", headers={"X-Requested-With": "compare"})
+            options = {o["name"]: o["options"] for o in opts}
+            variables = [{**v, "options": options.get(v["name"], [])} for v in info.get("variables", [])]
+        chosen = {v["name"]: v["current"] for v in variables}
         for key, p in enumerate(walk(d.get("panels"))):
             targets = [t for t in p.get("targets") or [] if not t.get("hide")]
             ds = [(t.get("datasource") or p.get("datasource") or {}).get("uid") for t in targets]
-            if not targets or any(x != SQL_UID for x in ds) or any(not t.get("rawSql") for t in targets):
+            if not targets:
+                continue
+            if all(x == SQL_UID for x in ds) and all(t.get("rawSql") for t in targets):
+                pass
+            elif all(x in ("prometheus", "loki") for x in ds) and all(t.get("expr") for t in targets):
+                checked += 1
+                if not compare_metrics(app, graf, gauth, d, key, p, targets, ds, variables, chosen, metrics_from_ms, to_ms, metrics_interval, mfrm, to):
+                    bad += 1
+                continue
+            else:
                 continue
             checked += 1
             code, mine = app.call(f"https://{DOM}{SUFFIX}/api/dashboards/{uid}/panels/{key}/query",
@@ -190,6 +296,52 @@ def main():
                 print(f"  same  {label}")
     print(f"\n{checked - bad}/{checked} panels give the same data in the app and in Grafana")
     return bad
+
+
+def compare_metrics(app, graf, gauth, d, key, p, targets, ds, variables, chosen, from_ms, to_ms, interval, frm, to):
+    label = f"[{d['title']}] {p.get('title')}"
+    code, mine = app.call(f"https://{DOM}{SUFFIX}/api/dashboards/{d['uid']}/panels/{key}/query",
+                          {"from": frm, "to": to, "intervalMs": interval, "vars": chosen}, {"X-Requested-With": "compare"})
+    queries = []
+    for t, uid in zip(targets, ds):
+        instant = bool(t.get("instant")) or t.get("queryType") == "instant"
+        q = {**t, "expr": fill(t["expr"], variables, chosen), "datasource": {"uid": uid}, "intervalMs": interval, "maxDataPoints": 400,
+             "instant": instant, "range": not instant}
+        if uid == "loki":
+            q["queryType"] = "instant" if instant else "range"
+            q["maxLines"] = 1000
+        queries.append(q)
+    gcode, theirs = graf.call(f"https://grafana.{DOM}{SUFFIX}/api/ds/query", {"queries": queries, "from": str(from_ms), "to": str(to_ms)}, gauth)
+    if code != 200 or gcode != 200:
+        print(f"  FAIL  {label}: app HTTP {code}, Grafana HTTP {gcode} {str(theirs)[:200] if gcode != 200 else ''}")
+        return False
+    diffs = []
+    for r, t in zip(mine["results"], targets):
+        g = theirs["results"].get(r["refId"], {})
+        instant = bool(t.get("instant")) or t.get("queryType") == "instant"
+        if r.get("error") or g.get("error"):
+            if r.get("error") and g.get("error"):
+                continue  # both refuse (e.g. a metric of an engine that is not running)
+            diffs.append(f"{r['refId']}: app error {r.get('error')!r}, Grafana error {g.get('error')!r}")
+            continue
+        table = instant and r.get("table") is not None
+        a = app_metrics(r, table)
+        b = grafana_metrics(g, table)
+        if instant and not table:
+            a = {n: pts[-1:] for n, pts in app_metrics(r, False).items()}
+            b = {n: pts[-1:] for n, pts in grafana_metrics(g, False).items()}
+        if a != b:
+            only_a = sorted(set(a) - set(b))[:3]
+            only_b = sorted(set(b) - set(a))[:3]
+            differ = [k for k in set(a) & set(b) if a[k] != b[k]][:2]
+            diffs.append(f"{r['refId']}: only in the app {only_a}, only in Grafana {only_b}, differ {[(k, str(a[k])[:80], str(b[k])[:80]) for k in differ]}")
+    if diffs:
+        print(f"  FAIL  {label}")
+        for x in diffs:
+            print(f"        {x}")
+        return False
+    print(f"  same  {label}")
+    return True
 
 
 if __name__ == "__main__":
