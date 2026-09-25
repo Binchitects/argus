@@ -260,6 +260,28 @@ describe('chat', () => {
     expect(within(note).getByRole('link', { name: 'Hello there' })).toHaveAttribute('href', '/chat/c1')
   })
 
+  it('a question just sent is the one the rail marks', async () => {
+    const two = [...answered, msg('q2', 'a1', 'user', { content: 'Second?' }), msg('a2', 'q2', 'assistant', { content: 'Second answer.', model: 'Main-Model' })]
+    const three = [...two, msg('q3', 'a2', 'user', { content: 'Third?' }), msg('a3', 'q3', 'assistant', { content: 'Third answer.', model: 'Main-Model' })]
+    backend({
+      start: conversation({ messages: two, currentLeafId: 'a2', title: 'Hello there' }),
+      events: [
+        { type: 'question', id: 'q3', parentId: 'a2' },
+        { type: 'assistant', id: 'a3', parentId: 'q3', model: 'Main-Model' },
+        { type: 'content', text: 'Third answer.' },
+        { type: 'done', id: 'a3' },
+      ],
+      saved: three,
+    })
+    renderApp('/chat/c1')
+    const rail = await screen.findByRole('navigation', { name: 'Questions in this chat' })
+    await waitFor(() => expect(within(rail).getAllByRole('button')[1]).toHaveAttribute('aria-current', 'location'))
+    await ask('Third?')
+    await waitFor(() => expect(within(rail).getAllByRole('button')).toHaveLength(3))
+    await waitFor(() => expect(within(rail).getAllByRole('button')[2]).toHaveAttribute('aria-current', 'location'))
+    expect(within(rail).getAllByRole('button')[1]).not.toHaveAttribute('aria-current')
+  })
+
   it('an answer forks a new chat from there, the rail jumps between questions, and an archived chat says so', async () => {
     const two = [
       ...answered,
@@ -410,6 +432,42 @@ describe('chat', () => {
     await userEvent.click(within(versions).getByRole('button', { name: 'Previous question version' }))
     expect(await screen.findByText('answer one')).toBeInTheDocument()
     expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ messageId: 'q1' })
+  })
+
+  it('answering again right after a stop keeps the new answer on screen as it streams', async () => {
+    const stoppedTry = msg('a2', 'q1', 'assistant', { content: 'first try', status: 'stopped' })
+    let tries = 0
+    let reads = 0
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      // The stopped answer is saved a moment after the stop: the page waits for it.
+      'GET /api/chat/conversations/c1': () => ({
+        json: conversation({ messages: tries > 0 && ++reads > 2 ? [...answered, stoppedTry] : answered, currentLeafId: tries > 0 && reads > 2 ? 'a2' : 'a1' }),
+      }),
+      'POST /api/chat/conversations/c1/regenerate': () => {
+        tries++
+        const id = tries === 1 ? 'a2' : 'a3'
+        return {
+          events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id, parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: tries === 1 ? 'first try' : 'fresh answer' }],
+          hang: true,
+        }
+      },
+    })
+    renderApp('/chat/c1')
+    const again = async () => {
+      await userEvent.click(await screen.findByRole('button', { name: 'Answer again' }))
+      await userEvent.click(await screen.findByRole('menuitem', { name: 'Answer again' }))
+    }
+    await again()
+    expect(await screen.findByText('first try')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await again()
+    expect(await screen.findByText('fresh answer')).toBeInTheDocument()
+    // The stopped run would have found its saved answer by now, and cleared the screen.
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(screen.getByText('fresh answer')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
   })
 
   it('answering again can use another thinking level', async () => {

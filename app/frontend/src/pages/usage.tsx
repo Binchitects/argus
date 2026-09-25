@@ -81,7 +81,7 @@ function MyUsage() {
           {t.requests === 0 ? (
             <EmptyState title="No requests in this time range">Chats and API calls show up here within a minute.</EmptyState>
           ) : (
-            <div className="grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
+            <div className="stagger grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Tokens by kind</CardTitle>

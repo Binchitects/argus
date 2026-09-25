@@ -11,6 +11,9 @@ public sealed class FakeMcp : HttpMessageHandler
 
     public List<(string Method, Dictionary<string, string> Headers, JsonElement? Params)> Calls { get; } = [];
 
+    /// <summary>While set, "initialize" waits for it: a server slow to answer.</summary>
+    public TaskCompletionSource? Hold { get; set; }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken)).RootElement;
@@ -23,6 +26,10 @@ public sealed class FakeMcp : HttpMessageHandler
         if (headers.GetValueOrDefault("X-Api-Key") != ApiKey)
         {
             return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":"bad api key"}""", Encoding.UTF8, "application/json") };
+        }
+        if (method == "initialize" && Hold is { } hold)
+        {
+            await hold.Task.WaitAsync(cancellationToken);
         }
         if (method == "notifications/initialized")
         {

@@ -151,8 +151,12 @@ test.describe('chat with the model', () => {
     await expect(answer).not.toContainText('400')
     await answer.getByRole('button', { name: 'Answer again' }).click()
     await page.getByRole('menuitem', { name: 'Answer again' }).click()
-    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible()
+    // Stopped once the second answer has begun. (Stopped before it exists, there
+    // is no second version, and the first stays on screen.)
+    await expect(answer.getByText('Stopped.')).toBeHidden()
+    await expect(answer).toContainText('3', { timeout: 120_000 })
     await page.getByRole('button', { name: 'Stop' }).click()
+    await expect(answer.getByText('Stopped.')).toBeVisible({ timeout: 30_000 })
     const versions = page.getByRole('navigation', { name: 'Answer versions' })
     await expect(versions).toHaveText(/2 \/ 2/, { timeout: 30_000 })
     await versions.getByRole('button', { name: 'Previous answer version' }).click()
@@ -171,6 +175,24 @@ test.describe('chat with the model', () => {
     await expect(page.getByRole('region', { name: 'Answer' }).last()).toContainText(/cherry/i, { timeout: 120_000 })
     await done(page)
     await expect(page.getByRole('navigation', { name: 'Question versions' })).toHaveText(/2 \/ 2/)
+  })
+
+  test('a Word document and an Excel workbook are read as their text', async ({ page }) => {
+    await page.goto('/chat')
+    await thinking(page, 'No thinking')
+    const fixtures = new URL('./fixtures/', import.meta.url).pathname
+    await page.getByLabel('Attach files').setInputFiles([`${fixtures}plan.docx`, `${fixtures}budget.xlsx`])
+    await expect(page.getByText('plan.docx')).toBeVisible()
+    await expect(page.getByText('budget.xlsx')).toBeVisible()
+    await ask(page, "What is the project's code name, and what is the Platform team's budget? Reply as: NAME, NUMBER")
+    const answer = page.getByRole('region', { name: 'Answer' }).last()
+    await expect(answer).toContainText('AMBER-FALCON', { timeout: 120_000 })
+    await expect(answer).toContainText(/4,?200/)
+    await done(page)
+    await page.getByRole('button', { name: /^Files \(\d+\)$/ }).click()
+    const panel = page.getByRole('complementary', { name: 'Files' })
+    await panel.getByRole('button', { name: /budget\.xlsx/ }).click()
+    await expect(panel).toContainText('## Sheet: Budget')
   })
 
   test('an attached file is read, and is in the Files panel', async ({ page }) => {

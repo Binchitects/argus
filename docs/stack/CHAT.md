@@ -69,6 +69,13 @@ WebUI still runs at `https://chat.<LLM_DOMAIN>` until the new web is signed off
     the page. Uploads show their progress.
   - Text, code, Markdown, CSV, JSON and logs go as their text. PDFs go page by
     page; a scan with no text layer is refused, with the reason.
+  - Word, Excel and PowerPoint files (.docx, .xlsx, .pptx), their OpenDocument
+    cousins (.odt, .ods, .odp) and RTF go as their text, read on the server
+    from the file itself (nothing in it is run): headings, lists and tables
+    (as rows of cells) from a document, each sheet as CSV from a workbook,
+    each slide in order from a deck. Old binary Office files (.doc, .xls,
+    .ppt) are refused with how to save them in the newer format. The file
+    itself is kept beside its text.
   - Images (PNG, JPEG, GIF, WebP, told by their bytes) show as thumbnails.
     A thumbnail opens a viewer: fitted to the screen, or at actual size on a
     click. Arrows or the arrow keys move between images sent together, with

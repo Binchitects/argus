@@ -121,7 +121,13 @@ function SignedIn({ me }: { me: Me }) {
           </div>
         </header>
         <main id="main" tabIndex={-1} className={cn('w-full flex-1 outline-none', fullBleed ? 'min-h-0' : 'mx-auto max-w-(--page-max) px-4 py-6 sm:px-6 lg:px-8')}>
-          <Outlet context={me} />
+          {fullBleed ? (
+            <Outlet context={me} />
+          ) : (
+            <div key={location.pathname} className="animate-page">
+              <Outlet context={me} />
+            </div>
+          )}
         </main>
       </div>
       <CommandMenu open={paletteOpen} onOpenChange={setPaletteOpen} me={me} />
@@ -152,7 +158,7 @@ function SidebarNav({ sections, collapsed, onNavigate }: { sections: NavSection[
                   end={item.path === '/' || item.path === '/admin'}
                   className={({ isActive }) =>
                     cn(
-                      'flex h-8 items-center gap-2.5 rounded-md px-2 text-sm font-medium transition-colors hover:bg-sidebar-accent',
+                      'flex h-8 items-center gap-2.5 rounded-md px-2 text-sm font-medium transition-[color,background-color,scale] duration-150 hover:bg-sidebar-accent active:scale-[0.98] [&>svg]:transition-transform hover:[&>svg]:scale-110',
                       isActive ? 'bg-sidebar-accent text-foreground' : 'text-sidebar-foreground/85',
                       collapsed && 'justify-center px-0',
                     )

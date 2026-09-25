@@ -84,12 +84,12 @@ function ChatItem({ chat, active, archived, onNavigate }: { chat: ConversationSu
       </li>
     )
   return (
-    <li className="group/item relative min-w-0">
+    <li className="group/item relative min-w-0 animate-enter">
       <NavLink
         to={`/chat/${chat.id}`}
         onClick={onNavigate}
         title={chat.title}
-        className={cn('block truncate rounded-md py-1.5 pr-8 pl-2 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring', active ? 'bg-accent font-medium text-foreground' : 'text-foreground/85')}
+        className={cn('block truncate rounded-md py-1.5 pr-8 pl-2 text-sm transition-colors duration-150 outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring', active ? 'bg-accent font-medium text-foreground' : 'text-foreground/85')}
       >
         {chat.title}
       </NavLink>

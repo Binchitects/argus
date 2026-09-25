@@ -60,7 +60,7 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
   const [viewing, setViewing] = useState<number | null>(null)
   const images = m.attachments.filter((a) => a.kind === 'image')
   return (
-    <section className="group/q flex scroll-mt-4 flex-col items-end gap-1 outline-none" aria-label="You" data-question={m.id} tabIndex={-1}>
+    <section className="group/q flex animate-enter scroll-mt-4 flex-col items-end gap-1 outline-none" aria-label="You" data-question={m.id} tabIndex={-1}>
       {m.attachments.length > 0 && (
         <ul className="flex max-w-[85%] flex-wrap justify-end gap-2" aria-label="Attachments">
           {m.attachments.map((a) =>
@@ -232,7 +232,7 @@ export function AnswerTurn({
   }
 
   return (
-    <section className={cn('min-w-0', live && 'pb-2')} aria-label="Answer" aria-busy={live}>
+    <section className={cn('min-w-0 animate-enter', live && 'pb-2')} aria-label="Answer" aria-busy={live}>
       {notices.map((n, i) => (
         <NoticeLine key={i} text={n.text} />
       ))}

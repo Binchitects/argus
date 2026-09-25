@@ -28,5 +28,5 @@ export function Stat({ label, value, hint, icon: Icon, tone, className, text }: 
 }
 
 export function StatGrid({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5', className)}>{children}</div>
+  return <div className={cn('stagger grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5', className)}>{children}</div>
 }

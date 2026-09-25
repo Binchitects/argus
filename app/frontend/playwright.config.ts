@@ -22,6 +22,9 @@ export default defineConfig({
     storageState: 'e2e/.auth/state.json',
     trace: 'retain-on-failure',
     channel: process.env.E2E_CHANNEL || undefined,
+    // Axe and the screenshots see pages at rest, not halfway through a fade
+    // (the app turns its motion off for prefers-reduced-motion).
+    contextOptions: { reducedMotion: 'reduce' },
   },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },

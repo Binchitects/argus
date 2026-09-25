@@ -36,10 +36,10 @@ export function Thinking({ text, live, ms, since }: { text: string; live: boolea
     <Collapsible.Root open={open} onOpenChange={setOpen} className="mb-3">
       <Collapsible.Trigger className="group flex items-center gap-1.5 rounded-md py-1 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring">
         <Brain className={cn('size-4', live && 'animate-pulse text-primary')} aria-hidden="true" />
-        <span>{label}</span>
-        <ChevronRight className="size-3.5 transition-transform group-data-[state=open]:rotate-90" aria-hidden="true" />
+        <span className={cn(live && 'text-shimmer')}>{label}</span>
+        <ChevronRight className="size-3.5 transition-transform duration-200 group-data-[state=open]:rotate-90" aria-hidden="true" />
       </Collapsible.Trigger>
-      <Collapsible.Content>
+      <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
         <div ref={box} className="mt-1 max-h-72 overflow-y-auto border-l-2 pl-4 text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {text}
         </div>
@@ -97,8 +97,8 @@ export function ToolCard({
   const count = resultCount(value)
   return (
     <div className="my-2">
-      <Collapsible.Root open={open} onOpenChange={setOpen} className="overflow-hidden rounded-lg border bg-card">
-        <Collapsible.Trigger className="group flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:ring-inset">
+      <Collapsible.Root open={open} onOpenChange={setOpen} className="animate-enter overflow-hidden rounded-lg border bg-card transition-shadow hover:shadow-sm">
+        <Collapsible.Trigger className="group flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:ring-inset">
           <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary-ink">
             <Icon className="size-3.5" aria-hidden="true" />
           </span>
@@ -134,10 +134,10 @@ export function ToolCard({
             ) : (
               'Not run'
             )}
-            <ChevronRight className="size-3.5 transition-transform group-data-[state=open]:rotate-90" aria-hidden="true" />
+            <ChevronRight className="size-3.5 transition-transform duration-200 group-data-[state=open]:rotate-90" aria-hidden="true" />
           </span>
         </Collapsible.Trigger>
-        <Collapsible.Content>
+        <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
           <div className="grid gap-3 border-t px-3 py-3">
             {args.length > 0 && (
               <div>

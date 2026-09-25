@@ -5,7 +5,11 @@ namespace Llm.Api.Chat;
 
 public sealed class AttachmentException(string message) : Exception(message);
 
-/// <summary>A file's text, for the model. Text and code as they are; PDF page by page; nothing binary.</summary>
+/// <summary>
+/// A file's text, for the model. Text and code as they are; PDF page by page;
+/// Word, Excel, PowerPoint, OpenDocument and RTF as their text (<see cref="Documents"/>);
+/// nothing else binary.
+/// </summary>
 public static class Attachments
 {
     /// <summary>The pictures the chat takes. Never SVG: it is a document that can carry script.</summary>
@@ -35,10 +39,12 @@ public static class Attachments
         return null;
     }
 
-    public static (string Text, bool Truncated) Extract(string fileName, string contentType, byte[] bytes, int maxChars)
+    /// <summary>The text, whether it was cut at <paramref name="maxChars"/>, and whether it was converted (a PDF or a document, not text as it is).</summary>
+    public static (string Text, bool Truncated, bool Converted) Extract(string fileName, string contentType, byte[] bytes, int maxChars)
     {
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
         string text;
+        var converted = true;
         if (ext == ".pdf" || contentType == "application/pdf")
         {
             try
@@ -64,19 +70,28 @@ public static class Attachments
                 throw new AttachmentException($"{fileName} has no text layer (a scan?). Only PDFs with text can be read.");
             }
         }
+        else if (Documents.Text(fileName, bytes, maxChars) is { } document)
+        {
+            if (string.IsNullOrWhiteSpace(document))
+            {
+                throw new AttachmentException($"{fileName} has no text in it.");
+            }
+            text = document;
+        }
         else if (LooksBinary(bytes))
         {
-            throw new AttachmentException($"{fileName} is not a text file or a PDF. Attach text, code, Markdown, CSV, JSON, logs or PDFs.");
+            throw new AttachmentException($"{fileName} is not a file the chat can read. Attach text, code, Markdown, CSV, JSON, logs, PDFs, Word, Excel, PowerPoint or OpenDocument files, or pictures.");
         }
         else
         {
+            converted = false;
             text = new UTF8Encoding(false, false).GetString(bytes).Replace("\r\n", "\n", StringComparison.Ordinal);
             if (text.Length > 0 && text[0] == '﻿')
             {
                 text = text[1..];
             }
         }
-        return text.Length > maxChars ? (text[..maxChars], true) : (text, false);
+        return text.Length > maxChars ? (text[..maxChars], true, converted) : (text, false, converted);
     }
 
     /// <summary>A NUL byte in the first 8 KB: what git calls binary.</summary>

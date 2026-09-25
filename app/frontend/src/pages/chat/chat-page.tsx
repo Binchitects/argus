@@ -110,6 +110,24 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const scroller = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
   const [readingQuestion, setReadingQuestion] = useState<string | null>(null)
+  /** The thread's scrollbar width: the question rail sits beside it, not under it. */
+  const [gutter, setGutter] = useState(0)
+  /** A question jumped to stays marked until the person scrolls or asks again (a short chat is always "at the end"). */
+  const pinned = useRef<string | null>(null)
+  const questionCount = useRef(0)
+  /** The thread's scroller. Scrolling it by hand (not a jump's smooth scroll) lets the rail follow the view again. */
+  const thread = useCallback((el: HTMLDivElement | null) => {
+    scroller.current = el
+    if (!el) return
+    const unpin = () => {
+      pinned.current = null
+    }
+    const events = ['wheel', 'touchmove', 'keydown'] as const
+    for (const type of events) el.addEventListener(type, unpin, { passive: true })
+    return () => {
+      for (const type of events) el.removeEventListener(type, unpin)
+    }
+  }, [])
 
   const data = loaded.data
   const settings: ChatSettings = data
@@ -128,29 +146,59 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     document.title = title ? `${title} · ${brand ?? 'Chat'}` : `Chat · ${brand ?? ''}`.trim()
   }, [title, brand])
 
-  // Follow the answer as it grows, unless the person scrolled up to read.
-  useEffect(() => {
-    const el = scroller.current
-    if (atBottom && el) el.scrollTop = el.scrollHeight
-  }, [view.messages, atBottom])
-  const onScroll = () => {
+  /**
+   * The question being read: at the end of the thread, the last one (a question
+   * just sent is short of the top of the view); otherwise the last one whose top
+   * has passed the top of the view.
+   */
+  const updateReading = useCallback(() => {
     const el = scroller.current
     if (!el) return
-    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
-    // The question being read: the last one whose top has passed the top of the view.
+    setGutter(el.offsetWidth - el.clientWidth)
+    const questions = [...el.querySelectorAll<HTMLElement>('[data-question]')]
+    if (questions.length > questionCount.current) pinned.current = null
+    questionCount.current = questions.length
+    if (pinned.current) {
+      setReadingQuestion(pinned.current)
+      return
+    }
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+      setReadingQuestion(questions.at(-1)?.dataset.question ?? null)
+      return
+    }
     const line = el.getBoundingClientRect().top + 96
-    let reading: string | null = null
-    for (const q of el.querySelectorAll<HTMLElement>('[data-question]')) {
+    let reading = questions[0]?.dataset.question ?? null
+    for (const q of questions) {
       if (q.getBoundingClientRect().top > line) break
       reading = q.dataset.question ?? null
     }
     setReadingQuestion(reading)
+  }, [])
+
+  // Follow the answer as it grows, unless the person scrolled up to read.
+  useEffect(() => {
+    const el = scroller.current
+    if (atBottom && el) el.scrollTop = el.scrollHeight
+    updateReading()
+  }, [view.messages, atBottom, updateReading])
+
+  useEffect(() => {
+    window.addEventListener('resize', updateReading)
+    return () => window.removeEventListener('resize', updateReading)
+  }, [updateReading])
+
+  const onScroll = () => {
+    const el = scroller.current
+    if (!el) return
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
+    updateReading()
   }
 
   const jumpTo = (questionId: string) => {
     const target = scroller.current?.querySelector<HTMLElement>(`[data-question="${questionId}"]`)
     if (!target) return
     setAtBottom(false)
+    pinned.current = questionId
     setReadingQuestion(questionId)
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
     target.focus({ preventScroll: true })
@@ -204,8 +252,11 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   }
 
   /** Streams one answer; false when the question never reached the server (it goes back into the box). */
+  /** Which run is current: a run that ended tidies up only while no newer one has started. */
+  const runs = useRef(0)
   const run = useCallback(
     async (conversationId: string, endpoint: string, body: object, start: LiveState, localId: string | null): Promise<boolean> => {
+      const me = ++runs.current
       setLive(start)
       setStreaming(true)
       streamingIn.current = conversationId
@@ -237,13 +288,15 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
         // The server's copy is the truth (ids, statuses, what a stop kept). After a
         // stop it saves a moment after the stream ends: wait until it has the leaf.
         const leaf = liveRef.current?.leaf
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 20 && runs.current === me; i++) {
           await queryClient.invalidateQueries({ queryKey: conversationQuery(conversationId).queryKey })
           const saved = queryClient.getQueryData<Conversation>(conversationQuery(conversationId).queryKey)
           if (!received || !leaf || leaf.startsWith('local-') || saved?.messages.some((m) => m.id === leaf)) break
           await new Promise((r) => setTimeout(r, 300))
         }
-        setLive(null)
+        // "Answer again" right after a stop starts a new run while this one waits:
+        // clearing now would wipe the new answer off the screen as it streams.
+        if (runs.current === me) setLive(null)
       }
       return received || wasStopped
     },
@@ -339,10 +392,10 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
         />
         {empty ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
-            <div className="w-full max-w-2xl">
+            <div className="w-full max-w-2xl animate-enter">
               <h1 className="mb-2 text-center text-2xl font-semibold tracking-tight">What can I help with?</h1>
               <p className="mb-6 text-center text-muted-foreground">
-                {toolsOnHere.includes('argus') ? 'Ask anything. Argus searches the code you have access to in GitLab.' : 'Ask anything, or attach text, code, PDFs and images to ask about them.'}
+                {toolsOnHere.includes('argus') ? 'Ask anything. Argus searches the code you have access to in GitLab.' : 'Ask anything, or attach documents, spreadsheets, slides, PDFs, code and images to ask about them.'}
               </p>
               {error && (
                 <Alert variant="destructive" className="mb-3">
@@ -350,14 +403,14 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                 </Alert>
               )}
               <Composer streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} uploads={uploads} model={model} tools={toolsPicker} autoFocus big />
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <div className="stagger mt-4 grid gap-2 sm:grid-cols-3">
                 {(config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions).map((s) => (
                   <button
                     key={s.text}
                     type="button"
                     disabled={streaming}
                     onClick={() => void send(s.text)}
-                    className="flex items-start gap-2 rounded-xl border bg-card p-3 text-left text-sm text-muted-foreground transition-colors outline-none hover:border-primary/40 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring"
+                    className="flex items-start gap-2 rounded-xl border bg-card p-3 text-left text-sm text-muted-foreground transition-[color,border-color,box-shadow,translate] duration-200 outline-none hover:-translate-y-0.5 hover:border-primary/40 hover:text-foreground hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring"
                   >
                     <s.icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
                     {s.text}
@@ -369,7 +422,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
         ) : (
           <>
             <div className="relative flex min-h-0 flex-1 flex-col">
-              <div ref={scroller} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto" aria-live="polite">
+              <div ref={thread} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto" aria-live="polite">
                 <div className="mx-auto grid w-full max-w-(--thread-max) gap-6 px-4 py-6 sm:px-6">
                   {data?.archivedAt && (
                     <output className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
@@ -414,14 +467,14 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                   {error && <Alert variant="destructive">{error}</Alert>}
                 </div>
               </div>
-              <QuestionRail questions={turns.flatMap((t) => (t.question ? [t.question] : []))} active={readingQuestion} onJump={jumpTo} />
+              <QuestionRail questions={turns.flatMap((t) => (t.question ? [t.question] : []))} active={readingQuestion} onJump={jumpTo} gutter={gutter} />
             </div>
             <div className="relative mx-auto w-full max-w-(--thread-max) px-4 pb-4 sm:px-6">
               {!atBottom && (
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="absolute -top-12 left-1/2 -translate-x-1/2 rounded-full shadow-md"
+                  className="absolute -top-12 left-1/2 -translate-x-1/2 animate-pop rounded-full shadow-md"
                   onClick={() => {
                     setAtBottom(true)
                     scroller.current?.scrollTo?.({ top: scroller.current.scrollHeight, behavior: 'smooth' })

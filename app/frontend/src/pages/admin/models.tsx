@@ -101,7 +101,7 @@ export function ModelsPage() {
           {engine.error}
         </Alert>
       )}
-      <div className="grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
+      <div className="stagger grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
         {models.data.models.map((m) => (
           <ModelCard key={m.name} model={m} active={engine.active} onEdit={() => setEditing(m)} onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })} />
         ))}

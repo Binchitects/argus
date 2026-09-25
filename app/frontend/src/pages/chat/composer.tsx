@@ -127,7 +127,7 @@ export function Composer({
       />
       <div className="flex items-center gap-2 px-2 pt-1 pb-2">
         <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) uploads.add(e.target.files); e.target.value = '' }} aria-label="Attach files" />
-        <Tooltip content="Attach files: text, code, PDFs, images">
+        <Tooltip content="Attach files: Word, Excel, PowerPoint, PDF, text, code, images">
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => picker.current?.click()} aria-label="Attach">
             <Paperclip />
           </Button>
@@ -136,11 +136,11 @@ export function Composer({
         <span className="hidden text-xs text-muted-foreground lg:inline">Enter to send · Shift+Enter for a new line</span>
         <span className="ml-auto" />
         {streaming ? (
-          <Button type="button" size="icon-sm" variant="secondary" className="rounded-full" onClick={onStop} aria-label="Stop">
+          <Button type="button" size="icon-sm" variant="secondary" className="animate-pop rounded-full" onClick={onStop} aria-label="Stop">
             <Square className="fill-current" />
           </Button>
         ) : (
-          <Button type="submit" size="icon-sm" className="rounded-full" disabled={!canSend} aria-label="Send">
+          <Button type="submit" size="icon-sm" className="animate-pop rounded-full" disabled={!canSend} aria-label="Send">
             <ArrowUp />
           </Button>
         )}

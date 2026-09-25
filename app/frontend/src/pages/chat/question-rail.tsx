@@ -12,10 +12,15 @@ const preview = (m: Message) => {
  * ChatGPT's and DeepSeek's: hover one to read it, click to go to it. The one
  * being read is marked.
  */
-export function QuestionRail({ questions, active, onJump }: { questions: Message[]; active: string | null; onJump: (id: string) => void }) {
+export function QuestionRail({ questions, active, onJump, gutter = 0 }: { questions: Message[]; active: string | null; onJump: (id: string) => void; gutter?: number }) {
   if (questions.length < 2) return null
   return (
-    <nav aria-label="Questions in this chat" className="pointer-events-none absolute inset-y-0 right-0 z-10 hidden items-center md:flex">
+    <nav
+      aria-label="Questions in this chat"
+      className="pointer-events-none absolute inset-y-0 z-10 hidden items-center md:flex"
+      // Beside the thread's scrollbar, not under it.
+      style={{ right: gutter + 4 }}
+    >
       <ol className="pointer-events-auto flex max-h-[70%] flex-col items-end overflow-y-auto py-2 [scrollbar-width:none]">
         {questions.map((q, i) => {
           const current = q.id === active
@@ -29,7 +34,7 @@ export function QuestionRail({ questions, active, onJump }: { questions: Message
                   aria-current={current ? 'location' : undefined}
                   className="group flex h-6 w-8 items-center justify-end pr-2 outline-none focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:ring-inset"
                 >
-                  <span className={cn('block h-[3px] rounded-full transition-all group-hover:w-5 group-hover:bg-foreground', current ? 'w-5 bg-primary' : 'w-3 bg-muted-foreground')} />
+                  <span className={cn('block h-[3px] rounded-full transition-[width,background-color] duration-300 ease-(--ease-out-expo) group-hover:w-5 group-hover:bg-foreground', current ? 'w-5 bg-primary' : 'w-3 bg-muted-foreground')} />
                 </button>
               </Tooltip>
             </li>

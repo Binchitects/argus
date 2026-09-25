@@ -58,7 +58,7 @@ export function ToolsPage() {
           </Button>
         }
       />
-      <div className="grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
+      <div className="stagger grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
         {tools.data.map((t) => (
           <ToolCard key={t.id} tool={t} onEdit={() => setEditing(t.server)} />
         ))}

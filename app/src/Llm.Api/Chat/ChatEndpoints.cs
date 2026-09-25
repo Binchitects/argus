@@ -481,8 +481,8 @@ public static class ChatEndpoints
             {
                 throw new InvalidOperationException("There is no question to answer again.");
             }
-            c.CurrentLeafId = question.Id;
-            await db.SaveChangesAsync();
+            // The chat stays on the answer it shows until the new one exists: a stop
+            // before that would otherwise leave it on the question, every answer hidden.
             return (question, false);
         });
     }
@@ -593,11 +593,13 @@ public static class ChatEndpoints
         }
         try
         {
-            var (text, truncated) = Attachments.Extract(file.FileName, file.ContentType ?? "", ms.ToArray(), options.MaxAttachmentChars);
+            var (text, truncated, converted) = Attachments.Extract(file.FileName, file.ContentType ?? "", ms.ToArray(), options.MaxAttachmentChars);
             var a = new ChatAttachment
             {
                 UserId = me.Id, FileName = Path.GetFileName(file.FileName), ContentType = file.ContentType ?? "application/octet-stream",
                 Size = file.Length, Text = text, Truncated = truncated,
+                // A document's own bytes are kept beside its text: the Python sandbox opens the real .xlsx.
+                Data = converted ? ms.ToArray() : null,
             };
             db.ChatAttachments.Add(a);
             await db.SaveChangesAsync();

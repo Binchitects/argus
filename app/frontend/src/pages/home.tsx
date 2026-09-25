@@ -39,7 +39,7 @@ export function HomePage() {
         </h1>
         <p className="mt-1 text-muted-foreground">What would you like to do?</p>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <QuickAction to="/chat" icon={<MessageSquare />} title="Start a chat" description="Ask the model, with Argus searching the code you can read." />
         <QuickAction to="/usage" icon={<BarChart3 />} title="Your usage" description="Tokens, cache hits and cost, over time and by model." />
         <QuickAction to="/account" icon={<KeyRound />} title="API key" description="Connect Qwen Code, your IDE or scripts." />
@@ -70,7 +70,7 @@ function QuickAction({ to, icon, title, description }: { to: string; icon: React
   return (
     <Link
       to={to}
-      className="group flex items-start gap-4 rounded-xl border bg-card p-4 shadow-xs transition-colors outline-none hover:border-primary/40 hover:bg-accent/40 focus-visible:ring-[3px] focus-visible:ring-ring sm:flex-col sm:gap-3 sm:p-5"
+      className="group flex items-start gap-4 rounded-xl border bg-card p-4 shadow-xs transition-[background-color,border-color,box-shadow,translate] duration-200 outline-none hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent/40 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring sm:flex-col sm:gap-3 sm:p-5"
     >
       <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary [&_svg]:size-4.5">{icon}</div>
       <div className="min-w-0">

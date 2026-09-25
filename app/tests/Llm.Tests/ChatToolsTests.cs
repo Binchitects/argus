@@ -247,4 +247,44 @@ public sealed class ChatToolsTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/tools/servers/{Guid.Parse(toolId[4..])}", UriKind.Relative)));
         Assert.DoesNotContain(toolId, await ToolsInConfigAsync(b));
     }
+
+    [Fact]
+    public async Task Answering_again_keeps_the_chat_on_the_shown_answer_until_the_new_one_exists()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var made = await admin.PostAsync("/api/admin/tools/servers", new { name = "Slow Desk", url = "https://tools.example.test/mcp", headerName = "X-Api-Key", headerValue = FakeMcp.ApiKey });
+        var toolId = (await admin.JsonAsync(made)).GetProperty("toolId").GetString()!;
+        var (b, _, _) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { tools = new[] { toolId } });
+        await SendAsync(b, id, "first question");
+        async Task<JsonElement> ChatAsync() => await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
+        var shown = (await ChatAsync()).GetProperty("currentLeafId").GetGuid();
+
+        // The tool's server is slow to answer: the new answer is not there yet. A
+        // stop now used to leave the chat on the question, every answer hidden.
+        app.Mcp.Hold = new TaskCompletionSource();
+        try
+        {
+            int Initializes() { lock (app.Mcp.Calls) { return app.Mcp.Calls.Count(c => c.Method == "initialize"); } }
+            var before = Initializes();
+            var again = b.PostAsync($"/api/chat/conversations/{id}/regenerate", new { });
+            for (var i = 0; i < 100 && Initializes() == before; i++)
+            {
+                await Task.Delay(50);
+            }
+            Assert.Equal(shown, (await ChatAsync()).GetProperty("currentLeafId").GetGuid());
+            app.Mcp.Hold.SetResult();
+            await StatusAssert.Is(HttpStatusCode.OK, await again);
+        }
+        finally
+        {
+            app.Mcp.Hold?.TrySetResult();
+            app.Mcp.Hold = null;
+        }
+        var after = await ChatAsync();
+        var answers = after.GetProperty("messages").EnumerateArray().Where(m => m.GetProperty("role").GetString() == "assistant").ToList();
+        Assert.Equal(2, answers.Count);
+        Assert.Equal(answers[1].GetProperty("id").GetGuid(), after.GetProperty("currentLeafId").GetGuid());
+    }
 }

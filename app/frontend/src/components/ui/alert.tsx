@@ -28,7 +28,7 @@ export function Alert({
 }: Omit<ComponentProps<'div'>, 'title'> & VariantProps<typeof alertVariants> & { title?: ReactNode; action?: ReactNode }) {
   const Icon = icons[variant ?? 'info']
   return (
-    <div role={variant === 'destructive' ? 'alert' : 'status'} className={cn(alertVariants({ variant }), className)} {...props}>
+    <div role={variant === 'destructive' ? 'alert' : 'status'} className={cn(alertVariants({ variant }), 'animate-enter', className)} {...props}>
       <Icon aria-hidden="true" />
       <div className="col-start-2 min-w-0">
         {title && <p className="font-medium">{title}</p>}

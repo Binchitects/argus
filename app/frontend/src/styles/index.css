@@ -145,6 +145,68 @@
   }
 }
 
+/* ------------------------------------------------------------------ motion --
+ * One vocabulary for the whole app: things arrive by fading up a few pixels,
+ * quickly, easing out; what opens unfolds; what is pressed gives a little.
+ * Nothing bounces or lingers, and prefers-reduced-motion turns it all off.
+ */
+@theme {
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-enter: rise 320ms var(--ease-out-expo) both;
+  --animate-page: rise 260ms var(--ease-out-expo) both;
+  --animate-pop: pop-in 200ms var(--ease-out-expo) both;
+  --animate-shimmer: text-shimmer 2.4s linear infinite;
+
+  /* Not "enter": tw-animate-css's animate-in (dialogs, menus) owns that name. */
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+  }
+  @keyframes text-shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+}
+
+@layer components {
+  /* Children arrive one after another: a list or a grid of cards. */
+  .stagger > * {
+    animation: var(--animate-enter);
+  }
+  .stagger > :nth-child(2) { animation-delay: 30ms; }
+  .stagger > :nth-child(3) { animation-delay: 60ms; }
+  .stagger > :nth-child(4) { animation-delay: 90ms; }
+  .stagger > :nth-child(5) { animation-delay: 120ms; }
+  .stagger > :nth-child(6) { animation-delay: 150ms; }
+  .stagger > :nth-child(7) { animation-delay: 170ms; }
+  .stagger > :nth-child(8) { animation-delay: 190ms; }
+  .stagger > :nth-child(n + 9) { animation-delay: 210ms; }
+}
+
+/* Work in progress ("Thinking…"): a light passes along the words. Only with
+   motion on; without it the text is plain. */
+@media (prefers-reduced-motion: no-preference) {
+  .text-shimmer {
+    background: linear-gradient(90deg, var(--muted-foreground) 35%, var(--foreground) 50%, var(--muted-foreground) 65%) 0 0 / 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: var(--animate-shimmer);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
