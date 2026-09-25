@@ -26,7 +26,7 @@ export const admin: Me = {
 }
 export const member: Me = { ...admin, id: 'm1', userName: 'mo', displayName: 'Mo Member', email: 'mo@example.test', isAdmin: false }
 
-export type Handler = (body: unknown, init: RequestInit) => {
+export type Handler = (body: unknown, init: RequestInit, url: URL) => {
   status?: number
   json?: unknown
   /** Server-sent events, one per chunk; `hang` keeps the stream open until aborted. */
@@ -67,7 +67,7 @@ export function fakeApi(me: Me | null, routes: Record<string, Handler> = {}) {
     calls.push({ method, path: url.pathname + url.search, body, headers: (init.headers ?? {}) as Record<string, string> })
     const handler = all[`${method} ${url.pathname}`]
     if (!handler) return new Response('{"status":"not_found"}', { status: 404 })
-    const { status = 200, json, events, hang, offline } = handler(body, init)
+    const { status = 200, json, events, hang, offline } = handler(body, init, url)
     if (offline) throw new TypeError('Failed to fetch')
     if (events) {
       const stream = new ReadableStream<Uint8Array>({

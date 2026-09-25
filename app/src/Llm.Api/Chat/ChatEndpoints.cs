@@ -17,7 +17,10 @@ public sealed record NewConversation(string? Thinking = null, bool? UseArgus = n
 
 /// <summary>Only what is sent changes. For the numbers, a negative value clears them (back to the model's default).</summary>
 public sealed record ConversationChange(string? Title = null, string? Thinking = null, bool? UseArgus = null, string? Model = null,
-    string? SystemPrompt = null, double? Temperature = null, double? TopP = null, int? MaxTokens = null);
+    string? SystemPrompt = null, double? Temperature = null, double? TopP = null, int? MaxTokens = null, bool? Archived = null);
+
+/// <summary>Fork up to this message (default: the end of the branch on screen).</summary>
+public sealed record ForkRequest(Guid? MessageId = null);
 
 /// <summary>
 /// A question. It follows <see cref="ParentId"/> (default: the end of the branch on
@@ -50,6 +53,7 @@ public static class ChatEndpoints
         g.MapPost("/conversations/{id:guid}/messages", SendAsync);
         g.MapPost("/conversations/{id:guid}/regenerate", RegenerateAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
+        g.MapPost("/conversations/{id:guid}/fork", ForkAsync);
         g.MapPost("/attachments", UploadAsync).DisableAntiforgery();
         g.MapGet("/attachments/{id:guid}/content", ContentAsync);
     }
@@ -80,16 +84,17 @@ public static class ChatEndpoints
     private static Task<Conversation?> Owned(AppDbContext db, Guid id, AppUser me) =>
         db.Conversations.SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id);
 
-    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, string? q = null)
+    /// <summary>The person's chats, newest first; archived ones only when asked for.</summary>
+    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, string? q = null, bool archived = false)
     {
         var me = await Me(p, users);
-        var query = db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id);
+        var query = db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id && (archived ? c.ArchivedAt != null : c.ArchivedAt == null));
         if (!string.IsNullOrWhiteSpace(q))
         {
             query = query.Where(c => EF.Functions.ILike(c.Title, "%" + q.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
         }
         return Results.Ok(await query.OrderByDescending(c => c.UpdatedAt).Take(300)
-            .Select(c => new { c.Id, c.Title, c.UpdatedAt }).ToListAsync());
+            .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt }).ToListAsync());
     }
 
     private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models)
@@ -102,7 +107,7 @@ public static class ChatEndpoints
         }
         db.Conversations.Add(c);
         await db.SaveChangesAsync();
-        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, []));
+        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, null, []));
     }
 
     /// <summary>A chat's settings, checked. Null when all is well.</summary>
@@ -174,7 +179,10 @@ public static class ChatEndpoints
         var ids = messages.SelectMany(m => ChatService.ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => ids.Contains(a.Id))
             .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType }).ToDictionaryAsync(a => a.Id);
-        return Results.Ok(Shape(c, messages.Select(m => (object)new
+        var forkedFrom = c.ForkedFromId is { } from
+            ? await db.Conversations.AsNoTracking().Where(x => x.Id == from && x.UserId == me.Id).Select(x => new { x.Id, x.Title }).SingleOrDefaultAsync()
+            : null;
+        return Results.Ok(Shape(c, forkedFrom, messages.Select(m => (object)new
         {
             m.Id, m.ParentId, m.Role, m.Content, m.Reasoning, m.ToolName, m.ToolCallId,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
@@ -185,11 +193,11 @@ public static class ChatEndpoints
         })));
     }
 
-    private static object Shape(Conversation c, IEnumerable<object> messages) =>
+    private static object Shape(Conversation c, object? forkedFrom, IEnumerable<object> messages) =>
         new
         {
             c.Id, c.Title, c.Thinking, c.UseArgus, c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
-            c.CurrentLeafId, c.CreatedAt, c.UpdatedAt, messages,
+            c.CurrentLeafId, c.ArchivedAt, forkedFrom, c.CreatedAt, c.UpdatedAt, messages,
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models)
@@ -211,8 +219,66 @@ public static class ChatEndpoints
         {
             c.UseArgus = a;
         }
+        if (body.Archived is { } archive)
+        {
+            c.ArchivedAt = archive ? c.ArchivedAt ?? DateTimeOffset.UtcNow : null;
+        }
         await db.SaveChangesAsync();
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// A new chat holding the branch up to one message: its questions, answers,
+    /// tool calls and files, with the chat's settings. The original stays as it
+    /// is. A fork ends on a question or a finished answer, never inside a tool round.
+    /// </summary>
+    private static async Task<IResult> ForkAsync(Guid id, ForkRequest? body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db)
+    {
+        var me = await Me(p, users);
+        if (await Owned(db, id, me) is not { } c)
+        {
+            return Results.NotFound();
+        }
+        var byId = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id).ToDictionaryAsync(m => m.Id);
+        if ((body?.MessageId ?? c.CurrentLeafId) is not { } end || !byId.TryGetValue(end, out var last))
+        {
+            return AuthEndpoints.Problem(400, "message", byId.Count == 0 ? "This chat has nothing to fork yet." : "That message is not in this chat.");
+        }
+        if (last.Role == "tool" || last.ToolCallsJson is not null)
+        {
+            return AuthEndpoints.Problem(400, "message", "Fork from a question or a finished answer.");
+        }
+        var path = new List<ChatMessage>();
+        for (var m = last; m is not null; m = m.ParentId is { } parent ? byId.GetValueOrDefault(parent) : null)
+        {
+            path.Add(m);
+        }
+        path.Reverse();
+        var title = (c.Title + " (fork)")[..Math.Min(200, c.Title.Length + 7)];
+        var fork = new Conversation
+        {
+            UserId = me.Id, Title = title, Thinking = c.Thinking, UseArgus = c.UseArgus, Model = c.Model, SystemPrompt = c.SystemPrompt,
+            Temperature = c.Temperature, TopP = c.TopP, MaxTokens = c.MaxTokens, ForkedFromId = c.Id,
+        };
+        var copies = new Dictionary<Guid, Guid>();
+        var sequence = 0;
+        foreach (var m in path)
+        {
+            var copy = new ChatMessage
+            {
+                ConversationId = fork.Id, ParentId = m.ParentId is { } parent ? copies[parent] : null, Sequence = ++sequence, Role = m.Role,
+                Content = m.Content, Reasoning = m.Reasoning, ToolCallsJson = m.ToolCallsJson, ToolCallId = m.ToolCallId, ToolName = m.ToolName,
+                AttachmentsJson = m.AttachmentsJson, Model = m.Model, PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens,
+                CompletionTokens = m.CompletionTokens, ThinkingMs = m.ThinkingMs, DurationMs = m.DurationMs, Status = m.Status, Error = m.Error,
+                CreatedAt = m.CreatedAt,
+            };
+            copies[m.Id] = copy.Id;
+            db.ChatMessages.Add(copy);
+        }
+        fork.CurrentLeafId = copies[last.Id];
+        db.Conversations.Add(fork);
+        await db.SaveChangesAsync();
+        return Results.Created($"/api/chat/conversations/{fork.Id}", new { fork.Id, fork.Title });
     }
 
     /// <summary>Shows another branch: the newest line of messages below the one chosen.</summary>
@@ -246,8 +312,16 @@ public static class ChatEndpoints
         {
             return Results.NotFound();
         }
+        // Its files go too, except those another of the person's chats (a fork) still uses.
+        var used = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id && m.AttachmentsJson != null).Select(m => m.AttachmentsJson).ToListAsync();
+        var elsewhere = await db.ChatMessages.AsNoTracking()
+            .Where(m => m.ConversationId != id && m.AttachmentsJson != null && db.Conversations.Any(x => x.Id == m.ConversationId && x.UserId == me.Id))
+            .Select(m => m.AttachmentsJson).ToListAsync();
+        var keep = elsewhere.SelectMany(ChatService.ParseIds).ToHashSet();
+        var files = used.SelectMany(ChatService.ParseIds).Where(a => !keep.Contains(a)).ToList();
         db.Conversations.Remove(c);
         await db.SaveChangesAsync();
+        await db.ChatAttachments.Where(a => a.UserId == me.Id && files.Contains(a.Id)).ExecuteDeleteAsync();
         return Results.NoContent();
     }
 
@@ -259,6 +333,8 @@ public static class ChatEndpoints
             http.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
+        // Writing in an archived chat brings it back to the list.
+        c.ArchivedAt = null;
         var text = (body.Content ?? "").Trim();
         var attachments = (body.Attachments ?? []).Distinct().ToArray();
         if (text.Length == 0 && attachments.Length == 0)
@@ -307,6 +383,8 @@ public static class ChatEndpoints
             http.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
+        // Writing in an archived chat brings it back to the list.
+        c.ArchivedAt = null;
         var body = await ReadBodyAsync<Regenerate>(http) ?? new Regenerate();
         if (body.Thinking is { Length: > 0 } t && !ValidThinking(t, stack.Value))
         {

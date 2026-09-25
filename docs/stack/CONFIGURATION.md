@@ -130,8 +130,10 @@ refuse prompts the engine would happily accept, because they cache it.
 **`MODEL_MAX_OUTPUT`** *(sample `32768`)* — the largest completion the gateway
 advertises.
 
-**`MODEL_REASONING_EFFORT`** *(default `xhigh`)* — how hard the model thinks
-before it answers: `xhigh`, `medium`, or `low`. This is the **engine's**
+**`MODEL_REASONING_EFFORT`** *(default `medium`)* — how hard the model thinks
+before it answers when a chat or client does not choose: `xhigh` (the model's
+own default, and slowest), `medium`, or `low`. The app's chat starts at this
+level too, and each chat can pick another. This is the **engine's**
 chat-template variable, not OpenAI's. The template raises on anything else, so a
 typo is a 500 on every request rather than a quiet fallback to the default.
 
@@ -148,7 +150,7 @@ level on every start, so the level is chosen per chat the same way the model is:
 
 | picker entry | what it sends |
 |---|---|
-| `Qwen3.8-Flash-Next · Deep think` | `reasoning_effort: xhigh` (the engine default) |
+| `Qwen3.8-Flash-Next · Deep think` | `reasoning_effort: xhigh` (the model's own default) |
 | `Qwen3.8-Flash-Next · Balanced` | `reasoning_effort: medium` |
 | `Qwen3.8-Flash-Next · Quick` | `reasoning_effort: low` |
 | `Qwen3.8-Flash-Next · No thinking` | `enable_thinking: false` |

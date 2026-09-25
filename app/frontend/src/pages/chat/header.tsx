@@ -1,8 +1,8 @@
-import { Brain, Check, ChevronDown, Eye, FolderOpen, MessagesSquare, SlidersHorizontal, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import type { ChatConfig, ChatSettings } from './types'
+import { useChatActions } from './chat-actions'
 
 const DEFAULT = '__default__'
 
@@ -176,6 +177,7 @@ export function ChatHeader({
   filesOpen,
   onToggleFiles,
   onOpenList,
+  chat,
 }: {
   config: ChatConfig
   settings: ChatSettings
@@ -186,6 +188,8 @@ export function ChatHeader({
   filesOpen: boolean
   onToggleFiles: () => void
   onOpenList: () => void
+  /** The chat on screen, once it exists: fork, archive and delete it from here too. */
+  chat?: { id: string; title: string; archived: boolean }
 }) {
   const [name, setName] = useState<string | null>(null)
   return (
@@ -227,7 +231,35 @@ export function ChatHeader({
             <FolderOpen /> <span className="tabular-nums">{filesCount}</span>
           </Button>
         </Tooltip>
+        {chat && <ChatMenu chat={chat} />}
       </span>
     </header>
+  )
+}
+
+function ChatMenu({ chat }: { chat: { id: string; title: string; archived: boolean } }) {
+  const { fork, archive, askDelete } = useChatActions(chat, true)
+  return (
+    <DropdownMenu>
+      <Tooltip content="More">
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label="Chat actions">
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+      </Tooltip>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => fork.mutate()}>
+          <GitFork /> Fork
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => archive.mutate(!chat.archived)}>
+          {chat.archived ? <ArchiveRestore /> : <Archive />} {chat.archived ? 'Unarchive' : 'Archive'}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onSelect={() => void askDelete()}>
+          <Trash2 /> Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

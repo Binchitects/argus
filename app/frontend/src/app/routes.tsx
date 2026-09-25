@@ -8,7 +8,14 @@ import { navigation } from './nav'
 import { RequireAdmin } from './require-admin'
 import { Shell } from './shell'
 
-const lazy = (load: () => Promise<{ Component: ComponentType }>) => ({ lazy: load })
+/**
+ * A page's code, fetched when it is first opened. One retry, half a second
+ * later, rides out a dropped connection (or a browser reloading its
+ * certificates) before the page says it did not load.
+ */
+const lazy = (load: () => Promise<{ Component: ComponentType }>) => ({
+  lazy: () => load().catch(() => new Promise<void>((r) => setTimeout(r, 500)).then(load)),
+})
 
 /** Pages this web does not have yet show where they are meanwhile. */
 const notYet: RouteObject[] = navigation

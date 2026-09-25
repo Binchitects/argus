@@ -967,7 +967,7 @@ services:
       # config/litellm/config.yaml as the ENGINE's chat-template variables;
       # see the note there for why OpenAI's own reasoning_effort field cannot
       # be used for this.
-      MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-xhigh}
+      MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-medium}
       MODEL_ENABLE_THINKING: ${MODEL_ENABLE_THINKING:-true}
       ENGINE_API_BASE: ${ENGINE_API_BASE:-http://llamacpp:8080/v1}
       # `openai/` is the PROTOCOL, not the vendor -- it means "speak the OpenAI
@@ -1400,7 +1400,7 @@ services:
       Stack__ModelFile: ${LLAMACPP_MODEL_FILE:-}
       Stack__ModelContext: ${MODEL_CONTEXT:-}
       Stack__ModelMaxOutput: ${MODEL_MAX_OUTPUT:-32768}
-      Stack__ModelReasoningEffort: ${MODEL_REASONING_EFFORT:-xhigh}
+      Stack__ModelReasoningEffort: ${MODEL_REASONING_EFFORT:-medium}
       Stack__ModelEnableThinking: ${MODEL_ENABLE_THINKING:-true}
       Stack__ThinkingPresets: ${THINKING_PRESETS:-xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking}
       Stack__MtpDraftMax: ${LLAMACPP_MTP_DRAFT_MAX:-0}
@@ -1429,7 +1429,7 @@ services:
       StackEnv__MODEL_NAME: ${MODEL_NAME:-}
       StackEnv__MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
       StackEnv__MODEL_MAX_OUTPUT: ${MODEL_MAX_OUTPUT:-32768}
-      StackEnv__MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-xhigh}
+      StackEnv__MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-medium}
       StackEnv__MODEL_ENABLE_THINKING: ${MODEL_ENABLE_THINKING:-true}
       StackEnv__THINKING_PRESETS: ${THINKING_PRESETS:-xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking}
       StackEnv__LLAMACPP_MODEL_FILE: ${LLAMACPP_MODEL_FILE:-}

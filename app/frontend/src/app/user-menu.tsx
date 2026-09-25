@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { LifeBuoy, LogOut, Monitor, Moon, Palette, Sun, UserRound } from 'lucide-react'
+import { Columns2, LifeBuoy, LogOut, Maximize2, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Avatar } from '@/components/ui/avatar'
 import {
@@ -17,12 +17,14 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { infoQuery, supportHref, type Me } from '@/lib/api'
 import { useTheme, type ThemePreference } from '@/lib/theme'
+import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
 import { useSignOut } from './use-sign-out'
 
 export function UserMenu({ me }: { me: Me }) {
   const navigate = useNavigate()
   const signOut = useSignOut()
   const { preference, setPreference } = useTheme()
+  const width = useWidth()
   const support = useQuery(infoQuery).data?.supportContact
   const supportLink = support ? supportHref(support) : null
   return (
@@ -53,6 +55,24 @@ export function UserMenu({ me }: { me: Me }) {
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="system">
                 <Monitor /> System
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <RectangleHorizontal /> Width
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup value={width} onValueChange={(v) => setWidth(v as WidthPreference)}>
+              <DropdownMenuRadioItem value="comfortable">
+                <Columns2 /> Comfortable
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="wide">
+                <RectangleHorizontal /> Wide
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="full">
+                <Maximize2 /> Full width
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>

@@ -31,7 +31,7 @@ const config: ChatConfig = {
 
 const conversation = (over: Partial<Conversation> = {}): Conversation => ({
   id: 'c1', title: 'New chat', thinking: null, useArgus: true, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
-  currentLeafId: null, createdAt: '', updatedAt: '', messages: [], ...over,
+  currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [], ...over,
 })
 
 const msg = (id: string, parentId: string | null, role: Message['role'], over: Partial<Message> = {}): Message => ({ ...blank(id, role, parentId), ...over })
@@ -204,6 +204,80 @@ describe('chat', () => {
     expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fit to the screen' })).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('the chat list forks, archives and brings back chats, and never scrolls sideways', async () => {
+    const chat = { id: 'c1', title: 'Hello there', updatedAt: new Date().toISOString() }
+    let archived = false
+    const calls = backend({
+      start: conversation({ messages: answered, currentLeafId: 'a1', title: 'Hello there' }),
+      extra: {
+        'GET /api/chat/conversations': (_b, _i, url) => ({ json: (url.searchParams.get('archived') === 'true') === archived ? [chat] : [] }),
+        'PATCH /api/chat/conversations/c1': (body) => {
+          archived = (body as { archived: boolean }).archived
+          return { status: 204 }
+        },
+        'POST /api/chat/conversations/c1/fork': () => ({ status: 201, json: { id: 'c2', title: 'Hello there (fork)' } }),
+        'GET /api/chat/conversations/c2': () => ({ json: conversation({ id: 'c2', title: 'Hello there (fork)', messages: answered, currentLeafId: 'a1', forkedFrom: { id: 'c1', title: 'Hello there' } }) }),
+      },
+    })
+    const { router } = renderApp('/chat/c1')
+    const list = await screen.findByRole('navigation', { name: 'Chats' })
+    const link = await within(list).findByRole('link', { name: 'Hello there' })
+    expect(link).toHaveClass('truncate')
+    expect(list.querySelector('.overflow-x-hidden')).not.toBeNull()
+
+    await userEvent.click(within(list).getByRole('button', { name: 'Actions for Hello there' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Archive' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ archived: true }))
+    expect(await screen.findByText('Chat archived')).toBeInTheDocument()
+    await waitFor(() => expect(within(list).queryByRole('link', { name: 'Hello there' })).toBeNull())
+
+    await userEvent.click(within(list).getByRole('button', { name: 'Archived chats' }))
+    await userEvent.click(await within(list).findByRole('button', { name: 'Actions for Hello there' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Unarchive' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PATCH').at(-1)?.body).toEqual({ archived: false }))
+    await userEvent.click(within(list).getByRole('button', { name: 'All chats' }))
+
+    await userEvent.click(await within(list).findByRole('button', { name: 'Actions for Hello there' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Fork' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/chat/c2'))
+    const note = (await screen.findByText(/Forked from/)).closest('p')!
+    expect(within(note).getByRole('link', { name: 'Hello there' })).toHaveAttribute('href', '/chat/c1')
+  })
+
+  it('an answer forks a new chat from there, the rail jumps between questions, and an archived chat says so', async () => {
+    const two = [
+      ...answered,
+      msg('q2', 'a1', 'user', { content: 'And what about the second thing?' }),
+      msg('a2', 'q2', 'assistant', { content: 'The second answer.', model: 'Main-Model' }),
+    ]
+    const calls = backend({
+      start: conversation({ messages: two, currentLeafId: 'a2', title: 'Hello there', archivedAt: new Date().toISOString() }),
+      extra: {
+        'PATCH /api/chat/conversations/c1': () => ({ status: 204 }),
+        'POST /api/chat/conversations/c1/fork': () => ({ status: 201, json: { id: 'c3', title: 'Hello there (fork)' } }),
+        'GET /api/chat/conversations/c3': () => ({ json: conversation({ id: 'c3', messages: answered, currentLeafId: 'a1' }) }),
+      },
+    })
+    const { router } = renderApp('/chat/c1')
+    expect(await screen.findByText(/This chat is archived/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Unarchive' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ archived: false }))
+
+    const rail = screen.getByRole('navigation', { name: 'Questions in this chat' })
+    const marks = within(rail).getAllByRole('button')
+    expect(marks.map((b) => b.getAttribute('aria-label'))).toEqual(['Question 1: hello there', 'Question 2: And what about the second thing?'])
+    const scrolled = vi.spyOn(Element.prototype, 'scrollIntoView')
+    await userEvent.click(marks[1]!)
+    expect(scrolled.mock.contexts[0]).toHaveAttribute('data-question', 'q2')
+    expect(marks[1]).toHaveAttribute('aria-current', 'location')
+    expect(document.activeElement).toHaveAttribute('data-question', 'q2')
+
+    const first = screen.getAllByRole('region', { name: 'Answer' })[0]!
+    await userEvent.click(within(first).getByRole('button', { name: 'Fork from here' }))
+    await waitFor(() => expect(calls.find((c) => c.path.endsWith('/fork'))?.body).toEqual({ messageId: 'a1' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/chat/c3'))
   })
 
   it('stop keeps what was written and gives the box back', async () => {

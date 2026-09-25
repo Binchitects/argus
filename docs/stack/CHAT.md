@@ -10,7 +10,8 @@ WebUI still runs at `https://chat.<LLM_DOMAIN>` until the new web is signed off
   can do: context size, tools, thinking, and whether it can see images. A chat
   keeps its model. The deployment's own model is the default.
 - **Thinking.** Each chat has a thinking level from the deployment's
-  `THINKING_PRESETS`. While the model thinks, its reasoning shows with a timer.
+  `THINKING_PRESETS`. A new chat starts at the deployment's default,
+  `MODEL_REASONING_EFFORT` (medium unless changed). While the model thinks, its reasoning shows with a timer.
   Afterwards it folds to "Thought for 4.2 s", and can be opened again.
   *No thinking* really turns it off: it sends `enable_thinking: false` to the
   chat template.
@@ -63,8 +64,25 @@ WebUI still runs at `https://chat.<LLM_DOMAIN>` until the new web is signed off
 - **Answers.** Markdown with tables and maths (KaTeX), links that open safely
   in a new tab, and the model, time, tokens and cost under each answer. Model
   output is sanitised: HTML in an answer never runs.
-- **History.** Chats are grouped by date and can be searched, renamed and
-  deleted. The first question becomes the title and the browser tab's name.
+- **History.** Chats are grouped by date and can be searched. The first
+  question becomes the title and the browser tab's name. Long titles are cut
+  with an ellipsis; the list never scrolls sideways. From the list, or the
+  **⋯** menu in a chat's header, a chat can be:
+  - **renamed**;
+  - **forked**: a new chat with the branch on screen, its files and the chat's
+    settings. It notes where it came from; the original is untouched.
+  - **archived**: it leaves the list for **Archived chats** at the bottom, and
+    comes back by itself when you write in it (or with **Unarchive**);
+  - **deleted**, with its files, except files a fork still uses.
+- **Fork from an answer.** **Fork from here** under an answer starts a new
+  chat that ends with that answer, to try another direction without losing
+  this one.
+- **Jump to a question.** On wider screens a rail at the thread's right edge
+  has a mark for each question. Hover one to read the question and click it to
+  go there. The question being read is marked.
+- **Width.** Pages and the chat grow with the screen. **Width** in the account
+  menu (or Your account → Appearance) picks Comfortable, Wide (the default) or
+  Full width, remembered per browser.
 - **Phones.** The chat list and the Files panel open over the thread; the
   header fits a narrow screen.
 
@@ -110,8 +128,12 @@ Argus indexes. Set it when Argus reaches GitLab by an internal name.
 Messages form a tree: each has a parent, and the conversation remembers its
 current leaf. `POST .../messages` takes a `parentId` (default: the leaf) or
 `root: true`. `POST .../regenerate` takes the question and, optionally, a model
-and a thinking level. `PUT .../leaf` switches branch. Chats from before
-branches were each migrated to one branch.
+and a thinking level. `PUT .../leaf` switches branch. `POST .../fork` takes a
+`messageId` (default: the leaf) and copies the path to it into a new chat. The
+fork must end on a question or a finished answer, never inside a tool round.
+`PATCH` with `archived` archives a chat, and `GET /conversations?archived=true`
+lists the archived ones. Chats from before branches were each migrated to one
+branch.
 
 ## When something goes wrong
 
@@ -132,7 +154,9 @@ branches were each migrated to one branch.
   a revoked key being replaced, attachments, and ownership. Also the GitLab
   link address applying at once.
   Also branches (edits, answering again, switching, parents from another chat
-  refused), a chat's instructions and parameters, retries with another model,
+  refused), archiving (and coming back when written in), forks (up to the
+  chosen answer, with settings and files; never inside a tool round; the owner
+  only), a deleted chat's files (kept while a fork uses them), a chat's instructions and parameters, retries with another model,
   images to a model that can see and one that can't, SVG never served as an
   image, and the migration of existing chats. Real Postgres, a fake model and
   a fake Argus.
@@ -150,9 +174,14 @@ branches were each migrated to one branch.
     see" note, settings validation, and hostile HTML and maths
   - Argus's answers linking to GitLab, **Raw answer**, a failed tool in its
     own words, and the image viewer (arrows, keys, actual size)
+  - the list's fork, archive, Archived view and unarchive; fork from an
+    answer; the question rail; the archived notice
 - **Browser (Playwright), desktop and phone, both themes, with axe, in CI
   too:** a chat with Argus's answers and two images, served by the browser
   itself, from the links to the image viewer.
+- **Browser, with or without a model (in CI too):** a very long title leaves
+  no sideways scrolling; a chat forked, archived, found under Archived chats,
+  brought back and deleted; the question rail and a fork from an answer.
 - **Browser (Playwright), desktop and phone, against the real model:**
   - streaming and reload
   - thinking

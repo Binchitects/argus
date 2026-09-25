@@ -7,10 +7,21 @@ export const configQuery = {
   staleTime: 60_000,
 }
 
-export const listQuery = (search: string) => ({
-  queryKey: ['chat', 'list', search] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<ConversationSummary[]>(`/api/chat/conversations${search ? `?q=${encodeURIComponent(search)}` : ''}`, { signal }),
+export const listQuery = (search: string, archived = false) => ({
+  queryKey: ['chat', 'list', search, archived] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => {
+    const q = new URLSearchParams()
+    if (search) q.set('q', search)
+    if (archived) q.set('archived', 'true')
+    return api<ConversationSummary[]>(`/api/chat/conversations${q.size ? `?${q}` : ''}`, { signal })
+  },
 })
+
+/** Forks a chat up to a message (default: the end of the branch on screen); the new chat's id and title. */
+export const forkChat = (id: string, messageId?: string) =>
+  api<{ id: string; title: string }>(`/api/chat/conversations/${id}/fork`, { body: messageId ? { messageId } : {} })
+
+export const archiveChat = (id: string, archived: boolean) => api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { archived } })
 
 export const conversationQuery = (id: string) => ({
   queryKey: ['chat', 'conversation', id] as const,

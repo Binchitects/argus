@@ -10,6 +10,7 @@ afterEach(() => {
     // no storage in this environment
   }
   document.documentElement.className = ''
+  delete document.documentElement.dataset.width
 })
 
 // What jsdom lacks and Radix, cmdk and the theme use.

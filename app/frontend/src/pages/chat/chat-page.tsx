@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, Code2, FileUp, Lightbulb, Search, Sparkles } from 'lucide-react'
+import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Search, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -10,12 +10,13 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { configQuery, conversationQuery, streamChat } from './api'
+import { archiveChat, configQuery, conversationQuery, forkChat, streamChat } from './api'
 import { Composer } from './composer'
 import { collectFiles } from './files'
 import { FilesPanel } from './files-panel'
 import { ChatHeader } from './header'
 import { reduce, stopped, withQuestion, type LiveState } from './live'
+import { QuestionRail } from './question-rail'
 import { ChatList } from './sidebar'
 import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, QuestionTurn } from './turns'
@@ -51,7 +52,7 @@ export function ChatPage() {
   })
 
   return (
-    <div className="grid h-[calc(100dvh-3.5rem)] min-h-0 lg:grid-cols-[16rem_minmax(0,1fr)]">
+    <div className="grid h-[calc(100dvh-3.5rem)] min-h-0 lg:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[19rem_minmax(0,1fr)]">
       <div className="hidden min-h-0 border-r bg-sidebar lg:block">
         <ChatList activeId={id} onNew={startNew} />
       </div>
@@ -104,6 +105,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const [dragging, setDragging] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
+  const [readingQuestion, setReadingQuestion] = useState<string | null>(null)
 
   const data = loaded.data
   const settings: ChatSettings = data
@@ -128,7 +130,43 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   }, [view.messages, atBottom])
   const onScroll = () => {
     const el = scroller.current
-    if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
+    if (!el) return
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
+    // The question being read: the last one whose top has passed the top of the view.
+    const line = el.getBoundingClientRect().top + 96
+    let reading: string | null = null
+    for (const q of el.querySelectorAll<HTMLElement>('[data-question]')) {
+      if (q.getBoundingClientRect().top > line) break
+      reading = q.dataset.question ?? null
+    }
+    setReadingQuestion(reading)
+  }
+
+  const jumpTo = (questionId: string) => {
+    const target = scroller.current?.querySelector<HTMLElement>(`[data-question="${questionId}"]`)
+    if (!target) return
+    setAtBottom(false)
+    setReadingQuestion(questionId)
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    target.focus({ preventScroll: true })
+  }
+
+  const forkFrom = async (messageId: string) => {
+    if (!id) return
+    try {
+      const made = await forkChat(id, messageId)
+      void queryClient.invalidateQueries({ queryKey: ['chat', 'list'] })
+      navigate(`/chat/${made.id}`)
+      toast.success(`Forked into “${made.title}”`)
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+  }
+
+  const unarchive = async () => {
+    if (!id) return
+    await archiveChat(id, false).catch((e) => toast.error(errorMessage(e)))
+    await queryClient.invalidateQueries({ queryKey: ['chat'] })
   }
 
   const change = async (c: ChatSettings) => {
@@ -255,7 +293,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
 
   return (
     <div
-      className={cn('relative grid min-h-0 min-w-0', filesOpen && wide && 'grid-cols-[minmax(0,1fr)_26rem]')}
+      className={cn('relative grid min-h-0 min-w-0', filesOpen && wide && 'grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_34rem]')}
       onDragEnter={(e) => {
         if (e.dataTransfer.types.includes('Files')) {
           e.preventDefault()
@@ -281,6 +319,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
           filesOpen={filesOpen}
           onToggleFiles={() => setFilesOpen(!filesOpen)}
           onOpenList={onOpenList}
+          chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt } : undefined}
         />
         {empty ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
@@ -313,32 +352,53 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
           </div>
         ) : (
           <>
-            <div ref={scroller} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto" aria-live="polite">
-              <div className="mx-auto grid w-full max-w-3xl gap-6 px-4 py-6 sm:px-6">
-                {turns.map((t, i) => (
-                  <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                    {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} />}
-                    {(t.answer.length > 0 || (streaming && i === lastTurn)) && (
-                      <AnswerTurn
-                        answer={t.answer}
-                        siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
-                        live={streaming && i === lastTurn}
-                        thinkingSince={streaming && i === lastTurn ? view.thinkingSince : null}
-                        notices={i === lastTurn ? view.notices : []}
-                        config={config}
-                        question={t.question}
-                        onSwitch={switchTo}
-                        onRegenerate={regenerate}
-                        onOpenFile={openFile}
-                        busy={streaming}
-                      />
-                    )}
-                  </div>
-                ))}
-                {error && <Alert variant="destructive">{error}</Alert>}
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <div ref={scroller} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto" aria-live="polite">
+                <div className="mx-auto grid w-full max-w-(--thread-max) gap-6 px-4 py-6 sm:px-6">
+                  {data?.archivedAt && (
+                    <output className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+                      <Archive className="size-4 text-muted-foreground" aria-hidden="true" />
+                      <span className="flex-1">This chat is archived. Writing in it brings it back to the list.</span>
+                      <Button variant="outline" size="sm" className="h-7" onClick={() => void unarchive()}>
+                        Unarchive
+                      </Button>
+                    </output>
+                  )}
+                  {data?.forkedFrom && (
+                    <p className="-mb-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                      <GitFork className="size-3.5 shrink-0" aria-hidden="true" /> Forked from
+                      <Link to={`/chat/${data.forkedFrom.id}`} className="truncate font-medium text-foreground underline-offset-2 hover:underline">
+                        {data.forkedFrom.title}
+                      </Link>
+                    </p>
+                  )}
+                  {turns.map((t, i) => (
+                    <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
+                      {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} />}
+                      {(t.answer.length > 0 || (streaming && i === lastTurn)) && (
+                        <AnswerTurn
+                          answer={t.answer}
+                          siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
+                          live={streaming && i === lastTurn}
+                          thinkingSince={streaming && i === lastTurn ? view.thinkingSince : null}
+                          notices={i === lastTurn ? view.notices : []}
+                          config={config}
+                          question={t.question}
+                          onSwitch={switchTo}
+                          onRegenerate={regenerate}
+                          onOpenFile={openFile}
+                          onFork={id ? (messageId) => void forkFrom(messageId) : undefined}
+                          busy={streaming}
+                        />
+                      )}
+                    </div>
+                  ))}
+                  {error && <Alert variant="destructive">{error}</Alert>}
+                </div>
               </div>
+              <QuestionRail questions={turns.flatMap((t) => (t.question ? [t.question] : []))} active={readingQuestion} onJump={jumpTo} />
             </div>
-            <div className="relative mx-auto w-full max-w-3xl px-4 pb-4 sm:px-6">
+            <div className="relative mx-auto w-full max-w-(--thread-max) px-4 pb-4 sm:px-6">
               {!atBottom && (
                 <Button
                   variant="outline"

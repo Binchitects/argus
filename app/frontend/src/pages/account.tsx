@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, Monitor, Moon, RefreshCw, ShieldCheck, ShieldOff, Sun } from 'lucide-react'
+import { Columns2, KeyRound, Maximize2, Monitor, Moon, RectangleHorizontal, RefreshCw, ShieldCheck, ShieldOff, Sun } from 'lucide-react'
 import QRCode from 'qrcode'
 import { RadioGroup } from 'radix-ui'
 import { useEffect, useState } from 'react'
@@ -22,6 +22,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, meQuery, type Me } from '@/lib/api'
 import { ago, money, when } from '@/lib/format'
 import { useTheme, type ThemePreference } from '@/lib/theme'
+import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
 import { cn } from '@/lib/utils'
 
 interface Keys {
@@ -336,8 +337,18 @@ const themes: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
   { value: 'system', label: 'System', icon: Monitor },
 ]
 
+const widths: { value: WidthPreference; label: string; icon: typeof Sun }[] = [
+  { value: 'comfortable', label: 'Comfortable', icon: Columns2 },
+  { value: 'wide', label: 'Wide', icon: RectangleHorizontal },
+  { value: 'full', label: 'Full width', icon: Maximize2 },
+]
+
+const choice =
+  'flex flex-col items-center gap-2 rounded-lg border p-3 text-sm font-medium transition-colors outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring data-[state=checked]:border-primary data-[state=checked]:bg-primary/5 data-[state=checked]:text-primary-ink'
+
 function Appearance() {
   const { preference, setPreference } = useTheme()
+  const width = useWidth()
   return (
     <Card>
       <CardHeader>
@@ -345,13 +356,19 @@ function Appearance() {
         <CardDescription>Remembered on this device.</CardDescription>
       </CardHeader>
       <CardContent>
+        <p className="mb-2 text-sm font-medium">Theme</p>
         <RadioGroup.Root value={preference} onValueChange={(v) => setPreference(v as ThemePreference)} aria-label="Theme" className="grid grid-cols-3 gap-2">
           {themes.map((t) => (
-            <RadioGroup.Item
-              key={t.value}
-              value={t.value}
-              className="flex flex-col items-center gap-2 rounded-lg border p-3 text-sm font-medium transition-colors outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring data-[state=checked]:border-primary data-[state=checked]:bg-primary/5 data-[state=checked]:text-primary-ink"
-            >
+            <RadioGroup.Item key={t.value} value={t.value} className={choice}>
+              <t.icon className="size-5" aria-hidden="true" />
+              {t.label}
+            </RadioGroup.Item>
+          ))}
+        </RadioGroup.Root>
+        <p className="mt-4 mb-2 text-sm font-medium">Width on wide screens</p>
+        <RadioGroup.Root value={width} onValueChange={(v) => setWidth(v as WidthPreference)} aria-label="Width on wide screens" className="grid grid-cols-3 gap-2">
+          {widths.map((t) => (
+            <RadioGroup.Item key={t.value} value={t.value} className={choice}>
               <t.icon className="size-5" aria-hidden="true" />
               {t.label}
             </RadioGroup.Item>

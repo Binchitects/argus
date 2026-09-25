@@ -59,6 +59,7 @@ export interface ConversationSummary {
   id: string
   title: string
   updatedAt: string
+  archivedAt?: string | null
 }
 
 export interface Conversation extends ConversationSummary {
@@ -70,6 +71,9 @@ export interface Conversation extends ConversationSummary {
   topP: number | null
   maxTokens: number | null
   currentLeafId: string | null
+  archivedAt: string | null
+  /** The chat this one was forked from, while it still exists. */
+  forkedFrom: { id: string; title: string } | null
   createdAt: string
   messages: Message[]
 }

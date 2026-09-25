@@ -120,7 +120,7 @@ function SignedIn({ me }: { me: Me }) {
             <UserMenu me={me} />
           </div>
         </header>
-        <main id="main" tabIndex={-1} className={cn('w-full flex-1 outline-none', fullBleed ? 'min-h-0' : 'mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8')}>
+        <main id="main" tabIndex={-1} className={cn('w-full flex-1 outline-none', fullBleed ? 'min-h-0' : 'mx-auto max-w-(--page-max) px-4 py-6 sm:px-6 lg:px-8')}>
           <Outlet context={me} />
         </main>
       </div>

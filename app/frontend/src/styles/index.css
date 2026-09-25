@@ -313,3 +313,32 @@
   --hl-function: oklch(0.8 0.1 300);
   --hl-type: oklch(0.8 0.11 60);
 }
+
+/*
+ * Content width (Width in the user menu): how much of a wide screen the pages
+ * and the chat use. Wide, the default, grows with the screen; Comfortable is a
+ * reading column; Full uses everything.
+ */
+:root {
+  --page-max: 100rem;
+  --thread-max: 52rem;
+}
+@media (min-width: 1600px) {
+  :root {
+    --thread-max: 62rem;
+  }
+}
+@media (min-width: 2200px) {
+  :root {
+    --page-max: 140rem;
+    --thread-max: 76rem;
+  }
+}
+:root[data-width='comfortable'] {
+  --page-max: 80rem;
+  --thread-max: 48rem;
+}
+:root[data-width='full'] {
+  --page-max: 100%;
+  --thread-max: 100%;
+}

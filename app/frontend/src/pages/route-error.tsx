@@ -8,17 +8,20 @@ import { NotFoundPage } from './not-found'
 export function RouteErrorPage() {
   const error = useRouteError()
   if (isRouteErrorResponse(error) && error.status === 404) return <NotFoundPage />
-  // A new deployment replaced the lazily loaded file this tab still points to.
-  const stale = error instanceof Error && /dynamically imported module|Importing a module script failed/i.test(error.message)
+  // The page's code or styles did not arrive: the connection dropped, or a new
+  // deployment replaced the files this tab still points to. Both mean: reload.
+  const notLoaded = error instanceof Error && /dynamically imported module|Importing a module script failed|Unable to preload CSS/i.test(error.message)
   return (
     <div className="mx-auto max-w-lg py-16">
-      <h1 className="sr-only">Something went wrong</h1>
+      <h1 className="sr-only">{notLoaded ? 'This page did not load' : 'Something went wrong'}</h1>
       <EmptyState
         icon={AlertTriangle}
-        title={stale ? 'A newer version is available' : 'Something went wrong'}
+        title={notLoaded ? 'This page did not load' : 'Something went wrong'}
         action={<Button onClick={() => window.location.reload()}>Reload the page</Button>}
       >
-        {stale ? 'Reload to get it.' : 'This page hit an error. Reloading usually fixes it; if not, tell an admin what you were doing.'}
+        {notLoaded
+          ? 'The connection dropped, or a newer version was deployed. Reloading fetches it again.'
+          : 'This page hit an error. Reloading usually fixes it; if not, tell an admin what you were doing.'}
       </EmptyState>
     </div>
   )

@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, Copy, FileText, Pencil, RefreshCw, Square } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Copy, FileText, GitFork, Pencil, RefreshCw, Square } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -60,7 +60,7 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
   const [viewing, setViewing] = useState<number | null>(null)
   const images = m.attachments.filter((a) => a.kind === 'image')
   return (
-    <section className="group/q flex flex-col items-end gap-1" aria-label="You">
+    <section className="group/q flex scroll-mt-4 flex-col items-end gap-1 outline-none" aria-label="You" data-question={m.id} tabIndex={-1}>
       {m.attachments.length > 0 && (
         <ul className="flex max-w-[85%] flex-wrap justify-end gap-2" aria-label="Attachments">
           {m.attachments.map((a) =>
@@ -134,6 +134,7 @@ export function AnswerTurn({
   onSwitch,
   onRegenerate,
   onOpenFile,
+  onFork,
   busy,
 }: {
   answer: Message[]
@@ -146,6 +147,8 @@ export function AnswerTurn({
   onSwitch: (id: string) => void
   onRegenerate?: (question: Message, overrides?: { model?: string; thinking?: string }) => void
   onOpenFile: (name: string) => void
+  /** Fork into a new chat that ends with this answer. */
+  onFork?: (messageId: string) => void
   busy: boolean
 }) {
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
@@ -201,6 +204,13 @@ export function AnswerTurn({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+        )}
+        {onFork && last && !last.toolCalls?.length && !last.id.startsWith('local-') && (
+          <Tooltip content="Fork into a new chat from here">
+            <Button variant="ghost" size="icon-sm" className="size-7" disabled={busy} onClick={() => onFork(last.id)} aria-label="Fork from here">
+              <GitFork />
+            </Button>
+          </Tooltip>
         )}
         <span className="ml-1 flex flex-wrap items-center gap-x-2 tabular-nums">
           {last?.model && <span>{last.model}</span>}

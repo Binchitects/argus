@@ -81,6 +81,18 @@ describe('shell', () => {
     expect(screen.getByRole('link', { name: /Open in Grafana/ })).toHaveAttribute('href', `${window.location.protocol}//grafana.${window.location.host}/`)
   })
 
+  it('the width on wide screens is chosen in the user menu and remembered', async () => {
+    fakeApi(member)
+    renderApp('/')
+    await userEvent.click(await screen.findByRole('button', { name: /Account menu/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Width' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Full width' }))
+    expect(document.documentElement.dataset.width).toBe('full')
+    expect(localStorage.getItem('width')).toBe('full')
+    // The page's width comes from the chosen width (a CSS variable), not a fixed size.
+    expect(screen.getByRole('main')).toHaveClass('max-w-(--page-max)')
+  })
+
   it('unknown pages say so', async () => {
     fakeApi(member)
     renderApp('/no-such-page')

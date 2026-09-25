@@ -21,6 +21,10 @@ public sealed class Conversation
     /// sent to the model is the path from the root to this leaf.
     /// </summary>
     public Guid? CurrentLeafId { get; set; }
+    /// <summary>Set when the person archives the chat: it leaves the list, and comes back when they write in it.</summary>
+    public DateTimeOffset? ArchivedAt { get; set; }
+    /// <summary>The chat this one was forked from, if any (it may since have been deleted).</summary>
+    public Guid? ForkedFromId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];

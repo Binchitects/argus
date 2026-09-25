@@ -8,6 +8,9 @@ const live = process.env.E2E_CHAT === '1'
 async function ask(page: Page, text: string) {
   await page.getByRole('textbox', { name: 'Message' }).fill(text)
   await page.getByRole('textbox', { name: 'Message' }).press('Enter')
+  // On its way once it is on screen. Before that (a new chat is made first)
+  // "Send" still shows, and a wait for the answer to end would pass at once.
+  await expect(page.getByRole('region', { name: 'You' }).last()).toContainText(text.split('\n')[0]!.slice(0, 40), { timeout: 30_000 })
 }
 
 /** Picks a thinking level for the chat (or the new chat) on screen. */
@@ -236,6 +239,92 @@ test.describe('chat with the model', () => {
     await ask(page, 'Say hello.')
     await expect(page.getByRole('region', { name: 'Answer' }).last()).toContainText('BANANA', { timeout: 120_000 })
     await done(page)
+  })
+})
+
+// With or without a model: an answer, or the reason there is none, ends each turn.
+test.describe('organising chats', () => {
+  test.setTimeout(180_000)
+
+  async function turn(page: Page, text: string) {
+    await ask(page, text)
+    await expect(page).toHaveURL(/\/chat\/[0-9a-f-]{36}$/)
+    await expect(page.getByRole('region', { name: 'Answer' }).last().getByRole('button', { name: 'Copy answer' })).toBeVisible({ timeout: 120_000 })
+  }
+
+  test('a long title never scrolls the list sideways; a chat forks, archives, comes back and is deleted', async ({ page, isMobile }) => {
+    await page.goto('/chat')
+    if (live) await thinking(page, 'No thinking')
+    await turn(page, `Reply with the single word: ok ${Date.now()}`)
+    const original = page.url()
+    const name = `Organise ${Date.now()} ${'a very long chat title that keeps going '.repeat(4)}`.slice(0, 190)
+
+    let list = await chatList(page, isMobile)
+    const item = list.locator('a[aria-current="page"]').locator('..')
+    await item.hover()
+    await item.getByRole('button', { name: /^Actions for / }).click()
+    await page.getByRole('menuitem', { name: 'Rename' }).click()
+    await list.getByRole('textbox', { name: 'Chat name' }).fill(name)
+    await list.getByRole('textbox', { name: 'Chat name' }).press('Enter')
+    await expect(list.getByRole('link', { name })).toBeVisible()
+    const sideways = await list.evaluate((nav) => [...nav.querySelectorAll<HTMLElement>('div')].filter((d) => d.scrollWidth > d.clientWidth + 1 && getComputedStyle(d).overflowX !== 'hidden').length)
+    expect(sideways, 'boxes in the chat list that scroll sideways').toBe(0)
+
+    // Fork the whole chat from the list.
+    await list.getByRole('link', { name }).locator('..').hover()
+    await list.getByRole('button', { name: `Actions for ${name}` }).click()
+    await page.getByRole('menuitem', { name: 'Fork' }).click()
+    await expect(page).not.toHaveURL(original)
+    await expect(page.getByText('Forked from')).toBeVisible()
+    const fork = page.url()
+
+    // Archive the fork from its header, find it under Archived chats, bring it back.
+    await page.getByRole('button', { name: 'Chat actions' }).click()
+    await page.getByRole('menuitem', { name: 'Archive' }).click()
+    await expect(page.getByText(/This chat is archived/)).toBeVisible()
+    list = await chatList(page, isMobile)
+    await expect(list.getByRole('link', { name: `${name} (fork)`.slice(0, 200) })).toHaveCount(0)
+    await list.getByRole('button', { name: 'Archived chats' }).click()
+    await expect(list.getByRole('link', { name: `${name} (fork)`.slice(0, 200) })).toBeVisible()
+    await list.getByRole('button', { name: 'All chats' }).click()
+    if (isMobile) await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Unarchive' }).click()
+    await expect(page.getByText(/This chat is archived/)).toHaveCount(0)
+
+    // Delete both.
+    for (const url of [fork, original]) {
+      await page.goto(url)
+      await page.getByRole('button', { name: 'Chat actions' }).click()
+      await page.getByRole('menuitem', { name: 'Delete' }).click()
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click()
+      await expect(page).toHaveURL(/\/chat$/)
+    }
+  })
+
+  test('the rail jumps between questions, and an answer forks from there', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'the rail is for wider screens')
+    await page.goto('/chat')
+    if (live) await thinking(page, 'No thinking')
+    await turn(page, 'Reply with the single word: one')
+    await turn(page, 'Reply with the single word: two')
+    const rail = page.getByRole('navigation', { name: 'Questions in this chat' })
+    await expect(rail.getByRole('button')).toHaveCount(2)
+    await rail.getByRole('button', { name: /^Question 1:/ }).click()
+    await expect(rail.getByRole('button', { name: /^Question 1:/ })).toHaveAttribute('aria-current', 'location')
+    await expect(page.getByRole('region', { name: 'You' }).first()).toBeInViewport()
+    await expect(page.getByRole('region', { name: 'You' }).first()).toBeFocused()
+
+    const chat = page.url()
+    await page.getByRole('region', { name: 'Answer' }).first().getByRole('button', { name: 'Fork from here' }).click()
+    await expect(page).not.toHaveURL(chat)
+    await expect(page.getByRole('region', { name: 'You' })).toHaveCount(1)
+    for (const url of [page.url(), chat]) {
+      await page.goto(url)
+      await page.getByRole('button', { name: 'Chat actions' }).click()
+      await page.getByRole('menuitem', { name: 'Delete' }).click()
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click()
+      await expect(page).toHaveURL(/\/chat$/)
+    }
   })
 })
 

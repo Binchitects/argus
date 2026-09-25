@@ -37,6 +37,7 @@ swaps must never take the app down, and vice versa.
 | Repo | Work happens under `app/` on this branch. The final reorganisation happens once everything is green. |
 | Stack | .NET 10 LTS, EF Core + Npgsql, OpenIddict, YARP, xUnit + Testcontainers; React 19 + Vite + TypeScript, TanStack Query, ECharts, Vitest, Playwright. |
 | Frontend | Rewritten from zero as its own container (`web`, in `app/frontend/`): Radix primitives + Tailwind with our own components (the shadcn/ui approach), light and dark themes, self-hosted fonts and icons (air-gapped installs), accessibility checked with axe in every browser test. It replaced the first UI (`app/web`, served by the API) at `llm.<domain>` in 3C; the API now serves no pages. |
+| Decision models | Jev and Laya ("System One" models that return typed probabilities, not text; September 2026) were evaluated and **skipped for now**. Jev is hosted only, so data would leave the network. Laya is open, but zero-shot it scores below the majority baseline on its authors' benchmark and needs labelled data and calibration per task. It does not improve the chat. Worth revisiting when a team has a classification task with labelled data. |
 | Settings | Everything is configurable in the app. A setting applies at once when its service can take it live; otherwise the app saves it and shows the one command to apply it (still no Docker socket). Phase 6 makes those live too. |
 
 ## How "fully tested" is enforced
@@ -54,8 +55,8 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 3C done**: the new web, with the rich chat, is the app at
-`llm.<domain>`. Next: 3D (tools). The first chat UI and its
+Status: **Phase 3C.1 done** (chat polish). Next: 3D (tools, with local image
+generation) and 3D.2 (models at runtime, pulled forward from phase 6). The first chat UI and its
 [checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
 at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
 
@@ -293,15 +294,73 @@ at `next.<domain>`, which now redirects to `llm.<domain>`.
     - The stack suites still pass: functional 61/61, acceptance 33/0 (4
       skipped), auth audit, domain check, dashboards 34/34.
 
+### Phase 3C.1 — Chat polish  *(S)*
+- The layout uses wide screens: the thread, the settings and the admin pages grow
+  with the window instead of staying a narrow column.
+- The chat list has no sideways scrolling. Each chat can be renamed, archived
+  (with an Archived view to bring it back), deleted or forked.
+- Fork a chat from any message: a new chat with the branch up to that message.
+- A rail of the questions in the chat, to jump to any of them (like ChatGPT and
+  DeepSeek).
+- Medium thinking by default.
+- **Done when:** each is covered by UI and browser tests, on desktop and phone.
+- **Result:**
+  - **Width:** Comfortable, Wide (the default) or Full width, in the account
+    menu and on Your account. At 2560 px the thread is about 1,200 px wide
+    instead of 768, and admin pages use the screen.
+  - **The chat list:** a grid item's minimum width had made long titles push
+    the list sideways; titles now end in an ellipsis. Rename, fork, archive and
+    delete are in each chat's menu and the chat's header. **Archived chats**
+    has its own view, and writing in an archived chat brings it back.
+  - **Forks:** from the list or header (the branch on screen) or from any
+    answer (**Fork from here**). A fork shares the original's files, and
+    notes where it came from.
+  - **Question rail:** jump to any question; the one being read is marked.
+  - **Medium thinking** is the default in compose, both env samples and this
+    host's `.env`.
+  - **Found on the way:**
+    - Deleting a chat never deleted its files, though the dialog said so.
+      Images are stored in the database, so they piled up. Now they go,
+      except files a fork still uses.
+    - Opening two-factor setup and cancelling signed the person out on every
+      other device, because it rotated the security stamp. It no longer does;
+      turning two-factor on still does. In CI this signed out the browser
+      suite's shared session.
+    - A page's code or styles that fail to arrive are fetched once more, and
+      otherwise the page says it did not load. Before, a dropped CSS file
+      showed "Something went wrong".
+    - The browser tests' `ask()` could report an answer finished before it
+      started: in a new chat, Send shows while the chat is being made.
+  - **Tests:** 186 backend, 95 UI, and 121 browser tests on the live stack
+    with the real model (5 skipped), with no retries.
+
 ### Phase 3D — Tools  *(L)*
-- A tool registry in the API (built-in tools and MCP servers); admins choose which
-  exist and who may use them; a tool picker per chat; "ask before running" per tool.
+- A tool registry in the API (built-in tools and MCP servers, Argus among them);
+  admins turn each on or off and choose who may use it; a tool picker per chat;
+  "ask before running" per tool.
+- **Image generation**, local: FLUX.2 [klein] 4B (Apache 2.0) on
+  stable-diffusion.cpp's OpenAI-style server, in the GPU memory the chat model
+  leaves free. The model calls it as a tool, and the picture shows in the answer
+  and the Files panel.
 - Built-in: Argus, calculator, date and time, reading attached files in parts, a
   **Python sandbox** (its own container: no network, read-only root, CPU, memory and
   time limits; files it writes appear in the Files panel), and optional web fetch and
   search (off by default; allow-list; air-gapped installs leave it off).
 - **Done when:** each tool is tested end to end, and the sandbox has escape tests
   (network, filesystem, time and memory limits).
+
+### Phase 3D.2 — Models at runtime  *(M)*
+Pulled forward from phase 6.
+- llama.cpp's router mode serves every local model, each with its own preset
+  (context, offload, speculative decoding). LiteLLM routes them all to it, so a
+  model is added or switched with no restart.
+- **Models** page: admins load, unload and switch models with one click. One
+  GPU holds one large model, so a switch is an admin's decision; people pick
+  from the loaded models they may use.
+- **Access per model:** everyone, admins, or chosen groups. It is enforced in
+  the chat and on API keys (LiteLLM's per-key model list).
+- **Done when:** the three local models switch from the page with no shell, a
+  person sees and can call only the models they may use, and both are tested.
 
 ### Phase 3E — Assistants and knowledge  *(L)*
 - Assistants: a name, icon, instructions, model, thinking level, tools and knowledge;
@@ -341,10 +400,10 @@ Replaces: Grafana.
 Makes the settings that still need "run this command" apply from the app, without
 giving any web container the Docker socket.
 - Prices and model routes through LiteLLM's database-backed model API.
-- The engine: a small supervisor inside the engine container restarts llama.cpp with
-  new arguments or a new model when the app asks over the internal network
-  (authenticated, validated, audited). llama.cpp's router mode is evaluated for
-  switching models without a restart.
+- The engine: model switching moves to 3D.2 (router mode). What remains is
+  engine-wide arguments, applied by a small supervisor inside the engine
+  container when the app asks over the internal network (authenticated,
+  validated, audited).
 - What is left (compose profiles, host limits) is listed with its reason.
 - **Done when:** changing each setting in the app takes effect without a shell, and a
   test proves it for each.
