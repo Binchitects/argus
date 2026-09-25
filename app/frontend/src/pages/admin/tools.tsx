@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plug, PlugZap, Plus, Trash2, Users, Wrench } from 'lucide-react'
+import { Pencil, Plug, PlugZap, Plus, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -7,21 +7,17 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { toolIcon } from '../chat/tools'
-import { groupsQuery } from './groups-api'
+import { AccessPicker, type Audience } from './access-picker'
 
-type Audience = 'Everyone' | 'Admins' | 'Groups'
 
 interface ToolRow {
   id: string
@@ -88,10 +84,6 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
     onError: (e) => toast.error(errorMessage(e)),
   })
   const set = (change: Partial<Setting>) => save.mutate({ ...current, ...change })
-  // "Chosen groups" is saved once a group is chosen: until then it would let nobody in.
-  const [choosingGroups, setChoosingGroups] = useState(false)
-  const audience = choosingGroups ? 'Groups' : tool.setting.audience
-  const id = (what: string) => `${tool.id}-${what}`
   return (
     <Card className={tool.setting.enabled ? '' : 'opacity-80'}>
       <CardHeader className="flex flex-row items-start gap-3">
@@ -129,39 +121,7 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
             </p>
           </div>
         )}
-        <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
-          <Label htmlFor={id('who')} className="text-muted-foreground">
-            Who may use it
-          </Label>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={audience}
-              onValueChange={(a: Audience) => {
-                setChoosingGroups(a === 'Groups' && current.groups.length === 0)
-                if (a !== 'Groups' || current.groups.length > 0) set({ audience: a, groups: a === 'Groups' ? current.groups : [] })
-              }}
-            >
-              <SelectTrigger id={id('who')} size="sm" className="w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Everyone">Everyone</SelectItem>
-                <SelectItem value="Admins">Admins only</SelectItem>
-                <SelectItem value="Groups">Chosen groups</SelectItem>
-              </SelectContent>
-            </Select>
-            {audience === 'Groups' && (
-              <GroupsPicker
-                chosen={current.groups}
-                names={tool.setting.groups}
-                onChange={(groups) => {
-                  setChoosingGroups(false)
-                  set({ audience: 'Groups', groups })
-                }}
-              />
-            )}
-          </div>
-        </div>
+        <AccessPicker value={tool.setting} onChange={(audience, groups) => set({ audience, groups })} />
         <div className="grid gap-2">
           <Label className="flex items-center justify-between gap-3 font-normal">
             <span>
@@ -197,47 +157,6 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
         )}
       </CardContent>
     </Card>
-  )
-}
-
-function GroupsPicker({ chosen, onChange, names }: { chosen: string[]; onChange: (groups: string[]) => void; names: { id: string; name: string }[] }) {
-  const groups = useQuery(groupsQuery)
-  const label = chosen.length === 0 ? 'Choose groups' : names.map((g) => g.name).join(', ') || `${chosen.length} groups`
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="max-w-64 min-w-0 justify-start">
-          <Users /> <span className="truncate">{label}</span>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 p-2">
-        {groups.data?.length === 0 ? (
-          <p className="p-2 text-sm text-muted-foreground">
-            No groups yet. Make one under <a href="/admin/groups" className="underline underline-offset-2">Groups</a>.
-          </p>
-        ) : (
-          <ul className="grid max-h-64 gap-0.5 overflow-y-auto">
-            {groups.data?.map((g) => (
-              <li key={g.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent">
-                <Checkbox
-                  id={`pick-${g.id}`}
-                  checked={chosen.includes(g.id)}
-                  onCheckedChange={(v) => {
-                    const next = v === true ? [...chosen, g.id] : chosen.filter((x) => x !== g.id)
-                    if (next.length > 0) onChange(next)
-                    else toast.error('Keep at least one group, or let everyone use it.')
-                  }}
-                />
-                <label htmlFor={`pick-${g.id}`} className="min-w-0 flex-1 cursor-pointer truncate text-sm">
-                  {g.name}
-                  <span className="ml-1 text-xs text-muted-foreground">({g.members})</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        )}
-      </PopoverContent>
-    </Popover>
   )
 }
 

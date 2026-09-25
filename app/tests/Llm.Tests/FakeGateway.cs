@@ -13,6 +13,8 @@ public sealed class FakeGateway : ILiteLlm
         public required string Email { get; init; }
         public required string Alias { get; init; }
         public bool Blocked { get; set; }
+        /// <summary>The models the key may call; empty: every model.</summary>
+        public IReadOnlyList<string> Models { get; set; } = [];
     }
 
     public ConcurrentDictionary<string, decimal?> Budgets { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -36,13 +38,23 @@ public sealed class FakeGateway : ILiteLlm
         return Task.CompletedTask;
     }
 
-    public Task<string> GenerateKeyAsync(string email, string keyAlias, CancellationToken ct = default)
+    public Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, CancellationToken ct = default)
     {
         Check();
         var secret = "sk-" + Guid.NewGuid().ToString("N");
         var token = "hash-" + Guid.NewGuid().ToString("N");
-        Keys[token] = new Key { Secret = secret, Token = token, Email = email, Alias = keyAlias };
+        Keys[token] = new Key { Secret = secret, Token = token, Email = email, Alias = keyAlias, Models = models ?? [] };
         return Task.FromResult(secret);
+    }
+
+    public Task SetKeyModelsAsync(string token, IReadOnlyList<string> models, CancellationToken ct = default)
+    {
+        Check();
+        if (Keys.TryGetValue(token, out var key))
+        {
+            key.Models = models;
+        }
+        return Task.CompletedTask;
     }
 
     public List<string> ServiceKeys { get; } = [];
@@ -61,7 +73,7 @@ public sealed class FakeGateway : ILiteLlm
     public Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
     {
         Check();
-        IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow))];
+        IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models))];
         return Task.FromResult(list);
     }
 
@@ -100,6 +112,40 @@ public sealed class FakeGateway : ILiteLlm
     {
         Check();
         return Task.FromResult<IReadOnlyList<GatewayModel>>([.. Models]);
+    }
+
+    /// <summary>Models the app added: the gateway's id, name, fingerprint and what it was added with.</summary>
+    public ConcurrentDictionary<string, (string Name, string Fingerprint, System.Text.Json.Nodes.JsonObject Params, System.Text.Json.Nodes.JsonObject Info)> Managed { get; } = new();
+
+    public Task<IReadOnlyList<ManagedModel>> ManagedModelsAsync(CancellationToken ct = default)
+    {
+        Check();
+        return Task.FromResult<IReadOnlyList<ManagedModel>>([.. Managed.Select(m => new ManagedModel(m.Key, m.Value.Name, m.Value.Fingerprint))]);
+    }
+
+    public Task AddModelAsync(string name, System.Text.Json.Nodes.JsonObject litellmParams, System.Text.Json.Nodes.JsonObject modelInfo, string fingerprint, CancellationToken ct = default)
+    {
+        Check();
+        Managed[Guid.NewGuid().ToString()] = (name, fingerprint, litellmParams, modelInfo);
+        lock (Models)
+        {
+            Models.Add(new GatewayModel(name, modelInfo["max_input_tokens"]?.GetValue<int>(), modelInfo["max_output_tokens"]?.GetValue<int>(),
+                modelInfo["supports_vision"]?.GetValue<bool>() ?? false, true, true, null, null, null));
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteModelAsync(string id, CancellationToken ct = default)
+    {
+        Check();
+        if (Managed.TryRemove(id, out var gone))
+        {
+            lock (Models)
+            {
+                Models.RemoveAll(m => m.Name == gone.Name);
+            }
+        }
+        return Task.CompletedTask;
     }
 
     public Task DeleteUserAsync(string email, CancellationToken ct = default)

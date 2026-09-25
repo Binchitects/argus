@@ -223,6 +223,8 @@ raises, while the same value sent as `reasoning_effort` is dropped.
 |---|---|---|
 | `LLAMACPP_MODEL_DIR` | *required* | host directory holding the GGUFs. **Put it on NVMe** — the weights are memory-mapped and paged in on demand |
 | `LLAMACPP_MODEL_FILE` | *required* | the model file; for a split GGUF, the **first** shard |
+| `LLAMACPP_LIBRARY_DIR` | `LLAMACPP_MODEL_DIR` | the **model library**: the host folder Admin → Models adds more models from, searched three levels deep. Usually the folder that holds `LLAMACPP_MODEL_DIR` |
+| `LLAMACPP_MODELS_MAX` | `1` | models loaded at once. Loading one more unloads the least recently used. One GPU usually holds one large model |
 | `LLAMACPP_HF_REPO` | empty | Hugging Face repo to download from on first start. Empty means the files must already be present |
 | `LLAMACPP_HF_FILES` | empty | space-separated paths inside that repo. They land flat in `LLAMACPP_MODEL_DIR` and are SHA-256 checked |
 | `LLAMACPP_ENGINE_URL` | empty | a llama.cpp release tarball to run instead of the stock server. Exists for MTP: mainline has no MTP graph for some architectures, so the stock image accepts `--spec-type draft-mtp` and silently does nothing |
@@ -237,6 +239,12 @@ raises, while the same value sent as `reasoning_effort` is dropped.
 | `LLAMACPP_EXTRA_ARGS` | see sample | anything else for `llama-server` |
 | `LLAMACPP_IMAGE_TAG` | `server-cuda` | the image tag to run |
 | `LLAMACPP_API_KEY` | secret | the engine's own key. **Not something clients need** — Traefik injects it (see below) |
+
+The engine runs llama.cpp in **router mode** (`deploy/llamacpp/router.sh`):
+the variables above become the `.env` model's preset (`LLAMACPP_EXTRA_ARGS`
+translated to preset keys), the models added in Admin → Models come from
+`config/engine/models.ini`, and a change to that file restarts llama-server so
+it reads it. See [ADMIN.md](ADMIN.md#models).
 
 `LLAMACPP_MODEL_DIR` and `LLAMACPP_MODEL_FILE` are required **by compose itself**
 (`:?`), so a missing one fails at `docker compose up` with the variable named,

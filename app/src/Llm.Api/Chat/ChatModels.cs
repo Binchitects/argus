@@ -26,7 +26,8 @@ public sealed class ChatModels(IServiceScopeFactory scopes, IOptions<StackOption
     public async Task<GatewayModel?> ImageModelAsync(CancellationToken ct = default) =>
         (await AllAsync(ct)).FirstOrDefault(m => m.Mode == "image_generation");
 
-    private async Task<IReadOnlyList<GatewayModel>> AllAsync(CancellationToken ct)
+    /// <summary>Every model at the gateway: chat and pictures.</summary>
+    public async Task<IReadOnlyList<GatewayModel>> AllAsync(CancellationToken ct = default)
     {
         if (_cached is { } c && clock.GetUtcNow() - _at < Fresh)
         {

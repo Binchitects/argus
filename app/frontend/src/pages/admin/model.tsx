@@ -52,8 +52,8 @@ export function ModelPage() {
   return (
     <>
       <PageHeader
-        title="Model"
-        description="What is running, and the shipped deployments to switch to."
+        title="Deployment"
+        description="The .env model the engine starts with, and the shipped deployments to switch to."
         actions={
           <Button variant="outline" asChild>
             <Link to="/admin/settings#model">

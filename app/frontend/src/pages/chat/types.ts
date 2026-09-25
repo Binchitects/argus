@@ -5,6 +5,8 @@ export interface ChatModel {
   vision: boolean
   tools: boolean
   thinking: boolean
+  /** False for an engine model that is not loaded now: it cannot answer until an admin loads it. */
+  loaded: boolean
   prices: { input: number | null; cachedInput: number | null; output: number | null }
 }
 

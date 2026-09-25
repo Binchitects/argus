@@ -1,7 +1,7 @@
 # Settings in the app
 
 Admin → Settings (`https://<LLM_DOMAIN>/admin/settings` in the new web) lists
-every setting an admin can change: 87 of them in 12 groups. Each is typed and
+every setting an admin can change: 89 of them in 12 groups. Each is typed and
 checked, with its unit, default and limits, and a note on what changing it
 does. Search looks across every group. A group can be linked directly, for
 example `/admin/settings#company-directory-ldap`.

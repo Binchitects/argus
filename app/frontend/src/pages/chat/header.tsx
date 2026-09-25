@@ -21,17 +21,19 @@ export function ModelPicker({ config, value, onChange }: { config: ChatConfig; v
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-8 min-w-0 max-w-64 shrink gap-1.5 px-2 font-semibold" aria-label={`Model: ${current?.name ?? 'none'}`}>
           <span className="truncate">{current?.name ?? 'No model'}</span>
+          {current && !current.loaded && <Badge variant="warning">Not loaded</Badge>}
           <ChevronDown className="opacity-60" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-80">
         <DropdownMenuLabel>Model</DropdownMenuLabel>
         {config.models.map((m) => (
-          <DropdownMenuItem key={m.name} onSelect={() => onChange(m.name === config.model ? null : m.name)} className="items-start">
+          <DropdownMenuItem key={m.name} disabled={!m.loaded} onSelect={() => onChange(m.name === config.model ? null : m.name)} className="items-start">
             <span className="mt-0.5 w-4">{m.name === current?.name && <Check />}</span>
             <span className="grid gap-1">
               <span className="font-medium text-foreground">{m.name}</span>
               <span className="flex flex-wrap gap-1">
+                {!m.loaded && <Badge variant="warning">Not loaded now</Badge>}
                 {m.context && <Badge variant="secondary">{formatValue(m.context)} context</Badge>}
                 {m.tools && (
                   <Badge variant="secondary">
@@ -53,6 +55,9 @@ export function ModelPicker({ config, value, onChange }: { config: ChatConfig; v
           </DropdownMenuItem>
         ))}
         {config.models.length === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">The gateway lists no model.</p>}
+        {config.models.some((m) => !m.loaded) && (
+          <p className="border-t px-2 pt-2 pb-1 text-xs text-muted-foreground">A model that is not loaded answers once an admin loads it, in Administration → Models.</p>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

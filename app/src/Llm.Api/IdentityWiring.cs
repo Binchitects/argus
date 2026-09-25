@@ -253,6 +253,28 @@ public static class IdentityWiring
         services.AddScoped<Chat.Tools.ToolRegistry>();
         services.AddSingleton<Chat.Tools.ToolApprovals>();
         services.AddScoped<Chat.ChatService>();
+
+        // The engine's models (llama.cpp's router): Admin -> Models, and who may use which model.
+        services.Configure<Models.EngineOptions>(config.GetSection("Engine"));
+        services.PostConfigure<Models.EngineOptions>(o =>
+        {
+            if (config["Engine:Enabled"] is null)
+            {
+                var profiles = config["Stack:ComposeProfiles"] ?? "";
+                o.Enabled = profiles.Split(',', StringSplitOptions.TrimEntries).Contains("llamacpp", StringComparer.OrdinalIgnoreCase);
+            }
+            o.DefaultModel ??= config["Stack:ModelName"];
+        });
+        services.AddHttpClient<Models.EngineClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.AddSingleton<Models.EngineState>();
+        services.AddSingleton<Models.ModelLibrary>();
+        services.AddScoped<Models.ModelCatalog>();
+        services.AddScoped<Models.ModelPolicy>();
+        services.AddScoped<Models.KeyAccess>();
+        services.AddSingleton<Models.KeyAccessWatcher>();
+        services.AddHostedService(sp => sp.GetRequiredService<Models.KeyAccessWatcher>());
+        services.AddSingleton<Models.EngineWatcher>();
+        services.AddHostedService(sp => sp.GetRequiredService<Models.EngineWatcher>());
     }
 
     /// <summary>
@@ -321,6 +343,7 @@ public static class IdentityWiring
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
+        Models.ModelEndpoints.MapModels(app);
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

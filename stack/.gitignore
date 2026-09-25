@@ -81,4 +81,7 @@ config/ca/*.pem
 # The Settings page's pending .env changes (can hold a secret)
 config/app/pending.env
 config/app/pending.env.tmp
+# Written by the app for the engine and Prometheus (Admin -> Models).
+config/engine/*
+!config/engine/README.md
 config/app/applied-*

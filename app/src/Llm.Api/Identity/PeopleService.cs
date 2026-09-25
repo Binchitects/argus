@@ -20,6 +20,7 @@ public sealed partial class PeopleService(
     UserManager<AppUser> users,
     AppDbContext db,
     ILiteLlm gateway,
+    Models.KeyAccess keyAccess,
     Audit audit,
     DirectoryFile directory,
     IOpenIddictTokenManager tokens,
@@ -82,7 +83,7 @@ public sealed partial class PeopleService(
             {
                 await gateway.SetBudgetAsync(email, p.Budget);
             }
-            var key = await gateway.GenerateKeyAsync(email, KeyAlias(user));
+            var key = await gateway.GenerateKeyAsync(email, KeyAlias(user), await keyAccess.ListForAsync(user));
             return (user, new Secrets(password, key));
         }
         catch (GatewayException ex)
@@ -97,7 +98,7 @@ public sealed partial class PeopleService(
         await gateway.EnsureUserAsync(user.Email!);
         if ((await gateway.KeysAsync(user.Email!)).Count == 0)
         {
-            await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user));
+            await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user));
         }
     }
 
@@ -178,7 +179,7 @@ public sealed partial class PeopleService(
         var old = await gateway.KeysAsync(user.Email!);
         await gateway.DeleteKeysAsync(old.Select(k => k.Token));
         await gateway.EnsureUserAsync(user.Email!);
-        var key = await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user));
+        var key = await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user));
         await audit.WriteAsync("person.rotate_key", user.UserName, detail: $"revoked {old.Count}");
         return new Secrets(null, key);
     }

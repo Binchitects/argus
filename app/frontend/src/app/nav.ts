@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  Boxes,
   Cpu,
   Database,
   Home,
@@ -55,7 +56,8 @@ export const navigation: NavSection[] = [
       { title: 'People', path: '/admin/people', icon: Users, keywords: ['users', 'accounts', 'credit', 'keys'], ready: true },
       { title: 'Groups', path: '/admin/groups', icon: UsersRound, keywords: ['teams', 'access', 'directory groups', 'permissions'], ready: true },
       { title: 'Sign-in', path: '/admin/sign-in', icon: KeyRound, keywords: ['ldap', 'directory', 'active directory', '2fa'], ready: true },
-      { title: 'Model', path: '/admin/model', icon: Cpu, keywords: ['llama', 'engine', 'gpu', 'prices'], ready: true },
+      { title: 'Models', path: '/admin/models', icon: Boxes, keywords: ['switch', 'load', 'llama', 'library', 'gguf', 'permissions'], ready: true },
+      { title: 'Deployment', path: '/admin/model', icon: Cpu, keywords: ['model', 'llama', 'engine', 'gpu', 'prices', 'env'], ready: true },
       { title: 'Tools', path: '/admin/tools', icon: Wrench, keywords: ['mcp', 'argus', 'image generation', 'calculator', 'permissions'], ready: true },
       { title: 'Settings', path: '/admin/settings', icon: Settings, keywords: ['configuration', 'config', 'env'], ready: true },
       { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'], ready: true },

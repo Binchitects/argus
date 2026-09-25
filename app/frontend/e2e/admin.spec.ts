@@ -8,7 +8,8 @@ const pages: [string, string][] = [
   ['/admin/groups', 'Groups'],
   ['/admin/tools', 'Tools'],
   ['/admin/sign-in', 'Sign-in'],
-  ['/admin/model', 'Model'],
+  ['/admin/models', 'Models'],
+  ['/admin/model', 'Deployment'],
   ['/admin/settings', 'Settings'],
   ['/admin/audit', 'Audit log'],
   ['/admin/indexing', 'Indexing'],
@@ -136,6 +137,24 @@ test('a live setting applies at once and is audited; a stack setting waits and c
   await page.goto('/admin/audit')
   await page.getByRole('radio', { name: 'Settings' }).click()
   await expect(page.getByRole('cell', { name: 'Branding:ProductName' }).first()).toBeVisible()
+})
+
+test('the engine has its model loaded, and more come from the library', async ({ page }) => {
+  await page.goto('/admin/models')
+  await settled(page, 'Models')
+  // Read-only: loading another model here would switch it for every other test.
+  test.skip(await page.getByText(/needs the llama\.cpp engine/).isVisible(), 'no llama.cpp engine')
+  const env = page.locator('main section').filter({ has: page.getByText('.env', { exact: true }) })
+  await expect(env.getByText('Loaded', { exact: true })).toBeVisible({ timeout: 60_000 })
+  await expect(env.getByRole('button', { name: 'Unload' })).toBeVisible()
+  await page.getByRole('button', { name: 'Add a model' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Add a model' })
+  await dialog.getByRole('combobox', { name: 'Model file' }).click()
+  // Choosing a file names the model after it.
+  await page.getByRole('option').first().click()
+  await expect(dialog.getByLabel('Name')).not.toHaveValue('')
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
 })
 
 test('members cannot open admin pages', async ({ browser, baseURL }) => {

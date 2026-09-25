@@ -55,9 +55,10 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 3D, part 1 done** (groups, the tool registry, image generation,
-MCP servers, ask before running). Next: 3D.2 (models at runtime, pulled forward
-from phase 6), then 3D part 2 (sandbox, web). The first chat UI and its
+Status: **Phase 3D.2 done** (models at runtime: llama.cpp's router, Admin →
+Models, access per model in the chat and on API keys), after 3D part 1 (groups,
+the tool registry, image generation, MCP servers, ask before running). Next: 3D
+part 2 (sandbox, web). The first chat UI and its
 [checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
 at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
 
@@ -386,6 +387,47 @@ Pulled forward from phase 6.
   the chat and on API keys (LiteLLM's per-key model list).
 - **Done when:** the three local models switch from the page with no shell, a
   person sees and can call only the models they may use, and both are tested.
+- **Progress:**
+  - **Router mode:** `deploy/llamacpp/router.sh` builds the `.env` model's
+    preset (the same memory logic as before; `LLAMACPP_EXTRA_ARGS` translated
+    to preset keys), adds the app's `config/engine/models.ini`, and starts
+    llama-server with `--models-max 1 --no-models-autoload`. A change to the
+    file restarts it; at start it loads the model the app chose last.
+  - **Admin → Models:** every model at the gateway; load and unload the
+    engine's; add, edit and remove models from the library
+    (`LLAMACPP_LIBRARY_DIR`, GGUF headers read for architecture, size and
+    trained context). The app registers them at LiteLLM itself (`/model/new`,
+    marked as its own and fingerprinted, so only changes are re-sent). The old
+    Model page is now **Deployment**.
+  - **Access per model:** everyone, admins or chosen groups. The chat lists
+    only a person's models and the server refuses the others; a model that is
+    not loaded is listed greyed out and refused with a reason. API keys follow:
+    the app keeps each key's model list at LiteLLM (`/key/update`), on every
+    change and every ten minutes, so another model answers 403.
+  - **Metrics:** Prometheus scrapes `/metrics?model=<loaded>` from a target
+    file the app writes, so the dashboards follow a switch.
+  - **Found on the way:** this build of llama.cpp replaced `--mlock` with
+    `load-mode = mmap+mlock`; router-level arguments override every preset, so
+    all of a model's arguments live in its preset; an unhandled exception in a
+    background service stopped the whole app (the watchers now catch
+    everything but shutdown); a model that failed to load was loaded again
+    every 3 seconds, 200 times in ten minutes, with nothing loaded meanwhile
+    (the router marks it `failed`; the app now shows that, does not retry it,
+    and loads the `.env` model in its place; the live test used a library file
+    that turned out to be an incomplete download); Prometheus's config directory is a read-only
+    mount, so the target file is mounted beside it; and the acceptance and
+    functional suites predated the image model (they now generate a small
+    picture with it rather than chat with it).
+  - **Live, on the RTX 3090:** the 27B added from the library (the engine
+    restarted and had the 94 GB `.env` model loaded again in 28 s); switched to
+    it in 16 s, answering in 5.5 s; back in 34 s; Prometheus followed each
+    switch. The library's third model, Flash-Next IQ3_XXS, is an incomplete
+    download: its load failed once and the `.env` model took its place in 32 s.
+    Two models switch from the page; the third needs its file downloaded again.
+  - **Tests:** 231 backend, 108 UI, 139 browser on the live stack (5 skipped;
+    one certificate error from the installed Chrome, passed when re-run),
+    functional 65/65 (a model given to admins leaves a person's key, is
+    refused, and comes back), acceptance 32/32.
 
 ### Phase 3E — Assistants and knowledge  *(L)*
 - Assistants: a name, icon, instructions, model, thinking level, tools and knowledge;

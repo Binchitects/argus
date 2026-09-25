@@ -49,6 +49,9 @@ def env(key, default=""):
 
 DOM = env("LLM_DOMAIN", "llm.localhost")
 MODEL = env("MODEL_NAME")
+# The picture model, when the image profile is on (Admin -> Tools, image generation).
+IMAGE = env("IMAGEGEN_MODEL_NAME") if "image" in env("COMPOSE_PROFILES").split(",") else ""
+LOCAL = {}  # models added in Admin -> Models: name -> who may use it
 PORT = env("TRAEFIK_HTTPS_PORT", "443")
 SUFFIX = "" if PORT == "443" else f":{PORT}"
 CTX = ssl.create_default_context(cafile=str(ROOT / "config/traefik/certs/tls.crt"))
@@ -123,6 +126,21 @@ def api_key_call(key, path="/v1/models", payload=None, timeout=300):
     return b.req(u("gateway", path), payload, headers={"Authorization": f"Bearer {key}"}, timeout=timeout)[:2]
 
 
+def listed_by(key):
+    code, body = api_key_call(key)
+    return [m.get("id") for m in json.loads(body).get("data", [])] if code == 200 else []
+
+
+def wait_listed(key, model, want, seconds=45):
+    """Whether the key's model list (kept by the app's key sync) comes to include, or not, the model."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if (model in listed_by(key)) == want:
+            return True
+        time.sleep(1.5)
+    return False
+
+
 def chat(key, text="Reply with the single word: pong", max_tokens=400):
     return api_key_call(key, "/v1/chat/completions",
                         {"model": MODEL, "messages": [{"role": "user", "content": text}],
@@ -191,6 +209,12 @@ def main():
         len(samples) == shipped and all(x.get("block", "").startswith("# >>> MODEL") for x in samples),
         f"{len(samples)} of {shipped} samples")
     rec("admin", "the Model page names the running model", model.get("running", {}).get("name") == MODEL, MODEL)
+    code, models = admin.app("GET", "/api/admin/models")
+    rows = models.get("models", []) if code == 200 else []
+    LOCAL.update({m["name"]: (m.get("access") or {}).get("audience") for m in rows if m.get("source") == "local"})
+    env_row = next((m for m in rows if m.get("source") == "env"), {})
+    rec("admin", "the Models page has the .env model, loaded",
+        env_row.get("name") == MODEL and env_row.get("status") in ("loaded", None), f"HTTP {code} {env_row.get('status')}")
     code, overview = admin.app("GET", "/api/admin/overview")
     down = [x["name"] for x in overview.get("services", []) if not x.get("ok")]
     rec("admin", "the Overview reaches the gateway, Prometheus and Grafana", code == 200 and not down, f"down: {down}" if down else "")
@@ -236,9 +260,11 @@ def main():
 
     # ----------------------------------------------------------------- API key
     print("\n3. The person's API key")
-    code, body = api_key_call(key)
-    listed = [m.get("id") for m in json.loads(body).get("data", [])] if code == 200 else []
-    rec("key", "the gateway lists exactly one model, by its real name", listed == [MODEL], f"{listed}")
+    listed = listed_by(key)
+    # The .env model, the picture model, and the models added in Admin -> Models
+    # that everyone may use -- by their real names, nothing else.
+    expected = [MODEL] + ([IMAGE] if IMAGE else []) + [n for n, a in LOCAL.items() if a == "Everyone"]
+    rec("key", "the gateway lists the models the person may use, by their real names", sorted(listed) == sorted(expected), f"{listed}")
     code, body = chat(key)
     content = ""
     if code == 200:
@@ -247,6 +273,20 @@ def main():
     rec("key", "key gets a completion from the model", code == 200 and bool(content.strip()), f"HTTP {code}")
     code, _ = api_key_call("sk-not-a-real-key")
     rec("key", "an invalid key is refused", code in (400, 401, 403), f"HTTP {code}")
+    # Access per model (Admin -> Models): given to admins only, a model leaves
+    # the person's key (the app keeps each key's model list at the gateway) and
+    # is refused; given back, it returns.
+    if IMAGE:
+        def rule(audience):
+            return admin.app("PUT", f"/api/admin/models/{urllib.parse.quote(IMAGE, safe='')}/access", {"audience": audience, "groups": []})[0]
+        try:
+            code = rule("Admins")
+            rec("key", "a model given to admins only leaves the person's key", code == 204 and wait_listed(key, IMAGE, False), f"HTTP {code}")
+            code, _ = api_key_call(key, "/v1/images/generations", {"model": IMAGE, "prompt": "a red square", "size": "256x256", "n": 1})
+            rec("key", "and a call to it is refused", code in (401, 403), f"HTTP {code}")
+        finally:
+            code = rule("Everyone")
+        rec("key", "given back to everyone, it is listed again", code == 204 and wait_listed(key, IMAGE, True), f"HTTP {code}")
     code, _ = Browser().req(u("gateway", "/v1/models"))[:2]
     rec("key", "no key is refused", code in (400, 401, 403), f"HTTP {code}")
 
@@ -296,8 +336,8 @@ def main():
         # (deploy/seed-presets.py) -- and nothing else: no aliases, no Arena Model.
         presets = [lvl.split(":")[0].strip().lower() for lvl in (env("THINKING_PRESETS") or "").split(",") if lvl.strip()] \
             if "llamacpp" in env("COMPOSE_PROFILES") else []
-        expected = [MODEL] + [f"{MODEL}-think-{lvl}".replace("/", "-").lower() for lvl in presets]
-        rec("sso", "Open WebUI lists the real model and its thinking presets, nothing else", sorted(models) == sorted(expected), ", ".join(models))
+        expected = [MODEL] + [f"{MODEL}-think-{lvl}".replace("/", "-").lower() for lvl in presets] + ([IMAGE] if IMAGE else []) + list(LOCAL)
+        rec("sso", "Open WebUI lists the stack's models and the thinking presets, nothing else", sorted(models) == sorted(expected), ", ".join(models))
         model = MODEL
         code, body, _, _ = person.req(u("chat", "/api/chat/completions"),
                                       {"model": model, "stream": False, "max_tokens": 400,

@@ -131,20 +131,35 @@ def main() -> int:
     # a crash mid-`--force-recreate` left the engine on the old model while
     # the gateway advertised the new one, and this check passed anyway
     # because `local` was present in both.
-    model_for_tools = gw_models[0] if gw_models else os.environ.get("MODEL_NAME", "")
-    unusable = []
+    # An image model (the `image` profile) is exercised with a small picture,
+    # not a chat. A model of the engine's router that is not loaded answers
+    # "not loaded": it exists, and loads from Admin -> Models.
+    try:
+        modes = {m.get("model_name"): (m.get("model_info") or {}).get("mode")
+                 for m in call(GW, "/model/info", token=MASTER).get("data", [])}
+    except Exception:
+        modes = {}
+    chat_models = [n for n in gw_models if modes.get(n) != "image_generation"]
+    model_for_tools = chat_models[0] if chat_models else os.environ.get("MODEL_NAME", "")
+    unusable, unloaded = [], []
     for name in gw_models:
         try:
-            call(GW, "/chat/completions",
-                 {"model": name,
-                  "messages": [{"role": "user", "content": f"ping {stamp}"}],
-                  "max_tokens": 1}, token=MASTER)
+            if modes.get(name) == "image_generation":
+                call(GW, "/images/generations",
+                     {"model": name, "prompt": f"a small red square {stamp}", "size": "256x256", "n": 1},
+                     token=MASTER, timeout=300)
+            else:
+                call(GW, "/chat/completions",
+                     {"model": name,
+                      "messages": [{"role": "user", "content": f"ping {stamp}"}],
+                      "max_tokens": 1}, token=MASTER)
         except urllib.error.HTTPError as exc:
-            unusable.append(f"{name}:{exc.code}")
+            body = exc.read().decode(errors="replace") if exc.fp else ""
+            (unloaded if "not loaded" in body else unusable).append(f"{name}:{exc.code}")
         except Exception as exc:
             unusable.append(f"{name}:{type(exc).__name__}")
     record("every advertised name actually answers", not unusable,
-           f"engine={served}" if not unusable else f"unusable={unusable}")
+           (f"engine={served}" + (f" not loaded={unloaded}" if unloaded else "")) if not unusable else f"unusable={unusable}")
 
     # --- the gateway ADVERTISES its context window -----------------------
     # Regression guard. While max_input_tokens was null here, every client had
@@ -155,7 +170,7 @@ def main() -> int:
     try:
         info = call(GW, "/model/info", token=MASTER).get("data", [])
         windows = {m.get("model_name"): (m.get("model_info") or {}).get("max_input_tokens")
-                   for m in info}
+                   for m in info if (m.get("model_info") or {}).get("mode") != "image_generation"}
         missing = [n for n, w in windows.items() if not w]
         record("gateway advertises a context window", bool(windows) and not missing,
                f"{windows}" if not missing else f"null for {missing}")

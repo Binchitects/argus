@@ -4,6 +4,7 @@ using System.Text.Json;
 using Llm.Api.Access;
 using Llm.Api.Chat.Tools;
 using Llm.Api.Endpoints;
+using Llm.Api.Models;
 using Llm.Api.Operations;
 using Llm.Core.Chat;
 using Llm.Core.Data;
@@ -65,17 +66,19 @@ public static class ChatEndpoints
         g.MapGet("/attachments/{id:guid}/content", ContentAsync);
     }
 
-    private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access,
+    private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access, ModelPolicy policy,
         IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
     {
-        var list = await models.ListAsync(ct);
-        var tools = await registry.ForAsync(await access.MembershipAsync(await Me(p, users), ct), ct);
+        var me = await Me(p, users);
+        // The models this person may use; a model of the engine that is not loaded is listed, marked so.
+        var (list, first, onEngine) = await policy.ForAsync(me, await models.ListAsync(ct), ct);
+        var tools = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
         return Results.Ok(new
         {
-            model = list.Count > 0 ? list[0].Name : stack.Value.ModelName,
+            model = first?.Name ?? stack.Value.ModelName,
             models = list.Select(m => new
             {
-                m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking,
+                m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, loaded = policy.Ready(m.Name, onEngine),
                 prices = new { input = m.InputPerMtok, cachedInput = m.CachedInputPerMtok, output = m.OutputPerMtok },
             }),
             presets = ThinkingPresets.Parse(stack.Value.ThinkingPresets),
@@ -113,11 +116,11 @@ public static class ChatEndpoints
     }
 
     private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
-        ToolRegistry registry, AccessService access, CancellationToken ct)
+        ToolRegistry registry, AccessService access, ModelPolicy policy, CancellationToken ct)
     {
         var me = await Me(p, users);
         var c = new Conversation { UserId = me.Id };
-        if (await ApplyAsync(c, new ConversationChange(null, body.Thinking, null, body.Model, body.SystemPrompt, body.Temperature, body.TopP, body.MaxTokens), stack.Value, models) is { } problem)
+        if (await ApplyAsync(c, new ConversationChange(null, body.Thinking, null, body.Model, body.SystemPrompt, body.Temperature, body.TopP, body.MaxTokens), stack.Value, models, me, policy) is { } problem)
         {
             return problem;
         }
@@ -160,7 +163,7 @@ public static class ChatEndpoints
     }
 
     /// <summary>A chat's settings, checked. Null when all is well.</summary>
-    private static async Task<IResult?> ApplyAsync(Conversation c, ConversationChange body, StackOptions stack, ChatModels models)
+    private static async Task<IResult?> ApplyAsync(Conversation c, ConversationChange body, StackOptions stack, ChatModels models, AppUser me, ModelPolicy policy)
     {
         if (body.Thinking is { } t)
         {
@@ -175,6 +178,10 @@ public static class ChatEndpoints
             if (model != "" && (await models.ListAsync()).All(m => m.Name != model))
             {
                 return AuthEndpoints.Problem(400, "model", $"The gateway does not serve {model}.");
+            }
+            if (model != "" && !(await policy.AllowedAsync(me, [model])).Contains(model))
+            {
+                return AuthEndpoints.Problem(403, "model", $"You may not use {model}.");
             }
             c.Model = model == "" ? null : model;
         }
@@ -251,7 +258,7 @@ public static class ChatEndpoints
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
-        ToolRegistry registry, AccessService access, CancellationToken ct)
+        ToolRegistry registry, AccessService access, ModelPolicy policy, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me) is not { } c)
@@ -262,7 +269,7 @@ public static class ChatEndpoints
         {
             c.Title = string.IsNullOrWhiteSpace(title) ? "New chat" : title.Trim()[..Math.Min(200, title.Trim().Length)];
         }
-        if (await ApplyAsync(c, body, stack.Value, models) is { } problem)
+        if (await ApplyAsync(c, body, stack.Value, models, me, policy) is { } problem)
         {
             return problem;
         }

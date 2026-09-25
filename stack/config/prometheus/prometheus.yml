@@ -152,15 +152,21 @@ scrape_configs:
   # llama.cpp, when it is the active engine. Needs --metrics on the server
   # (off by default -- /metrics answers 501 without it) and a bearer token,
   # since llama.cpp protects every path except /health.
+  #
+  # Router mode: the engine has several models, one loaded at a time, and each
+  # has its own metrics at /metrics?model=NAME. The app writes the loaded
+  # one(s) to targets.json (Admin -> Models); the relabel turns the target's
+  # `model` label into that parameter.
   - job_name: llamacpp
     metrics_path: /metrics
     authorization:
       credentials_file: /etc/prometheus/secrets/llamacpp.token
-    static_configs:
-      - targets: ["llamacpp:8080"]
-        labels:
-          tier: optional
-          component: inference
+    file_sd_configs:
+      - files: ["/engine-sd/targets.json"]
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [model]
+        target_label: __param_model
 
   - job_name: cpu-temp
     static_configs:

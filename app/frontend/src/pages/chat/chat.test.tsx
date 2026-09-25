@@ -18,8 +18,8 @@ vi.mock('./api', async (original) => ({
 const config: ChatConfig = {
   model: 'Main-Model',
   models: [
-    { name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } },
-    { name: 'Eyes-Model', context: 32768, maxOutput: 4096, vision: true, tools: true, thinking: false, prices: { input: 1, cachedInput: 0.1, output: 2 } },
+    { name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } },
+    { name: 'Eyes-Model', context: 32768, maxOutput: 4096, vision: true, tools: true, thinking: false, loaded: true, prices: { input: 1, cachedInput: 0.1, output: 2 } },
   ],
   presets: [{ level: 'xhigh', label: 'Deep think' }, { level: 'off', label: 'No thinking' }],
   defaultThinking: 'xhigh',
@@ -99,6 +99,16 @@ describe('chat', () => {
     // Tokens and cost from the model's prices: (600*0.2 + 400*0.02 + 200*0.8) / 1e6.
     expect(within(a).getByText(/1 K in · 200 out/)).toBeInTheDocument()
     expect(within(a).getByText('· $0.00029')).toBeInTheDocument()
+  })
+
+  it('a model that is not loaded is listed but cannot be chosen', async () => {
+    backend({ config: { models: [config.models[0], { ...config.models[1], loaded: false }] } })
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: /^Model:/ }))
+    const eyes = await screen.findByRole('menuitem', { name: /Eyes-Model/ })
+    expect(eyes).toHaveAttribute('aria-disabled', 'true')
+    expect(within(eyes).getByText('Not loaded now')).toBeInTheDocument()
+    expect(screen.getByText(/answers once an admin loads it/)).toBeInTheDocument()
   })
 
   it('code the model writes is in the Files panel, and a code block can be copied and downloaded', async () => {

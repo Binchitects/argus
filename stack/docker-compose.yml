@@ -371,6 +371,7 @@ services:
       - ${LLM_CONFIG_DIR:-./config}/authelia:/config
       - ${LLM_CONFIG_DIR:-./config}/traefik/auth:/traefik-auth
       - ${LLM_CONFIG_DIR:-./config}/app:/app-settings
+      - ${LLM_CONFIG_DIR:-./config}/engine:/engine-config
     command:
       - |
         set -e
@@ -386,6 +387,9 @@ services:
         # The Settings page writes pending .env changes here (scripts/apply-settings.sh applies them).
         chmod 700 /app-settings
         chown -R "$$APP_UID:$$APP_GID" /app-settings
+        # Admin -> Models writes the engine's presets here; the engine and Prometheus read them.
+        chmod 755 /engine-config
+        chown -R "$$APP_UID:$$APP_GID" /engine-config
         if [ -f /config/users.yml ]; then chown "$$APP_UID:$$APP_GID" /config/users.yml; fi
         if [ "$$owner" != "$$APP_UID:$$APP_GID" ]; then
           echo "auth-init: note: config/ belongs to $$owner but the app runs as $$APP_UID:$$APP_GID."
@@ -668,6 +672,12 @@ services:
       - ${LLAMACPP_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}:/gguf:ro
       # Filled by model-init from LLAMACPP_ENGINE_URL; empty = stock server.
       - llamacpp-engine:/engine:ro
+      # Router mode (deploy/llamacpp/router.sh): the models the app added
+      # (config/engine/models.ini), the one to keep loaded (active), and the
+      # library they come from.
+      - ./deploy/llamacpp/router.sh:/router.sh:ro
+      - ${LLM_CONFIG_DIR:-./config}/engine:/presets:ro
+      - ${LLAMACPP_LIBRARY_DIR:-${LLAMACPP_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}}:/library:ro
     # Which llama-server runs, and MTP. Both come from .env via model-init:
     #
     #   LLAMACPP_ENGINE_URL  a release tarball unpacked into /engine. Empty runs
@@ -684,6 +694,17 @@ services:
     #       --spec-draft-cpu-moe to keep a draft head's experts in system RAM.
     environment:
       LLAMA_CACHE: /models/.llama-cache
+      # The .env model's preset (router.sh), with what single-model mode took
+      # on its command line.
+      MODEL_NAME: ${MODEL_NAME:?set MODEL_NAME in .env}
+      MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
+      LLAMACPP_API_KEY: ${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}
+      LLAMACPP_THREADS: ${LLAMACPP_THREADS:-8}
+      LLAMACPP_N_GPU_LAYERS: ${LLAMACPP_N_GPU_LAYERS:-99}
+      LLAMACPP_KV_TYPE: ${LLAMACPP_KV_TYPE:-q8_0}
+      LLAMACPP_PARALLEL: ${LLAMACPP_PARALLEL:-1}
+      # How many models stay loaded at once; one GPU usually holds one.
+      LLAMACPP_MODELS_MAX: ${LLAMACPP_MODELS_MAX:-1}
       LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
       LLAMACPP_MTP_DRAFT_MAX: ${LLAMACPP_MTP_DRAFT_MAX:-0}
       LLAMACPP_MTP_ARGS: ${LLAMACPP_MTP_ARGS:-}
@@ -706,87 +727,11 @@ services:
       memlock:
         soft: -1
         hard: -1
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        # ---- memory: pin and/or preload the weights, when that is possible ----
-        f="$$LLAMACPP_MODEL_FILE"
-        case "$$f" in *-00001-of-*) files=$$(ls /gguf/$${f%-00001-of-*}-000*-of-*.gguf 2>/dev/null) ;; *) files="/gguf/$$f" ;; esac
-        [ -z "$$LLAMACPP_MTP_HEAD" ] || files="$$files /gguf/$$LLAMACPP_MTP_HEAD"
-        model_kb=$$(du -ckL $$files 2>/dev/null | tail -1 | cut -f1)
-        ram_kb=$$(awk '/^MemTotal:/{print $$2}' /proc/meminfo)
-        budget_kb=$$(( ram_kb - $${LLAMACPP_RAM_RESERVE_GB:-8} * 1048576 ))
-        on_cpu=0
-        [ "$${LLAMACPP_N_CPU_MOE:-0}" -gt 0 ] && on_cpu=1
-        case "$$LLAMACPP_EXTRA_ARGS" in *=CPU*|*--cpu-moe*|*-ngl\ 0*) on_cpu=1 ;; esac
-        fits=0; [ "$${model_kb:-0}" -gt 0 ] && [ "$$model_kb" -le "$$budget_kb" ] && fits=1
-        gb() { echo "$$(( $$1 / 1048576 )) GB"; }
-        mlock=0
-        case "$${LLAMACPP_MLOCK:-auto}" in
-          on)  mlock=1; [ $$fits = 1 ] || echo "memory: WARNING pinning $$(gb $$model_kb) with only $$(gb $$budget_kb) to spare -- expect thrashing" ;;
-          off) echo "memory: pinning off (LLAMACPP_MLOCK=off)" ;;
-          *)   if [ $$on_cpu = 0 ]; then echo "memory: weights run on the GPU; nothing in RAM to pin"
-               elif [ $$fits = 1 ]; then mlock=1
-               else echo "memory: NOT pinning -- model $$(gb $$model_kb) exceeds RAM $$(gb $$ram_kb) minus the $${LLAMACPP_RAM_RESERVE_GB:-8} GB reserve; weights page in from disk on demand, so keep them on NVMe (more RAM removes the paging)"; fi ;;
-        esac
-        if [ $$mlock = 1 ]; then
-          echo "memory: pinning $$(gb $$model_kb) of weights in RAM (--mlock); $$(gb $$(( ram_kb - model_kb ))) left for the rest"
-          set -- "$$@" --mlock
-        fi
-        case "$${LLAMACPP_PRELOAD:-auto}" in
-          on|auto)
-            if [ $$mlock = 0 ] && [ $$fits = 1 ] && [ $$on_cpu = 1 ] || [ "$$LLAMACPP_PRELOAD" = on ]; then
-              t0=$$(date +%s); cat $$files > /dev/null
-              echo "memory: preloaded $$(gb $$model_kb) into the page cache in $$(( $$(date +%s) - t0 )) s"
-            fi ;;
-        esac
-        # ------------------------------------------------------------------------
-        bin=/app/llama-server
-        if [ -x /engine/llama-server ]; then bin=/engine/llama-server; echo "engine: $$(cat /engine/.source 2>/dev/null || echo /engine)"; fi
-        if [ "$${LLAMACPP_MTP_DRAFT_MAX:-0}" -gt 0 ]; then
-          echo "MTP: drafting $$LLAMACPP_MTP_DRAFT_MAX token(s) per step$${LLAMACPP_MTP_HEAD:+ with head /gguf/$$LLAMACPP_MTP_HEAD}"
-          [ -z "$$LLAMACPP_MTP_HEAD" ] || set -- "$$@" -md "/gguf/$$LLAMACPP_MTP_HEAD"
-          set -- "$$@" --spec-type draft-mtp --spec-draft-n-max "$$LLAMACPP_MTP_DRAFT_MAX" $$LLAMACPP_MTP_ARGS
-        fi
-        exec "$$bin" "$$@"
-      - llama-server
-    # The image entrypoint is llama-server, so this holds only flags.
-    #
-    # ON THE --api-key DEFAULT: the placeholder is not the security boundary and
-    # must never be reached. It is now a required variable, so compose refuses
-    # the key is still the placeholder, and acceptance.py fails on any
-    # `change-me` left in .env.
-    #
-    # It is a plain default rather than a required-variable marker for two
-    # reasons. Compose interpolates EVERY service before filtering by profile,
-    # so a marker here aborts `docker compose` for people who never run this
-    # engine -- including every .env written before it existed. And a presence
-    # check would not help anyway: a template shipping a placeholder would be
-    # satisfied by precisely the value we are trying to reject. Checking the
-    # VALUE, where the enabled profile is known, is what actually closes it.
-    #
-    # --n-cpu-moe is the flag that matters: it keeps the routed experts of the
-    # last N layers in system RAM instead of VRAM. Attention, the shared expert
-    # and the embeddings stay on the GPU. Set it high enough that the GPU-side
-    # footprint fits your card; too low and the server dies with a CUDA OOM
-    # during weight loading.
-    command: >
-      -m /gguf/${LLAMACPP_MODEL_FILE:-SET_LLAMACPP_MODEL_FILE_IN_ENV.gguf}
-      --host 0.0.0.0
-      --port 8080
-      --api-key ${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}
-      --alias ${MODEL_NAME:?set MODEL_NAME in .env}
-      -c ${MODEL_CONTEXT:-32768}
-      -t ${LLAMACPP_THREADS:-8}
-      -ngl ${LLAMACPP_N_GPU_LAYERS:-99}
-      --n-cpu-moe ${LLAMACPP_N_CPU_MOE:-0}
-      --cache-type-k ${LLAMACPP_KV_TYPE:-q8_0}
-      --cache-type-v ${LLAMACPP_KV_TYPE:-q8_0}
-      --parallel ${LLAMACPP_PARALLEL:-1}
-      --jinja
-      --metrics
-      ${LLAMACPP_EXTRA_ARGS:-}
+    # llama.cpp in router mode: several models, one loaded at a time, switched
+    # live from Admin -> Models without a restart. The script builds the .env
+    # model's preset (pinning and preloading its weights as before), adds the
+    # app's models, and restarts llama-server when the app changes that list.
+    entrypoint: ["/bin/sh", "/router.sh"]
     # mmap means the GGUF is paged from disk on demand rather than read whole.
     # With 512 experts and 10 firing per token the hot set is far smaller than
     # the file, so this is what makes a 94 GB model usable on 48 GB of RAM --
@@ -1489,6 +1434,12 @@ services:
       Argus__Url: ${ARGUS_URL:-http://argus:7700}
       Argus__AdminToken: ${ARGUS_ADMIN_TOKEN:-}
       Argus__GitlabUrl: ${ARGUS_GITLAB_URL:-}
+      # llama.cpp's router (profile llamacpp): Admin -> Models loads and unloads models live.
+      Engine__Url: http://llamacpp:8080
+      Engine__ApiKey: ${LLAMACPP_API_KEY:-}
+      Engine__ConfigDir: /engine-config
+      Engine__LibraryDir: /library
+      Engine__EngineLibraryDir: /library
       Argus__GitlabAuth: ${ARGUS_GITLAB_AUTH:-}
       Argus__GitlabUsername: ${ARGUS_GITLAB_USERNAME:-}
       # The chat's credential at Argus's MCP endpoint (with each person's email beside it).
@@ -1511,6 +1462,7 @@ services:
       StackEnv__LLAMACPP_HF_REPO: ${LLAMACPP_HF_REPO:-}
       StackEnv__LLAMACPP_HF_FILES: ${LLAMACPP_HF_FILES:-}
       StackEnv__LLAMACPP_MODEL_DIR: ${LLAMACPP_MODEL_DIR:-}
+      StackEnv__LLAMACPP_LIBRARY_DIR: ${LLAMACPP_LIBRARY_DIR:-}
       StackEnv__LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
       StackEnv__LLAMACPP_MTP_ARGS: ${LLAMACPP_MTP_ARGS:-}
       StackEnv__LLAMACPP_ENGINE_URL: ${LLAMACPP_ENGINE_URL:-}
@@ -1520,6 +1472,7 @@ services:
       StackEnv__LLAMACPP_N_CPU_MOE: ${LLAMACPP_N_CPU_MOE:-0}
       StackEnv__LLAMACPP_KV_TYPE: ${LLAMACPP_KV_TYPE:-q8_0}
       StackEnv__LLAMACPP_PARALLEL: ${LLAMACPP_PARALLEL:-1}
+      StackEnv__LLAMACPP_MODELS_MAX: ${LLAMACPP_MODELS_MAX:-1}
       StackEnv__LLAMACPP_MTP_DRAFT_MAX: ${LLAMACPP_MTP_DRAFT_MAX:-0}
       StackEnv__LLAMACPP_EXTRA_ARGS: ${LLAMACPP_EXTRA_ARGS:-}
       StackEnv__LLAMACPP_THREADS: ${LLAMACPP_THREADS:-8}
@@ -1566,6 +1519,10 @@ services:
       - ${LLM_ENV_SAMPLES_DIR:-./env-samples}:/env-samples:ro
       # The Settings page's pending .env changes, for scripts/apply-settings.sh.
       - ${LLM_CONFIG_DIR:-./config}/app:/settings
+      # Admin -> Models: the engine's presets, the model to keep loaded and
+      # Prometheus's targets (written here), and the model library (read only).
+      - ${LLM_CONFIG_DIR:-./config}/engine:/engine-config
+      - ${LLAMACPP_LIBRARY_DIR:-${LLAMACPP_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}}:/library:ro
     read_only: true
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
@@ -1894,6 +1851,8 @@ services:
       - ${LLM_CONFIG_DIR:-./config}/prometheus:/etc/prometheus:ro
       # Mounted OVER the bind-mounted secrets directory; see prometheus-secrets.
       - prometheus-secrets:/etc/prometheus/secrets:ro
+      # The loaded model(s), for the llama.cpp job (written by the app).
+      - ${LLM_CONFIG_DIR:-./config}/engine:/engine-sd:ro
       - prometheus-data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml

@@ -350,7 +350,7 @@ restart**, so nothing could ever trust it.
 
 | service | image | what it does |
 |---|---|---|
-| `llamacpp` | `ghcr.io/ggml-org/llama.cpp:server-cuda` | GGUF inference. The default for a single 24 GB card, because MoE experts can live in system RAM (`LLAMACPP_N_CPU_MOE`) and be paged from NVMe |
+| `llamacpp` | `ghcr.io/ggml-org/llama.cpp:server-cuda` | GGUF inference. The default for a single 24 GB card, because MoE experts can live in system RAM (`LLAMACPP_N_CPU_MOE`) and be paged from NVMe. Runs in **router mode**: several models, one loaded at a time, switched from Admin → Models by the engine's API (`/models/load`), with no restart and no Docker socket |
 | `model-init` | same | one-shot. Downloads the GGUF shards from Hugging Face, verifies SHA-256, optionally unpacks a custom engine tarball, then exits. **`llamacpp` waits for it to exit 0** (`service_completed_successfully`), so a failure here stops the engine rather than producing one that cannot find its weights |
 | `vllm` | `vllm/vllm-openai:latest` | the alternative engine, for safetensors/AWQ models |
 | `vllm-secondary` | same | a second, small model on the same GPU (`multi-model` profile), reached at `api2.<domain>` |
@@ -487,6 +487,7 @@ rather than designed. This table is the short path from symptom to cause.
 | `config/traefik/auth/users.htpasswd` | **yes**, every `up` | no |
 | `config/traefik/certs/*.crt` | **yes**, by `tls-init` | no |
 | `config/prometheus/secrets/llamacpp.token` | **yes** | no |
+| `config/engine/` (`models.ini`, `active`, `targets.json`) | **yes**, by the app (Admin → Models) | no; the engine and Prometheus read it |
 | `config/authelia/directory/` | **yes** — the list of people (no passwords) the app publishes for Argus | no; the directory itself is kept with a `.gitkeep` |
 | `config/argus/tls/` | empty; you drop a CA here | yes, in the airgap/private-CA case |
 | `env-samples/*.env` | no | they are templates; copy one to `.env` |

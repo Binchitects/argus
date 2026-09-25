@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 namespace Llm.Api.Gateway;
 
 /// <summary>A person's standing at the gateway. Spend and budget are in the gateway's currency units.</summary>
@@ -12,8 +14,12 @@ public sealed record GatewayUser(string UserId, decimal Spend, decimal? Budget);
 /// <summary>A model the gateway serves. Mode is "chat", or "image_generation" for a picture model.</summary>
 public sealed record GatewayModel(string Name, int? Context, int? MaxOutput, bool Vision, bool Tools, bool Thinking, decimal? InputPerMtok, decimal? CachedInputPerMtok, decimal? OutputPerMtok, string Mode = "chat");
 
+/// <summary>A model the app added to the gateway (model_info.llm_app = "local"): the gateway's id for it, and what it was added with.</summary>
+public sealed record ManagedModel(string Id, string Name, string? Fingerprint);
+
 /// <summary>A key as the gateway lists it: the hashed token (never the key itself), alias, spend and state.</summary>
-public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt);
+/// <remarks>Models: the models the key may call; empty means every model.</remarks>
+public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt, IReadOnlyList<string>? Models = null);
 
 /// <summary>
 /// LiteLLM's admin API. People are known to it by email, which is what ties
@@ -27,7 +33,11 @@ public interface ILiteLlm
     /// <summary>Sets the ceiling on both the user (API keys) and the end-user record (the shared chat key).</summary>
     Task SetBudgetAsync(string email, decimal? budget, CancellationToken ct = default);
 
-    Task<string> GenerateKeyAsync(string email, string keyAlias, CancellationToken ct = default);
+    /// <param name="models">The models the key may call; empty or null: every model.</param>
+    Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, CancellationToken ct = default);
+
+    /// <summary>Which models a key may call (by its hashed token); empty: every model.</summary>
+    Task SetKeyModelsAsync(string token, IReadOnlyList<string> models, CancellationToken ct = default);
 
     /// <summary>A key that belongs to no person (the chat's): spend is attributed by the request's `user`.</summary>
     Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default);
@@ -39,6 +49,14 @@ public interface ILiteLlm
 
     /// <summary>The models the gateway serves (/model/info).</summary>
     Task<IReadOnlyList<GatewayModel>> ModelsAsync(CancellationToken ct = default);
+
+    /// <summary>The models the app added (Admin -> Models), stored in the gateway's database.</summary>
+    Task<IReadOnlyList<ManagedModel>> ManagedModelsAsync(CancellationToken ct = default);
+
+    /// <summary>Adds a model at runtime (/model/new), marked as the app's.</summary>
+    Task AddModelAsync(string name, JsonObject litellmParams, JsonObject modelInfo, string fingerprint, CancellationToken ct = default);
+
+    Task DeleteModelAsync(string id, CancellationToken ct = default);
 }
 
 public sealed class GatewayException(string message, int? status = null, Exception? inner = null) : Exception(message, inner)

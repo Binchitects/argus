@@ -185,11 +185,11 @@ export function AnswerTurn({
               <DropdownMenuItem onSelect={() => onRegenerate(question)}>
                 <RefreshCw /> Answer again
               </DropdownMenuItem>
-              {config.models.length > 1 && (
+              {config.models.filter((mo) => mo.loaded).length > 1 && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel>With another model</DropdownMenuLabel>
-                  {config.models.map((mo) => (
+                  {config.models.filter((mo) => mo.loaded).map((mo) => (
                     <DropdownMenuItem key={mo.name} onSelect={() => onRegenerate(question, { model: mo.name })}>
                       {mo.name}
                     </DropdownMenuItem>

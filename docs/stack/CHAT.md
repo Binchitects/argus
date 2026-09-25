@@ -6,9 +6,11 @@ WebUI still runs at `https://chat.<LLM_DOMAIN>` until the new web is signed off
 
 ## What it does
 
-- **Models.** The picker lists what the gateway serves, with what each model
-  can do: context size, tools, thinking, and whether it can see images. A chat
-  keeps its model. The deployment's own model is the default.
+- **Models.** The picker lists the models you may use (Admin → Models), with
+  what each can do: context size, tools, thinking, and whether it can see
+  images. A chat keeps its model. The default is the loaded model. An engine
+  model that is not loaded is listed greyed out, "Not loaded now": an admin
+  loads it.
 - **Thinking.** Each chat has a thinking level from the deployment's
   `THINKING_PRESETS`. A new chat starts at the deployment's default,
   `MODEL_REASONING_EFFORT` (medium unless changed). While the model thinks, its reasoning shows with a timer.
@@ -117,6 +119,8 @@ attachments, instead of being lost.
   company directory). A chat can only turn on tools its owner may use, and the
   server checks it on every answer: a tool an admin takes away leaves every
   chat at once.
+- **Models are for whom an admin says** too (Admin → Models), with the same
+  rules, in the chat and on the person's API keys.
 - **MCP servers** get the person's email only if the admin set a header for
   it. A server's key is stored encrypted under `APP_DATA_KEY` and never shown.
 
@@ -165,6 +169,8 @@ branch.
 | "This chat is already answering" | one answer at a time per chat | stop it, or wait |
 | "This conversation is longer than the model can read" | the question and its attachments alone do not fit | start a new chat, or attach less |
 | "… cannot see images" | the chat's model has no vision | choose a model that shows "Sees images" |
+| "You may not use …" | an admin took the model away from you | choose another model |
+| "… is not loaded right now" | the chat's model is not the one the engine has loaded | choose a loaded model, or ask an admin to load it (Admin → Models) |
 | "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](ARGUS.md) |
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
 | No **Image generation** in the Tools menu | no image model at the gateway | turn on the `image` profile (Settings → Deployment) and apply it |

@@ -90,7 +90,7 @@ public static class GroupEndpoints
         return Results.Created($"/api/admin/groups/{group.Id}", new { group.Id, group.Name });
     }
 
-    private static async Task<IResult> UpdateAsync(Guid id, GroupRequest body, AppDbContext db, Audit audit)
+    private static async Task<IResult> UpdateAsync(Guid id, GroupRequest body, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys)
     {
         if (await db.Groups.SingleOrDefaultAsync(x => x.Id == id) is not { } group)
         {
@@ -114,10 +114,11 @@ public static class GroupEndpoints
         }
         await db.SaveChangesAsync();
         await audit.WriteAsync("group.update", group.Name);
+        keys.Wake();
         return Results.NoContent();
     }
 
-    private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, Audit audit)
+    private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys)
     {
         if (await db.Groups.SingleOrDefaultAsync(x => x.Id == id) is not { } group)
         {
@@ -126,10 +127,11 @@ public static class GroupEndpoints
         db.Groups.Remove(group);
         await db.SaveChangesAsync();
         await audit.WriteAsync("group.delete", group.Name);
+        keys.Wake();
         return Results.NoContent();
     }
 
-    private static async Task<IResult> AddMembersAsync(Guid id, MembersRequest body, AppDbContext db, Audit audit)
+    private static async Task<IResult> AddMembersAsync(Guid id, MembersRequest body, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys)
     {
         if (await db.Groups.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id) is not { } group)
         {
@@ -152,10 +154,11 @@ public static class GroupEndpoints
             await audit.WriteAsync("group.add_member", p.UserName, detail: group.Name);
         }
         await db.SaveChangesAsync();
+        keys.Wake();
         return Results.NoContent();
     }
 
-    private static async Task<IResult> RemoveMemberAsync(Guid id, Guid userId, AppDbContext db, Audit audit)
+    private static async Task<IResult> RemoveMemberAsync(Guid id, Guid userId, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys)
     {
         if (await db.GroupMembers.SingleOrDefaultAsync(m => m.GroupId == id && m.UserId == userId) is not { } member)
         {
@@ -166,6 +169,7 @@ public static class GroupEndpoints
         var name = await db.Groups.Where(x => x.Id == id).Select(x => x.Name).SingleAsync();
         var person = await db.Users.Where(u => u.Id == userId).Select(u => u.UserName).SingleAsync();
         await audit.WriteAsync("group.remove_member", person, detail: name);
+        keys.Wake();
         return Results.NoContent();
     }
 

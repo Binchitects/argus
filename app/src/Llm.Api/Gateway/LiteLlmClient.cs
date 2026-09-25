@@ -53,9 +53,14 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         }
     }
 
-    public async Task<string> GenerateKeyAsync(string email, string keyAlias, CancellationToken ct = default)
+    public async Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, CancellationToken ct = default)
     {
-        var res = await SendAsync(HttpMethod.Post, "/key/generate", new JsonObject { ["user_id"] = email, ["key_alias"] = keyAlias }, ct);
+        var body = new JsonObject { ["user_id"] = email, ["key_alias"] = keyAlias };
+        if (models is { Count: > 0 })
+        {
+            body["models"] = new JsonArray([.. models.Select(m => (JsonNode)m)]);
+        }
+        var res = await SendAsync(HttpMethod.Post, "/key/generate", body, ct);
         return res?["key"]?.GetValue<string>() is { Length: > 0 } key
             ? key
             : throw new GatewayException("The gateway created no key.");
@@ -93,6 +98,29 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         return models;
     }
 
+    public async Task SetKeyModelsAsync(string token, IReadOnlyList<string> models, CancellationToken ct = default) =>
+        await SendAsync(HttpMethod.Post, "/key/update", new JsonObject { ["key"] = token, ["models"] = new JsonArray([.. models.Select(m => (JsonNode)m)]) }, ct);
+
+    public async Task<IReadOnlyList<ManagedModel>> ManagedModelsAsync(CancellationToken ct = default)
+    {
+        var res = await SendAsync(HttpMethod.Get, "/model/info", null, ct);
+        return [.. (res?["data"] as JsonArray ?? []).OfType<JsonObject>()
+            .Where(row => row["model_info"]?["llm_app"]?.GetValue<string>() == "local" && row["model_info"]?["id"] is not null)
+            .Select(row => new ManagedModel(row["model_info"]!["id"]!.GetValue<string>(), row["model_name"]?.GetValue<string>() ?? "",
+                row["model_info"]?["llm_app_fingerprint"]?.GetValue<string>()))];
+    }
+
+    public async Task AddModelAsync(string name, JsonObject litellmParams, JsonObject modelInfo, string fingerprint, CancellationToken ct = default)
+    {
+        var info = (JsonObject)modelInfo.DeepClone();
+        info["llm_app"] = "local";
+        info["llm_app_fingerprint"] = fingerprint;
+        await SendAsync(HttpMethod.Post, "/model/new", new JsonObject { ["model_name"] = name, ["litellm_params"] = litellmParams.DeepClone(), ["model_info"] = info }, ct);
+    }
+
+    public async Task DeleteModelAsync(string id, CancellationToken ct = default) =>
+        await SendAsync(HttpMethod.Post, "/model/delete", new JsonObject { ["id"] = id }, ct, allowStatus: [404]);
+
     public async Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
     {
         var res = await SendAsync(HttpMethod.Get, $"/key/list?user_id={Uri.EscapeDataString(email)}&return_full_object=true", null, ct);
@@ -111,7 +139,8 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
             }
             keys.Add(new GatewayKey(token, Str(k, "key_alias") ?? "", Str(k, "key_name"), Dec(k, "spend") ?? 0,
                 k["blocked"]?.GetValueKind() == JsonValueKind.True,
-                DateTimeOffset.TryParse(Str(k, "created_at"), CultureInfo.InvariantCulture, out var at) ? at : null));
+                DateTimeOffset.TryParse(Str(k, "created_at"), CultureInfo.InvariantCulture, out var at) ? at : null,
+                [.. (k["models"] as JsonArray ?? []).Select(m => m?.GetValue<string>() ?? "")]));
         }
         return keys;
     }

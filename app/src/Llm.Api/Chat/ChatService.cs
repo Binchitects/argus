@@ -30,6 +30,7 @@ public sealed partial class ChatService(
     ToolRegistry registry,
     ToolApprovals approvals,
     AccessService access,
+    Models.ModelPolicy policy,
     ChatModels models,
     IOptionsMonitor<ChatOptions> chat,
     ILogger<ChatService> logger)
@@ -40,8 +41,27 @@ public sealed partial class ChatService(
     public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {
         var email = user.Email!.ToLowerInvariant();
-        var model = await models.ResolveAsync(overrides.Model ?? conversation.Model, ct);
+        // A chat that chose no model takes the first this person may use that is loaded.
+        var requested = overrides.Model ?? conversation.Model;
+        var model = requested is null
+            ? (await policy.ForAsync(user, await models.ListAsync(ct), ct)).Default
+            : await models.ResolveAsync(requested, ct);
         var modelName = model?.Name ?? "default";
+        if (model is not null && await policy.RefusalAsync(user, model.Name, ct) is { } refusal)
+        {
+            var sequence = (await db.ChatMessages.Where(m => m.ConversationId == conversation.Id).MaxAsync(m => (int?)m.Sequence, ct) ?? 0) + 1;
+            var refused = new ChatMessage
+            {
+                ConversationId = conversation.Id, ParentId = question.Id, Role = "assistant", Sequence = sequence, Model = modelName,
+                Status = MessageStatus.Failed, Error = refusal,
+            };
+            db.ChatMessages.Add(refused);
+            conversation.CurrentLeafId = refused.Id;
+            await emit(new { type = "assistant", id = refused.Id, parentId = question.Id, model = modelName });
+            await FinishAsync(conversation, ct);
+            await emit(new { type = "error", message = refusal });
+            return;
+        }
         var thinking = overrides.Thinking ?? conversation.Thinking;
 
         // The chat's tools that this person may use, each made ready for this answer.

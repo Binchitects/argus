@@ -1,6 +1,7 @@
 using Llm.Core.Access;
 using Llm.Core.Chat;
 using Llm.Core.Identity;
+using Llm.Core.Models;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
     public DbSet<McpServer> McpServers => Set<McpServer>();
+    public DbSet<LocalModel> LocalModels => Set<LocalModel>();
+    public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -108,6 +111,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.HeaderName).HasMaxLength(200);
             e.Property(m => m.EmailHeader).HasMaxLength(200);
             e.HasIndex(m => m.Name).IsUnique();
+        });
+
+        builder.Entity<LocalModel>(e =>
+        {
+            e.ToTable("local_models");
+            e.HasKey(m => m.Name);
+            e.Property(m => m.Name).HasMaxLength(100);
+            e.Property(m => m.File).HasMaxLength(1000);
+            e.Property(m => m.Projector).HasMaxLength(1000);
+            e.Property(m => m.KvType).HasMaxLength(20);
+            e.Property(m => m.ExtraPreset).HasMaxLength(4000);
+        });
+        builder.Entity<ModelAccess>(e =>
+        {
+            e.ToTable("model_access");
+            e.HasKey(m => m.Model);
+            e.Property(m => m.Model).HasMaxLength(200);
+            e.Property(m => m.Groups).HasDefaultValueSql("'{}'::uuid[]");
         });
 
         builder.Entity<AuditEvent>(e =>
