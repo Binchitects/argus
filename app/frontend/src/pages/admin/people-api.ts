@@ -27,6 +27,10 @@ export interface Created {
 export interface PersonDetail {
   person: Person
   keys: { alias: string; preview: string | null; spend: number; blocked: boolean; createdAt: string | null }[]
+  /** The groups they are in: app groups they were added to, and directory groups that match. */
+  groups: { id: string; name: string; directory: boolean }[]
+  /** For directory people: the directory's groups, as of their last sign-in or check. */
+  directoryGroups: string[]
   warning: string | null
 }
 

@@ -23,6 +23,8 @@ public sealed class AppUser : IdentityUser<Guid>
     public string? DisabledReason { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSignInAt { get; set; }
+    /// <summary>For directory people: the groups the directory lists (DNs), as of the last sign-in or sync.</summary>
+    public List<string> DirectoryGroups { get; set; } = [];
 }
 
 public sealed class AppRole : IdentityRole<Guid>

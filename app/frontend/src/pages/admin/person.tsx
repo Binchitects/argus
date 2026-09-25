@@ -18,7 +18,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, money, when } from '@/lib/format'
 import { CreditMeter, PersonBadges } from './person-badges'
-import { parseCredit, personQuery, type Person } from './people-api'
+import { parseCredit, personQuery, type Person, type PersonDetail } from './people-api'
 
 export function PersonPage() {
   const { id = '' } = useParams()
@@ -28,7 +28,7 @@ export function PersonPage() {
 
   if (detail.isPending) return <PageSkeleton />
   if (detail.error) return <QueryError error={detail.error} retry={() => detail.refetch()} />
-  const { person: p, keys, warning } = detail.data
+  const { person: p, keys, warning, groups, directoryGroups } = detail.data
   const self = p.id === me.id
   const ldap = p.source === 'ldap'
 
@@ -69,6 +69,7 @@ export function PersonPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="grid content-start gap-6">
           <Profile p={p} />
+          <Groups groups={groups} directoryGroups={directoryGroups} />
           <Credit p={p} keys={keys} onSecret={setSecret} />
         </div>
         <div className="grid content-start gap-6">
@@ -339,6 +340,44 @@ function Danger({ p }: { p: Person }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </Card>
+  )
+}
+
+function Groups({ groups, directoryGroups }: { groups: PersonDetail['groups']; directoryGroups: string[] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Groups</CardTitle>
+        <CardDescription>What they belong to decides which tools and models they may use.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {groups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            In no group. <Link to="/admin/groups" className="underline underline-offset-2">Groups</Link>
+          </p>
+        ) : (
+          <ul className="flex flex-wrap gap-1.5">
+            {groups.map((g) => (
+              <li key={g.id}>
+                <Link to={`/admin/groups/${g.id}`} className="rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring">
+                  <Badge variant={g.directory ? 'outline' : 'secondary'}>{g.name}</Badge>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+        {directoryGroups.length > 0 && (
+          <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground">In the directory: {directoryGroups.length} groups</summary>
+            <ul className="mt-2 grid gap-1 font-mono text-xs break-all text-muted-foreground">
+              {directoryGroups.map((d) => (
+                <li key={d}>{d}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </CardContent>
     </Card>
   )
 }

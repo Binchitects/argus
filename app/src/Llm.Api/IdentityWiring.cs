@@ -206,6 +206,7 @@ public static class IdentityWiring
         services.AddScoped<Audit>();
         services.AddScoped<DirectoryFile>();
         services.AddScoped<PeopleService>();
+        services.AddScoped<Access.AccessService>();
         services.AddScoped<SignInService>();
         services.AddScoped<PersonClaims>();
         services.AddScoped<IdentityBootstrap>();
@@ -304,6 +305,7 @@ public static class IdentityWiring
         app.MapAuth();
         app.MapAccount();
         app.MapAdmin();
+        Access.GroupEndpoints.MapGroups(app);
         app.MapForwardAuth();
         app.MapOidc();
         Dashboards.DashboardEndpoints.MapDashboards(app);

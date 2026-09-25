@@ -1,3 +1,4 @@
+using Llm.Core.Access;
 using Llm.Core.Chat;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
@@ -16,6 +17,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
+    public DbSet<Group> Groups => Set<Group>();
+    public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -35,6 +38,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(u => u.DisplayName).HasMaxLength(200);
             e.Property(u => u.LdapDn).HasMaxLength(1000);
+            e.Property(u => u.DirectoryGroups).HasDefaultValueSql("'{}'::text[]");
             e.HasIndex(u => u.NormalizedEmail).IsUnique();
         });
 
@@ -67,6 +71,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(a => a.Kind).HasMaxLength(20);
             e.HasIndex(a => a.UserId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<Group>(e =>
+        {
+            e.ToTable("groups");
+            e.Property(g => g.Name).HasMaxLength(100);
+            e.Property(g => g.Description).HasMaxLength(500);
+            e.Property(g => g.Directory).HasMaxLength(1000);
+            e.HasIndex(g => g.Name).IsUnique();
+        });
+        builder.Entity<GroupMember>(e =>
+        {
+            e.ToTable("group_members");
+            e.HasKey(m => new { m.GroupId, m.UserId });
+            e.HasIndex(m => m.UserId);
+            e.HasOne<Group>().WithMany().HasForeignKey(m => m.GroupId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<AuditEvent>(e =>

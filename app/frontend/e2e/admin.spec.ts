@@ -5,6 +5,7 @@ const pages: [string, string][] = [
   ['/usage', 'Usage & cost'],
   ['/admin', 'Overview'],
   ['/admin/people', 'People'],
+  ['/admin/groups', 'Groups'],
   ['/admin/sign-in', 'Sign-in'],
   ['/admin/model', 'Model'],
   ['/admin/settings', 'Settings'],

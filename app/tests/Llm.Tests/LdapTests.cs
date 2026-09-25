@@ -209,7 +209,19 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
     public async Task A_directory_member_is_a_member_and_can_sign_in_by_email()
     {
         var b = await (await Browser()).SignedInAsync("bob@example.test", "bob-directory-pw");
-        Assert.False((await b.JsonAsync(await b.GetAsync("/api/auth/me"))).GetProperty("isAdmin").GetBoolean());
+        var me = await b.JsonAsync(await b.GetAsync("/api/auth/me"));
+        Assert.False(me.GetProperty("isAdmin").GetBoolean());
+
+        // The directory's groups are kept, so a directory group in the app has them as members.
+        var admin = await (await Browser()).SignedInAsync("admin", AppFixture.AdminPassword);
+        var seen = await admin.JsonAsync(await admin.GetAsync("/api/admin/groups/directory"));
+        Assert.Contains("llm-users", seen.EnumerateArray().Select(g => g.GetProperty("name").GetString()));
+        var made = await admin.PostAsync("/api/admin/groups", new { name = "Directory users " + Guid.NewGuid().ToString("N")[..6], directory = "llm-users" });
+        await StatusAssert.Is(HttpStatusCode.Created, made);
+        var group = await admin.JsonAsync(await admin.GetAsync($"/api/admin/groups/{(await admin.JsonAsync(made)).GetProperty("id").GetGuid()}"));
+        Assert.Contains("bob", group.GetProperty("members").EnumerateArray().Select(m => m.GetProperty("userName").GetString()));
+        var person = await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{me.GetProperty("id").GetGuid()}"));
+        Assert.Contains(group.GetProperty("name").GetString(), person.GetProperty("groups").EnumerateArray().Select(g => g.GetProperty("name").GetString()));
     }
 
     [Theory]

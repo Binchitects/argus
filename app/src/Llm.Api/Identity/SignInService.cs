@@ -209,6 +209,7 @@ public sealed partial class SignInService(
                 DisplayName = person.DisplayName,
                 Source = UserSource.Ldap,
                 LdapDn = person.Dn,
+                DirectoryGroups = [.. person.Groups.Order(StringComparer.OrdinalIgnoreCase)],
             };
             var created = await users.CreateAsync(user);
             if (!created.Succeeded)
@@ -239,6 +240,8 @@ public sealed partial class SignInService(
         user.DisplayName = person.DisplayName;
         user.LdapDn = person.Dn;
         user.UserName = person.UserName;
+        // Kept for access rules (tools, models) that name directory groups.
+        user.DirectoryGroups = [.. person.Groups.Order(StringComparer.OrdinalIgnoreCase)];
         await users.UpdateAsync(user);
         if (await users.IsInRoleAsync(user, Roles.Admin) != admin)
         {

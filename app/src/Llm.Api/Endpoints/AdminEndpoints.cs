@@ -121,7 +121,7 @@ public static class AdminEndpoints
         }
     }
 
-    private static Task<IResult> GetAsync(Guid id, PeopleService people, UserManager<AppUser> users, ILiteLlm gateway) =>
+    private static Task<IResult> GetAsync(Guid id, PeopleService people, UserManager<AppUser> users, ILiteLlm gateway, Access.AccessService access, AppDbContext db) =>
         WithPerson(id, people, async u =>
         {
             IReadOnlyList<GatewayKey> keys = [];
@@ -136,9 +136,14 @@ public static class AdminEndpoints
             {
                 warning = ex.Message;
             }
+            var member = await access.MembershipAsync(u);
+            var groups = await db.Groups.AsNoTracking().Where(g => member.Groups.Contains(g.Id)).OrderBy(g => g.Name)
+                .Select(g => new { g.Id, g.Name, directory = g.Directory != null }).ToListAsync();
             return Results.Ok(new
             {
                 person = Row(u, await users.IsInRoleAsync(u, Roles.Admin), standing),
+                groups,
+                directoryGroups = u.DirectoryGroups,
                 keys = keys.Select(k => new { alias = k.Alias, preview = k.Preview, spend = k.Spend, blocked = k.Blocked, createdAt = k.CreatedAt }),
                 warning,
             });
