@@ -82,6 +82,7 @@ python scripts/smoke_test.py --url https://argus.llm.localhost/mcp --token <deve
 | [`stack/`](stack/) | **The deployment.** Compose file, per-service config, env samples, operational scripts | [`stack/README.md`](stack/README.md) |
 | [`src/argus/`](src/argus/) | **The Argus package** — the MCP code index and documentation server. Installable and runnable on its own | [`docs/argus/`](docs/argus/) |
 | [`packs/`](packs/) | **Eleven built knowledge packs**, 1.87 GB — prose, API symbols and embeddings in one SQLite file each. Three more are parked in `packs/disabled/` | [`docs/argus/knowledge-packs.md`](docs/argus/knowledge-packs.md) |
+| [`dotnet/`](dotnet/) | **Argus in .NET 10** — a drop-in second implementation, proven identical to the Python one by a conformance run and tested end to end behind the admin console | [`docs/argus/dotnet.md`](docs/argus/dotnet.md) |
 | [`tests/`](tests/) | The Argus suite — **1,091 tests**, no Docker required | `pytest` |
 | [`docs/`](docs/) | **All documentation**, split into [`docs/stack/`](docs/stack/) and [`docs/argus/`](docs/argus/) | [`docs/`](docs/) |
 | [`clients/`](clients/) | **Copy-pasteable configs** for DeepSeek Harness, Qwen Code, Claude Code, Continue and any generic MCP client, each marked with whether it was actually executed | [`clients/README.md`](clients/README.md) |

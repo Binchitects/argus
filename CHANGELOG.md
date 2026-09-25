@@ -12,6 +12,37 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## Unreleased
+
+### :rocket: Epics and highlights
+
+- **Argus in .NET.** `dotnet/` is a complete second implementation on .NET 10 —
+  indexer, all 17 MCP tools, admin/webhook/metrics, packs, CLI — that serves
+  the same database and packs and answers byte for byte like the Python one.
+  A conformance run compares the two on a real C corpus (index tables, 45 tool
+  calls × 4 identities, HTTP surface, 14 pack sources); an end-to-end run
+  drives the admin console against it in Chromium. First index pass 14.1 s
+  against Python's 21.1 s on the same corpus. Select it with
+  `ARGUS_DOCKERFILE=dotnet/Dockerfile`
+
+### :sparkles: New features & Enhancements
+
+- Grafana *Indexing*: an index-health row from Argus's own metrics — scrape
+  status, repositories, stale, errored, oldest pass, symbols — with a
+  per-repository freshness table and trends
+- Grafana *LLM overview*: KV-cache usage and prompt-processing speed read from
+  llama.cpp as well as vLLM
+- `argus healthcheck`, so the .NET image's health probe needs no Python
+
+### :bug: Bugs fixed
+
+- `argus verify` never exited 2: it looked for a `status` on each finding,
+  which `verify_text` nests under `corrections`, so the Stop hook built on it
+  passed every contradicted draft. Its message now quotes what the draft said
+- `docs_verify` reported the description as part of the last contract field
+  (`User32.dll -- Displays a modal dialog box.`); the contract now ends at the
+  ` -- ` marker, and contradicted fields carry `stated`
+
 ## v2.9.0 (2026-09-18)
 
 ### :rocket: Epics and highlights

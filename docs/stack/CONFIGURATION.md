@@ -382,6 +382,8 @@ name as well as position.
 | variable | default | what it does |
 |---|---|---|
 | `ARGUS_VERSION` | `latest` | the image tag |
+| `ARGUS_DOCKERFILE` | `Dockerfile` | which implementation to build. `dotnet/Dockerfile` builds the .NET one: same CLI, tools, database, volume and UID, so switching is a rebuild. See [argus/dotnet.md](../argus/dotnet.md) |
+| `ARGUS_IMAGE` | `argus` | the image name. Set `argus-dotnet` alongside the line above, so the two builds do not overwrite each other's tag |
 | `ARGUS_GITLAB_URL` | `config/argus/config.yaml`'s value | **which GitLab.** Overrides `url:` in the committed config file, so this is the line to change |
 | `ARGUS_GITLAB_TOKEN` | — | read-only service token: `read_api` + `read_repository`, Reporter or above in every project to index. No admin, no sudo |
 | `ARGUS_GITLAB_AUTH` | inferred | `token` or `password`. Inferred when empty: a token alone means token mode, a username alone means password mode. **A username wins over a token**, so set this explicitly if a username is left behind from an earlier experiment |

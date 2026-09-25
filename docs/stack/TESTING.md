@@ -329,9 +329,14 @@ variable:
 | C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik, and Open WebUI's MCP client lists 16 tools |
 | C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `scripts/test-gitlab/` exists to answer. **Verified and now automated** against a real GitLab CE by `./scripts/test-gitlab/run.sh`, which is one command from a cold start: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. `verify_tools.py` extends it to **all sixteen MCP tools over the wire**, checks each result's declared shape, and asserts that no structured field names a repository the caller cannot read |
 
-### C4 — Browser *(G8, entirely missing)*
+### C4 — Browser *(G8, partial: the console's Argus pages)*
 
-The only layer nothing touches. Minimum viable set, headless (Playwright):
+`dotnet/tests/e2e/run.py` drives the admin console's Indexing, Explore, Knowledge
+packs and Overview pages in headless Chromium against a live Argus (84 checks,
+including the MCP SDK over HTTP and stdio); see
+[argus/dotnet.md](../argus/dotnet.md#how-it-is-proven-equal). It supplies the
+proxy's identity headers itself, so the SSO chain below is still untested.
+Minimum viable set for the rest, headless (Playwright):
 
 | test | asserts |
 |---|---|
