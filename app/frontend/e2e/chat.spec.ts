@@ -328,6 +328,38 @@ test.describe('organising chats', () => {
   })
 })
 
+test.describe('tools', () => {
+  test('the composer turns tools on and off for a chat', async ({ page }) => {
+    await page.goto('/chat')
+    const button = page.getByRole('button', { name: /^Tools: \d+ of \d+ on$/ })
+    const before = Number((await button.getAttribute('aria-label'))!.match(/(\d+) of/)![1])
+    await button.click()
+    await page.getByRole('switch', { name: /Calculator/ }).click()
+    await expect(page.getByRole('button', { name: new RegExp(`^Tools: ${before - 1} of`) })).toBeVisible()
+  })
+
+  test('the model uses the calculator, and draws with the image tool', async ({ page, request }) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    test.setTimeout(300_000)
+    await page.goto('/chat')
+    await thinking(page, 'No thinking')
+    await ask(page, 'Use the calculator tool: what is 123456789 * 987654321? Reply with the number only.')
+    const answer = page.getByRole('region', { name: 'Answer' }).last()
+    await expect(answer.locator('.tool-name', { hasText: 'Calculate' })).toBeVisible({ timeout: 120_000 })
+    await expect(answer).toContainText(/121,?932,?631,?112,?635,?269/, { timeout: 120_000 })
+    await done(page)
+
+    const tools = (await (await request.get('/api/chat/config')).json()) as { tools: { id: string }[] }
+    test.skip(!tools.tools.some((t) => t.id === 'image'), 'no image model at the gateway')
+    await ask(page, 'Use the image tool to draw a small red apple on a white table, 512x512.')
+    const pictures = page.getByRole('region', { name: 'Answer' }).last().getByRole('list', { name: 'Pictures' })
+    await expect(pictures.getByRole('img')).toBeVisible({ timeout: 240_000 })
+    await done(page)
+    await pictures.getByRole('button').first().click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+  })
+})
+
 // With the Argus test fixture up and a person who cannot read eal-core:
 //   E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=...
 test.describe('chat with Argus', () => {

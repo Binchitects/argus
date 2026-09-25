@@ -245,6 +245,13 @@ public static class IdentityWiring
         services.AddSingleton<Chat.ChatKey>();
         services.AddSingleton<Chat.ChatModels>();
         services.AddHttpClient<Chat.ArgusMcp>(c => c.Timeout = TimeSpan.FromMinutes(2));
+        services.AddHttpClient(Chat.Tools.ToolRegistry.McpClient, c => c.Timeout = TimeSpan.FromMinutes(2));
+        services.AddScoped<Chat.Tools.ArgusTool>();
+        services.AddScoped<Chat.Tools.ImageTool>();
+        services.AddSingleton<Chat.Tools.CalculatorTool>();
+        services.AddSingleton<Chat.Tools.TimeTool>();
+        services.AddScoped<Chat.Tools.ToolRegistry>();
+        services.AddSingleton<Chat.Tools.ToolApprovals>();
         services.AddScoped<Chat.ChatService>();
     }
 
@@ -313,6 +320,7 @@ public static class IdentityWiring
         Operations.OperationsEndpoints.MapOperations(app);
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
+        Chat.Tools.ToolEndpoints.MapTools(app);
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

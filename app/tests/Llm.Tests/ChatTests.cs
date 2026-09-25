@@ -74,7 +74,10 @@ public sealed class ChatTests(AppFixture app)
         Assert.Contains(headers["Authorization"][7..], app.Gateway.ServiceKeys);
         Assert.Equal("low", body["chat_template_kwargs"]!["reasoning_effort"]!.GetValue<string>());
         Assert.True(body["stream_options"]!["include_usage"]!.GetValue<bool>());
-        Assert.Null(body["tools"]);
+        // Argus off: the other tools on in new chats, and no Argus function.
+        var functions = body["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
+        Assert.Contains("calculate", functions);
+        Assert.DoesNotContain("find_symbol", functions);
         Assert.Equal("system", body["messages"]![0]!["role"]!.GetValue<string>());
 
         var conv = await ConversationAsync(b, id);
@@ -167,7 +170,7 @@ public sealed class ChatTests(AppFixture app)
             var events = await SendAsync(b, id, "hello");
             Assert.Equal("argus_unavailable", events.First(e => e.GetProperty("type").GetString() == "notice").GetProperty("kind").GetString());
             Assert.Contains("done", Types(events));
-            Assert.Null(app.Model.Requests.Last().Body["tools"]);
+            Assert.DoesNotContain("find_symbol", app.Model.Requests.Last().Body["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
         }
         finally
         {

@@ -14,6 +14,7 @@ import {
   Telescope,
   Users,
   UsersRound,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -55,6 +56,7 @@ export const navigation: NavSection[] = [
       { title: 'Groups', path: '/admin/groups', icon: UsersRound, keywords: ['teams', 'access', 'directory groups', 'permissions'], ready: true },
       { title: 'Sign-in', path: '/admin/sign-in', icon: KeyRound, keywords: ['ldap', 'directory', 'active directory', '2fa'], ready: true },
       { title: 'Model', path: '/admin/model', icon: Cpu, keywords: ['llama', 'engine', 'gpu', 'prices'], ready: true },
+      { title: 'Tools', path: '/admin/tools', icon: Wrench, keywords: ['mcp', 'argus', 'image generation', 'calculator', 'permissions'], ready: true },
       { title: 'Settings', path: '/admin/settings', icon: Settings, keywords: ['configuration', 'config', 'env'], ready: true },
       { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'], ready: true },
     ],

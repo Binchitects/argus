@@ -135,6 +135,8 @@ export function AnswerTurn({
   onRegenerate,
   onOpenFile,
   onFork,
+  approvals,
+  onDecide,
   busy,
 }: {
   answer: Message[]
@@ -149,6 +151,9 @@ export function AnswerTurn({
   onOpenFile: (name: string) => void
   /** Fork into a new chat that ends with this answer. */
   onFork?: (messageId: string) => void
+  /** Tool calls waiting for the person to allow them, and how to answer. */
+  approvals?: string[]
+  onDecide?: (callId: string, allow: boolean) => void
   busy: boolean
 }) {
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
@@ -248,7 +253,9 @@ export function AnswerTurn({
             {a.reasoning && <Thinking text={a.reasoning} live={live && isLast && !a.content && !a.toolCalls?.length} ms={a.thinkingMs} since={isLast ? thinkingSince : null} />}
             {a.content && <Markdown text={a.content} onOpenFile={onOpenFile} />}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
-            {a.toolCalls?.map((t) => <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} />)}
+            {a.toolCalls?.map((t) => (
+              <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} />
+            ))}
             {a.error && (
               <Alert variant="destructive" className="my-2">
                 {a.error}

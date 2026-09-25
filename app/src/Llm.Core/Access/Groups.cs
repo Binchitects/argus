@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Llm.Core.Access;
 
 /// <summary>
@@ -24,6 +26,7 @@ public sealed class GroupMember
 }
 
 /// <summary>Who may use something. Admins always may, so they can set it up and test it.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<Audience>))]
 public enum Audience
 {
     Everyone = 0,

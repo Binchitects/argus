@@ -70,7 +70,7 @@ describe('people', () => {
 
   it('deleting asks for the username to be typed', async () => {
     const calls = fakeApi(admin, {
-      'GET /api/admin/people/p1': () => ({ json: { person: people[0], keys: [], warning: null } }),
+      'GET /api/admin/people/p1': () => ({ json: { person: people[0], keys: [], groups: [], directoryGroups: [], warning: null } }),
       'DELETE /api/admin/people/p1': () => ({ status: 204 }),
       'GET /api/admin/people': () => ({ json: { warning: null, people } }),
     })
@@ -87,7 +87,7 @@ describe('people', () => {
 
   it('credit is set from the person page', async () => {
     const calls = fakeApi(admin, {
-      'GET /api/admin/people/p1': () => ({ json: { person: people[0], keys: [{ alias: 'grace', preview: 'sk-...1234', spend: 3, blocked: false, createdAt: null }], warning: null } }),
+      'GET /api/admin/people/p1': () => ({ json: { person: people[0], keys: [{ alias: 'grace', preview: 'sk-...1234', spend: 3, blocked: false, createdAt: null }], groups: [{ id: 'g1', name: 'Data science', directory: false }], directoryGroups: [], warning: null } }),
       'PUT /api/admin/people/p1/budget': () => ({ status: 204 }),
     })
     renderApp('/admin/people/p1')

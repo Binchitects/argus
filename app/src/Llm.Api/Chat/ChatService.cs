@@ -3,6 +3,8 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Llm.Api.Access;
+using Llm.Api.Chat.Tools;
 using Llm.Api.Gateway;
 using Llm.Core.Chat;
 using Llm.Core.Data;
@@ -18,14 +20,16 @@ public sealed record AnswerOverrides(string? Model = null, string? Thinking = nu
 /// <summary>
 /// One answer to a question in a conversation. The conversation is a tree: the
 /// model reads the path from the first message to the question, streams, calls
-/// Argus's tools as the person when it wants to, and every step is saved as a
-/// child of the one before, so the answer is its own branch. Events go to the
-/// browser as they happen (see ChatEndpoints).
+/// the chat's tools (Argus, pictures, MCP servers...) as the person when it wants
+/// to, and every step is saved as a child of the one before, so the answer is its
+/// own branch. Events go to the browser as they happen (see ChatEndpoints).
 /// </summary>
 public sealed partial class ChatService(
     AppDbContext db,
     GatewayChat gateway,
-    ArgusMcp argus,
+    ToolRegistry registry,
+    ToolApprovals approvals,
+    AccessService access,
     ChatModels models,
     IOptionsMonitor<ChatOptions> chat,
     ILogger<ChatService> logger)
@@ -40,23 +44,44 @@ public sealed partial class ChatService(
         var modelName = model?.Name ?? "default";
         var thinking = overrides.Thinking ?? conversation.Thinking;
 
-        ArgusSession? session = null;
-        JsonArray? tools = null;
-        if (conversation.UseArgus && argus.Enabled && model?.Tools != false)
+        // The chat's tools that this person may use, each made ready for this answer.
+        var runs = new Dictionary<string, (ToolChoice Choice, IToolRun Run)>();
+        var tools = new JsonArray();
+        var instructions = new List<string>();
+        if (model?.Tools != false)
         {
-            try
+            var allowed = await registry.ForAsync(await access.MembershipAsync(user, ct), ct);
+            foreach (var choice in ToolRegistry.Chosen(conversation.Tools, allowed))
             {
-                session = await argus.ConnectAsync(email, ct);
-                tools = ArgusMcp.ToOpenAiTools(await session.ToolsAsync(ct));
-            }
-            catch (ArgusToolException ex)
-            {
-                session = null;
-                await emit(new { type = "notice", kind = "argus_unavailable", text = $"Argus is not available for this answer: {ex.Message}" });
+                IToolRun run;
+                try
+                {
+                    run = await choice.Tool.StartAsync(new ToolContext(user, email, conversation), ct);
+                }
+                catch (McpException ex)
+                {
+                    await emit(new
+                    {
+                        type = "notice", kind = choice.Tool.Id == "argus" ? "argus_unavailable" : "tool_unavailable",
+                        text = $"{choice.Tool.Title} is not available for this answer: {ex.Message}",
+                    });
+                    continue;
+                }
+                foreach (var f in run.Functions.OfType<JsonObject>())
+                {
+                    if (f["function"]?["name"]?.GetValue<string>() is { } fname && runs.TryAdd(fname, (choice, run)))
+                    {
+                        tools.Add(f.DeepClone());
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(run.Instructions))
+                {
+                    instructions.Add(run.Instructions.Trim());
+                }
             }
         }
 
-        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, session?.Instructions, ct);
+        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, string.Join("\n\n", instructions), ct);
         if (imagesDropped)
         {
             await emit(new { type = "notice", kind = "no_vision", text = $"{modelName} cannot see images, so it got their names only. Choose a model that can see to ask about them." });
@@ -97,7 +122,7 @@ public sealed partial class ChatService(
                 request["chat_template_kwargs"] = kwargs;
             }
             // No tools on the last allowed round: the model must answer with what it has.
-            if (tools is { Count: > 0 } && round < chat.CurrentValue.MaxToolRounds)
+            if (tools.Count > 0 && round < chat.CurrentValue.MaxToolRounds)
             {
                 request["tools"] = tools.DeepClone();
             }
@@ -176,7 +201,7 @@ public sealed partial class ChatService(
                 thinkingMs = msg.ThinkingMs, durationMs = msg.DurationMs,
             });
 
-            if (calls.Count == 0 || session is null)
+            if (calls.Count == 0 || runs.Count == 0)
             {
                 await FinishAsync(conversation, ct);
                 await emit(new { type = "done", id = msg.Id });
@@ -200,41 +225,70 @@ public sealed partial class ChatService(
                 var id = call["id"]!.GetValue<string>();
                 var name = call["function"]!["name"]!.GetValue<string>();
                 var rawArgs = call["function"]!["arguments"]!.GetValue<string>();
-                await emit(new { type = "tool_call", id, name, arguments = rawArgs });
-                string text;
-                bool isError;
+                var known = runs.TryGetValue(name, out var target);
+                await emit(new { type = "tool_call", id, name, arguments = rawArgs, tool = known ? target.Choice.Tool.Id : null });
+                ToolResult outcome;
+                var declined = false;
                 var took = Stopwatch.StartNew();
                 try
                 {
                     var args = JsonNode.Parse(rawArgs.Length == 0 ? "{}" : rawArgs) as JsonObject ?? [];
-                    (text, isError) = await session.CallAsync(name, args, ct);
+                    if (!known)
+                    {
+                        outcome = new ToolResult($"There is no tool named {name}.", IsError: true);
+                    }
+                    else if (target.Choice.Setting.AskFirst && !await AskAsync(conversation, id, name, rawArgs, target.Choice.Tool, emit, ct))
+                    {
+                        declined = true;
+                        outcome = new ToolResult($"The person did not allow {target.Choice.Tool.Title} to run this call. Do not try it again unless they ask.", IsError: true);
+                    }
+                    else
+                    {
+                        took.Restart();
+                        outcome = await target.Run.CallAsync(name, args, ct);
+                    }
                 }
                 catch (JsonException)
                 {
-                    (text, isError) = ($"The arguments were not valid JSON: {rawArgs}", true);
+                    outcome = new ToolResult($"The arguments were not valid JSON: {rawArgs}", IsError: true);
                 }
-                catch (ArgusToolException ex)
+                catch (McpException ex)
                 {
-                    (text, isError) = (ex.Message, true);
+                    outcome = new ToolResult(ex.Message, IsError: true);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     await FinishAsync(conversation, CancellationToken.None);
                     return;
                 }
+                var (text, isError) = (outcome.Text, outcome.IsError);
                 var result = new ChatMessage
                 {
                     ConversationId = conversation.Id, ParentId = parent, Role = "tool", Sequence = ++next, ToolCallId = id, ToolName = name,
-                    Content = text, Status = isError ? MessageStatus.Failed : MessageStatus.Complete, DurationMs = (int)took.Elapsed.TotalMilliseconds,
+                    Content = text, Status = declined ? MessageStatus.Declined : isError ? MessageStatus.Failed : MessageStatus.Complete,
+                    DurationMs = (int)took.Elapsed.TotalMilliseconds,
+                    AttachmentsJson = outcome.Files is { Count: > 0 } made ? JsonSerializer.Serialize(made.Select(f => f.Id)) : null,
                 };
                 db.ChatMessages.Add(result);
                 conversation.CurrentLeafId = result.Id;
                 parent = result.Id;
                 await db.SaveChangesAsync(ct);
                 messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = text });
-                await emit(new { type = "tool_result", id, messageId = result.Id, name, text, isError, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs });
+                await emit(new
+                {
+                    type = "tool_result", id, messageId = result.Id, name, text, isError, declined, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs,
+                    attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType }),
+                });
             }
         }
+    }
+
+    /// <summary>"Ask before running": the page shows the call, and the answer waits for yes or no (ten minutes at most).</summary>
+    private async Task<bool> AskAsync(Conversation conversation, string callId, string name, string rawArgs, IChatTool tool, Func<object, Task> emit, CancellationToken ct)
+    {
+        var waiting = approvals.WaitAsync(conversation.Id, callId, TimeSpan.FromMinutes(10), ct);
+        await emit(new { type = "approval", id = callId, name, arguments = rawArgs, tool = tool.Id, title = tool.Title });
+        return await waiting;
     }
 
     private async Task FinishAsync(Conversation conversation, CancellationToken ct)
@@ -260,12 +314,13 @@ public sealed partial class ChatService(
     /// The branch as the model reads it, trimmed from the oldest end to fit its context.
     /// Images go as pictures to a model that can see, and as their names to one that cannot.
     /// </summary>
-    private async Task<(JsonArray Messages, bool ImagesDropped)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string? argusInstructions, CancellationToken ct)
+    private async Task<(JsonArray Messages, bool ImagesDropped)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string? toolInstructions, CancellationToken ct)
     {
         var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
         all[question.Id] = question;
         var stored = PathTo(all, question.Id);
-        var attachmentIds = stored.SelectMany(m => ParseIds(m.AttachmentsJson)).ToHashSet();
+        // Only questions' files go to the model; pictures a tool made are for the person.
+        var attachmentIds = stored.Where(m => m.Role == "user").SelectMany(m => ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => attachmentIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
         var vision = model?.Vision == true;
         var imagesDropped = false;
@@ -332,9 +387,9 @@ public sealed partial class ChatService(
         }
 
         var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC).";
-        if (!string.IsNullOrWhiteSpace(argusInstructions))
+        if (!string.IsNullOrWhiteSpace(toolInstructions))
         {
-            system += "\n\n" + argusInstructions;
+            system += "\n\n" + toolInstructions;
         }
         if (!string.IsNullOrWhiteSpace(conversation.SystemPrompt))
         {

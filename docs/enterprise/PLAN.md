@@ -55,8 +55,9 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 3C.1 done** (chat polish). Next: 3D (tools, with local image
-generation) and 3D.2 (models at runtime, pulled forward from phase 6). The first chat UI and its
+Status: **Phase 3D, part 1 done** (groups, the tool registry, image generation,
+MCP servers, ask before running). Next: 3D.2 (models at runtime, pulled forward
+from phase 6), then 3D part 2 (sandbox, web). The first chat UI and its
 [checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
 at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
 
@@ -348,6 +349,30 @@ at `next.<domain>`, which now redirects to `llm.<domain>`.
   search (off by default; allow-list; air-gapped installs leave it off).
 - **Done when:** each tool is tested end to end, and the sandbox has escape tests
   (network, filesystem, time and memory limits).
+- **Progress (part 1 of 2):**
+  - **Groups** (Admin → Groups), the base for "who may use it": app groups,
+    and directory groups whose members follow LDAP. Each person's directory
+    groups are now kept at sign-in and every sync.
+  - **The registry:** built-in tools and MCP servers behind one interface.
+    Admin → Tools turns each on or off and sets who may use it, on in new
+    chats, and ask before each call. A chat keeps its own list (the old Argus
+    switch became a list; chats with Argus off kept no tools). The server
+    checks access on every answer.
+  - **Built in:** Argus; **image generation** (FLUX.2 [klein] 4B beside the chat
+    model, about 20–30 s a picture); an **exact calculator** (decimal, 28
+    digits; the first, double-based version got the product of two nine-digit
+    numbers wrong, which the live test caught); date and time.
+  - **MCP servers:** added with a test, an encrypted key, and optionally the
+    person's email; their functions are named `{server}__{function}`.
+  - **Ask before running:** the answer waits for Allow or Don't allow (ten
+    minutes at most), and only the chat's owner can answer.
+  - **Found on the way:** tool JSON was escaped for HTML (`+` as `\u002B`,
+    `<` as `\u003C`), and the model read the escapes. It is now written plain.
+    The chiseled app image had no time zones; it now carries 3.9 MB of them.
+  - **Tests:** 226 backend, 103 UI, 133 browser on the live stack with the
+    real model (5 skipped), no retries.
+  - **Left for part 2:** the Python sandbox, web fetch and search, reading
+    attachments in parts.
 
 ### Phase 3D.2 — Models at runtime  *(M)*
 Pulled forward from phase 6.

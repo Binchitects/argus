@@ -16,6 +16,9 @@ RUN dotnet publish src/Llm.Api/Llm.Api.csproj -c Release --no-restore -o /out -p
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled
 WORKDIR /app
 COPY --from=api /out ./
+# Time zones for the chat's date and time tool: the chiseled image has none,
+# and the -extra image carries ICU as well, which nothing here needs.
+COPY --from=api /usr/share/zoneinfo /usr/share/zoneinfo
 ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 CMD ["dotnet", "Llm.Api.dll", "healthcheck"]

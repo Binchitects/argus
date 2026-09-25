@@ -71,6 +71,21 @@ model_list:
       max_output_tokens: ${MODEL_MAX_OUTPUT}
       max_tokens: ${MODEL_CONTEXT}
 
+  # The picture model (compose profile image; see the imagegen service). The
+  # litellm entrypoint removes this entry when that profile is off.
+  #<image>
+  - model_name: ${IMAGEGEN_MODEL_NAME}
+    litellm_params:
+      # openai/ is the protocol: sd-server answers /v1/images/generations.
+      model: openai/sd-cpp-local
+      api_base: http://imagegen:1234/v1
+      api_key: none
+      # Local: no price per picture, but each still counts as the person's request.
+      output_cost_per_image: 0
+    model_info:
+      mode: image_generation
+  #</image>
+
 router_settings:
   routing_strategy: simple-shuffle
   num_retries: 2

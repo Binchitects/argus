@@ -56,7 +56,7 @@ export function FilesPanel({ files, selected, onSelect, onClose }: { files: File
                         ? `${f.code.split('\n').length} lines · written in this chat`
                         : f.kind === 'repo'
                           ? `read by Argus${f.repo ? ` from ${f.repo}` : ''}`
-                          : `${formatValue(f.attachment.size, 'bytes')} · attached`}
+                          : `${formatValue(f.attachment.size, 'bytes')} · ${f.made ? 'made in this chat' : 'attached'}`}
                     </span>
                   </span>
                 </button>

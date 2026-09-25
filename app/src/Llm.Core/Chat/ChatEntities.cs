@@ -7,7 +7,11 @@ public sealed class Conversation
     public string Title { get; set; } = "New chat";
     /// <summary>Thinking level for this chat ("low", "xhigh", "off"...); null = the deployment's default.</summary>
     public string? Thinking { get; set; }
-    public bool UseArgus { get; set; } = true;
+    /// <summary>
+    /// The tools this chat may call (ids, see ToolSetting); null = the tools that
+    /// are on in new chats. What the person may use still applies.
+    /// </summary>
+    public List<string>? Tools { get; set; }
     /// <summary>The model this chat talks to; null = the deployment's default.</summary>
     public string? Model { get; set; }
     /// <summary>The person's own instructions for this chat, sent after the app's system prompt.</summary>
@@ -36,6 +40,8 @@ public enum MessageStatus
     /// <summary>The person pressed stop; what had arrived is kept.</summary>
     Stopped = 1,
     Failed = 2,
+    /// <summary>A tool call the person did not allow ("ask before running").</summary>
+    Declined = 3,
 }
 
 /// <summary>

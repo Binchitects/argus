@@ -9,7 +9,8 @@ public sealed record GatewayUser(string UserId, decimal Spend, decimal? Budget);
 /// vision no (a model needs a projector to see, and says so when it has one).
 /// Prices are per million tokens.
 /// </summary>
-public sealed record GatewayModel(string Name, int? Context, int? MaxOutput, bool Vision, bool Tools, bool Thinking, decimal? InputPerMtok, decimal? CachedInputPerMtok, decimal? OutputPerMtok);
+/// <summary>A model the gateway serves. Mode is "chat", or "image_generation" for a picture model.</summary>
+public sealed record GatewayModel(string Name, int? Context, int? MaxOutput, bool Vision, bool Tools, bool Thinking, decimal? InputPerMtok, decimal? CachedInputPerMtok, decimal? OutputPerMtok, string Mode = "chat");
 
 /// <summary>A key as the gateway lists it: the hashed token (never the key itself), alias, spend and state.</summary>
 public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt);

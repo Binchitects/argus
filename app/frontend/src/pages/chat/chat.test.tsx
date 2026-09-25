@@ -24,13 +24,17 @@ const config: ChatConfig = {
   presets: [{ level: 'xhigh', label: 'Deep think' }, { level: 'off', label: 'No thinking' }],
   defaultThinking: 'xhigh',
   argus: true,
+  tools: [
+    { id: 'argus', title: 'Argus', description: 'Searches the code you can read in GitLab.', icon: 'search-code', onByDefault: true, askFirst: false },
+    { id: 'calculator', title: 'Calculator', description: 'Exact arithmetic.', icon: 'calculator', onByDefault: true, askFirst: true },
+  ],
   gitlabUrl: null,
   maxUploadBytes: 20 * 1024 * 1024,
   imageTypes: ['image/png'],
 }
 
 const conversation = (over: Partial<Conversation> = {}): Conversation => ({
-  id: 'c1', title: 'New chat', thinking: null, useArgus: true, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'New chat', thinking: null, tools: ['argus', 'calculator'], useArgus: true, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [], ...over,
 })
 
@@ -87,7 +91,7 @@ describe('chat', () => {
     await userEvent.click(await screen.findByRole('menuitem', { name: /Eyes-Model/ }))
     await ask('hello there')
     await waitFor(() => expect(router.state.location.pathname).toBe('/chat/c1'))
-    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations')?.body).toMatchObject({ model: 'Eyes-Model', useArgus: true })
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations')?.body).toEqual({ model: 'Eyes-Model' })
     expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toEqual({ content: 'hello there', attachments: [], root: true })
     const a = await screen.findByRole('region', { name: 'Answer' })
     expect(await within(a).findByText('Thought for 2.3 s')).toBeInTheDocument()
@@ -278,6 +282,63 @@ describe('chat', () => {
     await userEvent.click(within(first).getByRole('button', { name: 'Fork from here' }))
     await waitFor(() => expect(calls.find((c) => c.path.endsWith('/fork'))?.body).toEqual({ messageId: 'a1' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/chat/c3'))
+  })
+
+  it("a chat's tools are chosen in the composer, before and after the chat exists", async () => {
+    const calls = backend({ events: answer, saved: answered, extra: { 'PATCH /api/chat/conversations/c1': () => ({ status: 204 }) } })
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: 'Tools: 2 of 2 on' }))
+    const argus = await screen.findByRole('switch', { name: /Argus/ })
+    expect(screen.getByText('Asks you before each call')).toBeInTheDocument()
+    await userEvent.click(argus)
+    expect(screen.getByRole('button', { name: 'Tools: 1 of 2 on' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await ask('hello there')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations')?.body).toEqual({ tools: ['calculator'] }))
+    // In a saved chat, a change is saved at once.
+    await userEvent.click(await screen.findByRole('button', { name: /^Tools:/ }))
+    await userEvent.click(await screen.findByRole('switch', { name: /Calculator/ }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ tools: ['argus'] }))
+  })
+
+  it('a tool that asks first waits for Allow, and a picture a tool made is shown', async () => {
+    const calls = backend({
+      events: [
+        { type: 'question', id: 'q1', parentId: null },
+        { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' },
+        { type: 'tool_call', id: 'call_1', name: 'calculate', arguments: '{"expression":"6*7"}', tool: 'calculator' },
+        { type: 'approval', id: 'call_1', name: 'calculate', arguments: '{"expression":"6*7"}', tool: 'calculator', title: 'Calculator' },
+      ],
+      hang: true,
+      extra: { 'POST /api/chat/conversations/c1/tool-calls/call_1': () => ({ status: 204 }) },
+    })
+    renderApp('/chat')
+    await ask('what is 6*7')
+    const a = await screen.findByRole('region', { name: 'Answer' })
+    expect(await within(a).findByText('Waiting for you')).toBeInTheDocument()
+    expect(within(a).getByRole('alert')).toHaveTextContent('Allow Calculate to run with these arguments?')
+    await userEvent.click(within(a).getByRole('button', { name: 'Allow' }))
+    await waitFor(() => expect(calls.find((c) => c.path.endsWith('/tool-calls/call_1'))?.body).toEqual({ allow: true }))
+    await waitFor(() => expect(within(a).queryByText('Waiting for you')).toBeNull())
+  })
+
+  it('a picture made by the image tool shows in the answer, opens full size, and is in the Files panel', async () => {
+    const picture = { id: 'img1', fileName: 'a-red-fox.png', size: 4096, truncated: false, kind: 'image' as const, contentType: 'image/png' }
+    const messages = [
+      msg('q1', null, 'user', { content: 'draw a fox' }),
+      msg('a1', 'q1', 'assistant', { toolCalls: [{ id: 'c1', function: { name: 'generate_image', arguments: '{"prompt":"a red fox"}' } }] }),
+      msg('t1', 'a1', 'tool', { toolCallId: 'c1', toolName: 'generate_image', content: '{"shown_to_the_person":true}', attachments: [picture] }),
+      msg('a2', 't1', 'assistant', { content: 'Here is a red fox.' }),
+    ]
+    backend({ start: conversation({ messages, currentLeafId: 'a2' }) })
+    renderApp('/chat/c1')
+    const a = await screen.findByRole('region', { name: 'Answer' })
+    await userEvent.click(within(within(a).getByRole('list', { name: 'Pictures' })).getByRole('button', { name: 'View a-red-fox.png' }))
+    expect(await screen.findByRole('dialog', { name: 'a-red-fox.png' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: /^Files \(1\)$/, hidden: true }))
+    const panel = await screen.findByRole('complementary', { name: 'Files' })
+    expect(within(panel).getByText(/made in this chat/)).toBeInTheDocument()
   })
 
   it('stop keeps what was written and gives the box back', async () => {

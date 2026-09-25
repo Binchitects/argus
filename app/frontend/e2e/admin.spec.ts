@@ -6,6 +6,7 @@ const pages: [string, string][] = [
   ['/admin', 'Overview'],
   ['/admin/people', 'People'],
   ['/admin/groups', 'Groups'],
+  ['/admin/tools', 'Tools'],
   ['/admin/sign-in', 'Sign-in'],
   ['/admin/model', 'Model'],
   ['/admin/settings', 'Settings'],

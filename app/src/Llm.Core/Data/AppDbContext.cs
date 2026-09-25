@@ -19,6 +19,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
+    public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
+    public DbSet<McpServer> McpServers => Set<McpServer>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -88,6 +90,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(m => m.UserId);
             e.HasOne<Group>().WithMany().HasForeignKey(m => m.GroupId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ToolSetting>(e =>
+        {
+            e.ToTable("tool_settings");
+            e.HasKey(t => t.ToolId);
+            e.Property(t => t.ToolId).HasMaxLength(100);
+            e.Property(t => t.Groups).HasDefaultValueSql("'{}'::uuid[]");
+        });
+        builder.Entity<McpServer>(e =>
+        {
+            e.ToTable("mcp_servers");
+            e.Property(m => m.Name).HasMaxLength(100);
+            e.Property(m => m.Description).HasMaxLength(500);
+            e.Property(m => m.Url).HasMaxLength(2000);
+            e.Property(m => m.HeaderName).HasMaxLength(200);
+            e.Property(m => m.EmailHeader).HasMaxLength(200);
+            e.HasIndex(m => m.Name).IsUnique();
         });
 
         builder.Entity<AuditEvent>(e =>

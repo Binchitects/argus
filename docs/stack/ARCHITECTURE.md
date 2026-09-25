@@ -95,6 +95,7 @@ key always starts; everything else needs its profile named.
 | `multi-model` | `vllm-secondary` | a second, small model on the same card |
 | `argus` | `argus`, `ollama` | the code index and its embedding model |
 | `embed` | `ollama` | embeddings alone, without Argus |
+| `image` | `imagegen` | picture generation beside the chat model, on the same GPU, behind the gateway |
 | `smi` | `nvidia-smi-exporter`, `cpu-temp-exporter` | GPU/CPU telemetry via NVML and the host's own sensors |
 | `dcgm` | `dcgm-exporter` | the alternative GPU exporter; heavier, more detail |
 | `cadvisor` | `cadvisor` | per-container CPU/memory |
@@ -364,6 +365,7 @@ one you chose.
 | service | image | what it does |
 |---|---|---|
 | `litellm` | `ghcr.io/berriai/litellm:main-stable` | `/v1` OpenAI-compatible endpoint. Per-person keys, spend, budgets, retries, optional Redis cache. Renders `${MODEL_NAME}`-style tokens in its config from the environment at startup |
+| `imagegen` | `ghcr.io/leejet/stable-diffusion.cpp` (pinned by digest) | pictures: FLUX.2 [klein] 4B by default, OpenAI-style `/v1/images/generations`. Weights in RAM, streamed to the GPU within `IMAGEGEN_MAX_VRAM`. Non-root, read-only root, on an internal network only LiteLLM joins |
 | `postgres` | `pgvector/pgvector:0.8.0-pg16` | one instance, three databases: `litellm`, `langfuse`, `argus` (created by `config/postgres/init/01-create-databases.sql`, with the `vector` extension). Argus uses it only when `ARGUS_VECTOR_BACKEND=pgvector` |
 
 Only one model is advertised, under one name. Aliases were removed on purpose:

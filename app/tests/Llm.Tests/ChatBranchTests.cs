@@ -251,7 +251,10 @@ public sealed class ChatBranchTests(AppFixture app)
             {
                 Assert.Equal(messages[i - 1].Id, messages[i].ParentId);
             }
-            Assert.Equal(messages[^1].Id, (await db.Conversations.AsNoTracking().SingleAsync()).CurrentLeafId);
+            var chat = await db.Conversations.AsNoTracking().SingleAsync();
+            Assert.Equal(messages[^1].Id, chat.CurrentLeafId);
+            // It had Argus off, so it keeps no tools (ChatTools).
+            Assert.Equal([], chat.Tools);
         }
     }
 }

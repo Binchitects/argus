@@ -27,6 +27,7 @@ public sealed class AppFixture : IAsyncLifetime
     public FakeGateway Gateway { get; } = new();
     public FakeArgus Argus { get; } = new();
     public FakeModel Model { get; } = new();
+    public FakeMcp Mcp { get; } = new();
     public string AppConnectionString { get; private set; } = "";
     /// <summary>The real dashboard files, found by walking up to the repository.</summary>
     public static string DashboardsPath { get; } = FindDashboards();
@@ -98,6 +99,7 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddHttpClient<Llm.Api.Operations.ArgusAdmin>().ConfigurePrimaryHttpMessageHandler(() => Argus);
                 s.AddHttpClient<Llm.Api.Chat.ArgusMcp>().ConfigurePrimaryHttpMessageHandler(() => Argus);
                 s.AddHttpClient<Llm.Api.Chat.GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => Model);
+                s.AddHttpClient(Llm.Api.Chat.Tools.ToolRegistry.McpClient).ConfigurePrimaryHttpMessageHandler(() => Mcp);
             });
         });
 

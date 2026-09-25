@@ -1,7 +1,7 @@
 # Settings in the app
 
 Admin → Settings (`https://<LLM_DOMAIN>/admin/settings` in the new web) lists
-every setting an admin can change: 79 of them in 11 groups. Each is typed and
+every setting an admin can change: 87 of them in 12 groups. Each is typed and
 checked, with its unit, default and limits, and a note on what changing it
 does. Search looks across every group. A group can be linked directly, for
 example `/admin/settings#company-directory-ldap`.
@@ -14,7 +14,7 @@ Each setting has a badge that says when it applies:
 |---|---|---|
 | **At once** | the app's database | Immediately. Examples: the company directory, chat limits, sign-in lockouts, branding. |
 | **Restart** | the app's database | When the app restarts. The page offers **Restart the app now**: the app stops itself and Docker's restart policy starts it again, in a few seconds. Examples: session lifetimes and the longest chat answer. |
-| **.env** | `stack/.env` | When you apply it on the host. Examples: the model, the engine and hardware, prices, credit defaults, Argus's GitLab connection, profiles, retention and backup. |
+| **.env** | `stack/.env` | When you apply it on the host. Examples: the model, the engine and hardware, image generation, prices, credit defaults, Argus's GitLab connection, profiles, retention and backup. |
 
 For both database kinds, a value saved here wins over `.env`. The page shows
 the value it overrides, and **Back to the .env value** removes the saved one.

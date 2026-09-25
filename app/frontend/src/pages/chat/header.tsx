@@ -5,10 +5,8 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import type { ChatConfig, ChatSettings } from './types'
@@ -201,12 +199,6 @@ export function ChatHeader({
         <ModelPicker config={config} value={settings.model ?? null} onChange={(model) => onChange({ model: model ?? '' })} />
         <ThinkingPicker config={config} value={settings.thinking ?? null} onChange={(thinking) => onChange({ thinking: thinking ?? '' })} />
       </div>
-      {config.argus && (
-        <Label className="ml-1 hidden h-8 items-center gap-2 rounded-md px-2 text-sm font-normal hover:bg-accent sm:flex">
-          <Switch checked={settings.useArgus ?? true} onCheckedChange={(v) => onChange({ useArgus: v })} aria-label="Search our code (Argus)" />
-          Argus
-        </Label>
-      )}
       <div className="mx-2 hidden min-w-0 flex-1 justify-center md:flex">
         {title !== null && onRename && (name === null ? (
           <button type="button" className="max-w-md truncate rounded-md px-2 py-1 text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring" onClick={() => setName(title)} aria-label={`Chat title: ${title}. Rename`}>

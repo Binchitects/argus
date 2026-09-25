@@ -14,6 +14,8 @@ export interface LiveState {
   title: string | null
   /** When the first reasoning token arrived for the answer being written (for the live timer). */
   thinkingSince: number | null
+  /** Tool calls waiting for the person to allow them. */
+  waiting?: string[]
 }
 
 export const blank = (id: string, role: Message['role'], parentId: string | null, content = ''): Message => ({
@@ -71,10 +73,15 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       if (a) a.toolCalls = [...(a.toolCalls ?? []), { id: e.id, function: { name: e.name, arguments: e.arguments } }]
       return { ...state, messages }
     }
+    case 'approval':
+      return { ...state, waiting: [...(state.waiting ?? []), e.id] }
     case 'tool_result': {
       const parent = state.leaf
-      messages.push({ ...blank(e.messageId, 'tool', parent, e.text), toolCallId: e.id, toolName: e.name, noAccess: e.noAccess, status: e.isError ? 'failed' : 'complete', durationMs: e.durationMs })
-      return { ...state, messages, leaf: e.messageId }
+      messages.push({
+        ...blank(e.messageId, 'tool', parent, e.text), toolCallId: e.id, toolName: e.name, noAccess: e.noAccess, durationMs: e.durationMs,
+        status: e.declined ? 'declined' : e.isError ? 'failed' : 'complete', attachments: e.attachments ?? [],
+      })
+      return { ...state, messages, leaf: e.messageId, waiting: (state.waiting ?? []).filter((w) => w !== e.id) }
     }
     case 'notice':
       return { ...state, notices: [...state.notices, { kind: e.kind, text: e.text }] }

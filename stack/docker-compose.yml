@@ -31,6 +31,11 @@ networks:
   llm-net:
     name: llm-net
     driver: bridge
+  # The image server has no key of its own: only LiteLLM reaches it, and it
+  # has no way out (internal).
+  image-net:
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_image
+    internal: true
 
 volumes:
   argus-data:
@@ -930,7 +935,7 @@ services:
     container_name: litellm
     profiles: [gateway]
     restart: unless-stopped
-    networks: [llm-net]
+    networks: [llm-net, image-net]
     # No published ports: Traefik is the only way in. Re-add a mapping
     # here only if you need to bypass the proxy for debugging.
     volumes:
@@ -986,6 +991,9 @@ services:
       # worse than one that is wrong, so both are passed explicitly.
       LITELLM_DEFAULT_USER_BUDGET: ${LITELLM_DEFAULT_USER_BUDGET:-50}
       LITELLM_BUDGET_DURATION: ${LITELLM_BUDGET_DURATION:-1mo}
+      # The picture model (profile image): listed only when that profile runs.
+      COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+      IMAGEGEN_MODEL_NAME: ${IMAGEGEN_MODEL_NAME:-FLUX.2-klein-4B}
     # One worker is ample for a small team and costs ~700 MB instead of ~3 GB.
     # Raise LITELLM_WORKERS only if the gateway itself becomes a bottleneck.
     entrypoint:
@@ -1000,7 +1008,10 @@ services:
                            ("MODEL_COST_CACHED_INPUT_TOKEN", "PRICE_CACHED_INPUT_PER_MTOK"),
                            ("MODEL_COST_OUTPUT_TOKEN", "PRICE_OUTPUT_PER_MTOK")):
             os.environ[key] = "%.12g" % (float(os.environ.get(price) or 0) / 1e6)
-        out = re.sub(r"\$\{(MODEL_NAME|MODEL_CONTEXT|MODEL_MAX_OUTPUT|MODEL_REASONING_EFFORT|MODEL_ENABLE_THINKING|MODEL_COST_INPUT_TOKEN|MODEL_COST_CACHED_INPUT_TOKEN|MODEL_COST_OUTPUT_TOKEN)\}", lambda m: os.environ[m.group(1)], src)
+        # The image model's entry only when its server runs (profile image).
+        if "image" not in [p.strip() for p in os.environ.get("COMPOSE_PROFILES", "").split(",")] or not os.environ.get("IMAGEGEN_MODEL_NAME"):
+            src = re.sub(r"\n *#<image>.*?#</image>", "", src, flags=re.S)
+        out = re.sub(r"\$\{(MODEL_NAME|MODEL_CONTEXT|MODEL_MAX_OUTPUT|MODEL_REASONING_EFFORT|MODEL_ENABLE_THINKING|MODEL_COST_INPUT_TOKEN|MODEL_COST_CACHED_INPUT_TOKEN|MODEL_COST_OUTPUT_TOKEN|IMAGEGEN_MODEL_NAME)\}", lambda m: os.environ[m.group(1)], src)
         open("/tmp/config.yaml", "w").write(out)
         PY
         exec docker/prod_entrypoint.sh "$$@"
@@ -1029,6 +1040,70 @@ services:
       # injecting the master key would attribute every request to one identity
       # and destroy per-user usage tracking.
       - "traefik.http.routers.litellm.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # IMAGE GENERATION (profile: image)
+  #
+  # stable-diffusion.cpp's server, OpenAI-style (/v1/images/generations),
+  # behind LiteLLM as IMAGEGEN_MODEL_NAME: the chat's image tool and API keys
+  # use it like any model, with the spend attributed to the person.
+  #
+  # It shares the GPU with the chat model. --auto-fit (the default) keeps the
+  # weights in RAM and streams them to the GPU for each step, within
+  # IMAGEGEN_MAX_VRAM (negative: leave that many GiB free), so the chat
+  # model's memory is never taken. Measured on a 24 GB RTX 3090 beside a 21 GB
+  # chat model: FLUX.2 [klein] 4B at 1024x1024 in 4 steps, 27 s.
+  #
+  # Models (Apache 2.0), into IMAGEGEN_MODEL_DIR:
+  #   flux-2-klein-4b-Q4_0.gguf   huggingface.co/leejet/FLUX.2-klein-4B-GGUF
+  #   Qwen3-4B-Q4_K_M.gguf        huggingface.co/unsloth/Qwen3-4B-GGUF
+  #   flux2-vae.safetensors       huggingface.co/Comfy-Org/flux2-klein-4B (split_files/vae)
+  # ============================================================================
+  imagegen:
+    image: ${IMAGEGEN_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede}
+    container_name: imagegen
+    profiles: [image]
+    restart: unless-stopped
+    networks: [image-net]
+    <<: *gpu-reservation
+    user: "65534:65534"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ${IMAGEGEN_MODEL_DIR:-./models/image}:/models:ro
+    entrypoint: ["/sd-server"]
+    command:
+      - --listen-ip
+      - 0.0.0.0
+      - --listen-port
+      - "1234"
+      - --diffusion-model
+      - /models/${IMAGEGEN_DIFFUSION_MODEL:-flux-2-klein-4b-Q4_0.gguf}
+      - --llm
+      - /models/${IMAGEGEN_TEXT_ENCODER:-Qwen3-4B-Q4_K_M.gguf}
+      - --vae
+      - /models/${IMAGEGEN_VAE:-flux2-vae.safetensors}
+      - --max-vram
+      - "${IMAGEGEN_MAX_VRAM:--1}"
+      - --diffusion-fa
+      - --cfg-scale
+      - "${IMAGEGEN_CFG_SCALE:-1.0}"
+      - --steps
+      - "${IMAGEGEN_STEPS:-4}"
+      - -W
+      - "1024"
+      - -H
+      - "1024"
+    healthcheck:
+      # No curl in the image: bash opens the port.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/1234"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
     logging: *default-logging
 
   # ============================================================================
@@ -1466,6 +1541,14 @@ services:
       StackEnv__ARGUS_GITLAB_CA_CERT: ${ARGUS_GITLAB_CA_CERT:-}
       StackEnv__ARGUS_GITLAB_VERIFY: ${ARGUS_GITLAB_VERIFY:-}
       StackEnv__HF_TOKEN_SET: ${HF_TOKEN:+yes}
+      StackEnv__IMAGEGEN_MODEL_NAME: ${IMAGEGEN_MODEL_NAME:-FLUX.2-klein-4B}
+      StackEnv__IMAGEGEN_MODEL_DIR: ${IMAGEGEN_MODEL_DIR:-}
+      StackEnv__IMAGEGEN_DIFFUSION_MODEL: ${IMAGEGEN_DIFFUSION_MODEL:-flux-2-klein-4b-Q4_0.gguf}
+      StackEnv__IMAGEGEN_TEXT_ENCODER: ${IMAGEGEN_TEXT_ENCODER:-Qwen3-4B-Q4_K_M.gguf}
+      StackEnv__IMAGEGEN_VAE: ${IMAGEGEN_VAE:-flux2-vae.safetensors}
+      StackEnv__IMAGEGEN_STEPS: ${IMAGEGEN_STEPS:-4}
+      StackEnv__IMAGEGEN_CFG_SCALE: ${IMAGEGEN_CFG_SCALE:-1.0}
+      StackEnv__IMAGEGEN_MAX_VRAM: ${IMAGEGEN_MAX_VRAM:--1}
       StackEnv__COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
       StackEnv__PROMETHEUS_RETENTION_TIME: ${PROMETHEUS_RETENTION_TIME:-30d}
       StackEnv__PROMETHEUS_RETENTION_SIZE: ${PROMETHEUS_RETENTION_SIZE:-20GB}

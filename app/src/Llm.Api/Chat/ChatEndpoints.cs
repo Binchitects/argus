@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Text.Json;
+using Llm.Api.Access;
+using Llm.Api.Chat.Tools;
 using Llm.Api.Endpoints;
 using Llm.Api.Operations;
 using Llm.Core.Chat;
@@ -12,12 +14,16 @@ using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Chat;
 
+/// <summary>A new chat. Tools: the tool ids it may call (default: those on in new chats); UseArgus: Argus on or off in that list.</summary>
 public sealed record NewConversation(string? Thinking = null, bool? UseArgus = null, string? Model = null, string? SystemPrompt = null,
-    double? Temperature = null, double? TopP = null, int? MaxTokens = null);
+    double? Temperature = null, double? TopP = null, int? MaxTokens = null, string[]? Tools = null);
 
 /// <summary>Only what is sent changes. For the numbers, a negative value clears them (back to the model's default).</summary>
 public sealed record ConversationChange(string? Title = null, string? Thinking = null, bool? UseArgus = null, string? Model = null,
-    string? SystemPrompt = null, double? Temperature = null, double? TopP = null, int? MaxTokens = null, bool? Archived = null);
+    string? SystemPrompt = null, double? Temperature = null, double? TopP = null, int? MaxTokens = null, bool? Archived = null, string[]? Tools = null);
+
+/// <summary>The person's answer to a call waiting for them ("ask before running").</summary>
+public sealed record ToolDecision(bool Allow);
 
 /// <summary>Fork up to this message (default: the end of the branch on screen).</summary>
 public sealed record ForkRequest(Guid? MessageId = null);
@@ -54,13 +60,16 @@ public static class ChatEndpoints
         g.MapPost("/conversations/{id:guid}/regenerate", RegenerateAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync);
+        g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
         g.MapPost("/attachments", UploadAsync).DisableAntiforgery();
         g.MapGet("/attachments/{id:guid}/content", ContentAsync);
     }
 
-    private static async Task<IResult> Config(IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
+    private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access,
+        IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
     {
         var list = await models.ListAsync(ct);
+        var tools = await registry.ForAsync(await access.MembershipAsync(await Me(p, users), ct), ct);
         return Results.Ok(new
         {
             model = list.Count > 0 ? list[0].Name : stack.Value.ModelName,
@@ -71,7 +80,13 @@ public static class ChatEndpoints
             }),
             presets = ThinkingPresets.Parse(stack.Value.ThinkingPresets),
             defaultThinking = string.Equals(stack.Value.ModelEnableThinking, "false", StringComparison.OrdinalIgnoreCase) ? "off" : stack.Value.ModelReasoningEffort,
-            argus = argus.Enabled,
+            argus = tools.Any(t => t.Tool.Id == "argus"),
+            // The tools this person may use; a chat turns them on and off.
+            tools = tools.Select(t => new
+            {
+                id = t.Tool.Id, title = t.Tool.Title, description = t.Tool.Description, icon = t.Tool.Icon,
+                onByDefault = t.Setting.OnByDefault, askFirst = t.Setting.AskFirst,
+            }),
             // For links from Argus's answers to the code (Argus reads the same GitLab).
             gitlabUrl = argus.Enabled ? (string.IsNullOrWhiteSpace(chat.CurrentValue.GitlabLinkUrl) ? argusOptions.Value.GitlabUrl : chat.CurrentValue.GitlabLinkUrl)?.TrimEnd('/') : null,
             maxUploadBytes = chat.CurrentValue.MaxUploadBytes,
@@ -97,17 +112,51 @@ public static class ChatEndpoints
             .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt }).ToListAsync());
     }
 
-    private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models)
+    private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
+        ToolRegistry registry, AccessService access, CancellationToken ct)
     {
         var me = await Me(p, users);
-        var c = new Conversation { UserId = me.Id, UseArgus = body.UseArgus ?? true };
+        var c = new Conversation { UserId = me.Id };
         if (await ApplyAsync(c, new ConversationChange(null, body.Thinking, null, body.Model, body.SystemPrompt, body.Temperature, body.TopP, body.MaxTokens), stack.Value, models) is { } problem)
         {
             return problem;
         }
+        var allowed = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
+        if (ApplyTools(c, body.Tools, body.UseArgus, allowed) is { } refused)
+        {
+            return refused;
+        }
         db.Conversations.Add(c);
-        await db.SaveChangesAsync();
-        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, null, []));
+        await db.SaveChangesAsync(ct);
+        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, OnFor(c, allowed), null, []));
+    }
+
+    /// <summary>The ids of the tools a chat has on, of those the person may use.</summary>
+    private static List<string> OnFor(Conversation c, IReadOnlyList<ToolChoice> allowed) => [.. ToolRegistry.Chosen(c.Tools, allowed).Select(t => t.Tool.Id)];
+
+    /// <summary>A chat's tools from a request: a whole list, and/or Argus switched on or off in it.</summary>
+    private static IResult? ApplyTools(Conversation c, string[]? tools, bool? useArgus, IReadOnlyList<ToolChoice> allowed)
+    {
+        if (tools is not null)
+        {
+            var known = allowed.Select(t => t.Tool.Id).ToHashSet();
+            if (tools.FirstOrDefault(t => !known.Contains(t)) is { } unknown)
+            {
+                return AuthEndpoints.Problem(400, "tools", $"The tool {unknown} is not available to you.");
+            }
+            c.Tools = [.. tools.Distinct()];
+        }
+        if (useArgus is { } on)
+        {
+            var current = OnFor(c, allowed);
+            current.Remove("argus");
+            if (on && allowed.Any(t => t.Tool.Id == "argus"))
+            {
+                current.Insert(0, "argus");
+            }
+            c.Tools = current;
+        }
+        return null;
     }
 
     /// <summary>A chat's settings, checked. Null when all is well.</summary>
@@ -168,21 +217,22 @@ public static class ChatEndpoints
     private static bool ValidThinking(string level, StackOptions stack) =>
         level == "off" || ThinkingPresets.Parse(stack.ThinkingPresets).Any(p => p.Level == level);
 
-    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db)
+    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolRegistry registry, AccessService access, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me) is not { } c)
         {
             return Results.NotFound();
         }
-        var messages = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id).OrderBy(m => m.Sequence).ToListAsync();
+        var messages = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id).OrderBy(m => m.Sequence).ToListAsync(ct);
         var ids = messages.SelectMany(m => ChatService.ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => ids.Contains(a.Id))
-            .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType }).ToDictionaryAsync(a => a.Id);
+            .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType }).ToDictionaryAsync(a => a.Id, ct);
         var forkedFrom = c.ForkedFromId is { } from
-            ? await db.Conversations.AsNoTracking().Where(x => x.Id == from && x.UserId == me.Id).Select(x => new { x.Id, x.Title }).SingleOrDefaultAsync()
+            ? await db.Conversations.AsNoTracking().Where(x => x.Id == from && x.UserId == me.Id).Select(x => new { x.Id, x.Title }).SingleOrDefaultAsync(ct)
             : null;
-        return Results.Ok(Shape(c, forkedFrom, messages.Select(m => (object)new
+        var tools = OnFor(c, await registry.ForAsync(await access.MembershipAsync(me, ct), ct));
+        return Results.Ok(Shape(c, tools, forkedFrom, messages.Select(m => (object)new
         {
             m.Id, m.ParentId, m.Role, m.Content, m.Reasoning, m.ToolName, m.ToolCallId,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
@@ -193,14 +243,15 @@ public static class ChatEndpoints
         })));
     }
 
-    private static object Shape(Conversation c, object? forkedFrom, IEnumerable<object> messages) =>
+    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages) =>
         new
         {
-            c.Id, c.Title, c.Thinking, c.UseArgus, c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
+            c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
             c.CurrentLeafId, c.ArchivedAt, forkedFrom, c.CreatedAt, c.UpdatedAt, messages,
         };
 
-    private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models)
+    private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
+        ToolRegistry registry, AccessService access, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me) is not { } c)
@@ -215,15 +266,19 @@ public static class ChatEndpoints
         {
             return problem;
         }
-        if (body.UseArgus is { } a)
+        if (body.Tools is not null || body.UseArgus is not null)
         {
-            c.UseArgus = a;
+            var allowed = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
+            if (ApplyTools(c, body.Tools, body.UseArgus, allowed) is { } refused)
+            {
+                return refused;
+            }
         }
         if (body.Archived is { } archive)
         {
             c.ArchivedAt = archive ? c.ArchivedAt ?? DateTimeOffset.UtcNow : null;
         }
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
 
@@ -257,7 +312,7 @@ public static class ChatEndpoints
         var title = (c.Title + " (fork)")[..Math.Min(200, c.Title.Length + 7)];
         var fork = new Conversation
         {
-            UserId = me.Id, Title = title, Thinking = c.Thinking, UseArgus = c.UseArgus, Model = c.Model, SystemPrompt = c.SystemPrompt,
+            UserId = me.Id, Title = title, Thinking = c.Thinking, Tools = c.Tools is null ? null : [.. c.Tools], Model = c.Model, SystemPrompt = c.SystemPrompt,
             Temperature = c.Temperature, TopP = c.TopP, MaxTokens = c.MaxTokens, ForkedFromId = c.Id,
         };
         var copies = new Dictionary<Guid, Guid>();
@@ -279,6 +334,19 @@ public static class ChatEndpoints
         db.Conversations.Add(fork);
         await db.SaveChangesAsync();
         return Results.Created($"/api/chat/conversations/{fork.Id}", new { fork.Id, fork.Title });
+    }
+
+    /// <summary>Yes or no to a tool call waiting for the person ("ask before running").</summary>
+    private static async Task<IResult> DecideAsync(Guid id, string callId, ToolDecision body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolApprovals approvals)
+    {
+        var me = await Me(p, users);
+        if (await Owned(db, id, me) is null)
+        {
+            return Results.NotFound();
+        }
+        return approvals.Decide(id, callId, body.Allow)
+            ? Results.NoContent()
+            : AuthEndpoints.Problem(409, "not_waiting", "That tool call is not waiting for an answer any more.");
     }
 
     /// <summary>Shows another branch: the newest line of messages below the one chosen.</summary>

@@ -1,7 +1,10 @@
-import { AlertTriangle, Brain, Check, ChevronRight, CircleX, FileText, FolderTree, ListTree, Loader2, Search, TextSearch, Wrench, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Brain, Calculator, Check, ChevronRight, CircleX, Clock, FileText, FolderTree, Image as ImageIcon, ListTree, Loader2, Search, ShieldQuestion, ShieldX, TextSearch, Wrench, type LucideIcon } from 'lucide-react'
 import { Collapsible } from 'radix-ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { attachmentUrl } from './api'
+import { ImageViewer } from './image-viewer'
 import { cn } from '@/lib/utils'
 import { argsOf, parseResult, resultCount } from './argus'
 import { seconds, toolTitle } from './format'
@@ -46,6 +49,9 @@ export function Thinking({ text, live, ms, since }: { text: string; live: boolea
 }
 
 const toolIcons: [RegExp, LucideIcon][] = [
+  [/image|picture|draw/, ImageIcon],
+  [/calculat/, Calculator],
+  [/time|date|days_between/, Clock],
   [/symbol|definition|reference/, Search],
   [/grep|search|find/, TextSearch],
   [/read|file|open|show/, FileText],
@@ -65,12 +71,28 @@ function argsSummary(raw: string): [string, string][] {
  * One tool call: what was asked, whether it ran, how long it took, what came
  * back. The no-access notice stays outside the fold: the person must see it.
  */
-export function ToolCard({ call, result, live }: { call: ToolCall; result?: Message; live: boolean }) {
+export function ToolCard({
+  call,
+  result,
+  live,
+  waiting,
+  onDecide,
+}: {
+  call: ToolCall
+  result?: Message
+  live: boolean
+  /** The call waits for the person to allow it ("ask before running"). */
+  waiting?: boolean
+  onDecide?: (allow: boolean) => void
+}) {
   const [open, setOpen] = useState(false)
+  const [viewing, setViewing] = useState<number | null>(null)
+  const pictures = result?.attachments.filter((a) => a.kind === 'image') ?? []
   const Icon = toolIcons.find(([re]) => re.test(call.function.name))?.[1] ?? Wrench
   const args = argsSummary(call.function.arguments)
-  const running = !result && live
-  const failed = result?.status === 'failed'
+  const running = !result && live && !waiting
+  const declined = result?.status === 'declined'
+  const failed = result?.status === 'failed' || declined
   const value = useMemo(() => (result && !failed ? parseResult(result.content) : undefined), [result, failed])
   const count = resultCount(value)
   return (
@@ -89,10 +111,18 @@ export function ToolCard({ call, result, live }: { call: ToolCall; result?: Mess
             ))}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-            {running ? (
+            {waiting ? (
+              <span className="flex items-center gap-1 text-warning-ink">
+                <ShieldQuestion className="size-3.5" aria-hidden="true" /> Waiting for you
+              </span>
+            ) : running ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> Running
               </>
+            ) : declined ? (
+              <span className="flex items-center gap-1">
+                <ShieldX className="size-3.5" aria-hidden="true" /> Not allowed
+              </span>
             ) : failed ? (
               <span className="flex items-center gap-1 text-destructive-ink">
                 <CircleX className="size-3.5" aria-hidden="true" /> Failed
@@ -133,6 +163,37 @@ export function ToolCard({ call, result, live }: { call: ToolCall; result?: Mess
           </div>
         </Collapsible.Content>
       </Collapsible.Root>
+      {waiting && onDecide && (
+        <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+          <ShieldQuestion className="size-4 shrink-0 text-warning-ink" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            Allow <strong>{toolTitle(call.function.name)}</strong> to run with these arguments?
+          </span>
+          <Button size="sm" variant="outline" className="h-7" onClick={() => onDecide(false)}>
+            Don&apos;t allow
+          </Button>
+          <Button size="sm" className="h-7" onClick={() => onDecide(true)}>
+            Allow
+          </Button>
+        </div>
+      )}
+      {pictures.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-2" aria-label="Pictures">
+          {pictures.map((p, i) => (
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => setViewing(i)}
+                className="block cursor-zoom-in overflow-hidden rounded-xl border outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+                aria-label={`View ${p.fileName}`}
+              >
+                <img src={attachmentUrl(p.id)} alt={p.fileName} className="max-h-96 w-auto max-w-full object-contain" loading="lazy" />
+              </button>
+            </li>
+          ))}
+          <ImageViewer images={pictures} index={viewing} onIndex={setViewing} />
+        </ul>
+      )}
       {result?.noAccess && (
         <Alert variant="warning" title="You do not have access to some of this code." className="mt-2" role="note">
           <pre className="mt-1 font-mono text-xs whitespace-pre-wrap">{result.content.split('\n').filter((l) => l.startsWith('- ')).join('\n')}</pre>

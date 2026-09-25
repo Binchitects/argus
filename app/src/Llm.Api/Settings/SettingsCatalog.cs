@@ -15,14 +15,16 @@ public static class SettingsCatalog
     private const string Model = "Model";
     private const string Engine = "Engine and hardware";
     private const string Argus = "Argus (GitLab)";
+    private const string Image = "Image generation";
     private const string Deployment = "Deployment";
     private const string Monitoring = "Monitoring";
     private const string Backup = "Backup";
 
     public static readonly IReadOnlyList<string> Profiles =
-        ["gateway", "proxy", "auth", "llamacpp", "vllm", "multi-model", "argus", "embed", "logging", "tracing", "smi", "dcgm", "cadvisor"];
+        ["gateway", "proxy", "auth", "llamacpp", "vllm", "multi-model", "argus", "embed", "image", "logging", "tracing", "smi", "dcgm", "cadvisor"];
 
     private const string Engine1 = "The engine restarts and reloads the model: chat and the API pause for a few minutes.";
+    private const string Image1 = "The image server restarts (under a minute); the chat model is not touched.";
 
     public static readonly IReadOnlyList<SettingDefinition> All =
     [
@@ -151,7 +153,24 @@ public static class SettingsCatalog
             { Options = ["true", "false"], Dangerous = true },
         new("HF_TOKEN", Model, "Hugging Face token", "Only for gated repositories.", SettingType.Secret, SettingScope.Stack),
 
-        new("COMPOSE_PROFILES", Deployment, "Parts that run", "gateway, proxy and auth are the core; llamacpp or vllm is the engine; argus adds the code index; logging, tracing, smi, dcgm and cadvisor are observability.", SettingType.Choices, SettingScope.Stack)
+        new("IMAGEGEN_MODEL_NAME", Image, "Model name", "What the gateway and the chat call the picture model. It runs when the image profile is on (Deployment).", SettingType.Text, SettingScope.Stack)
+            { Default = "FLUX.2-klein-4B", Optional = false, Pattern = @"[A-Za-z0-9._:-]{1,100}", PatternHelp = "letters, digits and . _ : -", Impact = "The gateway restarts (a few seconds)." },
+        new("IMAGEGEN_MODEL_DIR", Image, "Model directory", "The host folder with the diffusion model, its text encoder and VAE.", SettingType.Text, SettingScope.Stack)
+            { Dangerous = true, Impact = Image1 },
+        new("IMAGEGEN_DIFFUSION_MODEL", Image, "Diffusion model file", "In the model directory, e.g. flux-2-klein-4b-Q4_0.gguf.", SettingType.Text, SettingScope.Stack)
+            { Default = "flux-2-klein-4b-Q4_0.gguf", Optional = false, Impact = Image1 },
+        new("IMAGEGEN_TEXT_ENCODER", Image, "Text encoder file", "The language model that reads the prompt, e.g. Qwen3-4B-Q4_K_M.gguf for FLUX.2 klein.", SettingType.Text, SettingScope.Stack)
+            { Default = "Qwen3-4B-Q4_K_M.gguf", Optional = false, Impact = Image1 },
+        new("IMAGEGEN_VAE", Image, "VAE file", "e.g. flux2-vae.safetensors.", SettingType.Text, SettingScope.Stack)
+            { Default = "flux2-vae.safetensors", Optional = false, Impact = Image1 },
+        new("IMAGEGEN_STEPS", Image, "Steps", "More is slower and, for distilled models like klein, rarely better. 4 for FLUX.2 klein.", SettingType.WholeNumber, SettingScope.Stack)
+            { Default = "4", Min = 1, Max = 60, Optional = false, Impact = Image1 },
+        new("IMAGEGEN_CFG_SCALE", Image, "Guidance (CFG) scale", "1.0 for distilled models like FLUX.2 klein.", SettingType.Number, SettingScope.Stack)
+            { Default = "1.0", Min = 0, Max = 30, Optional = false, Impact = Image1 },
+        new("IMAGEGEN_MAX_VRAM", Image, "GPU memory budget (GiB)", "What the image server may use of the GPU. Negative: leave that much free for the chat model; 0: all that is free.", SettingType.Number, SettingScope.Stack)
+            { Default = "-1", Min = -24, Max = 192, Optional = false, Unit = "GiB", Impact = Image1 },
+
+        new("COMPOSE_PROFILES", Deployment, "Parts that run", "gateway, proxy and auth are the core; llamacpp or vllm is the engine; argus adds the code index; image adds picture generation; logging, tracing, smi, dcgm and cadvisor are observability.", SettingType.Choices, SettingScope.Stack)
             { Options = Profiles, Optional = false, Dangerous = true, Impact = "Services start or stop to match." },
 
         new("PROMETHEUS_RETENTION_TIME", Monitoring, "Keep metrics for", "e.g. 30d.", SettingType.Text, SettingScope.Stack)

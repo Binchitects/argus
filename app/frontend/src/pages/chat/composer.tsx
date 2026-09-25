@@ -1,5 +1,5 @@
 import { ArrowUp, EyeOff, FileText, Paperclip, Square, X } from 'lucide-react'
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
@@ -20,6 +20,7 @@ export function Composer({
   model,
   autoFocus,
   big,
+  tools,
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
@@ -28,6 +29,8 @@ export function Composer({
   model?: ChatModel
   autoFocus?: boolean
   big?: boolean
+  /** The chat's tools picker, beside the attach button. */
+  tools?: ReactNode
 }) {
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
@@ -129,7 +132,8 @@ export function Composer({
             <Paperclip />
           </Button>
         </Tooltip>
-        <span className="hidden text-xs text-muted-foreground sm:inline">Enter to send · Shift+Enter for a new line</span>
+        {tools}
+        <span className="hidden text-xs text-muted-foreground lg:inline">Enter to send · Shift+Enter for a new line</span>
         <span className="ml-auto" />
         {streaming ? (
           <Button type="button" size="icon-sm" variant="secondary" className="rounded-full" onClick={onStop} aria-label="Stop">

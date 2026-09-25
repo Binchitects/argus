@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Operations;
@@ -7,10 +8,11 @@ using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Chat;
 
-public sealed class ArgusToolException(string message) : Exception(message);
+/// <summary>An MCP server refused, failed, or could not be reached; the message says which.</summary>
+public sealed class McpException(string message) : Exception(message);
 
-/// <summary>A session with Argus's MCP server as one person: their GitLab access, their answers.</summary>
-public sealed class ArgusSession(HttpClient http, Uri endpoint, string token, string email, string? sessionId, string protocol)
+/// <summary>A session with one MCP server, with the headers it was opened with (a token, whose it is).</summary>
+public sealed class McpSession(HttpClient http, Uri endpoint, IReadOnlyDictionary<string, string> headers, string? sessionId, string protocol, string server)
 {
     private int _id = 10;
 
@@ -18,15 +20,15 @@ public sealed class ArgusSession(HttpClient http, Uri endpoint, string token, st
 
     public async Task<JsonArray> ToolsAsync(CancellationToken ct)
     {
-        var result = await ArgusMcp.RequestAsync(http, endpoint, token, email, sessionId, protocol, Interlocked.Increment(ref _id), "tools/list", new JsonObject(), ct);
+        var result = await Mcp.RequestAsync(http, endpoint, headers, sessionId, protocol, Interlocked.Increment(ref _id), "tools/list", new JsonObject(), server, ct);
         return result?["tools"] as JsonArray ?? [];
     }
 
     /// <returns>The tool's answer, and whether the tool reported an error.</returns>
     public async Task<(string Text, bool IsError)> CallAsync(string name, JsonObject arguments, CancellationToken ct)
     {
-        var result = await ArgusMcp.RequestAsync(http, endpoint, token, email, sessionId, protocol, Interlocked.Increment(ref _id), "tools/call",
-            new JsonObject { ["name"] = name, ["arguments"] = arguments }, ct);
+        var result = await Mcp.RequestAsync(http, endpoint, headers, sessionId, protocol, Interlocked.Increment(ref _id), "tools/call",
+            new JsonObject { ["name"] = name, ["arguments"] = arguments }, server, ct);
         var isError = result?["isError"]?.GetValue<bool>() == true;
         return (isError ? TextOf(result) : StructuredOf(result) ?? TextOf(result), isError);
     }
@@ -48,27 +50,28 @@ public sealed class ArgusSession(HttpClient http, Uri endpoint, string token, st
             return null;
         }
         var value = structured.Count == 1 && structured.ContainsKey("result") ? structured["result"] : structured;
-        return value?.ToJsonString() ?? "null";
+        return value?.ToJsonString(Mcp.Plain) ?? "null";
     }
 }
 
 /// <summary>
 /// The smallest MCP client that does the job: streamable HTTP, JSON-RPC,
-/// answers as JSON or as SSE. Argus accepts the chat token only from inside the
-/// network, with the person's email beside it, exactly as Open WebUI calls it.
+/// answers as JSON or as SSE.
 /// </summary>
-public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat)
+public static class Mcp
 {
     public const string Protocol = "2025-06-18";
-    public const string EmailHeader = "x-openwebui-user-email";
 
-    public bool Enabled => argus.Value.Deployed && !string.IsNullOrWhiteSpace(argus.Value.Url) && !string.IsNullOrWhiteSpace(chat.CurrentValue.ArgusChatToken);
+    /// <summary>
+    /// JSON as written for the model and the page: code keeps its &lt; &amp; + and
+    /// other languages their letters, instead of \u escapes. It never goes into HTML.
+    /// </summary>
+    public static readonly JsonSerializerOptions Plain = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    public async Task<ArgusSession> ConnectAsync(string email, CancellationToken ct)
+    /// <param name="server">The server's name, for messages ("Argus refused: …").</param>
+    public static async Task<McpSession> ConnectAsync(HttpClient http, Uri endpoint, IReadOnlyDictionary<string, string> headers, string server, CancellationToken ct)
     {
-        var endpoint = new Uri(argus.Value.Url.TrimEnd('/') + "/mcp");
-        var token = chat.CurrentValue.ArgusChatToken!;
-        using var req = Build(endpoint, token, email, null, null, new JsonObject
+        using var req = Build(endpoint, headers, null, null, new JsonObject
         {
             ["jsonrpc"] = "2.0", ["id"] = 1, ["method"] = "initialize",
             ["params"] = new JsonObject
@@ -78,32 +81,41 @@ public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOpt
                 ["clientInfo"] = new JsonObject { ["name"] = "llm-app", ["version"] = AppInfo.Current.Version },
             },
         });
-        using var res = await SendAsync(http, req, ct);
+        using var res = await SendAsync(http, req, server, ct);
         var session = res.Headers.TryGetValues("mcp-session-id", out var ids) ? ids.First() : null;
-        var result = await ReadResultAsync(res, 1, ct);
+        var result = await ReadResultAsync(res, 1, server, ct);
         var protocol = result?["protocolVersion"]?.GetValue<string>() ?? Protocol;
-        using (var note = Build(endpoint, token, email, session, protocol, new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/initialized" }))
-        using (await SendAsync(http, note, ct))
+        using (var note = Build(endpoint, headers, session, protocol, new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/initialized" }))
+        using (await SendAsync(http, note, server, ct))
         {
         }
-        return new ArgusSession(http, endpoint, token, email, session, protocol) { Instructions = result?["instructions"]?.GetValue<string>() };
+        return new McpSession(http, endpoint, headers, session, protocol, server) { Instructions = result?["instructions"]?.GetValue<string>() };
     }
 
-    internal static async Task<JsonNode?> RequestAsync(HttpClient http, Uri endpoint, string token, string email, string? session, string protocol,
-        int id, string method, JsonObject @params, CancellationToken ct)
+    internal static async Task<JsonNode?> RequestAsync(HttpClient http, Uri endpoint, IReadOnlyDictionary<string, string> headers, string? session, string protocol,
+        int id, string method, JsonObject @params, string server, CancellationToken ct)
     {
-        using var req = Build(endpoint, token, email, session, protocol, new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id, ["method"] = method, ["params"] = @params });
-        using var res = await SendAsync(http, req, ct);
-        return await ReadResultAsync(res, id, ct);
+        using var req = Build(endpoint, headers, session, protocol, new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id, ["method"] = method, ["params"] = @params });
+        using var res = await SendAsync(http, req, server, ct);
+        return await ReadResultAsync(res, id, server, ct);
     }
 
-    private static HttpRequestMessage Build(Uri endpoint, string token, string email, string? session, string? protocol, JsonObject body)
+    private static HttpRequestMessage Build(Uri endpoint, IReadOnlyDictionary<string, string> headers, string? session, string? protocol, JsonObject body)
     {
         var req = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         req.Headers.Accept.ParseAdd("application/json");
         req.Headers.Accept.ParseAdd("text/event-stream");
-        req.Headers.Add(EmailHeader, email);
+        foreach (var (name, value) in headers)
+        {
+            if (string.Equals(name, "Authorization", StringComparison.OrdinalIgnoreCase) && value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", value[7..]);
+            }
+            else
+            {
+                req.Headers.TryAddWithoutValidation(name, value);
+            }
+        }
         if (session is not null)
         {
             req.Headers.Add("mcp-session-id", session);
@@ -115,7 +127,7 @@ public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOpt
         return req;
     }
 
-    private static async Task<HttpResponseMessage> SendAsync(HttpClient http, HttpRequestMessage req, CancellationToken ct)
+    private static async Task<HttpResponseMessage> SendAsync(HttpClient http, HttpRequestMessage req, string server, CancellationToken ct)
     {
         HttpResponseMessage res;
         try
@@ -124,7 +136,7 @@ public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOpt
         }
         catch (Exception ex) when (ex is HttpRequestException || (ex is TaskCanceledException && !ct.IsCancellationRequested))
         {
-            throw new ArgusToolException("Argus did not answer.");
+            throw new McpException($"{server} did not answer.");
         }
         if (!res.IsSuccessStatusCode)
         {
@@ -132,12 +144,12 @@ public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOpt
             res.Dispose();
             // A 401 from Argus names the reason (unknown person, no GitLab account): pass it on.
             var reason = TryError(body) ?? $"HTTP {(int)res.StatusCode}";
-            throw new ArgusToolException("Argus refused: " + reason);
+            throw new McpException($"{server} refused: {reason}");
         }
         return res;
     }
 
-    private static async Task<JsonNode?> ReadResultAsync(HttpResponseMessage res, int id, CancellationToken ct)
+    private static async Task<JsonNode?> ReadResultAsync(HttpResponseMessage res, int id, string server, CancellationToken ct)
     {
         var text = await res.Content.ReadAsStringAsync(ct);
         IEnumerable<string> messages = res.Content.Headers.ContentType?.MediaType == "text/event-stream"
@@ -160,11 +172,11 @@ public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOpt
             }
             if (node["error"] is JsonObject err)
             {
-                throw new ArgusToolException(err["message"]?.GetValue<string>() ?? "Argus reported an error.");
+                throw new McpException(err["message"]?.GetValue<string>() ?? $"{server} reported an error.");
             }
             return node["result"];
         }
-        throw new ArgusToolException("Argus sent no answer to the request.");
+        throw new McpException($"{server} sent no answer to the request.");
     }
 
     private static string? TryError(string body)
@@ -180,18 +192,34 @@ public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOpt
         }
     }
 
-    /// <summary>MCP tools, as the OpenAI tool definitions the model expects.</summary>
-    public static JsonArray ToOpenAiTools(JsonArray mcpTools) =>
+    /// <summary>MCP tools, as the OpenAI tool definitions the model expects, optionally renamed.</summary>
+    public static JsonArray ToOpenAiTools(JsonArray mcpTools, Func<string, string>? rename = null) =>
         [.. mcpTools.OfType<JsonObject>().Select(t => (JsonNode)new JsonObject
         {
             ["type"] = "function",
             ["function"] = new JsonObject
             {
-                ["name"] = t["name"]?.DeepClone(),
+                ["name"] = rename is null ? t["name"]?.DeepClone() : rename(t["name"]?.GetValue<string>() ?? ""),
                 ["description"] = t["description"]?.DeepClone() ?? "",
                 ["parameters"] = t["inputSchema"]?.DeepClone() ?? new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() },
             },
         })];
+}
+
+/// <summary>
+/// Argus's MCP server, as the chat uses it: the chat token and the person's
+/// email beside it, accepted only from inside the network, exactly as Open WebUI
+/// calls it. Argus answers with that person's GitLab access.
+/// </summary>
+public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat)
+{
+    public const string EmailHeader = "x-openwebui-user-email";
+
+    public bool Enabled => argus.Value.Deployed && !string.IsNullOrWhiteSpace(argus.Value.Url) && !string.IsNullOrWhiteSpace(chat.CurrentValue.ArgusChatToken);
+
+    public Task<McpSession> ConnectAsync(string email, CancellationToken ct) =>
+        Mcp.ConnectAsync(http, new Uri(argus.Value.Url.TrimEnd('/') + "/mcp"),
+            new Dictionary<string, string> { ["Authorization"] = "Bearer " + chat.CurrentValue.ArgusChatToken, [EmailHeader] = email }, "Argus", ct);
 
     /// <summary>Argus's words when something exists but the person cannot read it (src/argus/access.py).</summary>
     public const string NoAccessMarker = "Nothing you have access to matches this";

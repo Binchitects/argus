@@ -49,6 +49,7 @@ export const routes: RouteObject[] = [
               { path: 'people/:id', ...lazy(() => import('@/pages/admin/person').then((m) => ({ Component: m.PersonPage }))) },
               { path: 'groups', ...lazy(() => import('@/pages/admin/groups').then((m) => ({ Component: m.GroupsPage }))) },
               { path: 'groups/:id', ...lazy(() => import('@/pages/admin/group').then((m) => ({ Component: m.GroupPage }))) },
+              { path: 'tools', ...lazy(() => import('@/pages/admin/tools').then((m) => ({ Component: m.ToolsPage }))) },
               { path: 'sign-in', ...lazy(() => import('@/pages/admin/sign-in').then((m) => ({ Component: m.SignInPage }))) },
               { path: 'model', ...lazy(() => import('@/pages/admin/model').then((m) => ({ Component: m.ModelPage }))) },
               { path: 'settings', ...lazy(() => import('@/pages/admin/settings').then((m) => ({ Component: m.SettingsPage }))) },

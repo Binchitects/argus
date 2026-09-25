@@ -28,6 +28,19 @@ WebUI still runs at `https://chat.<LLM_DOMAIN>` until the new web is signed off
   - Arrows show "2 / 3" on a question or an answer with other versions, and
     switch between them.
   - What is on screen, and what the model reads, is the branch you are on.
+- **Tools.** **Tools** beside the paperclip lists the tools you may use and
+  which of them this chat has on; a new chat starts with those an admin put
+  on in new chats. The model calls a tool when a question needs it.
+  - **Argus**: the code you can read in GitLab (below).
+  - **Image generation**: a picture from a description, made by the image
+    model at the gateway (the `image` profile). It shows in the answer, opens
+    full size, and is a file of the chat.
+  - **Calculator**: exact arithmetic to 28 digits, so the model does not
+    guess. Functions like sqrt and sin are good to 15 digits.
+  - **Date and time**: the time in any time zone, and the days between dates.
+  - **MCP servers** an admin added: their tools, by name.
+  - A tool set to **ask before each call** waits with **Allow** and **Don't
+    allow**. A call you do not allow is not run, and the model is told so.
 - **Tool calls.** Each call is a card: the tool, what it was asked, whether it
   ran, how many results, and how long it took. Opened, it shows Argus's answer
   for what it is:
@@ -99,6 +112,13 @@ attachments, instead of being lost.
   email to a GitLab account and its access. Without a GitLab account for the
   email, the answer carries "Argus is not available for this answer" with
   Argus's reason, and the model answers without code search.
+- **Tools are for whom an admin says** (Admin → Tools): everyone, admins, or
+  members of chosen groups (Admin → Groups: app groups, or groups from the
+  company directory). A chat can only turn on tools its owner may use, and the
+  server checks it on every answer: a tool an admin takes away leaves every
+  chat at once.
+- **MCP servers** get the person's email only if the admin set a header for
+  it. A server's key is stored encrypted under `APP_DATA_KEY` and never shown.
 
 ## Cost and credit
 
@@ -146,11 +166,18 @@ branch.
 | "This conversation is longer than the model can read" | the question and its attachments alone do not fit | start a new chat, or attach less |
 | "… cannot see images" | the chat's model has no vision | choose a model that shows "Sees images" |
 | "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](ARGUS.md) |
+| "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
+| No **Image generation** in the Tools menu | no image model at the gateway | turn on the `image` profile (Settings → Deployment) and apply it |
 
 ## How it is tested
 
 - **Backend (xUnit):** streaming, tool rounds (Argus's rows reach the model and
-  the page as one JSON list), the no-access notice, stop, the budget sentence,
+  the page as one JSON list), each built-in tool, a chat's own tools and who may
+  use them (off, groups, off in new chats), asking first (declined and allowed,
+  and nobody else can answer), pictures kept as the person's files and deleted
+  with the chat, an MCP server tested, added, called with its key and the
+  person's email, and removed, the calculator's parser (exact to 28 digits,
+  code refused), the no-access notice, stop, the budget sentence,
   a revoked key being replaced, attachments, and ownership. Also the GitLab
   link address applying at once.
   Also branches (edits, answering again, switching, parents from another chat
@@ -179,8 +206,12 @@ branch.
 - **Browser (Playwright), desktop and phone, both themes, with axe, in CI
   too:** a chat with Argus's answers and two images, served by the browser
   itself, from the links to the image viewer.
-- **Browser, with or without a model (in CI too):** a very long title leaves
-  no sideways scrolling; a chat forked, archived, found under Archived chats,
+- **Browser, against the real model:** the model calls the calculator and gets
+  the exact product of two nine-digit numbers, and draws a picture with the
+  image tool, which opens full size.
+- **Browser, with or without a model (in CI too):** the Tools menu turns a
+  tool off for a chat; the Tools and Groups pages pass axe in both themes; a
+  very long title leaves no sideways scrolling; a chat forked, archived, found under Archived chats,
   brought back and deleted; the question rail and a fork from an answer.
 - **Browser (Playwright), desktop and phone, against the real model:**
   - streaming and reload

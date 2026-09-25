@@ -44,16 +44,43 @@ public sealed class GatewayChat(HttpClient http, ChatKey key)
         }
     }
 
-    private async Task<HttpResponseMessage> OpenAsync(JsonObject request, string personEmail, CancellationToken ct)
+    /// <summary>One picture from an image model at the gateway, as PNG bytes. The spend is the person's, as in chat.</summary>
+    public async Task<byte[]> GenerateImageAsync(string model, string prompt, string size, string personEmail, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/chat/completions", UriKind.Relative))
+        var body = new JsonObject { ["model"] = model, ["prompt"] = prompt, ["size"] = size, ["n"] = 1, ["response_format"] = "b64_json", ["user"] = personEmail };
+        for (var attempt = 1; ; attempt++)
+        {
+            HttpResponseMessage res;
+            try
+            {
+                res = await PostAsync("/v1/images/generations", body, personEmail, "application/json", ct);
+            }
+            catch (ChatGatewayException ex) when (ex.Status == 401 && attempt == 1)
+            {
+                await key.ForgetAsync(ct);
+                continue;
+            }
+            using (res)
+            {
+                var b64 = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct))?["data"]?[0]?["b64_json"]?.GetValue<string>();
+                return string.IsNullOrEmpty(b64) ? throw new ChatGatewayException("The image model sent no picture.") : Convert.FromBase64String(b64);
+            }
+        }
+    }
+
+    private Task<HttpResponseMessage> OpenAsync(JsonObject request, string personEmail, CancellationToken ct) =>
+        PostAsync("/v1/chat/completions", request, personEmail, "text/event-stream", ct);
+
+    private async Task<HttpResponseMessage> PostAsync(string path, JsonObject request, string personEmail, string accept, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative))
         {
             Content = new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json"),
         };
         // Attribution (LiteLLM's user_header_mappings) and enforcement (the `user`
         // field, set by the caller): the same two signals identity-proxy gives chat.
         req.Headers.Add("X-OpenWebUI-User-Email", personEmail);
-        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
         try
         {
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await key.GetAsync(ct));

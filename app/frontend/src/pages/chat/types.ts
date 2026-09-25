@@ -8,12 +8,24 @@ export interface ChatModel {
   prices: { input: number | null; cachedInput: number | null; output: number | null }
 }
 
+/** A tool this person may use; a chat turns it on or off. */
+export interface ChatTool {
+  id: string
+  title: string
+  description: string
+  /** search-code, image, calculator, clock, plug */
+  icon: string
+  onByDefault: boolean
+  askFirst: boolean
+}
+
 export interface ChatConfig {
   model: string | null
   models: ChatModel[]
   presets: { level: string; label: string }[]
   defaultThinking: string | null
   argus: boolean
+  tools: ChatTool[]
   gitlabUrl: string | null
   maxUploadBytes: number
   imageTypes: string[]
@@ -43,7 +55,8 @@ export interface Message {
   toolCallId: string | null
   toolCalls: ToolCall[] | null
   attachments: Attachment[]
-  status: 'complete' | 'stopped' | 'failed'
+  /** declined: a tool call the person did not allow. */
+  status: 'complete' | 'stopped' | 'failed' | 'declined'
   error: string | null
   model: string | null
   promptTokens: number | null
@@ -64,6 +77,8 @@ export interface ConversationSummary {
 
 export interface Conversation extends ConversationSummary {
   thinking: string | null
+  /** The ids of the tools this chat has on. */
+  tools: string[]
   useArgus: boolean
   model: string | null
   systemPrompt: string | null
@@ -81,6 +96,8 @@ export interface Conversation extends ConversationSummary {
 /** A chat's own settings, as sent to create or change it. */
 export interface ChatSettings {
   thinking?: string | null
+  /** Tool ids; unset means the tools that are on in new chats. */
+  tools?: string[]
   useArgus?: boolean
   model?: string | null
   systemPrompt?: string | null
@@ -97,8 +114,9 @@ export type ChatEvent =
   | { type: 'thought'; ms: number }
   | { type: 'content'; text: string }
   | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; thinkingMs: number | null; durationMs: number | null }
-  | { type: 'tool_call'; id: string; name: string; arguments: string }
-  | { type: 'tool_result'; id: string; messageId: string; name: string; text: string; isError: boolean; noAccess: boolean; durationMs: number }
+  | { type: 'tool_call'; id: string; name: string; arguments: string; tool?: string | null }
+  | { type: 'approval'; id: string; name: string; arguments: string; tool: string; title: string }
+  | { type: 'tool_result'; id: string; messageId: string; name: string; text: string; isError: boolean; declined?: boolean; noAccess: boolean; durationMs: number; attachments?: Attachment[] }
   | { type: 'notice'; kind: string; text: string }
   | { type: 'error'; message: string }
   | { type: 'done'; id: string }

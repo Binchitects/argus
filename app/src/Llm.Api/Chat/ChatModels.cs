@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Chat;
 
 /// <summary>
-/// The models the chat offers: the gateway's list, cached for a minute. When the
+/// The models the chat offers (and the picture models its image tool uses): the gateway's list, cached for a minute. When the
 /// gateway cannot say, the deployment's own model (from .env) stands in, so the
 /// chat still opens and says why answers fail rather than failing to load.
 /// </summary>
@@ -18,7 +18,15 @@ public sealed class ChatModels(IServiceScopeFactory scopes, IOptions<StackOption
 
     public string? DefaultName => stack.Value.ModelName;
 
-    public async Task<IReadOnlyList<GatewayModel>> ListAsync(CancellationToken ct = default)
+    /// <summary>The models one can chat with.</summary>
+    public async Task<IReadOnlyList<GatewayModel>> ListAsync(CancellationToken ct = default) =>
+        [.. (await AllAsync(ct)).Where(m => m.Mode == "chat")];
+
+    /// <summary>The gateway's picture model, if it serves one.</summary>
+    public async Task<GatewayModel?> ImageModelAsync(CancellationToken ct = default) =>
+        (await AllAsync(ct)).FirstOrDefault(m => m.Mode == "image_generation");
+
+    private async Task<IReadOnlyList<GatewayModel>> AllAsync(CancellationToken ct)
     {
         if (_cached is { } c && clock.GetUtcNow() - _at < Fresh)
         {

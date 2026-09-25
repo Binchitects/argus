@@ -34,7 +34,8 @@ export function parseFence(info: string | undefined, code: string): { lang: stri
 }
 
 export type FileItem =
-  | { kind: 'attachment'; key: string; name: string; attachment: Attachment }
+  /** made: a picture a tool made (image generation), not something attached. */
+  | { kind: 'attachment'; key: string; name: string; attachment: Attachment; made?: boolean }
   | { kind: 'code'; key: string; name: string; lang: string | null; code: string; messageId: string }
   | { kind: 'repo'; key: string; name: string; repo: string | null; path: string; branch: string | null; lang: string | null; code: string; truncated: boolean }
 
@@ -61,7 +62,7 @@ export function collectFiles(path: Message[]): FileItem[] {
     for (const a of m.attachments) {
       if (seen.has(a.id)) continue
       seen.add(a.id)
-      items.push({ kind: 'attachment', key: `a-${a.id}`, name: a.fileName, attachment: a })
+      items.push({ kind: 'attachment', key: `a-${a.id}`, name: a.fileName, attachment: a, made: m.role === 'tool' })
     }
     if (m.role === 'tool' && m.status !== 'failed') {
       const file = toHits(parseResult(m.content))?.find((h) => h.content !== null)

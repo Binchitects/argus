@@ -17,6 +17,8 @@ import { FilesPanel } from './files-panel'
 import { ChatHeader } from './header'
 import { reduce, stopped, withQuestion, type LiveState } from './live'
 import { QuestionRail } from './question-rail'
+import { toolsOn } from './tools'
+import { ToolsPicker } from './tools-picker'
 import { ChatList } from './sidebar'
 import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, QuestionTurn } from './turns'
@@ -89,7 +91,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const queryClient = useQueryClient()
   const loaded = useQuery({ ...conversationQuery(id ?? ''), enabled: !!id })
   const brand = useQuery(infoQuery).data?.name
-  const [draft, setDraft] = useState<ChatSettings>({ useArgus: true })
+  const [draft, setDraft] = useState<ChatSettings>({})
   const [live, setLive] = useState<LiveState | null>(null)
   const liveRef = useRef<LiveState | null>(null)
   useEffect(() => {
@@ -109,7 +111,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
 
   const data = loaded.data
   const settings: ChatSettings = data
-    ? { model: data.model, thinking: data.thinking, useArgus: data.useArgus, systemPrompt: data.systemPrompt, temperature: data.temperature, topP: data.topP, maxTokens: data.maxTokens }
+    ? { model: data.model, thinking: data.thinking, tools: data.tools, systemPrompt: data.systemPrompt, temperature: data.temperature, topP: data.topP, maxTokens: data.maxTokens }
     : draft
   const view: LiveState = live ?? { messages: data?.messages ?? [], leaf: data?.currentLeafId ?? null, notices: [], title: null, thinkingSince: null }
   const tree = useMemo(() => new ChatTree(view.messages), [view.messages])
@@ -117,6 +119,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const turns = toTurns(path)
   const files = useMemo(() => collectFiles(path), [path])
   const model = config.models.find((m) => m.name === settings.model) ?? config.models[0]
+  const toolsOnHere = toolsOn(config.tools, settings.tools)
   const title = live?.title ?? data?.title ?? null
 
   useEffect(() => {
@@ -163,6 +166,13 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     }
   }
 
+  /** Yes or no to a tool call waiting for the person. */
+  const decide = async (callId: string, allow: boolean) => {
+    if (!id) return
+    setLive((s) => (s ? { ...s, waiting: (s.waiting ?? []).filter((w) => w !== callId) } : s))
+    await api(`/api/chat/conversations/${id}/tool-calls/${encodeURIComponent(callId)}`, { body: { allow } }).catch((e) => toast.error(errorMessage(e)))
+  }
+
   const unarchive = async () => {
     if (!id) return
     await archiveChat(id, false).catch((e) => toast.error(errorMessage(e)))
@@ -181,6 +191,8 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
       toast.error(errorMessage(e))
     }
   }
+
+  const toolsPicker = model?.tools === false ? null : <ToolsPicker tools={config.tools} value={toolsOnHere} onChange={(tools) => void change({ tools })} />
 
   const rename = async (t: string) => {
     if (!id) return
@@ -326,14 +338,14 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
             <div className="w-full max-w-2xl">
               <h1 className="mb-2 text-center text-2xl font-semibold tracking-tight">What can I help with?</h1>
               <p className="mb-6 text-center text-muted-foreground">
-                {config.argus && (settings.useArgus ?? true) ? 'Ask anything. Argus searches the code you have access to in GitLab.' : 'Ask anything, or attach text, code, PDFs and images to ask about them.'}
+                {toolsOnHere.includes('argus') ? 'Ask anything. Argus searches the code you have access to in GitLab.' : 'Ask anything, or attach text, code, PDFs and images to ask about them.'}
               </p>
               {error && (
                 <Alert variant="destructive" className="mb-3">
                   {error}
                 </Alert>
               )}
-              <Composer streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} uploads={uploads} model={model} autoFocus big />
+              <Composer streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} uploads={uploads} model={model} tools={toolsPicker} autoFocus big />
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
                 {(config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions).map((s) => (
                   <button
@@ -388,6 +400,8 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                           onRegenerate={regenerate}
                           onOpenFile={openFile}
                           onFork={id ? (messageId) => void forkFrom(messageId) : undefined}
+                          approvals={streaming && i === lastTurn ? view.waiting : undefined}
+                          onDecide={(callId, allow) => void decide(callId, allow)}
                           busy={streaming}
                         />
                       )}
@@ -413,7 +427,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                   <ArrowDown />
                 </Button>
               )}
-              <Composer streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} uploads={uploads} model={model} autoFocus />
+              <Composer streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} uploads={uploads} model={model} tools={toolsPicker} autoFocus />
             </div>
           </>
         )}

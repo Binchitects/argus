@@ -286,6 +286,34 @@ fast classification or as a fallback while the big model is busy.
 
 The two shares of `GPU_MEMORY_UTILIZATION` must add up to less than 1.
 
+### Image generation (`image` profile)
+
+A picture model beside the chat model, on the same GPU. The chat's **Image
+generation** tool and anyone's API key use it through the gateway, as the
+model `IMAGEGEN_MODEL_NAME` (`POST /v1/images/generations`). The spend is
+counted against the person, like chat.
+
+`imagegen` runs [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)'s
+server with **FLUX.2 [klein] 4B** (Apache 2.0) by default. Its three files
+(about 5.3 GB) go in `IMAGEGEN_MODEL_DIR`; the `imagegen` service in
+`docker-compose.yml` names where to get each one.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `IMAGEGEN_MODEL_NAME` | `FLUX.2-klein-4B` | the name at the gateway and in the chat |
+| `IMAGEGEN_MODEL_DIR` | — | the host folder with the files |
+| `IMAGEGEN_DIFFUSION_MODEL`, `IMAGEGEN_TEXT_ENCODER`, `IMAGEGEN_VAE` | klein's files | file names in that folder |
+| `IMAGEGEN_STEPS`, `IMAGEGEN_CFG_SCALE` | `4`, `1.0` | right for a distilled model like klein |
+| `IMAGEGEN_MAX_VRAM` | `-1` | GiB of GPU memory it may use; negative leaves that much free |
+
+**Sharing the GPU.** The weights stay in RAM, and each step streams them to
+the GPU within `IMAGEGEN_MAX_VRAM`, so the chat model's memory is never taken.
+Measured on a 24 GB RTX 3090 beside a 21 GB chat model: 1024x1024 in about
+27 s, 768x768 in 20 s.
+
+**Isolation.** The server has no key of its own. It sits on an internal network
+(`image-net`) that only LiteLLM joins, with no way out.
+
 ---
 
 ## 8. Hardware limits
@@ -506,6 +534,7 @@ for what each brings up; this is the short reference:
 | `multi-model` | `vllm-secondary` |
 | `argus` | `argus`, `ollama` |
 | `embed` | `ollama` |
+| `image` | `imagegen` (picture generation; see §7) |
 | `smi` | `nvidia-smi-exporter`, `cpu-temp-exporter` |
 | `dcgm` | `dcgm-exporter` |
 | `cadvisor` | `cadvisor` |
