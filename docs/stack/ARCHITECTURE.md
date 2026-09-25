@@ -96,6 +96,8 @@ key always starts; everything else needs its profile named.
 | `argus` | `argus`, `ollama` | the code index and its embedding model |
 | `embed` | `ollama` | embeddings alone, without Argus |
 | `image` | `imagegen` | picture generation beside the chat model, on the same GPU, behind the gateway |
+| `sandbox` | `sandbox` | the chat's Python: no network, a job per unprivileged user, limits; the app hands it jobs through a volume |
+| `websearch` | `searxng` | a search engine for the chat's Web tool, on its own network with the app only |
 | `smi` | `nvidia-smi-exporter`, `cpu-temp-exporter` | GPU/CPU telemetry via NVML and the host's own sensors |
 | `dcgm` | `dcgm-exporter` | the alternative GPU exporter; heavier, more detail |
 | `cadvisor` | `cadvisor` | per-container CPU/memory |
@@ -360,6 +362,17 @@ Exactly one of `llamacpp`/`vllm` should hold the GPU; `ENGINE_API_BASE`,
 `ENGINE_API_KEY` and `ENGINE_MODEL` in `.env` are what point the gateway at the
 one you chose.
 
+### 7.3a Chat tools
+
+| service | image | what it does |
+|---|---|---|
+| `sandbox` | built from `deploy/sandbox` (Python 3.13 and data packages) | runs the chat's Python. `network_mode: none`, a read-only root, all capabilities dropped but those needed to run each job as its own user (20000 + slot), `no-new-privileges`, an init that reaps orphans, pid, memory and CPU limits; per job: CPU time, address space, file size, open files and process limits, a wiped tmpfs directory, and every process of its user killed afterwards. The app writes jobs to the `sandbox-jobs` volume and reads results beside them: no port, no Docker socket |
+| `searxng` | `ghcr.io/searxng/searxng` (pinned) | search for the Web tool, answering the app in JSON. On `search-net` with the app only, read-only, as its own user, no port or route |
+
+The Web tool itself runs in the app: a page is opened only when its site is
+allowed and every address it connects to (redirects too, checked as each
+connection is made) is on the public internet.
+
 ### 7.4 Gateway
 
 | service | image | what it does |
@@ -488,6 +501,7 @@ rather than designed. This table is the short path from symptom to cause.
 | `config/traefik/certs/*.crt` | **yes**, by `tls-init` | no |
 | `config/prometheus/secrets/llamacpp.token` | **yes** | no |
 | `config/engine/` (`models.ini`, `active`, `targets.json`) | **yes**, by the app (Admin → Models) | no; the engine and Prometheus read it |
+| `config/searxng/settings.yml` | no | rarely: the search engine's settings (engines, safe search); its key comes from `SEARXNG_SECRET` |
 | `config/authelia/directory/` | **yes** — the list of people (no passwords) the app publishes for Argus | no; the directory itself is kept with a `.gitkeep` |
 | `config/argus/tls/` | empty; you drop a CA here | yes, in the airgap/private-CA case |
 | `env-samples/*.env` | no | they are templates; copy one to `.env` |

@@ -36,6 +36,10 @@ networks:
   image-net:
     name: ${COMPOSE_PROJECT_NAME:-llmservice}_image
     internal: true
+  # The search engine's own network: out to the internet, and to the app, which
+  # is its only client. Nothing else of the stack is on it.
+  search-net:
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_search
 
 volumes:
   argus-data:
@@ -56,6 +60,8 @@ volumes:
   vllm-cache:
     name: ${COMPOSE_PROJECT_NAME:-llmservice}_vllm-cache
   llamacpp-engine:
+  # Jobs for the Python sandbox and their results (the app writes, the sandbox runs).
+  sandbox-jobs:
   open-webui-data:
   prometheus-data:
   prometheus-secrets:
@@ -1052,6 +1058,79 @@ services:
     logging: *default-logging
 
   # ============================================================================
+  # PYTHON SANDBOX (profile: sandbox)
+  #
+  # The chat's Python tool runs code here. No network at all, a read-only root,
+  # only the capabilities needed to run each job as its own unprivileged user,
+  # with CPU, memory, file and process limits (deploy/sandbox/runner.py). The
+  # app hands it jobs through the sandbox-jobs volume: no Docker socket, no port.
+  # ============================================================================
+  sandbox:
+    build: ${LLM_DEPLOY_DIR:-./deploy}/sandbox
+    image: llmservice-sandbox:latest
+    container_name: sandbox
+    profiles: [sandbox]
+    restart: unless-stopped
+    # An init as PID 1 reaps what a job orphaned: zombies would count against
+    # the next job's process limit (found by scripts/sandbox-check.py).
+    init: true
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    # Root in the container only to hand each job to its own user and clean up after it.
+    cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: ${SANDBOX_MEMORY:-3g}
+    cpus: ${SANDBOX_CPUS:-2}
+    tmpfs:
+      - /work:size=${SANDBOX_DISK:-1g},mode=0711
+      - /tmp:size=64m,mode=0700
+    volumes:
+      - sandbox-jobs:/jobs
+    environment:
+      SANDBOX_OWNER_UID: ${LLM_UID:-1000}
+      SANDBOX_OWNER_GID: ${LLM_GID:-1000}
+      SANDBOX_SLOTS: ${SANDBOX_SLOTS:-2}
+      SANDBOX_JOB_MEMORY_MB: ${SANDBOX_JOB_MEMORY_MB:-1536}
+      SANDBOX_MAX_TIMEOUT: "300"
+    logging: *default-logging
+
+  # ============================================================================
+  # WEB SEARCH (profile: websearch)
+  #
+  # SearXNG for the chat's Web tool: it asks public search engines and answers
+  # the app in JSON. No port and no route: the app is its only client, on
+  # search-net. Needs SEARXNG_SECRET in .env (openssl rand -hex 32); without it
+  # SearXNG refuses to start. The Web tool itself stays off until an admin turns
+  # it on and allows sites (Settings -> Python and web).
+  # ============================================================================
+  searxng:
+    image: ${SEARXNG_IMAGE:-ghcr.io/searxng/searxng@sha256:cfbf1eac79dac3044a510e0f671bdad499b3dc4914cd2a77dfc9328238035add}
+    container_name: searxng
+    profiles: [websearch]
+    restart: unless-stopped
+    networks: [search-net]
+    user: "977:977"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /var/cache/searxng:uid=977,gid=977,mode=0700
+      - /tmp
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    healthcheck:
+      test: ["CMD", "/usr/local/searxng/.venv/bin/python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8080/healthz', headers={'X-Real-IP': '127.0.0.1'}), timeout=4)"]
+      interval: 30s
+      timeout: 6s
+      start_period: 20s
+      retries: 3
+    logging: *default-logging
+
+  # ============================================================================
   # ARGUS (profile: argus)
   #
   # Semi-RAG code index and documentation server. Indexes repositories from a
@@ -1374,7 +1453,8 @@ services:
     restart: unless-stopped
     # The owner of config/: the files the app writes stay yours (see auth-init).
     user: "${LLM_UID:-1000}:${LLM_GID:-1000}"
-    networks: [llm-net]
+    # search-net: the websearch profile's SearXNG (the Web tool's search).
+    networks: [llm-net, search-net]
     depends_on:
       postgres:
         condition: service_healthy
@@ -1494,6 +1574,10 @@ services:
       StackEnv__ARGUS_GITLAB_CA_CERT: ${ARGUS_GITLAB_CA_CERT:-}
       StackEnv__ARGUS_GITLAB_VERIFY: ${ARGUS_GITLAB_VERIFY:-}
       StackEnv__HF_TOKEN_SET: ${HF_TOKEN:+yes}
+      StackEnv__SANDBOX_SLOTS: ${SANDBOX_SLOTS:-2}
+      StackEnv__SANDBOX_JOB_MEMORY_MB: ${SANDBOX_JOB_MEMORY_MB:-1536}
+      StackEnv__SANDBOX_MEMORY: ${SANDBOX_MEMORY:-3g}
+      StackEnv__SANDBOX_CPUS: ${SANDBOX_CPUS:-2}
       StackEnv__IMAGEGEN_MODEL_NAME: ${IMAGEGEN_MODEL_NAME:-FLUX.2-klein-4B}
       StackEnv__IMAGEGEN_MODEL_DIR: ${IMAGEGEN_MODEL_DIR:-}
       StackEnv__IMAGEGEN_DIFFUSION_MODEL: ${IMAGEGEN_DIFFUSION_MODEL:-flux-2-klein-4b-Q4_0.gguf}
@@ -1523,6 +1607,8 @@ services:
       # Prometheus's targets (written here), and the model library (read only).
       - ${LLM_CONFIG_DIR:-./config}/engine:/engine-config
       - ${LLAMACPP_LIBRARY_DIR:-${LLAMACPP_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}}:/library:ro
+      # The Python sandbox's jobs (profile sandbox): code and files in, results out.
+      - sandbox-jobs:/sandbox
     read_only: true
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]

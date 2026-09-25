@@ -40,6 +40,19 @@ WebUI still runs at `https://chat.<LLM_DOMAIN>` until the new web is signed off
   - **Calculator**: exact arithmetic to 28 digits, so the model does not
     guess. Functions like sqrt and sin are good to 15 digits.
   - **Date and time**: the time in any time zone, and the days between dates.
+  - **Python**: code run in the sandbox (the `sandbox` profile) with numpy,
+    pandas, matplotlib, scipy, sympy and openpyxl. The chat's files are in its
+    working directory under their names (the original .xlsx, not its text);
+    what it writes comes back: charts as pictures in the answer, other files
+    in the Files panel and on the card, to open or download. Each run starts
+    afresh, has no network, and stops at its time limit (60 s unless changed).
+  - **Reading files**: a long attachment goes into the question only up to a
+    budget (30,000 characters), with a note saying how long it really is; the
+    model reads on by lines, or searches it, when it needs more. Files a tool
+    made are read the same way.
+  - **Web** (off until an admin turns it on): search (the `websearch`
+    profile's SearXNG) and reading pages, from the sites an admin allows only.
+    Pages are read in parts, as text; PDFs and documents on the web too.
   - **MCP servers** an admin added: their tools, by name.
   - A tool set to **ask before each call** waits with **Allow** and **Don't
     allow**. A call you do not allow is not run, and the model is told so.
@@ -128,6 +141,15 @@ attachments, instead of being lost.
   chat at once.
 - **Models are for whom an admin says** too (Admin → Models), with the same
   rules, in the chat and on the person's API keys.
+- **Python runs are sealed off.** No network at all; each run is its own
+  unprivileged user in its own directory, with CPU, memory, file size and
+  process limits; nothing it starts outlives it; its directory is wiped. It
+  sees only the files of the chat it runs for. `scripts/sandbox-check.py`
+  tests all of it against the running sandbox.
+- **The web is only what an admin allows**: named sites (or `*` for any public
+  one), and never an address inside the network, whatever a name or a
+  redirect points to: every connection is checked as it is made. Pages are
+  data to the model, not instructions.
 - **MCP servers** get the person's email only if the admin set a header for
   it. A server's key is stored encrypted under `APP_DATA_KEY` and never shown.
 
@@ -181,6 +203,9 @@ branch.
 | "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](ARGUS.md) |
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
 | No **Image generation** in the Tools menu | no image model at the gateway | turn on the `image` profile (Settings → Deployment) and apply it |
+| No **Python** in the Tools menu | the sandbox is not running | turn on the `sandbox` profile and apply it; `scripts/sandbox-check.py` says whether it is sound |
+| No **Web** in the Tools menu | it is off (the default), or no site is allowed | Admin → Tools → Web on, and Settings → Python and web → Sites the chat may open |
+| "… is not one of the sites the chat may open" | the page's site is not allowed | allow it in Settings → Python and web, or `*` for any public site |
 
 ## How it is tested
 

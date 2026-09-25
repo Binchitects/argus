@@ -1,12 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, ExternalLink, FileCode2, FileSearch, FileText, Image as ImageIcon, X } from 'lucide-react'
+import { ArrowLeft, Download, ExternalLink, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, X } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { attachmentUrl, configQuery } from './api'
+import { attachmentUrl, configQuery, downloadUrl } from './api'
 import { gitlabLink } from './argus'
 import { CodeBlock } from './code-block'
 import type { FileItem } from './files'
@@ -47,7 +47,7 @@ export function FilesPanel({ files, selected, onSelect, onClose }: { files: File
                   className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring"
                 >
                   <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-md', f.kind === 'attachment' ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary-ink')}>
-                    {f.kind === 'code' ? <FileCode2 className="size-4" /> : f.kind === 'repo' ? <FileSearch className="size-4" /> : f.attachment.kind === 'image' ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}
+                    {f.kind === 'code' ? <FileCode2 className="size-4" /> : f.kind === 'repo' ? <FileSearch className="size-4" /> : f.attachment.kind === 'image' ? <ImageIcon className="size-4" /> : f.attachment.kind === 'file' ? <FileDown className="size-4" /> : <FileText className="size-4" />}
                   </span>
                   <span className="grid min-w-0">
                     <span className="truncate text-sm font-medium">{f.name}</span>
@@ -73,7 +73,35 @@ function Viewer({ file }: { file: FileItem }) {
   if (file.kind === 'code') return <CodeBlock code={file.code} lang={file.lang} name={file.name} />
   if (file.kind === 'repo') return <RepoViewer file={file} />
   if (file.attachment.kind === 'image') return <ImageFile attachment={file.attachment} />
-  return <TextViewer id={file.attachment.id} name={file.name} truncated={file.attachment.truncated} />
+  if (file.attachment.kind === 'file') return <DownloadOnly attachment={file.attachment} />
+  return (
+    <div className="grid gap-2">
+      {file.attachment.original && (
+        <a href={downloadUrl(file.attachment.id)} download={file.attachment.fileName} className="flex w-fit items-center gap-1.5 text-xs font-medium text-primary-ink underline-offset-2 hover:underline">
+          <Download className="size-3.5" aria-hidden="true" /> Download {file.attachment.fileName}
+        </a>
+      )}
+      <TextViewer id={file.attachment.id} name={file.name} truncated={file.attachment.truncated} />
+    </div>
+  )
+}
+
+/** A file that is neither text nor a picture (a .zip Python wrote): what it is, and the file itself. */
+function DownloadOnly({ attachment }: { attachment: Extract<FileItem, { kind: 'attachment' }>['attachment'] }) {
+  return (
+    <div className="grid justify-items-center gap-3 rounded-lg border border-dashed px-4 py-8 text-center">
+      <FileDown className="size-8 text-muted-foreground" aria-hidden="true" />
+      <div>
+        <p className="font-medium break-all">{attachment.fileName}</p>
+        <p className="text-sm text-muted-foreground">{formatValue(attachment.size, 'bytes')} · not a file the page can show</p>
+      </div>
+      <Button asChild size="sm">
+        <a href={downloadUrl(attachment.id)} download={attachment.fileName}>
+          <Download /> Download
+        </a>
+      </Button>
+    </div>
+  )
 }
 
 function ImageFile({ attachment }: { attachment: Extract<FileItem, { kind: 'attachment' }>['attachment'] }) {

@@ -182,8 +182,8 @@ test.describe('chat with the model', () => {
     await thinking(page, 'No thinking')
     const fixtures = new URL('./fixtures/', import.meta.url).pathname
     await page.getByLabel('Attach files').setInputFiles([`${fixtures}plan.docx`, `${fixtures}budget.xlsx`])
-    await expect(page.getByText('plan.docx')).toBeVisible()
-    await expect(page.getByText('budget.xlsx')).toBeVisible()
+    await expect(page.getByText('plan.docx', { exact: true })).toBeVisible()
+    await expect(page.getByText('budget.xlsx', { exact: true })).toBeVisible()
     await ask(page, "What is the project's code name, and what is the Platform team's budget? Reply as: NAME, NUMBER")
     const answer = page.getByRole('region', { name: 'Answer' }).last()
     await expect(answer).toContainText('AMBER-FALCON', { timeout: 120_000 })
@@ -379,6 +379,48 @@ test.describe('tools', () => {
     await done(page)
     await pictures.getByRole('button').first().click()
     await expect(page.getByRole('dialog')).toBeVisible()
+  })
+
+  test('the model searches the web and reads a page of an allowed site', async ({ page, request }) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    test.setTimeout(300_000)
+    const headers = { 'X-Requested-With': 'fetch' }
+    // On for this chat only (not in new chats), with one site allowed; put back after.
+    expect((await request.put('/api/admin/config', { headers, data: { changes: [{ key: 'Web:AllowedSites', value: 'docs.python.org' }] } })).ok()).toBe(true)
+    expect((await request.put('/api/admin/tools/web', { headers, data: { enabled: true, audience: 'Everyone', groups: [], onByDefault: false, askFirst: false } })).ok()).toBe(true)
+    try {
+      await page.goto('/chat')
+      await thinking(page, 'No thinking')
+      await page.getByRole('button', { name: /^Tools: \d+ of \d+ on$/ }).click()
+      await page.getByRole('switch', { name: /^Web/ }).click()
+      await page.keyboard.press('Escape')
+      await ask(page, 'Use web_search to find the Python documentation for asyncio.gather, open that page with fetch_page, and tell me in one sentence what return_exceptions=True does. Give the page address.')
+      const answer = page.getByRole('region', { name: 'Answer' }).last()
+      await expect(answer.locator('.tool-name', { hasText: 'Fetch page' }).first()).toBeVisible({ timeout: 180_000 })
+      await done(page)
+      await expect(answer).toContainText('docs.python.org')
+      await expect(answer).toContainText(/exception/i)
+    } finally {
+      await request.put('/api/admin/tools/web', { headers, data: { enabled: false, audience: 'Everyone', groups: [], onByDefault: false, askFirst: false } })
+      await request.put('/api/admin/config', { headers, data: { changes: [{ key: 'Web:AllowedSites', value: null, reset: true }] } })
+    }
+  })
+
+  test('the model analyses an attached workbook with Python and charts it', async ({ page, request }) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    const tools = (await (await request.get('/api/chat/config')).json()) as { tools: { id: string }[] }
+    test.skip(!tools.tools.some((t) => t.id === 'python'), 'no Python sandbox (profile sandbox)')
+    test.setTimeout(300_000)
+    await page.goto('/chat')
+    await thinking(page, 'No thinking')
+    await page.getByLabel('Attach files').setInputFiles(new URL('./fixtures/budget.xlsx', import.meta.url).pathname)
+    await expect(page.getByText('budget.xlsx', { exact: true })).toBeVisible()
+    await ask(page, 'Use run_python with pandas to read budget.xlsx, print the total of the Budget column, and save a bar chart of Budget by Team as chart.png. Then tell me the total.')
+    const answer = page.getByRole('region', { name: 'Answer' }).last()
+    await expect(answer.locator('.tool-name', { hasText: 'Run python' }).first()).toBeVisible({ timeout: 120_000 })
+    await expect(answer.getByRole('list', { name: 'Pictures' }).getByRole('img')).toBeVisible({ timeout: 180_000 })
+    await done(page)
+    await expect(answer).toContainText(/5,?500/)
   })
 })
 

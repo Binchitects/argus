@@ -55,10 +55,10 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 3D.2 done** (models at runtime: llama.cpp's router, Admin →
-Models, access per model in the chat and on API keys), after 3D part 1 (groups,
-the tool registry, image generation, MCP servers, ask before running). Next: 3D
-part 2 (sandbox, web). The first chat UI and its
+Status: **Phase 3D done**: part 2 (the Python sandbox, the web, reading files
+in parts, Office documents) after 3D.2 (models at runtime) and part 1 (groups,
+the tool registry, image generation, MCP servers, ask before running). Next:
+3E (assistants and knowledge). The first chat UI and its
 [checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
 at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
 
@@ -374,6 +374,41 @@ at `next.<domain>`, which now redirects to `llm.<domain>`.
     real model (5 skipped), no retries.
   - **Left for part 2:** the Python sandbox, web fetch and search, reading
     attachments in parts.
+- **Progress (part 2 of 2):**
+  - **Python sandbox** (profile `sandbox`): its own container with no network
+    at all, a read-only root, and only the capabilities to run each job as its
+    own user; per job CPU time, memory, file size, open file and process
+    limits, a wiped tmpfs directory, everything its user started killed
+    afterwards, and a stop from the page that reaches the run. The app hands
+    it jobs through a volume, so no Docker socket and no port. numpy, pandas,
+    matplotlib, scipy, sympy, openpyxl. The chat's files are in its working
+    directory (the original .xlsx, not its text); charts come back as pictures
+    and other files to open or download.
+  - **Escape tests** (`scripts/sandbox-check.py`, 17 checks against the
+    running container): network, reading the jobs and other runs, writing the
+    image, time (busy and sleeping), memory, file size, a fork bomb, processes
+    that try to outlive the run, huge output, stop.
+  - **Web** (off by default): search through the `websearch` profile's
+    SearXNG, and reading pages, from sites an admin allows only; every
+    connection, redirects included, is checked to be a public address as it
+    is made (DNS rebinding included). Pages are read as text, in parts.
+  - **Reading files in parts:** a long attachment goes into the question up
+    to a budget, with a note; the model reads on by lines or searches it.
+    Files tools made are read the same way. Text kept per attachment went
+    from 200,000 to 1,000,000 characters.
+  - **Office documents** as attachments: Word, Excel, PowerPoint,
+    OpenDocument and RTF, read on the server from their XML.
+  - **Found on the way:** a fork bomb's children, killed but never reaped
+    (the runner was PID 1), filled the next job's process limit: the sandbox
+    now has an init. After a stop, "Answer again" could leave the new answer
+    streaming unseen (a finished run cleared the page), and a stop just
+    before the new answer existed hid every answer; both fixed and tested.
+    The question rail sat under the scrollbar and did not follow a new
+    question; the UI got its motion.
+  - **Tests:** 274 backend, 111 UI, 145 browser on the live stack with the
+    real model (Python on a workbook, a web search and page, Office files),
+    sandbox 17/17, functional 65/65, acceptance 32/32, dashboards 34/34.
+
 
 ### Phase 3D.2 — Models at runtime  *(M)*
 Pulled forward from phase 6.

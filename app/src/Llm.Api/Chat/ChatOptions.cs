@@ -7,7 +7,10 @@ public sealed class ChatOptions
     public string GatewayUrl { get; set; } = "http://litellm:4000";
 
     public int MaxToolRounds { get; set; } = 8;
-    public int MaxAttachmentChars { get; set; } = 200_000;
+    /// <summary>Text kept per attachment (what the Files panel shows and read_file reads).</summary>
+    public int MaxAttachmentChars { get; set; } = 1_000_000;
+    /// <summary>What of one attachment goes into the question itself; the rest is read in parts.</summary>
+    public int InlineAttachmentChars { get; set; } = 30_000;
     public long MaxUploadBytes { get; set; } = 20 * 1024 * 1024;
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromMinutes(15);
 

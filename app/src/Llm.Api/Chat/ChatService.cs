@@ -101,7 +101,7 @@ public sealed partial class ChatService(
             }
         }
 
-        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, string.Join("\n\n", instructions), ct);
+        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, string.Join("\n\n", instructions), runs.ContainsKey("read_file"), ct);
         if (imagesDropped)
         {
             await emit(new { type = "notice", kind = "no_vision", text = $"{modelName} cannot see images, so it got their names only. Choose a model that can see to ask about them." });
@@ -297,7 +297,7 @@ public sealed partial class ChatService(
                 await emit(new
                 {
                     type = "tool_result", id, messageId = result.Id, name, text, isError, declined, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs,
-                    attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType }),
+                    attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType, original = f.Kind != "image" && f.Data != null }),
                 });
             }
         }
@@ -331,10 +331,32 @@ public sealed partial class ChatService(
     }
 
     /// <summary>
+    /// An attachment as it goes into the question: whole when it is short; otherwise
+    /// its start, cut at a line, and a note saying how long it is and how to read on.
+    /// </summary>
+    public static string Inline(ChatAttachment f, int budget, bool canReadFiles)
+    {
+        var cutWhenAttached = f.Truncated ? " (the file itself was longer: it was cut when it was attached)" : "";
+        if (f.Text.Length <= budget)
+        {
+            return f.Truncated ? f.Text + $"\n[end of what was kept{cutWhenAttached}]" : f.Text;
+        }
+        var end = f.Text.LastIndexOf('\n', Math.Max(0, budget - 1));
+        var shown = f.Text[..(end > budget / 2 ? end : budget)];
+        var shownLines = shown.Count(c => c == '\n') + 1;
+        var totalLines = f.Text.Count(c => c == '\n') + 1;
+        var how = canReadFiles
+            ? $"Read on with read_file (file \"{f.FileName}\", from_line {shownLines + 1}), or find parts with search_file."
+            : "The rest is not included here.";
+        return shown + $"\n[This file goes on: lines 1 to {shownLines} of {totalLines} are above ({shown.Length:N0} of {f.Text.Length:N0} characters){cutWhenAttached}. {how}]";
+    }
+
+    /// <summary>
     /// The branch as the model reads it, trimmed from the oldest end to fit its context.
     /// Images go as pictures to a model that can see, and as their names to one that cannot.
     /// </summary>
-    private async Task<(JsonArray Messages, bool ImagesDropped)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string? toolInstructions, CancellationToken ct)
+    private async Task<(JsonArray Messages, bool ImagesDropped)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string? toolInstructions,
+        bool canReadFiles, CancellationToken ct)
     {
         var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
         all[question.Id] = question;
@@ -372,8 +394,13 @@ public sealed partial class ChatService(
                             }
                             continue;
                         }
+                        if (f.Kind == "file")
+                        {
+                            text.Append("\n\n[file attached: ").Append(f.FileName).Append(" (not text; run_python can open it)]");
+                            continue;
+                        }
                         text.Append("\n\n<attachment name=\"").Append(f.FileName.Replace("\"", "'", StringComparison.Ordinal)).Append("\">\n")
-                            .Append(f.Text).Append(f.Truncated ? "\n[truncated]" : "").Append("\n</attachment>");
+                            .Append(Inline(f, chat.CurrentValue.InlineAttachmentChars, canReadFiles)).Append("\n</attachment>");
                     }
                     if (images.Count == 0)
                     {

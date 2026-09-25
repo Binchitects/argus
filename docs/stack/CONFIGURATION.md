@@ -360,6 +360,7 @@ rotating it.
 | `PROXY_AUTH_PASSWORD` | `openssl rand -hex 32` | the matching password |
 | `LLAMACPP_API_KEY` | `openssl rand -hex 32` | the engine's own key, injected by Traefik |
 | `LITELLM_MASTER_KEY` | `echo sk-$(openssl rand -hex 24)` | mints per-person keys. **Must start with `sk-`** |
+| `SEARXNG_SECRET` | `openssl rand -hex 32` | only with the `websearch` profile (SearXNG refuses to start without it); free to rotate |
 | `LITELLM_SALT_KEY` | `echo sk-$(openssl rand -hex 24)` | **never change after first start** |
 | `LLM_PG_PASSWORD` | `openssl rand -hex 32` | the Postgres password; also the default for ClickHouse and MinIO |
 | `WEBUI_SECRET_KEY` | `openssl rand -hex 32` | Open WebUI's session signing key |
@@ -456,6 +457,28 @@ verification failed`.
 
 ---
 
+## 11a. Chat tools: Python and the web (`sandbox`, `websearch` profiles)
+
+| variable | default | what it does |
+|---|---|---|
+| `SANDBOX_SLOTS` | `2` | Python runs at once; more wait for a free slot |
+| `SANDBOX_JOB_MEMORY_MB` | `1536` | memory one run may use (its address space); more is a `MemoryError` |
+| `SANDBOX_MEMORY` | `3g` | the sandbox container's memory, all runs together |
+| `SANDBOX_CPUS` | `2` | its CPUs; a run uses one |
+| `SEARXNG_SECRET` | *(secret)* | the search engine's key (§9) |
+
+What the tools may do is set live in the app, not here (Settings → Python and
+web): the longest Python run (60 s), the sites the Web tool may open (none
+until set; `*` for any public site), and another SearXNG to search with.
+The Web tool is off until an admin turns it on in Admin → Tools.
+
+The sandbox image is built on the first `up` (Python packages from PyPI,
+about 100 MB); `scripts/sandbox-check.py` tests its isolation against the
+running container. Air-gapped, leave `websearch` off; `sandbox` works offline
+once its image is in the bundle.
+
+---
+
 ## 12. Tracing (`tracing` profile)
 
 Langfuse keeps request traces, backed by ClickHouse (the traces) and MinIO (the
@@ -543,6 +566,8 @@ for what each brings up; this is the short reference:
 | `argus` | `argus`, `ollama` |
 | `embed` | `ollama` |
 | `image` | `imagegen` (picture generation; see §7) |
+| `sandbox` | `sandbox` (the chat's Python; see §11a) |
+| `websearch` | `searxng` (search for the chat's Web tool; see §11a) |
 | `smi` | `nvidia-smi-exporter`, `cpu-temp-exporter` |
 | `dcgm` | `dcgm-exporter` |
 | `cadvisor` | `cadvisor` |

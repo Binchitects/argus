@@ -74,7 +74,7 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 /// what admins chose for each: on or off, for whom, on in new chats, ask first.
 /// </summary>
 public sealed class ToolRegistry(
-    AppDbContext db, ArgusTool argus, ImageTool image, CalculatorTool calculator, TimeTool time,
+    AppDbContext db, ArgusTool argus, ImageTool image, CalculatorTool calculator, TimeTool time, FilesTool files, PythonTool python, WebTool web,
     IHttpClientFactory http, IOptions<AuthOptions> auth)
 {
     public const string McpClient = "mcp";
@@ -83,11 +83,11 @@ public sealed class ToolRegistry(
     {
         var settings = await db.ToolSettings.AsNoTracking().ToDictionaryAsync(s => s.ToolId, ct);
         var servers = await db.McpServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
-        IEnumerable<IChatTool> tools = [argus, image, calculator, time, .. servers.Select(Server)];
+        IEnumerable<IChatTool> tools = [argus, python, web, image, calculator, time, files, .. servers.Select(Server)];
         var all = new List<ToolChoice>();
         foreach (var tool in tools)
         {
-            all.Add(new ToolChoice(tool, settings.GetValueOrDefault(tool.Id) ?? new ToolSetting { ToolId = tool.Id }, await tool.UnavailableAsync(ct)));
+            all.Add(new ToolChoice(tool, settings.GetValueOrDefault(tool.Id) ?? tool.Defaults(), await tool.UnavailableAsync(ct)));
         }
         return all;
     }

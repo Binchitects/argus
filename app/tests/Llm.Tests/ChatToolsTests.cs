@@ -44,8 +44,9 @@ public sealed class ChatToolsTests(AppFixture app)
         [.. (await b.JsonAsync(await b.GetAsync("/api/chat/config"))).GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("id").GetString()!)];
 
     /// <summary>Its own app and database: tool settings must not leak into other tests.</summary>
-    private WebApplicationFactory<Program> NewApp(FakeGateway? gateway = null) =>
-        app.Create(app.ConnectionStringFor("tools_" + Guid.NewGuid().ToString("N")[..8]), gateway ?? new FakeGateway(), new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-tool-tests" });
+    private WebApplicationFactory<Program> NewApp(FakeGateway? gateway = null, Dictionary<string, string?>? settings = null) =>
+        app.Create(app.ConnectionStringFor("tools_" + Guid.NewGuid().ToString("N")[..8]), gateway ?? new FakeGateway(),
+            new Dictionary<string, string?>(settings ?? []) { ["Auth:DataKey"] = "a-data-key-for-tool-tests" });
 
     private static Task<HttpResponseMessage> SetToolAsync(TestBrowser admin, string tool, object setting) =>
         admin.Http.PutAsJsonAsync(new Uri($"/api/admin/tools/{tool}", UriKind.Relative), setting);
@@ -80,7 +81,7 @@ public sealed class ChatToolsTests(AppFixture app)
     public async Task A_chat_has_its_own_tools_among_those_the_person_may_use()
     {
         var (b, _, email) = await PersonAsync(app.Factory);
-        Assert.Equal(["argus", "calculator", "time"], await ToolsInConfigAsync(b));
+        Assert.Equal(["argus", "calculator", "time", "files"], await ToolsInConfigAsync(b));
         var id = await NewChatAsync(b, new { tools = new[] { "calculator" } });
         await SendAsync(b, id, "hello");
         Assert.Equal(["calculate"], FunctionsSentFor(email));
@@ -286,5 +287,115 @@ public sealed class ChatToolsTests(AppFixture app)
         var answers = after.GetProperty("messages").EnumerateArray().Where(m => m.GetProperty("role").GetString() == "assistant").ToList();
         Assert.Equal(2, answers.Count);
         Assert.Equal(answers[1].GetProperty("id").GetGuid(), after.GetProperty("currentLeafId").GetGuid());
+    }
+
+    [Fact]
+    public async Task A_long_file_goes_in_part_and_the_model_reads_on_or_searches_it()
+    {
+        await using var f = NewApp(settings: new() { ["Chat:InlineAttachmentChars"] = "2000" });
+        var (b, _, email) = await PersonAsync(f);
+        var log = string.Join('\n', Enumerable.Range(1, 1000).Select(i => i == 800 ? $"line {i}: ERROR code ZEBRA-9 in the payment worker" : $"line {i}: all quiet"));
+        using var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(log));
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
+        form.Add(part, "file", "worker.log");
+        var file = await b.JsonAsync(await b.Http.PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), form));
+        var id = await NewChatAsync(b, new { });
+
+        async Task<List<JsonElement>> AskAsync(string text)
+        {
+            var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = text, attachments = new[] { file.GetProperty("id").GetGuid() } });
+            return [.. (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+                .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement)];
+        }
+        var events = await AskAsync("""Where is the error? [call search_file {"file":"worker.log","text":"zebra"}]""");
+        // The question carried the start of the file and a note, not the whole of it.
+        var question = app.Model.Requests.First(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        Assert.Contains("line 1: all quiet", question, StringComparison.Ordinal);
+        Assert.DoesNotContain("ZEBRA-9", question, StringComparison.Ordinal);
+        Assert.Matches(@"\[This file goes on: lines 1 to \d+ of 1000 are above .* Read on with read_file \(file ""worker\.log"", from_line \d+\)", question);
+        Assert.Contains("read_file", FunctionsSentFor(email));
+        var found = JsonDocument.Parse(Event(events, "tool_result").GetProperty("text").GetString()!).RootElement;
+        Assert.Equal(800, found.GetProperty("matches")[0].GetProperty("line").GetInt32());
+
+        events = await AskAsync("""Read around it [call read_file {"file":"WORKER.LOG","from_line":799,"lines":3}]""");
+        var read = JsonDocument.Parse(Event(events, "tool_result").GetProperty("text").GetString()!).RootElement;
+        Assert.Equal("799: line 799: all quiet\n800: line 800: ERROR code ZEBRA-9 in the payment worker\n801: line 801: all quiet\n", read.GetProperty("text").GetString());
+        Assert.Equal(802, read.GetProperty("next_from_line").GetInt32());
+        Assert.Equal(1000, read.GetProperty("total_lines").GetInt32());
+
+        // Attached with each question, the file is listed once.
+        events = await AskAsync("""[call list_files {}]""");
+        var listed = JsonDocument.Parse(Event(events, "tool_result").GetProperty("text").GetString()!).RootElement.GetProperty("files");
+        Assert.Equal(["worker.log"], listed.EnumerateArray().Select(x => x.GetProperty("file").GetString()));
+    }
+
+    private static async Task<Guid> UploadAsync(TestBrowser b, string name, string text)
+    {
+        using var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(text));
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
+        form.Add(part, "file", name);
+        return (await b.JsonAsync(await b.Http.PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), form))).GetProperty("id").GetGuid();
+    }
+
+    [Fact]
+    public async Task Python_runs_in_the_sandbox_with_the_chats_files_and_what_it_writes_comes_back()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = NewApp(settings: new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var (b, _, _) = await PersonAsync(f);
+        Assert.Contains("python", await ToolsInConfigAsync(b));
+        var csv = await UploadAsync(b, "sales.csv", "month,amount\n1,10\n2,32\n");
+        var id = await NewChatAsync(b, new { });
+        async Task<JsonElement> RunAsync(string text, Guid[]? files = null)
+        {
+            var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = text, attachments = files ?? [] });
+            var events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+                .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+            return Event(events, "tool_result");
+        }
+
+        var result = await RunAsync("""Chart it [call run_python {"code":"print(1)  # chart # csv # binary"}]""", [csv]);
+        var output = JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement;
+        Assert.False(result.GetProperty("isError").GetBoolean());
+        Assert.Equal(0, output.GetProperty("exit_code").GetInt32());
+        Assert.Contains("given: sales.csv\n", output.GetProperty("stdout").GetString(), StringComparison.Ordinal);
+        Assert.Equal(["data.bin (in their Files panel)", "figure-1.png (shown as a picture)", "summary.csv (in their Files panel)"],
+            output.GetProperty("files_given_to_the_person").EnumerateArray().Select(x => x.GetString()));
+        var made = result.GetProperty("attachments").EnumerateArray().ToDictionary(a => a.GetProperty("fileName").GetString()!);
+        Assert.Equal("image", made["figure-1.png"].GetProperty("kind").GetString());
+        Assert.Equal("text", made["summary.csv"].GetProperty("kind").GetString());
+        Assert.Equal("file", made["data.bin"].GetProperty("kind").GetString());
+        Assert.True(made["data.bin"].GetProperty("original").GetBoolean());
+
+        // A file it made is the person's to download, as it was written, never rendered.
+        var download = await b.GetAsync($"/api/chat/attachments/{made["data.bin"].GetProperty("id").GetGuid()}/content?download=1");
+        Assert.Equal([0, 1, 2, 3, 0, 255], await download.Content.ReadAsByteArrayAsync());
+        Assert.Equal("application/octet-stream", download.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("attachment", download.Content.Headers.ContentDisposition!.DispositionType);
+
+        // What it made is read like any file, and the next run is given it too.
+        var read = JsonDocument.Parse((await RunAsync("""[call read_file {"file":"summary.csv"}]""")).GetProperty("text").GetString()!).RootElement;
+        Assert.Equal("1: month,total\n2: 1,42\n", read.GetProperty("text").GetString());
+        var again = JsonDocument.Parse((await RunAsync("""[call run_python {"code":"print(2)"}]""")).GetProperty("text").GetString()!).RootElement;
+        Assert.Contains("given: data.bin,figure-1.png,sales.csv,summary.csv\n", again.GetProperty("stdout").GetString(), StringComparison.Ordinal);
+
+        // Code that fails is an error the model reads, with its traceback.
+        var failed = await RunAsync("""[call run_python {"code":"raise ValueError  # fail"}]""");
+        Assert.True(failed.GetProperty("isError").GetBoolean());
+        Assert.Contains("ValueError: bad", JsonDocument.Parse(failed.GetProperty("text").GetString()!).RootElement.GetProperty("stderr").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Without_a_running_sandbox_python_is_not_offered_and_says_why()
+    {
+        await using var sandbox = new FakeSandbox(alive: false);
+        await using var f = NewApp(settings: new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var (b, _, _) = await PersonAsync(f);
+        Assert.DoesNotContain("python", await ToolsInConfigAsync(b));
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var python = (await admin.JsonAsync(await admin.GetAsync("/api/admin/tools"))).EnumerateArray().Single(t => t.GetProperty("id").GetString() == "python");
+        Assert.Contains("sandbox profile", python.GetProperty("unavailable").GetString(), StringComparison.Ordinal);
     }
 }

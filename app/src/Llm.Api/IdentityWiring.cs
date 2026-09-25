@@ -250,6 +250,25 @@ public static class IdentityWiring
         services.AddScoped<Chat.Tools.ImageTool>();
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
+        services.AddScoped<Chat.Tools.FilesTool>();
+        services.Configure<Chat.Tools.SandboxOptions>(config.GetSection("Sandbox"));
+        services.AddSingleton<Chat.Tools.SandboxClient>();
+        services.AddScoped<Chat.Tools.PythonTool>();
+        services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
+        services.PostConfigure<Chat.Tools.WebOptions>(o =>
+        {
+            // The websearch profile's own SearXNG, unless an admin set another.
+            var profiles = config["Stack:ComposeProfiles"] ?? "";
+            if (string.IsNullOrWhiteSpace(o.SearchUrl) && profiles.Split(',', StringSplitOptions.TrimEntries).Contains("websearch", StringComparer.OrdinalIgnoreCase))
+            {
+                o.SearchUrl = "http://searxng:8080";
+            }
+        });
+        services.AddSingleton<Chat.Tools.WebResolver>();
+        services.AddHttpClient(Chat.Tools.WebFetcher.Client).ConfigurePrimaryHttpMessageHandler(sp => Chat.Tools.WebFetcher.Handler(sp.GetRequiredService<Chat.Tools.WebResolver>()));
+        services.AddHttpClient(Chat.Tools.WebFetcher.SearchClient, c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.AddSingleton<Chat.Tools.WebFetcher>();
+        services.AddScoped<Chat.Tools.WebTool>();
         services.AddScoped<Chat.Tools.ToolRegistry>();
         services.AddSingleton<Chat.Tools.ToolApprovals>();
         services.AddScoped<Chat.ChatService>();

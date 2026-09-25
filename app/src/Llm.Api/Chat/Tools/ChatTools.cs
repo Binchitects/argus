@@ -43,6 +43,9 @@ public interface IChatTool
 
     /// <summary>Ready for one answer. Throws <see cref="McpException"/> when its server cannot be reached.</summary>
     Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct);
+
+    /// <summary>How it is set until an admin changes it: on, for everyone, in new chats.</summary>
+    ToolSetting Defaults() => new() { ToolId = Id };
 }
 
 /// <summary>Builds the JSON schema for a function's parameters.</summary>

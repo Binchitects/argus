@@ -234,7 +234,7 @@ public static class ChatEndpoints
         var messages = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id).OrderBy(m => m.Sequence).ToListAsync(ct);
         var ids = messages.SelectMany(m => ChatService.ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => ids.Contains(a.Id))
-            .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType }).ToDictionaryAsync(a => a.Id, ct);
+            .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType, original = a.Kind != "image" && a.Data != null }).ToDictionaryAsync(a => a.Id, ct);
         var forkedFrom = c.ForkedFromId is { } from
             ? await db.Conversations.AsNoTracking().Where(x => x.Id == from && x.UserId == me.Id).Select(x => new { x.Id, x.Title }).SingleOrDefaultAsync(ct)
             : null;
@@ -603,7 +603,7 @@ public static class ChatEndpoints
             };
             db.ChatAttachments.Add(a);
             await db.SaveChangesAsync();
-            return Results.Ok(new { a.Id, a.FileName, a.Size, a.Kind, a.ContentType, chars = text.Length, a.Truncated });
+            return Results.Ok(new { a.Id, a.FileName, a.Size, a.Kind, a.ContentType, chars = text.Length, a.Truncated, original = a.Data is not null });
         }
         catch (AttachmentException ex)
         {
@@ -624,6 +624,14 @@ public static class ChatEndpoints
             return Results.NotFound();
         }
         http.Response.Headers.CacheControl = "private, max-age=3600";
+        // ?download: the file itself (a document's original, a file Python made), to save, never to render.
+        if (http.Request.Query.ContainsKey("download"))
+        {
+            http.Response.Headers.XContentTypeOptions = "nosniff";
+            return a.Data is not null
+                ? Results.File(a.Data, "application/octet-stream", a.FileName)
+                : Results.File(System.Text.Encoding.UTF8.GetBytes(a.Text), "text/plain; charset=utf-8", a.FileName);
+        }
         return a.Kind == "image" && a.Data is not null
             ? Results.File(a.Data, a.ContentType)
             : Results.Text(a.Text, "text/plain; charset=utf-8");

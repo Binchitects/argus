@@ -1,9 +1,10 @@
-import { AlertTriangle, Brain, Calculator, Check, ChevronRight, CircleX, Clock, FileText, FolderTree, Image as ImageIcon, ListTree, Loader2, Search, ShieldQuestion, ShieldX, TextSearch, Wrench, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Brain, Calculator, Check, ChevronRight, CircleX, Clock, Download, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, type LucideIcon } from 'lucide-react'
 import { Collapsible } from 'radix-ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { attachmentUrl } from './api'
+import { formatValue } from '@/lib/format'
+import { attachmentUrl, downloadUrl } from './api'
 import { ImageViewer } from './image-viewer'
 import { cn } from '@/lib/utils'
 import { argsOf, parseResult, resultCount } from './argus'
@@ -49,6 +50,8 @@ export function Thinking({ text, live, ms, since }: { text: string; live: boolea
 }
 
 const toolIcons: [RegExp, LucideIcon][] = [
+  [/python|run_code/, SquareTerminal],
+  [/web|url|fetch/, Globe],
   [/image|picture|draw/, ImageIcon],
   [/calculat/, Calculator],
   [/time|date|days_between/, Clock],
@@ -77,10 +80,13 @@ export function ToolCard({
   live,
   waiting,
   onDecide,
+  onOpenFile,
 }: {
   call: ToolCall
   result?: Message
   live: boolean
+  /** Opens a file the tool made in the Files panel. */
+  onOpenFile?: (name: string) => void
   /** The call waits for the person to allow it ("ask before running"). */
   waiting?: boolean
   onDecide?: (allow: boolean) => void
@@ -88,6 +94,7 @@ export function ToolCard({
   const [open, setOpen] = useState(false)
   const [viewing, setViewing] = useState<number | null>(null)
   const pictures = result?.attachments.filter((a) => a.kind === 'image') ?? []
+  const made = result?.attachments.filter((a) => a.kind !== 'image') ?? []
   const Icon = toolIcons.find(([re]) => re.test(call.function.name))?.[1] ?? Wrench
   const args = argsSummary(call.function.arguments)
   const running = !result && live && !waiting
@@ -192,6 +199,28 @@ export function ToolCard({
             </li>
           ))}
           <ImageViewer images={pictures} index={viewing} onIndex={setViewing} />
+        </ul>
+      )}
+      {made.length > 0 && (
+        <ul className="stagger mt-2 flex flex-wrap gap-2" aria-label="Files made">
+          {made.map((f) => (
+            <li key={f.id} className="flex min-w-0 items-center gap-1 rounded-lg border bg-card py-1 pr-1 pl-2.5 text-sm shadow-xs">
+              <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              {f.kind === 'text' && onOpenFile ? (
+                <button type="button" onClick={() => onOpenFile(f.fileName)} className="min-w-0 truncate font-medium underline-offset-2 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`Open ${f.fileName} in the Files panel`}>
+                  {f.fileName}
+                </button>
+              ) : (
+                <span className="min-w-0 truncate font-medium">{f.fileName}</span>
+              )}
+              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{formatValue(f.size, 'bytes')}</span>
+              <Button asChild variant="ghost" size="icon-sm" className="size-7">
+                <a href={downloadUrl(f.id)} download={f.fileName} aria-label={`Download ${f.fileName}`}>
+                  <Download />
+                </a>
+              </Button>
+            </li>
+          ))}
         </ul>
       )}
       {result?.noAccess && (

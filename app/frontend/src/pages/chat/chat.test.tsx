@@ -374,6 +374,28 @@ describe('chat', () => {
     expect(within(panel).getByText(/made in this chat/)).toBeInTheDocument()
   })
 
+  it('files a Python run wrote: text opens in the Files panel, anything else is there to download', async () => {
+    const csv = { id: 'f1', fileName: 'summary.csv', size: 20, truncated: false, kind: 'text' as const, contentType: 'text/plain' }
+    const zip = { id: 'f2', fileName: 'export.zip', size: 2048, truncated: false, kind: 'file' as const, contentType: 'application/octet-stream', original: true }
+    const messages = [
+      msg('q1', null, 'user', { content: 'summarise' }),
+      msg('a1', 'q1', 'assistant', { toolCalls: [{ id: 'c1', function: { name: 'run_python', arguments: '{"code":"print(1)"}' } }] }),
+      msg('t1', 'a1', 'tool', { toolCallId: 'c1', toolName: 'run_python', content: '{"exit_code":0,"stdout":"1\\n"}', attachments: [csv, zip] }),
+      msg('a2', 't1', 'assistant', { content: 'Done.' }),
+    ]
+    backend({ start: conversation({ messages, currentLeafId: 'a2' }), extra: { 'GET /api/chat/attachments/f1/content': () => ({ json: 'month,total\n1,42' }) } })
+    renderApp('/chat/c1')
+    const made = within(await screen.findByRole('region', { name: 'Answer' })).getByRole('list', { name: 'Files made' })
+    expect(within(made).getByRole('link', { name: 'Download export.zip' })).toHaveAttribute('href', '/api/chat/attachments/f2/content?download=1')
+    await userEvent.click(within(made).getByRole('button', { name: 'Open summary.csv in the Files panel' }))
+    const panel = await screen.findByRole('complementary', { name: 'Files' })
+    expect(await within(panel).findByText(/month,total/)).toBeInTheDocument()
+    await userEvent.click(within(panel).getByRole('button', { name: /Back|All files/ }))
+    await userEvent.click(within(panel).getByRole('button', { name: /export\.zip/ }))
+    expect(within(panel).getByText(/not a file the page can show/)).toBeInTheDocument()
+    expect(within(panel).getByRole('link', { name: /Download/ })).toHaveAttribute('download', 'export.zip')
+  })
+
   it('stop keeps what was written and gives the box back', async () => {
     backend({
       events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'partial answer' }],

@@ -133,7 +133,7 @@ say "  with packs:    $( [ "$WITH_PACKS" = 1 ] && echo yes || echo 'no (--with-p
 # --------------------------------------------------------------- the images --
 if [ "$WITH_IMAGES" = 1 ]; then
   step "Making sure every image exists locally"
-  # Build first: the three locally-built images cannot be pulled, and compose
+  # Build first: the locally built images (the app, the web, the sandbox...) cannot be pulled, and compose
   # skips the ones with no build section.
   ( cd "$STACK_DIR" && "${COMPOSE[@]}" build ) || die "docker compose build failed"
 

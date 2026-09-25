@@ -16,15 +16,17 @@ public static class SettingsCatalog
     private const string Engine = "Engine and hardware";
     private const string Argus = "Argus (GitLab)";
     private const string Image = "Image generation";
+    private const string Tools = "Python and web";
     private const string Deployment = "Deployment";
     private const string Monitoring = "Monitoring";
     private const string Backup = "Backup";
 
     public static readonly IReadOnlyList<string> Profiles =
-        ["gateway", "proxy", "auth", "llamacpp", "vllm", "multi-model", "argus", "embed", "image", "logging", "tracing", "smi", "dcgm", "cadvisor"];
+        ["gateway", "proxy", "auth", "llamacpp", "vllm", "multi-model", "argus", "embed", "image", "sandbox", "websearch", "logging", "tracing", "smi", "dcgm", "cadvisor"];
 
     private const string Engine1 = "The engine restarts and reloads the model: chat and the API pause for a few minutes.";
     private const string Image1 = "The image server restarts (under a minute); the chat model is not touched.";
+    private const string Sandbox1 = "The sandbox restarts (seconds); a Python run in progress fails.";
 
     public static readonly IReadOnlyList<SettingDefinition> All =
     [
@@ -71,8 +73,15 @@ public static class SettingsCatalog
             { Default = "8", Min = 1, Max = 32, Optional = false },
         new("Chat:MaxUploadBytes", Chat, "Largest attachment", "Per file.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "20971520", Unit = "bytes", Min = 1048576, Max = 104857600, Optional = false },
-        new("Chat:MaxAttachmentChars", Chat, "Text kept per attachment", "Longer files are cut to this many characters and marked \"cut to fit\".", SettingType.WholeNumber, SettingScope.Live)
-            { Default = "200000", Min = 1000, Max = 5000000, Optional = false },
+        new("Chat:MaxAttachmentChars", Chat, "Text kept per attachment", "Longer files are cut to this many characters and marked \"cut to fit\". The model reads what does not fit in the question in parts.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "1000000", Min = 1000, Max = 5000000, Optional = false },
+        new("Chat:InlineAttachmentChars", Chat, "Text of an attachment in the question", "What of each attachment goes into the question itself. The model reads the rest in parts (the Reading files tool), so a long file does not fill the context.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "30000", Min = 2000, Max = 1000000, Optional = false },
+        new("Web:AllowedSites", Tools, "Sites the chat may open", "Host names, comma separated: docs.python.org, *.microsoft.com (a domain and its subdomains), or * for any public site. Empty: the Web tool stays off. Addresses inside your network are never opened.", SettingType.Text, SettingScope.Live)
+            { Default = "" },
+        new("Web:SearchUrl", Tools, "Search engine", "A SearXNG instance for the Web tool's search. Empty: the websearch profile's own when it is on; otherwise no search, only opening pages.", SettingType.Url, SettingScope.Live),
+        new("Sandbox:TimeoutSeconds", Tools, "Longest Python run", "A run still going after this long is stopped, and the model told so.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "60", Min = 5, Max = 300, Unit = "seconds", Optional = false },
         new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
 
@@ -174,7 +183,16 @@ public static class SettingsCatalog
         new("IMAGEGEN_MAX_VRAM", Image, "GPU memory budget (GiB)", "What the image server may use of the GPU. Negative: leave that much free for the chat model; 0: all that is free.", SettingType.Number, SettingScope.Stack)
             { Default = "-1", Min = -24, Max = 192, Optional = false, Unit = "GiB", Impact = Image1 },
 
-        new("COMPOSE_PROFILES", Deployment, "Parts that run", "gateway, proxy and auth are the core; llamacpp or vllm is the engine; argus adds the code index; image adds picture generation; logging, tracing, smi, dcgm and cadvisor are observability.", SettingType.Choices, SettingScope.Stack)
+        new("SANDBOX_SLOTS", Tools, "Python runs at once", "More runs wait for a free slot. Each slot is its own user in the sandbox.", SettingType.WholeNumber, SettingScope.Stack)
+            { Default = "2", Min = 1, Max = 8, Optional = false, Impact = Sandbox1 },
+        new("SANDBOX_JOB_MEMORY_MB", Tools, "Memory per Python run", "A run that needs more fails with MemoryError.", SettingType.WholeNumber, SettingScope.Stack)
+            { Default = "1536", Min = 256, Max = 65536, Unit = "MB", Optional = false, Impact = Sandbox1 },
+        new("SANDBOX_MEMORY", Tools, "Memory for the whole sandbox", "All runs together, e.g. 3g. Less than the runs at once times the memory per run is usually enough: most runs use little.", SettingType.Text, SettingScope.Stack)
+            { Default = "3g", Pattern = @"\d+(m|g)", PatternHelp = "a number and m or g", Optional = false, Impact = Sandbox1 },
+        new("SANDBOX_CPUS", Tools, "CPUs for the sandbox", "All runs together; a run uses one.", SettingType.Number, SettingScope.Stack)
+            { Default = "2", Min = 0.5m, Max = 64, Optional = false, Impact = Sandbox1 },
+
+        new("COMPOSE_PROFILES", Deployment, "Parts that run", "gateway, proxy and auth are the core; llamacpp or vllm is the engine; argus adds the code index; image adds picture generation; sandbox runs the chat's Python; websearch adds a search engine for the chat; logging, tracing, smi, dcgm and cadvisor are observability.", SettingType.Choices, SettingScope.Stack)
             { Options = Profiles, Optional = false, Dangerous = true, Impact = "Services start or stop to match." },
 
         new("PROMETHEUS_RETENTION_TIME", Monitoring, "Keep metrics for", "e.g. 30d.", SettingType.Text, SettingScope.Stack)

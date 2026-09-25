@@ -83,3 +83,5 @@ export function uploadFile(file: File, onProgress: (share: number) => void, sign
 }
 
 export const attachmentUrl = (id: string) => `/api/chat/attachments/${id}/content`
+/** The file itself, to save (never shown in the page). */
+export const downloadUrl = (id: string) => `${attachmentUrl(id)}?download=1`

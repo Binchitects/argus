@@ -29,6 +29,7 @@ public sealed class AppFixture : IAsyncLifetime
     public FakeModel Model { get; } = new();
     public FakeMcp Mcp { get; } = new();
     public FakeEngine Engine { get; } = new();
+    public FakeWeb Web { get; } = new();
     public string AppConnectionString { get; private set; } = "";
     /// <summary>The real dashboard files, found by walking up to the repository.</summary>
     public static string DashboardsPath { get; } = FindDashboards();
@@ -102,6 +103,9 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddHttpClient<Llm.Api.Chat.GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => Model);
                 s.AddHttpClient(Llm.Api.Chat.Tools.ToolRegistry.McpClient).ConfigurePrimaryHttpMessageHandler(() => Mcp);
                 s.AddHttpClient<Llm.Api.Models.EngineClient>().ConfigurePrimaryHttpMessageHandler(() => Engine);
+                s.AddSingleton<Llm.Api.Chat.Tools.WebResolver>(Web.Resolver);
+                s.AddHttpClient(Llm.Api.Chat.Tools.WebFetcher.Client).ConfigurePrimaryHttpMessageHandler(() => Web);
+                s.AddHttpClient(Llm.Api.Chat.Tools.WebFetcher.SearchClient).ConfigurePrimaryHttpMessageHandler(() => Web);
             });
         });
 

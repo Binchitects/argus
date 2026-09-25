@@ -38,8 +38,11 @@ export interface Attachment {
   fileName: string
   size: number
   truncated: boolean
-  kind: 'text' | 'image'
+  /** text: read by the model; image: a picture; file: neither (a file Python made), to download. */
+  kind: 'text' | 'image' | 'file'
   contentType: string
+  /** The file's own bytes are kept (a document's original, a file a tool made): it can be downloaded. */
+  original?: boolean
 }
 
 export interface ToolCall {
