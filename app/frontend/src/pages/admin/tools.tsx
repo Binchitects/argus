@@ -85,7 +85,8 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
   })
   const set = (change: Partial<Setting>) => save.mutate({ ...current, ...change })
   return (
-    <Card className={tool.setting.enabled ? '' : 'opacity-80'}>
+    // Off: a quieter card, not faded text (faded grey text fails contrast).
+    <Card className={tool.setting.enabled ? '' : 'border-dashed bg-muted/40 shadow-none'}>
       <CardHeader className="flex flex-row items-start gap-3">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary-ink">
           <Icon className="size-4.5" aria-hidden="true" />
