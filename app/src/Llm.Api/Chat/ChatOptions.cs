@@ -14,6 +14,21 @@ public sealed class ChatOptions
     public long MaxUploadBytes { get; set; } = 20 * 1024 * 1024;
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromMinutes(15);
 
+    /// <summary>Answers one person may have running at once, across their chats; more wait their turn.</summary>
+    public int AnswersPerPerson { get; set; } = 1;
+
+    /// <summary>Answers running at once in the whole chat; 0: as many as the engine serves at once (<see cref="EngineSlots"/>).</summary>
+    public int AnswersAtOnce { get; set; }
+
+    /// <summary>LLAMACPP_PARALLEL: what the engine serves at once (set from the stack's .env).</summary>
+    public int EngineSlots { get; set; }
+
+    /// <summary>Longest an answer waits in line before it gives up.</summary>
+    public TimeSpan QueueTimeout { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>Requests one API key may have at the gateway at once (LiteLLM refuses more with 429); 0: no limit.</summary>
+    public int ApiRequestsPerKey { get; set; } = 2;
+
     /// <summary>GitLab as people's browsers reach it, for links from Argus's answers; empty: ARGUS_GITLAB_URL.</summary>
     public string? GitlabLinkUrl { get; set; }
 

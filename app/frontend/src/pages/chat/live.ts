@@ -16,6 +16,8 @@ export interface LiveState {
   thinkingSince: number | null
   /** Tool calls waiting for the person to allow them. */
   waiting?: string[]
+  /** In line for a turn (the model serves few at once): how many go first. */
+  queued?: number | null
 }
 
 export const blank = (id: string, role: Message['role'], parentId: string | null, content = ''): Message => ({
@@ -47,7 +49,9 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       return { ...state, title: e.title }
     case 'assistant':
       messages.push({ ...blank(e.id, 'assistant', e.parentId), model: e.model })
-      return { ...state, messages, leaf: e.id, thinkingSince: null }
+      return { ...state, messages, leaf: e.id, thinkingSince: null, queued: null }
+    case 'queued':
+      return { ...state, queued: e.ahead }
     case 'reasoning': {
       const a = lastAssistant()
       if (a) a.reasoning = (a.reasoning ?? '') + e.text

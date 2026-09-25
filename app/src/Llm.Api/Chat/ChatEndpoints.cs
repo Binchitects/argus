@@ -541,7 +541,23 @@ public static class ChatEndpoints
             }
             try
             {
-                await chat.AnswerAsync(me, c, question, overrides, Emit, http.RequestAborted);
+                // Fair use: a place of the few the model serves at once, in turn (AnswerGate).
+                AnswerGate.Place place;
+                try
+                {
+                    place = await http.RequestServices.GetRequiredService<AnswerGate>().EnterAsync(me.Id,
+                        line => Emit(new { type = "queued", ahead = line.Ahead }), http.RequestAborted);
+                }
+                catch (TimeoutException ex)
+                {
+                    await Emit(new { type = "error", message = ex.Message });
+                    return;
+                }
+
+                using (place)
+                {
+                    await chat.AnswerAsync(me, c, question, overrides, Emit, http.RequestAborted);
+                }
             }
             catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
             {

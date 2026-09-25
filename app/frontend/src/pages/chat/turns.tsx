@@ -128,6 +128,7 @@ export function AnswerTurn({
   siblings,
   live,
   thinkingSince,
+  queued,
   notices,
   config,
   question,
@@ -143,6 +144,8 @@ export function AnswerTurn({
   siblings: Message[]
   live: boolean
   thinkingSince: number | null
+  /** In line for a turn: how many go first (null: not waiting). */
+  queued?: number | null
   notices: Notice[]
   config: ChatConfig
   question?: Message
@@ -243,7 +246,7 @@ export function AnswerTurn({
             <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
             <span className="size-1.5 animate-bounce rounded-full bg-current" />
           </span>
-          Waiting for the model…
+          {queued == null ? 'Waiting for the model…' : queued === 0 ? 'Your turn is next: the model is answering others.' : `Waiting for your turn: ${queued} ${queued === 1 ? 'answer' : 'answers'} ahead of you.`}
         </output>
       )}
       {assistants.map((a, i) => {

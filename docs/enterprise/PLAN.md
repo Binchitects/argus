@@ -405,6 +405,12 @@ at `next.<domain>`, which now redirects to `llm.<domain>`.
     before the new answer existed hid every answer; both fixed and tested.
     The question rail sat under the scrollbar and did not follow a new
     question; the UI got its motion.
+  - **Fair use** (asked for after): a person has one answer running at a
+    time and the chat as many as the engine serves at once; the rest wait in
+    line, served in turn (whoever has had least goes first), and see their
+    place. API keys have at most two requests at once at LiteLLM (429
+    beyond), applied to every key. The model menu showed the first model
+    instead of the default and went stale after a switch; fixed.
   - **Tests:** 274 backend, 111 UI, 145 browser on the live stack with the
     real model (Python on a workbook, a web search and page, Office files),
     sandbox 17/17, functional 65/65, acceptance 32/32, dashboards 34/34.

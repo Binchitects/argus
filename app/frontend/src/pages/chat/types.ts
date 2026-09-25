@@ -123,5 +123,7 @@ export type ChatEvent =
   | { type: 'approval'; id: string; name: string; arguments: string; tool: string; title: string }
   | { type: 'tool_result'; id: string; messageId: string; name: string; text: string; isError: boolean; declined?: boolean; noAccess: boolean; durationMs: number; attachments?: Attachment[] }
   | { type: 'notice'; kind: string; text: string }
+  /** Waiting for a turn: the model serves few at once, in turn (fair use). */
+  | { type: 'queued'; ahead: number }
   | { type: 'error'; message: string }
   | { type: 'done'; id: string }

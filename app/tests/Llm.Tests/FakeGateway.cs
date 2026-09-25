@@ -15,6 +15,7 @@ public sealed class FakeGateway : ILiteLlm
         public bool Blocked { get; set; }
         /// <summary>The models the key may call; empty: every model.</summary>
         public IReadOnlyList<string> Models { get; set; } = [];
+        public int? MaxParallel { get; set; }
     }
 
     public ConcurrentDictionary<string, decimal?> Budgets { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -38,21 +39,22 @@ public sealed class FakeGateway : ILiteLlm
         return Task.CompletedTask;
     }
 
-    public Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, CancellationToken ct = default)
+    public Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, CancellationToken ct = default)
     {
         Check();
         var secret = "sk-" + Guid.NewGuid().ToString("N");
         var token = "hash-" + Guid.NewGuid().ToString("N");
-        Keys[token] = new Key { Secret = secret, Token = token, Email = email, Alias = keyAlias, Models = models ?? [] };
+        Keys[token] = new Key { Secret = secret, Token = token, Email = email, Alias = keyAlias, Models = models ?? [], MaxParallel = maxParallel };
         return Task.FromResult(secret);
     }
 
-    public Task SetKeyModelsAsync(string token, IReadOnlyList<string> models, CancellationToken ct = default)
+    public Task SetKeyAccessAsync(string token, IReadOnlyList<string> models, int? maxParallel, CancellationToken ct = default)
     {
         Check();
         if (Keys.TryGetValue(token, out var key))
         {
             key.Models = models;
+            key.MaxParallel = maxParallel;
         }
         return Task.CompletedTask;
     }
@@ -73,7 +75,7 @@ public sealed class FakeGateway : ILiteLlm
     public Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
     {
         Check();
-        IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models))];
+        IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel))];
         return Task.FromResult(list);
     }
 

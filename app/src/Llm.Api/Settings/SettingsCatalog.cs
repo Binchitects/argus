@@ -82,6 +82,14 @@ public static class SettingsCatalog
         new("Web:SearchUrl", Tools, "Search engine", "A SearXNG instance for the Web tool's search. Empty: the websearch profile's own when it is on; otherwise no search, only opening pages.", SettingType.Url, SettingScope.Live),
         new("Sandbox:TimeoutSeconds", Tools, "Longest Python run", "A run still going after this long is stopped, and the model told so.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "60", Min = 5, Max = 300, Unit = "seconds", Optional = false },
+        new("Chat:AnswersPerPerson", Chat, "Answers at once, per person", "Answers one person may have running at once, across their chats. More wait their turn, so nobody takes the model from the others.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "1", Min = 1, Max = 16, Optional = false },
+        new("Chat:AnswersAtOnce", Chat, "Answers at once, everyone", "Answers the chat runs at once; the rest wait in line, served in turn (whoever has had least goes first). 0: as many as the engine serves at once (People served at once).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "0", Min = 0, Max = 256, Optional = false },
+        new("Chat:QueueTimeout", Chat, "Longest wait in line", "An answer that has waited this long for its turn gives up and says the model is busy.", SettingType.Duration, SettingScope.Live)
+            { Default = "00:10:00", Unit = "minutes", Min = 1, Max = 120, Optional = false },
+        new("Chat:ApiRequestsPerKey", Chat, "API requests at once, per key", "Requests one API key (Qwen Code, an IDE, a script) may have at the gateway at once; more are refused (HTTP 429) until one ends. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "2", Min = 0, Max = 64, Optional = false },
         new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
 

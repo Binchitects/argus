@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, configQuery, conversationQuery, forkChat, streamChat } from './api'
+import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, streamChat } from './api'
 import { Composer } from './composer'
 import { collectFiles } from './files'
 import { FilesPanel } from './files-panel'
@@ -138,7 +138,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const path = useMemo(() => tree.path(view.leaf), [tree, view.leaf])
   const turns = toTurns(path)
   const files = useMemo(() => collectFiles(path), [path])
-  const model = config.models.find((m) => m.name === settings.model) ?? config.models[0]
+  const model = chatModel(config, settings.model)
   const toolsOnHere = toolsOn(config.tools, settings.tools)
   const title = live?.title ?? data?.title ?? null
 
@@ -285,6 +285,8 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
         abort.current = null
         if (wasStopped) setLive((s) => (s ? stopped(s) : s))
         void queryClient.invalidateQueries({ queryKey: ['chat', 'list'] })
+        // A model refused as not loaded, or switched meanwhile: the menu learns of it now.
+        void queryClient.invalidateQueries({ queryKey: configQuery.queryKey })
         // The server's copy is the truth (ids, statuses, what a stop kept). After a
         // stop it saves a moment after the stream ends: wait until it has the leaf.
         const leaf = liveRef.current?.leaf
@@ -450,6 +452,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                           siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
                           live={streaming && i === lastTurn}
                           thinkingSince={streaming && i === lastTurn ? view.thinkingSince : null}
+                          queued={streaming && i === lastTurn ? view.queued : null}
                           notices={i === lastTurn ? view.notices : []}
                           config={config}
                           question={t.question}

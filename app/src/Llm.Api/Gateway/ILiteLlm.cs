@@ -19,7 +19,7 @@ public sealed record ManagedModel(string Id, string Name, string? Fingerprint);
 
 /// <summary>A key as the gateway lists it: the hashed token (never the key itself), alias, spend and state.</summary>
 /// <remarks>Models: the models the key may call; empty means every model.</remarks>
-public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt, IReadOnlyList<string>? Models = null);
+public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt, IReadOnlyList<string>? Models = null, int? MaxParallel = null);
 
 /// <summary>
 /// LiteLLM's admin API. People are known to it by email, which is what ties
@@ -34,10 +34,11 @@ public interface ILiteLlm
     Task SetBudgetAsync(string email, decimal? budget, CancellationToken ct = default);
 
     /// <param name="models">The models the key may call; empty or null: every model.</param>
-    Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, CancellationToken ct = default);
+    Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, CancellationToken ct = default);
 
     /// <summary>Which models a key may call (by its hashed token); empty: every model.</summary>
-    Task SetKeyModelsAsync(string token, IReadOnlyList<string> models, CancellationToken ct = default);
+    /// <summary>The models a key may call, and how many requests it may have at once (null: no limit).</summary>
+    Task SetKeyAccessAsync(string token, IReadOnlyList<string> models, int? maxParallel, CancellationToken ct = default);
 
     /// <summary>A key that belongs to no person (the chat's): spend is attributed by the request's `user`.</summary>
     Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default);

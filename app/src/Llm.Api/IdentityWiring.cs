@@ -234,7 +234,15 @@ public static class IdentityWiring
             {
                 o.GatewayUrl = url;
             }
+            // What llama.cpp serves at once: the chat's default limit (AnswerGate).
+            var profiles = config["Stack:ComposeProfiles"] ?? "";
+            if (o.EngineSlots == 0 && profiles.Split(',', StringSplitOptions.TrimEntries).Contains("llamacpp", StringComparer.OrdinalIgnoreCase)
+                && int.TryParse(config["StackEnv:LLAMACPP_PARALLEL"], System.Globalization.CultureInfo.InvariantCulture, out var slots))
+            {
+                o.EngineSlots = slots;
+            }
         });
+        services.AddSingleton<Chat.AnswerGate>();
         services.AddHttpClient<Chat.GatewayChat>((sp, c) =>
         {
             var o = sp.GetRequiredService<IOptions<Chat.ChatOptions>>().Value;

@@ -124,6 +124,22 @@ WebUI still runs at `https://chat.<LLM_DOMAIN>` until the new web is signed off
 A question that never reached the server goes back into the box with its
 attachments, instead of being lost.
 
+## Fair use
+
+The model serves few people at once (llama.cpp's `LLAMACPP_PARALLEL` slots).
+So that everyone gets their turn:
+
+- **In the chat**, a person has one answer running at a time (Settings → Chat →
+  Answers at once, per person), and the chat as many as the engine serves at
+  once (Answers at once, everyone; 0 means the engine's slots). Others wait in
+  line and see how many answers are ahead of them. A free place goes to
+  whoever has had least: someone with nothing running goes before someone
+  whose last answer just ended. A wait of more than ten minutes gives up and
+  says the model is busy.
+- **API keys** (Qwen Code, IDEs, scripts) have at most two requests at once
+  (API requests at once, per key); a third at the same time gets HTTP 429 and
+  can retry. It applies to every key, within seconds of a change.
+
 ## Who sees what
 
 - A chat belongs to one person. Nobody else can read it, **admins included**:
@@ -200,6 +216,9 @@ branch.
 | "… cannot see images" | the chat's model has no vision | choose a model that shows "Sees images" |
 | "You may not use …" | an admin took the model away from you | choose another model |
 | "… is not loaded right now" | the chat's model is not the one the engine has loaded | choose a loaded model, or ask an admin to load it (Admin → Models) |
+| "Waiting for your turn: N answers ahead of you" | the model is serving others; your answer is in line | nothing: it starts on its own. An admin can change the limits (Settings → Chat) |
+| "The model has been busy for 10 minutes" | the line did not move for that long | ask again later; tell an admin if it happens often |
+| An API call answers **429** | the key already has as many requests running as it may | wait for one to finish, or retry; an admin sets the limit (API requests at once, per key) |
 | "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](ARGUS.md) |
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
 | No **Image generation** in the Tools menu | no image model at the gateway | turn on the `image` profile (Settings → Deployment) and apply it |

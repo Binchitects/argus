@@ -9,13 +9,14 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
+import { chatModel } from './api'
 import type { ChatConfig, ChatSettings } from './types'
 import { useChatActions } from './chat-actions'
 
 const DEFAULT = '__default__'
 
 export function ModelPicker({ config, value, onChange }: { config: ChatConfig; value: string | null; onChange: (model: string | null) => void }) {
-  const current = config.models.find((m) => m.name === value) ?? config.models[0]
+  const current = chatModel(config, value)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -92,7 +93,7 @@ export function ChatSettingsPopover({ config, settings, onChange }: { config: Ch
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState({ systemPrompt: '', temperature: '', topP: '', maxTokens: '' })
   const [error, setError] = useState<string | null>(null)
-  const model = config.models.find((m) => m.name === settings.model) ?? config.models[0]
+  const model = chatModel(config, settings.model)
   const custom = !!settings.systemPrompt || settings.temperature != null || settings.topP != null || settings.maxTokens != null
   const num = (v: string) => (v.trim() === '' ? null : Number(v))
   const apply = () => {

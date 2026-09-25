@@ -3,16 +3,21 @@ using Llm.Api.Gateway;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Models;
 
 /// <summary>
 /// Who may use which model holds for API keys too: each person's keys carry the
 /// models they may call (LiteLLM refuses the rest with 403). The chat's own key
-/// is not one of them; the app checks the chat itself.
+/// is not one of them; the app checks the chat itself. Fair use holds for keys
+/// too: each carries how many requests it may have at once.
 /// </summary>
-public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, ChatModels models, ILiteLlm gateway)
+public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, ChatModels models, ILiteLlm gateway, IOptionsMonitor<ChatOptions> chat)
 {
+    /// <summary>Requests a key may have at once; null: no limit.</summary>
+    public int? MaxParallel => chat.CurrentValue.ApiRequestsPerKey > 0 ? chat.CurrentValue.ApiRequestsPerKey : null;
+
     /// <summary>LiteLLM's word for "no model": an empty list would mean every model.</summary>
     public const string NoModels = "no-default-models";
 
@@ -33,9 +38,9 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
             var want = await ListForAsync(user, ct);
             foreach (var key in await gateway.KeysAsync(user.Email!, ct))
             {
-                if (!(key.Models ?? []).Order(StringComparer.Ordinal).SequenceEqual(want.Order(StringComparer.Ordinal)))
+                if (!(key.Models ?? []).Order(StringComparer.Ordinal).SequenceEqual(want.Order(StringComparer.Ordinal)) || key.MaxParallel != MaxParallel)
                 {
-                    await gateway.SetKeyModelsAsync(key.Token, want, ct);
+                    await gateway.SetKeyAccessAsync(key.Token, want, MaxParallel, ct);
                     changed++;
                 }
             }
@@ -45,9 +50,28 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
 }
 
 /// <summary>Runs <see cref="KeyAccess.SyncAsync"/> when access or groups change, and every 10 minutes (the directory's groups change on their own).</summary>
-public sealed partial class KeyAccessWatcher(IServiceScopeFactory scopes, ILogger<KeyAccessWatcher> logger) : BackgroundService
+public sealed partial class KeyAccessWatcher : BackgroundService
 {
     private readonly SemaphoreSlim _wake = new(0);
+    private readonly IServiceScopeFactory scopes;
+    private readonly ILogger<KeyAccessWatcher> logger;
+    private readonly IDisposable? _onChange;
+
+    public KeyAccessWatcher(IServiceScopeFactory scopes, ILogger<KeyAccessWatcher> logger, IOptionsMonitor<ChatOptions> chat)
+    {
+        this.scopes = scopes;
+        this.logger = logger;
+        // A new limit of requests per key reaches every key at once, not in ten minutes.
+        var perKey = chat.CurrentValue.ApiRequestsPerKey;
+        _onChange = chat.OnChange(o =>
+        {
+            if (o.ApiRequestsPerKey != perKey)
+            {
+                perKey = o.ApiRequestsPerKey;
+                Wake();
+            }
+        });
+    }
 
     public void Wake()
     {
@@ -59,17 +83,21 @@ public sealed partial class KeyAccessWatcher(IServiceScopeFactory scopes, ILogge
 
     public override void Dispose()
     {
+        _onChange?.Dispose();
         _wake.Dispose();
         base.Dispose();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Soon after start (an upgrade may bring a new limit), then every ten minutes or when woken.
+        var wait = TimeSpan.FromSeconds(15);
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await _wake.WaitAsync(TimeSpan.FromMinutes(10), stoppingToken);
+                await _wake.WaitAsync(wait, stoppingToken);
+                wait = TimeSpan.FromMinutes(10);
                 await using var scope = scopes.CreateAsyncScope();
                 var changed = await scope.ServiceProvider.GetRequiredService<KeyAccess>().SyncAsync(stoppingToken);
                 if (changed > 0)

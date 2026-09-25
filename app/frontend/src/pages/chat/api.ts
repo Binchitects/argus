@@ -4,8 +4,15 @@ import type { Attachment, ChatConfig, ChatEvent, Conversation, ConversationSumma
 export const configQuery = {
   queryKey: ['chat', 'config'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<ChatConfig>('/api/chat/config', { signal }),
-  staleTime: 60_000,
+  // Models load and unload while people chat (Admin -> Models): the menu keeps up.
+  staleTime: 10_000,
+  refetchInterval: 20_000,
+  refetchOnWindowFocus: true,
 }
+
+/** The model a chat answers with: its own choice, else the default (the loaded one), not simply the first listed. */
+export const chatModel = (config: ChatConfig, chosen: string | null | undefined) =>
+  config.models.find((m) => m.name === chosen) ?? config.models.find((m) => m.name === config.model) ?? config.models[0]
 
 export const listQuery = (search: string, archived = false) => ({
   queryKey: ['chat', 'list', search, archived] as const,

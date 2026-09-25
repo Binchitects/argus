@@ -101,6 +101,23 @@ describe('chat', () => {
     expect(within(a).getByText('· $0.00029')).toBeInTheDocument()
   })
 
+  it('a chat that chose no model shows the one that answers: the default, not the first listed', async () => {
+    // An admin loaded the second model: the first is listed, not loaded; the default is the second.
+    backend({ config: { model: 'Eyes-Model', models: [{ ...config.models[0], loaded: false }, config.models[1]] } })
+    renderApp('/chat')
+    expect(await screen.findByRole('button', { name: 'Model: Eyes-Model' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Model: Eyes-Model' }))
+    expect(await screen.findByRole('menuitem', { name: /Eyes-Model/ })).not.toHaveAttribute('aria-disabled')
+    expect(screen.getByRole('menuitem', { name: /Main-Model/ })).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('an answer waiting its turn says how many go first', async () => {
+    backend({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'queued', ahead: 2 }], hang: true })
+    renderApp('/chat')
+    await ask('busy day')
+    expect(await screen.findByText('Waiting for your turn: 2 answers ahead of you.')).toBeInTheDocument()
+  })
+
   it('a model that is not loaded is listed but cannot be chosen', async () => {
     backend({ config: { models: [config.models[0], { ...config.models[1], loaded: false }] } })
     renderApp('/chat')

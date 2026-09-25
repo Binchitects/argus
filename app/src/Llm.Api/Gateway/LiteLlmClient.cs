@@ -53,12 +53,16 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         }
     }
 
-    public async Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, CancellationToken ct = default)
+    public async Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, CancellationToken ct = default)
     {
         var body = new JsonObject { ["user_id"] = email, ["key_alias"] = keyAlias };
         if (models is { Count: > 0 })
         {
             body["models"] = new JsonArray([.. models.Select(m => (JsonNode)m)]);
+        }
+        if (maxParallel is > 0)
+        {
+            body["max_parallel_requests"] = maxParallel;
         }
         var res = await SendAsync(HttpMethod.Post, "/key/generate", body, ct);
         return res?["key"]?.GetValue<string>() is { Length: > 0 } key
@@ -98,8 +102,14 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         return models;
     }
 
-    public async Task SetKeyModelsAsync(string token, IReadOnlyList<string> models, CancellationToken ct = default) =>
-        await SendAsync(HttpMethod.Post, "/key/update", new JsonObject { ["key"] = token, ["models"] = new JsonArray([.. models.Select(m => (JsonNode)m)]) }, ct);
+    public async Task SetKeyAccessAsync(string token, IReadOnlyList<string> models, int? maxParallel, CancellationToken ct = default) =>
+        await SendAsync(HttpMethod.Post, "/key/update", new JsonObject
+        {
+            ["key"] = token,
+            ["models"] = new JsonArray([.. models.Select(m => (JsonNode)m)]),
+            // LiteLLM refuses a key's requests past this many at once (429).
+            ["max_parallel_requests"] = maxParallel is > 0 ? maxParallel : null,
+        }, ct);
 
     public async Task<IReadOnlyList<ManagedModel>> ManagedModelsAsync(CancellationToken ct = default)
     {
@@ -140,7 +150,8 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
             keys.Add(new GatewayKey(token, Str(k, "key_alias") ?? "", Str(k, "key_name"), Dec(k, "spend") ?? 0,
                 k["blocked"]?.GetValueKind() == JsonValueKind.True,
                 DateTimeOffset.TryParse(Str(k, "created_at"), CultureInfo.InvariantCulture, out var at) ? at : null,
-                [.. (k["models"] as JsonArray ?? []).Select(m => m?.GetValue<string>() ?? "")]));
+                [.. (k["models"] as JsonArray ?? []).Select(m => m?.GetValue<string>() ?? "")],
+                k["max_parallel_requests"] is JsonValue p && p.TryGetValue<int>(out var parallel) ? parallel : null));
         }
         return keys;
     }
