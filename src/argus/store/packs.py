@@ -624,9 +624,13 @@ def verify_text(packs: Sequence[Pack], text: str,
         near = (text if len(known) == 1
                 else " ".join(s for s in _SENTENCES.split(text) if name in s))
 
+        # The contract ends at the " -- " marker `_requirement_line` puts
+        # before the API's description. Without the cut, the last field read
+        # "User32.dll -- Displays a modal dialog box." -- and `documented` is
+        # the string a model is told to copy verbatim.
+        contract = str(hits[0].get("signature", "")).split(" -- ", 1)[0]
         documented = {k: v.strip() for k, v in
-                      (part.split(":", 1) for part in
-                       str(hits[0].get("signature", "")).split(";")
+                      (part.split(":", 1) for part in contract.split(";")
                        if ":" in part)}
         fields = []
         for field, shape in _FIELD_SHAPES.items():
@@ -634,7 +638,9 @@ def verify_text(packs: Sequence[Pack], text: str,
                           if k.strip().lower() == field), "")
             if not value:
                 continue
-            stated = {m.group(0).lower() for m in shape.finditer(near)}
+            # As the draft spelled them, so a correction can quote them back.
+            said = list(dict.fromkeys(m.group(0) for m in shape.finditer(near)))
+            stated = {s.lower() for s in said}
             wanted = {m.group(0).lower() for m in shape.finditer(value)}
             if not wanted:
                 continue
@@ -644,8 +650,10 @@ def verify_text(packs: Sequence[Pack], text: str,
                 status = "contradicted"
             else:
                 status = "unstated"
-            fields.append({"field": field, "documented": value,
-                           "status": status})
+            entry = {"field": field, "documented": value, "status": status}
+            if status == "contradicted":
+                entry["stated"] = ", ".join(said)
+            fields.append(entry)
         if fields:
             seen[name] = {
                 "name": hits[0].get("name", name),

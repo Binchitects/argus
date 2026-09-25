@@ -763,7 +763,18 @@ public static class Commands
         }
         finally { PackStore.ClosePacks(opened); }
 
-        var contradicted = findings.Where(f => (f["status"]?.ToString() ?? "").ToLowerInvariant() == "contradicted").ToList();
+        // One entry per wrong claim. VerifyText reports per API with the verdicts
+        // nested under `corrections`; filtering the findings on a `status` they
+        // never carry meant this command could not exit 2 and the hook never blocked.
+        var contradicted = new List<JsonObject>();
+        foreach (var f in findings)
+            foreach (var c in f["corrections"] as JsonArray ?? [])
+            {
+                if (c is not JsonObject claim || (claim["status"]?.ToString() ?? "").ToLowerInvariant() != "contradicted") continue;
+                var flat = new JsonObject { ["symbol"] = f["name"]?.DeepClone(), ["source"] = f["source"]?.DeepClone(), ["url"] = f["url"]?.DeepClone() };
+                foreach (var (k, v) in claim) flat[k] = v?.DeepClone();
+                contradicted.Add(flat);
+            }
         if (a.Flag("json"))
             Out.WriteLine(PyJson.Dumps(new JsonObject
             {

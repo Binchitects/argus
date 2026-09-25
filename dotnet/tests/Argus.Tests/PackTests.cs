@@ -142,10 +142,51 @@ public class PackTests
             Assert.Contains(fields, f => f!["field"]!.GetValue<string>() == "header" && f["status"]!.GetValue<string>() == "confirmed");
             Assert.Contains(fields, f => f!["field"]!.GetValue<string>() == "library" && f["status"]!.GetValue<string>() == "contradicted");
             Assert.Contains(fields, f => f!["field"]!.GetValue<string>() == "dll" && f["status"]!.GetValue<string>() == "unstated");
+            // The adapter appends " -- <description>" to the requirement line; it is not part of any field.
+            Assert.Equal("User32.dll", fields.Single(f => f!["field"]!.GetValue<string>() == "dll")!["documented"]!.GetValue<string>());
+            var correction = (JsonObject)((JsonArray)findings.Single()["corrections"]!).Single()!;
+            Assert.Equal("""{"field":"library","documented":"User32.lib","status":"contradicted","stated":"Kernel32.lib"}""",
+                correction.ToJsonString());
             var contracts = PackStore.ApiContracts(packs, "void f() { MessageBoxW(0,0,0,0); MessageBoxW(0,0,0,0); }");
             Assert.Equal(2, contracts.Single()["mentions"]!.GetValue<int>());
         }
         finally { PackStore.ClosePacks(packs); }
+    }
+
+    [Fact]
+    public void The_verify_command_blocks_a_contradicted_draft_and_passes_a_right_one()
+    {
+        using var dir = new TempDir();
+        var root = Path.Combine(dir.Path, "sdk");
+        Directory.CreateDirectory(Path.Combine(root, "sdk-api-src", "content", "winuser"));
+        File.WriteAllText(Path.Combine(root, "sdk-api-src", "content", "winuser", "nf-winuser-messageboxw.md"),
+            "---\nUID: NF:winuser.MessageBoxW\ntitle: MessageBoxW function (winuser.h)\ndescription: Shows a box.\nreq.header: winuser.h\nreq.lib: User32.lib\nreq.dll: User32.dll\n---\nShows a box.\n");
+        var packs = Path.Combine(dir.Path, "packs");
+        Directory.CreateDirectory(packs);
+        PackBuilder.BuildPack(MicrosoftApiRef.Win32Api(), root, Path.Combine(packs, "win32.arguspack"), "1", FakeEmbedder.Embed,
+            sourceCommit: "x", log: TextWriter.Null);
+        var cfg = dir.File("config.yaml", $"gitlab:\n  url: https://gl.test\n  token: t\nindex:\n  data_dir: {dir.Path}/d\n  db_path: {dir.Path}/d/i.db\npacks:\n  dir: {packs}\n");
+
+        var (rc, stdout, stderr) = Capture(() => Program.Run(["verify", "--config", cfg, "--text", "MessageBoxW lives in shell32.dll.", "--json"]));
+        Assert.Equal(Cli.Commands.ExitVerifyContradicted, rc);
+        var contradicted = (JsonArray)JsonNode.Parse(stdout)!["contradicted"]!;
+        Assert.Equal("""{"symbol":"MessageBoxW","source":"win32","url":"https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-messageboxw","field":"dll","documented":"User32.dll","status":"contradicted","stated":"shell32.dll"}""",
+            contradicted.Single()!.ToJsonString());
+        Assert.Contains("you said 'shell32.dll'; the documentation says 'User32.dll' [win32]", stderr);
+
+        (rc, _, _) = Capture(() => Program.Run(["verify", "--config", cfg, "--text", "MessageBoxW lives in User32.dll.", "--quiet"]));
+        Assert.Equal(0, rc);
+    }
+
+    static (int Rc, string Out, string Err) Capture(Func<int> run)
+    {
+        var (oldOut, oldErr) = (Console.Out, Console.Error);
+        using var o = new StringWriter();
+        using var e = new StringWriter();
+        Console.SetOut(o);
+        Console.SetError(e);
+        try { return (run(), o.ToString(), e.ToString()); }
+        finally { Console.SetOut(oldOut); Console.SetError(oldErr); }
     }
 
     [Fact]

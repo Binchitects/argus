@@ -137,9 +137,9 @@ def test_only_contradicted_blocks(monkeypatch, cfg_file, capsys):
     for status, expected in cases:
         monkeypatch.setattr(store_packs, "verify_text",
                             lambda p, t, limit=0, s=status: [
-                                {"symbol": "wcscpy_s", "field": "header",
-                                 "status": s, "stated": "string.h",
-                                 "documented": "wchar.h"}])
+                                _finding("wcscpy_s", {"field": "header", "status": s,
+                                                      "stated": "string.h",
+                                                      "documented": "wchar.h"})])
         rc = _verify(Args(cfg_file, text="a draft naming wcscpy_s"))
         assert rc == expected, f"status {status!r} produced exit {rc}"
 
@@ -155,9 +155,10 @@ def test_the_contradiction_message_is_an_instruction(monkeypatch, cfg_file, caps
     monkeypatch.setattr(store_packs, "close_packs", lambda packs: None)
     monkeypatch.setattr(store_packs, "verify_text",
                         lambda p, t, limit=0: [
-                            {"symbol": "wcscpy_s", "field": "header",
-                             "status": "contradicted", "stated": "string.h",
-                             "documented": "wchar.h", "source": "win32"}])
+                            _finding("wcscpy_s", {"field": "header",
+                                                  "status": "contradicted",
+                                                  "stated": "string.h",
+                                                  "documented": "wchar.h"})])
 
     rc = _verify(Args(cfg_file, text="wcscpy_s is in <string.h>"))
     assert rc == EXIT_VERIFY_CONTRADICTED
@@ -165,6 +166,44 @@ def test_the_contradiction_message_is_an_instruction(monkeypatch, cfg_file, caps
     assert "contradicts" in err
     assert "do not restate them from memory" in err
     assert "wcscpy_s" in err and "string.h" in err and "wchar.h" in err
+    assert "[win32]" in err
+
+
+def _finding(name: str, *fields: dict) -> dict:
+    """One API as `verify_text` really reports it: the verdicts nested under
+    `fields`, the contradicted ones repeated under `corrections`. These tests
+    once faked a flat per-claim shape the function never returns, so they
+    passed while the real command could not exit 2."""
+    return {"name": name, "source": "win32", "url": f"https://x/{name}",
+            "doc_path": f"{name}.md", "fields": list(fields),
+            "corrections": [f for f in fields if f["status"] == "contradicted"]}
+
+
+def test_a_real_pack_blocks_a_wrong_claim(cfg_file, capsys):
+    """No monkeypatching: a real pack, whose requirement line carries the
+    description after the " -- " marker exactly as the win32 adapter writes it,
+    and the real `verify_text`. This is the path a Stop hook runs."""
+    import shutil
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent / "store"))
+    from test_packs import _verify_pack
+
+    built = _verify_pack(cfg_file.parent / "built", description=True)
+    shutil.copy(built, cfg_file.parent / "packs" / built.name)
+
+    rc = _verify(Args(cfg_file, text="MessageBoxW lives in shell32.dll.", json=True))
+    captured = capsys.readouterr()
+    assert rc == EXIT_VERIFY_CONTRADICTED, captured.err
+    body = json.loads(captured.out)
+    assert body["contradicted"] == [{
+        "symbol": "MessageBoxW", "source": "v", "url": "https://x/MessageBoxW",
+        "field": "dll", "documented": "User32.dll", "status": "contradicted",
+        "stated": "shell32.dll"}]
+    assert "you said 'shell32.dll'; the documentation says 'User32.dll'" in captured.err
+
+    assert _verify(Args(cfg_file, text="MessageBoxW lives in User32.dll.", quiet=True)) == 0
 
 
 def test_json_output_carries_the_findings(monkeypatch, cfg_file, capsys):
@@ -174,12 +213,14 @@ def test_json_output_carries_the_findings(monkeypatch, cfg_file, capsys):
     monkeypatch.setattr(store_packs, "open_packs", lambda paths: ["pack"])
     monkeypatch.setattr(store_packs, "close_packs", lambda packs: None)
     monkeypatch.setattr(store_packs, "verify_text",
-                        lambda p, t, limit=0: [{"symbol": "x", "status": "confirmed"}])
+                        lambda p, t, limit=0: [
+                            _finding("x", {"field": "header", "status": "confirmed",
+                                           "documented": "x.h"})])
 
     assert _verify(Args(cfg_file, text="draft", json=True)) == 0
     body = json.loads(capsys.readouterr().out)
     assert body["contradicted"] == []
-    assert body["findings"] == [{"symbol": "x", "status": "confirmed"}]
+    assert [f["name"] for f in body["findings"]] == ["x"]
 
 
 def test_stdin_is_read_when_the_path_is_a_dash(monkeypatch, cfg_file, capsys):

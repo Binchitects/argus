@@ -420,7 +420,12 @@ public static class PackStore
             var near = known.Count == 1 ? text : string.Join(" ", ReSplit(Sentences, text).Where(s => s.Contains(name, StringComparison.Ordinal)));
             var documented = new List<(string K, string V)>();
             var signature = hit["signature"] is null ? "None" : S(hit, "signature");
-            foreach (var part in signature.Split(';'))
+            // The contract ends at the " -- " marker the adapters put before the
+            // API's description; without the cut the last field carried the prose,
+            // and `documented` is the string a model is told to copy verbatim.
+            int marker = signature.IndexOf(" -- ", StringComparison.Ordinal);
+            var contract = marker < 0 ? signature : signature[..marker];
+            foreach (var part in contract.Split(';'))
             {
                 int colon = part.IndexOf(':');
                 if (colon < 0) continue;
@@ -439,11 +444,14 @@ public static class PackStore
             {
                 var value = docDict.FirstOrDefault(d => PyStr.Strip(d.K).ToLowerInvariant() == field).V ?? "";
                 if (value.Length == 0) continue;
-                var stated = shape.Matches(near).Select(x => x.Value.ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
+                // As the draft spelled them, so a correction can quote them back.
+                var said = shape.Matches(near).Select(x => x.Value).Distinct(StringComparer.Ordinal).ToList();
+                var stated = said.Select(x => x.ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
                 var wanted = shape.Matches(value).Select(x => x.Value.ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
                 if (wanted.Count == 0) continue;
                 var status = wanted.Overlaps(stated) ? "confirmed" : stated.Count > 0 ? "contradicted" : "unstated";
                 var entry = new JsonObject { ["field"] = field, ["documented"] = value, ["status"] = status };
+                if (status == "contradicted") entry["stated"] = string.Join(", ", said);
                 fields.Add(entry);
                 if (status == "contradicted") corrections.Add(entry.DeepClone());
             }

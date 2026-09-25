@@ -496,15 +496,21 @@ def test_search_docs_itself_applies_the_relevance_filter(tmp_path):
         packs.close_packs(opened)
 
 
-def _verify_pack(tmp_path):
-    """A pack with two APIs whose requirement lines differ."""
+def _verify_pack(tmp_path, description: bool = False):
+    """A pack with two APIs whose requirement lines differ.
+
+    `description` appends each API's summary after the " -- " marker, which
+    is how the win32 and wdk adapters actually write the field."""
     from argus.packs import format as pack_format
+    tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / "v.arguspack"
     conn = pack_format.create_pack(path)
     comp = zstandard.ZstdCompressor()
     for i, (name, sig) in enumerate((
-            ("MessageBoxW", "Header: winuser.h; Library: User32.lib; DLL: User32.dll"),
-            ("IoCreateDevice", "Header: wdm.h; Library: NtosKrnl.lib; IRQL: <= APC_LEVEL"))):
+            ("MessageBoxW", "Header: winuser.h; Library: User32.lib; DLL: User32.dll"
+                            + (" -- Displays a modal dialog box." if description else "")),
+            ("IoCreateDevice", "Header: wdm.h; Library: NtosKrnl.lib; IRQL: <= APC_LEVEL"
+                               + (" -- Creates a device object." if description else "")))):
         cur = conn.execute(
             "INSERT INTO docs (path, title, url, lang, content, content_len) "
             "VALUES (?, ?, ?, 'md', ?, 0)",
@@ -535,6 +541,26 @@ def test_verify_reports_only_what_the_draft_gets_wrong(tmp_path):
         assert fields["library"] == "confirmed"
         assert fields["dll"] == "unstated"
         assert [c["documented"] for c in got["MessageBoxW"]["corrections"]] == ["winuser.h"]
+    finally:
+        packs.close_packs(opened)
+
+
+def test_the_description_after_the_marker_is_not_part_of_the_contract(tmp_path):
+    """The adapters append the API's summary after " -- ", so the LAST field of
+    every real requirement line carried it: `documented` read "User32.dll --
+    Displays a modal dialog box.", and that is the string a model is told to
+    copy verbatim. A contradicted field also says what the draft claimed, so a
+    correction can quote it back."""
+    opened = packs.open_packs([_verify_pack(tmp_path, description=True)])
+    try:
+        got = {r["name"]: r for r in packs.verify_text(
+            opened, "MessageBoxW lives in Shell32.dll.")}
+        assert got["MessageBoxW"]["corrections"] == [
+            {"field": "dll", "documented": "User32.dll", "status": "contradicted",
+             "stated": "Shell32.dll"}]
+        irql = {r["name"]: r for r in packs.verify_text(opened, "IoCreateDevice at PASSIVE_LEVEL.")}
+        assert [f["documented"] for f in irql["IoCreateDevice"]["fields"]
+                if f["field"] == "irql"] == ["<= APC_LEVEL"]
     finally:
         packs.close_packs(opened)
 

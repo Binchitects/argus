@@ -1157,8 +1157,15 @@ def _verify(args) -> int:
     finally:
         store_packs.close_packs(opened)
 
-    contradicted = [f for f in findings
-                    if str(f.get("status", "")).lower() == "contradicted"]
+    # One entry per wrong claim. `verify_text` reports per API, with the
+    # verdicts nested under each finding's `corrections`; filtering the
+    # findings themselves on a `status` they never carry meant this command
+    # could not exit 2 at all, and the hook it exists for never blocked.
+    contradicted = [
+        {"symbol": f.get("name"), "source": f.get("source"), "url": f.get("url"),
+         **c}
+        for f in findings for c in (f.get("corrections") or [])
+        if str(c.get("status", "")).lower() == "contradicted"]
 
     if args.json:
         print(json.dumps({"contradicted": contradicted,
