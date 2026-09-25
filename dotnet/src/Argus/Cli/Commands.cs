@@ -468,6 +468,26 @@ public static class Commands
         return 0;
     }
 
+    /// <summary>
+    /// Exit 0 when the server answers /healthz with 200. For a container
+    /// healthcheck: the image ships no curl and no Python, so the probe is the
+    /// program itself.
+    /// </summary>
+    public static int Healthcheck(string url)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var resp = client.GetAsync(url).GetAwaiter().GetResult();
+            return (int)resp.StatusCode == 200 ? 0 : 1;
+        }
+        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or UriFormatException)
+        {
+            Err.WriteLine($"unhealthy: {exc.Message}");
+            return 1;
+        }
+    }
+
     // --- serve ---------------------------------------------------------------------------
 
     public static int Serve(ArgusConfig cfg, string host, int port, IReadOnlyList<string>? allowedHosts)

@@ -2,7 +2,7 @@
   "uid": "llm-overview",
   "title": "LLM Overview",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "refresh": "1m",
   "tags": [
@@ -917,8 +917,8 @@
         },
         {
           "type": "gauge",
-          "title": "KV cache used (vLLM only)",
-          "description": "vLLM reports KV cache occupancy; llama.cpp exports no equivalent metric, so this is empty on llama.cpp.",
+          "title": "KV cache used",
+          "description": "Fraction of the engine's KV cache in use. vLLM exports vllm:gpu_cache_usage_perc; llama.cpp builds that still export llamacpp:kv_cache_usage_ratio show here too. Newer llama.cpp builds dropped that metric, so this reads 'no data' on them -- context pressure then shows up as rising 'Requests queued' instead.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -932,7 +932,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "max(vllm:gpu_cache_usage_perc)",
+              "expr": "max(vllm:gpu_cache_usage_perc) or max(llamacpp:kv_cache_usage_ratio)",
               "legendFormat": "kv cache"
             }
           ],
@@ -1017,8 +1017,8 @@
         },
         {
           "type": "timeseries",
-          "title": "Time to first token (vLLM histogram)",
-          "description": "vLLM's own TTFT histogram; llama.cpp has none. The 'Time to first token' panel above, from the gateway's logs, works for both.",
+          "title": "Engine time to first token (vLLM) / prompt processing speed (llama.cpp)",
+          "description": "vLLM exports a TTFT histogram; llama.cpp does not, so for llama.cpp this shows prompt-processing speed (tokens/s while prefilling), which is what TTFT is made of. Request-level TTFT for every engine is in 'Time to first token' above, from LiteLLM's logs.",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -1033,17 +1033,22 @@
             {
               "refId": "A",
               "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
-              "legendFormat": "p50"
+              "legendFormat": "vLLM p50 TTFT (s)"
             },
             {
               "refId": "B",
               "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
-              "legendFormat": "p95"
+              "legendFormat": "vLLM p95 TTFT (s)"
             },
             {
               "refId": "C",
               "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
-              "legendFormat": "p99"
+              "legendFormat": "vLLM p99 TTFT (s)"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(llamacpp:prompt_tokens_total[5m])) / sum(rate(llamacpp:prompt_seconds_total[5m])) >= 0",
+              "legendFormat": "llama.cpp prefill tok/s"
             }
           ],
           "fieldConfig": {
@@ -1056,7 +1061,24 @@
                 "showPoints": "never"
               }
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "llama.cpp prefill tok/s"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  }
+                ]
+              }
+            ]
           },
           "options": {
             "legend": {

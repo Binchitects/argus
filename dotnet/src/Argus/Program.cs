@@ -11,7 +11,7 @@ public static class Program
     const string Prog = "argus";
 
     static readonly string[] Commands_ =
-        ["embed", "index", "backup", "kpi", "status", "verify", "resolve", "serve", "flush-acl", "pack"];
+        ["embed", "index", "backup", "kpi", "status", "verify", "resolve", "serve", "flush-acl", "pack", "healthcheck"];
 
     static readonly string[] PackCommands = ["build", "list", "install", "info", "remove", "update", "index"];
 
@@ -43,6 +43,7 @@ public static class Program
             .Opt("--host", $"Bind address (default: {Cli.Commands.DefaultServeHost})")
             .Opt("--port", $"Bind port (default: {Cli.Commands.DefaultServePort})")
             .Many("--allowed-host", "Host header value the DNS-rebinding check will accept on /mcp (repeatable).", dest: "allowed_hosts", metavar: "HOST"),
+        "healthcheck" => new ArgSpec($"{Prog} healthcheck").Opt("--url", "Health endpoint (default: http://127.0.0.1:7700/healthz)"),
         "flush-acl" => new ArgSpec($"{Prog} flush-acl").Opt("--config", required: true).Opt("--user", "Only clear this GitLab username's cache entries"),
         "pack build" => new ArgSpec($"{Prog} pack build")
             .Opt("--source", $"One of: {string.Join(", ", SourceCatalog.Sources.Keys.OrderBy(k => k, StringComparer.Ordinal))}", required: true)
@@ -155,6 +156,7 @@ public static class Program
             }
         }
         if (command == "verify") return Cli.Commands.Verify(a);
+        if (command == "healthcheck") return Cli.Commands.Healthcheck(a.Get("url") ?? "http://127.0.0.1:7700/healthz");
 
         ArgusConfig cfg;
         try { cfg = ArgusConfig.Load(a.Req("config")); }

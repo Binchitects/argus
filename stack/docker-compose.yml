@@ -1270,11 +1270,18 @@ services:
     logging: *default-logging
 
   argus:
-    image: argus:${ARGUS_VERSION:-latest}
+    image: ${ARGUS_IMAGE:-argus}:${ARGUS_VERSION:-latest}
     # Not a public image: `docker compose up` builds it from this repository
     # the first time (a few minutes), then reuses the local image.
+    #
+    # Two implementations, one contract. The default builds the Python server
+    # (Dockerfile at the repository root). ARGUS_DOCKERFILE=dotnet/Dockerfile
+    # with ARGUS_IMAGE=argus-dotnet builds the .NET one instead: the same CLI,
+    # MCP tools, database, volume and UID, verified identical by
+    # dotnet/tests/conformance. Switching is a rebuild; the index is reused.
     build:
       context: ..
+      dockerfile: ${ARGUS_DOCKERFILE:-Dockerfile}
       target: server
     container_name: argus
     profiles: [argus]
@@ -1415,7 +1422,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7700/healthz', timeout=5).status==200 else 1)"]
+      # Either image: the Python one has python and no `healthcheck` command,
+      # the .NET one has `argus healthcheck` and no python.
+      test: ["CMD-SHELL", "if command -v python >/dev/null 2>&1; then python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7700/healthz', timeout=5).status==200 else 1)\"; else argus healthcheck; fi"]
       interval: 30s
       timeout: 10s
       retries: 3
