@@ -295,7 +295,8 @@ describe('chat', () => {
     await userEvent.keyboard('{Escape}')
     await ask('hello there')
     await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations')?.body).toEqual({ tools: ['calculator'] }))
-    // In a saved chat, a change is saved at once.
+    // In a saved chat (once the thread, and its own composer, is on screen), a change is saved at once.
+    expect(await within(await screen.findByRole('region', { name: 'Answer' })).findByText(/Here is code/)).toBeInTheDocument()
     await userEvent.click(await screen.findByRole('button', { name: /^Tools:/ }))
     await userEvent.click(await screen.findByRole('switch', { name: /Calculator/ }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ tools: ['argus'] }))

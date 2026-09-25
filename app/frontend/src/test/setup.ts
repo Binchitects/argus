@@ -1,6 +1,10 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+
+// findBy* and waitFor wait up to 5 s, not 1: a page's first render (its code
+// loaded on demand) can take longer than a second on a busy CI runner.
+configure({ asyncUtilTimeout: 5000 })
 
 afterEach(() => {
   cleanup()

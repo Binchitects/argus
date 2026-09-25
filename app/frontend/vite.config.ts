@@ -35,6 +35,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // The first test of a page pays for compiling it (the chat's markdown,
+    // highlighting and maths); on a busy CI runner that alone can pass 5 s.
+    testTimeout: 15_000,
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,

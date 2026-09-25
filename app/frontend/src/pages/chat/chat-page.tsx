@@ -101,6 +101,8 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
+  /** The chat an answer is streaming in: known before the route says so, when a new chat's first answer starts. */
+  const streamingIn = useRef<string | null>(null)
   const uploads = useUploads(config.maxUploadBytes)
   const [filesOpen, setFilesOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
@@ -168,9 +170,10 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
 
   /** Yes or no to a tool call waiting for the person. */
   const decide = async (callId: string, allow: boolean) => {
-    if (!id) return
+    const chat = streamingIn.current ?? id
+    if (!chat) return
     setLive((s) => (s ? { ...s, waiting: (s.waiting ?? []).filter((w) => w !== callId) } : s))
-    await api(`/api/chat/conversations/${id}/tool-calls/${encodeURIComponent(callId)}`, { body: { allow } }).catch((e) => toast.error(errorMessage(e)))
+    await api(`/api/chat/conversations/${chat}/tool-calls/${encodeURIComponent(callId)}`, { body: { allow } }).catch((e) => toast.error(errorMessage(e)))
   }
 
   const unarchive = async () => {
@@ -205,6 +208,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     async (conversationId: string, endpoint: string, body: object, start: LiveState, localId: string | null): Promise<boolean> => {
       setLive(start)
       setStreaming(true)
+      streamingIn.current = conversationId
       setError(null)
       setAtBottom(true)
       const controller = new AbortController()
