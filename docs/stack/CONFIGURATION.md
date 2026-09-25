@@ -96,7 +96,7 @@ against this compose file, so the defaults keep a checkout self-contained.
 
 | variable | default | what it points at |
 |---|---|---|
-| `LLM_CONFIG_DIR` | `./config` | the app (Argus directory), Traefik, LiteLLM, Prometheus, Grafana, Loki, Postgres, Argus — every committed config file |
+| `LLM_CONFIG_DIR` | `./config` | the app (dashboards, Argus directory), Traefik, LiteLLM, Prometheus, Loki, Postgres, Argus — every committed config file |
 | `LLM_DEPLOY_DIR` | `./deploy` | the build contexts and the exporter sources |
 | `LLM_MODELS_DIR` | `./models` | the bind mount at `/models`, and the default for `LLAMACPP_MODEL_DIR` |
 | `LLM_ENV_SAMPLES_DIR` | `./env-samples` | read by the app's **Admin → Model** page |
@@ -364,8 +364,6 @@ rotating it.
 | `LITELLM_SALT_KEY` | `echo sk-$(openssl rand -hex 24)` | **never change after first start** |
 | `LLM_PG_PASSWORD` | `openssl rand -hex 32` | the Postgres password; also the default for ClickHouse and MinIO |
 | `WEBUI_SECRET_KEY` | `openssl rand -hex 32` | Open WebUI's session signing key |
-| `GRAFANA_ADMIN_PASSWORD` | `openssl rand -hex 32` | Grafana's local admin |
-| `GRAFANA_OIDC_CLIENT_SECRET` | `openssl rand -hex 32` | Grafana's OIDC client |
 | `OPENWEBUI_OIDC_CLIENT_SECRET` | `openssl rand -hex 32` | Open WebUI's OIDC client |
 | `API_OIDC_CLIENT_SECRET` | `openssl rand -hex 32` | the `client_credentials` client machine callers use |
 | `ARGUS_ADMIN_TOKEN` | `openssl rand -hex 32` | enables Argus's `/admin/index` route; unset means the surface does not exist |
@@ -411,11 +409,10 @@ name as well as position.
 | `WEBUI_DEFAULT_ROLE` | `user` | what a newly signed-in person gets. Never `admin`: behind SSO anyone who can authenticate would otherwise self-promote |
 | `WEBUI_BACKEND_URL` | `http://identity-proxy:8080/v1` | where Open WebUI sends completions |
 | `WEBUI_BACKEND_KEY` | `${LITELLM_MASTER_KEY}` | the **single shared key** Open WebUI uses. Because it is shared, per-person attribution depends on the forwarded email header, and enforcement depends on `identity-proxy` |
-| `GRAFANA_ADMIN_USER` | `localadmin` | Grafana's local admin (the SSO admin is separate) |
 | `PROTECTED_CHAIN` | `sso-chain@file` | the middleware chain on the unauthenticated internals. Use `protected-chain@file` when the `auth` profile is off |
 | `PROMETHEUS_RETENTION_TIME` | `30d` | how long metrics are kept |
 | `PROMETHEUS_RETENTION_SIZE` | `20GB` | and how much disk they may take. Whichever hits first |
-| `ADMIN_GROUP` | `admins` | the group name the app gives admins in OIDC and forwardAuth; Grafana and Open WebUI map it to their admin role |
+| `ADMIN_GROUP` | `admins` | the group name the app gives admins in OIDC and forwardAuth; Open WebUI maps it to its admin role |
 | `HF_TOKEN` | empty | only needed for gated Hugging Face repositories |
 
 ---
@@ -514,7 +511,7 @@ One backup is one directory, `BACKUP_DIR/<date>_<time>/`:
 * `postgres.sql.gz` — a `pg_dumpall` of the gateway database (people, API keys,
   budgets, spend), taken **from the running server** so it is consistent.
 * `volumes/<name>.tar.gz` — every other named volume. SQLite databases inside
-  them (chat history, Grafana, the Argus index and audit) are
+  them (chat history, the Argus index and audit) are
   copied through SQLite's own online backup, so a write in progress cannot tear
   them.
 * `config/` — `.env`, every compose file in `COMPOSE_FILE`, and `config/`.
@@ -544,7 +541,6 @@ overwritten in meaning if you set them independently.
 | `OAUTH_ADMIN_ROLES` | `ADMIN_GROUP` (default `admins`) — the app's group that becomes an Open WebUI admin |
 | `OAUTH_ALLOWED_ROLES` | `*` — anyone the app signs in may use chat; authorisation comes from the group claim |
 | `OFFLINE_MODE`, `CHECKPOINT_DISABLE`, `LITELLM_LOCAL_MODEL_COST_MAP` | LiteLLM does not phone home and uses its bundled model cost map instead of fetching one |
-| `GF_PLUGINS_PREINSTALL_DISABLED`, `GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES` | Grafana neither preinstalls nor checks for plugins over the network |
 
 ---
 
@@ -556,7 +552,7 @@ for what each brings up; this is the short reference:
 
 | profile | brings up |
 |---|---|
-| *(none needed)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `grafana`, `node-exporter`, `power-limits`, `open-webui` |
+| *(none needed)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `node-exporter`, `power-limits`, `open-webui` |
 | `proxy` | `traefik` |
 | `auth` | `auth-init`, `redis` |
 | `gateway` | `app`, `litellm`, `postgres`, `redis`, `identity-proxy` |
@@ -584,7 +580,7 @@ knowing before something looks broken:
 - **Promtail reads `HOST_DOCKER_DIR`**, which defaults to `/var/lib/docker`. A
   rootless daemon or a custom `data-root` collects nothing until that path is
   corrected. Preflight checks the mount, so a wrong path is caught before `up`
-  rather than showing up as an empty Grafana later.
+  rather than showing up as an empty Logs page later.
 - **Promtail collects only this compose project's containers.** A second stack
   on the same daemon — the bundled test GitLab, for instance — does not end up
   in this deployment's Loki.
@@ -609,14 +605,12 @@ place to go for behaviour the `.env` does not expose.
 | `traefik/dynamic/middlewares.yml` | the middleware chains: `internal-auth` (basic auth), `security-headers`, `compress` (which never compresses SSE), `default-chain`, `protected-chain`, `app-auth` (forwardAuth to the app), `sso-chain` |
 | `traefik/dynamic/tls.yml` | the certificate store and TLS options: minimum version TLS 1.2, and a restricted cipher list |
 | `litellm/config.yaml` | the model list and its advertised window, router retries and timeout, the default per-person budget, the Redis cache policy (`mode: default_off`), and `user_header_mappings` — the mapping that makes chat spend and API spend one number |
-| `prometheus/prometheus.yml` | the 15 scrape jobs and their intervals |
+| `prometheus/prometheus.yml` | the 14 scrape jobs and their intervals |
 | `prometheus/rules/*.yml` | alerting rules: `hardware.yml` (9), `llm.yml` (7), `stack.yml` (5), `argus.yml` (4). `slo.yml` holds two more written out but **commented off** — an SLO alert needs a target somebody agreed to, and shipping guesses produces alarms nobody owns |
-| `alertmanager/alertmanager.yml` | routing and receivers. **Out of the box everything routes to the `null` receiver**: alerts are visible in Prometheus and Alertmanager and notified nowhere. Slack, SMTP and generic-webhook receivers are present but commented out, and read their secrets from files (`slack_api_url_file`, `auth_password_file`) so a real URL never lands in version control |
+| `alertmanager/alertmanager.yml` | routing and receivers. **Out of the box everything routes to the `null` receiver**: alerts are visible on the app's Alerts page (and in Prometheus and Alertmanager) and notified nowhere. Slack, SMTP and generic-webhook receivers are present but commented out, and read their secrets from files (`slack_api_url_file`, `auth_password_file`) so a real URL never lands in version control |
 | `loki/loki-config.yml` | storage and retention for log aggregation — retention is **enabled**, at 336 h (14 days), with a 2 h delete delay |
 | `promtail/promtail-config.yml` | which logs to collect; reads the Docker socket and container log files |
-| `grafana/provisioning/datasources/datasources.yml` | Prometheus, Loki, Alertmanager **and Postgres** (the spend tables, because LiteLLM's `/metrics` is enterprise-only and vLLM's metrics have no user dimension) |
-| `grafana/provisioning/dashboards/dashboards.yml` | how dashboard JSON is loaded |
-| `grafana/dashboards/*.json` | ten dashboards: **LLM Overview**, **Usage by person**, **GPU Hardware**, **Resources (CPU, Memory, GPU)**, **Stack Health & Alerts**, **Stack Performance**, **Host & Containers**, **Logs**, **Argus** (audit events, query latency) and **Indexing** (index passes, per-repo outcomes and failures). They reference fixed datasource UIDs, which is why those UIDs are pinned in the datasource file |
+| `dashboards/*.json` | ten dashboards, in Grafana's JSON format, that the app draws (Observe → Dashboards): **LLM Overview**, **Usage by person**, **GPU Hardware**, **Resources (CPU, Memory, GPU)**, **Stack Health & Alerts**, **Stack Performance**, **Host & Containers**, **Logs**, **Argus** (audit events, query latency) and **Indexing** (index passes, per-repo outcomes and failures). A panel names its datasource by UID: `prometheus`, `loki` or `litellm-db` (the gateway's Postgres: the spend tables, because LiteLLM's `/metrics` is enterprise-only and vLLM's metrics have no user dimension). Edit a file and the next request uses it |
 | `postgres/init/01-create-databases.sql` | creates the `litellm`, `langfuse` and `argus` databases and the `vector` extension. Runs **once**, only when `postgres-data` is empty |
 | `argus/config.yaml` | container-side Argus config: the GitLab URL **as a default**, and where the index and packs live |
 | `argus/tls/` | empty. Drop a private CA here and point `ARGUS_GITLAB_CA_CERT` at it |

@@ -38,7 +38,7 @@ scrape_configs:
       # carries any compose project label, so a second stack on the same host
       # -- the bundled test GitLab is one -- had its whole log shipped into
       # this deployment's Loki. That is not just volume: it is another
-      # project's logs appearing in this project's Grafana, and on first start
+      # project's logs appearing in this project's Logs page, and on first start
       # it is what pushed the busiest stream past Loki's rate limit.
       #
       # The project name comes from COMPOSE_PROJECT_NAME rather than a literal,
@@ -50,7 +50,7 @@ scrape_configs:
 
     pipeline_stages:
       # vLLM writes conventional Python logging lines; lift the level out so you
-      # can filter with {container="vllm"} | level="ERROR" in Grafana.
+      # can filter with {container="vllm"} | level="ERROR".
       - match:
           selector: '{container="vllm"}'
           stages:
@@ -67,7 +67,7 @@ scrape_configs:
           expression: ".*Avg prompt throughput.*"
 
       # llama.cpp is the stack's other engine, and its logs were collected
-      # raw with no level label -- so the same Grafana filter that works for
+      # raw with no level label -- so the same level filter that works for
       # vLLM returned nothing on a llama.cpp deployment. Its lines look like
       # "0.03.172.993 I srv load_model: ..." -- a timestamp, then a single
       # letter level (D/I/W/E).
@@ -88,10 +88,22 @@ scrape_configs:
           expression: ".*print_timing.*"
 
       - match:
-          selector: '{container=~"prometheus|grafana|loki|promtail"}'
+          selector: '{container=~"prometheus|loki|promtail"}'
           stages:
             - regex:
                 expression: 'level=(?P<level>[a-zA-Z]+)'
+            - labels:
+                level:
+
+      # The app writes one JSON object per line ({"LogLevel":"Warning",...}),
+      # a field Loki's level detection does not know: lift it, so the Logs
+      # page's level filter and colours cover the app too.
+      - match:
+          selector: '{container="app"} |~ "^[{]"'
+          stages:
+            - json:
+                expressions:
+                  level: LogLevel
             - labels:
                 level:
 

@@ -16,6 +16,12 @@ const pages: [string, string][] = [
   ['/admin/packs', 'Knowledge packs'],
   ['/admin/explore', 'Explore the index'],
   ['/admin/monitoring', 'Monitoring'],
+  ['/admin/dashboards', 'Dashboards'],
+  ['/admin/dashboards/stack-health', 'Stack Health & Alerts'],
+  ['/admin/dashboards/stack-logs', 'Logs (Loki)'],
+  ['/admin/dashboards/gpu-hardware', 'GPU Hardware'],
+  ['/admin/logs', 'Logs'],
+  ['/admin/alerts', 'Alerts'],
 ]
 
 /** The page has its heading and nothing is still loading. */
@@ -51,6 +57,62 @@ test('the usage dashboard draws every panel without an error', async ({ page }) 
   expect(await panels.count()).toBeGreaterThanOrEqual(20)
   await expect(panels.locator('[role=alert]')).toHaveCount(0)
   expect(errors).toEqual([])
+})
+
+test('every dashboard draws every panel without an error', async ({ page }) => {
+  const errors = watchConsole(page)
+  await page.goto('/admin/dashboards')
+  const links = page.getByRole('list', { name: 'Dashboards' }).getByRole('link')
+  await expect(links.first()).toBeVisible()
+  const hrefs = await links.evaluateAll((a) => a.map((x) => x.getAttribute('href')!))
+  expect(hrefs.length).toBe(9)
+  for (const href of hrefs) {
+    await page.goto(href)
+    await expect(page.locator('main [data-panel]').first()).toBeVisible()
+    await expect(page.locator('main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
+    await expect(page.locator('main [data-panel] [role=alert]'), href).toHaveCount(0)
+  }
+  expect(errors).toEqual([])
+})
+
+test('logs: narrowed by container, level and text in the address, and live', async ({ page }) => {
+  await page.goto('/admin/logs')
+  const lines = page.getByRole('region', { name: 'Logs, log lines' })
+  await expect(lines.getByRole('listitem').first()).toBeVisible({ timeout: 30_000 })
+
+  await page.getByRole('button', { name: 'Containers' }).click()
+  await page.getByRole('menuitemcheckbox', { name: 'traefik', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL(/container=traefik/)
+  await expect(page.getByText('The query sent to Loki')).toBeVisible()
+  await page.getByText('The query sent to Loki').click()
+  await expect(page.getByText('{container=~"traefik"}')).toBeVisible()
+  // A long query scrolls in its box; the page never gets wider than the screen.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+
+  await page.getByRole('radio', { name: 'Warnings and errors' }).click()
+  await expect(page).toHaveURL(/level=warn/)
+  await expect(page.getByText(/detected_level=~/)).toBeVisible()
+
+  await page.getByLabel('Contains').fill('no-such-text-in-any-log')
+  await expect(page).toHaveURL(/q=no-such-text/)
+  await expect(page.getByText('No log lines in this time range.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Live' }).click()
+  await expect(page.getByRole('button', { name: 'Live' })).toHaveAttribute('aria-pressed', 'true')
+  const tail = await page.waitForRequest((r) => r.url().includes('/api/admin/logs/?') && r.url().includes('limit=500'), { timeout: 10_000 })
+  expect(new URL(tail.url()).searchParams.get('container')).toBe('traefik')
+})
+
+test('alerts: what fires, what fired, and every rule with its query', async ({ page }) => {
+  await page.goto('/admin/alerts')
+  await expect(page.getByText('Firing now', { exact: true }).first()).toBeVisible()
+  const rules = page.getByRole('heading', { name: 'stack', exact: true })
+  await expect(rules).toBeVisible()
+  const first = page.locator('details summary').first()
+  await first.click()
+  await expect(page.locator('details[open]').getByRole('region', { name: 'PromQL' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
 })
 
 test('a chart has a table view, and the time range changes what is asked', async ({ page }) => {

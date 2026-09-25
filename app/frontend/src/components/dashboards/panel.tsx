@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import DOMPurify from 'dompurify'
 import { Info, Table2, TrendingUp } from 'lucide-react'
 import { marked } from 'marked'
@@ -12,10 +12,14 @@ import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { intervalFor, resolve, type TimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
-import { reduce } from './reduce'
+import { LogsPanel } from './logs-panel'
+import { reduceEach } from './reduce'
 import type { Column, PanelData, PanelDef } from './types'
+import type { Chosen } from './variables'
+import { thresholdColor, tone } from './colors'
+import { Gauge, Sparkline } from './visuals'
 
-export function PanelView({ uid, panel, range, tick }: { uid: string; panel: PanelDef; range: TimeRange; tick: number }) {
+export function PanelView({ uid, panel, range, tick, vars = {} }: { uid: string; panel: PanelDef; range: TimeRange; tick: number; vars?: Chosen }) {
   if (panel.type === 'text') {
     return (
       <Frame panel={panel}>
@@ -27,7 +31,7 @@ export function PanelView({ uid, panel, range, tick }: { uid: string; panel: Pan
       </Frame>
     )
   }
-  return <QueryPanel uid={uid} panel={panel} range={range} tick={tick} />
+  return <QueryPanel uid={uid} panel={panel} range={range} tick={tick} vars={vars} />
 }
 
 function Frame({ panel, action, children, className, compact }: { panel: PanelDef; action?: ReactNode; children: ReactNode; className?: string; compact?: boolean }) {
@@ -54,24 +58,28 @@ function Frame({ panel, action, children, className, compact }: { panel: PanelDe
   )
 }
 
-function QueryPanel({ uid, panel, range, tick }: { uid: string; panel: PanelDef; range: TimeRange; tick: number }) {
+function QueryPanel({ uid, panel, range, tick, vars }: { uid: string; panel: PanelDef; range: TimeRange; tick: number; vars: Chosen }) {
   const [asTable, setAsTable] = useState(false)
   const data = useQuery({
-    queryKey: ['panel', uid, panel.key, range.from, range.to, tick],
+    queryKey: ['panel', uid, panel.key, range.from, range.to, tick, JSON.stringify(vars)],
     enabled: panel.supported,
+    // A refresh keeps what is on screen until the new answer is in.
+    placeholderData: keepPreviousData,
     queryFn: ({ signal }) => {
       const from = resolve(range.from)
       const to = resolve(range.to)
       // As Grafana: roughly one bucket per 3 px of a full-width panel.
       const points = Math.round(((panel.gridPos?.w ?? 24) / 24) * 400)
       return api<PanelData>(`/api/dashboards/${uid}/panels/${panel.key}/query`, {
-        body: { from: from.toISOString(), to: to.toISOString(), intervalMs: intervalFor(from, to, points) },
+        // The dashboard's variables, when it has any.
+        body: { from: from.toISOString(), to: to.toISOString(), intervalMs: intervalFor(from, to, points), ...(Object.keys(vars).length ? { vars } : {}) },
         signal,
       })
     },
   })
-  const unit = panel.fieldConfig?.defaults?.unit
-  const decimals = panel.fieldConfig?.defaults?.decimals
+  const defaults = panel.fieldConfig?.defaults
+  const unit = defaults?.unit
+  const decimals = defaults?.decimals
   const error = data.error ? errorMessage(data.error) : data.data?.results.find((r) => r.error)?.error
   const isChart = panel.type === 'timeseries' || panel.type === 'barchart'
   const isStat = panel.type === 'stat' || panel.type === 'gauge'
@@ -79,7 +87,7 @@ function QueryPanel({ uid, panel, range, tick }: { uid: string; panel: PanelDef;
 
   let body: ReactNode = null
   if (!panel.supported) {
-    body = <p className="text-sm text-muted-foreground">This panel reads {panel.datasources.join(', ')}, which moves into the app in phase 5. It is in Grafana until then.</p>
+    body = <p className="text-sm text-muted-foreground">This panel reads {panel.datasources.join(', ')}, which the app does not serve.</p>
   } else if (data.isPending) {
     body = <Skeleton className={isStat ? 'h-9 w-28' : 'h-48'} />
   } else if (error) {
@@ -90,13 +98,62 @@ function QueryPanel({ uid, panel, range, tick }: { uid: string; panel: PanelDef;
     )
   } else if (data.data) {
     const results = data.data.results
-    if (isStat) {
-      const v = reduce(results, panel.options?.reduceOptions?.calcs)
+    const logs = results.flatMap((r) => r.logs ?? [])
+    if (panel.type === 'logs') {
+      const o = panel.options
       body = (
-        <div className="text-2xl font-semibold tracking-tight whitespace-nowrap tabular-nums xl:text-[1.75rem]" aria-label={panel.title}>
-          {formatValue(v, unit, decimals)}
-        </div>
+        <LogsPanel
+          lines={logs}
+          label={panel.title ?? 'Logs'}
+          showTime={o?.showTime !== false}
+          showLabels={o?.showLabels === true}
+          wrap={o?.wrapLogMessage !== false}
+          ascending={o?.sortOrder === 'Ascending'}
+          details={o?.enableLogDetails !== false}
+          highlight={vars.search?.[0] || undefined}
+        />
       )
+    } else if (isStat) {
+      const values = reduceEach(results, panel.options?.reduceOptions?.calcs)
+      const steps = defaults?.thresholds?.steps
+      const fixed = defaults?.color?.mode === 'fixed' ? defaults.color.fixedColor : undefined
+      if (!values.length || values.every((v) => v.value === null)) {
+        body = <div className="text-2xl font-semibold text-muted-foreground">{defaults?.noValue ?? 'No data'}</div>
+      } else if (panel.type === 'gauge') {
+        const min = defaults?.min ?? 0
+        const max = defaults?.max ?? (unit === 'percentunit' ? 1 : 100)
+        body = (
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-2">
+            {values.slice(0, 8).map((v) => (
+              <div key={v.name} className="grid justify-items-center">
+                <Gauge value={v.value} min={min} max={max} steps={steps} unit={unit} decimals={decimals} label={values.length > 1 ? v.name : (panel.title ?? v.name)} />
+                {values.length > 1 && <p className="max-w-full truncate text-xs text-muted-foreground">{v.name}</p>}
+              </div>
+            ))}
+          </div>
+        )
+      } else {
+        body = (
+          <div className={cn('grid gap-3', values.length > 1 && 'grid-cols-[repeat(auto-fit,minmax(7rem,1fr))]')}>
+            {values.slice(0, 12).map((v) => {
+              const t = tone(fixed ?? thresholdColor(v.value, steps))
+              const background = panel.options?.colorMode === 'background' && t
+              return (
+                <div key={v.name} className={cn('grid min-w-0 gap-1 rounded-lg', background && `${t.fill} px-3 py-2`)}>
+                  {values.length > 1 && <p className="truncate text-xs text-muted-foreground">{v.name}</p>}
+                  <div
+                    className={cn('text-2xl font-semibold tracking-tight whitespace-nowrap tabular-nums xl:text-[1.75rem]', panel.options?.colorMode !== 'none' && t?.ink)}
+                    aria-label={values.length > 1 ? `${panel.title}: ${v.name}` : panel.title}
+                  >
+                    {v.value === null ? (defaults?.noValue ?? '—') : formatValue(v.value, unit, decimals)}
+                  </div>
+                  {panel.options?.graphMode === 'area' && v.points.length > 1 && <Sparkline points={v.points} className={t?.ink ?? 'text-primary'} />}
+                </div>
+              )
+            })}
+          </div>
+        )
+      }
     } else if (isChart) {
       const series = results.flatMap((r) => r.series ?? [])
       const custom = panel.fieldConfig?.defaults?.custom
@@ -117,7 +174,8 @@ function QueryPanel({ uid, panel, range, tick }: { uid: string; panel: PanelDef;
       )
     } else {
       const t = results.find((r) => r.table)?.table
-      body = t ? <ResultTable columns={t.columns} rows={t.rows} panel={panel} capped={t.capped} /> : <p className="text-sm text-muted-foreground">No data.</p>
+      const shaped = t ? organize(t.columns, t.rows, panel) : null
+      body = shaped && t ? <ResultTable columns={shaped.columns} rows={shaped.rows} panel={panel} capped={t.capped} /> : <p className="text-sm text-muted-foreground">No data.</p>
     }
   }
 
@@ -137,6 +195,18 @@ function QueryPanel({ uid, panel, range, tick }: { uid: string; panel: PanelDef;
       {body}
     </Frame>
   )
+}
+
+/** Grafana's "organize fields" transformation: columns left out, renamed and put in order. */
+function organize(columns: Column[], rows: unknown[][], panel: PanelDef): { columns: Column[]; rows: unknown[][] } {
+  const o = panel.transformations?.find((t) => t.id === 'organize')?.options
+  if (!o) return { columns, rows }
+  const keep = columns.map((c, i) => ({ c, i })).filter(({ c }) => !o.excludeByName?.[c.name])
+  keep.sort((a, b) => (o.indexByName?.[a.c.name] ?? 999 + a.i) - (o.indexByName?.[b.c.name] ?? 999 + b.i))
+  return {
+    columns: keep.map(({ c }) => ({ ...c, name: o.renameByName?.[c.name] || c.name })),
+    rows: rows.map((r) => keep.map(({ i }) => r[i])),
+  }
 }
 
 function columnUnit(panel: PanelDef, column: string): { unit?: string; decimals?: number } {

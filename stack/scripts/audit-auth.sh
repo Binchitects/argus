@@ -27,7 +27,7 @@ JAR="$(mktemp)"
 trap 'rm -f "$JAR"' EXIT
 
 RES=(--ssl-no-revoke --cacert "$CA" --resolve "$DOM:443:127.0.0.1")
-for h in chat grafana traces api gateway metrics alerts admin; do RES+=(--resolve "$h.$DOM:443:127.0.0.1"); done
+for h in chat traces api gateway metrics alerts admin; do RES+=(--resolve "$h.$DOM:443:127.0.0.1"); done
 XRW=(-H 'X-Requested-With: audit')
 
 FAILS=0
@@ -46,10 +46,8 @@ echo
 # in when it was created. If those drift, the audit passes while every real
 # sign-in fails.
 echo "0. Container secrets match .env (drift check)"
-for pair in "app:Oidc__GrafanaSecret:GRAFANA_OIDC_CLIENT_SECRET" \
-            "app:Oidc__OpenWebUiSecret:OPENWEBUI_OIDC_CLIENT_SECRET" \
+for pair in "app:Oidc__OpenWebUiSecret:OPENWEBUI_OIDC_CLIENT_SECRET" \
             "app:Oidc__ApiSecret:API_OIDC_CLIENT_SECRET" \
-            "grafana:GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:GRAFANA_OIDC_CLIENT_SECRET" \
             "open-webui:OAUTH_CLIENT_SECRET:OPENWEBUI_OIDC_CLIENT_SECRET" \
             "langfuse:AUTH_CUSTOM_CLIENT_SECRET:LANGFUSE_OIDC_CLIENT_SECRET"; do
   c=${pair%%:*}; rest=${pair#*:}; ev=${rest%%:*}; fv=${rest#*:}
@@ -103,19 +101,23 @@ sys.exit(0 if c.get("email") else 2)
     --data-urlencode "code=$code" --data-urlencode "redirect_uri=$uri" "$APP/connect/token")
   echo "$again" | grep -q '"invalid_grant"' && green OK "$id: a used code is refused" || red FAIL "$id: code reuse: ${again:0:80}"
 }
-flow grafana    "https://grafana.$DOM/login/generic_oauth" "openid profile email groups" "$(get GRAFANA_OIDC_CLIENT_SECRET)"
 flow open-webui "https://chat.$DOM/oauth/oidc/callback"    "openid profile email groups" "$(get OPENWEBUI_OIDC_CLIENT_SECRET)"
 if profile_on tracing; then
   flow langfuse "https://traces.$DOM/api/auth/callback/custom" "openid email profile" "$(get LANGFUSE_OIDC_CLIENT_SECRET)"
 else
   skip "langfuse (tracing profile off)"
 fi
-c=$(curl -s "${RES[@]}" -u "grafana:not-the-secret" -d "grant_type=client_credentials" "$APP/connect/token")
+c=$(curl -s "${RES[@]}" -u "open-webui:not-the-secret" -d "grant_type=client_credentials" "$APP/connect/token")
 echo "$c" | grep -q '"invalid_client"' && green OK "a wrong client secret is refused" || red FAIL "wrong secret: ${c:0:80}"
-loc=$(curl -s -o /dev/null -w '%{redirect_url}' "${RES[@]}" -b "$JAR" -G --data-urlencode "client_id=grafana" \
+loc=$(curl -s -o /dev/null -w '%{redirect_url}' "${RES[@]}" -b "$JAR" -G --data-urlencode "client_id=open-webui" \
   --data-urlencode "redirect_uri=https://evil.example/cb" --data-urlencode "response_type=code" \
   --data-urlencode "scope=openid" "$APP/connect/authorize")
 [[ "$loc" != https://evil.example* ]] && green OK "an unregistered redirect URI is never followed" || red FAIL "redirected to $loc"
+# Grafana signed in here until its dashboards moved into the app: its client must be gone.
+loc=$(curl -s -o /dev/null -w '%{redirect_url}' "${RES[@]}" -b "$JAR" -G --data-urlencode "client_id=grafana" \
+  --data-urlencode "redirect_uri=https://grafana.$DOM/login/generic_oauth" --data-urlencode "response_type=code" \
+  --data-urlencode "scope=openid" "$APP/connect/authorize")
+[[ "$loc" != https://grafana.* ]] && green OK "the retired Grafana client is gone" || red FAIL "grafana still signs in: $loc"
 
 # ---------------------------------------------------------------------------
 echo

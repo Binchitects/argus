@@ -28,7 +28,7 @@ machine's network interface belong to Traefik:
 ┌──▼───┐   ┌────▼────┐    ┌─────▼─────┐   ┌─────▼─────┐  ┌────▼─────┐
 │ auth │   │ gateway │    │ inference │   │    ui     │  │  observ. │
 │authel│   │ litellm │    │ llamacpp  │   │ open-webui│  │ prometh. │
-│admin │   │ +pg+red │    │ vllm      │   │ admin-pnl │  │ grafana  │
+│admin │   │ +pg+red │    │ vllm      │   │ admin-pnl │  │ alertmgr │
 │redis │   │identity-│    │ ollama    │   │ argus     │  │ loki ... │
 └──────┘   │ proxy   │    └───────────┘   └───────────┘  └──────────┘
            └─────────┘
@@ -40,7 +40,7 @@ the API gateway can be the single place that authenticates machine callers and
 counts their tokens.
 
 That single-ingress design is also why a broken Traefik is a total outage and a
-broken Grafana is not — and why `tls-init` failing takes the whole stack down
+broken Prometheus is not — and why `tls-init` failing takes the whole stack down
 with it (see §9).
 
 ---
@@ -61,7 +61,6 @@ with it (see §9).
 | `api.<domain>` | llama.cpp **or** vLLM | forwardAuth (machine token), plus a key-injecting middleware |
 | `api2.<domain>` | vLLM secondary (`multi-model`) | none in front — no forwardAuth and **no key injection**, so the caller presents `VLLM_API_KEY` itself |
 | `argus.<domain>` | Argus MCP | none — per-caller GitLab PAT |
-| `grafana.<domain>` | Grafana | OIDC (its own session) |
 | `traces.<domain>` | Langfuse | OIDC (its own session) |
 | `metrics.<domain>` | Prometheus | `sso-chain` |
 | `alerts.<domain>` | Alertmanager | `sso-chain` |
@@ -86,7 +85,7 @@ key always starts; everything else needs its profile named.
 
 | profile | brings up | why it is separate |
 |---|---|---|
-| *(always)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `grafana`, `node-exporter`, `power-limits`, `open-webui` | the minimum that is useful and cheap; TLS is not optional, and an LLM stack nobody can monitor is one nobody notices breaking |
+| *(always)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `node-exporter`, `power-limits`, `open-webui` | the minimum that is useful and cheap; TLS is not optional, and an LLM stack nobody can monitor is one nobody notices breaking |
 | `proxy` | `traefik` | the ingress. Separate so a machine can run the engines without 80/443 |
 | `auth` | `auth-init`, `redis` | the basic-auth fallback file and the Argus directory |
 | `gateway` | `app`, `litellm`, `postgres`, `redis`, `identity-proxy` | the app (sign-in for everything), the API gateway, per-person keys and budgets |
@@ -122,7 +121,7 @@ service reaches every other by its **service name** (`http://litellm:4000`,
 Three names are *also* resolvable, deliberately:
 
 * `<domain>` → Traefik. Traefik carries an explicit network alias for it,
-  because the OIDC token exchange is server-to-server: Grafana, Open WebUI and
+  because the OIDC token exchange is server-to-server: Open WebUI and
   Langfuse call the issuer (the app) **directly** rather than through the browser.
   Without that alias `<domain>` does not resolve inside a container and
   every login fails at the token step — while `/healthz` on every service still
@@ -133,8 +132,8 @@ Three names are *also* resolvable, deliberately:
   machine, and `cpu-temp-exporter`, for the hardware monitor it reads CPU
   temperature from. Inside a container `localhost` means the container itself.
 
-**Nineteen named volumes.** They are prefixed with `COMPOSE_PROJECT_NAME`, so
-the real names are `llmservice_grafana-data` and so on. `.env` is the only
+**Eighteen named volumes.** They are prefixed with `COMPOSE_PROJECT_NAME`, so
+the real names are `llmservice_postgres-data` and so on. `.env` is the only
 place the project name is set, and changing it after the first start gives you
 a stack that boots with none of its data.
 
@@ -145,7 +144,6 @@ a stack that boots with none of its data.
 | `argus-data` | the code index, symbol embeddings, audit and ACL cache | yes — rebuilt by re-indexing (minutes to hours) |
 | `ollama-models` | `nomic-embed-text` and anything else pulled | yes — re-pulled, ~274 MB |
 | `open-webui-data` | chat history, accounts, uploaded files | no |
-| `grafana-data` | Grafana's own users, API keys, dashboard edits | yes if dashboards are provisioned from `config/grafana/` (they are) |
 | `prometheus-data` | 30 days of metrics by default | yes — the history, not the config |
 | `prometheus-secrets` | the engine scrape token, generated on every `up` | yes |
 | `alertmanager-data` | silences and the notification log | yes |
@@ -197,7 +195,7 @@ writes from `PROXY_AUTH_USER`/`PROXY_AUTH_PASSWORD`.
 
 ### 5.2 OIDC, for services with their own session
 
-Grafana, Open WebUI and Langfuse each have their own user database and their own
+Open WebUI and Langfuse each have their own user database and their own
 sign-in screen. Rather than deleting those, they delegate the *sign-in* to the
 app and keep the session:
 
@@ -215,11 +213,9 @@ Two consequences worth knowing:
 * The server-to-server token exchange is why `<domain>` itself must resolve
   inside the network (§4), and why every such container carries the stack's
   certificate as a trusted CA.
-* Grafana is the exception to "containers verify the certificate": Grafana is
-  Go, reads the **operating system** trust store and honours no CA environment
-  variable, so its OAuth client runs with
-  `GF_AUTH_GENERIC_OAUTH_TLS_SKIP_VERIFY_INSECURE=true`. That is a deliberate,
-  documented downgrade on one in-network call, not an oversight.
+* Grafana signed in the same way until phase 5, when its dashboards moved into
+  the app. A `grafana` client left by an older version is deleted at start, so
+  its secret stops working.
 
 ### 5.3 Bearer credentials, for machines and for Argus
 
@@ -306,17 +302,25 @@ else's email from outside.
 
 ```
 prometheus ──scrape──► node-exporter, nvidia-smi-exporter, cpu-temp-exporter,
-                       llamacpp / vllm, cadvisor, dcgm, traefik, loki, grafana
+                       llamacpp / vllm, cadvisor, dcgm, traefik, loki
      │
      ├─ rules in config/prometheus/rules/*.yml
      ├─ firing alerts ──► alertmanager ──► (filesystem notifier)
-     └─ datasource ──► grafana ──► 9 provisioned dashboards
+     └─ queried by ──► the app ──► 10 dashboards, Logs (Loki), Alerts
 ```
+
+The app draws every dashboard itself (Observe → Dashboards): the files in
+`config/dashboards/` are Grafana's JSON format, and the app runs each panel's
+query against Prometheus, Loki or the gateway's database, with Grafana's rules
+for steps, macros, variables and series names. Before Grafana was removed, every
+one of the 153 panels gave the same data in both (`compare-dashboards.py`,
+commit 8c07f7b). The Logs page reads Loki; the Alerts page reads Alertmanager
+(what fires now), Prometheus's rules, and its `ALERTS` series (what fired before).
 
 Per-person token usage is **not** scraped: LiteLLM's `/metrics` is an
 enterprise feature on current builds, and vLLM's metrics carry token counts but
-no user dimension. That is why Grafana has a *Postgres* datasource reading the
-same spend tables the LiteLLM admin UI reads.
+no user dimension. That is why the usage dashboards query the same spend tables
+the LiteLLM admin UI reads, in Postgres.
 
 ---
 
@@ -396,10 +400,9 @@ clients cached `/model/info` and showed every alias as a separate model.
 
 | service | image | profile | what it does |
 |---|---|---|---|
-| `prometheus` | `prom/prometheus:v3.1.0` | always | scrapes 15 jobs; rules in `config/prometheus/rules/` |
+| `prometheus` | `prom/prometheus:v3.1.0` | always | scrapes 14 jobs; rules in `config/prometheus/rules/` |
 | `prometheus-secrets` | `prom/prometheus:v3.1.0` | always | one-shot. Puts the engine's scrape token into a volume Prometheus mounts read-only |
-| `alertmanager` | `prom/alertmanager:v0.28.0` | always | receives firing alerts. The default receiver is `null`, so alerts are visible in the UI and sent nowhere until you configure one |
-| `grafana` | `grafana/grafana:11.5.1` | always | 10 provisioned dashboards (Prometheus, Loki, Alertmanager and Postgres datasources), including **Argus** (audit events, query latency) and **Indexing** (index passes, per-repo outcomes and failures) |
+| `alertmanager` | `prom/alertmanager:v0.28.0` | always | receives firing alerts. The default receiver is `null`, so alerts are visible on the app's Alerts page (and Alertmanager's UI) and sent nowhere until you configure one |
 | `node-exporter` | `prom/node-exporter:v1.9.0` | always | host CPU, memory, disk, network |
 | `nvidia-smi-exporter` | `utkuozdemir/nvidia_gpu_exporter:1.3.2` | `smi` | GPU via NVML |
 | `cpu-temp-exporter` | `python:3.13-slim` + `stack/deploy/cpu-temp-exporter/exporter.py` | `smi` | CPU package temperature, which NVML does not report |

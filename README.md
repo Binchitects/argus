@@ -270,9 +270,8 @@ Each of these used to be a script you had to run in the right order.
 
 | address | what | sign-in |
 |---|---|---|
-| `https://llm.localhost` | **the app**: sign-in for everything, **chat** (models, thinking, branches, files, Argus), usage and cost, people, API keys, credit, 2FA, **every setting**, the model, the code index, packs, audit log | its own sign-in; Admin needs `admins` |
+| `https://llm.localhost` | **the app**: sign-in for everything, **chat** (models, thinking, branches, files, Argus), usage and cost, people, API keys, credit, 2FA, **every setting**, the model, the code index, packs, audit log, **dashboards, logs and alerts** | its own sign-in; Admin needs `admins` |
 | `https://chat.llm.localhost` | Open WebUI, with Argus as a tool, until the app's chat is signed off ([CHAT.md](docs/stack/CHAT.md)) | SSO |
-| `https://grafana.llm.localhost` | dashboards | SSO |
 | `https://gateway.llm.localhost/v1` | OpenAI-compatible API for tools | **the person's own API key** |
 | `https://argus.llm.localhost/mcp` | Argus MCP server (profile `argus`) | **the person's own GitLab token** |
 | `https://metrics.llm.localhost` · `alerts.` | Prometheus, Alertmanager | SSO, `admins` only |
@@ -332,7 +331,7 @@ eval "$(./scripts/with-ca.sh --print)"     # same as: make ca
 A `000`, a `certificate verify failed`, or a connection error from a host tool is
 almost always this variable rather than the stack being down. Containers need
 none of it: they mount the certificate and set these same variables themselves.
-Go and Java tools (Grafana, Traefik, most JVM CLIs) read the **operating
+Go and Java tools (Traefik, most JVM CLIs) read the **operating
 system's** store and honour none of these variables — `with-ca.sh` says so on
 stderr rather than appearing to do nothing.
 
@@ -570,7 +569,7 @@ conversation or system prompt — (`PRICE_CACHED_INPUT_PER_MTOK`), and generated
 (`PRICE_OUTPUT_PER_MTOK`). Checked against the spend log: an identical request
 resent, with 84 of its 88 prompt tokens cached, cost 40% less, to the digit.
 
-Grafana's **Usage by person** has a *Tokens and cost* section: cache-miss input,
+The **Usage by person** dashboard has a *Tokens and cost* section: cache-miss input,
 cache-hit input, hit rate, output and cost in total, per person, and over time.
 **LLM Overview** splits token throughput the same way. Credit limits in the admin
 panel are in the same currency.
@@ -608,8 +607,8 @@ recreates exactly the containers the change affects.
 | backups | `BACKUP_DIR`, `BACKUP_COPY_DIR`, `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`, `BACKUP_TIME` | `./scripts/backup.sh` takes a complete, verified backup (pg_dumpall, SQLite online copies, config with secrets); `sudo ./scripts/backup.sh --install-timer` runs it daily; `--restore --from <dir>` puts it back; `BACKUP_COPY_DIR` keeps a verified second copy on another disk |
 
 Config files, for what `.env` does not cover: alert rules in
-`stack/config/prometheus/rules/`, dashboards in `stack/config/grafana/dashboards/`
-(edit the files; UI edits are overwritten). Who may reach which service is
+`stack/config/prometheus/rules/`, dashboards in `stack/config/dashboards/`
+(Grafana's JSON format; the app draws them and uses an edited file at once). Who may reach which service is
 decided by the app; see [AUTHENTICATION](docs/stack/AUTHENTICATION.md).
 
 ### Switching the model
@@ -827,8 +826,9 @@ python3 scripts/functional-test.py
 `acceptance.py` checks wiring, and that `.env` and every sample resolve completely.
 `functional-test.py` does what people do, for real: creates a person in the app,
 signs them in, uses their key, proves a credit limit binds and a rotated key dies,
-signs into Grafana and Open WebUI with the right roles, and confirms a chat is billed
-to whoever typed it — 43 checks. `domain-check.sh` proves the running stack answers
+signs into Open WebUI with the right role, reads the dashboards, logs and alerts as the
+admin (and is refused as the person), and confirms a chat is billed to whoever typed
+it — 68 checks. `domain-check.sh` proves the running stack answers
 for `LLM_DOMAIN`. `audit-auth.sh`, `multiuser-bench.py` and `qwen-code-realworld.py`
 go deeper on login, concurrency and agent work.
 

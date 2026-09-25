@@ -28,7 +28,7 @@ ok()   { printf '  \033[32mOK\033[0m    %s\n' "$*"; }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; FAILS=$((FAILS+1)); }
 
 resolve=()
-for h in "" chat grafana admin gateway api metrics alerts argus; do
+for h in "" chat admin gateway api metrics alerts argus; do
   name="${h:+$h.}$DOM"; resolve+=(--resolve "$name:$PORT:127.0.0.1")
 done
 C=(curl -s --max-time 20 --cacert "$CRT" "${resolve[@]}")
@@ -55,7 +55,6 @@ expect() {  # host path expected-codes-regex label
 expect "" /readyz 200
 expect gateway /health/liveliness 200
 expect chat / "200|302"
-expect grafana /login 200
 expect admin / 302   # the old admin panel address, redirected into the app
 expect metrics / 302
 expect alerts / 302
@@ -70,12 +69,9 @@ iss="$(printf '%s' "$disc" | python3 -c 'import json,sys; print(json.load(sys.st
 [[ "$iss" == "$APP/" ]] && ok "OIDC issuer $iss" || bad "OIDC issuer '${iss}'"
 loc="$("${B[@]}" -o /dev/null -w '%{redirect_url}' "$(u metrics /)")"
 [[ "$loc" == "$APP/login?rd="* ]] && ok "forward-auth sends the browser to sign in at $APP" || bad "forward-auth redirect: $loc"
-loc="$("${C[@]}" -o /dev/null -w '%{redirect_url}' "$(u grafana /login/generic_oauth)")"
-[[ "$loc" == "$APP/connect/authorize"*"redirect_uri=https%3A%2F%2Fgrafana.$DOM"* ]] \
-  && ok "Grafana SSO starts at the app with its own redirect URI" || bad "Grafana SSO redirect: ${loc:0:140}"
 loc="$("${C[@]}" -o /dev/null -w '%{redirect_url}' "$(u chat /oauth/oidc/login)")"
-[[ "$loc" == "$APP/connect/authorize"* ]] \
-  && ok "Open WebUI SSO starts at the app" || bad "Open WebUI SSO redirect: ${loc:0:140}"
+[[ "$loc" == "$APP/connect/authorize"*"redirect_uri=https%3A%2F%2Fchat.$DOM"* ]] \
+  && ok "Open WebUI SSO starts at the app with its own redirect URI" || bad "Open WebUI SSO redirect: ${loc:0:140}"
 
 echo "4. inside the network"
 if docker exec open-webui python -c "import socket; socket.gethostbyname('$DOM')" 2>/dev/null; then

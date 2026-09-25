@@ -15,8 +15,10 @@ echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, LegendCompone
  * tooltip, and a legend whenever there is more than one series. At most eight
  * series: the seven largest and "Other".
  */
-export function TimeChart({ series: raw, unit, stacked, bars, height = 260, label, from, to }: {
+export function TimeChart({ series: raw, unit, stacked, bars, height = 260, label, from, to, fixed }: {
   series: ChartSeries[]
+  /** Series whose colour is a state, not an identity (a log level): name to CSS custom property. */
+  fixed?: Record<string, string>
   /** The selected range, epoch ms: the axis spans it even where there is no data. */
   from?: number
   to?: number
@@ -34,6 +36,7 @@ export function TimeChart({ series: raw, unit, stacked, bars, height = 260, labe
     if (!ref.current) return
     const chart = echarts.init(ref.current, undefined, { renderer: 'svg' })
     const colors = seriesColors(series.map((s) => s.name), resolved)
+    for (const [name, token] of Object.entries(fixed ?? {})) colors.set(name, cssColor(token, colors.get(name) ?? '#888'))
     const text = cssColor('--muted-foreground', '#62656d')
     const grid = cssColor('--border', '#e2e3e7')
     const surface = cssColor('--popover', '#ffffff')
@@ -75,7 +78,7 @@ export function TimeChart({ series: raw, unit, stacked, bars, height = 260, labe
       resize.disconnect()
       chart.dispose()
     }
-  }, [series, unit, stacked, bars, from, to, resolved])
+  }, [series, unit, stacked, bars, from, to, resolved, fixed])
 
   // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- ECharts draws into a div; the table view carries the data
   return <div ref={ref} style={{ height }} role="img" aria-label={label} className="w-full" />

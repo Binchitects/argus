@@ -11,9 +11,8 @@ import { ServiceList } from './services'
 export function MonitoringPage() {
   const s = useQuery({ queryKey: ['admin', 'services'], queryFn: ({ signal }) => api<Probe[]>('/api/admin/services', { signal }), refetchInterval: 15_000 })
   const links: [string, string, string][] = [
-    ['Grafana', serviceUrl('grafana'), 'The dashboards not in the app yet: engine, GPU, host, logs, Argus.'],
-    ['Prometheus', serviceUrl('metrics'), 'Raw metrics and alert rules.'],
-    ['Alertmanager', serviceUrl('alerts'), 'Firing alerts.'],
+    ['Prometheus', serviceUrl('metrics'), 'Raw metrics and ad hoc queries.'],
+    ['Alertmanager', serviceUrl('alerts'), 'Silences, and where notifications go.'],
     ['Argus MCP', `${serviceUrl('argus')}mcp`, 'The code index, for agents.'],
   ]
   return (

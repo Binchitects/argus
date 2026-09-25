@@ -56,7 +56,7 @@ if (Test-Path $envFile) {
     }
 }
 
-$names = @('', 'auth', 'chat', 'admin', 'api', 'grafana', 'metrics', 'alerts',
+$names = @('', 'auth', 'chat', 'admin', 'api', 'metrics', 'alerts',
            'gateway', 'traces', 'logs', 'cadvisor', 'node', 'gpu', 's3', 'argus') |
     ForEach-Object { if ($_) { "$_.$domain" } else { $domain } }
 

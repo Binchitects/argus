@@ -22,7 +22,7 @@ const passwordSchema = z.object({
 })
 const codeSchema = z.object({ code: z.string().trim().min(1, 'Enter the code.') })
 
-/** Sign-in for the app and for everything that trusts it (Grafana, the chat, tools). */
+/** Sign-in for the app and for everything that trusts it (the chat, tools). */
 export function LoginPage() {
   const [params] = useSearchParams()
   const redirect = params.get('rd') ?? '/'

@@ -20,7 +20,7 @@
 #   postgres.sql.gz        pg_dumpall of the gateway database: people, API keys, budgets,
 #                          spend. Taken from the running server, so it is consistent.
 #   volumes/<name>.tar.gz  every other named volume. SQLite databases inside them (chats,
-#                          Grafana, the Argus index and audit) are copied
+#                          the Argus index and audit) are copied
 #                          with SQLite's online backup, so a write in progress cannot tear them.
 #   config/                .env, every compose file named in COMPOSE_FILE, and config/ with
 #                          links FOLLOWED: users, OIDC key and client secrets, basic-auth.

@@ -40,7 +40,7 @@ cpu_temperature_source_info{source="lhm"} 1
 ```
 
 `cpu_temperature_available` exists so that **no sensor** and **a sensor reading
-27.85** cannot look the same. When it is 0 the Grafana panel says "No CPU
+27.85** cannot look the same. When it is 0 the dashboard panel says "No CPU
 sensor available on this host" rather than plotting nothing and looking broken.
 
 ## Linux

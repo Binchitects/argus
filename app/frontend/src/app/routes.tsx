@@ -2,9 +2,7 @@ import type { ComponentType } from 'react'
 import type { RouteObject } from 'react-router'
 import { HomePage } from '@/pages/home'
 import { NotFoundPage } from '@/pages/not-found'
-import { NotYetPage } from '@/pages/not-yet'
 import { RouteErrorPage } from '@/pages/route-error'
-import { navigation } from './nav'
 import { RequireAdmin } from './require-admin'
 import { Shell } from './shell'
 
@@ -16,12 +14,6 @@ import { Shell } from './shell'
 const lazy = (load: () => Promise<{ Component: ComponentType }>) => ({
   lazy: () => load().catch(() => new Promise<void>((r) => setTimeout(r, 500)).then(load)),
 })
-
-/** Pages this web does not have yet show where they are meanwhile. */
-const notYet: RouteObject[] = navigation
-  .flatMap((s) => s.items)
-  .filter((i) => !i.ready)
-  .map((i) => ({ path: i.path.slice(1) + '/*', element: <NotYetPage /> }))
 
 export const routes: RouteObject[] = [
   { path: '/login', ...lazy(() => import('@/pages/login').then((m) => ({ Component: m.LoginPage }))), errorElement: <RouteErrorPage /> },
@@ -59,10 +51,13 @@ export const routes: RouteObject[] = [
               { path: 'packs', ...lazy(() => import('@/pages/admin/argus').then((m) => ({ Component: m.PacksPage }))) },
               { path: 'explore', ...lazy(() => import('@/pages/admin/argus').then((m) => ({ Component: m.ExplorePage }))) },
               { path: 'monitoring', ...lazy(() => import('@/pages/admin/monitoring').then((m) => ({ Component: m.MonitoringPage }))) },
+              { path: 'dashboards', ...lazy(() => import('@/pages/admin/dashboards').then((m) => ({ Component: m.DashboardsPage }))) },
+              { path: 'dashboards/:uid', ...lazy(() => import('@/pages/admin/dashboards').then((m) => ({ Component: m.DashboardPage }))) },
+              { path: 'logs', ...lazy(() => import('@/pages/admin/logs').then((m) => ({ Component: m.LogsPage }))) },
+              { path: 'alerts', ...lazy(() => import('@/pages/admin/alerts').then((m) => ({ Component: m.AlertsPage }))) },
               { path: '*', element: <NotFoundPage /> },
             ],
           },
-          ...notYet,
           { path: '*', element: <NotFoundPage /> },
         ],
       },

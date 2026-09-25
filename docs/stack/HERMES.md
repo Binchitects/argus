@@ -277,7 +277,7 @@ curl https://gateway.llm.localhost/v1/chat/completions \
   -d '{"model":"local","messages":[{"role":"user","content":"hi"}],"max_tokens":16}'
 ```
 
-Then confirm the call landed on **you** — Grafana → **Usage by person**, or:
+Then confirm the call landed on **you** — the app's **Usage & cost** page (Everyone), or:
 
 ```bash
 curl "https://gateway.llm.localhost/user/info?user_id=you@example.com" \

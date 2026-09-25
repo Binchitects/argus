@@ -188,8 +188,12 @@ function ModelCard({ model: m, active, onEdit, onChanged }: { model: ModelRow; a
         {m.source === 'local' && m.atGateway === false && <Alert variant="warning">Not at the gateway yet: it is added again within a minute.</Alert>}
         {m.status === 'failed' && (
           <Alert variant="destructive" title="The engine could not load it">
-            Its log says why: <code className="text-xs">docker compose logs llamacpp</code> on the host, or Grafana's logs. An incomplete download, a file this
-            llama.cpp cannot read, or too little GPU memory are the usual causes. It is not tried again until you load it.
+            Its log says why:{' '}
+            <Link to="/admin/logs?container=llamacpp&level=warn" className="font-medium underline underline-offset-2">
+              the engine's warnings and errors
+            </Link>
+            , or <code className="text-xs">docker compose logs llamacpp</code> on the host. An incomplete download, a file this llama.cpp cannot read, or too
+            little GPU memory are the usual causes. It is not tried again until you load it.
           </Alert>
         )}
         <AccessPicker value={m.access} onChange={(audience, groups) => access.mutate({ audience, groups })} />

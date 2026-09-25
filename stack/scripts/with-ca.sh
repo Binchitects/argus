@@ -122,7 +122,7 @@ eval "$(emit)"
 
 # A note for the tools this cannot help. Go and Java read the OPERATING
 # SYSTEM's trust store and honour none of the variables above, so a Go binary
-# (Grafana, Traefik, many CLIs) or a JVM tool still fails here. That is a real
+# (Traefik, many CLIs) or a JVM tool still fails here. That is a real
 # limit, not an oversight -- say it rather than let it look like this script
 # silently did nothing.
 printf 'with-ca: trusting %s for this command only (Go/Java tools ignore this)\n' \

@@ -3,7 +3,7 @@
 # Runs as the calling user (no root-owned files), shares the NuGet cache
 # between runs, and uses the host network so Testcontainers' mapped ports
 # on localhost are reachable from the tests. The whole repository is mounted:
-# the tests read the real dashboard files in stack/config/grafana/dashboards.
+# the tests read the real dashboard files in stack/config/dashboards.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 cache="${DN_CACHE:-$HOME/.cache/llm-app-dotnet}"

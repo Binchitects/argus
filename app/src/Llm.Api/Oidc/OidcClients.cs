@@ -22,10 +22,16 @@ public sealed class OidcClients(
 
         var d = auth.Value.Domain;
         var o = oidc.Value;
-        await UpsertAppAsync("grafana", "Grafana", o.GrafanaSecret, $"https://grafana.{d}/login/generic_oauth", $"https://grafana.{d}/login", ct);
         await UpsertAppAsync("open-webui", "Open WebUI", o.OpenWebUiSecret, $"https://chat.{d}/oauth/oidc/callback", $"https://chat.{d}/auth", ct);
         await UpsertAppAsync("langfuse", "Langfuse", o.LangfuseSecret, $"https://traces.{d}/api/auth/callback/custom", $"https://traces.{d}/", ct);
         await UpsertMachineAsync("api", "Model API (machine clients)", o.ApiSecret, ct);
+
+        // Apps this service no longer has: a client an older version registered
+        // must not keep accepting its secret. Grafana went when its dashboards moved into the app.
+        foreach (var retired in new[] { "grafana" })
+        {
+            await UpsertAsync(retired, null, new OpenIddictApplicationDescriptor(), ct);
+        }
     }
 
     private async Task UpsertAppAsync(string id, string name, string? secret, string redirect, string postLogout, CancellationToken ct)

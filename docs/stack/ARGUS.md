@@ -325,7 +325,7 @@ instructions block. Two useful end-to-end probes:
 
 ---
 
-## Who asked what: Argus in Grafana
+## Who asked what: the Argus dashboard
 
 Every tool call and every refused request is written to the audit table in
 Argus's sidecar database, and **also printed as one JSON line on stdout**
@@ -342,7 +342,7 @@ bearer token, or a GitLab token GitLab rejected; no tool ran.
 
 Promtail ships these lines to Loki — `logging` is in the default
 `COMPOSE_PROFILES`, so this works on a fresh deployment — with `event`,
-`outcome` and `tool` as labels. The **Argus** dashboard in Grafana shows calls
+`outcome` and `tool` as labels. The app's **Argus** dashboard (Observe → Dashboards) shows calls
 by tool and by person, no-access answers, errors, refusals, p95 latency, and a
 searchable audit trail with each call's arguments. Calls from Qwen Code, Claude
 Code or any MCP client and from Open WebUI all appear under the person's GitLab
@@ -524,8 +524,8 @@ returns 200 and `up` is still 1, which is why this watches
 and knows about nothing, which used to present as an empty table that looked
 like a fresh install).
 
-The app's **Admin → Overview** reads the same computation, so the tile, the Grafana
-line and the alert cannot disagree; `CONTRIBUTING`-style threshold changes
+The app's **Admin → Overview** reads the same computation, so the tile, the
+dashboard line and the alert cannot disagree; `CONTRIBUTING`-style threshold changes
 belong in `.env`, not in the app.
 
 ---

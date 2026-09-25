@@ -7,8 +7,9 @@ exist, datasources are healthy. It does not prove the things people actually
 do work -- that someone an admin creates in the app can sign in, that their
 key reaches the model, that a budget really stops them, that a rotated key
 really dies, that a non-admin cannot reach the admin area or the metrics,
-that Grafana and Open WebUI sign them in with the right role, that a chat in
-Open WebUI is billed to the person who typed it.
+that Open WebUI signs them in with the right role, that the dashboards, logs
+and alerts answer the admin and nobody else, that a chat in Open WebUI is
+billed to the person who typed it.
 
 This does each of those through the public HTTPS endpoints with real logins,
 as the admin and as a brand-new person it creates, and removes that person at
@@ -217,7 +218,7 @@ def main():
         env_row.get("name") == MODEL and env_row.get("status") in ("loaded", None), f"HTTP {code} {env_row.get('status')}")
     code, overview = admin.app("GET", "/api/admin/overview")
     down = [x["name"] for x in overview.get("services", []) if not x.get("ok")]
-    rec("admin", "the Overview reaches the gateway, Prometheus and Grafana", code == 200 and not down, f"down: {down}" if down else "")
+    rec("admin", "the Overview reaches the gateway, Prometheus, Alertmanager and Loki", code == 200 and not down, f"down: {down}" if down else "")
     code = admin.req(u("admin", "/model"), follow=False)[0]
     loc = admin.req(u("admin", "/model"), follow=False)[2].get("Location", "")
     rec("admin", "the old admin panel address sends bookmarks to the app", code == 302 and loc.endswith("/admin/model"), f"HTTP {code} {loc}")
@@ -298,17 +299,22 @@ def main():
 
     # ------------------------------------------------------------ SSO + roles
     print("\n4. Single sign-on and roles")
-    for label, b, want in (("admin", admin, "Admin"), ("person", person, "Viewer")):
-        code, final, body = sso(b, u("grafana", "/login/generic_oauth"), "grafana")
-        code2, me, _, _ = b.req(u("grafana", "/api/user"))
-        role = ""
-        if code2 == 200:
-            c3, orgs, _, _ = b.req(u("grafana", "/api/user/orgs"))
-            role = (json.loads(orgs)[0].get("role") if c3 == 200 and orgs.startswith("[") else "")
-        rec("sso", f"Grafana signs in the {label} as {want}", role == want, f"role={role or 'none'}, HTTP {code2}")
-    code, body, _, _ = admin.req(u("grafana", "/api/search?type=dash-db"))
-    n = len(json.loads(body)) if code == 200 else 0
-    rec("sso", "Grafana shows the provisioned dashboards", n >= 8, f"{n} dashboards")
+    # The dashboards, logs and alerts are in the app (Grafana is gone): the admin's, nobody else's.
+    code, boards = admin.app("GET", "/api/dashboards/")
+    rec("obs", "the app lists every dashboard", code == 200 and len(boards) >= 10, f"HTTP {code}, {len(boards) if code == 200 else 0} dashboards")
+    now = time.time()
+    span = {"from": datetime.fromtimestamp(now - 3600, timezone.utc).isoformat(), "to": datetime.fromtimestamp(now, timezone.utc).isoformat()}
+    code, up = admin.app("POST", "/api/dashboards/stack-health/panels/0/query", span)
+    series = [x for t in (up.get("results") or []) for x in (t.get("series") or [])] if code == 200 else []
+    rec("obs", "a Prometheus panel answers with data (targets up)", bool(series) and all(not t.get("error") for t in up["results"]), f"HTTP {code}, {len(series)} series")
+    code, logs = admin.app("GET", "/api/admin/logs/?limit=5")
+    rec("obs", "the Logs page reads Loki", code == 200 and len(logs.get("lines", [])) > 0, f"HTTP {code} {logs.get('error', '')}")
+    code, alerts = admin.app("GET", "/api/admin/alerts/")
+    errors = alerts.get("errors") or {}
+    rec("obs", "the Alerts page reads Alertmanager and every rule", code == 200 and len(alerts.get("rules") or []) > 0 and not any(errors.values()),
+        f"HTTP {code}, {len(alerts.get('rules') or [])} rules, {errors}")
+    refused = [p for p in ("/api/dashboards/", "/api/admin/logs/", "/api/admin/alerts/") if person.app("GET", p)[0] != 403]
+    rec("obs", "a person cannot read the dashboards, logs or alerts", not refused, f"not refused: {refused}")
 
     code, final, body = sso(person, u("chat", "/oauth/oidc/login"), "chat")
     token = person.cookie("token")

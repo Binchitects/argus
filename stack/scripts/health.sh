@@ -23,7 +23,6 @@ CHECKS=(
   "Open WebUI|http://open-webui:8080/health|"
   "Prometheus|http://prometheus:9090/-/healthy|"
   "Alertmanager|http://alertmanager:9093/-/healthy|"
-  "Grafana|http://grafana:3000/api/health|"
   "node-exporter|http://node-exporter:9100/metrics|"
   "cAdvisor|http://cadvisor:8080/healthz|cadvisor"
   "GPU exporter|http://nvidia-smi-exporter:9835/metrics|smi"

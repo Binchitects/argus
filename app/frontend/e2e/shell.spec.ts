@@ -58,9 +58,8 @@ test('navigation: the sidebar on desktop, a drawer on the phone', async ({ page,
     await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
     await page.getByRole('button', { name: 'Expand sidebar' }).click()
   }
-  await expect(page).toHaveURL(/\/dashboards$/)
-  await expect(page.getByText('Being rebuilt')).toBeVisible()
-  await expect(page.getByRole('link', { name: /Open in Grafana/ })).toHaveAttribute('href', /^https:\/\/grafana\.llm\.localhost(:\d+)?\/$/)
+  await expect(page).toHaveURL(/\/admin\/dashboards$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Dashboards' })).toBeVisible()
 })
 
 test('no horizontal scrolling at any width', async ({ page }) => {

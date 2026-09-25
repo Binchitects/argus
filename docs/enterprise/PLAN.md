@@ -32,7 +32,7 @@ swaps must never take the app down, and vice versa.
 | Topic | Decision |
 |---|---|
 | Sign-in | The app is its own OIDC provider (OpenIddict). Users are local accounts or come from LDAP / Active Directory (bind + group → role mapping). Other tools (the CLI, Qwen Code, IDEs) sign in through it. |
-| Dashboards | All ten Grafana dashboards are rebuilt natively in the app. Grafana is removed in Phase 5. |
+| Dashboards | All ten dashboards are drawn by the app from the same files (Grafana's JSON format). Grafana was removed in Phase 5. |
 | Alerts | Prometheus rules stay; the app shows firing alerts and history. Alertmanager stays as plumbing. |
 | Repo | Work happens under `app/` on this branch. The final reorganisation happens once everything is green. |
 | Stack | .NET 10 LTS, EF Core + Npgsql, OpenIddict, YARP, xUnit + Testcontainers; React 19 + Vite + TypeScript, TanStack Query, ECharts, Vitest, Playwright. |
@@ -55,10 +55,11 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 3D done**: part 2 (the Python sandbox, the web, reading files
-in parts, Office documents) after 3D.2 (models at runtime) and part 1 (groups,
-the tool registry, image generation, MCP servers, ask before running). Next:
-3E (assistants and knowledge). The first chat UI and its
+Status: **Phase 5 done** (every dashboard, the logs and the alerts in the app;
+Grafana removed), after **Phase 3D** (the Python sandbox, the web, reading files
+in parts, Office documents, models at runtime, groups, the tool registry, image
+generation, MCP servers, ask before running, fair use). Next: Phase 4 (Argus in
+.NET), then 3E (assistants and knowledge). The first chat UI and its
 [checklist](PHASE3-CHECKLIST.md) are superseded: sign-off happens on the new web
 at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
 
@@ -503,6 +504,22 @@ Replaces: Grafana.
 - Live log viewer on Loki; firing alerts and history from Alertmanager.
 - **Done when:** the panel audit (every panel query run on legacy and new) matches, and
   Grafana is removed.
+- **Result:** every dashboard is drawn by the app (Observe → Dashboards): Prometheus and
+  Loki panels as well as SQL, with Grafana's steps, macros, variables, legends, stats,
+  gauges, tables and logs panels. `compare-dashboards.py` ran every panel in both:
+  153/153 identical over (30 d, 6 h), (7 d, 24 h) and (2 d, 1 h), then Grafana was
+  removed with its sign-in client (deleted at start where an older version left it),
+  scrape job, probes, secrets and routes. The Logs page reads Loki by container, level
+  and text, with a live tail; the page never sends LogQL. The Alerts page shows what
+  fires (Alertmanager), what fired over a day, week or month (Prometheus's `ALERTS`),
+  and every rule. The app now probes Alertmanager and Loki, and Promtail lifts the
+  app's own log level. `audit-dashboards.py` runs every panel's queries in the app:
+  207 queries, 0 errors. Tests: 290 backend, 119 UI; the live stack passes functional
+  68/68, acceptance 32/0, the auth audit and the domain check. Browser: 158 passed,
+  including every new page in both themes on desktop and phone; the chat tests that
+  wait for the real model time out when run in parallel, because every browser signs
+  in as the same admin and fair use queues one person's chats (to fix: run them one
+  at a time). `enterprise-p5` is tagged once that suite is green.
 
 ### Phase 6 — Every setting live  *(M)*
 Makes the settings that still need "run this command" apply from the app, without

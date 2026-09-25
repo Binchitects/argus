@@ -111,7 +111,7 @@ touch "$PKG/models/.gitkeep"
 # means the two lists cannot drift: the definition of "committed
 # configuration" is the same one that decides what this archive carries.
 if git rev-parse --git-dir >/dev/null 2>&1; then
-  for d in prometheus alertmanager grafana loki promtail litellm postgres argus; do
+  for d in prometheus alertmanager dashboards loki promtail litellm postgres argus; do
     [[ -d "config/$d" ]] || continue
     while IFS= read -r f; do
       mkdir -p "$PKG/$(dirname "$f")"
@@ -124,7 +124,7 @@ else
   # directories and let the secret scan below be the guard. It will refuse if
   # the tree had run.
   say "${dim}(not a git checkout - copying config/ wholesale; the secret scan is the guard)${off}"
-  for d in prometheus alertmanager grafana loki promtail litellm postgres argus; do
+  for d in prometheus alertmanager dashboards loki promtail litellm postgres argus; do
     [[ -d "config/$d" ]] && cp -r "config/$d" "$PKG/config/"
   done
 fi

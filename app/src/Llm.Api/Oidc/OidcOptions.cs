@@ -7,7 +7,6 @@ namespace Llm.Api.Oidc;
 /// </summary>
 public sealed class OidcOptions
 {
-    public string? GrafanaSecret { get; set; }
     public string? OpenWebUiSecret { get; set; }
     public string? LangfuseSecret { get; set; }
 

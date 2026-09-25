@@ -69,7 +69,7 @@ jobs:
           # The Settings page's folder for pending .env changes (the app runs as a non-root user).
           mkdir -p ci-settings && chmod 777 ci-settings
           docker run -d --name app --network e2e --read-only --tmpfs /tmp \
-            -v "$PWD/stack/config/grafana/dashboards:/dashboards:ro" -v "$PWD/stack/env-samples:/env-samples:ro" \
+            -v "$PWD/stack/config/dashboards:/dashboards:ro" -v "$PWD/stack/env-samples:/env-samples:ro" \
             -v "$PWD/ci-settings:/settings" \
             -e Database__Host=postgres -e Database__Username=app -e Database__Password=ci \
             -e Auth__Domain=llm.localhost -e Auth__HttpsPort=8443 -e "Auth__AdminPassword=$E2E_PASSWORD" \

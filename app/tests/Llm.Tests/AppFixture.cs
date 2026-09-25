@@ -17,7 +17,7 @@ public sealed class AppFixture : IAsyncLifetime
 {
     public const string Domain = "llm.test";
     public const string AdminPassword = "correct horse battery staple admin";
-    public const string GrafanaSecret = "grafana-secret-for-tests";
+    public const string OpenWebUiSecret = "open-webui-secret-for-tests";
     public const string ApiSecret = "api-secret-for-tests";
 
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:0.8.0-pg16").Build();
@@ -30,6 +30,7 @@ public sealed class AppFixture : IAsyncLifetime
     public FakeMcp Mcp { get; } = new();
     public FakeEngine Engine { get; } = new();
     public FakeWeb Web { get; } = new();
+    public FakeObserve Observe { get; } = new();
     public string AppConnectionString { get; private set; } = "";
     /// <summary>The real dashboard files, found by walking up to the repository.</summary>
     public static string DashboardsPath { get; } = FindDashboards();
@@ -38,13 +39,13 @@ public sealed class AppFixture : IAsyncLifetime
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            var candidate = Path.Combine(dir.FullName, "stack", "config", "grafana", "dashboards");
+            var candidate = Path.Combine(dir.FullName, "stack", "config", "dashboards");
             if (Directory.Exists(candidate))
             {
                 return candidate;
             }
         }
-        throw new DirectoryNotFoundException("stack/config/grafana/dashboards not found above the test binaries.");
+        throw new DirectoryNotFoundException("stack/config/dashboards not found above the test binaries.");
     }
 
     public string DirectoryPath => Path.Combine(_webRoot, "..", Path.GetFileName(_webRoot) + "-directory", "users.yml");
@@ -71,14 +72,14 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Auth:AdminEmail", "admin@llm.test");
             b.UseSetting("Auth:SessionRecheck", "00:00:00");
             b.UseSetting("Auth:DirectoryFile", DirectoryPath);
-            b.UseSetting("Oidc:GrafanaSecret", GrafanaSecret);
+            b.UseSetting("Oidc:OpenWebUiSecret", OpenWebUiSecret);
             b.UseSetting("Oidc:ApiSecret", ApiSecret);
             b.UseSetting("Dashboards:Path", DashboardsPath);
             b.UseSetting("Dashboards:SqlDatabase", "litellm_test");
             b.UseSetting("Dashboards:StatementTimeout", "00:00:03");
             b.UseSetting("Argus:Url", "http://argus:7700");
             b.UseSetting("Argus:AdminToken", FakeArgus.Token);
-            b.UseSetting("Stack:EnvSamplesDir", Path.Combine(DashboardsPath, "..", "..", "..", "env-samples"));
+            b.UseSetting("Stack:EnvSamplesDir", Path.Combine(DashboardsPath, "..", "..", "env-samples"));
             b.UseSetting("Stack:ModelName", "Qwen3.8-Flash-Next");
             b.UseSetting("Stack:ThinkingPresets", "xhigh:Deep think,low:Quick,off:No thinking");
             b.UseSetting("Stack:ModelContext", "32768");
@@ -89,7 +90,8 @@ public sealed class AppFixture : IAsyncLifetime
             // Nothing listens here: probes are refused at once instead of waiting on DNS.
             b.UseSetting("Stack:LiteLlmProbeUrl", "http://127.0.0.1:9");
             b.UseSetting("Stack:PrometheusUrl", "http://127.0.0.1:9");
-            b.UseSetting("Stack:GrafanaProbeUrl", "http://127.0.0.1:9");
+            b.UseSetting("Dashboards:AlertmanagerUrl", "http://127.0.0.1:9");
+            b.UseSetting("Dashboards:LokiUrl", "http://127.0.0.1:9");
             foreach (var (k, v) in settings ?? new Dictionary<string, string?>())
             {
                 b.UseSetting(k, v);
@@ -106,6 +108,9 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddSingleton<Llm.Api.Chat.Tools.WebResolver>(Web.Resolver);
                 s.AddHttpClient(Llm.Api.Chat.Tools.WebFetcher.Client).ConfigurePrimaryHttpMessageHandler(() => Web);
                 s.AddHttpClient(Llm.Api.Chat.Tools.WebFetcher.SearchClient).ConfigurePrimaryHttpMessageHandler(() => Web);
+                s.AddHttpClient<Llm.Api.Dashboards.PromDatasource>().ConfigurePrimaryHttpMessageHandler(() => Observe);
+                s.AddHttpClient<Llm.Api.Dashboards.LokiDatasource>().ConfigurePrimaryHttpMessageHandler(() => Observe);
+                s.AddHttpClient<Llm.Api.Dashboards.AlertmanagerClient>().ConfigurePrimaryHttpMessageHandler(() => Observe);
             });
         });
 

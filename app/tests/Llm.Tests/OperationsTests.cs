@@ -41,7 +41,7 @@ public sealed class OperationsTests(AppFixture app)
         var m = await admin.JsonAsync(await admin.GetAsync("/api/admin/model"));
         Assert.Equal("Qwen3.8-Flash-Next", m.GetProperty("running").GetProperty("name").GetString());
         var samples = m.GetProperty("samples").EnumerateArray().ToList();
-        var shipped = Directory.GetFiles(Path.Combine(AppFixture.DashboardsPath, "..", "..", "..", "env-samples"), "*.env").Length;
+        var shipped = Directory.GetFiles(Path.Combine(AppFixture.DashboardsPath, "..", "..", "env-samples"), "*.env").Length;
         Assert.Equal(shipped, samples.Count);
         Assert.All(samples, s =>
         {
@@ -61,7 +61,7 @@ public sealed class OperationsTests(AppFixture app)
         Assert.Contains("0.20", text, StringComparison.Ordinal);
         Assert.DoesNotContain(AppFixture.AdminPassword, text, StringComparison.Ordinal);
         Assert.DoesNotContain(FakeArgus.Token, text, StringComparison.Ordinal);
-        Assert.DoesNotContain(AppFixture.GrafanaSecret, text, StringComparison.Ordinal);
+        Assert.DoesNotContain(AppFixture.OpenWebUiSecret, text, StringComparison.Ordinal);
     }
 
     [Fact]

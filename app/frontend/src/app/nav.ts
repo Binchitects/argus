@@ -8,9 +8,11 @@ import {
   KeyRound,
   LayoutDashboard,
   LineChart,
+  Logs,
   MessageSquare,
   Package,
   ScrollText,
+  Siren,
   Settings,
   Telescope,
   Users,
@@ -25,12 +27,6 @@ export interface NavItem {
   icon: LucideIcon
   /** Words the command palette also matches. */
   keywords?: string[]
-  /** Built already; otherwise the page says which phase brings it, and where the job is done meanwhile. */
-  ready?: boolean
-  /** The plan phase that builds it here. */
-  phase?: string
-  /** The service that does this job until then (a subdomain of this one). */
-  elsewhere?: { name: string; subdomain: string }
 }
 
 export interface NavSection {
@@ -43,41 +39,43 @@ export const navigation: NavSection[] = [
   {
     title: 'Workspace',
     items: [
-      { title: 'Home', path: '/', icon: Home, ready: true },
-      { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'], ready: true },
-      { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'], ready: true },
+      { title: 'Home', path: '/', icon: Home },
+      { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'] },
+      { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'] },
     ],
   },
   {
     title: 'Administration',
     adminOnly: true,
     items: [
-      { title: 'Overview', path: '/admin', icon: LayoutDashboard, keywords: ['status', 'health', 'services'], ready: true },
-      { title: 'People', path: '/admin/people', icon: Users, keywords: ['users', 'accounts', 'credit', 'keys'], ready: true },
-      { title: 'Groups', path: '/admin/groups', icon: UsersRound, keywords: ['teams', 'access', 'directory groups', 'permissions'], ready: true },
-      { title: 'Sign-in', path: '/admin/sign-in', icon: KeyRound, keywords: ['ldap', 'directory', 'active directory', '2fa'], ready: true },
-      { title: 'Models', path: '/admin/models', icon: Boxes, keywords: ['switch', 'load', 'llama', 'library', 'gguf', 'permissions'], ready: true },
-      { title: 'Deployment', path: '/admin/model', icon: Cpu, keywords: ['model', 'llama', 'engine', 'gpu', 'prices', 'env'], ready: true },
-      { title: 'Tools', path: '/admin/tools', icon: Wrench, keywords: ['mcp', 'argus', 'image generation', 'calculator', 'permissions'], ready: true },
-      { title: 'Settings', path: '/admin/settings', icon: Settings, keywords: ['configuration', 'config', 'env'], ready: true },
-      { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'], ready: true },
+      { title: 'Overview', path: '/admin', icon: LayoutDashboard, keywords: ['status', 'health', 'services'] },
+      { title: 'People', path: '/admin/people', icon: Users, keywords: ['users', 'accounts', 'credit', 'keys'] },
+      { title: 'Groups', path: '/admin/groups', icon: UsersRound, keywords: ['teams', 'access', 'directory groups', 'permissions'] },
+      { title: 'Sign-in', path: '/admin/sign-in', icon: KeyRound, keywords: ['ldap', 'directory', 'active directory', '2fa'] },
+      { title: 'Models', path: '/admin/models', icon: Boxes, keywords: ['switch', 'load', 'llama', 'library', 'gguf', 'permissions'] },
+      { title: 'Deployment', path: '/admin/model', icon: Cpu, keywords: ['model', 'llama', 'engine', 'gpu', 'prices', 'env'] },
+      { title: 'Tools', path: '/admin/tools', icon: Wrench, keywords: ['mcp', 'argus', 'image generation', 'calculator', 'permissions'] },
+      { title: 'Settings', path: '/admin/settings', icon: Settings, keywords: ['configuration', 'config', 'env'] },
+      { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'] },
     ],
   },
   {
     title: 'Argus',
     adminOnly: true,
     items: [
-      { title: 'Indexing', path: '/admin/indexing', icon: Database, keywords: ['gitlab', 'repositories', 'index'], ready: true },
-      { title: 'Packs', path: '/admin/packs', icon: Package, keywords: ['knowledge packs'], ready: true },
-      { title: 'Explore', path: '/admin/explore', icon: Telescope, keywords: ['symbols', 'search code'], ready: true },
+      { title: 'Indexing', path: '/admin/indexing', icon: Database, keywords: ['gitlab', 'repositories', 'index'] },
+      { title: 'Packs', path: '/admin/packs', icon: Package, keywords: ['knowledge packs'] },
+      { title: 'Explore', path: '/admin/explore', icon: Telescope, keywords: ['symbols', 'search code'] },
     ],
   },
   {
     title: 'Observe',
     adminOnly: true,
     items: [
-      { title: 'Monitoring', path: '/admin/monitoring', icon: Activity, keywords: ['prometheus', 'alerts', 'probes'], ready: true },
-      { title: 'Dashboards', path: '/dashboards', icon: LineChart, keywords: ['grafana', 'gpu', 'performance'], phase: '5', elsewhere: { name: 'Grafana', subdomain: 'grafana' } },
+      { title: 'Monitoring', path: '/admin/monitoring', icon: Activity, keywords: ['prometheus', 'probes', 'health', 'services'] },
+      { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['grafana', 'gpu', 'performance', 'metrics', 'charts'] },
+      { title: 'Logs', path: '/admin/logs', icon: Logs, keywords: ['loki', 'errors', 'containers', 'tail'] },
+      { title: 'Alerts', path: '/admin/alerts', icon: Siren, keywords: ['alertmanager', 'firing', 'rules', 'incidents'] },
     ],
   },
 ]
@@ -94,7 +92,7 @@ export function findNavItem(pathname: string): NavItem | undefined {
     .sort((a, b) => b.path.length - a.path.length)[0]
 }
 
-/** https://grafana.llm.example.com/ from llm.example.com: a service beside this one. */
+/** https://metrics.llm.example.com/ from llm.example.com: a service beside this one. */
 export function serviceUrl(subdomain: string, location: Pick<Location, 'protocol' | 'host'> = window.location): string {
   return `${location.protocol}//${subdomain}.${location.host}/`
 }

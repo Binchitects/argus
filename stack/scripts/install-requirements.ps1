@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Checks Docker, the NVIDIA driver, GPU passthrough into containers and Git
-    Bash, then installs windows_exporter so Grafana can graph the REAL host's
+    Bash, then installs windows_exporter so the dashboards can graph the REAL host's
     CPU, memory and temperature instead of the WSL2 VM's, and wires up the
     Prometheus scrape job.
 

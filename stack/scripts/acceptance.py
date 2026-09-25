@@ -174,7 +174,7 @@ def check_config() -> None:
 
 # ------------------------------------------------------- B. infrastructure ---
 EXPECTED = {
-    "": ["open-webui", "prometheus", "grafana", "alertmanager", "node-exporter", "power-limits"],
+    "": ["open-webui", "prometheus", "alertmanager", "node-exporter", "power-limits"],
     "cadvisor": ["cadvisor"],
     "proxy": ["traefik"],
     "gateway": ["litellm", "postgres", "redis", "app"],
@@ -246,7 +246,6 @@ def check_infra() -> None:
 ROUTES = [
     ("chat", "/", {200, 302}, ""),
     ("gateway", "/v1/models", {200, 401}, ""),
-    ("grafana", "/", {200, 302}, ""),
     ("", "/readyz", {200}, "gateway"),
     # The old admin panel address: a redirect into the app's /admin, for bookmarks.
     # This client follows redirects, so it sees the app's page at the end (200).
@@ -353,60 +352,23 @@ def check_observability() -> None:
         except Exception as exc:
             record("obs", "Prometheus targets", "FAIL", str(exc)[:70])
 
-    user, pw = env("GRAFANA_ADMIN_USER", "admin"), env("GRAFANA_ADMIN_PASSWORD")
-    if not pw:
-        record("obs", "Grafana", "SKIP", "no GRAFANA_ADMIN_PASSWORD in .env")
-        return
-    import base64
-    auth = base64.b64encode(f"{user}:{pw}".encode()).decode()
-    def gf(path: str):
-        req = urllib.request.Request(url("grafana", path),
-                                     headers={"Authorization": f"Basic {auth}"})
-        return urllib.request.urlopen(req, context=ctx(), timeout=30)
+    # The app draws the dashboards, logs and alerts from these (Grafana is gone).
+    code, out = sh("docker", "compose", "exec", "-T", "prometheus",
+                   "wget", "-qO-", "http://localhost:9090/api/v1/rules?type=alert")
     try:
-        with gf("/api/datasources") as r:
-            ds = json.load(r)
-    except Exception as exc:
-        record("obs", "Grafana API", "FAIL", str(exc)[:80] + " (password may predate a redeploy)")
-        return
-    record("obs", "Grafana API reachable", "PASS", f"{len(ds)} datasources")
-
-    # Datasources for profile-gated services (Loki with `logging` off, Langfuse
-    # with `tracing` off) cannot be healthy and are not defects.
-    gated = {"loki": "logging", "langfuse": "tracing", "clickhouse": "tracing"}
-    bad, skipped = [], []
-    for d in ds:
-        need = gated.get(d["name"].lower())
-        if need and need not in PROFILES:
-            skipped.append(d["name"]); continue
-        try:
-            with gf(f"/api/datasources/{d['id']}/health") as r:
-                if json.load(r).get("status") != "OK":
-                    bad.append(d["name"])
-        except urllib.error.HTTPError as exc:
-            # Grafana's built-in Alertmanager datasource has no backend health
-            # handler and answers "plugin.unavailable". Verified separately that
-            # it proxies /api/v2/status correctly, so this is a missing endpoint,
-            # not a broken datasource.
-            body = exc.read().decode("utf-8", "replace")
-            if "plugin.unavailable" in body:
-                skipped.append(f"{d['name']} (no health endpoint)")
-            else:
-                bad.append(d["name"])
-        except Exception:
-            bad.append(d["name"])
-    if skipped:
-        record("obs", f"datasources for disabled profiles", "SKIP", ", ".join(skipped))
-    record("obs", "every active datasource healthy", "PASS" if not bad else "FAIL",
-           f"{len(ds) - len(skipped)} checked" if not bad else f"unhealthy: {bad}")
-
-    try:
-        with gf("/api/search?type=dash-db") as r:
-            dash = json.load(r)
-        record("obs", "dashboards provisioned", "PASS" if dash else "FAIL",
-               f"{len(dash)}: {[d['title'] for d in dash][:4]}")
-    except Exception as exc:
-        record("obs", "dashboards provisioned", "FAIL", str(exc)[:70])
+        rules = sum(len(g["rules"]) for g in json.loads(out)["data"]["groups"]) if code == 0 else 0
+    except Exception:
+        rules = 0
+    record("obs", "alert rules loaded", "PASS" if rules else "FAIL", f"{rules} rules")
+    code, _ = sh("docker", "compose", "exec", "-T", "alertmanager", "wget", "-qO-", "http://localhost:9093/-/healthy")
+    record("obs", "Alertmanager healthy", "PASS" if code == 0 else "FAIL")
+    if "logging" in PROFILES:
+        code, _ = sh("docker", "compose", "exec", "-T", "loki", "wget", "-qO-", "http://localhost:3100/ready")
+        record("obs", "Loki ready", "PASS" if code == 0 else "FAIL")
+    else:
+        record("obs", "Loki", "SKIP", "logging profile off")
+    dashboards = sorted(p.stem for p in (ROOT / "config" / "dashboards").glob("*.json"))
+    record("obs", "dashboard files for the app", "PASS" if len(dashboards) >= 10 else "FAIL", f"{len(dashboards)}: {dashboards[:4]}")
 
 
 # ------------------------------------------------------------ F. serving ---

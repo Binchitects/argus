@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     The model cache is deliberately excluded — it is large and re-downloadable.
-    What is NOT re-creatable is your chat history, dashboards you customised in
-    Grafana, metrics history, and the gateway/tracing databases.
+    What is NOT re-creatable is your chat history, metrics history, and the
+    gateway/tracing databases.
 
 .EXAMPLE
     .\scripts\backup.ps1
@@ -34,7 +34,6 @@ foreach ($line in $envLines) {
 
 $volumes = @(
     'open-webui-data',
-    'grafana-data',
     'prometheus-data',
     'alertmanager-data',
     'postgres-data',

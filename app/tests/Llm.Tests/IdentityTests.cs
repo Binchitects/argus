@@ -357,12 +357,12 @@ public sealed class IdentityTests(AppFixture app)
             var res = await b.PostAsync("/api/auth/login", new { userName = "admin", password = AppFixture.AdminPassword, redirect = target });
             return (await b.JsonAsync(res)).GetProperty("redirect").GetString()!;
         }
-        Assert.Equal("https://grafana.llm.test/d/x", await RedirectFor("https://grafana.llm.test/d/x"));
+        Assert.Equal("https://traces.llm.test/project/x", await RedirectFor("https://traces.llm.test/project/x"));
         Assert.Equal("/connect/authorize?x=1", await RedirectFor("/connect/authorize?x=1"));
         Assert.Equal("/", await RedirectFor("https://evil.example/"));
         Assert.Equal("/", await RedirectFor("//evil.example/"));
         Assert.Equal("/", await RedirectFor("https://llm.test.evil.example/"));
-        Assert.Equal("/", await RedirectFor("http://grafana.llm.test/"));
+        Assert.Equal("/", await RedirectFor("http://traces.llm.test/"));
     }
 
     [Fact]

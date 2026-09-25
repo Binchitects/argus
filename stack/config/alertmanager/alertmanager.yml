@@ -7,7 +7,7 @@
 # slack_api_url_file / auth_password_file pointing at a mounted secret.
 #
 # Out of the box everything routes to `null` — alerts are visible in the
-# Alertmanager UI (http://localhost:9093) and in Grafana, but nothing is sent.
+# app's Alerts page and in the Alertmanager UI, but nothing is sent.
 # Uncomment a receiver below to change that.
 # ==============================================================================
 

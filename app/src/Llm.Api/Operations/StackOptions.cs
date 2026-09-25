@@ -23,7 +23,6 @@ public sealed class StackOptions
     public string EnvSamplesDir { get; set; } = "/env-samples";
 
     public string PrometheusUrl { get; set; } = "http://prometheus:9090";
-    public string GrafanaProbeUrl { get; set; } = "http://grafana:3000";
     public string LiteLlmProbeUrl { get; set; } = "http://litellm:4000";
 }
 

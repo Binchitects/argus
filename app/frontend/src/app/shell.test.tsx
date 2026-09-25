@@ -74,13 +74,6 @@ describe('shell', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/login'))
   })
 
-  it('a page that is not rebuilt yet opens in the current app', async () => {
-    fakeApi(admin)
-    renderApp('/dashboards')
-    expect(await screen.findByText('Being rebuilt')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Open in Grafana/ })).toHaveAttribute('href', `${window.location.protocol}//grafana.${window.location.host}/`)
-  })
-
   it('the width on wide screens is chosen in the user menu and remembered', async () => {
     fakeApi(member)
     renderApp('/')

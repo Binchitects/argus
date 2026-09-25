@@ -15,7 +15,7 @@ public sealed class AuthOptions
     /// <summary>Sets the first admin's password when nobody exists yet; never changes it afterwards.</summary>
     public string? AdminPassword { get; set; }
 
-    /// <summary>Group name other services see for admins (Grafana and Open WebUI map it to their admin role).</summary>
+    /// <summary>Group name other services see for admins (Open WebUI maps it to its admin role).</summary>
     public string AdminGroup { get; set; } = "admins";
 
     /// <summary>Authelia's users.yml, imported once so existing people keep their passwords.</summary>

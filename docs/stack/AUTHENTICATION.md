@@ -17,7 +17,7 @@ So browsers and programs get different credentials from the same issuer:
 
 | Caller | Mechanism | Credential |
 |---|---|---|
-| A person, in a browser | the app's session, or OIDC for Grafana / chat / Langfuse | session cookie: 1 h idle, 12 h at most |
+| A person, in a browser | the app's session, or OIDC for chat / Langfuse | session cookie: 1 h idle, 12 h at most |
 | A person's tools (Qwen Code, IDEs, scripts) | their API key at the gateway | `sk-...` key, spend tracked per person |
 | A machine client of the engine API | OAuth2 client credentials | access token, 1 h |
 
@@ -37,9 +37,10 @@ to the domain, so it covers every `*.<LLM_DOMAIN>` service at once.
 
 ### 2. OIDC: apps with their own sign-in screen
 
-Grafana, Open WebUI and Langfuse send people to the app and get back an
-identity: username, name, email, and groups. The `admins` group becomes
-Grafana's Admin role and Open WebUI's admin role; everyone is in `users`.
+Open WebUI and Langfuse send people to the app and get back an identity:
+username, name, email, and groups. The `admins` group becomes Open WebUI's
+admin role; everyone is in `users`. (Grafana signed in this way too until its
+dashboards moved into the app; its client is deleted at start.)
 Roles are rebuilt at every token refresh, so a demotion reaches the apps without
 anyone signing out.
 
@@ -124,8 +125,8 @@ with their own repository access.
 
 An install that ran Authelia keeps its people: on its first start the app
 imports `config/authelia/users.yml` once, with roles, and everyone signs in with
-their old password (it is re-hashed at that first sign-in). Grafana and Langfuse
-link the existing accounts by email.
+their old password (it is re-hashed at that first sign-in). Langfuse links the
+existing accounts by email.
 
 ---
 
@@ -263,16 +264,11 @@ label requires recreating the affected containers: `docker compose up -d`.
 a container whose health check is failing. `docker compose ps` shows it as
 `starting` or `unhealthy`.
 
-**Grafana: `user already exists` after signing in.** A local Grafana account has
-the same login. This is why `GRAFANA_ADMIN_USER` is `localadmin` and not
-`admin`: keep the two namespaces apart.
-
 **`redirect_uri` rejected, or the sign-in bounces at once.** The app builds its
 callback from its own base-URL setting, which must be the proxy hostname:
 
 | App | Setting | Must be |
 |---|---|---|
-| Grafana | `GF_SERVER_ROOT_URL` | `https://grafana.<LLM_DOMAIN>/` |
 | Open WebUI | `OPENID_REDIRECT_URI` | `https://chat.<LLM_DOMAIN>/oauth/oidc/callback` |
 | Langfuse | `NEXTAUTH_URL` | `https://traces.<LLM_DOMAIN>` |
 
@@ -290,5 +286,5 @@ resolve in CLI tools either, hence `--resolve host:443:127.0.0.1`.
 
 Set `PROTECTED_CHAIN=protected-chain@file` in `.env` and `docker compose up -d`.
 The services with no sign-in of their own then use the basic-auth credentials in
-`PROXY_AUTH_USER` / `PROXY_AUTH_PASSWORD` instead. The app, Grafana, chat and the
+`PROXY_AUTH_USER` / `PROXY_AUTH_PASSWORD` instead. The app, chat and the
 gateway keep their own sign-in.

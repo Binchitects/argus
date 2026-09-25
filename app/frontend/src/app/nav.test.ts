@@ -11,7 +11,7 @@ describe('nav', () => {
   })
 
   it('links a service beside this one, keeping the port', () => {
-    expect(serviceUrl('grafana', { protocol: 'https:', host: 'llm.example.com' })).toBe('https://grafana.llm.example.com/')
-    expect(serviceUrl('grafana', { protocol: 'https:', host: 'llm.example.com:8443' })).toBe('https://grafana.llm.example.com:8443/')
+    expect(serviceUrl('metrics', { protocol: 'https:', host: 'llm.example.com' })).toBe('https://metrics.llm.example.com/')
+    expect(serviceUrl('metrics', { protocol: 'https:', host: 'llm.example.com:8443' })).toBe('https://metrics.llm.example.com:8443/')
   })
 })

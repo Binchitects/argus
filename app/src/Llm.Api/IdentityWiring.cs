@@ -215,6 +215,9 @@ public static class IdentityWiring
         services.Configure<Dashboards.DashboardOptions>(config.GetSection("Dashboards"));
         services.AddSingleton<Dashboards.DashboardStore>();
         services.AddSingleton<Dashboards.SqlDatasource>();
+        services.AddHttpClient<Dashboards.PromDatasource>(c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient<Dashboards.LokiDatasource>(c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient<Dashboards.AlertmanagerClient>(c => c.Timeout = TimeSpan.FromSeconds(15));
 
         services.Configure<Operations.StackOptions>(config.GetSection("Stack"));
         services.Configure<Operations.ArgusOptions>(config.GetSection("Argus"));
@@ -366,6 +369,8 @@ public static class IdentityWiring
         app.MapOidc();
         Dashboards.DashboardEndpoints.MapDashboards(app);
         Dashboards.UsageEndpoints.MapUsage(app);
+        Dashboards.LogEndpoints.MapLogs(app);
+        Dashboards.AlertEndpoints.MapAlerts(app);
         Operations.OperationsEndpoints.MapOperations(app);
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);

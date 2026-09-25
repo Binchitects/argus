@@ -23,7 +23,8 @@ public static class OperationsEndpoints
     {
         var g = app.MapGroup("/api/admin").RequireAuthorization(AdminEndpoints.Policy);
         g.MapGet("/overview", OverviewAsync);
-        g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value)));
+        g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a, IOptions<Dashboards.DashboardOptions> d) =>
+            Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value)));
         g.MapGet("/model", ModelInfo);
         g.MapGet("/settings", SettingsInfo);
         g.MapGet("/people.csv", PeopleCsvAsync);
@@ -80,7 +81,7 @@ public static class OperationsEndpoints
     }
 
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, ILiteLlm gateway, ArgusAdmin argus,
-        IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, CancellationToken ct)
+        IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Count(u => !u.IsDisabled);
@@ -97,7 +98,7 @@ public static class OperationsEndpoints
         var mine = people.Select(p => (p, g: standing.GetValueOrDefault(p.Email ?? ""))).ToList();
         var over = mine.Where(x => x.g is { Budget: > 0 } g && g.Spend >= g.Budget).Select(x => x.p.UserName).ToList();
 
-        var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value);
+        var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value, dashboards.Value);
         JsonNode? index = null;
         string? indexError = null;
         if (argus.Enabled)
@@ -131,15 +132,20 @@ public static class OperationsEndpoints
         });
     }
 
-    public static async Task<IReadOnlyList<Probe>> ProbeAllAsync(IHttpClientFactory factory, StackOptions s, ArgusOptions a)
+    public static async Task<IReadOnlyList<Probe>> ProbeAllAsync(IHttpClientFactory factory, StackOptions s, ArgusOptions a, Dashboards.DashboardOptions d)
     {
         var http = factory.CreateClient("probe");
         var checks = new List<Task<Probe>>
         {
             ProbeAsync(http, "Model gateway", "LiteLLM: API keys, credit, the chat's model", s.LiteLlmProbeUrl.TrimEnd('/') + "/health/liveliness"),
             ProbeAsync(http, "Prometheus", "metrics and alert rules", s.PrometheusUrl.TrimEnd('/') + "/-/healthy"),
-            ProbeAsync(http, "Grafana", "the dashboards not yet in the app", s.GrafanaProbeUrl.TrimEnd('/') + "/api/health"),
+            ProbeAsync(http, "Alertmanager", "firing alerts and their notifications", d.AlertmanagerUrl.TrimEnd('/') + "/-/healthy"),
         };
+        // Loki runs with the logging profile only.
+        if (string.IsNullOrWhiteSpace(s.ComposeProfiles) || s.ComposeProfiles.Split(',', StringSplitOptions.TrimEntries).Contains("logging", StringComparer.OrdinalIgnoreCase))
+        {
+            checks.Add(ProbeAsync(http, "Loki", "every service's logs", d.LokiUrl.TrimEnd('/') + "/ready"));
+        }
         if (a.Enabled)
         {
             checks.Add(ProbeAsync(http, "Argus", "the code index", a.Url.TrimEnd('/') + "/healthz"));

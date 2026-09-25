@@ -27,7 +27,10 @@ page covers the rest.
 | **Indexing** | The Argus code index: repositories, failures, files and symbols; start a run for extra branches (globs work; each default branch is always included); watch it and read its log. |
 | **Packs** | Installed knowledge packs, with incompatible ones shown and why; install from a URL (with its SHA-256), update from the published index, remove. |
 | **Explore** | What the index actually holds: search symbols and paths across the estate. For "a tool found nothing: is it absent, named differently, or never indexed?". |
-| **Monitoring** | Live probes of the gateway, Prometheus, Grafana and Argus, and links to the tools that are not in the app yet. |
+| **Monitoring** | Live probes of the gateway, Prometheus, Alertmanager, Loki and Argus, and links to Prometheus's and Alertmanager's own pages. |
+| **Dashboards** | Ten dashboards, drawn by the app: the model and the gateway (LLM Overview, Stack Performance), the machine (Resources, GPU Hardware, Host & Containers), the services (Stack Health & Alerts, Logs), Argus and its index, and usage by person. See [Dashboards](#dashboards) below. |
+| **Logs** | Every service's logs from Loki, newest first: by container, level (all, warnings and errors, errors) and text, over five minutes to a month, and **Live** for new lines as they are written. The filters are in the address, so a view can be linked. |
+| **Alerts** | What fires now (from Alertmanager, with silenced ones marked), every time an alert fired over a day, a week or a month, and every rule with its state, severity, how long its condition must hold, and its query. |
 | **Settings** | Every setting, grouped and searchable: applied at once, by a restart the app does itself, or with one host command for `.env` values. See [SETTINGS.md](SETTINGS.md). |
 | **Audit log** | Every sign-in and every change to people or the index, with who, whom and from where. |
 | **Sign-in** | Local accounts and the company directory; "Check the directory now". |
@@ -103,29 +106,39 @@ hit rate, output, cost, cost per 1M tokens, per person and over time.
 input cache miss, input cache hit (and what share of input it is), output, cost,
 over time and by model.
 
-### How the app draws the dashboards
+### Dashboards
 
-The app reads the same dashboard files Grafana provisions
-(`stack/config/grafana/dashboards/`) and runs their PostgreSQL panels itself:
+The dashboards are files in Grafana's JSON format, in `stack/config/dashboards/`,
+and the app draws them itself (Grafana was removed in phase 5 of the
+[plan](../enterprise/PLAN.md)). Each panel's query runs on the app's server:
 
-- Grafana's macros are reproduced (`$__timeFilter`, `$__timeGroupAlias`,
-  `$__interval`, `$__range` and friends), including how Grafana rounds the
-  interval, and rows become series by Grafana's rule for the time-series format.
-- The browser asks for "panel N of dashboard X over this range" and gets rows
-  back. It never sends or receives SQL.
-- Each query runs as a role that can only `SELECT`, in a read-only transaction,
-  one statement, with a 15-second timeout and a 5,000-row cap.
-- Panels that read Prometheus or Loki say so and point to Grafana until phase 5
-  of the [plan](../enterprise/PLAN.md).
+- **PostgreSQL** (the usage panels read the gateway's spend tables): Grafana's
+  macros are reproduced (`$__timeFilter`, `$__timeGroupAlias`, `$__interval`,
+  `$__range` and friends), including how Grafana rounds the interval, and rows
+  become series by Grafana's rule for the time-series format. Each query runs as
+  a role that can only `SELECT`, in a read-only transaction, one statement, with
+  a 15-second timeout and a 5,000-row cap.
+- **Prometheus and Loki**: the step Grafana would use (the panel's minimum
+  interval, the scrape interval, Loki's 11,000-point limit), the range aligned to
+  it, `$__rate_interval`, `$__auto` and the rest, the dashboard's variables
+  (Container, Search) and series named by the legend format.
+- The browser asks for "panel N of dashboard X over this range, with these
+  variables" and gets data back. It never sends or receives a query, and a
+  variable's value is only ever one of its options.
 
-Edit a dashboard file and both Grafana and the app pick it up; the app reads the
-files on every request.
+Live dashboards (those with a refresh in their file) refresh themselves, and
+can pause. Edit a dashboard file and the next request uses it: the app reads
+the files on every request.
 
-`scripts/compare-dashboards.py` holds the app to Grafana: every SQL panel is
-queried in both with the same range and interval, and the rows must be equal.
+Before Grafana was removed, every panel was queried in both over the same range
+and gave the same data: 153 of 153, over 30 days for usage and 6 hours for
+metrics, over 7 days and 24 hours, and over 2 days and 1 hour. The script that
+did it, `compare-dashboards.py`, is in the history (commit 8c07f7b).
+`scripts/audit-dashboards.py` now runs every panel's queries in the app and
+reports errors, empty panels, null values and percentages out of range:
 
 ```bash
-python3 scripts/compare-dashboards.py 30d
+python3 scripts/audit-dashboards.py 6h
 ```
 
 ### Charts

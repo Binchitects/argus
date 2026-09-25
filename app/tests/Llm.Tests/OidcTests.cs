@@ -3,20 +3,21 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
 [Collection(nameof(AppCollection))]
 public sealed class OidcTests(AppFixture app)
 {
-    private const string GrafanaCallback = "https://grafana.llm.test/login/generic_oauth";
+    private const string WebUiCallback = "https://chat.llm.test/oauth/oidc/callback";
 
     private TestBrowser Browser() => new(app.Factory);
 
-    private static string AuthorizeUrl(string state = "s1", string? prompt = null, string redirect = GrafanaCallback) =>
+    private static string AuthorizeUrl(string state = "s1", string? prompt = null, string redirect = WebUiCallback) =>
         QueryHelpers.AddQueryString("/connect/authorize", new Dictionary<string, string?>
         {
-            ["client_id"] = "grafana",
+            ["client_id"] = "open-webui",
             ["response_type"] = "code",
             ["redirect_uri"] = redirect,
             ["scope"] = "openid profile email groups",
@@ -24,8 +25,8 @@ public sealed class OidcTests(AppFixture app)
             ["prompt"] = prompt,
         }.Where(kv => kv.Value is not null));
 
-    /// <summary>Runs the authorization-code flow as Grafana would and returns the token response.</summary>
-    private async Task<JsonElement> SignInToGrafanaAsync(string user, string password)
+    /// <summary>Runs the authorization-code flow as Open WebUI would and returns the token response.</summary>
+    private async Task<JsonElement> SignInToWebUiAsync(string user, string password)
     {
         var b = Browser();
         var start = await b.GetAsync(AuthorizeUrl());
@@ -41,10 +42,10 @@ public sealed class OidcTests(AppFixture app)
         var authorized = await b.GetAsync(back);
         Assert.Equal(HttpStatusCode.Redirect, authorized.StatusCode);
         var callback = authorized.Headers.Location!;
-        Assert.StartsWith(GrafanaCallback, callback.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith(WebUiCallback, callback.ToString(), StringComparison.Ordinal);
         var query = QueryHelpers.ParseQuery(callback.Query);
         Assert.Equal("s1", query["state"].ToString());
-        return await ExchangeAsync(query["code"].ToString(), AppFixture.GrafanaSecret, HttpStatusCode.OK);
+        return await ExchangeAsync(query["code"].ToString(), AppFixture.OpenWebUiSecret, HttpStatusCode.OK);
     }
 
     private async Task<JsonElement> ExchangeAsync(string code, string secret, HttpStatusCode expected)
@@ -55,10 +56,10 @@ public sealed class OidcTests(AppFixture app)
             {
                 ["grant_type"] = "authorization_code",
                 ["code"] = code,
-                ["redirect_uri"] = GrafanaCallback,
+                ["redirect_uri"] = WebUiCallback,
             }),
         };
-        req.Headers.Authorization = TestBrowser.Basic("grafana", secret);
+        req.Headers.Authorization = TestBrowser.Basic("open-webui", secret);
         var res = await Browser().Http.SendAsync(req);
         await StatusAssert.Is(expected, res);
         return JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
@@ -100,9 +101,9 @@ public sealed class OidcTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Grafana_signs_in_an_admin_with_the_admin_group()
+    public async Task Open_webui_signs_in_an_admin_with_the_admin_group()
     {
-        var tokens = await SignInToGrafanaAsync("admin", AppFixture.AdminPassword);
+        var tokens = await SignInToWebUiAsync("admin", AppFixture.AdminPassword);
         var id = Payload(tokens.GetProperty("id_token").GetString()!);
         Assert.Equal("admin", id.GetProperty("preferred_username").GetString());
         Assert.Equal("admin@llm.test", id.GetProperty("email").GetString());
@@ -116,7 +117,7 @@ public sealed class OidcTests(AppFixture app)
     {
         var admin = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
         var (email, password, _) = await PersonAsync(admin);
-        var tokens = await SignInToGrafanaAsync(email, password);
+        var tokens = await SignInToWebUiAsync(email, password);
         var info = await UserInfoAsync(tokens.GetProperty("access_token").GetString()!);
         Assert.Equal(["users"], info.GetProperty("groups").EnumerateArray().Select(g => g.GetString()!).ToArray());
         Assert.Equal(email, info.GetProperty("email").GetString());
@@ -127,7 +128,7 @@ public sealed class OidcTests(AppFixture app)
     {
         var admin = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
         var (email, password, id) = await PersonAsync(admin);
-        var tokens = await SignInToGrafanaAsync(email, password);
+        var tokens = await SignInToWebUiAsync(email, password);
         await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/people/{id}", UriKind.Relative), new { disabled = true });
         await UserInfoAsync(tokens.GetProperty("access_token").GetString()!, HttpStatusCode.Unauthorized);
     }
@@ -148,8 +149,8 @@ public sealed class OidcTests(AppFixture app)
         var b = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
         var res = await b.GetAsync(AuthorizeUrl());
         var code = QueryHelpers.ParseQuery(res.Headers.Location!.Query)["code"].ToString();
-        await ExchangeAsync(code, AppFixture.GrafanaSecret, HttpStatusCode.OK);
-        var again = await ExchangeAsync(code, AppFixture.GrafanaSecret, HttpStatusCode.BadRequest);
+        await ExchangeAsync(code, AppFixture.OpenWebUiSecret, HttpStatusCode.OK);
+        var again = await ExchangeAsync(code, AppFixture.OpenWebUiSecret, HttpStatusCode.BadRequest);
         Assert.Equal("invalid_grant", again.GetProperty("error").GetString());
     }
 
@@ -167,7 +168,7 @@ public sealed class OidcTests(AppFixture app)
     {
         var res = await Browser().GetAsync(AuthorizeUrl(prompt: "none"));
         Assert.Equal(HttpStatusCode.Redirect, res.StatusCode);
-        Assert.StartsWith(GrafanaCallback, res.Headers.Location!.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith(WebUiCallback, res.Headers.Location!.ToString(), StringComparison.Ordinal);
         Assert.Equal("login_required", QueryHelpers.ParseQuery(res.Headers.Location!.Query)["error"].ToString());
     }
 
@@ -176,7 +177,27 @@ public sealed class OidcTests(AppFixture app)
     {
         // Langfuse has no secret in the test configuration, so it must not be a client at all.
         var b = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
-        var res = await b.GetAsync(AuthorizeUrl().Replace("client_id=grafana", "client_id=langfuse", StringComparison.Ordinal));
+        var res = await b.GetAsync(AuthorizeUrl().Replace("client_id=open-webui", "client_id=langfuse", StringComparison.Ordinal));
+        Assert.NotEqual(HttpStatusCode.Redirect, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_retired_client_left_by_an_older_version_is_removed_at_start()
+    {
+        // Grafana signed in through the app until its dashboards moved into the app.
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var apps = scope.ServiceProvider.GetRequiredService<OpenIddict.Abstractions.IOpenIddictApplicationManager>();
+            await apps.CreateAsync(new OpenIddict.Abstractions.OpenIddictApplicationDescriptor
+            {
+                ClientId = "grafana", ClientSecret = "old-grafana-secret", ClientType = OpenIddict.Abstractions.OpenIddictConstants.ClientTypes.Confidential,
+                RedirectUris = { new Uri("https://grafana.llm.test/login/generic_oauth") },
+            });
+            await scope.ServiceProvider.GetRequiredService<Llm.Api.Oidc.OidcClients>().RunAsync();
+            Assert.Null(await apps.FindByClientIdAsync("grafana"));
+        }
+        var b = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
+        var res = await b.GetAsync(AuthorizeUrl(redirect: "https://grafana.llm.test/login/generic_oauth").Replace("client_id=open-webui", "client_id=grafana", StringComparison.Ordinal));
         Assert.NotEqual(HttpStatusCode.Redirect, res.StatusCode);
     }
 
@@ -202,7 +223,7 @@ public sealed class OidcTests(AppFixture app)
         Assert.Equal("llm-api", claims.GetProperty("aud").GetString());
         Assert.InRange(claims.GetProperty("exp").GetInt64() - claims.GetProperty("iat").GetInt64(), 3000, 3600);
         await MachineTokenAsync(b, "api", "wrong", expected: HttpStatusCode.Unauthorized);
-        await MachineTokenAsync(b, "grafana", AppFixture.GrafanaSecret, expected: HttpStatusCode.BadRequest); // not allowed that grant
+        await MachineTokenAsync(b, "open-webui", AppFixture.OpenWebUiSecret, expected: HttpStatusCode.BadRequest); // not allowed that grant
     }
 }
 

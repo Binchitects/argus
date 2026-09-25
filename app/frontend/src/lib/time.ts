@@ -11,6 +11,23 @@ export const presets: { label: string; from: string }[] = [
   { label: 'Last 90 days', from: 'now-90d' },
 ]
 
+/** The ranges for live metrics and logs: minutes to a month. */
+export const metricPresets: { label: string; from: string }[] = [
+  { label: 'Last 5 minutes', from: 'now-5m' },
+  { label: 'Last 15 minutes', from: 'now-15m' },
+  { label: 'Last hour', from: 'now-1h' },
+  { label: 'Last 6 hours', from: 'now-6h' },
+  { label: 'Last 24 hours', from: 'now-24h' },
+  { label: 'Last 7 days', from: 'now-7d' },
+  { label: 'Last 30 days', from: 'now-30d' },
+]
+
+/** "30s", "1m", "5m" (a dashboard's refresh) in milliseconds, or null. */
+export function refreshMs(text: string | undefined | null): number | null {
+  const m = /^(\d+)([smhd])$/.exec(text ?? '')
+  return m ? Number(m[1]) * ({ s: 1e3, m: 6e4, h: 3.6e6, d: 8.64e7 } as Record<string, number>)[m[2]!]! : null
+}
+
 const units: Record<string, number> = { s: 1e3, m: 6e4, h: 3.6e6, d: 8.64e7, w: 6.048e8, M: 2.592e9, y: 3.1536e10 }
 
 /** "now", "now-30d", or an ISO time, as a Date. */
@@ -41,5 +58,5 @@ export function intervalFor(from: Date, to: Date, points: number): number {
 }
 
 export function rangeLabel(r: TimeRange): string {
-  return presets.find((p) => p.from === r.from && r.to === 'now')?.label ?? `${r.from} to ${r.to}`
+  return [...presets, ...metricPresets].find((p) => p.from === r.from && r.to === 'now')?.label ?? `${r.from} to ${r.to}`
 }

@@ -17,11 +17,11 @@ Every number here was measured against the tree, not estimated.
 | layer | entry point | asserts | needs |
 |---|---|---|---|
 | **Unit** | `pytest tests/` — **928 tests** | the Argus Python package: config, credentials, gitlab, mirror, tls, acl, access, resolve, worker, cli, packs, parse, store, mcpsrv, auditlog — plus `check_mounts.py`, the stack's preflight guard | nothing running; no Docker |
-| **App** | `./dn test` (xUnit), `npm test` (Vitest) and `npm run e2e` (Playwright) in `app/`, and CI on every push | sign-in, OIDC, forwardAuth, LDAP against a real OpenLDAP, people and keys, the dashboard engine running every SQL panel against LiteLLM's real schema, the admin pages including Indexing's exit-code meanings and the partial-enumeration opt-in, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
-| **Dashboard parity** | `scripts/compare-dashboards.py` | every SQL panel queried in the app and in Grafana over the same range and interval gives the same rows | a running stack |
-| **Acceptance** | `scripts/acceptance.py` | 7 groups — `config`, `routes`, `identity`, `infra`, `obs`, `ops`, `e2e`. Routes answer, OIDC discovery documents exist, scraping works, datasources are healthy | a running stack |
+| **App** | `./dn test` (xUnit), `npm test` (Vitest) and `npm run e2e` (Playwright) in `app/`, and CI on every push | sign-in, OIDC, forwardAuth, LDAP against a real OpenLDAP, people and keys, the dashboard engine running every SQL panel against LiteLLM's real schema and every Prometheus and Loki panel against a fake of both (every query fully expanded), the Logs and Alerts APIs, the admin pages including Indexing's exit-code meanings and the partial-enumeration opt-in, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
+| **Dashboard audit** | `scripts/audit-dashboards.py` | every panel's queries run in the app: no errors; empty panels, null values and percentages out of range are reported. (Parity with Grafana, 153 of 153 panels, was proven before Grafana was removed: `compare-dashboards.py`, commit 8c07f7b.) | a running stack |
+| **Acceptance** | `scripts/acceptance.py` | 7 groups — `config`, `routes`, `identity`, `infra`, `obs`, `ops`, `e2e`. Routes answer, OIDC discovery documents exist, scraping works, alert rules load, Alertmanager and Loki answer | a running stack |
 | **E2E** | `scripts/e2e-check.py` | from **inside** the network: the engine serves the model the gateway advertises, an API call is attributed to the key that made it, a chat is attributed to the same person, an over-budget person is refused | a running stack |
-| **Functional** | `scripts/functional-test.py` | 66 checks of what a *person* does: SSO sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, self-signup refusal, per-person billing on both surfaces, access per model, and fair use (a key's third request at once is refused) | `auth`,`gateway` profiles |
+| **Functional** | `scripts/functional-test.py` | 68 checks of what a *person* does: SSO sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, self-signup refusal, per-person billing on both surfaces, access per model, fair use (a key's third request at once is refused), and the dashboards, logs and alerts answering the admin and nobody else | `auth`,`gateway` profiles |
 | **Sandbox** | `scripts/sandbox-check.py` | 17 checks against the running sandbox, sending jobs as the app does: code runs with its files and they come back; no network; no reading the jobs, other runs or the runner, no writing the image; time, memory, file size and process limits bind; nothing a run starts outlives it, not even as a zombie; a stop stops it | `sandbox` profile |
 | **Auth audit** | `scripts/audit-auth.sh` | a **real** OAuth2 authorization-code exchange per OIDC client, then the claims actually delivered | `auth` profile |
 | **Domain** | `scripts/domain-check.sh` | every hostname routes, TLS serves the right certificate, and the *old* domain is gone | `proxy` |
@@ -36,7 +36,7 @@ uniform coverage of the stack.
 
 ## 2. Coverage per service, measured
 
-Each of the 32 services against the nine test entry points, by name:
+Each of the 34 services against the test entry points, by name:
 
 | covered | service | by |
 |---|---|---|
@@ -44,12 +44,15 @@ Each of the 32 services against the nine test entry points, by name:
 | ✅ | app (sign-in, OIDC, forwardAuth, people) | app tests (xUnit, Vitest, Playwright), acceptance, functional-test, health, domain-check, audit-auth |
 | ✅ | open-webui | acceptance, e2e-check, functional-test, health, domain-check, audit-auth |
 | ✅ | litellm | acceptance, e2e-check, functional-test, health |
-| ✅ | grafana | acceptance, functional-test, health, domain-check, audit-auth |
 | ✅ | traefik | acceptance, functional-test, health, domain-check, audit-auth |
 | ✅ | langfuse | acceptance, health, audit-auth |
-| ✅ | prometheus, alertmanager, node-exporter, nvidia-smi-exporter, cadvisor, loki, redis, postgres, power-limits, clickhouse | acceptance/health only |
+| ✅ | prometheus, alertmanager, loki | acceptance, health, functional-test and audit-dashboards (through the app's dashboards, Logs and Alerts) |
+| ✅ | node-exporter, nvidia-smi-exporter, cadvisor, redis, postgres, power-limits, clickhouse | acceptance/health only |
 | ✅ | llamacpp, vllm | e2e-check, health, smoke/bench |
-| ✅ | app | app tests, CI, acceptance, functional-test, audit-auth, compare-dashboards |
+| ✅ | app | app tests, CI, acceptance, functional-test, audit-auth, audit-dashboards |
+| ✅ | web | Playwright (every page, desktop and phone, both themes, axe), domain-check |
+| ✅ | sandbox | sandbox-check (17 checks against the real container), app tests (with a fake) |
+| ⚠️ | imagegen | functional-test (access per model) |
 | ⚠️ | model-init, tls-init | one script each |
 | ❌ | **auth-init** | nothing |
 | ❌ | **identity-proxy** | nothing |
@@ -61,8 +64,9 @@ Each of the 32 services against the nine test entry points, by name:
 | ❌ | **minio** | nothing |
 | ❌ | **promtail** | nothing |
 | ❌ | **vllm-secondary** | nothing |
+| ❌ | **searxng** | nothing against the real one (the app's web tool is tested with a fake) |
 
-Ten services are named by no test at all.
+Eleven services are named by no test at all.
 
 ### The bigger caveat: skipped is not passed
 
@@ -247,14 +251,16 @@ year default expiry on a blank `expires_at` — were each read off a live GitLab
 
 Every scrape target `up == 1` **for the profiles that are on**; rule files load;
 one alert is driven from a synthetic metric to Alertmanager and observed. Today
-only "the datasource is healthy" is checked.
+acceptance checks that the rules load and that Alertmanager and Loki answer, and
+the functional test reads a Prometheus panel, Loki's lines and every rule through
+the app; no alert is driven end to end yet.
 
 Log *ingestion* is the newest gap to close, and the first live start showed why
 it needs a test. Promtail's `keep` filter was documented as "only ingest this
 stack's containers" and its regex was `".+"` — every container on the daemon
 carrying any compose project label. The bundled test GitLab's whole log was
 being shipped into this deployment's Loki, which is both volume and another
-project's data appearing in this project's Grafana. It now matches
+project's data appearing in this project's Logs page. It now matches
 `COMPOSE_PROJECT_NAME`, and Loki's per-stream rate limit was raised from its
 3MB/s default: Promtail reads each container's entire existing log file on first
 start, and Loki answered `429 — entry ignored` for most of the backlog, which is
@@ -339,7 +345,7 @@ original minimum set, and where each item stands:
 | C4.2 | the self-signed certificate produces a warning that can be accepted, and the page then loads |
 | C4.3 | a chat renders a streamed answer incrementally: **done in the app's chat** (`chat.spec.ts`) |
 | C4.4 | Argus is offered to a non-admin: **done in the app's chat**, with the no-access notice for someone without access |
-| C4.5 | all nine Grafana dashboards render with data, no "datasource not found" |
+| C4.5 | every dashboard draws every panel without an error: **done in the app** (`admin.spec.ts`) |
 | C4.6 | sign-out ends the session at the app and every service that trusts it |
 
 ### C5 — Recovery from the client's point of view
@@ -463,7 +469,7 @@ make smoke           # API surface
 ./scripts/audit-auth.sh
 ./scripts/acceptance.py        # note: SKIP is not PASS
 ./scripts/functional-test.py   # the person-facing flows
-./scripts/compare-dashboards.py  # the app's usage dashboards == Grafana's
+./scripts/audit-dashboards.py 6h  # every panel's queries, run in the app
 
 # the web in a real browser (in app/frontend): desktop and phone, both themes,
 # axe accessibility; E2E_CHAT=1 adds the chat against the real model

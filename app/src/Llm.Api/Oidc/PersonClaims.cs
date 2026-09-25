@@ -11,7 +11,7 @@ namespace Llm.Api.Oidc;
 /// <summary>What other services learn about a person. One place, so every app sees the same identity.</summary>
 public sealed class PersonClaims(UserManager<AppUser> users, IOptions<AuthOptions> auth)
 {
-    /// <summary>"users" for everyone, plus the admin group (Grafana and Open WebUI map it to their admin role).</summary>
+    /// <summary>"users" for everyone, plus the admin group (Open WebUI maps it to its admin role).</summary>
     public async Task<string[]> GroupsAsync(AppUser user) =>
         await users.IsInRoleAsync(user, Roles.Admin) ? [auth.Value.AdminGroup, "users"] : ["users"];
 

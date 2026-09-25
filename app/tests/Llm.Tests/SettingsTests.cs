@@ -316,7 +316,7 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public void Every_stack_setting_reaches_the_app_through_compose_and_nothing_else_does()
     {
-        var compose = File.ReadAllText(Path.Combine(AppFixture.DashboardsPath, "..", "..", "..", "docker-compose.yml"));
+        var compose = File.ReadAllText(Path.Combine(AppFixture.DashboardsPath, "..", "..", "docker-compose.yml"));
         var passed = StackEnvName().Matches(compose).Select(m => m.Groups[1].Value).ToHashSet();
         foreach (var d in SettingsCatalog.StackSettings)
         {

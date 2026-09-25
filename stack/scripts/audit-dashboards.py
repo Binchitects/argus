@@ -1,150 +1,146 @@
 #!/usr/bin/env python3
-"""Run every Grafana panel query through Grafana's /api/ds/query and judge the data.
+"""Run every dashboard panel's queries in the app and judge the data.
 
-Catches what a healthy-looking Grafana hides: queries that error (bad PromQL,
-LogQL or SQL), panels that are empty, NaN or null series, and percentages out
-of range. It also produces the baseline the app's native dashboards must match
-(docs/enterprise/PLAN.md, phase 5).
+Catches what a healthy-looking page hides: queries that error (bad PromQL,
+LogQL or SQL), panels that are empty, null or NaN values, and percentages out
+of range. Each panel is asked as its page asks it: through the app's
+/api/dashboards API, signed in as the admin (the password comes from .env and
+is never printed).
 
-    python3 scripts/audit-dashboards.py              # last 30 minutes
-    python3 scripts/audit-dashboards.py now-6h       # another window
+    python3 scripts/audit-dashboards.py              # metrics and logs over 30 minutes
+    python3 scripts/audit-dashboards.py 6h           # another window (usage panels: 30 days)
     python3 scripts/audit-dashboards.py --json out.json
 
-It runs in a throwaway container of the stack's own Python image, on llm-net
-next to Grafana, so nothing is published; the Grafana admin credentials come
-from .env.
 Exit status: the number of queries that ERRORED. Empty panels are reported but
 do not fail: many are empty by design until the matching traffic exists.
 """
-import os
-import subprocess
+import http.cookiejar
+import json
+import math
+import ssl
 import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-
-INNER = r'''
-import base64, glob, json, math, os, sys, urllib.request, urllib.error
-G = "http://grafana:3000"
-AUTH = "Basic " + base64.b64encode(f"{os.environ['GU']}:{os.environ['GP']}".encode()).decode()
-WINDOW = os.environ.get("WINDOW", "now-30m")
-
-def post(path, body):
-    req = urllib.request.Request(G + path, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": AUTH})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        return {"_http": e.code, "_body": e.read().decode()[:300]}
-
-def walk(ps):
-    for p in ps:
-        yield p
-        yield from walk(p.get("panels", []))
-
-out = []
-for f in sorted(glob.glob("/dash/*.json")):
-    d = json.load(open(f))
-    varvals = {}
-    for v in d.get("templating", {}).get("list", []):
-        cur = (v.get("current") or {}).get("value")
-        # What "All" sends: the variable's own allValue (Loki rejects .*), else .*
-        varvals[v["name"]] = (v.get("allValue") or ".*") if (v.get("includeAll") or v.get("type") == "query") \
-            else (cur if isinstance(cur, str) else "")
-    for p in walk(d.get("panels", [])):
-        unit = (p.get("fieldConfig", {}).get("defaults", {}) or {}).get("unit", "")
-        pds = p.get("datasource") or {}
-        for t in p.get("targets") or []:
-            if t.get("hide"):
-                continue
-            ds = t.get("datasource") or pds
-            uid = ds.get("uid") if isinstance(ds, dict) else ds
-            q = dict(t)
-            q["datasource"] = {"uid": uid}
-            for key in ("expr", "rawSql"):
-                if isinstance(q.get(key), str):
-                    for k, v in varvals.items():
-                        q[key] = q[key].replace("${%s:regex}" % k, v).replace("${%s}" % k, v).replace("$" + k, v)
-            q.setdefault("intervalMs", 15000)
-            q.setdefault("maxDataPoints", 400)
-            if uid == "prometheus":
-                q["range"] = True
-                q["instant"] = False
-            res = post("/api/ds/query", {"queries": [q], "from": WINDOW, "to": "now"})
-            rec = {"dash": d["title"], "panel": p.get("title"), "ref": t.get("refId"), "unit": unit,
-                   "ds": uid, "q": (q.get("expr") or q.get("rawSql") or "")[:220]}
-            if "_http" in res:
-                rec["verdict"] = f"ERROR HTTP {res['_http']}: {res['_body'][:200]}"
-                out.append(rec)
-                continue
-            r = list(res.get("results", {}).values())[0]
-            if r.get("error"):
-                rec["verdict"] = "ERROR " + r["error"][:200]
-                out.append(rec)
-                continue
-            pts = nans = 0
-            vals = []
-            for fr in r.get("frames", []):
-                fields = fr.get("schema", {}).get("fields", [])
-                data = fr.get("data", {}).get("values", [])
-                for i, fl in enumerate(fields):
-                    if fl.get("type") != "number":
-                        continue
-                    for v in (data[i] if i < len(data) else []):
-                        if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
-                            nans += 1
-                        else:
-                            pts += 1
-                            vals.append(v)
-            probs = []
-            if pts == 0:
-                probs.append("NO DATA")
-            if nans:
-                probs.append(f"{nans} null/NaN")
-            if vals and unit == "percentunit" and max(vals) > 1.0001:
-                probs.append(f"percentunit max {max(vals):.3g}")
-            if vals and unit == "percent" and max(vals) > 100.01:
-                probs.append(f"percent max {max(vals):.3g}")
-            rec["verdict"] = "; ".join(probs) or "ok"
-            rec["min"] = min(vals) if vals else None
-            rec["max"] = max(vals) if vals else None
-            out.append(rec)
-json.dump(out, sys.stdout, default=str)
-'''
+SQL_UID = "litellm-db"
 
 
-def env(key):
+def env(key, default=""):
     for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
         if line.startswith(key + "="):
             return line.split("=", 1)[1].strip()
-    return ""
+    return default
+
+
+DOM = env("LLM_DOMAIN", "llm.localhost")
+PORT = env("TRAEFIK_HTTPS_PORT", "443")
+BASE = f"https://{DOM}" + ("" if PORT == "443" else f":{PORT}")
+CTX = ssl.create_default_context(cafile=str(ROOT / "config/traefik/certs/tls.crt"))
+OPENER = urllib.request.build_opener(urllib.request.HTTPSHandler(context=CTX),
+                                     urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+
+def call(path, body=None):
+    req = urllib.request.Request(BASE + path, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type": "application/json", "Accept": "application/json",
+                                          "X-Requested-With": "audit"})
+    try:
+        with OPENER.open(req, timeout=120) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.load(e)
+        except ValueError:
+            return e.code, {"error": f"HTTP {e.code}"}
+
+
+def seconds(text):
+    return int(text[:-1]) * {"m": 60, "h": 3600, "d": 86400}[text[-1]]
+
+
+def iso(t):
+    return datetime.fromtimestamp(t, timezone.utc).isoformat()
+
+
+def values(result):
+    """Every number a target returned, and how many were null or NaN; log lines are counted apart."""
+    nums, bad = [], 0
+    for s in result.get("series") or []:
+        for p in s["points"]:
+            v = p[1] if len(p) > 1 else None
+            if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
+                bad += 1
+            else:
+                nums.append(v)
+    table = result.get("table")
+    if table:
+        numeric = [i for i, c in enumerate(table["columns"]) if c["type"] == "number"]
+        for row in table["rows"]:
+            for i in numeric:
+                if row[i] is None:
+                    bad += 1
+                else:
+                    nums.append(row[i])
+    return nums, bad, len(result.get("logs") or [])
 
 
 def main():
-    import json
     args = sys.argv[1:]
     dump = None
     if "--json" in args:
         i = args.index("--json")
         dump = args[i + 1]
         del args[i:i + 2]
-    window = args[0] if args else "now-30m"
-    dash = ROOT / "config" / "grafana" / "dashboards"
-    r = subprocess.run(
-        ["docker", "run", "--rm", "-i", "--network", "llm-net", "--entrypoint", "python",
-         "-e", f"GU={env('GRAFANA_ADMIN_USER') or 'admin'}", "-e", f"GP={env('GRAFANA_ADMIN_PASSWORD')}",
-         "-e", f"WINDOW={window}", "-v", f"{dash}:/dash:ro", "llmservice-identity-proxy:latest", "-"],
-        input=INNER, capture_output=True, text=True)
-    if r.returncode != 0:
-        sys.exit(f"audit failed to run: {r.stderr.strip()[-400:]}")
-    rows = json.loads(r.stdout)
+    window = args[0].removeprefix("now-") if args else "30m"
+    code, body = call("/api/auth/login", {"userName": "admin", "password": env("ADMIN_PASSWORD") or env("AUTHELIA_ADMIN_PASSWORD")})
+    if code != 200 or body.get("status") != "ok":
+        sys.exit(f"cannot sign in to the app: HTTP {code} {body.get('error', '')}")
+
+    now = time.time()
+    rows = []
+    _, dashboards = call("/api/dashboards/")
+    for listed in dashboards:
+        _, d = call(f"/api/dashboards/{listed['uid']}")
+        for p in d["panels"]:
+            if p["type"] in ("row", "text") or not p.get("supported"):
+                continue
+            # Usage panels read the gateway's database: a month, as their page opens.
+            span = 30 * 86400 if SQL_UID in p.get("datasources", []) else seconds(window)
+            code, r = call(f"/api/dashboards/{d['uid']}/panels/{p['key']}/query",
+                           {"from": iso(now - span), "to": iso(now), "maxDataPoints": 400})
+            unit = ((p.get("fieldConfig") or {}).get("defaults") or {}).get("unit", "")
+            base = {"dash": d["title"], "panel": p.get("title"), "unit": unit}
+            if code != 200:
+                rows.append({**base, "ref": "-", "verdict": f"ERROR HTTP {code}: {r.get('error', '')[:200]}"})
+                continue
+            for t in r["results"]:
+                rec = {**base, "ref": t["refId"]}
+                if t.get("error"):
+                    rows.append({**rec, "verdict": "ERROR " + t["error"][:200]})
+                    continue
+                nums, bad, lines = values(t)
+                problems = []
+                if not nums and not lines:
+                    problems.append("NO DATA")
+                if bad:
+                    problems.append(f"{bad} null/NaN")
+                if nums and unit == "percentunit" and max(nums) > 1.0001:
+                    problems.append(f"percentunit max {max(nums):.3g}")
+                if nums and unit == "percent" and max(nums) > 100.01:
+                    problems.append(f"percent max {max(nums):.3g}")
+                rows.append({**rec, "verdict": "; ".join(problems) or "ok",
+                             "min": min(nums) if nums else None, "max": max(nums) if nums else None, "lines": lines})
+
     if dump:
         Path(dump).write_text(json.dumps(rows, indent=1, default=str), encoding="utf-8")
     errors = [x for x in rows if x["verdict"].startswith("ERROR")]
     empty = [x for x in rows if x["verdict"] != "ok" and not x["verdict"].startswith("ERROR")]
-    print(f"{len(rows)} panel queries over {window}: {len(rows) - len(errors) - len(empty)} ok, "
-          f"{len(empty)} empty or partial, {len(errors)} errors")
+    print(f"{len(rows)} panel queries (metrics and logs over {window}, usage over 30d): "
+          f"{len(rows) - len(errors) - len(empty)} ok, {len(empty)} empty or partial, {len(errors)} errors")
     for x in errors:
         print(f"  ERROR  [{x['dash']}] {x['panel']} ({x['ref']}): {x['verdict'][6:]}")
     for x in empty:

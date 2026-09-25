@@ -8,7 +8,7 @@ public sealed record TableResult(IReadOnlyList<Column> Columns, IReadOnlyList<ob
 /// <summary>One line of a chart: [epoch ms, value] points.</summary>
 public sealed record Series(string Name, IReadOnlyList<double?[]> Points);
 
-public sealed record TargetResult(string RefId, string Format, TableResult? Table, IReadOnlyList<Series>? Series, string? Error);
+public sealed record TargetResult(string RefId, string Format, TableResult? Table, IReadOnlyList<Series>? Series, string? Error, IReadOnlyList<LogLine>? Logs = null);
 
 public static class SeriesShaping
 {
