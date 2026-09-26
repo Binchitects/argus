@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { ChevronsLeft, ChevronsRight, Menu, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useMatches, useNavigate } from 'react-router'
+import { Link, Outlet, useLocation, useMatch, useMatches, useNavigate, useResolvedPath } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
@@ -10,7 +10,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { infoQuery, meQuery, type Me } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
-import { findNavItem, visibleNavigation, type NavSection } from './nav'
+import { findNavItem, visibleNavigation, type NavItem, type NavSection } from './nav'
 import { UserMenu } from './user-menu'
 
 function readCollapsed(): boolean {
@@ -144,34 +144,51 @@ function Brand({ name, collapsed }: { name: string; collapsed: boolean }) {
   )
 }
 
+/**
+ * One entry of the sidebar. Its class is worked out here, a plain string: the
+ * collapsed sidebar wraps it in a tooltip trigger, whose slot joins class names
+ * as strings, so a NavLink's class function would be turned into its own source.
+ */
+function SidebarLink({ item, collapsed, onNavigate }: { item: NavItem; collapsed: boolean; onNavigate?: () => void }) {
+  const resolved = useResolvedPath(item.path)
+  const active = useMatch({ path: resolved.pathname, end: item.path === '/' || item.path === '/admin' }) !== null
+  const link = (
+    <Link
+      to={item.path}
+      aria-current={active ? 'page' : undefined}
+      aria-label={collapsed ? item.title : undefined}
+      onClick={onNavigate}
+      className={cn(
+        'flex h-8 items-center gap-2.5 rounded-md px-2 text-sm font-medium transition-[color,background-color,scale] duration-150 hover:bg-sidebar-accent active:scale-[0.98] [&>svg]:transition-transform hover:[&>svg]:scale-110',
+        active ? 'bg-sidebar-accent text-foreground' : 'text-sidebar-foreground/85',
+        collapsed && 'mx-auto size-9 justify-center px-0',
+      )}
+    >
+      <item.icon className="size-4 shrink-0" aria-hidden="true" />
+      {!collapsed && <span className="truncate">{item.title}</span>}
+    </Link>
+  )
+  return collapsed ? (
+    <Tooltip content={item.title} side="right">
+      {link}
+    </Tooltip>
+  ) : (
+    link
+  )
+}
+
 function SidebarNav({ sections, collapsed, onNavigate }: { sections: NavSection[]; collapsed: boolean; onNavigate?: () => void }) {
   return (
     <nav aria-label="Main" className="flex-1 overflow-y-auto px-2 py-3">
-      {sections.map((s) => (
-        <div key={s.title} className="mb-4">
-          {collapsed ? <div className="mx-2 mb-2 h-px bg-sidebar-border first:hidden" /> : <p className="px-2 pb-1.5 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">{s.title}</p>}
+      {sections.map((s, i) => (
+        <div key={s.title} className={collapsed ? 'mb-2' : 'mb-4'}>
+          {collapsed ? i > 0 && <div className="mx-2 mb-2 h-px bg-sidebar-border" aria-hidden="true" /> : <p className="px-2 pb-1.5 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">{s.title}</p>}
           <ul className="grid gap-0.5">
-            {s.items.map((item) => {
-              const link = (
-                <NavLink
-                  to={item.path}
-                  end={item.path === '/' || item.path === '/admin'}
-                  className={({ isActive }) =>
-                    cn(
-                      'flex h-8 items-center gap-2.5 rounded-md px-2 text-sm font-medium transition-[color,background-color,scale] duration-150 hover:bg-sidebar-accent active:scale-[0.98] [&>svg]:transition-transform hover:[&>svg]:scale-110',
-                      isActive ? 'bg-sidebar-accent text-foreground' : 'text-sidebar-foreground/85',
-                      collapsed && 'justify-center px-0',
-                    )
-                  }
-                  aria-label={collapsed ? item.title : undefined}
-                  onClick={onNavigate}
-                >
-                  <item.icon className="size-4 shrink-0" aria-hidden="true" />
-                  {!collapsed && <span className="truncate">{item.title}</span>}
-                </NavLink>
-              )
-              return <li key={item.path}>{collapsed ? <Tooltip content={item.title} side="right">{link}</Tooltip> : link}</li>
-            })}
+            {s.items.map((item) => (
+              <li key={item.path}>
+                <SidebarLink item={item} collapsed={collapsed} onNavigate={onNavigate} />
+              </li>
+            ))}
           </ul>
         </div>
       ))}

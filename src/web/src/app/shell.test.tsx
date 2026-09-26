@@ -86,6 +86,21 @@ describe('shell', () => {
     expect(screen.getByRole('main')).toHaveClass('max-w-(--page-max)')
   })
 
+  it('the collapsed sidebar keeps each link laid out and the current page marked', async () => {
+    fakeApi(admin)
+    renderApp('/admin/people')
+    await userEvent.click(await screen.findByRole('button', { name: 'Collapse sidebar' }))
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    const people = within(nav).getByRole('link', { name: 'People' })
+    // Its class is its own, not a class function's source text (a tooltip trigger joins classes as strings).
+    expect(people.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'size-9', 'bg-sidebar-accent']))
+    expect(people.className).not.toMatch(/isActive|=>/)
+    expect(people).toHaveAttribute('aria-current', 'page')
+    expect(within(nav).getByRole('link', { name: 'Chat' })).not.toHaveAttribute('aria-current')
+    await userEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+    expect(within(nav).getByRole('link', { name: 'People' })).toHaveAttribute('aria-current', 'page')
+  })
+
   it('unknown pages say so', async () => {
     fakeApi(member)
     renderApp('/no-such-page')
