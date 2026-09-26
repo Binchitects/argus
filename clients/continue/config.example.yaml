@@ -1,9 +1,13 @@
-# Continue -> Argus. Merge into ~/.continue/config.yaml.
-# The code index key comes from Settings & keys in the app.
+# Continue -> Argus.  NOT EXECUTED on this machine; transcribed from Continue's
+# documented MCP configuration. Merge into ~/.continue/config.yaml.
+#
+# stdio form: Argus runs as a child process and resolves ARGUS_TOKEN once, at
+# startup. For the HTTP form see clients/generic-mcp/http.json -- Continue takes
+# the same url/headers shape as every other URL-based client.
+
 mcpServers:
   - name: argus
-    type: streamable-http
-    url: http://llm.example.lan:8080/mcp
-    requestOptions:
-      headers:
-        Authorization: Bearer ak_your_code_index_key
+    command: argus
+    args: ["serve", "--config", "/etc/argus/config.yaml", "--stdio"]
+    env:
+      ARGUS_TOKEN: <gitlab-pat>

@@ -1,0 +1,3 @@
+[*.cs]
+# Written by `dotnet ef migrations add`, not by hand.
+generated_code = true

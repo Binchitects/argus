@@ -1,22 +1,87 @@
-# Secrets: never commit. Copy a file from env-samples/ as the template.
+# Secrets — never commit. Copy a file from env-samples/ as the template.
 .env
 .env.*
 
-# Model weights (large, re-downloadable)
+# Local model weights (large, re-downloadable)
 models/*
 !models/.gitkeep
 
-# Backups hold .env and every account
+# Volume backups contain .env and database dumps
 backups/
 
-# Whatever an operator drops here (a GitLab CA, a TLS key) belongs to their
-# environment. The README keeps the directory in a fresh clone, so the bind
-# mount never has to be created by Docker as an empty root-owned directory.
-config/argus/tls/*
-!config/argus/tls/README.md
+# Agent/session scratch and local tool state - not part of the stack
+.remember/
+.claude/
+.cache/
+.deploytest/
 
+# Runtime logs written into config dirs by the services themselves
+
+# OS / editor noise
 Thumbs.db
 .DS_Store
 *.swp
 .idea/
 .vscode/
+
+# The exported TLS certificate (tls-init) and basic-auth hash (auth-init)
+config/traefik/certs/*
+!config/traefik/certs/.gitkeep
+config/traefik/auth/*
+!config/traefik/auth/.gitkeep
+
+# Argus's private CA for a GitLab that is not on a public one. Whatever an
+# operator drops here belongs to their environment, not to this repository --
+# and unlike the self-signed certificate above, it is not reproducible from
+# .env. The README stays so the directory exists in a fresh clone and the bind
+# mount in docker-compose.yml never has to be created by Docker.
+config/argus/tls/*
+!config/argus/tls/README.md
+
+# Authelia: generated secrets, OIDC signing key and user password hashes
+config/authelia/secrets/*
+config/authelia/clients.yml
+# contains no secrets. users.yml holds the password hashes and is not.
+config/authelia/users.yml
+
+# Issued API keys - never commit
+.keys/
+
+# packaging scratch and built release artefacts (hundreds of MB, and
+# rebuildable with scripts/package.sh)
+.pkgstage/
+dist/
+
+# redeploy-test.sh artefacts
+.redeploy-setup*.log
+redeploy-report.txt
+config/authelia/configuration.yml
+
+# Prometheus needs a bearer token to scrape llama.cpp, which protects every
+# path except /health. Written by the prometheus-secrets service from LLAMACPP_API_KEY.
+config/prometheus/secrets/*
+!config/prometheus/secrets/.gitkeep
+
+# The admin panel keeps a backup each time it rewrites the user database.
+# It holds password hashes and must not be committed.
+config/authelia/users.yml.bak
+config/authelia/users.yml.tmp
+# The hash-free account list the admin panel publishes for Argus to read.
+#
+# The DIRECTORY is kept in the repository with a placeholder, and only its
+# CONTENTS are ignored. Without that, a fresh clone has no source for the argus
+# and admin-panel bind mounts, so Docker creates a root-owned empty directory
+# there instead -- which is exactly the failure `make preflight` exists to name,
+# and it would refuse `make up` on every clean deployment.
+config/authelia/directory/*
+!config/authelia/directory/.gitkeep
+config/ca/*.crt
+config/ca/*.pem
+
+# The Settings page's pending .env changes (can hold a secret)
+config/app/pending.env
+config/app/pending.env.tmp
+# Written by the app for the engine and Prometheus (Admin -> Models).
+config/engine/*
+!config/engine/README.md
+config/app/applied-*

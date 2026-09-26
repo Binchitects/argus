@@ -1,0 +1,129 @@
+# ==============================================================================
+# Traefik static configuration.
+#
+# "Static" means everything Traefik needs before it can start: entrypoints,
+# providers, TLS plumbing. Routing rules are NOT here — they come from the
+# Docker provider (container labels) and the file provider (config/traefik/
+# dynamic/), both of which reload without restarting Traefik.
+# ==============================================================================
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      # Everything is TLS; port 80 exists only to bounce clients to 443.
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":443"
+    http:
+      tls: {}
+    transport:
+      respondingTimeouts:
+        # Token generation streams for a long time. The default 60s write
+        # timeout would cut long completions off mid-stream.
+        readTimeout: 0
+        writeTimeout: 0
+        idleTimeout: 180s
+
+  # Internal-only entrypoint. Kept separate from `web` so that /ping and
+  # /metrics are not caught by the HTTPS redirect above.
+  traefik:
+    address: ":8082"
+
+api:
+  # Dashboard off: this Traefik is a plain reverse proxy. With no router
+  # pointing at api@internal the API is unreachable from outside as well.
+  # /ping and /metrics live on the separate `traefik` entrypoint and are
+  # unaffected - the healthcheck and Prometheus still work.
+  dashboard: false
+  insecure: false
+
+ping:
+  entryPoint: traefik
+
+metrics:
+  prometheus:
+    entryPoint: traefik
+    addEntryPointsLabels: true
+    addServicesLabels: true
+    addRoutersLabels: true
+
+# ------------------------------------------------------------------------------
+# Real certificates (production domains only).
+#
+# The shipped setup serves a self-signed certificate that the tls-init service
+# generates on first `up` (config/traefik/dynamic/tls.yml). That is the only
+# option for `llm.localhost`: `.localhost` is a reserved TLD (RFC 6761) and no
+# public CA will ever issue for it, nor for any name that does not resolve
+# publicly. Browsers warn once; API clients either trust
+# config/traefik/certs/tls.crt or skip verification.
+#
+# When this stack moves to a real domain with public DNS, uncomment the resolver
+# below, set LLM_DOMAIN, delete the defaultCertificate entry in dynamic/tls.yml so
+# ACME serves the certificates, and add to each router:
+#     traefik.http.routers.<name>.tls.certresolver=letsencrypt
+#
+# httpChallenge needs :80 reachable from the internet; use dnsChallenge instead
+# if that is not the case or if you need a wildcard.
+#
+# certificatesResolvers:
+#   letsencrypt:
+#     acme:
+#       email: 'you@example.com'          # a real, monitored mailbox
+#       storage: /etc/traefik/certs/acme.json   # must be 0600
+#       # Verify against the staging CA FIRST -- the production endpoint rate
+#       # limits to 5 failures per account per hostname per hour, and a broken
+#       # challenge burns that quota fast.
+#       caServer: https://acme-staging-v02.api.letsencrypt.org/directory
+#       httpChallenge:
+#         entryPoint: web
+# ------------------------------------------------------------------------------
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    # Opt-in: a container is only routed if it carries traefik.enable=true.
+    # Prevents accidentally publishing something the moment it starts.
+    exposedByDefault: false
+    network: llm-net
+    watch: true
+    # Scope discovery to THIS compose project.
+    #
+    # The Docker provider sees every container on the daemon, not just this
+    # stack's. Router names are a flat global namespace, so an unrelated
+    # project that happens to name a router `authelia` -- a very likely name --
+    # silently REPLACES ours. Measured here: a `docsmanager` stack defined
+    # `traefik.http.routers.authelia.rule = Host(\`auth.127-0-0-1.nip.io\`)`,
+    # and auth.llm.localhost started redirecting to that project's domain.
+    # Login broke with no error in any log, because nothing had failed --
+    # the route simply pointed elsewhere.
+    #
+    # exposedByDefault: false does NOT protect against this: the other
+    # container opted in for its own Traefik, and ours cannot tell the
+    # difference.
+    # @COMPOSE_PROJECT_NAME@ is replaced from .env when the container starts.
+    constraints: "Label(`com.docker.compose.project`,`@COMPOSE_PROJECT_NAME@`)"
+
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+log:
+  level: INFO
+
+accessLog:
+  filters:
+    # Logging every 200 for a token stream is noise; keep errors and retries.
+    statusCodes:
+      - "400-499"
+      - "500-599"
+    retryAttempts: true

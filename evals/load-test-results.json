@@ -1,0 +1,88 @@
+[
+  {
+    "clients": 1,
+    "calls": 10,
+    "errors": 0,
+    "error_kinds": [],
+    "elapsed_s": 1.29,
+    "throughput_rps": 7.8,
+    "p50_ms": 70.9,
+    "p95_ms": null,
+    "max_ms": 120.9,
+    "writer_commits": 0
+  },
+  {
+    "clients": 2,
+    "calls": 20,
+    "errors": 0,
+    "error_kinds": [],
+    "elapsed_s": 0.74,
+    "throughput_rps": 27.2,
+    "p50_ms": 64.5,
+    "p95_ms": null,
+    "max_ms": 87.2,
+    "writer_commits": 0
+  },
+  {
+    "clients": 4,
+    "calls": 40,
+    "errors": 0,
+    "error_kinds": [],
+    "elapsed_s": 0.77,
+    "throughput_rps": 51.8,
+    "p50_ms": 53.5,
+    "p95_ms": 137.8,
+    "max_ms": 151.2,
+    "writer_commits": 0
+  },
+  {
+    "clients": 8,
+    "calls": 80,
+    "errors": 0,
+    "error_kinds": [],
+    "elapsed_s": 1.37,
+    "throughput_rps": 58.6,
+    "p50_ms": 30.0,
+    "p95_ms": 144.6,
+    "max_ms": 495.6,
+    "writer_commits": 0
+  },
+  {
+    "clients": 16,
+    "calls": 160,
+    "errors": 0,
+    "error_kinds": [],
+    "elapsed_s": 1.56,
+    "throughput_rps": 102.3,
+    "p50_ms": 56.4,
+    "p95_ms": 247.0,
+    "max_ms": 390.8,
+    "writer_commits": 0
+  },
+  {
+    "clients": 4,
+    "calls": 40,
+    "errors": 0,
+    "error_kinds": [],
+    "elapsed_s": 3.84,
+    "throughput_rps": 10.4,
+    "p50_ms": 346.1,
+    "p95_ms": 435.9,
+    "max_ms": 468.9,
+    "writer_commits": 193,
+    "with_writer": true
+  },
+  {
+    "clients": 16,
+    "calls": 160,
+    "errors": 0,
+    "error_kinds": [],
+    "elapsed_s": 3.7,
+    "throughput_rps": 43.2,
+    "p50_ms": 232.3,
+    "p95_ms": 493.9,
+    "max_ms": 794.2,
+    "writer_commits": 204,
+    "with_writer": true
+  }
+]

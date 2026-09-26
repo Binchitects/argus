@@ -1,20 +1,43 @@
-# Is every part of the stack up and answering? Exit code = number of failures.
-. "$PSScriptRoot\lib.ps1"
-$port = EnvGet 'ARGUS_HTTP_PORT' '8080'
-$gw = EnvGet 'GATEWAY_PORT' '4000'
-Write-Host 'containers'
-foreach ($svc in 'llamacpp', 'llamacpp-embed', 'postgres', 'litellm', 'argus') {
-    $state = docker inspect -f '{{.State.Status}}{{if .State.Health}}/{{.State.Health.Status}}{{end}}' $svc 2>$null
-    if (-not $state) { $state = 'missing' }
-    if ($state -in 'running', 'running/healthy') { Ok "$svc ($state)" } else { Bad "$svc ($state)" }
+<#
+.SYNOPSIS
+    PowerShell wrapper for scripts/health.sh.
+
+.DESCRIPTION
+    The logic lives in the bash script so there is one implementation to keep
+    correct. This wrapper locates the Git for Windows bash and forwards all
+    arguments unchanged.
+
+    It used to probe http://localhost:<port> directly. That stopped working the
+    moment the stack moved behind Traefik: only 80/443 are published now, so
+    every probe failed and a perfectly healthy stack was reported as entirely
+    down. health.sh probes from INSIDE the docker network instead, which is
+    what the README always claimed this did.
+#>
+[CmdletBinding()]
+param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
+
+$ErrorActionPreference = 'Continue'
+$root = Split-Path -Parent $PSScriptRoot
+
+# Look for Git's bash FIRST. `Get-Command bash` on Windows usually resolves to
+# WSL's bash in System32, which mounts drives at /mnt/e - so an MSYS path like
+# /e/Projects/... fails there with "No such file or directory".
+$bash = @(
+    "$env:ProgramFiles\Git\bin\bash.exe",
+    "${env:ProgramFiles(x86)}\Git\bin\bash.exe",
+    "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $bash) {
+    $candidate = (Get-Command bash -ErrorAction SilentlyContinue).Source
+    if ($candidate -and $candidate -notlike "*System32*") { $bash = $candidate }
 }
-Write-Host 'endpoints'
-function Probe([string]$Url) { try { (Invoke-WebRequest -Uri $Url -TimeoutSec 5 -UseBasicParsing).StatusCode -eq 200 } catch { $false } }
-if (Probe "http://127.0.0.1:$port/healthz") { Ok "app        http://127.0.0.1:$port" } else { Bad "app does not answer on :$port" }
-if (Probe "http://127.0.0.1:$gw/health/liveliness") { Ok "gateway    http://127.0.0.1:$gw/v1" } else { Bad "gateway does not answer on :$gw" }
-docker exec llamacpp curl -fsS -m 5 http://localhost:8080/health *> $null
-if ($LASTEXITCODE -eq 0) { Ok "chat model $(EnvGet 'MODEL_NAME')" } else { Bad 'chat model not ready (a large model takes minutes to load: docker logs -f llamacpp)' }
-docker exec llamacpp-embed curl -fsS -m 5 http://localhost:8080/health *> $null
-if ($LASTEXITCODE -eq 0) { Ok 'embeddings' } else { Bad 'embedding server not ready' }
-if ($script:Failed -eq 0) { Write-Host "all healthy: open http://localhost:$port" } else { Write-Host "$($script:Failed) problem(s)" }
-exit $script:Failed
+if (-not $bash) {
+    Write-Host 'Git Bash not found. Install Git for Windows (it ships bash).' -ForegroundColor Red
+    exit 1
+}
+
+# Git Bash wants an MSYS path (/e/foo), not a Windows one (E:/foo).
+$unix = '/' + $root.Substring(0,1).ToLower() + $root.Substring(2).Replace('\', '/')
+& $bash "$unix/scripts/health.sh" @Rest
+exit $LASTEXITCODE

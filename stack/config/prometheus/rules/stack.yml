@@ -1,0 +1,62 @@
+# Stack-level plumbing: is everything we expect to be running, running?
+
+groups:
+
+  - name: stack
+    interval: 30s
+    rules:
+
+      # `tier: optional` is attached in prometheus.yml to every target that
+      # belongs to a compose profile which may not be enabled. Without this
+      # filter you would get permanent false alarms for disabled profiles.
+      - alert: TargetDown
+        expr: up{tier!="optional"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Target {{ $labels.job }} ({{ $labels.instance }}) is down"
+          description: "Prometheus has failed to scrape this target for 5 minutes."
+
+      - alert: ContainerRestartLoop
+        expr: changes(container_start_time_seconds{name!=""}[15m]) > 3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.name }} restarted more than 3 times in 15m"
+          description: "Crash loop. Inspect with `docker logs {{ $labels.name }}`."
+
+      - alert: ContainerMemoryNearLimit
+        expr: >-
+          container_memory_working_set_bytes{name!=""}
+          / clamp_min(container_spec_memory_limit_bytes{name!=""}, 1) > 0.90
+          and container_spec_memory_limit_bytes{name!=""} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} above 90% of its memory limit"
+          description: "The OOM killer is the next step. Raise the limit or reduce the workload."
+
+      - alert: PrometheusScrapesFailing
+        expr: rate(prometheus_target_scrapes_sample_duplicate_timestamp_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus is rejecting duplicate samples"
+          description: "Usually two jobs scraping the same target with identical labels."
+
+      - alert: PrometheusStorageNearRetentionSize
+        expr: >-
+          prometheus_tsdb_storage_blocks_bytes
+          / clamp_min(prometheus_tsdb_retention_limit_bytes, 1) > 0.90
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus TSDB at 90% of its size retention limit"
+          description: >-
+            Old blocks are about to be dropped early. Raise
+            PROMETHEUS_RETENTION_SIZE or lengthen the scrape interval.

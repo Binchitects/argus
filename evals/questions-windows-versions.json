@@ -1,0 +1,375 @@
+{
+ "source": "MicrosoftDocs/sdk-api",
+ "questions": [
+  {
+   "kind": "sequel-old",
+   "prompt": "What is the minimum supported Windows client for FwpmTransactionCommit0?",
+   "expect": "Windows Vista [desktop apps only]",
+   "api": "FwpmTransactionCommit0",
+   "path": "fwpmu/nf-fwpmu-fwpmtransactioncommit0.md"
+  },
+  {
+   "kind": "sequel-old",
+   "prompt": "What is the minimum supported Windows client for ICEnroll2?",
+   "expect": "Windows XP [desktop apps only]",
+   "api": "ICEnroll2",
+   "path": "xenroll/nn-xenroll-icenroll2.md"
+  },
+  {
+   "kind": "sequel-old",
+   "prompt": "What is the minimum supported Windows client for IComTransaction2Events::OnTransactionAbort2?",
+   "expect": "Windows 2000 Professional [desktop apps only]",
+   "api": "IComTransaction2Events::OnTransactionAbort2",
+   "path": "comsvcs/nf-comsvcs-icomtransaction2events-ontransactionabort2.md"
+  },
+  {
+   "kind": "sequel-old",
+   "prompt": "What is the minimum supported Windows client for FWPM_NET_EVENT_CALLBACK0?",
+   "expect": "Windows 7 [desktop apps only]",
+   "api": "FWPM_NET_EVENT_CALLBACK0",
+   "path": "fwpmu/nc-fwpmu-fwpm_net_event_callback0.md"
+  },
+  {
+   "kind": "sequel-old",
+   "prompt": "What is the minimum supported Windows client for _MIB_IPNET_TABLE2?",
+   "expect": "Windows Vista [desktop apps only]",
+   "api": "_MIB_IPNET_TABLE2",
+   "path": "netioapi/ns-netioapi-mib_ipnet_table2.md"
+  },
+  {
+   "kind": "sequel-old",
+   "prompt": "What is the minimum supported Windows client for IUpdateInstaller2?",
+   "expect": "Windows XP, Windows 2000 Professional with SP3 [desktop apps only]",
+   "api": "IUpdateInstaller2",
+   "path": "wuapi/nn-wuapi-iupdateinstaller2.md"
+  },
+  {
+   "kind": "sequel-new",
+   "prompt": "What is the minimum supported Windows client for INetwork2?",
+   "expect": "Windows 11 Build 22621",
+   "api": "INetwork2",
+   "path": "netlistmgr/nn-netlistmgr-inetwork2.md"
+  },
+  {
+   "kind": "sequel-new",
+   "prompt": "What is the minimum supported Windows client for CreateFile3?",
+   "expect": "Windows 11 24H2 [desktop apps \\| UWP apps]",
+   "api": "CreateFile3",
+   "path": "fileapi/nf-fileapi-createfile3.md"
+  },
+  {
+   "kind": "sequel-new",
+   "prompt": "What is the minimum supported Windows client for IAppxFactory4?",
+   "expect": "Windows 11 version 26100",
+   "api": "IAppxFactory4",
+   "path": "appxpackaging/nn-appxpackaging-iappxfactory4.md"
+  },
+  {
+   "kind": "sequel-new",
+   "prompt": "What is the minimum supported Windows client for QueueUserAPC2?",
+   "expect": "Windows 11 (Build 22000)",
+   "api": "QueueUserAPC2",
+   "path": "processthreadsapi/nf-processthreadsapi-queueuserapc2.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IFaxServer::get_DirtyDays?",
+   "expect": "Windows 2000 Professional [desktop apps only]",
+   "api": "IFaxServer::get_DirtyDays",
+   "path": "faxcom/nf-faxcom-ifaxserver-get_dirtydays.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IFaxStatus::get_SubmittedTime?",
+   "expect": "Windows 2000 Professional [desktop apps only]",
+   "api": "IFaxStatus::get_SubmittedTime",
+   "path": "faxcom/nf-faxcom-ifaxstatus-get_submittedtime.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for UrlEscapeA?",
+   "expect": "Windows 2000 Professional, Windows XP [desktop apps only]",
+   "api": "UrlEscapeA",
+   "path": "shlwapi/nf-shlwapi-urlescapea.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for ICameraControl::getRange_Iris?",
+   "expect": "Windows XP with SP2 [desktop apps only]",
+   "api": "ICameraControl::getRange_Iris",
+   "path": "vidcap/nf-vidcap-icameracontrol-getrange_iris.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IDecimateVideoImage::SetDecimationImageSize?",
+   "expect": "Windows XP [desktop apps only]",
+   "api": "IDecimateVideoImage::SetDecimationImageSize",
+   "path": "strmif/nf-strmif-idecimatevideoimage-setdecimationimagesize.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for PathGradientBrush::RotateTransform?",
+   "expect": "Windows XP, Windows 2000 Professional [desktop apps only]",
+   "api": "PathGradientBrush::RotateTransform",
+   "path": "gdipluspath/nf-gdipluspath-pathgradientbrush-rotatetransform.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IMMCVersionInfo?",
+   "expect": "Windows Vista",
+   "api": "IMMCVersionInfo",
+   "path": "mmc/nn-mmc-immcversioninfo.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IRegistrationInfo::put_SecurityDescriptor?",
+   "expect": "Windows Vista [desktop apps only]",
+   "api": "IRegistrationInfo::put_SecurityDescriptor",
+   "path": "taskschd/nf-taskschd-iregistrationinfo-put_securitydescriptor.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IVdsIscsiPortalGroup::AddPortal?",
+   "expect": "Windows Vista [desktop apps only]",
+   "api": "IVdsIscsiPortalGroup::AddPortal",
+   "path": "vds/nf-vds-ivdsiscsiportalgroup-addportal.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IUIAutomationTextPattern::RangeFromChild?",
+   "expect": "Windows 7, Windows Vista with SP2 and Platform Update for Windows Vista, Windows XP with SP3 and Platform Update for Windows Vista [desktop apps only]",
+   "api": "IUIAutomationTextPattern::RangeFromChild",
+   "path": "uiautomationclient/nf-uiautomationclient-iuiautomationtextpattern-rangefromchild.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IISDB_BIT::GetBroadcastViewPropriety?",
+   "expect": "Windows 7 [desktop apps only]",
+   "api": "IISDB_BIT::GetBroadcastViewPropriety",
+   "path": "dvbsiparser/nf-dvbsiparser-iisdb_bit-getbroadcastviewpropriety.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IMbnConnection::get_ConnectionID?",
+   "expect": "Windows 7 [desktop apps \\| UWP apps]",
+   "api": "IMbnConnection::get_ConnectionID",
+   "path": "mbnapi/nf-mbnapi-imbnconnection-get_connectionid.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IMbnDeviceService::QuerySupportedCommands?",
+   "expect": "Windows 8 [desktop apps \\| UWP apps]",
+   "api": "IMbnDeviceService::QuerySupportedCommands",
+   "path": "mbnapi/nf-mbnapi-imbndeviceservice-querysupportedcommands.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for ISpellCheckProvider::SetOptionValue?",
+   "expect": "Windows 8 [desktop apps \\| UWP apps]",
+   "api": "ISpellCheckProvider::SetOptionValue",
+   "path": "spellcheckprovider/nf-spellcheckprovider-ispellcheckprovider-setoptionvalue.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IMFPMPHostApp?",
+   "expect": "Windows 8 [desktop apps \\| UWP apps]",
+   "api": "IMFPMPHostApp",
+   "path": "mfidl/nn-mfidl-imfpmphostapp.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for NVME_ERROR_INFO_LOG?",
+   "expect": "Windows 10",
+   "api": "NVME_ERROR_INFO_LOG",
+   "path": "nvme/ns-nvme-nvme_error_info_log.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IMFTimedTextStyle::GetFontStyle?",
+   "expect": "Windows 10 [desktop apps only]",
+   "api": "IMFTimedTextStyle::GetFontStyle",
+   "path": "mfmediaengine/nf-mfmediaengine-imftimedtextstyle-getfontstyle.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for CF_CALLBACK_INFO?",
+   "expect": "Windows 10, version 1709 [desktop apps only]",
+   "api": "CF_CALLBACK_INFO",
+   "path": "cfapi/ns-cfapi-cf_callback_info.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IInkD2DRenderer2::Draw?",
+   "expect": "Windows 11 [desktop apps only]",
+   "api": "IInkD2DRenderer2::Draw",
+   "path": "inkrenderer/nf-inkrenderer-iinkd2drenderer2-draw.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for IDOManager?",
+   "expect": "Windows 11 Build 22621",
+   "api": "IDOManager",
+   "path": "deliveryoptimization/nn-deliveryoptimization-idomanager.md"
+  },
+  {
+   "kind": "floor",
+   "prompt": "What is the minimum supported Windows client for INetwork2::IsDomainAuthenticatedBy?",
+   "expect": "Windows 11 Build 22621",
+   "api": "INetwork2::IsDomainAuthenticatedBy",
+   "path": "netlistmgr/nf-netlistmgr-inetwork2-isdomainauthenticatedby.md"
+  },
+  {
+   "kind": "server",
+   "prompt": "What is the minimum supported Windows Server version for _VDS_DISK_FREE_EXTENT?",
+   "expect": "Windows Server 2008 R2 [desktop apps only]",
+   "api": "_VDS_DISK_FREE_EXTENT",
+   "path": "vds/ns-vds-vds_disk_free_extent.md"
+  },
+  {
+   "kind": "server",
+   "prompt": "What is the minimum supported Windows Server version for IWiaNotifyDevMgr::NewDeviceArrival?",
+   "expect": "Windows Server 2003 [desktop apps only]",
+   "api": "IWiaNotifyDevMgr::NewDeviceArrival",
+   "path": "wia_xp/nf-wia_xp-iwianotifydevmgr-newdevicearrival.md"
+  },
+  {
+   "kind": "server",
+   "prompt": "What is the minimum supported Windows Server version for IVdsController::Reset?",
+   "expect": "Windows Server 2003 [desktop apps only]",
+   "api": "IVdsController::Reset",
+   "path": "vdshwprv/nf-vdshwprv-ivdscontroller-reset.md"
+  },
+  {
+   "kind": "server",
+   "prompt": "What is the minimum supported Windows Server version for _EVENT_EXTENDED_ITEM_INSTANCE?",
+   "expect": "Windows Server 2008 [desktop apps only]",
+   "api": "_EVENT_EXTENDED_ITEM_INSTANCE",
+   "path": "evntcons/ns-evntcons-event_extended_item_instance.md"
+  },
+  {
+   "kind": "server",
+   "prompt": "What is the minimum supported Windows Server version for _BCRYPT_PQDSA_PADDING_INFO?",
+   "expect": "Windows Server 2025",
+   "api": "_BCRYPT_PQDSA_PADDING_INFO",
+   "path": "bcrypt/ns-bcrypt-bcrypt_pqdsa_padding_info.md"
+  },
+  {
+   "kind": "none",
+   "prompt": "Is IWTSSBPlugin::WTSSBX_SessionChangeNotification supported on any released Windows client?",
+   "expect": "None supported",
+   "api": "IWTSSBPlugin::WTSSBX_SessionChangeNotification",
+   "path": "tssbx/nf-tssbx-iwtssbplugin-wtssbx_sessionchangenotification.md"
+  },
+  {
+   "kind": "none",
+   "prompt": "Is ClusterResourceOpenEnumEx supported on any released Windows client?",
+   "expect": "None supported",
+   "api": "ClusterResourceOpenEnumEx",
+   "path": "clusapi/nf-clusapi-clusterresourceopenenumex.md"
+  },
+  {
+   "kind": "none",
+   "prompt": "Is _MPR_IF_CUSTOMINFOEX0 supported on any released Windows client?",
+   "expect": "None supported",
+   "api": "_MPR_IF_CUSTOMINFOEX0",
+   "path": "mprapi/ns-mprapi-mpr_if_custominfoex0.md"
+  },
+  {
+   "kind": "none",
+   "prompt": "Is IFsrmSetting::get_DisableCommandLine supported on any released Windows client?",
+   "expect": "None supported",
+   "api": "IFsrmSetting::get_DisableCommandLine",
+   "path": "fsrm/nf-fsrm-ifsrmsetting-get_disablecommandline.md"
+  },
+  {
+   "kind": "control-header",
+   "prompt": "Which header declares WscRegisterForChanges?",
+   "expect": "wscapi.h",
+   "api": "WscRegisterForChanges",
+   "path": "wscapi/nf-wscapi-wscregisterforchanges.md"
+  },
+  {
+   "kind": "control-header",
+   "prompt": "Which header declares DrawThemeBackground?",
+   "expect": "uxtheme.h",
+   "api": "DrawThemeBackground",
+   "path": "uxtheme/nf-uxtheme-drawthemebackground.md"
+  },
+  {
+   "kind": "control-header",
+   "prompt": "Which header declares SHCreateFileExtractIconW?",
+   "expect": "shlobj_core.h",
+   "api": "SHCreateFileExtractIconW",
+   "path": "shlobj_core/nf-shlobj_core-shcreatefileextracticonw.md"
+  },
+  {
+   "kind": "control-header",
+   "prompt": "Which header declares DhcpSetOptionInfo?",
+   "expect": "dhcpsapi.h",
+   "api": "DhcpSetOptionInfo",
+   "path": "dhcpsapi/nf-dhcpsapi-dhcpsetoptioninfo.md"
+  },
+  {
+   "kind": "control-header",
+   "prompt": "Which header declares IMFSpatialAudioObjectBuffer::GetID?",
+   "expect": "mfspatialaudio.h",
+   "api": "IMFSpatialAudioObjectBuffer::GetID",
+   "path": "mfspatialaudio/nf-mfspatialaudio-imfspatialaudioobjectbuffer-getid.md"
+  },
+  {
+   "kind": "control-header",
+   "prompt": "Which header declares GetQueuedCompletionStatus?",
+   "expect": "ioapiset.h",
+   "api": "GetQueuedCompletionStatus",
+   "path": "ioapiset/nf-ioapiset-getqueuedcompletionstatus.md"
+  },
+  {
+   "kind": "semantic",
+   "mode": "search",
+   "prompt": "Which Windows API requires Windows 10, version 1709?",
+   "expect": "Windows 10, version 1709",
+   "api": "CF_CALLBACK_INFO",
+   "path": "cfapi/ns-cfapi-cf_callback_info.md"
+  },
+  {
+   "kind": "semantic",
+   "mode": "search",
+   "prompt": "Which Windows API requires Windows 2000 Professional?",
+   "expect": "Windows 2000 Professional",
+   "api": "IFaxStatus::get_SubmittedTime",
+   "path": "faxcom/nf-faxcom-ifaxstatus-get_submittedtime.md"
+  },
+  {
+   "kind": "semantic",
+   "mode": "search",
+   "prompt": "Which Windows API requires Windows 7?",
+   "expect": "Windows 7",
+   "api": "IMbnConnection::get_ConnectionID",
+   "path": "mbnapi/nf-mbnapi-imbnconnection-get_connectionid.md"
+  },
+  {
+   "kind": "semantic",
+   "mode": "search",
+   "prompt": "Which Windows API requires Windows Server 2025?",
+   "expect": "Windows Server 2025",
+   "api": "_BCRYPT_PQDSA_PADDING_INFO",
+   "path": "bcrypt/ns-bcrypt-bcrypt_pqdsa_padding_info.md"
+  },
+  {
+   "kind": "semantic",
+   "mode": "search",
+   "prompt": "Which Windows API requires Windows XP with SP2?",
+   "expect": "Windows XP with SP2",
+   "api": "ICameraControl::getRange_Iris",
+   "path": "vidcap/nf-vidcap-icameracontrol-getrange_iris.md"
+  },
+  {
+   "kind": "semantic",
+   "mode": "search",
+   "prompt": "Which Windows API requires Windows Server 2008?",
+   "expect": "Windows Server 2008",
+   "api": "_EVENT_EXTENDED_ITEM_INSTANCE",
+   "path": "evntcons/ns-evntcons-event_extended_item_instance.md"
+  }
+ ]
+}

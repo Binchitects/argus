@@ -1,0 +1,10 @@
+# CI only: Traefik in front of the web and the app, split by path the way the
+# stack's labels split them, over HTTPS (sessions use Secure cookies).
+entryPoints:
+  websecure:
+    address: ":8443"
+providers:
+  file:
+    filename: /etc/traefik/routes.yml
+log:
+  level: WARN

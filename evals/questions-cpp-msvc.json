@@ -1,0 +1,282 @@
+[
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"symbol : a symbol with this name already exists in the current scope\"?",
+  "answer": "c2386",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"argument : invalid template argument for type, expected compile-time constant expression\"?",
+  "answer": "c2975",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"identifier : allocate( ) is only valid for data items of static extent\"?",
+  "answer": "c2479",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"operator : unable to find overloaded operator\"?",
+  "answer": "c2545",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"symbol is not accessible from class\"?",
+  "answer": "c2877",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"var is not allowed when the default capture mode is by-reference\"?",
+  "answer": "c3488",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"attribute: attribute not applied because qualifier assembly did not match\"?",
+  "answer": "c3453",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"construct : __declspec(modifier) can only be applied to a function returning a pointer\"?",
+  "answer": "c2710",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"cannot define an anonymous type inside parentheses\"?",
+  "answer": "c2465",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"member : cannot be used as an explicit override, must be a member of a base class\"?",
+  "answer": "c3651",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"class : constructor syntax missing formal parameters\"?",
+  "answer": "c2461",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"string : assembly reference is invalid and cannot be resolved\"?",
+  "answer": "c2261",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"type : cannot throw or catch this type\"?",
+  "answer": "c2715",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"function : an explicit specialization of a function template cannot have any default arguments\"?",
+  "answer": "c2765",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"increment in OpenMP for statement has improper form\"?",
+  "answer": "c3019",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"property: obsolete construct declaration style\"?",
+  "answer": "c3917",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"event_method: function must have type type\"?",
+  "answer": "c3919",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"class : invalid expression as a template argument for argument\"?",
+  "answer": "c2762",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"operator new is not supported with /clr:safe\"?",
+  "answer": "c3383",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "error-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"function: a method marked DllImport cannot be defined\"?",
+  "answer": "c3618",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"conversion from type_1 to type_2 requires a narrowing conversion\"?",
+  "answer": "c4838",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"enumeration: a forward declaration of an unscoped enumeration must have an underlying type (int assumed)\"?",
+  "answer": "c4471",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"nonstandard extension used: must specify at least a storage class or a type\"?",
+  "answer": "c4218",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"XML document comment target: reference to unknown symbol symbol\"?",
+  "answer": "c4638",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"constructor will not be a default constructor for class class due to the default argument\"?",
+  "answer": "c4534",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"expected token1; found token2\"?",
+  "answer": "c4081",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"compiler limit : out of debugger types, delete program database database and rebuild\"?",
+  "answer": "c4168",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"behavior change: function called, but a member operator was called in previous versions\"?",
+  "answer": "c4342",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"attribute : WARNING!! attribute may cause invalid code generation: use with caution\"?",
+  "answer": "c4684",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"undefined behavior: `offsetof` applied to a member of a virtual base\"?",
+  "answer": "c4597",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"returning address of local variable or temporary : optional_context\"?",
+  "answer": "c4172",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"function : too many actual parameters\"?",
+  "answer": "c4020",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"Object allocated on the heap may not be aligned for this type\"?",
+  "answer": "c4316",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"operator : unsigned/negative constant mismatch\"?",
+  "answer": "c4287",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"import cross-referenced type library type_lib1 before importing type_lib2\"?",
+  "answer": "c4336",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"declaration of identifier hides previous local declaration\"?",
+  "answer": "c4456",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"function : unreferenced inline function has been removed\"?",
+  "answer": "c4514",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"expression: incompatible types - from type1 to type2\"?",
+  "answer": "c4133",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"return type of accessor does not match the last parameter type of the corresponding setter\"?",
+  "answer": "c4948",
+  "shape": "one code like C1234"
+ },
+ {
+  "pack": "cpp-msvc",
+  "kind": "warning-code",
+  "question": "Which MSVC compiler diagnostic code produces this exact message: \"Conversion rules for arithmetic operations in a comparison mean that one branch cannot be executed\"?",
+  "answer": "c4754",
+  "shape": "one code like C1234"
+ }
+]

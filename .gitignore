@@ -12,6 +12,12 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/e2e/.work/
 
+# Python (the stack's scripts and tools)
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
 # Runtime state (all rebuildable, or secret)
 data/
 *.db

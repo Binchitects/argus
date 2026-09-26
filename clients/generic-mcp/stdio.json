@@ -4,7 +4,7 @@
       "command": "argus",
       "args": ["serve", "--config", "/etc/argus/config.yaml", "--stdio"],
       "env": {
-        "ARGUS_TOKEN": "<your-gitlab-token>"
+        "ARGUS_TOKEN": "<gitlab-pat>"
       }
     }
   }

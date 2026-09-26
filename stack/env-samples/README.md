@@ -19,10 +19,10 @@ Make the secrets. Every empty value under `SECRETS` has a comment saying how to
 make it; this fills them all at once:
 
 ```bash
-awk '/^# SECRETS/{s=1} /^# APP/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' .env > .env.new && mv .env.new .env && chmod 600 .env
+awk '/^# SECRETS/{s=1} /^# PEOPLE/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' .env > .env.new && mv .env.new .env && chmod 600 .env
 ```
 
-Set `ARGUS_ADMIN_EMAIL`, and `LLAMACPP_MODEL_DIR` to a directory on NVMe, then:
+Set `LLAMACPP_MODEL_DIR` to a directory on NVMe, then:
 
 ```bash
 docker compose up -d
@@ -33,13 +33,15 @@ deployment the same passwords.
 
 ## Adding a new setup
 
-A setup is one file; there is nothing to register.
+A setup is one file. The app's **Admin → Model** page lists every `.env` in this
+directory automatically; there is nothing to register.
 
 1. **Copy the closest sample** and name it `<model>.<card>.env`, lowercase, e.g.
    `qwen3.8-27b.rtx4090.env`. Start from a MoE sample for a MoE model and a dense one
    for a dense model.
 
-2. **Edit the header** -- these five lines are how a reader tells setups apart:
+2. **Edit the header.** The Model page reads these five lines, so keep their
+   spelling:
 
    ```
    # TITLE: <model> on <card>
@@ -49,7 +51,8 @@ A setup is one file; there is nothing to register.
    # STATUS: <"Measured on this hardware." or what it was derived from>
    ```
 
-3. **Edit only the MODEL block** (and HARDWARE for a different machine).
+3. **Edit only the MODEL block**, between `# >>> MODEL` and `# <<< MODEL`. Keep both
+   marker lines exactly: the Model page copies what is between them.
 
    | setting | how to choose it |
    |---|---|
@@ -67,10 +70,10 @@ A setup is one file; there is nothing to register.
 4. **Leave everything outside the MODEL block alone**, except `GPU_POWER_LIMIT_W` if
    the card needs a different cap. Never put a value under `SECRETS`.
 
-5. **Check it resolves.** Compose names any required value that is missing:
+5. **Check it resolves.** This fails and names the sample if anything is missing:
 
    ```bash
-   docker compose --env-file env-samples/<yours>.env config --quiet
+   python3 scripts/acceptance.py --skip-e2e
    ```
 
 6. **Run it and measure it** before calling it measured:
@@ -80,12 +83,10 @@ A setup is one file; there is nothing to register.
    ```
 
    ```bash
-   make smoke
+   python3 scripts/multiuser-bench.py --base-url https://gateway.llm.localhost --ca config/traefik/certs/tls.crt --key-a sk-... --key-b sk-... --model <MODEL_NAME> --scenarios single,parallel
    ```
 
-   then measure tokens per second for one and for two people at once (llama.cpp
-   prints `eval time ... tokens per second` for every request in `make logs S=llamacpp`),
-   and a long prompt's read time. Put the result in the `MEASURED` line and change `STATUS` to
+   Put the result in the `MEASURED` line and change `STATUS` to
    `Measured on this hardware.`
 
 7. **Add it to the table** at the top of this file and in the top-level README.

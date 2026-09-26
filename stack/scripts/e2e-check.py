@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""End-to-end check of the whole stack, from inside the compose network.
+
+Asserts the things that are easy to believe without evidence:
+
+  * the engine serves the model the gateway advertises
+  * an API call attributes spend to the person whose key made it
+  * a chat through Open WebUI attributes to the SAME person, so their total
+    spans both surfaces rather than being two unrelated numbers
+  * a person over their ceiling is refused on the chat path, not merely
+    recorded -- attribution without enforcement is the failure this stack
+    spent the longest getting wrong
+
+Run it through a throwaway container on llm-net:
+
+    docker run --rm --network llm-net -e MK=... -v "$PWD/scripts:/s:ro" \\
+        python:3.13-slim python /s/e2e-check.py
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+GW = os.environ.get("GATEWAY_URL", "http://litellm:4000")
+WEBUI = os.environ.get("WEBUI_URL", "http://open-webui:8080")
+# The engine is whichever one is actually serving. Both run as compose
+# services and only one of them can hold the GPU. Naming only vLLM here made
+# this check engine-specific when its intent -- "something is really serving
+# the models the gateway advertises" -- is not.
+ENGINES = [
+    ("vLLM", os.environ.get("VLLM_URL", "http://vllm:8000") + "/v1/models",
+     os.environ.get("VLLM_API_KEY")),
+    ("llama.cpp", os.environ.get("LLAMACPP_URL", "http://llamacpp:8080") + "/v1/models",
+     os.environ.get("LLAMACPP_API_KEY")),
+]
+ARGUS = os.environ.get("ARGUS_URL", "http://argus:7700")
+MASTER = os.environ["MK"]
+
+GREEN, RED, YELLOW, DIM, OFF = (
+    "\033[32m", "\033[31m", "\033[33m", "\033[90m", "\033[0m")
+results: list[tuple[str, bool, str]] = []
+
+
+def record(name: str, passed: bool, detail: str = "") -> bool:
+    mark = f"{GREEN}PASS{OFF}" if passed else f"{RED}FAIL{OFF}"
+    print(f"  [{mark}] {name}" + (f"  {DIM}{detail}{OFF}" if detail else ""),
+          flush=True)
+    results.append((name, passed, detail))
+    return passed
+
+
+def call(base, path, payload=None, token=None, headers=None, timeout=600):
+    head = {"Content-Type": "application/json"}
+    if token:
+        head["Authorization"] = f"Bearer {token}"
+    head.update(headers or {})
+    req = urllib.request.Request(
+        base + path, method="POST" if payload is not None else "GET",
+        headers=head,
+        data=json.dumps(payload).encode() if payload is not None else None)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read().decode("utf-8", "replace")
+    try:
+        return json.loads(body)
+    except ValueError:
+        return body
+
+
+def spend(user_id: str) -> float:
+    got = call(GW, f"/user/info?user_id={user_id}", token=MASTER)
+    return float((got.get("user_info", got)).get("spend") or 0)
+
+
+def wait_for_spend(user_id: str, baseline: float, seconds: int = 180) -> float:
+    """Poll until spend rises above `baseline`, or give up.
+
+    Generous, because LiteLLM writes spend asynchronously and caches the user
+    record. A short window here does not just flake -- it mis-attributes: the
+    API call's spend arrives during the CHAT step and the two checks swap
+    verdicts, which is exactly what happened at 75s.
+    """
+    latest = baseline
+    for _ in range(max(1, seconds // 3)):
+        time.sleep(3)
+        latest = spend(user_id)
+        if latest > baseline:
+            return latest
+    return latest
+
+
+def main() -> int:
+    stamp = int(time.time())
+    email = f"e2e-{stamp}@example.com"
+    # Unique per run, and that is load-bearing. litellm_settings.cache is on,
+    # so an identical prompt is served from Redis at zero cost and records no
+    # spend -- the attribution checks below then fail against a stack that is
+    # working perfectly. The first run of this file passed and every rerun
+    # failed, which is exactly what a cache hit looks like from the outside.
+    prompt = f"Say hi. Request {stamp}."
+    print(f"\n{DIM}  identity under test: {email}{OFF}\n", flush=True)
+
+    # --- the engine ------------------------------------------------------
+    # vLLM enforces its own api key (VLLM_API_KEY); without it the engine
+    # answers 401 and this reads as "not serving".
+    served, engine, why = [], None, []
+    for name, url, token in ENGINES:
+        try:
+            served = [m["id"] for m in
+                      call(url, "", token=token, timeout=30).get("data", [])]
+        except Exception as exc:
+            why.append(f"{name}:{type(exc).__name__}")
+            continue
+        if served:
+            engine = name
+            break
+        why.append(f"{name}:no-models")
+    record("an engine is serving", bool(served),
+           f"{engine} models={served}" if engine else " ".join(why))
+
+    # --- the gateway advertises it ---------------------------------------
+    gw_models = [m["id"] for m in call(GW, "/v1/models", token=MASTER).get("data", [])]
+    record("gateway advertises models", bool(gw_models), f"{gw_models}")
+    # Every advertised name is EXERCISED, not just matched against the
+    # engine's list. An alias like `local` passes a name comparison while
+    # mapping to a checkpoint the engine does not serve, so the gateway looks
+    # healthy and every real request 404s behind it. That is not theoretical:
+    # a crash mid-`--force-recreate` left the engine on the old model while
+    # the gateway advertised the new one, and this check passed anyway
+    # because `local` was present in both.
+    # An image model (the `image` profile) is exercised with a small picture,
+    # not a chat. A model of the engine's router that is not loaded answers
+    # "not loaded": it exists, and loads from Admin -> Models.
+    try:
+        modes = {m.get("model_name"): (m.get("model_info") or {}).get("mode")
+                 for m in call(GW, "/model/info", token=MASTER).get("data", [])}
+    except Exception:
+        modes = {}
+    chat_models = [n for n in gw_models if modes.get(n) != "image_generation"]
+    model_for_tools = chat_models[0] if chat_models else os.environ.get("MODEL_NAME", "")
+    unusable, unloaded = [], []
+    for name in gw_models:
+        try:
+            if modes.get(name) == "image_generation":
+                call(GW, "/images/generations",
+                     {"model": name, "prompt": f"a small red square {stamp}", "size": "256x256", "n": 1},
+                     token=MASTER, timeout=300)
+            else:
+                call(GW, "/chat/completions",
+                     {"model": name,
+                      "messages": [{"role": "user", "content": f"ping {stamp}"}],
+                      "max_tokens": 1}, token=MASTER)
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode(errors="replace") if exc.fp else ""
+            (unloaded if "not loaded" in body else unusable).append(f"{name}:{exc.code}")
+        except Exception as exc:
+            unusable.append(f"{name}:{type(exc).__name__}")
+    record("every advertised name actually answers", not unusable,
+           (f"engine={served}" + (f" not loaded={unloaded}" if unloaded else "")) if not unusable else f"unusable={unusable}")
+
+    # --- the gateway ADVERTISES its context window -----------------------
+    # Regression guard. While max_input_tokens was null here, every client had
+    # to probe the window itself -- and clients cache what they probe. Hermes
+    # cached 24,576 from the vLLM era, then refused to start against a 131,072
+    # engine while quoting a number no live component had. Advertising the
+    # window makes that unrepresentable; this keeps it advertised.
+    try:
+        info = call(GW, "/model/info", token=MASTER).get("data", [])
+        windows = {m.get("model_name"): (m.get("model_info") or {}).get("max_input_tokens")
+                   for m in info if (m.get("model_info") or {}).get("mode") != "image_generation"}
+        missing = [n for n, w in windows.items() if not w]
+        record("gateway advertises a context window", bool(windows) and not missing,
+               f"{windows}" if not missing else f"null for {missing}")
+    except Exception as exc:
+        record("gateway advertises a context window", False, type(exc).__name__)
+
+    # --- STREAMING tool calls survive the round trip ---------------------
+    # The failure this catches cost an hour of agent time and left nothing on
+    # disk. A gateway streaming transform emitted every parallel tool call
+    # under the SAME index, so a client concatenated their arguments into one
+    # unparseable string and the call was dropped:
+    #
+    #   {"pattern": "*.c", ...}{"pattern": "*.inf", ...}
+    #   -> Failed to parse tool call arguments: Extra data: line 1 column 73
+    #
+    # The agent retried forever, re-prefilling the whole conversation each
+    # time. Nothing errored loudly; it just never finished. The bug was in the
+    # transform, not the engine, so this stays asserted on every backend --
+    # indices must come back DISTINCT.
+    try:
+        tools = [{"type": "function", "function": {
+            "name": "search_files", "description": "Search for files by glob pattern.",
+            "parameters": {"type": "object", "properties": {
+                "pattern": {"type": "string"}, "path": {"type": "string"}},
+                "required": ["pattern", "path"]}}}]
+        payload = {"model": model_for_tools, "tools": tools, "stream": True,
+                   "max_tokens": 400, "messages": [{"role": "user", "content":
+                       f"Find all .c files AND all .inf files in /tmp/{stamp}. "
+                       "Use search_files. Issue both searches now."}]}
+        req = urllib.request.Request(
+            GW + "/v1/chat/completions", method="POST",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {MASTER}"})
+        def _stream_tool_calls() -> dict[int, str]:
+            """One streamed request; returns arguments accumulated per index."""
+            found: dict[int, str] = {}
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                for raw in resp:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    body = line[5:].strip()
+                    if body == "[DONE]":
+                        break
+                    delta = json.loads(body)["choices"][0].get("delta", {})
+                    for tc in delta.get("tool_calls") or []:
+                        i = tc.get("index", 0)
+                        fn = tc.get("function") or {}
+                        found[i] = found.get(i, "") + (fn.get("arguments") or "")
+            return found
+
+        # Retry ONLY an empty result. The two failure modes are different and
+        # must not be conflated:
+        #
+        #   no calls at all  -> the model declined to use the tool this time.
+        #                       That is sampling, not a defect, and it made
+        #                       this check flaky: it failed once and passed on
+        #                       an immediate re-run with no code change.
+        #   calls that do not parse -> the concatenation bug this check exists
+        #                       for. Deterministic, so retrying would only
+        #                       hide it. Reported on the first observation.
+        #
+        # If every attempt comes back empty, that IS worth failing on -- it is
+        # the signature of a wrong --tool-call-parser, where the engine returns
+        # 200 with tool_calls null and the XML left in the message content.
+        ATTEMPTS = 3
+        slots: dict[int, str] = {}
+        for attempt in range(ATTEMPTS):
+            slots = _stream_tool_calls()
+            if slots:
+                break
+
+        bad = []
+        for i, args in slots.items():
+            try:
+                json.loads(args)
+            except ValueError as exc:
+                bad.append(f"slot {i}: {exc}")
+
+        if not slots:
+            detail = (f"no tool calls in {ATTEMPTS} attempts -- check "
+                      "--tool-call-parser matches what the model emits")
+        elif bad:
+            detail = "; ".join(bad)
+        else:
+            detail = f"{len(slots)} call(s), indices={sorted(slots)}"
+        record("streaming tool-call arguments parse", bool(slots) and not bad, detail)
+    except Exception as exc:
+        record("streaming tool-call arguments parse", False, type(exc).__name__)
+
+    # --- the engine SERVES the window the gateway advertises --------------
+    # An engine that silently serves less than the gateway advertises does not
+    # error: it TRUNCATES long prompts, which reads as the model failing to
+    # find things it was given rather than as a configuration fault. Worth
+    # asserting rather than trusting.
+    #
+    # llama.cpp reports its real window on /props. The exact nesting has moved
+    # between releases, so search for n_ctx rather than hardcoding a path, and
+    # SKIP on an unrecognised shape -- a probe that cannot read the answer must
+    # not report a failure it did not observe.
+    if engine == "llama.cpp":
+        def _find_n_ctx(node):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if k == "n_ctx" and isinstance(v, int):
+                        return v
+                    found = _find_n_ctx(v)
+                    if found:
+                        return found
+            elif isinstance(node, list):
+                for v in node:
+                    found = _find_n_ctx(v)
+                    if found:
+                        return found
+            return None
+
+        try:
+            props = call(os.environ.get("LLAMACPP_URL", "http://llamacpp:8080") + "/props",
+                         "", token=os.environ.get("LLAMACPP_API_KEY"), timeout=30)
+            served = _find_n_ctx(props)
+            want = max((w for w in windows.values() if w), default=0)
+            if served is None:
+                print(f"  [{YELLOW}SKIP{OFF}] engine serves the advertised window: "
+                      f"no n_ctx in /props -- llama.cpp changed its shape", flush=True)
+            else:
+                # --parallel N divides the window between slots, so the
+                # per-request window is what must clear the advertised one.
+                record("engine serves the advertised window", served >= want,
+                       f"engine={served:,} advertised={want:,}")
+        except Exception as exc:
+            record("engine serves the advertised window", False, type(exc).__name__)
+
+    # --- provision one person, both records ------------------------------
+    for path, body in (
+        ("/user/new", {"user_id": email, "user_email": email,
+                       "user_role": "internal_user", "max_budget": 1.0}),
+        ("/end_user/new", {"user_id": email, "max_budget": 0.000004}),
+    ):
+        try:
+            call(GW, path, body, token=MASTER)
+        except urllib.error.HTTPError:
+            pass
+    key = call(GW, "/key/generate",
+               {"user_id": email, "key_alias": f"e2e-{stamp}"}, token=MASTER)["key"]
+    record("per-person key minted", bool(key))
+
+    model = gw_models[0] if gw_models else os.environ.get("MODEL_NAME", "")
+
+    # --- API path attributes ---------------------------------------------
+    before = spend(email)
+    call(GW, "/chat/completions",
+         {"model": model, "messages": [{"role": "user", "content": prompt}],
+          "max_tokens": 24}, token=key)
+    after = wait_for_spend(email, before)
+    record("API usage attributed to the person", after > before,
+           f"${before:.6f} -> ${after:.6f}")
+
+    # --- chat path attributes to the SAME person -------------------------
+    try:
+        tok = call(WEBUI, "/api/v1/auths/signup",
+                   {"name": "E2E", "email": email, "password": "Str0ng-E2E-Passw0rd"})["token"]
+        before = spend(email)
+        call(WEBUI, "/api/chat/completions",
+             {"model": model, "messages": [{"role": "user", "content": prompt}],
+              "max_tokens": 24, "stream": False}, token=tok)
+        after = wait_for_spend(email, before)
+        record("chat usage attributed to the same person", after > before,
+               f"${before:.6f} -> ${after:.6f}")
+
+        # --- and the ceiling binds there too -----------------------------
+        refused = False
+        for _ in range(5):
+            try:
+                call(WEBUI, "/api/chat/completions",
+                     {"model": model,
+                      "messages": [{"role": "user", "content": prompt + " again"}],
+                      "max_tokens": 16, "stream": False}, token=tok)
+            except urllib.error.HTTPError as exc:
+                refused = "budget" in exc.read().decode("utf-8", "replace").lower()
+                break
+            time.sleep(5)
+        record("over-budget person refused in chat", refused,
+               "attribution without enforcement is the failure mode this catches")
+    except urllib.error.HTTPError as exc:
+        # Open WebUI is SSO-only (ENABLE_PASSWORD_AUTH, ENABLE_SIGNUP off), so a
+        # local signup is refused -- as it must be: when it was allowed, the
+        # account this made became the Open WebUI admin, with the password
+        # above. functional-test.py covers the chat path through the app's sign-in.
+        if exc.code == 403:
+            print(f"  [{YELLOW}SKIP{OFF}] chat path: Open WebUI is SSO-only, no local signup "
+                  f"-- functional-test.py covers chat attribution through SSO",
+                  flush=True)
+        else:
+            record("chat path", False, f"HTTP {exc.code}")
+
+    # --- argus, if it is running -----------------------------------------
+    try:
+        health = call(ARGUS, "/healthz", timeout=20)
+        record("argus reachable", bool(health), str(health)[:40])
+    except Exception:
+        print(f"  [{YELLOW}SKIP{OFF}] argus not running", flush=True)
+
+    # --- put the stack back the way we found it --------------------------
+    # This check provisions a throwaway person, a key and an end-user record,
+    # and every run used to leave all three behind. They accumulate in the
+    # dashboards as fake people, and the deliberately tiny end-user budget
+    # keeps throwing ExceededBudget in the gateway logs long after the run,
+    # which reads like a real fault. Clean up regardless of pass or fail.
+    for path, body in (
+        ("/key/delete", {"key_aliases": [f"e2e-{stamp}"]}),
+        ("/end_user/delete", {"user_ids": [email]}),
+        ("/user/delete", {"user_ids": [email]}),
+    ):
+        try:
+            call(GW, path, body, token=MASTER, timeout=30)
+        except Exception:
+            pass  # best effort: a failed teardown must not fail the suite
+
+    passed = sum(1 for _n, ok, _d in results if ok)
+    print(f"\n  {passed}/{len(results)} checks passed\n", flush=True)
+    return 0 if passed == len(results) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
