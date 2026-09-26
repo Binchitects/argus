@@ -15,7 +15,7 @@ namespace Llm.Api.Operations;
 public sealed record Probe(string Name, string Purpose, bool Ok, string Detail);
 
 public sealed record IndexRequest(string[]? Branches, bool AllowPartial = false);
-public sealed record PackRequest(string? Source, string? Sha256, string? Name, string? IndexUrl);
+public sealed record PackRequest(string? Source, string? Sha256, string? Name, string? IndexUrl, string? File = null);
 
 public static class OperationsEndpoints
 {
@@ -50,10 +50,11 @@ public static class OperationsEndpoints
                 "install" => new() { ["source"] = body.Source, ["sha256"] = body.Sha256 },
                 "update" => new() { ["name"] = body.Name, ["index_url"] = body.IndexUrl },
                 "remove" => new() { ["name"] = body.Name },
+                "load" => new() { ["file"] = body.File },
                 _ => throw new ArgusException("Unknown pack action.", 404),
             };
             var res = await a.PostAsync("packs/" + action, payload, ct);
-            await audit.WriteAsync("argus.packs." + action, body.Name ?? body.Source);
+            await audit.WriteAsync("argus.packs." + action, body.Name ?? body.Source ?? body.File);
             return res;
         }, a));
         argus.MapGet("/explore", (string? q, string? repo, int? limit, ArgusAdmin a, CancellationToken ct) =>
@@ -61,6 +62,19 @@ public static class OperationsEndpoints
             var query = $"explore?q={Uri.EscapeDataString(q ?? "")}&repo={Uri.EscapeDataString(repo ?? "")}&limit={Math.Clamp(limit ?? 50, 1, 500)}";
             return Relay(() => a.GetAsync(query, ct), a);
         });
+        // Explore's searches (references, code, docs) and opening a result: passed through as asked.
+        foreach (var (what, keys) in new[]
+        {
+            ("references", new[] { "name", "repo", "limit" }), ("code", new[] { "q", "repo", "limit" }), ("file", new[] { "repo_id", "path" }),
+            ("docs", new[] { "q", "mode", "source", "limit" }), ("doc", new[] { "path", "source" }),
+        })
+        {
+            argus.MapGet("/explore/" + what, (HttpRequest request, ArgusAdmin a, CancellationToken ct) =>
+            {
+                var query = string.Join('&', keys.Select(k => $"{k}={Uri.EscapeDataString(request.Query[k].ToString())}"));
+                return Relay(() => a.GetAsync($"explore/{what}?{query}", ct), a);
+            });
+        }
     }
 
     /// <summary>Argus's answer as it is, or a sentence saying why there is none.</summary>

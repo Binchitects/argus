@@ -112,6 +112,48 @@ public class PackTests
     }
 
     [Fact]
+    public void A_pack_in_the_library_loads_as_a_link_and_unloads_without_touching_the_library()
+    {
+        using var dir = new TempDir();
+        var root = Path.Combine(AppContext.BaseDirectory, "packfixtures", "react");
+        var library = Path.Combine(dir.Path, "library");
+        var packs = Path.Combine(dir.Path, "packs");
+        var built = Path.Combine(library, "docs", "react-1.0.arguspack");
+        PackBuilder.BuildPack(new ReactDocs(), root, built, "1.0", FakeEmbedder.Embed, sourceCommit: "abc", log: TextWriter.Null);
+        File.WriteAllText(Path.Combine(library, "broken.arguspack"), "not a pack");
+
+        var listed = Registry.ListLibrary(library, packs);
+        Assert.Equal(["broken.arguspack", "docs/react-1.0.arguspack"], listed.Select(l => l.File));
+        Assert.False(listed[0].Pack.Compatible);
+        Assert.StartsWith("unreadable", listed[0].Pack.IncompatibleReason, StringComparison.Ordinal);
+        Assert.Equal("react", listed[1].Pack.Name);
+        Assert.False(listed[1].Loaded);
+
+        // Loaded: a link under its own name, searched like any installed pack.
+        Assert.Equal("react", Registry.Load(library, "docs/react-1.0.arguspack", packs).Name);
+        var link = new FileInfo(Path.Combine(packs, "react.arguspack"));
+        Assert.NotNull(link.LinkTarget);
+        Assert.True(Registry.ListLibrary(library, packs)[1].Loaded);
+        var opened = PackStore.OpenPacks(Registry.PackFiles(packs));
+        try { Assert.NotEmpty(PackStore.LookupSymbol(opened, "usestate")); }
+        finally { PackStore.ClosePacks(opened); }
+
+        // Nothing outside the library, nothing unreadable.
+        Assert.Throws<RegistryError>(() => Registry.Load(library, "../packs/react.arguspack", packs));
+        Assert.Throws<RegistryError>(() => Registry.Load(library, "broken.arguspack", packs));
+        Assert.Throws<RegistryError>(() => Registry.Load(library, "docs/missing.arguspack", packs));
+
+        // Its library file gone: left out of every search, listed so it can be unloaded.
+        var moved = Path.Combine(dir.Path, "elsewhere.arguspack");
+        File.Move(built, moved);
+        Assert.Empty(Registry.PackFiles(packs));
+        Assert.Contains("library file is gone", Registry.ListInstalled(packs).Single().IncompatibleReason, StringComparison.Ordinal);
+        Assert.True(Registry.Remove("react", packs));
+        Assert.Equal([], Directory.GetFileSystemEntries(packs).Select(Path.GetFileName));
+        Assert.True(File.Exists(moved));
+    }
+
+    [Fact]
     public void A_checksum_mismatch_refuses_the_install_and_leaves_nothing_behind()
     {
         using var dir = new TempDir();

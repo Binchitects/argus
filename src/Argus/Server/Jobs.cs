@@ -214,6 +214,7 @@ public sealed class Jobs(ArgusConfig cfg)
     public JsonObject PackJobSnapshot() { lock (_packLock) return (JsonObject)_pack.DeepClone(); }
     public bool PackJobRunning() { lock (_packLock) return _pack["state"]?.ToString() == "running"; }
 
+    /// <summary>The installed packs; "source" says whether one is loaded from the pack library (a link) or was installed (a copy).</summary>
     public static JsonArray PackRows(string packsDir)
     {
         var rows = Registry.ListInstalled(packsDir).OrderBy(p => p.Name, StringComparer.Ordinal).Select(p => (JsonNode?)new JsonObject
@@ -221,9 +222,19 @@ public sealed class Jobs(ArgusConfig cfg)
             ["name"] = p.Name, ["version"] = p.Version, ["model"] = p.EmbeddingModel, ["dim"] = p.EmbeddingDim,
             ["size_bytes"] = p.SizeBytes, ["license"] = p.License, ["commit"] = p.SourceCommit,
             ["compatible"] = p.Compatible, ["incompatible_reason"] = p.IncompatibleReason,
+            ["source"] = Registry.LinkedFrom(p.Path) is null ? "installed" : "library",
         });
         return new JsonArray(rows.ToArray());
     }
+
+    /// <summary>The pack library's files, and which are loaded.</summary>
+    public static JsonArray LibraryRows(string libraryDir, string packsDir) =>
+        new([.. Registry.ListLibrary(libraryDir, packsDir).Select(l => (JsonNode?)new JsonObject
+        {
+            ["file"] = l.File, ["name"] = l.Pack.Name, ["version"] = l.Pack.Version, ["model"] = l.Pack.EmbeddingModel, ["dim"] = l.Pack.EmbeddingDim,
+            ["size_bytes"] = l.Pack.SizeBytes, ["license"] = l.Pack.License, ["commit"] = l.Pack.SourceCommit,
+            ["compatible"] = l.Pack.Compatible, ["incompatible_reason"] = l.Pack.IncompatibleReason, ["loaded"] = l.Loaded,
+        })]);
 
     public bool StartPackJob(string action, string? source = null, string? sha256 = null, string? name = null, string? indexUrl = null)
     {

@@ -433,9 +433,10 @@ name as well as position.
 | `ARGUS_GITLAB_PASSWORD` | — | password mode only. Never read from `config/argus/config.yaml` — a `password` key there is refused outright rather than ignored |
 | `ARGUS_GITLAB_CA_CERT` | empty | path **inside the container** to the CA that signed GitLab's certificate. Drop the PEM in `config/argus/tls/` and use `/etc/argus/tls/<name>` |
 | `ARGUS_GITLAB_VERIFY` | empty | `false` disables certificate verification. Last resort for a self-signed GitLab with no CA file anywhere. Setting it **and** `ARGUS_GITLAB_CA_CERT` is refused at startup |
-| `ARGUS_EMBED_MODEL` | `nomic-embed-text` | Ollama model for query embeddings |
+| `ARGUS_EMBED_URL` | `http://llamacpp-embed:8080` | the embedding server, over the OpenAI protocol: the stack's `llamacpp-embed` (llama.cpp on the CPU, `nomic-embed-text-v1.5`, fetched by `embed-init`) |
+| `ARGUS_EMBED_MODEL` | `nomic-embed-text` | the embedding model's name, recorded in the index and in every pack |
 | `ARGUS_EMBED_DIM` | `768` | its output dimension. Must match the model, or the pack vectors are unusable |
-| `ARGUS_OLLAMA_URL` | `http://ollama:11434` | without this Argus falls back to `localhost:11434`, which inside a container is the container itself |
+| `ARGUS_PACK_LIBRARY_DIR` | the repository's `packs/` | the **pack library**: built knowledge packs (`tools/build-packs.sh` writes them there), mounted read-only; **Admin → Packs** loads them. Loading links a pack, so nothing is copied |
 | `ARGUS_INDEX_INTERVAL` | `900` | seconds between automatic index passes. **`0` turns automatic reindexing off**, and then the index only advances when somebody presses **Index now** under **Admin → Indexing** |
 | `ARGUS_INDEX_STALE_AFTER` | `3600` | seconds without a successful pass before a repository counts as stale. Feeds `argus_index_stale`, the `ArgusIndexStale` alert and the number on **Admin → Overview**. Default is 4 × the interval above |
 | `ARGUS_WEBHOOK_TOKEN` | empty | the GitLab push webhook's secret. **Empty means the webhook route does not exist at all.** Set it here and put the same value in GitLab's webhook configuration; see [ARGUS.md](argus/README.md#indexing-on-push). Deliberately not the admin token — this one is stored in GitLab, so it is the lower-privilege credential |

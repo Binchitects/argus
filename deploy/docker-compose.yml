@@ -1355,6 +1355,9 @@ services:
       ARGUS_APP: "off"
       ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
       ARGUS_EMBED_DIM: ${ARGUS_EMBED_DIM:-768}
+      # Built knowledge packs to load from (Admin -> Packs), like the model
+      # library for models: loading one links it, nothing is copied.
+      ARGUS_PACK_LIBRARY: /pack-library
       # How often the server reindexes by itself, in seconds. 0 or unset means
       # NEVER, which is what this stack shipped with: the index only advanced
       # when an operator pressed "Index now", so every answer was served from
@@ -1433,6 +1436,10 @@ services:
       # pack estate that already exist on the host, add the override file:
       #   docker compose -f docker-compose.yml -f services/argus-local.yml up -d
       - argus-data:/var/lib/argus
+      # The pack library, read-only: where tools/build-packs.sh writes, the
+      # repository's packs/ unless ARGUS_PACK_LIBRARY_DIR says otherwise. It
+      # exists in every checkout (packs/README.md), so Docker never creates it.
+      - ${ARGUS_PACK_LIBRARY_DIR:-${LLM_SOURCE_DIR:-..}/packs}:/pack-library:ro
       # The directory, not the file: a single-file mount pins an inode, and the
       # app replaces the file atomically. Only the
       # hash-free copy: Argus has no business reading password hashes.

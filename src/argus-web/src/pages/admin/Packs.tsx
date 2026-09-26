@@ -37,6 +37,34 @@ export default function Packs() {
       <div className="tiles">
         <div className="tile" data-testid="tile-packs"><div className="tile-label">Packs installed</div><div className="tile-value">{d?.packs.length ?? "—"}</div><div className="dim">{d?.packs.length ? `${megabytes(total)} on disk` : "none yet"}</div></div>
       </div>
+      {d?.library_dir && (
+        <div className="card">
+          <h2>Pack library</h2>
+          <p className="dim small">Built packs in <code>{d.library_dir}</code>. Loading links one in: instant, nothing copied; unloading leaves it in the library.</p>
+          <table data-testid="library-table">
+            <thead><tr><th>Pack</th><th>File</th><th>Embedding</th><th className="right">Size</th><th>State</th><th /></tr></thead>
+            <tbody>
+              {(d.library ?? []).map((p) => (
+                <tr key={p.file}>
+                  <td><strong>{p.name}</strong> <span className="dim">{p.version}</span>{!p.compatible && <div className="warn small">{p.incompatible_reason}</div>}</td>
+                  <td className="dim"><code>{p.file}</code></td>
+                  <td className="dim">{p.model}/{p.dim}</td>
+                  <td className="right">{megabytes(p.size_bytes)}</td>
+                  <td>{p.loaded ? <strong>Loaded</strong> : <span className="dim">Not loaded</span>}</td>
+                  <td className="right">
+                    {p.loaded ? (
+                      <button className="btn small" disabled={running} onClick={() => void act("/admin/packs/remove", { name: p.name }, `Unloaded ${p.name}.`)}>Unload</button>
+                    ) : (
+                      <button className="btn small primary" disabled={running || !p.compatible} onClick={() => void act("/admin/packs/load", { file: p.file }, `Loaded ${p.name}.`)}>Load</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {(d.library ?? []).length === 0 && <tr><td colSpan={6} className="dim">The library is empty: build packs into it with tools/build-packs.sh.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="card">
         {running ? (
           <div className="msg">{(d!.job.action ?? "working").replace(/^./, (c) => c.toUpperCase())} <b>{d!.job.target}</b> — started {relTime(d!.job.started)}.</div>

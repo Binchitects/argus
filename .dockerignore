@@ -29,6 +29,8 @@ src/argus-web/e2e/.work/
 TestResults/
 
 data/
+packs/
+.packwork/
 *.db
 *.db-wal
 *.db-shm

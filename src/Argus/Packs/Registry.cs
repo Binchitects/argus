@@ -16,6 +16,9 @@ public sealed record InstalledPack(
 
 public sealed record IndexEntry(string Name, string Version, string Url, string Sha256, long SizeBytes, string License);
 
+/// <summary>A pack file in the pack library, by its path there, and whether it is the one loaded under its name.</summary>
+public sealed record LibraryPack(string File, InstalledPack Pack, bool Loaded);
+
 /// <summary>
 /// Installing, listing and publishing packs. A pack
 /// names its own file from its metadata, so the name is validated before it is
@@ -65,7 +68,17 @@ public static class Registry
             meta.GetValueOrDefault("source_commit", ""), compatible, reason);
     }
 
-    public static List<string> PackFiles(string dir) =>
+    /// <summary>The packs to search: a link whose library file is gone is left out, so one missing pack never stops the rest.</summary>
+    public static List<string> PackFiles(string dir) => Entries(dir).Where(Reachable).ToList();
+
+    /// <summary>A file there to read: a plain one, or a link whose target is (File.Exists is true for a broken link).</summary>
+    static bool Reachable(string path)
+    {
+        var info = new FileInfo(path);
+        return info.LinkTarget is null ? info.Exists : info.ResolveLinkTarget(returnFinalTarget: true) is { Exists: true };
+    }
+
+    static List<string> Entries(string dir) =>
         Directory.Exists(dir)
             ? Directory.EnumerateFiles(dir, "*" + PackSuffix).OrderBy(p => p, StringComparer.Ordinal).ToList()
             : [];
@@ -73,9 +86,14 @@ public static class Registry
     public static List<InstalledPack> ListInstalled(string destDir)
     {
         var packs = new List<InstalledPack>();
-        foreach (var path in PackFiles(destDir))
+        foreach (var path in Entries(destDir))
         {
             var stem = Path.GetFileNameWithoutExtension(path);
+            if (!Reachable(path))
+            {
+                packs.Add(new InstalledPack(stem, "", path, "", "", 0, "", "", "", false, $"its library file is gone ({LinkedFrom(path)}): unload it"));
+                continue;
+            }
             Dictionary<string, string> meta;
             try { meta = ReadPackMeta(path); }
             catch (RegistryError exc)
@@ -92,9 +110,82 @@ public static class Registry
         return packs;
     }
 
+    /// <summary>
+    /// The pack files in a library folder (read-only; two levels deep), each read
+    /// for what it is. One is loaded when the pack of its name in
+    /// <paramref name="destDir"/> is a link to it.
+    /// </summary>
+    public static List<LibraryPack> ListLibrary(string libraryDir, string destDir)
+    {
+        if (!Directory.Exists(libraryDir)) return [];
+        var root = Path.GetFullPath(libraryDir);
+        var files = Directory.EnumerateFiles(root, "*" + PackSuffix, new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 2, IgnoreInaccessible = true })
+            .Where(f => !Path.GetFileName(f).StartsWith('.')).OrderBy(f => f, StringComparer.Ordinal);
+        var packs = new List<LibraryPack>();
+        foreach (var path in files)
+        {
+            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            InstalledPack pack;
+            try
+            {
+                var meta = ReadPackMeta(path);
+                var (compatible, reason) = Compatibility(meta);
+                pack = new InstalledPack(meta.GetValueOrDefault("source_name", Path.GetFileNameWithoutExtension(path)), meta.GetValueOrDefault("pack_version", ""), path,
+                    meta.GetValueOrDefault("embedding_model", ""), meta.GetValueOrDefault("embedding_dim", ""), new FileInfo(path).Length,
+                    meta.GetValueOrDefault("license", ""), meta.GetValueOrDefault("attribution", ""), meta.GetValueOrDefault("source_commit", ""),
+                    compatible && NameRe.IsMatch(meta.GetValueOrDefault("source_name", "")), compatible ? (NameRe.IsMatch(meta.GetValueOrDefault("source_name", "")) ? "" : "its name is not a valid pack name") : reason);
+            }
+            catch (RegistryError exc)
+            {
+                pack = new InstalledPack(Path.GetFileNameWithoutExtension(path), "", path, "", "", new FileInfo(path).Length, "", "", "", false, $"unreadable: {exc.Message}");
+            }
+            packs.Add(new LibraryPack(relative, pack, LinkedFrom(Path.Combine(destDir, pack.Name + PackSuffix)) == path));
+        }
+        return packs;
+    }
+
+    /// <summary>
+    /// Loads a pack from the library: a link under its own name in <paramref name="destDir"/>,
+    /// so nothing is copied and it takes effect on the next search. Only a readable pack
+    /// built with this server's embedding model: another's vectors would not compare.
+    /// </summary>
+    public static InstalledPack Load(string libraryDir, string relative, string destDir)
+    {
+        var root = Path.GetFullPath(libraryDir).TrimEnd('/') + "/";
+        var full = Path.GetFullPath(Path.Combine(root, relative));
+        if (!full.StartsWith(root, StringComparison.Ordinal) || !full.EndsWith(PackSuffix, StringComparison.Ordinal) || !File.Exists(full))
+            throw new RegistryError($"no pack file {PyStr.Repr(relative)} in the pack library");
+        var meta = ReadPackMeta(full);
+        var name = RequireName(meta.GetValueOrDefault("source_name", ""));
+        var (compatible, reason) = Compatibility(meta);
+        if (!compatible) throw new RegistryError($"{name} cannot be loaded: {reason}");
+        Directory.CreateDirectory(destDir);
+        var link = Path.Combine(destDir, $".link-{Guid.NewGuid():N}.tmp");
+        File.CreateSymbolicLink(link, full);
+        try
+        {
+            File.Move(link, Path.Combine(destDir, $"{name}{PackSuffix}"), overwrite: true);
+        }
+        catch
+        {
+            File.Delete(link);
+            throw;
+        }
+        return new InstalledPack(name, meta.GetValueOrDefault("pack_version", ""), full, meta.GetValueOrDefault("embedding_model", ""),
+            meta.GetValueOrDefault("embedding_dim", ""), new FileInfo(full).Length, meta.GetValueOrDefault("license", ""),
+            meta.GetValueOrDefault("attribution", ""), meta.GetValueOrDefault("source_commit", ""), true);
+    }
+
+    /// <summary>The file a link points to (absolute), or null for a plain file or none.</summary>
+    public static string? LinkedFrom(string path)
+    {
+        return new FileInfo(path).LinkTarget is { } target ? Path.GetFullPath(target, Path.GetDirectoryName(path)!) : null;
+    }
+
     public static bool Remove(string name, string destDir)
     {
         var path = Path.Combine(destDir, $"{RequireName(name)}{PackSuffix}");
+        // A link whose library file went away is still there to remove.
         if (!File.Exists(path)) return false;
         File.Delete(path);
         return true;

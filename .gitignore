@@ -38,7 +38,8 @@ tools/test-gitlab/work/
 
 # Knowledge packs: built ones are hundreds of MB, published out of band. The
 # leading slash matters: a bare `packs/` would also hide source directories.
-/packs/
+/packs/*
+!/packs/README.md
 .packwork/
 dist/
 

@@ -72,6 +72,8 @@ public sealed record ArgusConfig
     public required GitLabConfig GitLab { get; init; }
     public required IndexConfig Index { get; init; }
     public string? PacksDirSetting { get; init; }
+    /// <summary>A read-only folder of built packs to load from (ARGUS_PACK_LIBRARY, packs.library); null: none.</summary>
+    public string? PackLibrary { get; init; }
     /// <summary>The file this was loaded from, so a spawned indexer can be handed the same one.</summary>
     public string? SourcePath { get; init; }
 
@@ -179,6 +181,7 @@ public sealed record ArgusConfig
                 Branches = ix.TryGetValue("branches", out var br) ? StringList(br) : [],
             },
             PacksDirSetting = string.IsNullOrEmpty(packsDir) ? Path.Combine(dataDir, "packs") : packsDir,
+            PackLibrary = Env("ARGUS_PACK_LIBRARY") ?? Scalar(pk, "library"),
             SourcePath = Path.GetFullPath(path),
         };
     }

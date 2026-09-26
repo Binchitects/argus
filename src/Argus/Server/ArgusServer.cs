@@ -433,6 +433,42 @@ public static class ArgusServer
             }
         });
 
+        // Explore's searches: code references, code text and the documentation packs, and opening what they find.
+        IResult Search(HttpRequest request, Func<JsonNode?> run)
+        {
+            if (!Authorised(request)) return Forbidden();
+            try
+            {
+                var result = run();
+                return result is null ? Json(new JsonObject { ["error"] = "not found" }, 404) : Json(result);
+            }
+            catch (ExploreError exc) { return Json(new JsonObject { ["error"] = exc.Message }, 400); }
+            catch (Exception exc) when (exc is Microsoft.Data.Sqlite.SqliteException or IOException) { return Json(new JsonObject { ["error"] = Short(exc) }, 500); }
+        }
+        string Q(HttpRequest request, string key) => PyStr.Strip(request.Query[key].ToString());
+        int? Limit(HttpRequest request) => int.TryParse(request.Query["limit"].ToString(), out var n) ? n : null;
+
+        app.MapGet(AdminPrefix + "explore/references", (HttpRequest request) => Search(request, () =>
+        {
+            using var conn = Db.ConnectReadonly(cfg.Index.DbPath);
+            return ExploreSearch.References(conn, Q(request, "name"), Q(request, "repo"), Limit(request));
+        }));
+        app.MapGet(AdminPrefix + "explore/code", (HttpRequest request) => Search(request, () =>
+        {
+            using var conn = Db.ConnectReadonly(cfg.Index.DbPath);
+            return ExploreSearch.Code(conn, Q(request, "q"), Q(request, "repo"), Limit(request));
+        }));
+        app.MapGet(AdminPrefix + "explore/file", (HttpRequest request) => Search(request, () =>
+        {
+            if (!long.TryParse(Q(request, "repo_id"), out var repoId)) throw new ExploreError("repo_id is a number");
+            using var conn = Db.ConnectReadonly(cfg.Index.DbPath);
+            return ExploreSearch.File(conn, repoId, Q(request, "path"));
+        }));
+        app.MapGet(AdminPrefix + "explore/docs", (HttpRequest request) => Search(request, () =>
+            ExploreSearch.Docs(cfg.PacksDir, Q(request, "q"), Q(request, "mode"), Q(request, "source"), Limit(request))));
+        app.MapGet(AdminPrefix + "explore/doc", (HttpRequest request) => Search(request, () =>
+            ExploreSearch.Doc(cfg.PacksDir, Q(request, "path"), Q(request, "source"))));
+
         app.MapGet(AdminPrefix + "packs", (HttpRequest request) =>
         {
             if (!Authorised(request)) return Forbidden();
@@ -443,6 +479,8 @@ public static class ArgusServer
                 {
                     ["packs"] = Jobs.PackRows(cfg.PacksDir), ["job"] = job,
                     ["index_url"] = Jobs.PackIndexUrl(), ["packs_dir"] = cfg.PacksDir,
+                    ["library_dir"] = cfg.PackLibrary,
+                    ["library"] = cfg.PackLibrary is { Length: > 0 } lib ? Jobs.LibraryRows(lib, cfg.PacksDir) : new JsonArray(),
                 });
             }
             catch (Exception exc)
@@ -473,6 +511,24 @@ public static class ArgusServer
             if (!jobs.StartPackJob("update", name: name, indexUrl: indexUrl))
                 return Json(new JsonObject { ["error"] = "another pack operation is running" }, 409);
             return Json(new JsonObject { ["status"] = "started", ["action"] = "update", ["name"] = name ?? "" });
+        });
+
+        // Loading from the pack library is a link, not a download: instant, so no job.
+        app.MapPost(AdminPrefix + "packs/load", async (HttpRequest request) =>
+        {
+            if (!Authorised(request)) return Forbidden();
+            var body = await BodyOrEmpty(request);
+            var file = PyStr.Strip(body["file"]?.ToString() ?? "");
+            if (cfg.PackLibrary is not { Length: > 0 } library) return Json(new JsonObject { ["error"] = "no pack library: set ARGUS_PACK_LIBRARY on the argus service" }, 400);
+            if (file.Length == 0) return Json(new JsonObject { ["error"] = "a pack file of the library is required" }, 400);
+            if (jobs.PackJobRunning()) return Json(new JsonObject { ["error"] = "a pack operation is running; wait for it to finish" }, 409);
+            try
+            {
+                var pack = Registry.Load(library, file, cfg.PacksDir);
+                return Json(new JsonObject { ["status"] = "loaded", ["name"] = pack.Name, ["file"] = file });
+            }
+            catch (RegistryError exc) { return Json(new JsonObject { ["error"] = exc.Message }, 400); }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException) { return Json(new JsonObject { ["error"] = Short(exc) }, 500); }
         });
 
         app.MapPost(AdminPrefix + "packs/remove", async (HttpRequest request) =>

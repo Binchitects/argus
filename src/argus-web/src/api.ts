@@ -192,7 +192,10 @@ export interface Pack {
 }
 
 export interface PacksStatus {
-  packs: Pack[];
+  packs: (Pack & { source?: "library" | "installed" })[];
+  /** The pack library's files (ARGUS_PACK_LIBRARY), and which are loaded. */
+  library?: (Pack & { file: string; loaded: boolean })[];
+  library_dir?: string | null;
   job: { state: string; action: string | null; target: string | null; started: number | null; finished: number | null; returncode: number | null; tail: string[] };
   index_url: string;
   packs_dir?: string;

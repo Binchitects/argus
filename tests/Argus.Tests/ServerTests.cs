@@ -214,6 +214,54 @@ public sealed class ServerTests : IDisposable
         Assert.Equal(1, text.Split('\n').Count(l => l.StartsWith("# HELP argus_index_files ", StringComparison.Ordinal)));
     }
 
+    async Task<(HttpStatusCode Status, JsonNode Body)> AdminGet(string path)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, path);
+        req.Headers.Add("x-argus-admin-token", "admin-secret");
+        var resp = await _http.SendAsync(req);
+        return (resp.StatusCode, JsonNode.Parse(await resp.Content.ReadAsStringAsync())!);
+    }
+
+    [Fact]
+    public async Task Explore_finds_references_and_code_in_every_repository_and_opens_a_file()
+    {
+        Assert.Equal(HttpStatusCode.Forbidden, (await _http.GetAsync("/admin/explore/references?name=DecodeFrame")).StatusCode);
+
+        var (status, refs) = await AdminGet("/admin/explore/references?name=DecodeFrame");
+        Assert.Equal(HttpStatusCode.OK, status);
+        var hit = refs["rows"]!.AsArray().Single()!;
+        Assert.Equal("src/decode.c", hit["path"]!.GetValue<string>());
+        Assert.Equal(2, hit["line"]!.GetValue<long>());
+        Assert.True(hit["is_definition"]!.GetValue<bool>());
+        // The operator sees every repository, not only what one person may.
+        Assert.Equal("grp/hidden", (await AdminGet("/admin/explore/references?name=Hidden")).Body["rows"]![0]!["repo"]!.GetValue<string>());
+        Assert.Empty((await AdminGet("/admin/explore/references?name=Hidden&repo=grp/alpha")).Body["rows"]!.AsArray());
+
+        var code = (await AdminGet("/admin/explore/code?q=frame")).Body["rows"]!.AsArray();
+        Assert.Equal("src/decode.c", code.Single()!["path"]!.GetValue<string>());
+        var (bad, why) = await AdminGet("/admin/explore/code?q=%22unclosed");
+        Assert.Equal(HttpStatusCode.BadRequest, bad);
+        Assert.StartsWith("That search syntax is not valid", why["error"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.DoesNotContain("regex", why["error"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        var (found, file) = await AdminGet($"/admin/explore/file?repo_id={_repo}&path=src/decode.c");
+        Assert.Equal(HttpStatusCode.OK, found);
+        Assert.Contains("int DecodeFrame", file["content"]!.GetValue<string>());
+        Assert.Equal(HttpStatusCode.NotFound, (await AdminGet($"/admin/explore/file?repo_id={_repo}&path=nope.c")).Status);
+
+        // No packs: said plainly, as a request that cannot run, not a failure.
+        var (noPacks, docs) = await AdminGet("/admin/explore/docs?q=frame");
+        Assert.Equal(HttpStatusCode.BadRequest, noPacks);
+        Assert.Contains("No documentation packs are loaded", docs["error"]!.GetValue<string>());
+        // Without a library, loading says what to set; the listing has an empty one.
+        var load = new HttpRequestMessage(HttpMethod.Post, "/admin/packs/load") { Content = new StringContent("""{"file":"x.arguspack"}""", Encoding.UTF8, "application/json") };
+        load.Headers.Add("x-argus-admin-token", "admin-secret");
+        var loaded = await _http.SendAsync(load);
+        Assert.Equal(HttpStatusCode.BadRequest, loaded.StatusCode);
+        Assert.Contains("ARGUS_PACK_LIBRARY", await loaded.Content.ReadAsStringAsync());
+        Assert.Empty((await AdminGet("/admin/packs")).Body["library"]!.AsArray());
+    }
+
     [Fact]
     public async Task The_webhook_ignores_what_it_should_and_refuses_a_bad_token()
     {
