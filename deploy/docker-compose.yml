@@ -1135,21 +1135,20 @@ services:
   # ============================================================================
   # ARGUS (profile: argus)
   #
-  # Semi-RAG code index and documentation server. Indexes repositories from a
-  # GitLab instance, serves a symbol/dependency graph plus knowledge packs, and
-  # exposes them to an agent harness as tools.
-  #
-  # Built from E:/Projects/CodeAssistant; the image is also shipped as an
-  # offline tarball in dist/ so a target host needs no build toolchain.
+  # The code index and documentation server (src/Argus, .NET). Indexes
+  # repositories from GitLab, serves a symbol and dependency graph plus
+  # knowledge packs over MCP, and answers the platform's chat as the signed-in
+  # person. Built from this repository (src/Argus/Dockerfile) on first `up`;
+  # the image runs its test suite during the build. It serves no app of its own
+  # here (ARGUS_APP=off): the platform's app is the one people use.
   # ============================================================================
 
   # ============================================================================
-  # EMBEDDINGS (profiles: argus, embed)
+  # OLLAMA (profile: embed)
   #
-  # Argus's semantic layer calls Ollama for every vector -- argus/embed.py
-  # defaults to http://localhost:11434 -- but Ollama appeared in no compose
-  # file, no env template and no config.yaml. The semantic index was therefore
-  # not buildable from this stack at all, whichever database stores the result.
+  # The Python Argus embedded through Ollama. The .NET Argus uses the OpenAI
+  # protocol and llamacpp-embed (below), so Ollama is no longer in the argus
+  # profile; it stays under `embed` for anything else that wants it.
   #
   # CPU ON PURPOSE. The inference engine already holds ~20.5 GB of a 24 GB
   # card, and nomic-embed-text is a 137M-parameter model: putting it on the GPU
@@ -1162,7 +1161,7 @@ services:
   ollama:
     image: ollama/ollama:0.5.7
     container_name: ollama
-    profiles: [argus, embed]
+    profiles: [embed]
     restart: unless-stopped
     networks: [llm-net]
     # Embeddings belong on the GPU.
@@ -1224,8 +1223,81 @@ services:
       retries: 5
     logging: *default-logging
 
+  # ============================================================================
+  # EMBEDDINGS FOR ARGUS (profile: argus)
+  #
+  # nomic-embed-text on the CPU, OpenAI protocol (/v1/embeddings): what Argus's
+  # semantic_search and which_repo read. The engine's image, run without a GPU
+  # (it falls back to the CPU), so nothing more is pulled; embed-init fetches
+  # the model once into EMBED_MODEL_DIR, checked against Hugging Face's SHA-256.
+  # ============================================================================
+  embed-init:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG:-server-cuda}
+    container_name: embed-init
+    healthcheck:
+      disable: true
+    profiles: [argus]
+    restart: "no"
+    networks: [llm-net]
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    environment:
+      EMBED_HF_REPO: ${EMBED_HF_REPO:-nomic-ai/nomic-embed-text-v1.5-GGUF}
+      EMBED_MODEL_FILE: ${EMBED_MODEL_FILE:-nomic-embed-text-v1.5.f16.gguf}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ${EMBED_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}:/embed
+    command:
+      - |
+        set -euo pipefail
+        f="/embed/$$EMBED_MODEL_FILE"
+        if [ -f "$$f" ]; then echo "embed-init: have $$EMBED_MODEL_FILE"; exit 0; fi
+        auth=(); [ -n "$$HF_TOKEN" ] && auth=(-H "Authorization: Bearer $$HF_TOKEN")
+        url="https://huggingface.co/$$EMBED_HF_REPO/resolve/main/$$EMBED_MODEL_FILE"
+        head=$$(curl -sI --connect-timeout 10 --max-time 60 "$${auth[@]}" "$$url" | tr -d '\r') \
+          || { echo "embed-init: $$EMBED_MODEL_FILE is not in EMBED_MODEL_DIR and Hugging Face is unreachable; copy it there"; exit 1; }
+        sha=$$(printf '%s\n' "$$head" | sed -n 's/^x-linked-etag: "\{0,1\}\([0-9a-f]\{64\}\)"\{0,1\}/\1/Ip' | head -1)
+        echo "embed-init: downloading $$EMBED_MODEL_FILE from $$EMBED_HF_REPO"
+        curl -fL --no-progress-meter --retry 20 --retry-delay 10 -C - "$${auth[@]}" -o "$$f.part" "$$url"
+        if [ -n "$$sha" ]; then echo "$$sha  $$f.part" | sha256sum -c --quiet; fi
+        owner=$$(stat -c %u:%g /embed); mv "$$f.part" "$$f"; chown "$$owner" "$$f" || true
+        echo "embed-init: ready"
+    logging: *default-logging
+
+  llamacpp-embed:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG:-server-cuda}
+    container_name: llamacpp-embed
+    profiles: [argus]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - ${EMBED_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}:/embed:ro
+    entrypoint: ["/app/llama-server"]
+    command: >
+      -m /embed/${EMBED_MODEL_FILE:-nomic-embed-text-v1.5.f16.gguf}
+      --host 0.0.0.0
+      --port 8080
+      --alias ${ARGUS_EMBED_MODEL:-nomic-embed-text}
+      --embeddings
+      --pooling mean
+      -ngl 0
+      -c 2048 -b 2048 -ub 2048
+      -t ${EMBED_THREADS:-4}
+      --parallel 2
+    cpus: ${EMBED_CPUS:-4}
+    depends_on:
+      embed-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    logging: *default-logging
+
   argus:
-    image: argus:${ARGUS_VERSION:-latest}
+    image: llmservice-argus:${ARGUS_VERSION:-latest}
     # Not a public image: `docker compose up` builds it from this repository
     # the first time (a few minutes), then reuses the local image.
     build:
@@ -1277,7 +1349,10 @@ services:
       # their GitLab username (GitLab's public email is the fallback). The
       # admin panel's hash-free copy of the account list, not users.yml.
       ARGUS_AUTHELIA_USERS_FILE: /authelia/users.yml
-      ARGUS_OLLAMA_URL: ${ARGUS_OLLAMA_URL:-http://ollama:11434}
+      # Embeddings for semantic_search and which_repo, over the OpenAI protocol.
+      ARGUS_EMBED_URL: ${ARGUS_EMBED_URL:-http://llamacpp-embed:8080}
+      # No app of its own: the platform's app is the one people use.
+      ARGUS_APP: "off"
       ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
       ARGUS_EMBED_DIM: ${ARGUS_EMBED_DIM:-768}
       # How often the server reindexes by itself, in seconds. 0 or unset means
@@ -1367,11 +1442,12 @@ services:
       - traefik-certs:/certs:ro
     depends_on:
       tls-init: { condition: service_completed_successfully }
+      llamacpp-embed: { condition: service_healthy }
     # GitLab runs on the host, not in this compose project.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7700/healthz', timeout=5).status==200 else 1)"]
+      test: ["CMD", "argus", "healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3

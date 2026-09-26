@@ -97,7 +97,7 @@ export function IndexingPage() {
   return (
     <>
       <PageHeader title="Indexing" description="Argus's index of your GitLab: what it holds, how current it is, and runs on demand." />
-      <div className="grid gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         <StatGrid className="xl:grid-cols-4">
           <Stat icon={Database} label="Repositories" value={idx.repos ?? 0} hint={idx.stale ? `${idx.stale} out of date` : 'all current'} tone={idx.stale ? 'warning' : undefined} />
           <Stat icon={TriangleAlert} label="Failing" value={idx.errored ?? 0} tone={idx.errored ? 'destructive' : undefined} />
@@ -199,7 +199,7 @@ export function PacksPage() {
           )
         }
       />
-      <div className="grid gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         {p.data.error && <Alert variant="warning">{p.data.error}</Alert>}
         {p.data.packs.length === 0 ? (
           <EmptyState icon={Package} title="No pack installed">
@@ -311,7 +311,7 @@ export function ExplorePage() {
   return (
     <>
       <PageHeader title="Explore the index" description="Search symbols and paths across everything indexed: is something absent, named differently, or never indexed?" />
-      <div className="grid gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         <form
           className="flex flex-wrap items-end gap-3"
           onSubmit={(ev) => {

@@ -54,6 +54,13 @@ public static class ArgusServer
     /// service token.
     /// </summary>
     public const string ChatTokenEnv = "ARGUS_CHAT_CLIENT_TOKEN";
+    /// <summary>
+    /// ARGUS_APP=off: no app of its own (the web, /api and its accounts), for
+    /// when another app is the one people use -- the platform. MCP, the
+    /// operator surface (by its token) and the webhook are unchanged.
+    /// </summary>
+    public const string AppEnv = "ARGUS_APP";
+    public static bool AppEnabled() => !string.Equals(Environment.GetEnvironmentVariable(AppEnv), "off", StringComparison.OrdinalIgnoreCase);
     public const string ChatEmailHeader = "x-openwebui-user-email";
     public const string UsersFileEnv = "ARGUS_AUTHELIA_USERS_FILE";
     static readonly string[] ProxyHeaders = ["x-forwarded-for", "x-forwarded-host", "x-real-ip"];
@@ -92,8 +99,9 @@ public static class ArgusServer
     {
         using (var conn = Db.Connect(cfg.Index.DbPath)) Db.Migrate(conn);
         var appDbPath = AppDb.PathFor(cfg.Index.DataDir);
-        using (var conn = AppDb.Open(appDbPath))
-            if (Users.Bootstrap(conn) is { } admin) Console.WriteLine($"created the first administrator, {admin.Username}");
+        if (AppEnabled())
+            using (var conn = AppDb.Open(appDbPath))
+                if (Users.Bootstrap(conn) is { } admin) Console.WriteLine($"created the first administrator, {admin.Username}");
 
         var tools = new Tools(cfg);
         var jobs = new Jobs(cfg);
@@ -132,7 +140,7 @@ public static class ArgusServer
             ? hosts.SelectMany(h => new[] { $"http://{h}", $"https://{h}" }).ToList()
             : hosts.Select(h => $"http://{h}").ToList();
 
-        PlatformApi.MapWeb(app, WebRoot());
+        if (AppEnabled()) PlatformApi.MapWeb(app, WebRoot());
         app.Use(PlatformApi.Errors);
         app.Use(async (ctx, next) => await Authenticate(ctx, next, cfg, directory, appDbPath));
         app.Use(async (ctx, next) =>
@@ -149,7 +157,7 @@ public static class ArgusServer
         app.MapGet(HealthzPath, () => Json(new JsonObject { ["status"] = "ok" }));
         MapAdmin(app, cfg, jobs);
         if (WebhookEnabled()) MapWebhook(app, jobs);
-        PlatformApi.Map(app, cfg, appDbPath, gateway, chat);
+        if (AppEnabled()) PlatformApi.Map(app, cfg, appDbPath, gateway, chat);
         app.MapMcp("/mcp");
 
         if (Jobs.IndexInterval() > 0) jobs.StartScheduler();
@@ -227,6 +235,12 @@ public static class ArgusServer
         PlatformApi.Identify(ctx, appDbPath);
         var user = PlatformApi.CurrentUser(ctx);
 
+        if (!AppEnabled() && path.StartsWith(ApiPrefix, StringComparison.Ordinal))
+        {
+            // No app of its own: nothing answers under /api.
+            await next();
+            return;
+        }
         if (path.StartsWith(ApiPrefix, StringComparison.Ordinal) || path.StartsWith(AdminPrefix, StringComparison.Ordinal))
         {
             if (!PlatformApi.CsrfOk(ctx))

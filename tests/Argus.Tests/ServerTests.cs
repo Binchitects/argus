@@ -237,3 +237,64 @@ public sealed class ServerTests : IDisposable
         Assert.Equal("no project.path_with_namespace", missing["error"]!.GetValue<string>());
     }
 }
+
+/// <summary>ARGUS_APP=off, as the platform runs it: MCP and the operator surface, no app of its own.</summary>
+[Collection("process-state")]
+public sealed class ServerWithoutAppTests : IDisposable
+{
+    readonly TestIndex _ix = new();
+    readonly EnvScope _env = new(("ARGUS_APP", "off"), ("ARGUS_ADMIN_TOKEN", "admin-secret"),
+        ("ARGUS_ADMIN_USERNAME", "admin"), ("ARGUS_ADMIN_EMAIL", "admin@example.com"), ("ARGUS_ADMIN_PASSWORD", "a-long-password-here"),
+        ("ARGUS_ACCESS_NOTICES", "0"), ("ARGUS_AUDIT_LOG", "0"), ("ARGUS_INDEX_INTERVAL", "0"));
+    readonly WebApplication _app;
+    readonly HttpClient _http;
+
+    public ServerWithoutAppTests()
+    {
+        var repo = _ix.Repo(11, "grp/alpha");
+        Writes.UpsertAclCache(_ix.Conn, Acl.Hash("tok-alice"), 5, "alice", $"[{repo}]", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        _app = ArgusServer.Create(_ix.Config(), configure: b => b.WebHost.UseTestServer());
+        _app.StartAsync().GetAwaiter().GetResult();
+        _http = _app.GetTestClient();
+        _http.BaseAddress = new Uri("http://localhost:7700");
+    }
+
+    public void Dispose()
+    {
+        _app.StopAsync().GetAwaiter().GetResult();
+        ((IDisposable)_app).Dispose();
+        _env.Dispose();
+        _ix.Dispose();
+    }
+
+    [Fact]
+    public async Task No_app_no_api_no_accounts_but_mcp_and_the_operator_surface_answer()
+    {
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync("/")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync("/api/auth/me")).StatusCode);
+        // The admin credentials in the environment create nobody: there is no one to sign in as.
+        var appDb = Argus.Platform.AppDb.PathFor(_ix.Config().Index.DataDir);
+        if (File.Exists(appDb))
+        {
+            using var conn = Argus.Platform.AppDb.Open(appDb);
+            Assert.Equal(0, Argus.Platform.Users.Count(conn));
+        }
+
+        var init = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0", id = 1, method = "initialize",
+                @params = new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "t", version = "1" } },
+            }), Encoding.UTF8, "application/json"),
+        };
+        init.Headers.Accept.ParseAdd("application/json");
+        init.Headers.Accept.ParseAdd("text/event-stream");
+        init.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "tok-alice");
+        Assert.Equal(HttpStatusCode.OK, (await _http.SendAsync(init)).StatusCode);
+
+        var admin = new HttpRequestMessage(HttpMethod.Get, "/admin/index/status");
+        admin.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "admin-secret");
+        Assert.Equal(HttpStatusCode.OK, (await _http.SendAsync(admin)).StatusCode);
+    }
+}

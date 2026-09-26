@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Argus: the .NET code index service (index, knowledge packs, MCP, its admin
 # API) with its own React app (src/argus-web), on one port.
 #
@@ -14,7 +12,8 @@
 # so the base is pinned and the test stage turns any drift into a failed build.
 
 ARG DOTNET_TAG=10.0-noble
-ARG NODE_TAG=22-bookworm-slim
+# The web builds on the same Node image as the platform's (src/web).
+ARG NODE_TAG=22-alpine
 
 # ------------------------------------------------------------- frontend -----
 FROM node:${NODE_TAG} AS frontend
