@@ -27,11 +27,22 @@ data/
 config.local.yaml
 # Unanchored `config.yaml` is not ignored: the stack bind-mounts two committed ones.
 
+# The test GitLab's seeded credentials and its data (throwaway, but still credentials)
+scripts/test-gitlab/seeded.json
+scripts/test-gitlab/work/
+
+# Knowledge packs: built ones are hundreds of MB, published out of band. The
+# leading slash matters: a bare `packs/` would also hide source directories.
+/packs/
+.packwork/
+dist/
+
 # Editors / OS
 .vscode/
 .idea/
 *.swp
 .DS_Store
 Thumbs.db
+desktop.ini
 .claude/
 .remember/
