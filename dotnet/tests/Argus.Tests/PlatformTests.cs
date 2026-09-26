@@ -267,13 +267,36 @@ public sealed class PlatformHttpTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Login_is_rate_limited()
+    public async Task Failed_sign_ins_are_throttled_but_successful_ones_are_not()
     {
         var b = NewBrowser();
+        for (int i = 0; i < 15; i++) Assert.Equal(HttpStatusCode.OK, (await b.Send(HttpMethod.Post, "/api/auth/login", new { username = "root", password = "root-long-password" })).StatusCode);
         var codes = new List<HttpStatusCode>();
-        for (int i = 0; i < 12; i++)
+        for (int i = 0; i < 11; i++)
             codes.Add((await b.Send(HttpMethod.Post, "/api/auth/login", new { username = "root", password = "nope" })).StatusCode);
-        Assert.Contains(HttpStatusCode.TooManyRequests, codes);
+        Assert.Equal(Enumerable.Repeat(HttpStatusCode.Unauthorized, 10).Append(HttpStatusCode.TooManyRequests), codes);
+        var locked = await b.Send(HttpMethod.Post, "/api/auth/login", new { username = "root", password = "root-long-password" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, locked.StatusCode);
+        Assert.True(locked.Headers.RetryAfter is not null);
+        Assert.Contains("Too many failed sign-ins", await locked.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public void The_throttle_window_slides_and_success_clears_the_name()
+    {
+        var clock = DateTimeOffset.UnixEpoch;
+        var t = new LoginThrottle(perName: 3, perAddress: 5, window: TimeSpan.FromMinutes(10), now: () => clock);
+        for (int i = 0; i < 3; i++) t.Failed("Bob", "10.0.0.1");
+        Assert.Equal(TimeSpan.FromMinutes(10), t.RetryAfter("bob", "10.0.0.9"));
+        clock += TimeSpan.FromMinutes(4);
+        Assert.Equal(TimeSpan.FromMinutes(6), t.RetryAfter("bob", "10.0.0.9"));
+        t.Succeeded("BOB");
+        Assert.Null(t.RetryAfter("bob", "10.0.0.9"));
+        t.Failed("carol", "10.0.0.1");
+        t.Failed("dave", "10.0.0.1");
+        Assert.NotNull(t.RetryAfter("erin", "10.0.0.1"));      // five failures from one address, across names
+        clock += TimeSpan.FromMinutes(11);
+        Assert.Null(t.RetryAfter("erin", "10.0.0.1"));
     }
 
     [Fact]
@@ -410,6 +433,8 @@ public sealed class PlatformHttpTests : IAsyncLifetime
     public async Task The_app_shell_is_served_for_client_routes_but_not_for_api_paths()
     {
         var http = _app!.GetTestClient();
+        foreach (var route in new[] { "/manage/packs", "/manage/people", "/settings" })
+            Assert.Contains("<div id=root>", await (await http.GetAsync(route)).Content.ReadAsStringAsync());
         var shell = await http.GetAsync("/chat/abc");
         Assert.Equal(HttpStatusCode.OK, shell.StatusCode);
         Assert.Contains("<div id=root>", await shell.Content.ReadAsStringAsync());

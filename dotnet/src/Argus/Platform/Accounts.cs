@@ -328,3 +328,49 @@ public static class Users
         return Create(conn, username, email, password, "admin", "Administrator");
     }
 }
+
+/// <summary>
+/// Failed sign-ins, counted per name and per address over a sliding window.
+/// Only failures count, so a whole office behind one address signing in at
+/// nine o'clock is never throttled, while guessing at one account -- or many
+/// accounts from one address -- is.
+/// </summary>
+public sealed class LoginThrottle(int perName = 10, int perAddress = 50, TimeSpan? window = null, Func<DateTimeOffset>? now = null)
+{
+    readonly TimeSpan _window = window ?? TimeSpan.FromMinutes(10);
+    readonly Func<DateTimeOffset> _now = now ?? (() => DateTimeOffset.UtcNow);
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, List<DateTimeOffset>> _failures = new();
+
+    static string NameKey(string name) => "n:" + name.Trim().ToLowerInvariant();
+    static string AddressKey(string address) => "a:" + address;
+
+    TimeSpan? Over(string key, int limit)
+    {
+        if (!_failures.TryGetValue(key, out var list)) return null;
+        lock (list)
+        {
+            var cutoff = _now() - _window;
+            list.RemoveAll(t => t < cutoff);
+            return list.Count >= limit ? list[0] + _window - _now() : null;
+        }
+    }
+
+    /// <summary>How long to wait before another attempt is allowed, or null when one is.</summary>
+    public TimeSpan? RetryAfter(string name, string address)
+    {
+        var a = Over(NameKey(name), perName);
+        var b = Over(AddressKey(address), perAddress);
+        return a is null ? b : b is null ? a : (a > b ? a : b);
+    }
+
+    public void Failed(string name, string address)
+    {
+        foreach (var key in new[] { NameKey(name), AddressKey(address) })
+        {
+            var list = _failures.GetOrAdd(key, _ => []);
+            lock (list) list.Add(_now());
+        }
+    }
+
+    public void Succeeded(string name) => _failures.TryRemove(NameKey(name), out _);
+}

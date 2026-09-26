@@ -649,7 +649,7 @@ public static class Commands
         catch (EmbeddingUnavailable exc)
         {
             Err.WriteLine($"embedding failed: {exc.Message}");
-            Err.WriteLine("is ollama running, and has the model been pulled?");
+            Err.WriteLine($"is the embedding server at {Indexing.Embed.BaseUrl} running (ARGUS_EMBED_URL), and serving {Indexing.Embed.Model}?");
             return ExitPack;
         }
         Dictionary<string, string> meta;

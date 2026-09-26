@@ -125,7 +125,6 @@ public static class ArgusServer
         PlatformApi.MapWeb(app, WebRoot());
         app.Use(PlatformApi.Errors);
         app.Use(async (ctx, next) => await Authenticate(ctx, next, cfg, directory, appDbPath));
-        app.UseRateLimiter();
         app.Use(async (ctx, next) =>
         {
             if (ctx.Request.Path.StartsWithSegments("/mcp") && !TransportSecurity(ctx, hosts, origins, out var status, out var message))

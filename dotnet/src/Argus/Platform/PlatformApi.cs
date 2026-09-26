@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Threading.RateLimiting;
 using Argus.Access;
 using Argus.Configuration;
 using Argus.Server;
@@ -9,7 +8,6 @@ using Argus.Store;
 using Argus.Util;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 
@@ -27,7 +25,6 @@ public static class PlatformApi
     public const string CsrfHeader = "X-Argus-Request";
     public const string UserItem = "platform.user";
     public const string ViaItem = "platform.via";
-    public const string LoginPolicy = "login";
 
     static readonly JsonSerializerOptions JsonOut = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -58,16 +55,7 @@ public static class PlatformApi
         return null;
     }
 
-    public static void AddServices(IServiceCollection services)
-    {
-        services.AddRateLimiter(o =>
-        {
-            o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            o.AddPolicy(LoginPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
-                ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-        });
-    }
+    public static void AddServices(IServiceCollection services) => services.AddSingleton(new LoginThrottle());
 
     /// <summary>Who is calling, from the session cookie or a personal <c>ak_</c> key; recorded on the context for everything after.</summary>
     public static void Identify(HttpContext ctx, string appDbPath)
@@ -115,17 +103,28 @@ public static class PlatformApi
         var api = app.MapGroup("/api");
 
         // --- signing in --------------------------------------------------------------
-        api.MapPost("/auth/login", async (HttpContext ctx) =>
+        api.MapPost("/auth/login", async (HttpContext ctx, LoginThrottle throttle) =>
         {
             var body = await Body(ctx.Request);
             var name = Str(body, "username") ?? "";
             var password = Str(body, "password") ?? "";
+            var address = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            if (throttle.RetryAfter(name, address) is { } wait)
+            {
+                ctx.Response.Headers.RetryAfter = ((int)Math.Ceiling(wait.TotalSeconds)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return Error($"Too many failed sign-ins. Try again in {Math.Max(1, (int)Math.Ceiling(wait.TotalMinutes))} minute(s).", 429);
+            }
             using var conn = AppDb.Open(appDbPath);
             var user = await Task.Run(() => Users.CheckPassword(conn, name, password));
-            if (user is null) return Error("That username and password do not match an active account.", 401);
+            if (user is null)
+            {
+                throttle.Failed(name, address);
+                return Error("That username and password do not match an active account.", 401);
+            }
+            throttle.Succeeded(name);
             SetSessionCookie(ctx, Users.StartSession(conn, user.Id, ctx.Request.Headers.UserAgent.ToString()), Users.SessionLifetime);
             return Json(new JsonObject { ["user"] = user.ToJson(), ["endpoints"] = Endpoints(ctx) });
-        }).RequireRateLimiting(LoginPolicy);
+        });
 
         api.MapPost("/auth/logout", (HttpContext ctx) =>
         {
