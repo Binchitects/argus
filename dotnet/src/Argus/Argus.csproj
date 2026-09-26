@@ -15,7 +15,7 @@
   <ItemGroup>
     <!-- The schema is shared with the Python implementation, not copied: both
          read the same files, so the two can never migrate an index differently. -->
-    <EmbeddedResource Include="../../../src/argus/store/migrations/*.sql" LogicalName="migrations/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Migrations/*.sql" LogicalName="migrations/%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <!-- sqlite-vec, fetched by scripts/fetch-sqlite-vec.sh; copied under runtimes/<rid>/native

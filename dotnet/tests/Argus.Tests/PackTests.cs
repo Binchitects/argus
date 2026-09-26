@@ -5,7 +5,7 @@ using Argus.Packs.Sources;
 
 namespace Argus.Tests;
 
-/// <summary>Deterministic stand-in for Ollama: overlapping words point the same way.</summary>
+/// <summary>Deterministic stand-in for the embedding server: overlapping words point the same way.</summary>
 public static class FakeEmbedder
 {
     public static List<double[]> Embed(IReadOnlyList<string> texts) => texts.Select(Vector).ToList();

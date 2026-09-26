@@ -7,7 +7,6 @@ using Argus.Indexing;
 using Argus.Store;
 using Argus.Util;
 using Microsoft.Data.Sqlite;
-using YamlDotNet.RepresentationModel;
 
 namespace Argus.Access;
 
@@ -238,48 +237,19 @@ public sealed class MemberDirectory(GitLabConfig cfg, HttpClient? client = null,
 
 public static class People
 {
-    /// <summary>The sign-in username Authelia has for this email, if the users file is readable.</summary>
-    public static string? UsernameForEmail(string? usersFile, string email)
-    {
-        if (string.IsNullOrEmpty(usersFile)) return null;
-        YamlMappingNode? root;
-        try
-        {
-            var stream = new YamlStream();
-            using var reader = new StringReader(File.ReadAllText(usersFile));
-            stream.Load(reader);
-            root = stream.Documents.Count > 0 ? stream.Documents[0].RootNode as YamlMappingNode : null;
-        }
-        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException or YamlDotNet.Core.YamlException)
-        {
-            return null;
-        }
-        if (root is null) return null;
-        var addr = PyStr.Strip(email).ToLowerInvariant();
-        foreach (var (k, v) in root.Children)
-        {
-            if (k is not YamlScalarNode { Value: "users" } || v is not YamlMappingNode users) continue;
-            foreach (var (uk, uv) in users.Children)
-            {
-                if (uv is not YamlMappingNode entry) continue;
-                foreach (var (ek, ev) in entry.Children)
-                    if (ek is YamlScalarNode { Value: "email" } && ev is YamlScalarNode es
-                        && PyStr.Strip(es.Value ?? "").ToLowerInvariant() == addr)
-                        return (uk as YamlScalarNode)?.Value;
-            }
-        }
-        return null;
-    }
-
     const string CannotVerify = "Cannot verify your GitLab access right now and no recent cached " +
                                 "permission exists, so access is denied. Retry shortly.";
 
-    /// <summary>The Identity of a chat user, from membership read with the service credential.</summary>
-    public static Identity ResolvePerson(SqliteConnection conn, MemberDirectory directory, string? email, string? usersFile = null)
+    /// <summary>
+    /// The Identity of a signed-in person, from GitLab membership read with the
+    /// service credential. Matched by email, then by the GitLab username the
+    /// administrator linked to the account, if any.
+    /// </summary>
+    public static Identity ResolvePerson(SqliteConnection conn, MemberDirectory directory, string? email, string? gitlabUsername = null)
     {
         email = PyStr.Strip(email ?? "");
-        if (email.Length == 0) throw new AclDenied("The chat client did not say who is asking, so access is denied.");
-        var username = UsernameForEmail(usersFile, email);
+        if (email.Length == 0) throw new AclDenied("No email is known for this person, so access is denied.");
+        var username = string.IsNullOrWhiteSpace(gitlabUsername) ? null : gitlabUsername.Trim();
         JsonObject? user;
         try { user = directory.User(username, email); }
         catch (GitLabUnavailable exc) { throw new AclDenied(CannotVerify, exc); }
@@ -290,8 +260,8 @@ public static class People
                 $"No GitLab account matches {email} (looked up by email{also}). " +
                 "If that address is PRIVATE on the GitLab profile, only an " +
                 "administrator service token can match it -- otherwise set it as " +
-                "the profile's public email, or give the chat account the same " +
-                "username as your GitLab account.");
+                "the profile's public email, or ask an administrator to link your " +
+                "GitLab username to your account.");
         }
         if ((user["state"]?.ToString() ?? "active") != "active")
             throw new AclDenied($"The GitLab account {user["username"]} is not active.");

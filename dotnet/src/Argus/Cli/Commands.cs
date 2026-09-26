@@ -492,13 +492,80 @@ public static class Commands
 
     public static int Serve(ArgusConfig cfg, string host, int port, IReadOnlyList<string>? allowedHosts)
     {
-        var app = ArgusServer.Create(cfg, allowedHosts);
+        // HTTPS when a certificate is given (PEM, e.g. from the host's ACME client);
+        // plain HTTP otherwise, for localhost or behind the host's own proxy.
+        var cert = Environment.GetEnvironmentVariable("ARGUS_TLS_CERT") ?? "";
+        var key = Environment.GetEnvironmentVariable("ARGUS_TLS_KEY") ?? "";
+        var tls = cert.Length > 0 && key.Length > 0;
+        var app = ArgusServer.Create(cfg, allowedHosts, configure: tls
+            ? b => b.WebHost.ConfigureKestrel(k => k.ConfigureHttpsDefaults(h =>
+                h.ServerCertificate = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(cert, key)))
+            : null);
         var address = host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
-        app.Urls.Add($"http://{address}:{port}");
-        Out.WriteLine($"argus serving MCP on http://{address}:{port}/mcp");
+        var scheme = tls ? "https" : "http";
+        app.Urls.Add($"{scheme}://{address}:{port}");
+        Out.WriteLine($"argus serving the app on {scheme}://{address}:{port}/ and MCP on {scheme}://{address}:{port}/mcp");
         Out.Flush();
         app.Run();
         return 0;
+    }
+
+    // --- people -------------------------------------------------------------------------
+
+    /// <summary><c>argus user add|list|passwd|role|disable|enable</c>: accounts, for when the web app is not reachable yet.</summary>
+    public static int UserCommand(ArgusConfig cfg, string action, Parsed a)
+    {
+        using var conn = Platform.AppDb.Open(Platform.AppDb.PathFor(cfg.Index.DataDir));
+        try
+        {
+            switch (action)
+            {
+                case "list":
+                    foreach (var u in Platform.Users.List(conn))
+                        Out.WriteLine($"{u.Username,-24} {u.Email,-32} {u.Role,-6}{(u.Disabled ? " disabled" : "")}");
+                    return 0;
+                case "add":
+                {
+                    var password = a.Get("password") ?? "";
+                    var generated = password.Length == 0;
+                    if (generated) password = Platform.Passwords.Generate();
+                    var user = Platform.Users.Create(conn, a.Pos("username")!, a.Req("email"), password,
+                        a.Flag("admin") ? "admin" : "user", a.Get("name") ?? "", a.Get("gitlab"));
+                    Out.WriteLine($"created {user.Username} ({user.Role})");
+                    if (generated) Out.WriteLine($"password: {password}");
+                    return 0;
+                }
+                case "passwd":
+                {
+                    var user = Platform.Users.Find(conn, a.Pos("username")!) ?? throw new Platform.AccountError("No such person.");
+                    var password = a.Get("password") ?? "";
+                    var generated = password.Length == 0;
+                    if (generated) password = Platform.Passwords.Generate();
+                    Platform.Users.SetPassword(conn, user.Id, password);
+                    Out.WriteLine($"password changed for {user.Username}; their sessions have ended");
+                    if (generated) Out.WriteLine($"password: {password}");
+                    return 0;
+                }
+                case "role":
+                {
+                    var user = Platform.Users.Find(conn, a.Pos("username")!) ?? throw new Platform.AccountError("No such person.");
+                    Out.WriteLine($"{Platform.Users.Update(conn, user.Id, role: a.Pos("role")!).Username} is now {a.Pos("role")!}");
+                    return 0;
+                }
+                default:
+                {
+                    var user = Platform.Users.Find(conn, a.Pos("username")!) ?? throw new Platform.AccountError("No such person.");
+                    Platform.Users.Update(conn, user.Id, disabled: action == "disable");
+                    Out.WriteLine($"{user.Username} {action}d");
+                    return 0;
+                }
+            }
+        }
+        catch (Platform.AccountError exc)
+        {
+            Err.WriteLine($"user error: {exc.Message}");
+            return 2;
+        }
     }
 
     public static int ServeStdio(ArgusConfig cfg)

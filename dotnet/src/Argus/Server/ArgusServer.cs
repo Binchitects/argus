@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using Argus.Access;
 using Argus.Configuration;
 using Argus.Packs;
+using Argus.Platform;
 using Argus.Store;
 using Argus.Util;
 using ModelContextProtocol.AspNetCore;
@@ -30,19 +31,18 @@ public sealed class ArgusPrincipal : ClaimsPrincipal
 }
 
 /// <summary>
-/// The Argus HTTP surface (argus/mcpsrv/server.py): the MCP endpoint behind
-/// per-caller bearer authentication, the DNS-rebinding guard, /healthz, the
-/// operator surface under /admin/ (gated by ARGUS_ADMIN_TOKEN), the GitLab push
-/// webhook (gated by ARGUS_WEBHOOK_TOKEN), and the in-process index scheduler.
+/// The whole backend on one port: the React app, its API under /api (signed-in
+/// people, chat, administration), the MCP endpoint behind per-caller bearer
+/// authentication and the DNS-rebinding guard, /healthz, the code index's
+/// operator surface under /admin/ (an administrator's session, or
+/// ARGUS_ADMIN_TOKEN for scripts), the GitLab push webhook (gated by
+/// ARGUS_WEBHOOK_TOKEN), and the in-process index scheduler.
 /// </summary>
 public static class ArgusServer
 {
     public const string HealthzPath = "/healthz";
     public const string AdminPrefix = "/admin/";
-    public const string ChatTokenEnv = "ARGUS_CHAT_CLIENT_TOKEN";
-    public const string ChatEmailHeader = "x-openwebui-user-email";
-    public const string UsersFileEnv = "ARGUS_AUTHELIA_USERS_FILE";
-    static readonly string[] ProxyHeaders = ["x-forwarded-for", "x-forwarded-host", "x-real-ip"];
+    public const string ApiPrefix = "/api/";
     public const string AdminTokenEnv = "ARGUS_ADMIN_TOKEN";
     public const string WebhookPath = "/hook/gitlab";
     public const string WebhookTokenEnv = "ARGUS_WEBHOOK_TOKEN";
@@ -81,9 +81,20 @@ public static class ArgusServer
         Action<WebApplicationBuilder>? configure = null)
     {
         using (var conn = Db.Connect(cfg.Index.DbPath)) Db.Migrate(conn);
+        var appDbPath = AppDb.PathFor(cfg.Index.DataDir);
+        using (var conn = AppDb.Open(appDbPath))
+            if (Users.Bootstrap(conn) is { } admin) Console.WriteLine($"created the first administrator, {admin.Username}");
 
         var tools = new Tools(cfg);
         var jobs = new Jobs(cfg);
+        var gateway = Gateway.FromEnvironment();
+        var directory = new Lazy<MemberDirectory>(() => new MemberDirectory(cfg.GitLab));
+        Identity IdentityFor(AppUser user)
+        {
+            using var conn = Db.Connect(cfg.Index.DbPath);
+            return People.ResolvePerson(conn, directory.Value, user.Email, user.GitlabUsername);
+        }
+        var chat = new ChatService(tools, gateway, IdentityFor, appDbPath);
         var builder = WebApplication.CreateSlimBuilder(args ?? []);
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole(o => o.SingleLine = true);
@@ -91,6 +102,7 @@ public static class ArgusServer
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddSingleton(tools);
         builder.Services.AddSingleton(jobs);
+        PlatformApi.AddServices(builder.Services);
         builder.Services
             .AddMcpServer(o =>
             {
@@ -110,8 +122,10 @@ public static class ArgusServer
             ? hosts.SelectMany(h => new[] { $"http://{h}", $"https://{h}" }).ToList()
             : hosts.Select(h => $"http://{h}").ToList();
 
-        var directory = new Lazy<MemberDirectory>(() => new MemberDirectory(cfg.GitLab));
-        app.Use(async (ctx, next) => await Authenticate(ctx, next, cfg, directory));
+        PlatformApi.MapWeb(app, WebRoot());
+        app.Use(PlatformApi.Errors);
+        app.Use(async (ctx, next) => await Authenticate(ctx, next, cfg, directory, appDbPath));
+        app.UseRateLimiter();
         app.Use(async (ctx, next) =>
         {
             if (ctx.Request.Path.StartsWithSegments("/mcp") && !TransportSecurity(ctx, hosts, origins, out var status, out var message))
@@ -124,8 +138,9 @@ public static class ArgusServer
         });
 
         app.MapGet(HealthzPath, () => Json(new JsonObject { ["status"] = "ok" }));
-        if (AdminEnabled()) MapAdmin(app, cfg, jobs);
+        MapAdmin(app, cfg, jobs);
         if (WebhookEnabled()) MapWebhook(app, jobs);
+        PlatformApi.Map(app, cfg, appDbPath, gateway, chat);
         app.MapMcp("/mcp");
 
         if (Jobs.IndexInterval() > 0) jobs.StartScheduler();
@@ -193,39 +208,63 @@ public static class ArgusServer
         AuditLog.Denied(reason, path, detail);
     }
 
-    static async Task Authenticate(HttpContext ctx, Func<Task> next, ArgusConfig cfg, Lazy<MemberDirectory> directory)
+    /// <summary><c>ARGUS_WEB_ROOT</c>, or the <c>wwwroot</c> published beside the binary.</summary>
+    static string WebRoot() =>
+        Environment.GetEnvironmentVariable("ARGUS_WEB_ROOT") is { Length: > 0 } w ? w : Path.Combine(AppContext.BaseDirectory, "wwwroot");
+
+    static async Task Authenticate(HttpContext ctx, Func<Task> next, ArgusConfig cfg, Lazy<MemberDirectory> directory, string appDbPath)
     {
         var path = ctx.Request.Path.Value ?? "";
-        if (path == HealthzPath || (AdminEnabled() && path.StartsWith(AdminPrefix, StringComparison.Ordinal))
-            || (WebhookEnabled() && path == WebhookPath))
+        PlatformApi.Identify(ctx, appDbPath);
+        var user = PlatformApi.CurrentUser(ctx);
+
+        if (path.StartsWith(ApiPrefix, StringComparison.Ordinal) || path.StartsWith(AdminPrefix, StringComparison.Ordinal))
         {
+            if (!PlatformApi.CsrfOk(ctx))
+            {
+                ctx.Response.StatusCode = 403;
+                await ctx.Response.WriteAsJsonAsync(new { error = $"A change made from the browser must carry the {PlatformApi.CsrfHeader} header." });
+                return;
+            }
+            // Signing in needs no account; the operator surface authorises itself (a session or its token).
+            if (path.StartsWith(ApiPrefix, StringComparison.Ordinal) && !path.StartsWith("/api/auth/", StringComparison.Ordinal) && user is null)
+            {
+                ctx.Response.StatusCode = 401;
+                await ctx.Response.WriteAsJsonAsync(new { error = "Sign in first." });
+                return;
+            }
             await next();
             return;
         }
-        var token = ExtractBearer(ctx.Request.Headers.Authorization.ToString());
-        if (token is null)
+        if (!ctx.Request.Path.StartsWithSegments("/mcp"))
         {
-            AuditDenied(cfg, "missing_token", path);
-            await Unauthorized(ctx, "Missing or malformed Authorization header. Expected 'Authorization: Bearer <token>'.");
+            // The app, /healthz and the webhook: public, or authorised by their own handler.
+            await next();
             return;
         }
+
         Identity identity;
         try
         {
-            var chat = Environment.GetEnvironmentVariable(ChatTokenEnv) ?? "";
-            if (chat.Length > 0 && SecretEquals(token, chat))
+            if (user is not null && ctx.Items[PlatformApi.ViaItem] as string == "key")
             {
-                if (ProxyHeaders.Any(h => ctx.Request.Headers.ContainsKey(h)))
-                    throw new AclDenied("The chat-client credential is accepted only from inside the stack's network, not through the proxy.");
-                var email = ctx.Request.Headers[ChatEmailHeader].ToString();
                 identity = await Task.Run(() =>
                 {
                     using var conn = Db.Connect(cfg.Index.DbPath);
-                    return People.ResolvePerson(conn, directory.Value, email, Environment.GetEnvironmentVariable(UsersFileEnv));
+                    return People.ResolvePerson(conn, directory.Value, user.Email, user.GitlabUsername);
                 });
             }
             else
             {
+                var token = ExtractBearer(ctx.Request.Headers.Authorization.ToString());
+                if (token is null)
+                {
+                    AuditDenied(cfg, "missing_token", path);
+                    await Unauthorized(ctx, "Missing or malformed Authorization header. Expected 'Authorization: Bearer <token>'.");
+                    return;
+                }
+                if (token.StartsWith(Users.ApiKeyPrefix, StringComparison.Ordinal))
+                    throw new AclDenied("That key is not valid, or its account is disabled.");
                 identity = await Task.Run(() =>
                 {
                     using var conn = Db.Connect(cfg.Index.DbPath);
@@ -277,6 +316,8 @@ public static class ArgusServer
 
     static bool Authorised(HttpRequest request)
     {
+        if (PlatformApi.CurrentUser(request.HttpContext) is { IsAdmin: true }) return true;
+        if (!AdminEnabled()) return false;
         var supplied = request.Headers["x-argus-admin-token"].ToString();
         if (supplied.Length == 0) supplied = ExtractBearer(request.Headers.Authorization.ToString()) ?? "";
         return supplied.Length > 0 && SecretEquals(supplied, AdminToken());

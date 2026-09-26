@@ -11,9 +11,11 @@ public static class Program
     const string Prog = "argus";
 
     static readonly string[] Commands_ =
-        ["embed", "index", "backup", "kpi", "status", "verify", "resolve", "serve", "flush-acl", "pack", "healthcheck"];
+        ["embed", "index", "backup", "kpi", "status", "verify", "resolve", "serve", "flush-acl", "pack", "user", "healthcheck"];
 
     static readonly string[] PackCommands = ["build", "list", "install", "info", "remove", "update", "index"];
+
+    static readonly string[] UserCommands = ["add", "list", "passwd", "role", "disable", "enable"];
 
     static ArgSpec Where(ArgSpec spec) =>
         spec.Opt("--config", "Read packs.dir from this config").Opt("--packs-dir", "Directory holding installed packs");
@@ -43,6 +45,16 @@ public static class Program
             .Opt("--host", $"Bind address (default: {Cli.Commands.DefaultServeHost})")
             .Opt("--port", $"Bind port (default: {Cli.Commands.DefaultServePort})")
             .Many("--allowed-host", "Host header value the DNS-rebinding check will accept on /mcp (repeatable).", dest: "allowed_hosts", metavar: "HOST"),
+        "user add" => new ArgSpec($"{Prog} user add").Opt("--config", required: true).Positional("username")
+            .Opt("--email", "Their email; the code index matches it to a GitLab account", required: true)
+            .Opt("--name", "Display name").Opt("--gitlab", "Their GitLab username, when the email does not match")
+            .Opt("--password", "Initial password (default: generate and print one)").Flag("--admin", "Make them an administrator"),
+        "user list" => new ArgSpec($"{Prog} user list").Opt("--config", required: true),
+        "user passwd" => new ArgSpec($"{Prog} user passwd").Opt("--config", required: true).Positional("username")
+            .Opt("--password", "New password (default: generate and print one)"),
+        "user role" => new ArgSpec($"{Prog} user role").Opt("--config", required: true).Positional("username").Positional("role", help: "admin or user"),
+        "user disable" => new ArgSpec($"{Prog} user disable").Opt("--config", required: true).Positional("username"),
+        "user enable" => new ArgSpec($"{Prog} user enable").Opt("--config", required: true).Positional("username"),
         "healthcheck" => new ArgSpec($"{Prog} healthcheck").Opt("--url", "Health endpoint (default: http://127.0.0.1:7700/healthz)"),
         "flush-acl" => new ArgSpec($"{Prog} flush-acl").Opt("--config", required: true).Opt("--user", "Only clear this GitLab username's cache entries"),
         "pack build" => new ArgSpec($"{Prog} pack build")
@@ -103,6 +115,15 @@ public static class Program
                 if (!PackCommands.Contains(rest[0]))
                     throw new UsageError($"argument pack_command: invalid choice: '{rest[0]}' (choose from {string.Join(", ", PackCommands.Select(c => $"'{c}'"))})");
                 command = $"pack {rest[0]}";
+                rest = rest.Skip(1).ToList();
+            }
+            if (command == "user")
+            {
+                if (rest.Count == 0) throw new UsageError("the following arguments are required: user_command");
+                if (rest[0] is "-h" or "--help") throw new HelpRequested($"usage: {Prog} user [-h] {{{string.Join(",", UserCommands)}}} ...");
+                if (!UserCommands.Contains(rest[0]))
+                    throw new UsageError($"argument user_command: invalid choice: '{rest[0]}' (choose from {string.Join(", ", UserCommands.Select(c => $"'{c}'"))})");
+                command = $"user {rest[0]}";
                 rest = rest.Skip(1).ToList();
             }
             spec = SpecFor(command);
@@ -190,6 +211,8 @@ public static class Program
                     return Cli.Commands.Backup(cfg, a.Req("out"), a.Get("config"));
                 case "resolve":
                     return Cli.Commands.ResolveCommand(cfg);
+                case var u when u.StartsWith("user ", StringComparison.Ordinal):
+                    return Cli.Commands.UserCommand(cfg, u["user ".Length..], a);
                 default:
                     return Cli.Commands.Status(cfg);
             }

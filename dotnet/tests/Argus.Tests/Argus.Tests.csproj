@@ -17,8 +17,8 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
-    <!-- The Python suite's fixtures, shared rather than copied. -->
-    <None Include="../../../tests/fixtures/**/*" Link="fixtures/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="../../../tests/packs/fixtures/**/*" Link="packfixtures/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Test inputs: a ctags corpus and the documentation fixtures packs are built from. -->
+    <None Include="../fixtures/ctags/**/*" Link="fixtures/ctags/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../fixtures/packs/**/*" Link="packfixtures/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
