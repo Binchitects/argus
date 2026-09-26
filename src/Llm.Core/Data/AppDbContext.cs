@@ -121,6 +121,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.File).HasMaxLength(1000);
             e.Property(m => m.Projector).HasMaxLength(1000);
             e.Property(m => m.KvType).HasMaxLength(20);
+            e.Property(m => m.Placement).HasMaxLength(10).HasDefaultValue("auto");
+            e.Property(m => m.DraftHead).HasMaxLength(1000);
+            e.Property(m => m.DraftMax).HasDefaultValue(3);
             e.Property(m => m.ExtraPreset).HasMaxLength(4000);
         });
         builder.Entity<ModelAccess>(e =>

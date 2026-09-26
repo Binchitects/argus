@@ -294,10 +294,36 @@ public static class IdentityWiring
                 o.Enabled = profiles.Split(',', StringSplitOptions.TrimEntries).Contains("llamacpp", StringComparer.OrdinalIgnoreCase);
             }
             o.DefaultModel ??= config["Stack:ModelName"];
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            if (int.TryParse(config["StackEnv:LLAMACPP_THREADS"], inv, out var threads) && threads > 0)
+            {
+                o.Threads = threads;
+            }
+            if (double.TryParse(config["StackEnv:LLAMACPP_RAM_RESERVE_GB"], System.Globalization.NumberStyles.Float, inv, out var ram) && ram >= 0)
+            {
+                o.RamReserveBytes = (long)(ram * (1L << 30));
+            }
+            var image = (config["Stack:ComposeProfiles"] ?? "").Split(',', StringSplitOptions.TrimEntries).Contains("image", StringComparer.OrdinalIgnoreCase);
+            if (image && double.TryParse(config["StackEnv:IMAGEGEN_MAX_VRAM"] ?? "2", System.Globalization.NumberStyles.Float, inv, out var vram) && vram > 0)
+            {
+                o.ImageReserveBytes = (long)(vram * (1L << 30));
+            }
+            // Host paths, as .env has them: what of them is inside the library.
+            static string? Inside(string? library, string? path) =>
+                library is { Length: > 0 } && path is { Length: > 0 } && (path.TrimEnd('/') + "/").StartsWith(library.TrimEnd('/') + "/", StringComparison.Ordinal)
+                    ? System.IO.Path.GetRelativePath(library, path).Replace('\\', '/') : null;
+            var library = config["StackEnv:LLAMACPP_LIBRARY_DIR"];
+            o.ImageModelDir ??= Inside(library, config["StackEnv:IMAGEGEN_MODEL_DIR"]);
+            o.ImageTextEncoder ??= config["StackEnv:IMAGEGEN_TEXT_ENCODER"];
+            if (Inside(library, config["StackEnv:LLAMACPP_MODEL_DIR"]) is { } modelDir && config["StackEnv:LLAMACPP_MODEL_FILE"] is { Length: > 0 } modelFile)
+            {
+                o.DefaultModelFile ??= modelDir == "." ? modelFile : modelDir + "/" + modelFile;
+            }
         });
         services.AddHttpClient<Models.EngineClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddSingleton<Models.EngineState>();
         services.AddSingleton<Models.ModelLibrary>();
+        services.AddSingleton<Models.HardwareProbe>();
         services.AddScoped<Models.ModelCatalog>();
         services.AddScoped<Models.ModelPolicy>();
         services.AddScoped<Models.KeyAccess>();

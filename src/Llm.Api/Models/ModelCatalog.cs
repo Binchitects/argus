@@ -40,7 +40,7 @@ public sealed class EngineState
 /// (config/engine/active), Prometheus's scrape targets (config/engine/targets.json),
 /// and keeps the gateway's list in step.
 /// </summary>
-public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ChatModels chatModels, ILogger<ModelCatalog> logger)
+public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
     public const string ActiveFile = "active";
@@ -52,9 +52,33 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     private static readonly HashSet<string> Reserved = new(StringComparer.Ordinal)
     {
         "model", "hf-repo", "hf-file", "hf", "model-url", "mmproj", "mmproj-url", "host", "port", "api-key", "api-key-file", "alias",
-        "path", "ssl-key-file", "ssl-cert-file", "models-dir", "models-preset", "models-max", "models-autoload", "webui", "log-file",
-        "slot-save-path", "lora", "control-vector", "model-draft", "chat-template-file", "grammar-file", "json-schema-file",
+        "path", "ssl-key-file", "ssl-cert-file", "models-dir", "models-preset", "models-max", "models-autoload", "no-models-autoload", "webui", "no-webui",
+        "log-file", "slot-save-path", "lora", "lora-scaled", "control-vector", "control-vector-scaled", "model-draft", "spec-draft-model", "hf-repo-draft",
+        "chat-template-file", "grammar-file", "json-schema-file", "media-path", "mcp-servers-config", "log-prompts-dir", "lookup-cache-static",
+        "lookup-cache-dynamic", "docker-repo", "hf-token", "help", "version", "completion-bash", "list-devices", "cache-list", "offline",
     };
+
+    /// <summary>Preset keys the form sets: a second value in the extra lines would be ambiguous.</summary>
+    private static readonly HashSet<string> Managed = new(StringComparer.Ordinal)
+    {
+        "ctx-size", "n-gpu-layers", "gpu-layers", "n-cpu-moe", "cpu-moe", "cache-type-k", "cache-type-v", "parallel", "jinja", "metrics", "kv-unified", "no-kv-unified",
+        "threads", "ubatch-size", "batch-size", "fit", "rope-scaling", "rope-scale", "yarn-orig-ctx", "spec-type", "spec-draft-n-max", "draft-max", "draft-n",
+        "temp", "temperature", "top-p", "top-k", "min-p", "presence-penalty", "embedding", "embeddings", "pooling", "rerank", "reranking",
+    };
+
+    /// <summary>
+    /// The engine's option names (llama.cpp build 10902, Models/engine-options.txt). A preset key
+    /// outside them stops the whole engine, not one model, so none gets through.
+    /// </summary>
+    public static readonly IReadOnlySet<string> EngineOptionNames = LoadOptionNames();
+
+    private static HashSet<string> LoadOptionNames()
+    {
+        using var stream = typeof(ModelCatalog).Assembly.GetManifestResourceStream("engine-options.txt")
+            ?? throw new InvalidOperationException("engine-options.txt is not embedded");
+        using var reader = new StreamReader(stream);
+        return [.. reader.ReadToEnd().Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#'))];
+    }
 
     private string Dir => options.Value.ConfigDir;
 
@@ -65,6 +89,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// <summary>Why these extra preset lines cannot be used, or null.</summary>
     public static string? CheckExtra(string? extra)
     {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var raw in (extra ?? "").Split('\n'))
         {
             var line = raw.Trim();
@@ -77,35 +102,110 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             {
                 return $"\"{line}\" is not a preset line: write key = value, with llama-server's long option names (e.g. flash-attn = on).";
             }
-            if (Reserved.Contains(m.Groups[1].Value))
+            var key = m.Groups[1].Value;
+            if (Reserved.Contains(key))
             {
-                return $"{m.Groups[1].Value} is set by the Models page or the engine, not in extra lines.";
+                return $"{key} is set by the engine or reaches outside the model library: it cannot be set here.";
+            }
+            if (Managed.Contains(key))
+            {
+                return $"{key} is set by the form above: change it there.";
+            }
+            if (!EngineOptionNames.Contains(key))
+            {
+                return $"{key} is not an option of this engine's llama-server: a preset with it would stop the engine. Check the name (llama-server --help).";
+            }
+            if (!seen.Add(key))
+            {
+                return $"{key} is there twice.";
             }
         }
         return null;
     }
 
-    /// <summary>A model's section of the engine's presets.</summary>
-    public static string Preset(LocalModel m, string library)
+    /// <summary>A model's section of the engine's presets: the settings of its kind, and only what the engine should not decide itself.</summary>
+    public static string Preset(LocalModel m, string library, int? threads = null, ModelProfile? profile = null)
     {
         var sb = new StringBuilder();
         var inv = CultureInfo.InvariantCulture;
+        var root = library.TrimEnd('/');
         sb.Append('[').Append(m.Name).Append("]\n");
-        sb.Append("model = ").Append(library.TrimEnd('/')).Append('/').Append(m.File).Append('\n');
+        sb.Append("model = ").Append(root).Append('/').Append(m.File).Append('\n');
         if (m.Projector is { Length: > 0 } p)
         {
-            sb.Append("mmproj = ").Append(library.TrimEnd('/')).Append('/').Append(p).Append('\n');
+            sb.Append("mmproj = ").Append(root).Append('/').Append(p).Append('\n');
         }
-        sb.Append(inv, $"ctx-size = {m.Context}\n");
-        sb.Append(inv, $"n-gpu-layers = {m.GpuLayers}\n");
-        sb.Append(inv, $"n-cpu-moe = {m.CpuMoe}\n");
+        // One cache for the answers in parallel: a conversation can use all of it.
+        sb.Append(inv, $"ctx-size = {m.Context}\nparallel = {m.Parallel}\nkv-unified = true\n");
         sb.Append(inv, $"cache-type-k = {m.KvType}\ncache-type-v = {m.KvType}\n");
-        sb.Append(inv, $"parallel = {m.Parallel}\n");
+        if (m.Placement == "manual")
+        {
+            sb.Append(inv, $"n-gpu-layers = {m.GpuLayers}\n");
+            if (m.CpuMoe > 0)
+            {
+                sb.Append(inv, $"n-cpu-moe = {m.CpuMoe}\n");
+            }
+        }
+        else
+        {
+            // llama.cpp fits the layers and experts to the GPU memory free when it loads.
+            sb.Append("fit = on\n");
+        }
+        if (threads is > 0)
+        {
+            sb.Append(inv, $"threads = {threads}\n");
+        }
+        if (m.Ubatch is { } u)
+        {
+            sb.Append(inv, $"ubatch-size = {u}\n");
+            if (u > 2048)
+            {
+                sb.Append(inv, $"batch-size = {u}\n");
+            }
+        }
+        if (m.Mtp)
+        {
+            if (m.DraftHead is { Length: > 0 } head)
+            {
+                sb.Append("model-draft = ").Append(root).Append('/').Append(head).Append('\n');
+            }
+            sb.Append(inv, $"spec-type = draft-mtp\nspec-draft-n-max = {m.DraftMax}\n");
+        }
+        if (m.Yarn && profile?.TrainedContext is { } trained && trained > 0 && m.Context > trained)
+        {
+            sb.Append(inv, $"rope-scaling = yarn\nrope-scale = {Math.Ceiling(m.Context * 100.0 / trained) / 100:0.##}\nyarn-orig-ctx = {trained}\n");
+        }
+        if (m.Temperature is { } temp)
+        {
+            sb.Append(inv, $"temp = {temp:0.###}\n");
+        }
+        if (m.TopP is { } topP)
+        {
+            sb.Append(inv, $"top-p = {topP:0.###}\n");
+        }
+        if (m.TopK is { } topK)
+        {
+            sb.Append(inv, $"top-k = {topK}\n");
+        }
+        if (m.MinP is { } minP)
+        {
+            sb.Append(inv, $"min-p = {minP:0.###}\n");
+        }
+        if (m.PresencePenalty is { } presence)
+        {
+            sb.Append(inv, $"presence-penalty = {presence:0.###}\n");
+        }
         sb.Append("jinja = true\nmetrics = true\n");
         foreach (var raw in (m.ExtraPreset ?? "").Split('\n'))
         {
             var line = raw.Trim();
-            if (line.Length > 0 && !line.StartsWith('#') && !line.StartsWith(';'))
+            if (line.Length == 0 || line.StartsWith('#') || line.StartsWith(';'))
+            {
+                continue;
+            }
+            // Saved before a key was checked: only what the engine knows, and never what the form sets.
+            var key = PresetLine().Match(line) is { Success: true } k ? k.Groups[1].Value : null;
+            if (key is not null && !Reserved.Contains(key) && !Managed.Contains(key) && EngineOptionNames.Contains(key))
             {
                 sb.Append(line).Append('\n');
             }
@@ -117,8 +217,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     public async Task WritePresetsAsync(CancellationToken ct = default)
     {
         var models = await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct);
+        var profiles = models.Any(m => m.Yarn) ? library.List().ToDictionary(e => e.File.Path, e => e.Profile, StringComparer.Ordinal) : [];
         var text = "# Written by the app (Admin -> Models). The engine restarts when this changes.\n\n" +
-            string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir)));
+            string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File))));
         Write(PresetsFile, text);
     }
 
@@ -155,7 +256,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             var m = w.Model;
             var info = new JsonObject
             {
-                ["mode"] = "chat", ["max_input_tokens"] = m.Context, ["max_output_tokens"] = m.MaxOutput ?? Math.Min(m.Context, 32768),
+                ["mode"] = "chat", ["max_input_tokens"] = m.Context, ["max_output_tokens"] = m.MaxOutput ?? DefaultMaxOutput(m.Context),
                 ["max_tokens"] = m.Context, ["supports_vision"] = m.Projector is { Length: > 0 },
                 ["supports_function_calling"] = m.Tools, ["supports_reasoning"] = m.Thinking,
             };
@@ -173,6 +274,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         }
         chatModels.Forget();
     }
+
+    /// <summary>The longest answer when none is set: half the context, at most 32,768 tokens.</summary>
+    public static int DefaultMaxOutput(int context) => Math.Max(ModelAdvisor.MinOutput, Math.Min(32768, context / 2 / 1024 * 1024));
 
     private static string Fingerprint(LocalModel m) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', m.Context, m.MaxOutput, m.Projector, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok))))[..16];

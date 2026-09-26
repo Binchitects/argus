@@ -10,6 +10,9 @@
 #     restarts it here (a few seconds, then the model loads again).
 #   - At start it loads the model the app chose last (/presets/active), else
 #     the default. The app keeps it loaded from then on.
+#   - A model list llama-server refuses (an option it does not know stops the
+#     whole router) does not stop the default model: it runs alone until the
+#     app writes the list again.
 #
 # Router-level command-line arguments would override every model's preset,
 # so everything about a model lives in its preset section.
@@ -115,11 +118,20 @@ app_presets() {
 stamp() { stat -c %Y "$extra" 2>/dev/null || echo none; }
 
 pid=
+# The stamp of a models.ini llama-server refused (an option it does not know stops
+# the whole router): until the app writes it again, the default model runs alone.
+refused=
 trap 'if [ -n "$pid" ]; then kill -TERM "$pid" 2>/dev/null; wait "$pid"; fi; exit 0' TERM INT
 
 while true; do
-  { default_preset; echo; app_presets; } > "$presets"
   seen=$(stamp)
+  if [ "$seen" = "$refused" ]; then
+    default_preset > "$presets"
+    echo "router: serving $name alone until the app's model list changes (it was refused, above)"
+  else
+    { default_preset; echo; app_presets; } > "$presets"
+  fi
+  started=$(date +%s)
   echo "router: $(grep -c '^\[' "$presets") model(s): $(grep '^\[' "$presets" | tr -d '[]' | tr '\n' ' ')"
   "$bin" --models-preset "$presets" --models-max "${LLAMACPP_MODELS_MAX:-1}" --no-models-autoload \
     --host 0.0.0.0 --port 8080 --api-key "$key" &
@@ -145,6 +157,11 @@ while true; do
   done
   if [ $restart = 0 ]; then
     wait "$pid"; code=$?
+    if [ "$code" -ne 0 ] && [ $(( $(date +%s) - started )) -lt 30 ] && [ "$seen" != "$refused" ] && grep -q '^\[' "$extra" 2>/dev/null; then
+      echo "router: llama-server refused the app's model list ($code); starting again without it"
+      refused=$seen
+      continue
+    fi
     echo "router: llama-server exited ($code)"
     exit "$code"
   fi

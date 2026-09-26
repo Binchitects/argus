@@ -17,14 +17,25 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
-    /// <summary>Its own app, database and engine files, with a library of real (small) GGUF files.</summary>
+    /// <summary>Its own app, database and engine files, with a library of real (small) GGUF files of every kind.</summary>
     private (WebApplicationFactory<Program> App, FakeGateway Gateway) NewApp()
     {
-        GgufFile.Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"), "qwen3", "Tiny", "4B", 40960, padding: 1000);
-        GgufFile.Write(Path.Combine(Library, "tiny", "mmproj-Tiny-F16.gguf"), "clip", "Tiny vision");
-        GgufFile.Write(Path.Combine(Library, "image", "flux-2-klein-4b-Q4_0.gguf"), "flux");
-        GgufFile.Write(Path.Combine(Library, "big", "Big-00001-of-00002.gguf"), "qwen3moe", "Big", "80B", 262144, padding: 10);
-        File.WriteAllBytes(Path.Combine(Library, "big", "Big-00002-of-00002.gguf"), new byte[5000]);
+        GgufFile.Language("qwen3", name: "Tiny", context: 40960).Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"));
+        new GgufFile().Text("general.architecture", "clip").Bool("clip.has_vision_encoder", true).U32("clip.vision.projection_dim", 64)
+            .Tensor("v.blk.0.attn_q.weight", 2048).Write(Path.Combine(Library, "tiny", "mmproj-Tiny-F16.gguf"));
+        new GgufFile().Text("general.architecture", "clip").Bool("clip.has_vision_encoder", true).U32("clip.vision.projection_dim", 4096)
+            .Tensor("v.blk.0.attn_q.weight", 2048).Write(Path.Combine(Library, "other", "mmproj-Other-F16.gguf"));
+        new GgufFile().Tensor("double_blocks.0.img_attn.qkv.weight", 4096).Write(Path.Combine(Library, "image", "flux-2-klein-4b-Q4_0.gguf"));
+        GgufFile.Language("qwen3moe", name: "Big", context: 262144, experts: 8, used: 2, expertBytes: 8192).Write(Path.Combine(Library, "big", "Big-00001-of-00002.gguf"));
+        new GgufFile().U32("split.no", 1).Tensor("blk.3.ffn_down_exps.weight", 8192, 64, 16, 8).Write(Path.Combine(Library, "big", "Big-00002-of-00002.gguf"));
+        new GgufFile().Text("general.architecture", "qwen3moe").Bool("qwen3moe.nextn_shared_target_tensors", true).U32("qwen3moe.block_count", 5)
+            .U32("qwen3moe.nextn_predict_layers", 1).U32("qwen3moe.embedding_length", 64).Strings("tokenizer.ggml.tokens", 64)
+            .Tensor("blk.4.nextn.eh_proj.weight", 2048).Write(Path.Combine(Library, "big", "mtp-Big-Q8_0.gguf"));
+        new GgufFile().Text("general.architecture", "nomic-bert").U32("nomic-bert.pooling_type", 1).U32("nomic-bert.context_length", 2048)
+            .Tensor("token_embd.weight", 4096).Write(Path.Combine(Library, "embed", "nomic-embed-text-v1.5.f16.gguf"));
+        GgufFile.Language("llama", name: "Plain", template: "{% for m in messages %}{{ m.content }}{% endfor %}", headSize: 72)
+            .Write(Path.Combine(Library, "plain", "Plain-Q8_0.gguf"));
+        GgufFile.Language("qwen3", name: "Part").Write(Path.Combine(Library, "part", "Part-00001-of-00003.gguf"));
         Directory.CreateDirectory(Config);
         app.Engine.Reset(Path.Combine(Config, "models.ini"));
         var gateway = new FakeGateway();
@@ -32,6 +43,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         var f = app.Create(app.ConnectionStringFor("models_" + Guid.NewGuid().ToString("N")[..8]), gateway, new Dictionary<string, string?>
         {
             ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = Config, ["Engine:LibraryDir"] = Library,
+            ["StackEnv:LLAMACPP_THREADS"] = "12",
         });
         return (f, gateway);
     }
@@ -45,7 +57,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
     private static readonly object Tiny = new
     {
         name = "tiny-b", file = "tiny/Tiny-4B-Q4_K_M.gguf", projector = "tiny/mmproj-Tiny-F16.gguf", context = 16384, maxOutput = 4096,
-        gpuLayers = 99, cpuMoe = 0, kvType = "q8_0", parallel = 2, extraPreset = "flash-attn = on\n# a note\nubatch-size = 512", inputPerMtok = 0.1m,
+        kvType = "q8_0", parallel = 2, extraPreset = "flash-attn = on\n# a note\ncache-reuse = 256", inputPerMtok = 0.1m,
     };
 
     /// <summary>The watcher checks every few seconds; tests wait for what it should reach.</summary>
@@ -63,22 +75,101 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public async Task The_library_lists_gguf_files_for_what_they_are()
+    public async Task The_library_tells_what_each_file_is()
     {
         var (f, _) = NewApp();
         await using var _f = f;
         var admin = await AdminAsync(f);
         var files = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models/library"))).EnumerateArray().ToDictionary(x => x.GetProperty("path").GetString()!);
-        Assert.Equal(["big/Big-00001-of-00002.gguf", "image/flux-2-klein-4b-Q4_0.gguf", "tiny/Tiny-4B-Q4_K_M.gguf", "tiny/mmproj-Tiny-F16.gguf"], files.Keys.Order(StringComparer.Ordinal));
-        var tiny = files["tiny/Tiny-4B-Q4_K_M.gguf"];
-        Assert.Equal("model", tiny.GetProperty("role").GetString());
+        string Kind(string path) => files[path].GetProperty("profile").GetProperty("kind").GetString()!;
+        Assert.Equal(
+            ["big/Big-00001-of-00002.gguf", "big/mtp-Big-Q8_0.gguf", "embed/nomic-embed-text-v1.5.f16.gguf", "image/flux-2-klein-4b-Q4_0.gguf", "other/mmproj-Other-F16.gguf",
+             "part/Part-00001-of-00003.gguf", "plain/Plain-Q8_0.gguf", "tiny/Tiny-4B-Q4_K_M.gguf", "tiny/mmproj-Tiny-F16.gguf"],
+            files.Keys.Order(StringComparer.Ordinal));
+        var tiny = files["tiny/Tiny-4B-Q4_K_M.gguf"].GetProperty("profile");
+        Assert.Equal("language", tiny.GetProperty("kind").GetString());
+        Assert.Equal("dense", tiny.GetProperty("structure").GetString());
         Assert.Equal(40960, tiny.GetProperty("trainedContext").GetInt32());
-        Assert.Equal("4B", tiny.GetProperty("sizeLabel").GetString());
-        Assert.Equal("projector", files["tiny/mmproj-Tiny-F16.gguf"].GetProperty("role").GetString());
-        Assert.Equal("other", files["image/flux-2-klein-4b-Q4_0.gguf"].GetProperty("role").GetString());
+        Assert.Equal("Q4_K_M", tiny.GetProperty("quant").GetString());
+        Assert.True(tiny.GetProperty("thinking").GetBoolean());
+        Assert.True(tiny.GetProperty("tools").GetBoolean());
+        // 4 layers of 2 heads of 128 keys and 128 values, a cache of 8 bits (34 bytes a block of 32).
+        Assert.Equal(4 * 2 * 256 * 34 / 32, tiny.GetProperty("kvBytesPerToken").GetProperty("q8_0").GetInt64());
         var big = files["big/Big-00001-of-00002.gguf"];
         Assert.Equal(2, big.GetProperty("parts").GetInt32());
-        Assert.True(big.GetProperty("size").GetInt64() > 5000);
+        Assert.Equal("moe", big.GetProperty("profile").GetProperty("structure").GetString());
+        Assert.Equal(8, big.GetProperty("profile").GetProperty("experts").GetProperty("count").GetInt32());
+        // The second part's experts count too.
+        Assert.Equal(5 * 8192, big.GetProperty("profile").GetProperty("experts").GetProperty("bytes").GetInt64());
+        Assert.Equal("projector", Kind("tiny/mmproj-Tiny-F16.gguf"));
+        Assert.Equal("draft", Kind("big/mtp-Big-Q8_0.gguf"));
+        Assert.Equal("image", Kind("image/flux-2-klein-4b-Q4_0.gguf"));
+        Assert.Equal("embedding", Kind("embed/nomic-embed-text-v1.5.f16.gguf"));
+        Assert.Equal("unknown", Kind("part/Part-00001-of-00003.gguf"));
+        Assert.Contains("1 of its 3 parts", files["part/Part-00001-of-00003.gguf"].GetProperty("profile").GetProperty("why").GetString(), StringComparison.Ordinal);
+        // Heads of 72 cannot take a quantized cache (no flash attention for them); no thinking in its template.
+        var plain = files["plain/Plain-Q8_0.gguf"].GetProperty("profile");
+        Assert.Equal(["bf16", "f16"], plain.GetProperty("kvBytesPerToken").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.False(plain.GetProperty("thinking").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Each_kind_is_asked_only_what_it_has_within_its_limits()
+    {
+        var (f, _) = NewApp();
+        await using var _f = f;
+        var admin = await AdminAsync(f);
+        async Task RefusedAsync(object body, string code)
+        {
+            var res = await admin.PostAsync("/api/admin/models", body);
+            await StatusAssert.Is(HttpStatusCode.BadRequest, res);
+            Assert.Equal(code, (await admin.JsonAsync(res)).GetProperty("status").GetString());
+        }
+        // Only language models: the rest are made for something else, and say what.
+        await RefusedAsync(new { name = "x", file = "image/flux-2-klein-4b-Q4_0.gguf" }, "file");
+        await RefusedAsync(new { name = "x", file = "embed/nomic-embed-text-v1.5.f16.gguf" }, "file");
+        await RefusedAsync(new { name = "x", file = "tiny/mmproj-Tiny-F16.gguf" }, "file");
+        await RefusedAsync(new { name = "x", file = "big/mtp-Big-Q8_0.gguf" }, "file");
+        await RefusedAsync(new { name = "x", file = "part/Part-00001-of-00003.gguf" }, "file");
+        // Its trained context is the most, unless stretched; the answer leaves room for a prompt.
+        await RefusedAsync(new { name = "x", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 65536 }, "context");
+        await RefusedAsync(new { name = "x", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 2048 }, "context");
+        await RefusedAsync(new { name = "x", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 16384, maxOutput = 16000 }, "maxOutput");
+        // A projector made for another width, a cache its heads cannot take, thinking its template does not have.
+        await RefusedAsync(new { name = "x", file = "tiny/Tiny-4B-Q4_K_M.gguf", projector = "other/mmproj-Other-F16.gguf" }, "projector");
+        await RefusedAsync(new { name = "x", file = "plain/Plain-Q8_0.gguf", kvType = "q8_0", thinking = false, tools = false }, "kvType");
+        await RefusedAsync(new { name = "x", file = "plain/Plain-Q8_0.gguf", kvType = "f16", thinking = true, tools = false }, "thinking");
+        // A dense model has no experts; a model without a prediction layer or head does not draft.
+        await RefusedAsync(new { name = "x", file = "tiny/Tiny-4B-Q4_K_M.gguf", placement = "manual", cpuMoe = 2 }, "cpuMoe");
+        await RefusedAsync(new { name = "x", file = "tiny/Tiny-4B-Q4_K_M.gguf", mtp = true }, "mtp");
+        await RefusedAsync(new { name = "x", file = "tiny/Tiny-4B-Q4_K_M.gguf", temperature = 3.0 }, "sampling");
+        // An option the engine does not know would stop it: refused, as is one the form sets.
+        await RefusedAsync(new { name = "x", file = "tiny/Tiny-4B-Q4_K_M.gguf", extraPreset = "bogus-key = 1" }, "extra");
+        await RefusedAsync(new { name = "x", file = "tiny/Tiny-4B-Q4_K_M.gguf", extraPreset = "ctx-size = 8192" }, "extra");
+
+        // Stretched with YaRN: past its training, the preset says how.
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new { name = "tiny-long", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 65536, yarn = true }));
+        // A mixture of experts placed by hand, drafting with its head, with its own sampling.
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new
+        {
+            name = "big-hand", file = "big/Big-00001-of-00002.gguf", context = 131072, placement = "manual", gpuLayers = 99, cpuMoe = 3, ubatch = 4096,
+            mtp = true, draftHead = "big/mtp-Big-Q8_0.gguf", draftMax = 2, temperature = 0.6, topK = 20,
+        }));
+        var presets = await File.ReadAllTextAsync(Path.Combine(Config, "models.ini"));
+        Assert.Contains("[tiny-long]\nmodel = /library/tiny/Tiny-4B-Q4_K_M.gguf\nctx-size = 65536\nparallel = 1\nkv-unified = true\ncache-type-k = q8_0\ncache-type-v = q8_0\nfit = on\nthreads = 12\n", presets, StringComparison.Ordinal);
+        Assert.Contains("rope-scaling = yarn\nrope-scale = 1.6\nyarn-orig-ctx = 40960\n", presets, StringComparison.Ordinal);
+        Assert.Contains("n-gpu-layers = 99\nn-cpu-moe = 3\nthreads = 12\nubatch-size = 4096\nbatch-size = 4096\nmodel-draft = /library/big/mtp-Big-Q8_0.gguf\nspec-type = draft-mtp\nspec-draft-n-max = 2\ntemp = 0.6\ntop-k = 20\n", presets, StringComparison.Ordinal);
+        Assert.DoesNotContain("fit = on\nthreads = 12\nubatch", presets, StringComparison.Ordinal);
+
+        // What the form shows as it is filled in: the file's kind, its limits, a start, and (without Prometheus) no memory figures.
+        var advice = await admin.JsonAsync(await admin.PostAsync("/api/admin/models/advice", new { file = "big/Big-00001-of-00002.gguf", context = 999_999 }));
+        Assert.Equal("moe", advice.GetProperty("profile").GetProperty("structure").GetString());
+        Assert.Equal(262144, advice.GetProperty("limits").GetProperty("context").GetProperty("max").GetInt32());
+        Assert.Equal(["big/mtp-Big-Q8_0.gguf"], advice.GetProperty("limits").GetProperty("draftHeads").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal("q8_0", advice.GetProperty("recommended").GetProperty("kvType").GetString());
+        Assert.Equal("unknown", advice.GetProperty("estimate").GetProperty("fit").GetString());
+        Assert.Contains(advice.GetProperty("problems").EnumerateArray(), p => p.GetProperty("field").GetString() == "context" && p.GetProperty("error").GetBoolean());
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/models/advice", new { file = "../outside.gguf" }));
     }
 
     [Fact]
@@ -97,8 +188,8 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
 
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
         var presets = await File.ReadAllTextAsync(Path.Combine(Config, "models.ini"));
-        Assert.Contains("[tiny-b]\nmodel = /library/tiny/Tiny-4B-Q4_K_M.gguf\nmmproj = /library/tiny/mmproj-Tiny-F16.gguf\nctx-size = 16384\n", presets, StringComparison.Ordinal);
-        Assert.Contains("parallel = 2\njinja = true\nmetrics = true\nflash-attn = on\nubatch-size = 512\n", presets, StringComparison.Ordinal);
+        Assert.Contains("[tiny-b]\nmodel = /library/tiny/Tiny-4B-Q4_K_M.gguf\nmmproj = /library/tiny/mmproj-Tiny-F16.gguf\nctx-size = 16384\nparallel = 2\nkv-unified = true\n", presets, StringComparison.Ordinal);
+        Assert.Contains("fit = on\nthreads = 12\njinja = true\nmetrics = true\nflash-attn = on\ncache-reuse = 256\n", presets, StringComparison.Ordinal);
         Assert.DoesNotContain("a note", presets, StringComparison.Ordinal);
         var added = Assert.Single(gateway.Managed.Values);
         Assert.Equal("tiny-b", added.Name);
@@ -124,7 +215,8 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         var cleared = Row(await ModelsAsync(admin), "tiny-b");
         Assert.Equal(JsonValueKind.Null, cleared.GetProperty("maxOutput").ValueKind);
         Assert.Equal(JsonValueKind.Null, cleared.GetProperty("inputPerMtok").ValueKind);
-        Assert.Equal(32768, gateway.Managed.Values.Single().Info["max_output_tokens"]!.GetValue<int>());
+        // Without a longest answer: half the context.
+        Assert.Equal(16384, gateway.Managed.Values.Single().Info["max_output_tokens"]!.GetValue<int>());
 
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.DeleteAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative)));
         Assert.DoesNotContain("[tiny-b]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);

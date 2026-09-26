@@ -21,6 +21,20 @@ public sealed class EngineOptions
     public string LibraryDir { get; set; } = "/library";
     /// <summary>The same library inside the engine container.</summary>
     public string EngineLibraryDir { get; set; } = "/library";
+
+    // From the stack's .env (StackEnv), set at startup.
+    /// <summary>LLAMACPP_THREADS: the .env model's CPU threads, for every model.</summary>
+    public int? Threads { get; set; }
+    /// <summary>IMAGEGEN_MAX_VRAM, when the image server runs: GPU memory it may take beside the engine.</summary>
+    public long ImageReserveBytes { get; set; }
+    /// <summary>LLAMACPP_RAM_RESERVE_GB: RAM kept for everything but the engine.</summary>
+    public long RamReserveBytes { get; set; } = 8L << 30;
+    /// <summary>IMAGEGEN_MODEL_DIR, relative to the library when inside it.</summary>
+    public string? ImageModelDir { get; set; }
+    /// <summary>IMAGEGEN_TEXT_ENCODER: a language model the image generator reads.</summary>
+    public string? ImageTextEncoder { get; set; }
+    /// <summary>The .env model's file relative to the library, when it is inside it.</summary>
+    public string? DefaultModelFile { get; set; }
 }
 
 /// <summary>A model in the engine's list, and whether it is loaded.</summary>

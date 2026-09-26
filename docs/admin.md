@@ -55,12 +55,49 @@ large model). Switching is an API call, not a restart.
   again on its own: the `.env` model is loaded in its place, and the chat
   works on.
 - **Add a model** picks a GGUF from the **model library** (`LLAMACPP_LIBRARY_DIR`,
-  searched three levels deep; a split model is listed once, by its first part)
-  and says how to run it: context, longest answer, layers on the GPU, MoE
-  layers with their experts in RAM, cache type, people served at once, a vision
-  projector, thinking and tools, prices, and more engine options as
-  `key = value` lines (llama-server's long option names). Options the app or
-  the engine owns (files and paths, the port, the key) are refused.
+  searched three levels deep; a split model is listed once, by its first part).
+  **Each file is read for what it is** (its header and tensor table, not its
+  name): a dense or mixture-of-experts language model, with full, hybrid
+  (a cache in some layers only), sliding-window or recurrent attention; or an
+  embedding model, reranker, vision projector, draft head, image model or LoRA
+  adapter. Only language models can be added: the engine serves one model at a
+  time, so the rest are listed with what they are for. A split model with a
+  part missing is refused as incomplete.
+- **The form asks what that kind of model has, within its limits**, and shows
+  them: the context from 4,096 to what it was trained for (up to 4× with YaRN,
+  when its file does not stretch it already); the longest answer, at most the
+  context less 1,024 tokens for a prompt; the cache types its attention heads
+  can take (a quantized cache needs flash attention, which covers heads of 64,
+  80, 96, 112, 128 and 256); experts in RAM only for a mixture of experts;
+  drafting with multi-token prediction only for a model with its own
+  prediction layer or a draft head made for it (same architecture, width and
+  vocabulary); a vision projector only one made for its width; thinking and
+  tools only when its chat template has them. The API runs the same checks on
+  save.
+- **It starts from what fits this machine.** The GPU memory and RAM come from
+  Prometheus (the `smi` profile's exporter), less what the image server may take
+  (`IMAGEGEN_MAX_VRAM`) and the 1 GiB llama.cpp keeps free. The form estimates
+  weights, cache and buffers as it is filled in (within 1% of llama.cpp's own
+  estimate for dense and hybrid models, measured), and recommends the largest
+  context that keeps the model on the GPU (a mixture of experts: its experts in
+  RAM as needed), 1,024-token prompt steps when experts are in RAM, and MTP for
+  a dense model that fits. **Automatic placement** (the default) leaves the
+  layers to llama.cpp's fit, which places them for the memory free when the
+  model loads; by hand, a setting that would not fit is refused. A GPU power cap
+  far below the card's own (`GPU_POWER_LIMIT_W`) is named for a model that runs
+  all on the GPU: it is what limits one.
+- The added models share one cache between the answers in parallel
+  (`kv-unified`, as the `.env` model): one conversation can use all of the
+  context. They run with `LLAMACPP_THREADS`. Sampling left empty is the model's
+  own recommendation from its file, which the engine applies.
+- **More engine options** are `key = value` lines with llama-server's long
+  option names. Options the app or the engine owns (files and paths, the port,
+  the key), those the form sets, and names this engine does not know are
+  refused: a preset with an unknown option stops the whole engine. The known
+  names are this llama.cpp build's (`src/Llm.Api/Models/engine-options.txt`,
+  with the command that regenerates it after an engine upgrade). Should the
+  engine refuse the list anyway, it serves the `.env` model alone until the list
+  changes, and the models it left out say so on their cards.
 - **Adding, editing or removing a model restarts the engine** so it reads the
   new list: a few seconds, then the loaded model loads again. The gateway
   learns of the change at once (or within a minute, if it was down).

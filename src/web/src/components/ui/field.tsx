@@ -26,7 +26,7 @@ export function Field({ label, hint, error, children, className }: { label: Reac
   const errorId = error ? `${id}-error` : undefined
   const control: FieldControl = { id, 'aria-describedby': [hintId, errorId].filter(Boolean).join(' ') || undefined, 'aria-invalid': error ? true : undefined }
   return (
-    <div className={cn('grid gap-2', className)}>
+    <div className={cn('grid min-w-0 content-start gap-2', className)}>
       <Label htmlFor={id}>{label}</Label>
       <FieldContext value={control}>{children}</FieldContext>
       {hintId && (

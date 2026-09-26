@@ -22,4 +22,8 @@
     <ProjectReference Include="..\Llm.Core\Llm.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Models\engine-options.txt" LogicalName="engine-options.txt" />
+  </ItemGroup>
+
 </Project>

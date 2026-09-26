@@ -13,7 +13,8 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Models;
 
 public sealed record LocalModelRequest(
-    string? Name, string? File, string? Projector, int? Context, int? MaxOutput, int? GpuLayers, int? CpuMoe, string? KvType, int? Parallel,
+    string? Name, string? File, string? Projector, int? Context, int? MaxOutput, string? Placement, int? GpuLayers, int? CpuMoe, string? KvType, int? Parallel,
+    int? Ubatch, bool? Mtp, string? DraftHead, int? DraftMax, bool? Yarn, double? Temperature, double? TopP, int? TopK, double? MinP, double? PresencePenalty,
     string? ExtraPreset, bool? Thinking, bool? Tools, decimal? InputPerMtok, decimal? OutputPerMtok, string[]? Clear = null)
 {
     /// <summary>A value to empty: a missing one is left as it is.</summary>
@@ -29,13 +30,12 @@ public sealed record ModelAccessRequest(Audience Audience, Guid[]? Groups);
 /// </summary>
 public static class ModelEndpoints
 {
-    private static readonly string[] KvTypes = ["f16", "bf16", "q8_0", "q5_1", "q5_0", "q4_1", "q4_0", "iq4_nl"];
-
     public static void MapModels(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/admin/models").RequireAuthorization(AdminEndpoints.Policy);
         g.MapGet("", ListAsync);
-        g.MapGet("/library", (ModelLibrary library, AppDbContext db) => LibraryAsync(library, db));
+        g.MapGet("/library", LibraryAsync);
+        g.MapPost("/advice", AdviceAsync);
         g.MapPost("", AddAsync);
         g.MapPatch("/{name}", UpdateAsync);
         g.MapDelete("/{name}", RemoveAsync);
@@ -44,10 +44,11 @@ public static class ModelEndpoints
         g.MapPut("/{name}/access", AccessAsync);
     }
 
-    private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog,
+    private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
         IOptions<EngineOptions> engine, IOptions<StackOptions> stack, CancellationToken ct)
     {
         var e = engine.Value;
+        var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
         var local = await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct);
         var rules = await db.ModelAccess.AsNoTracking().ToDictionaryAsync(r => r.Model, ct);
         var groups = await db.Groups.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
@@ -65,15 +66,21 @@ public static class ModelEndpoints
                 name = d, source = "env", mode = "chat", status = state.StatusOf(d), file = stack.Value.ModelFile,
                 context = int.TryParse(stack.Value.ModelContext, CultureInfo.InvariantCulture, out var c) ? c : (int?)null,
                 vision = At(d)?.Vision ?? false, access = Access(d),
+                profile = e.DefaultModelFile is { } df ? files.GetValueOrDefault(df) : null,
             });
         }
         foreach (var m in local)
         {
             rows.Add(new
             {
-                name = m.Name, source = "local", mode = "chat", status = state.StatusOf(m.Name), file = m.File, m.Projector, context = m.Context, m.MaxOutput,
-                m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.OutputPerMtok,
+                name = m.Name, source = "local", mode = "chat",
+                // Not in the engine's list although it answered: not read yet (it restarts), or its preset refused.
+                status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null),
+                file = m.File, m.Projector, context = m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
+                m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
+                m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.OutputPerMtok,
                 vision = m.Projector is { Length: > 0 }, atGateway = At(m.Name) is not null, access = Access(m.Name),
+                profile = files.GetValueOrDefault(m.File),
             });
         }
         foreach (var m in atGateway.Where(m => m.Name != e.DefaultModel && local.All(l => l.Name != m.Name)))
@@ -92,18 +99,35 @@ public static class ModelEndpoints
         });
     }
 
-    private static async Task<IResult> LibraryAsync(ModelLibrary library, AppDbContext db)
+    private static async Task<IResult> LibraryAsync(ModelLibrary library, AppDbContext db, IOptions<EngineOptions> engine, CancellationToken ct)
     {
-        var used = await db.LocalModels.AsNoTracking().Select(m => new { m.Name, m.File, m.Projector }).ToListAsync();
+        var used = await db.LocalModels.AsNoTracking().Select(m => new { m.Name, m.File, m.Projector, m.DraftHead }).ToListAsync(ct);
+        var e = engine.Value;
         return Results.Ok(library.List().Select(f => new
         {
-            f.Path, f.Size, f.Parts, f.Role, f.Architecture, name = f.Name, f.SizeLabel, f.TrainedContext,
-            usedBy = used.Where(u => u.File == f.Path || u.Projector == f.Path).Select(u => u.Name),
+            f.File.Path, f.File.Size, f.File.Parts, f.Profile,
+            usedBy = used.Where(u => u.File == f.File.Path || u.Projector == f.File.Path || u.DraftHead == f.File.Path).Select(u => u.Name)
+                .Concat(e.DefaultModelFile == f.File.Path && e.DefaultModel is { } d ? [d] : []),
         }));
     }
 
-    private static async Task<IResult> AddAsync(LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, ChatModels gatewayModels,
-        IOptions<EngineOptions> engine, EngineWatcher watcher, Audit audit, CancellationToken ct)
+    /// <summary>What the form shows as it is filled in: the file's profile, the limits of its kind, recommended settings and a memory estimate.</summary>
+    private static async Task<IResult> AdviceAsync(LocalModelRequest body, ModelLibrary library, HardwareProbe hardware, AppDbContext db, CancellationToken ct)
+    {
+        var model = body.Name is { Length: > 0 } name && await db.LocalModels.AsNoTracking().SingleOrDefaultAsync(m => m.Name == name, ct) is { } saved
+            ? saved
+            : new LocalModel { Name = "draft", File = "" };
+        var file = (body.File ?? model.File).Trim();
+        if (library.Find(file) is not { } entry)
+        {
+            return AuthEndpoints.Problem(400, "file", "Choose a GGUF file from the model library.");
+        }
+        Merge(model, body, file);
+        return Results.Ok(ModelAdvisor.Advise(model, entry, library.List(), await hardware.GetAsync(ct)));
+    }
+
+    private static async Task<IResult> AddAsync(LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, HardwareProbe hardware,
+        ChatModels gatewayModels, IOptions<EngineOptions> engine, EngineWatcher watcher, Audit audit, CancellationToken ct)
     {
         if (!engine.Value.Enabled)
         {
@@ -121,31 +145,33 @@ public static class ModelEndpoints
             return AuthEndpoints.Problem(409, "exists", $"There is already a model named {name}.");
         }
         var model = new LocalModel { Name = name, File = "" };
-        if (Apply(model, body, library) is { } problem)
+        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct));
+        if (problem is not null)
         {
             return problem;
         }
         db.LocalModels.Add(model);
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("model.add", name, detail: model.File);
-        return Results.Created($"/api/admin/models/{name}", await AfterChangeAsync(catalog, watcher, ct));
+        return Results.Created($"/api/admin/models/{name}", await AfterChangeAsync(catalog, watcher, warning, ct));
     }
 
-    private static async Task<IResult> UpdateAsync(string name, LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, EngineWatcher watcher,
-        Audit audit, CancellationToken ct)
+    private static async Task<IResult> UpdateAsync(string name, LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, HardwareProbe hardware,
+        EngineWatcher watcher, Audit audit, CancellationToken ct)
     {
         if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } model)
         {
             return Results.NotFound();
         }
-        if (Apply(model, body, library) is { } problem)
+        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct));
+        if (problem is not null)
         {
             return problem;
         }
         model.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("model.update", name);
-        return Results.Ok(await AfterChangeAsync(catalog, watcher, ct));
+        return Results.Ok(await AfterChangeAsync(catalog, watcher, warning, ct));
     }
 
     private static async Task<IResult> RemoveAsync(string name, AppDbContext db, ModelCatalog catalog, IOptions<EngineOptions> engine, EngineWatcher watcher,
@@ -163,18 +189,18 @@ public static class ModelEndpoints
             catalog.SetActive(engine.Value.DefaultModel ?? ModelCatalog.None);
         }
         await audit.WriteAsync("model.remove", name);
-        return Results.Ok(await AfterChangeAsync(catalog, watcher, ct));
+        return Results.Ok(await AfterChangeAsync(catalog, watcher, null, ct));
     }
 
     /// <summary>The engine restarts on new presets; the gateway learns of the change. A gateway that is down is tried again later.</summary>
-    private static async Task<object> AfterChangeAsync(ModelCatalog catalog, EngineWatcher watcher, CancellationToken ct)
+    private static async Task<object> AfterChangeAsync(ModelCatalog catalog, EngineWatcher watcher, string? warning, CancellationToken ct)
     {
         await catalog.WritePresetsAsync(ct);
         watcher.Wake();
         try
         {
             await catalog.SyncGatewayAsync(ct);
-            return new { restarting = true, warning = (string?)null };
+            return new { restarting = true, warning };
         }
         catch (GatewayException ex)
         {
@@ -279,60 +305,73 @@ public static class ModelEndpoints
         return Results.NoContent();
     }
 
-    /// <summary>Checks and applies a model's settings; the name is set by the caller. Null when all is well.</summary>
-    private static IResult? Apply(LocalModel m, LocalModelRequest body, ModelLibrary library)
+    /// <summary>
+    /// Checks and applies a model's settings (the name is set by the caller): the file must be a
+    /// language model, and every setting inside what that model and this machine allow. The
+    /// warnings (slower, not wrong) come back to show.
+    /// </summary>
+    private static (IResult? Problem, string? Warning) Apply(LocalModel m, LocalModelRequest body, ModelLibrary library, Hardware? hardware)
     {
         var file = (body.File ?? m.File).Trim();
-        if (file.Length == 0 || file.StartsWith('/') || !file.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) || !library.Contains(file))
+        if (file.Length == 0 || file.StartsWith('/') || !file.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) || library.Find(file) is not { } entry)
         {
-            return AuthEndpoints.Problem(400, "file", "Choose a GGUF file from the model library.");
-        }
-        var projector = body.Projector is null ? m.Projector : body.Projector.Trim() is { Length: > 0 } p ? p : null;
-        if (projector is not null && (!projector.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) || !library.Contains(projector)))
-        {
-            return AuthEndpoints.Problem(400, "projector", "The vision projector must be a GGUF file in the model library.");
-        }
-        var context = body.Context ?? m.Context;
-        if (context is < 512 or > 1_048_576)
-        {
-            return AuthEndpoints.Problem(400, "context", "The context is 512 to 1,048,576 tokens.");
-        }
-        var maxOutput = body.Clears("maxOutput") ? null : body.MaxOutput ?? m.MaxOutput;
-        if (maxOutput is < 1 || maxOutput > context)
-        {
-            return AuthEndpoints.Problem(400, "max_output", "The longest answer is at most the context.");
-        }
-        var kv = body.KvType ?? m.KvType;
-        if (!KvTypes.Contains(kv))
-        {
-            return AuthEndpoints.Problem(400, "kv_type", $"The cache type is one of {string.Join(", ", KvTypes)}.");
-        }
-        if ((body.GpuLayers ?? m.GpuLayers) is < 0 or > 999 || (body.CpuMoe ?? m.CpuMoe) is < 0 or > 999 || (body.Parallel ?? m.Parallel) is < 1 or > 32)
-        {
-            return AuthEndpoints.Problem(400, "numbers", "GPU layers and MoE layers on the CPU are 0 to 999; parallel answers 1 to 32.");
+            return (AuthEndpoints.Problem(400, "file", "Choose a GGUF file from the model library."), null);
         }
         if ((body.InputPerMtok ?? 0) < 0 || (body.OutputPerMtok ?? 0) < 0)
         {
-            return AuthEndpoints.Problem(400, "price", "Prices cannot be negative.");
+            return (AuthEndpoints.Problem(400, "price", "Prices cannot be negative."), null);
         }
-        var extra = body.ExtraPreset ?? m.ExtraPreset;
-        if (ModelCatalog.CheckExtra(extra) is { } bad)
+        if (ModelCatalog.CheckExtra(body.ExtraPreset ?? m.ExtraPreset) is { } bad)
         {
-            return AuthEndpoints.Problem(400, "extra", bad);
+            return (AuthEndpoints.Problem(400, "extra", bad), null);
         }
+        var draft = Copy(m);
+        Merge(draft, body, file);
+        var advice = ModelAdvisor.Advise(draft, entry, library.List(), hardware);
+        if (advice.FirstError is { } error)
+        {
+            return (AuthEndpoints.Problem(400, error.Field, error.Message), null);
+        }
+        Merge(m, body, file);
+        var warnings = advice.Problems.Where(p => !p.Error).Select(p => p.Message).ToList();
+        return (null, warnings.Count > 0 ? "Saved. " + string.Join(" ", warnings) : null);
+    }
+
+    private static LocalModel Copy(LocalModel m) => new()
+    {
+        Name = m.Name, File = m.File, Projector = m.Projector, Context = m.Context, MaxOutput = m.MaxOutput, Placement = m.Placement, GpuLayers = m.GpuLayers,
+        CpuMoe = m.CpuMoe, KvType = m.KvType, Parallel = m.Parallel, Ubatch = m.Ubatch, Mtp = m.Mtp, DraftHead = m.DraftHead, DraftMax = m.DraftMax, Yarn = m.Yarn,
+        Temperature = m.Temperature, TopP = m.TopP, TopK = m.TopK, MinP = m.MinP, PresencePenalty = m.PresencePenalty, ExtraPreset = m.ExtraPreset,
+        Thinking = m.Thinking, Tools = m.Tools, InputPerMtok = m.InputPerMtok, OutputPerMtok = m.OutputPerMtok,
+    };
+
+    /// <summary>The request's values over the model's: a missing value is kept, one named in "clear" emptied.</summary>
+    private static void Merge(LocalModel m, LocalModelRequest body, string file)
+    {
         m.File = file;
-        m.Projector = projector;
-        m.Context = context;
-        m.MaxOutput = maxOutput;
+        m.Projector = body.Projector is null ? m.Projector : body.Projector.Trim() is { Length: > 0 } p ? p : null;
+        m.Context = body.Context ?? m.Context;
+        m.MaxOutput = body.Clears("maxOutput") ? null : body.MaxOutput ?? m.MaxOutput;
+        m.Placement = body.Placement ?? m.Placement;
         m.GpuLayers = body.GpuLayers ?? m.GpuLayers;
         m.CpuMoe = body.CpuMoe ?? m.CpuMoe;
-        m.KvType = kv;
+        m.KvType = body.KvType ?? m.KvType;
         m.Parallel = body.Parallel ?? m.Parallel;
+        m.Ubatch = body.Clears("ubatch") ? null : body.Ubatch ?? m.Ubatch;
+        m.Mtp = body.Mtp ?? m.Mtp;
+        m.DraftHead = body.Clears("draftHead") ? null : body.DraftHead is { } h ? (h.Trim() is { Length: > 0 } head ? head : null) : m.DraftHead;
+        m.DraftMax = body.DraftMax ?? m.DraftMax;
+        m.Yarn = body.Yarn ?? m.Yarn;
+        m.Temperature = body.Clears("temperature") ? null : body.Temperature ?? m.Temperature;
+        m.TopP = body.Clears("topP") ? null : body.TopP ?? m.TopP;
+        m.TopK = body.Clears("topK") ? null : body.TopK ?? m.TopK;
+        m.MinP = body.Clears("minP") ? null : body.MinP ?? m.MinP;
+        m.PresencePenalty = body.Clears("presencePenalty") ? null : body.PresencePenalty ?? m.PresencePenalty;
+        var extra = body.ExtraPreset ?? m.ExtraPreset;
         m.ExtraPreset = string.IsNullOrWhiteSpace(extra) ? null : extra.Trim();
         m.Thinking = body.Thinking ?? m.Thinking;
         m.Tools = body.Tools ?? m.Tools;
         m.InputPerMtok = body.Clears("inputPerMtok") ? null : body.InputPerMtok ?? m.InputPerMtok;
         m.OutputPerMtok = body.Clears("outputPerMtok") ? null : body.OutputPerMtok ?? m.OutputPerMtok;
-        return null;
     }
 }
