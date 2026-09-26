@@ -52,9 +52,9 @@ public class IndexingTests
         Assert.Equal(2, symbols.Count);
         Assert.Contains(symbols, s => s.Str("doc") == "Decode one frame.");
         Assert.Contains(symbols, s => s.Str("doc") == "Implementation.");
-        // ctags is not asked for --fields=+l, so no symbol carries a language and a
-        // Python docstring is never read -- the same as the Python indexer.
-        Assert.Equal("", Queries.FindSymbol([repoId], conn, "main")[0].Str("doc"));
+        // ctags reports each symbol's language (--fields=+l), which is what lets a
+        // Python docstring be read at all.
+        Assert.Equal("Run the tool.", Queries.FindSymbol([repoId], conn, "main")[0].Str("doc"));
         Assert.Equal(0, Queries.FindSymbol([repoId], conn, "helper")[0].Long("is_public"));
         Assert.False(Worker.ContractIsStale(conn, repoId));
 

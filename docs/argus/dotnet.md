@@ -149,9 +149,10 @@ fail without the fix:
   string a model is told to copy verbatim. Contradicted fields now also carry
   `stated`, what the draft said.
 
-## Known limitation, shared
+## Python docstrings, fixed in both
 
-Python docstrings are not extracted by either indexer: ctags is not run with
-`--fields=+l`, so no symbol carries a language and the docstring reader never
-runs. C, C++ and C# doc comments are unaffected. Fixing it changes the index
-contents, so it belongs in both implementations at once.
+Neither indexer used to read a Python docstring: ctags was not run with
+`--fields=+l`, so no symbol carried a language and the docstring reader, which
+is keyed on it, never ran. Both now ask for the language, and the symbol
+contract version is 3, so an existing index re-extracts every file on its next
+pass with no manual step.

@@ -42,6 +42,11 @@ Sections used:
 - `docs_verify` reported the description as part of the last contract field
   (`User32.dll -- Displays a modal dialog box.`); the contract now ends at the
   ` -- ` marker, and contradicted fields carry `stated`
+- Python docstrings never reached the index: ctags was not asked for each
+  symbol's language, which the docstring reader is keyed on. Symbol contract
+  version 3 re-extracts existing indexes on their next pass
+- Admin console alerts that mix bold text, line breaks and a link were laid out
+  as side-by-side columns; they read as one paragraph again
 
 ## v2.9.0 (2026-09-18)
 

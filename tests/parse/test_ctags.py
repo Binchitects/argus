@@ -62,6 +62,16 @@ def test_signature_captured(parsed):
     assert sig is not None and "const char" in sig
 
 
+def test_every_symbol_carries_its_language(tmp_path):
+    """Without `l` in --fields no symbol had a language, and the docstring
+    reader is keyed on it -- so no Python docstring ever reached the index."""
+    (tmp_path / "tool.py").write_text('def main():\n    """Run the tool."""\n', encoding="utf-8")
+    (tmp_path / "a.c").write_text("int f(void) { return 0; }\n", encoding="utf-8")
+    batch = ctags.extract_symbols(tmp_path, ["tool.py", "a.c"])
+    assert _by_name(batch.symbols["tool.py"])["main"]["language"] == "Python"
+    assert _by_name(batch.symbols["a.c"])["f"]["language"] == "C"
+
+
 def test_missing_files_do_not_raise(tmp_path):
     assert ctags.extract_symbols(tmp_path, ["nope.c"]).symbols == {}
 

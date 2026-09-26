@@ -36,13 +36,15 @@ CTAGS_TIMEOUT_SECONDS = 600
 #: Composed into the stamp by `worker._symbols_stamp`, so bumping this
 #: re-extracts everything on the next pass with no migration and no manual step.
 #: Version 1 is the implicit value on any row written before the stamp existed.
-SYMBOL_CONTRACT_VERSION = "2"
+SYMBOL_CONTRACT_VERSION = "3"
 
 CTAGS_ARGS = [
     "--output-format=json",
     # n=line, K=long kind, S=signature, s=scope, e=end line,
     # f=file-limited visibility (i.e. `static`), surfaced as JSON key "file".
-    "--fields=+nKSsef",
+    # l=language: without it no symbol carried one and Python docstrings were
+    # never read (contract version 3).
+    "--fields=+nKSsefl",
     # Universal Ctags disables the `prototype` kind by default for C/C++;
     # without it, header-only declarations (e.g. `int Foo(int);`) are
     # dropped entirely rather than reported with kind "prototype".

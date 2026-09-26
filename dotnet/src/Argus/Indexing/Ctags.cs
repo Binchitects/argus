@@ -32,12 +32,12 @@ public static class Ctags
     public const int TimeoutSeconds = 600;
 
     /// <summary>Bump when a symbol ROW means something different; composed into the per-file stamp.</summary>
-    public const string SymbolContractVersion = "2";
+    public const string SymbolContractVersion = "3";
 
     public static readonly string[] Args =
     [
         "--output-format=json",
-        "--fields=+nKSsef",
+        "--fields=+nKSsefl", // l: the language, which decides whether a docstring is read
         "--kinds-c=+p",
         "--kinds-c++=+p",
         "-L", "-",

@@ -513,6 +513,7 @@ def mcp_flows(env: Env) -> None:
         out["overview"] = await s.call_tool("overview", {})
         out["which"] = await s.call_tool("which_repo", {"description": "add a faster checksum to the deflate stream"})
         out["refs"] = await s.call_tool("find_references", {"name": "adler32"})
+        out["pydoc"] = await s.call_tool("find_symbol", {"name": "expire_keys"})
         out["search"] = await s.call_tool("search_code", {"query": "jpeg_start_decompress"})
         out["lookup"] = await s.call_tool("docs_lookup", {"name": "MessageBox"})
         out["verify"] = await s.call_tool("docs_verify", {"text": "MessageBoxW is declared in winuser.h and lives in shell32.dll."})
@@ -552,6 +553,10 @@ def mcp_flows(env: Env) -> None:
     which = rows(a["which"])
     check("mcp", "which_repo ranks zlib first for a deflate change",
           which and which[0].get("path_with_namespace") == "oss/zlib", which[0].get("path_with_namespace") if which else "none")
+    pydoc = rows(a["pydoc"])
+    check("mcp", "a Python docstring is served as the symbol's doc",
+          pydoc and pydoc[0].get("doc", "").startswith("Remove every key whose time to live has elapsed"),
+          (pydoc[0].get("doc") or "")[:60] if pydoc else "none")
     check("mcp", "find_references finds adler32 callers", len(rows(a["refs"])) > 0, f"{len(rows(a['refs']))} rows")
     check("mcp", "search_code full-text hit", any("jpeg" in json.dumps(r) for r in rows(a["search"])))
     lookup_rows = rows(a["lookup"])

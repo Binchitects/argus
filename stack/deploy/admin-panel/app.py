@@ -445,9 +445,9 @@ a.btn{{display:inline-block;text-decoration:none;background:transparent;
 a.btn:hover{{border-color:var(--accent);color:var(--accent)}}
 form.row{{display:flex;gap:var(--s3);flex-wrap:wrap;align-items:flex-end}}
 
-.msg{{padding:12px 15px;border-radius:var(--r);margin-bottom:var(--s4);font-size:13px;
- border:1px solid transparent;display:flex;gap:10px;align-items:flex-start}}
-.msg::before{{font-weight:700;line-height:1.4}}
+.msg{{padding:12px 15px 12px 34px;border-radius:var(--r);margin-bottom:var(--s4);font-size:13px;
+ border:1px solid transparent;position:relative;line-height:1.5}}
+.msg::before{{font-weight:700;position:absolute;left:15px;top:12px;line-height:1.5}}
 .msg.ok{{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok)}}
 .msg.ok::before{{content:"✓"}}
 .msg.bad{{background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 45%,transparent);color:var(--bad)}}
