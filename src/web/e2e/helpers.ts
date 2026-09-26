@@ -4,6 +4,9 @@ import { expect, type Page, type TestInfo } from '@playwright/test'
 /** CI runs without a model gateway (E2E_NO_GATEWAY=1): the API answers 502 for what needs it. */
 export const noGateway = !!process.env.E2E_NO_GATEWAY
 
+/** CI runs without Prometheus, Loki and Alertmanager (E2E_NO_OBSERVE=1): the Logs, Alerts and metric panels have nothing to read. */
+export const noObserve = !!process.env.E2E_NO_OBSERVE
+
 /**
  * Collects console errors, including Content-Security-Policy violations.
  * Ignored: expected 401s (the signed-out check), ERR_CERT_VERIFIER_CHANGED,

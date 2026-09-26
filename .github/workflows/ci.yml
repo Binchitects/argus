@@ -63,13 +63,15 @@ jobs:
 
   web-browser:
     # The API and web images behind Traefik, as deployed, driven by Playwright
-    # on desktop and phone (no model behind the gateway: E2E_NO_GATEWAY).
+    # on desktop and phone (no model behind the gateway, E2E_NO_GATEWAY, and no
+    # Prometheus, Loki or Alertmanager, E2E_NO_OBSERVE: the deployed run covers those).
     needs: [api, web]
     runs-on: ubuntu-24.04
     env:
       E2E_PASSWORD: ci admin password for tests
       E2E_BASE_URL: https://llm.localhost:8443
       E2E_NO_GATEWAY: "1"
+      E2E_NO_OBSERVE: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Build the images

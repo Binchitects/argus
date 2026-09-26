@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { expectAccessible, expectTheme, withTheme, noGateway, screenshot, watchConsole } from './helpers.ts'
+import { expectAccessible, expectTheme, withTheme, noGateway, noObserve, screenshot, watchConsole } from './helpers.ts'
 
 const pages: [string, string][] = [
   ['/usage', 'Usage & cost'],
@@ -20,8 +20,8 @@ const pages: [string, string][] = [
   ['/admin/dashboards/stack-health', 'Stack Health & Alerts'],
   ['/admin/dashboards/stack-logs', 'Logs (Loki)'],
   ['/admin/dashboards/gpu-hardware', 'GPU Hardware'],
-  ['/admin/logs', 'Logs'],
-  ['/admin/alerts', 'Alerts'],
+  // Their data comes from Loki and Alertmanager, which CI does not run.
+  ...(noObserve ? [] : ([['/admin/logs', 'Logs'], ['/admin/alerts', 'Alerts']] as [string, string][])),
 ]
 
 /** The page has its heading and nothing is still loading. */
@@ -60,6 +60,7 @@ test('the usage dashboard draws every panel without an error', async ({ page }) 
 })
 
 test('every dashboard draws every panel without an error', async ({ page }) => {
+  test.skip(noObserve, 'the metric and log panels read Prometheus and Loki')
   const errors = watchConsole(page)
   await page.goto('/admin/dashboards')
   const links = page.getByRole('list', { name: 'Dashboards' }).getByRole('link')
@@ -76,6 +77,7 @@ test('every dashboard draws every panel without an error', async ({ page }) => {
 })
 
 test('logs: narrowed by container, level and text in the address, and live', async ({ page }) => {
+  test.skip(noObserve, 'the logs come from Loki')
   await page.goto('/admin/logs')
   const lines = page.getByRole('region', { name: 'Logs, log lines' })
   await expect(lines.getByRole('listitem').first()).toBeVisible({ timeout: 30_000 })
@@ -105,6 +107,7 @@ test('logs: narrowed by container, level and text in the address, and live', asy
 })
 
 test('alerts: what fires, what fired, and every rule with its query', async ({ page }) => {
+  test.skip(noObserve, 'the alerts come from Alertmanager and Prometheus')
   await page.goto('/admin/alerts')
   await expect(page.getByText('Firing now', { exact: true }).first()).toBeVisible()
   const rules = page.getByRole('heading', { name: 'stack', exact: true })
