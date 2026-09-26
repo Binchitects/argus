@@ -18,7 +18,7 @@ public sealed class IndexResult
 }
 
 /// <summary>
-/// Index one repository at one commit (argus/worker.py): delete what went away,
+/// Index one repository at one commit: delete what went away,
 /// store what changed, extract symbols and their doc comments, and keep an
 /// honest account of every path that could not be finished so the next pass
 /// retries it -- up to a cap, after which it is recorded and given up on.

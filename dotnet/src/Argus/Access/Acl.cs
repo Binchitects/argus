@@ -18,7 +18,7 @@ public sealed record Identity(long UserId, string Username, IReadOnlyList<long> 
 
 /// <summary>
 /// A developer's GitLab token resolved to the repositories they may read
-/// (argus/acl.py). Cached by SHA-256 of the token -- never the token -- for ten
+///. Cached by SHA-256 of the token -- never the token -- for ten
 /// minutes, and served stale for up to an hour when GitLab itself is unwell.
 /// </summary>
 public static class Acl
@@ -124,10 +124,10 @@ public static class Acl
 public sealed class GitLabUnavailable(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>
-/// Project member lists and user lookups via the READ-ONLY service credential
-/// (argus/access.py): how a chat user (identified by the email Open WebUI
-/// forwards) gets exactly the repositories their GitLab membership grants, and
-/// how a refusal names whom to ask.
+/// Project member lists and user lookups via the READ-ONLY service credential:
+/// how a signed-in person (identified by their email, or the GitLab username an
+/// administrator linked) gets exactly the repositories their GitLab membership
+/// grants, and how a refusal names whom to ask.
 /// </summary>
 public sealed class MemberDirectory(GitLabConfig cfg, HttpClient? client = null, double ttl = Acl.TtlSeconds, Func<double>? now = null)
 {

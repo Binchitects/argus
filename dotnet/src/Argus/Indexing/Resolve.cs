@@ -5,7 +5,7 @@ namespace Argus.Indexing;
 
 /// <summary>
 /// Resolve <c>#include</c> strings to concrete files, across repos
-/// (argus/resolve.py). An include that cannot be pinned to exactly one file is
+///. An include that cannot be pinned to exactly one file is
 /// recorded as unresolved with a reason and contributes no edge: a wrong edge
 /// silently corrupts <c>repo_deps</c>, and nothing downstream can tell.
 /// </summary>

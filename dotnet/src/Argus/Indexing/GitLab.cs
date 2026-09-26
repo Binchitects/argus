@@ -16,7 +16,7 @@ public sealed record HttpResult(int Status, string Text)
 }
 
 /// <summary>
-/// TLS policy for reaching GitLab (argus/tls.py): one setting drives both the
+/// TLS policy for reaching GitLab: one setting drives both the
 /// API client and the git subprocess, because a call site that forgets is a
 /// call site that fails in the field.
 /// </summary>
@@ -95,7 +95,7 @@ public sealed class CredentialError(string message) : Exception(message);
 
 /// <summary>
 /// The one place that turns a <see cref="GitLabConfig"/> into an API credential
-/// (argus/credentials.py). Token mode sends <c>PRIVATE-TOKEN</c>; password mode
+///. Token mode sends <c>PRIVATE-TOKEN</c>; password mode
 /// signs in through the web form, mints a narrowly-scoped personal access token,
 /// caches it for the process, and re-mints once on a 401.
 /// </summary>
@@ -236,7 +236,7 @@ public sealed class GitLabError(string message) : Exception(message);
 
 public sealed record Project(long GitlabId, string PathWithNamespace, string DefaultBranch, string HttpUrl);
 
-/// <summary>Whether the service token can enumerate every repository (argus/gitlab.py).</summary>
+/// <summary>Whether the service token can enumerate every repository.</summary>
 public sealed record EnumerationHealth(bool IsAdmin, int VisibleCount, int MemberCount)
 {
     public bool Ok => IsAdmin || MemberCount <= VisibleCount;

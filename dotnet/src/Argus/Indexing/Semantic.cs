@@ -6,7 +6,7 @@ using Microsoft.Data.Sqlite;
 namespace Argus.Indexing;
 
 /// <summary>
-/// The semantic layer over PRIVATE code (argus/semantic.py): one vector per
+/// The semantic layer over PRIVATE code: one vector per
 /// public symbol, built from its kind, name, doc comment, scope, signature and
 /// path -- never a function body -- and stored in the pack layout so it is
 /// scored exactly as pack chunks are.

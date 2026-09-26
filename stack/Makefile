@@ -1,65 +1,49 @@
-# Convenience targets. Windows users: use the equivalent scripts\*.ps1 instead.
+# Convenience targets. Windows: the same scripts exist as scripts\*.ps1.
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help up down restart logs health smoke bench ps config pull clean backup gpu alerts preflight ca airgap package
+.PHONY: help up down restart logs health smoke ps config pull build backup clean user
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
-up: ## Start the stack (the whole deployment: cp env-samples/<one>.env .env first)
-	@./scripts/preflight.sh
-	@docker compose up -d
+up: ## Start everything (cp env-samples/<one>.env .env first)
+	@docker compose up -d --build
 
-preflight: ## Check that every bind mount resolves to real content, without starting anything
-	@./scripts/preflight.sh
-
-ca: ## Print the env exports that make HOST tools (dsh, curl, python) trust the stack certificate
-	@./scripts/with-ca.sh --print
-
-package: ## Build the drop-in archive in dist/ (add P="--no-image" to leave the Argus image out)
-	@./scripts/package.sh $(P)
-
-airgap: ## Build an offline bundle in dist/ (add A="--with-models --with-packs" for a complete one)
-	@./scripts/airgap-bundle.sh $(A)
-
-down: ## Stop the stack, keeping all volumes
+down: ## Stop everything, keeping all data
 	@docker compose --profile "*" down --remove-orphans
 
-restart: ## Recreate only the inference container
-	@docker compose up -d --force-recreate llamacpp
+restart: ## Recreate the chat model's container (after a MODEL change in .env)
+	@docker compose up -d --force-recreate model-init llamacpp litellm
 
-logs: ## Follow logs (make logs S=vllm for one service)
+logs: ## Follow logs (make logs S=argus for one service)
 	@docker compose logs -f --tail 100 $(S)
 
-health: ## Check every enabled component
+health: ## Is every part up and answering?
 	@./scripts/health.sh
 
-smoke: ## End-to-end API verification
+smoke: ## Sign in and get a real answer from the model, end to end
 	@./scripts/smoke-test.sh
 
-bench: ## Concurrency sweep (make bench C=1,4,8,16 N=16)
-	@./scripts/benchmark.sh --concurrency $(or $(C),1,4,8,16) --requests $(or $(N),16)
-
-ps: ## Show container status
+ps: ## Container status
 	@docker compose ps
 
-config: ## Render the fully-resolved compose file
+config: ## The fully-resolved compose file
 	@docker compose config
 
-pull: ## Pull the latest images
-	@docker compose pull
+pull: ## Pull newer images for the model engine and the gateway
+	@docker compose pull model-init llamacpp llamacpp-embed litellm postgres
 
-backup: ## Back up stateful volumes to ./backups
+build: ## Rebuild the app image (backend + frontend) from this checkout
+	@docker compose build argus
+
+backup: ## Back up people, conversations, index, packs, gateway database and .env
 	@./scripts/backup.sh
 
-gpu: ## Live GPU utilisation from the exporter
-	@curl -s localhost:9835/metrics | grep -E '^nvidia_smi_(utilization_gpu_ratio|memory_used_bytes|temperature_gpu|power_draw_watts)'
+user: ## Account admin from the shell, e.g. make user A="passwd admin"
+	@docker exec -it argus argus user $(A) --config /etc/argus/config.yaml
 
-alerts: ## List currently firing alerts
-	@curl -s localhost:9090/api/v1/alerts | python3 -c 'import json,sys; [print(f"{a[\"labels\"][\"severity\"]:9} {a[\"labels\"][\"alertname\"]:28} {a[\"state\"]}") for a in json.load(sys.stdin)["data"]["alerts"]] or print("none firing")'
-
-clean: ## Stop and DELETE all volumes (destructive)
-	@echo "This deletes models, metrics, dashboards and chat history."
+clean: ## Stop and DELETE all data volumes (destructive)
+	@echo "This deletes every account, conversation, key, budget and the code index."
 	@read -p "Type PURGE to confirm: " a && [ "$$a" = "PURGE" ] && docker compose --profile "*" down -v --remove-orphans

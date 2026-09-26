@@ -1,59 +1,31 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-*.egg-info/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
+# .NET
+dotnet/**/bin/
+dotnet/**/obj/
+dotnet/native/
+*.user
+TestResults/
 
-# Argus runtime state (all rebuildable from GitLab)
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e/.work/
+
+# Runtime state (all rebuildable, or secret)
 data/
 *.db
 *.db-wal
 *.db-shm
-
-# Local config with secrets
-config.yaml
-config.local.yaml
 .env
-
-# The bundled stack deployment carries its own .gitignore. The unanchored
-# `config.yaml` rule above matches at any depth, so without these exceptions it
-# silently strips two files that the stack's docker-compose bind-mounts, and a
-# fresh clone fails to start. Neither holds a secret: the Argus GitLab token and
-# the LiteLLM keys are both injected from the environment.
-!stack/config/argus/config.yaml
-!stack/config/litellm/config.yaml
+config.local.yaml
+# Unanchored `config.yaml` is not ignored: the stack bind-mounts two committed ones.
 
 # Editors / OS
 .vscode/
 .idea/
+*.swp
+.DS_Store
 Thumbs.db
-desktop.ini
-
-# SDD scratch
-
-# Claude Code local (machine-specific) settings; shared config goes in .claude/settings.json
-.claude/settings.local.json
-
-# Test-GitLab seeded credentials (throwaway, but still credentials)
-scripts/test-gitlab/seeded.json
-scripts/test-gitlab/work/
-
-# Task 12 measurement checkouts (large upstream clones, never committed)
-.packwork/
-
-# Built packs (large artifacts, published out of band)
-dist/
-
-# Built knowledge packs. Hundreds of MB of binary SQLite, rebuildable from
-# the pinned upstream checkouts -- an artifact, not source. A `git add -A`
-# swept 1.19 GB of these into a commit and the push died on it.
-#
-# Leading slash matters: a bare `packs/` matches any directory of that name at
-# any depth, which silently excluded src/argus/packs/ and tests/packs/ -- the pack
-# source tree itself. Already-tracked files kept working, so the only symptom
-# was new files there refusing to be added.
-/packs/
+.claude/
+.remember/

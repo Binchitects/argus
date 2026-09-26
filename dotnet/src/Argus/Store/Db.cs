@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 namespace Argus.Store;
 
 /// <summary>
-/// Opening the index, the way argus/store/db.py opens it.
+/// Opening the index.
 ///
 /// Three modes, and the difference between them is load-bearing: the indexer
 /// writes (WAL, foreign keys on), the server reads with <c>query_only</c> so no

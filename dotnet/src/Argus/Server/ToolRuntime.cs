@@ -7,7 +7,7 @@ using ModelContextProtocol.Protocol;
 
 namespace Argus.Server;
 
-/// <summary>One MCP tool as the Python server publishes it: name, description, schemas.</summary>
+/// <summary>One MCP tool as the server publishes it: name, description, schemas.</summary>
 public sealed record ToolSpec(string Name, string Description, string InputSchemaJson, string OutputSchemaJson)
 {
     public JsonObject InputSchema => (JsonObject)JsonNode.Parse(InputSchemaJson)!;

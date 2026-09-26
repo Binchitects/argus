@@ -17,7 +17,7 @@ public sealed class ServerTests : IDisposable
 {
     readonly TestIndex _ix = new();
     readonly EnvScope _env = new(("ARGUS_ADMIN_TOKEN", "admin-secret"), ("ARGUS_WEBHOOK_TOKEN", "hook-secret"),
-        ("ARGUS_ACCESS_NOTICES", "0"), ("ARGUS_AUDIT_LOG", "0"), ("ARGUS_INDEX_INTERVAL", "0"), ("ARGUS_CHAT_CLIENT_TOKEN", null));
+        ("ARGUS_ACCESS_NOTICES", "0"), ("ARGUS_AUDIT_LOG", "0"), ("ARGUS_INDEX_INTERVAL", "0"));
     readonly WebApplication _app;
     readonly HttpClient _http;
     readonly long _repo;

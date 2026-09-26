@@ -5,7 +5,7 @@ using Npgsql;
 namespace Argus.Store;
 
 /// <summary>
-/// The optional pgvector backend for symbol embeddings (argus/store/pgvector.py).
+/// The optional pgvector backend for symbol embeddings.
 ///
 /// Opt-in with <c>ARGUS_VECTOR_BACKEND=pgvector</c> and <c>ARGUS_PG_DSN</c>. One
 /// statement resolves the coarse Hamming pass, the cosine rerank AND the ACL, and

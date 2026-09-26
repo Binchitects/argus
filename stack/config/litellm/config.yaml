@@ -1,31 +1,23 @@
 # ==============================================================================
-# LiteLLM gateway (compose profile: gateway)
+# LiteLLM gateway
 #
-# Why put this in front of vLLM at all?
-#   - one virtual API key per person, with spend limits and rate limits
-#   - usage attributed to a user, which vLLM alone cannot do (its metrics carry
-#     a model_name label but no user dimension)
-#   - one endpoint that can front local vLLM AND hosted providers, with fallbacks
+# Why a gateway in front of llama.cpp:
+#   - one virtual API key per person, with a budget and spend attributed to them
+#     -- the app creates each person here (user_id = their email) and sends their
+#     chats with their own key, so one budget covers the app and the API alike
+#   - one OpenAI-compatible endpoint that can also front hosted providers later
 #
-# Reach it at https://gateway.<LLM_DOMAIN>/v1. Mint per-person keys with
-# POST /key/generate using LITELLM_MASTER_KEY.
-#
-# ONE MODEL, ONE NAME. The model list below has a single entry whose name,
-# window and output limit come from .env (MODEL_NAME, MODEL_CONTEXT,
-# MODEL_MAX_OUTPUT). LiteLLM does not expand variables in `model_name` or
-# `model_info`, so the litellm service renders ${MODEL_NAME}-style tokens in
-# this file from its environment at startup -- see its entrypoint in
-# docker-compose.yml. Changing model is an .env edit and `docker compose up -d`.
-#
-# There used to be three entries here -- `local`, the served name and a stale
-# `qwen3.8-9b` alias -- all pointing at the same engine, and every client showed
-# all three. Aliases are gone: clients see the model's real name only.
+# ONE MODEL, ONE NAME. The single entry's name, window and output limit come from
+# .env (MODEL_NAME, MODEL_CONTEXT, MODEL_MAX_OUTPUT). LiteLLM does not expand
+# variables in `model_name` or `model_info`, so the litellm service renders the
+# ${...} tokens in this file from its environment at startup (see its entrypoint
+# in docker-compose.yml). Changing model is an .env edit and `docker compose up -d`.
 # ==============================================================================
 
 model_list:
-  # The engine is chosen in .env: ENGINE_API_BASE / ENGINE_API_KEY, resolved by
-  # LiteLLM through os.environ/ (llama.cpp: http://llamacpp:8080/v1, vLLM:
-  # http://vllm:8000/v1). ENGINE_MODEL is openai/<the engine's served name>.
+  # The llama.cpp engine: ENGINE_API_BASE / ENGINE_API_KEY / ENGINE_MODEL are set
+  # by docker-compose.yml and resolved here through os.environ/. ENGINE_MODEL is
+  # openai/<llama.cpp's --alias>, which is MODEL_NAME.
   - model_name: ${MODEL_NAME}
     litellm_params:
       model: os.environ/ENGINE_MODEL
@@ -75,103 +67,23 @@ router_settings:
   routing_strategy: simple-shuffle
   num_retries: 2
   timeout: 600
-  # If the local engine is down or saturated, fall back rather than queue.
-  # Requires the cloud-fallback entry above.
-  # fallbacks:
-  #   - local: ["cloud-fallback"]
 
 litellm_settings:
   drop_params: true
   set_verbose: false
 
   # ------------------------------------------------------------ spend limits
-  # A default ceiling for every internal user, so a person who is added to the
-  # roster and never given an explicit quota is still bounded. Spend is
-  # counted from BOTH surfaces once user_header_mappings is in place, so this
-  # is a per-person total rather than a per-key one.
+  # A default ceiling for every person who is never given an explicit budget.
+  # These are USD figures derived from token counts and the prices in .env; on a
+  # local engine the "cost" is notional, but it is still what stops one person
+  # holding the GPU for a month. Raise it per person on the app's People page.
   #
-  # These are USD figures derived from token counts and the model's configured
-  # price. For a purely local vLLM deployment the "cost" is notional -- what it
-  # actually bounds is tokens -- but it is still the lever that stops one
-  # person consuming the whole GPU for a month, and it is what the dashboards
-  # sum. Set PRICE_INPUT_PER_MTOK, PRICE_CACHED_INPUT_PER_MTOK and
-  # PRICE_OUTPUT_PER_MTOK in .env to make the figure mean money.
-  #
-  # 0 would block every request rather than allow unlimited, so the default is
-  # a real number. Raise per-person in the admin panel (Credit).
+  # 0 would block every request rather than allow unlimited, so the default is a
+  # real number.
   max_internal_user_budget: os.environ/LITELLM_DEFAULT_USER_BUDGET
   internal_user_budget_duration: os.environ/LITELLM_BUDGET_DURATION
-  # Response cache in Redis, OFF unless a request asks for it.
-  #
-  # It used to be on for every request. The cache key is the model plus the
-  # messages -- not the person, not the temperature -- so it returned a stored
-  # answer for any repeat of the same conversation for an hour: "regenerate" in
-  # Open WebUI gave back the identical reply, two people who asked the same
-  # thing got one sampled answer between them, and a benchmark's second round
-  # measured Redis instead of the model.
-  #
-  # What it was meant to speed up, a resent system prompt, is already handled a
-  # layer down: the engine's prefix cache reuses those tokens without
-  # replaying an old answer. A caller that genuinely wants replay (a fixed eval
-  # set, say) opts in per request with  "cache": {"use-cache": true}.
-  cache: true
-  cache_params:
-    type: redis
-    host: redis
-    port: 6379
-    ttl: 3600
-    mode: default_off
-  # Log every request to Langfuse when the `tracing` profile is running.
-  # success_callback: ["langfuse"]
-  # failure_callback: ["langfuse"]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/DATABASE_URL
   store_model_in_db: true
-
-  # ---------------------------------------------------------------- identity
-  # This is what makes one person's API usage and their chat usage add up to
-  # ONE number instead of two unrelated ones.
-  #
-  # The problem it solves: Open WebUI authenticates to this gateway with a
-  # SINGLE shared key (see WEBUI_BACKEND_KEY in docker-compose.yml). Without
-  # the mapping below, every chat message from every person is spend against
-  # that one key -- the gateway can tell you the web UI used $40 this month
-  # and cannot tell you who used it. Per-person API keys were attributable all
-  # along; the web UI was the hole.
-  #
-  # Open WebUI forwards the signed-in identity as headers when
-  # ENABLE_FORWARD_USER_INFO_HEADERS is set. Mapping the EMAIL header to
-  # `internal_user` makes LiteLLM's internal user id the person's email
-  # address -- and the admin panel mints each API key with
-  # `user_id: <same email>`. One identity, both surfaces.
-  #
-  # Email rather than X-OpenWebUI-User-Id deliberately: the user id is an
-  # Open WebUI database row id, which exists nowhere else. Email is what
-  # Authelia issues over OIDC, what the admin panel already records, and therefore
-  # the only identifier the whole stack agrees on.
-  # BOTH roles, from the one header, because they do different jobs. Measured
-  # on this stack rather than assumed:
-  #
-  #   internal_user  ATTRIBUTES the spend. It makes chat usage land on the
-  #                  same identity as the person's API key, which is what
-  #                  makes their total one number instead of two.
-  #
-  #   customer       ENFORCES the ceiling. With internal_user alone, an
-  #                  over-budget person was refused on the API path (429) and
-  #                  still served on the web UI -- tracked but not stopped.
-  #                  The internal-user budget binds a key owned by that user;
-  #                  the web UI holds a SHARED key, so nothing bound. End-user
-  #                  budgets are the mechanism that checks a shared key
-  #                  against the caller named in the request.
-  #
-  # The admin panel therefore provisions each person twice, with the
-  # same email and the same ceiling: once as an internal user, once as an end
-  # user. Drop either half and you lose either the total or the limit.
-  user_header_mappings:
-    - header_name: X-OpenWebUI-User-Email
-      litellm_user_role: internal_user
-  # /metrics is an enterprise feature on current builds; the Prometheus job for
-  # it is commented out in config/prometheus/prometheus.yml.
-  # callbacks: ["prometheus"]

@@ -38,7 +38,8 @@ public static class Program
             .Opt("--text", "The draft inline, for a quick check")
             .Opt("--limit", "How many identifiers to resolve (default 40)")
             .Flag("--json", "Emit the findings as JSON on stdout")
-            .Flag("--quiet", "Say nothing when the draft is clean"),
+            .Flag("--quiet", "Say nothing when the draft is clean")
+            .Flag("--claude-hook", "Run as a Claude Code Stop hook: read the hook payload on stdin, check the last answer in its transcript, block only on a contradiction"),
         "resolve" => new ArgSpec($"{Prog} resolve").Opt("--config", required: true),
         "serve" => new ArgSpec($"{Prog} serve").Opt("--config", required: true)
             .Flag("--stdio", "Serve MCP over stdin/stdout instead of HTTP. Credential comes from ARGUS_TOKEN.")
@@ -55,7 +56,7 @@ public static class Program
         "user role" => new ArgSpec($"{Prog} user role").Opt("--config", required: true).Positional("username").Positional("role", help: "admin or user"),
         "user disable" => new ArgSpec($"{Prog} user disable").Opt("--config", required: true).Positional("username"),
         "user enable" => new ArgSpec($"{Prog} user enable").Opt("--config", required: true).Positional("username"),
-        "healthcheck" => new ArgSpec($"{Prog} healthcheck").Opt("--url", "Health endpoint (default: http://127.0.0.1:7700/healthz)"),
+        "healthcheck" => new ArgSpec($"{Prog} healthcheck").Opt("--url", "Health endpoint (default: this server on 127.0.0.1:7700, https when ARGUS_TLS_CERT is set)"),
         "flush-acl" => new ArgSpec($"{Prog} flush-acl").Opt("--config", required: true).Opt("--user", "Only clear this GitLab username's cache entries"),
         "pack build" => new ArgSpec($"{Prog} pack build")
             .Opt("--source", $"One of: {string.Join(", ", SourceCatalog.Sources.Keys.OrderBy(k => k, StringComparer.Ordinal))}", required: true)
@@ -177,7 +178,7 @@ public static class Program
             }
         }
         if (command == "verify") return Cli.Commands.Verify(a);
-        if (command == "healthcheck") return Cli.Commands.Healthcheck(a.Get("url") ?? "http://127.0.0.1:7700/healthz");
+        if (command == "healthcheck") return Cli.Commands.Healthcheck(a.Get("url") ?? Cli.Commands.DefaultHealthUrl);
 
         ArgusConfig cfg;
         try { cfg = ArgusConfig.Load(a.Req("config")); }

@@ -4,7 +4,7 @@ using Argus.Util;
 
 namespace Argus.Indexing;
 
-/// <summary>Which files are worth indexing (argus/parse/filters.py).</summary>
+/// <summary>Which files are worth indexing.</summary>
 public static class Filters
 {
     public static readonly Dictionary<string, string> ExtensionLang = new(StringComparer.Ordinal)
@@ -45,7 +45,7 @@ public static class Filters
     }
 }
 
-/// <summary>#include extraction (argus/parse/includes.py).</summary>
+/// <summary>#include extraction.</summary>
 public static class Includes
 {
     static readonly Regex IncludeRe = new(
@@ -75,7 +75,7 @@ public static class Includes
 
 /// <summary>
 /// The doc comment attached to a symbol -- what it DOES, not what it is called
-/// (argus/parse/docs.py). Walks backwards from a definition's first line over
+///. Walks backwards from a definition's first line over
 /// the text already stored; no language server, no AST.
 /// </summary>
 public static class DocComments

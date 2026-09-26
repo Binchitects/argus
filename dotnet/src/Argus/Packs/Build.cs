@@ -16,7 +16,7 @@ namespace Argus.Packs;
 public sealed class BuildError(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>
-/// Building a pack from a documentation source (argus/packs/build.py): fetch,
+/// Building a pack from a documentation source: fetch,
 /// parse, chunk, embed (through a persistent cache), quantise, and write the
 /// pack atomically. A rebuild over an existing pack keeps every document whose
 /// content hash is unchanged, so a docs refresh costs what changed upstream.

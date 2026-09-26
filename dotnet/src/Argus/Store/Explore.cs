@@ -6,7 +6,7 @@ namespace Argus.Store;
 
 /// <summary>
 /// Read-only operator queries over the index, with NO access filtering
-/// (argus/store/explore.py).
+///.
 ///
 /// These live apart from <see cref="Queries"/> on purpose: the only caller is the
 /// admin surface, gated by ARGUS_ADMIN_TOKEN, whose holder may see everything. A
@@ -91,7 +91,7 @@ public static class Explore
     }
 }
 
-/// <summary>Materialise the cross-repo dependency graph (argus/store/graph.py).</summary>
+/// <summary>Materialise the cross-repo dependency graph.</summary>
 public static class Graph
 {
     public static int RebuildRepoDeps(SqliteConnection conn)

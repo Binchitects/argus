@@ -15,7 +15,7 @@ using ModelContextProtocol.Protocol;
 namespace Argus.Cli;
 
 /// <summary>
-/// The `argus` command line (argus/cli.py): the same subcommands, options,
+/// The `argus` command line: the same subcommands, options,
 /// output lines and exit codes, so a hook, a cron job or the admin console
 /// cannot tell which implementation it is driving.
 /// </summary>
@@ -311,11 +311,6 @@ public static class Commands
     {
         Directory.CreateDirectory(outDir);
         var indexOut = Path.Combine(outDir, "index.db");
-        if (!File.Exists(cfg.Index.DbPath))
-        {
-            Err.WriteLine($"no index at {cfg.Index.DbPath}");
-            return 4;
-        }
         string? Vacuum(string source, string target)
         {
             try
@@ -328,6 +323,33 @@ public static class Commands
                 return null;
             }
             catch (SqliteException exc) { return Queries.SqliteMessage(exc); }
+        }
+        // People, their keys and conversations first: unlike the index, nothing can rebuild them.
+        var appDb = Platform.AppDb.PathFor(cfg.Index.DataDir);
+        long people = 0;
+        if (File.Exists(appDb))
+        {
+            var appOut = Path.Combine(outDir, "app.db");
+            if (Vacuum(appDb, appOut) is { } errApp)
+            {
+                Err.WriteLine($"app database backup failed: {errApp}");
+                return 4;
+            }
+            using var verifyApp = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = appOut, Pooling = false }.ToString());
+            verifyApp.Open();
+            var appStatus = Sql.Scalar(verifyApp, "PRAGMA integrity_check")?.ToString() ?? "";
+            if (appStatus != "ok")
+            {
+                Err.WriteLine($"app database backup failed integrity check: {appStatus}");
+                return 4;
+            }
+            people = Convert.ToInt64(Sql.Scalar(verifyApp, "SELECT COUNT(*) FROM users"));
+            Out.WriteLine($"app database: {people} people -> {appOut}");
+        }
+        if (!File.Exists(cfg.Index.DbPath))
+        {
+            Err.WriteLine($"no index at {cfg.Index.DbPath}" + (File.Exists(appDb) ? " (the app database was backed up)" : ""));
+            return File.Exists(appDb) ? 0 : 4;
         }
         if (Vacuum(cfg.Index.DbPath, indexOut) is { } err1)
         {
@@ -473,11 +495,19 @@ public static class Commands
     /// healthcheck: the image ships no curl and no Python, so the probe is the
     /// program itself.
     /// </summary>
+    /// <summary>Where this container's own server answers: https when it serves TLS.</summary>
+    public static string DefaultHealthUrl =>
+        (Environment.GetEnvironmentVariable("ARGUS_TLS_CERT") is { Length: > 0 } ? "https" : "http") + "://127.0.0.1:7700/healthz";
+
     public static int Healthcheck(string url)
     {
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            // A loopback probe of our own server: its certificate names the public host, not 127.0.0.1.
+            var loopback = Uri.TryCreate(url, UriKind.Absolute, out var u) && u.IsLoopback;
+            using var handler = new HttpClientHandler();
+            if (loopback) handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
             using var resp = client.GetAsync(url).GetAwaiter().GetResult();
             return (int)resp.StatusCode == 200 ? 0 : 1;
         }
@@ -784,8 +814,64 @@ public static class Commands
 
     // --- verify ----------------------------------------------------------------------------
 
+    /// <summary>
+    /// The last assistant text in a Claude Code transcript (JSON lines), or "" when the turn
+    /// ended on a tool call, a thinking block or nothing -- none of which is a claim to check.
+    /// </summary>
+    public static string LastAssistantText(string transcriptPath)
+    {
+        var text = "";
+        foreach (var line in File.ReadLines(transcriptPath))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            JsonObject? row;
+            try { row = JsonNode.Parse(line) as JsonObject; }
+            catch (System.Text.Json.JsonException) { continue; }
+            var message = row?["message"] as JsonObject;
+            if (row?["type"]?.ToString() != "assistant" && message?["role"]?.ToString() != "assistant") continue;
+            switch (message?["content"])
+            {
+                case JsonValue v when v.TryGetValue<string>(out var s):
+                    text = s;
+                    break;
+                case JsonArray blocks:
+                    var parts = blocks.OfType<JsonObject>().Where(b => b["type"]?.ToString() == "text").Select(b => b["text"]?.ToString() ?? "").ToList();
+                    if (parts.Count > 0) text = string.Join("\n", parts);
+                    break;
+            }
+        }
+        return text;
+    }
+
     public static int Verify(Parsed a)
     {
+        if (a.Flag("claude_hook"))
+        {
+            // Claude Code runs this when the model tries to finish. Exit 2 with a reason on stderr
+            // blocks the stop and hands the reason back; anything else lets the turn end -- including
+            // "could not check", which must never trap an agent in a turn it cannot finish.
+            string draft;
+            try
+            {
+                var payload = JsonNode.Parse(Console.In.ReadToEnd()) as JsonObject;
+                var path = payload?["transcript_path"]?.ToString() ?? "";
+                draft = path.Length > 0 && File.Exists(path) ? LastAssistantText(path) : "";
+            }
+            catch (Exception exc) when (exc is System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
+            {
+                return 0;
+            }
+            if (PyStr.Strip(draft).Length == 0) return 0;
+            var tmp = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(tmp, draft);
+                var rc = Program.Run(["verify", "--config", a.Req("config"), "--text-file", tmp, "--quiet",
+                    .. (a.Get("limit") is { } l ? new[] { "--limit", l } : [])]);
+                return rc == ExitVerifyContradicted ? rc : 0;
+            }
+            finally { File.Delete(tmp); }
+        }
         ArgusConfig cfg;
         try { cfg = ArgusConfig.Load(a.Req("config")); }
         catch (Exception exc) when (exc is ConfigError or IOException)

@@ -1,52 +1,48 @@
-# LLMService
+# The stack
 
-A self-hosted LLM service: GPU inference, a chat UI, an API gateway with a key and a
-budget per person, single sign-on, an admin panel and dashboards.
+Five services on one Docker network:
 
-**Everything you need to deploy it is in the top-level README:
-[Deploying the stack](../README.md#deploying-the-stack--read-this-part).**
-The short version:
+| service | what it is | reachable at |
+|---|---|---|
+| `argus` | the .NET backend serving the React app: sign-in, chat, administration, code index, knowledge packs, MCP | `http://localhost:8080` (`ARGUS_HTTP_PORT`) |
+| `litellm` | the model gateway: one OpenAI-compatible API, a key and a budget per person | `http://localhost:4000/v1` (`GATEWAY_PORT`) |
+| `postgres` | the gateway's database | internal |
+| `llamacpp` | the chat model on the GPU | internal |
+| `llamacpp-embed` | the embedding model (nomic-embed-text) on the CPU | internal |
+
+Plus `model-init`, which downloads both models on first start and exits, and
+the opt-in `power-limits` (GPU/CPU power caps, swappiness; privileged).
+
+## Deploy
 
 ```bash
 cp env-samples/qwen3.8-flash-next.rtx5090.env .env
+awk '/^# SECRETS/{s=1} /^# APP/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' .env > .env.new && mv .env.new .env && chmod 600 .env
 ```
+
+Set `ARGUS_ADMIN_EMAIL`, `LLAMACPP_MODEL_DIR` (on NVMe) and, for the code index,
+`ARGUS_GITLAB_URL` and `ARGUS_GITLAB_TOKEN`. Then:
 
 ```bash
-awk '/^# SECRETS/{s=1} /^# PEOPLE/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' .env > .env.new && mv .env.new .env && chmod 600 .env
+make up        # builds the app image the first time, downloads the models
+make health    # every part up?
+make smoke     # sign in and get a real answer from the model
 ```
 
-```bash
-make up
-```
+Open `http://localhost:8080` and sign in as `admin` with `ARGUS_ADMIN_PASSWORD`
+from `.env`. Add people on **People**; each gets a generated password, a
+gateway account and a budget. `BIND_ADDRESS=0.0.0.0` serves the network;
+`ARGUS_TLS_CERT`/`ARGUS_TLS_KEY` turn on HTTPS.
 
-`make up` runs `scripts/preflight.sh` first, then `docker compose up -d`. The
-preflight is worth the extra second: if this checkout has MOVED since the stack
-was last started, Docker has already created empty directories at the old
-absolute paths and the containers bind to those instead. Nothing errors -- you
-get Authelia crash-looping on a missing config, Alertmanager on a missing
-`alertmanager.yml`, the temperature exporter on a missing `exporter.py` and
-Traefik exiting 127, four unrelated-looking failures that all name files which
-plainly exist on disk. The preflight says "the containers were created from
-/old/path" instead. Use `make preflight` to run it alone.
+## Operate
 
-For a host with no network, `make airgap` writes a self-contained bundle to
-`dist/`: every image, optionally the model weights and knowledge packs, a
-generated `.env` with the secrets emptied, and a loader. On the isolated host it
-is `cp stack/.env.airgap stack/.env && ./fill-secrets.sh && ./load.sh --up`
--- no registry, no Hugging Face, no build. See "Deploying without a network" in
-the top-level README.
+| task | command |
+|---|---|
+| status | `make health`, `make ps`, `make logs S=argus` |
+| back up | `make backup` — people, conversations, keys, index, packs, gateway database, `.env` |
+| reset a password from the shell | `make user A="passwd admin"` |
+| change the model | edit the MODEL block of `.env`, then `make restart` |
+| update the app | `git pull && make build && make up` |
 
-`.env` is the whole configuration: model, paths, domain, power limits, secrets.
-`env-samples/` holds complete, measured deployments for Qwen3.8-Flash-Next and
-Qwen3.8-27B on an RTX 5090.
-
-Two references go with this file:
-
-* **[docs/ARCHITECTURE.md](../docs/stack/ARCHITECTURE.md) — every service, the network and
-  volumes, the three authentication mechanisms, the request flows, and a table of
-  what each failure actually means.
-* **[docs/CONFIGURATION.md](../docs/stack/CONFIGURATION.md) — every `.env` variable and
-  every file under `config/`, with what breaks when each is wrong.
-
-`docs/` otherwise holds reference material and measurement history; the top-level
-README is authoritative where they differ.
+The full reference is [docs/CONFIGURATION.md](../docs/CONFIGURATION.md) and
+[docs/OPERATIONS.md](../docs/OPERATIONS.md).

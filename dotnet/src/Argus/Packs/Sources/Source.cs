@@ -7,7 +7,7 @@ public sealed record Doc(string Path, string Title, string Url, string Lang, str
 
 public sealed record ApiSymbol(string Name, string Kind, string Namespace, string DocPath, string Anchor, string Signature);
 
-/// <summary>A documentation corpus a pack is built from (argus/packs/sources/base.py).</summary>
+/// <summary>A documentation corpus a pack is built from.</summary>
 public interface ISource
 {
     string Name { get; }

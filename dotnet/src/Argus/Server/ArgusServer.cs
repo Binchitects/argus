@@ -156,7 +156,7 @@ public static class ArgusServer
         return false;
     }
 
-    /// <summary>The MCP SDK's transport security in Python: Content-Type, then Host, then Origin.</summary>
+    /// <summary>MCP transport security: Content-Type, then Host, then Origin.</summary>
     static bool TransportSecurity(HttpContext ctx, List<string> hosts, List<string> origins, out int status, out string message)
     {
         status = 200;
@@ -490,7 +490,7 @@ public static class ArgusServer
     }
 }
 
-/// <summary>MCP request handlers: tools/list and tools/call over the Python catalog.</summary>
+/// <summary>MCP request handlers: tools/list and tools/call over the tool catalog.</summary>
 public static class McpHandlers
 {
     static Tools? _tools;

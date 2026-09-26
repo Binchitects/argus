@@ -9,7 +9,7 @@ namespace Argus.Packs;
 public sealed class PackMismatch(string message) : Exception(message);
 
 /// <summary>
-/// The on-disk pack format (argus/packs/format.py): one SQLite file holding the
+/// The on-disk pack format: one SQLite file holding the
 /// documents (zstd), their chunks, the API symbol index, an FTS5 table and two
 /// sqlite-vec tables. Packs are opened immutable, so any number of readers can
 /// share one file without locking.

@@ -1,7 +1,7 @@
 namespace Argus.Packs;
 
 /// <summary>
-/// Binary and int8 quantisation for embeddings (argus/packs/quantize.py).
+/// Binary and int8 quantisation for embeddings.
 ///
 /// A vector is stored twice, neither time as float32: 96 bytes of sign bits for
 /// the coarse Hamming pass and 768 bytes of int8 for the rescore. The bit order

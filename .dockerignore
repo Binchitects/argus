@@ -1,44 +1,25 @@
-# Build context hygiene. The image installs the package from source and runs
-# the suite; nothing else needs to cross the wire.
-
+# The image builds from source: the frontend (npm ci) and the backend (restore,
+# test, publish). Nothing prebuilt, secret or large crosses into the context.
 .git
 .github
 .claude
 .remember
 
-# Runtime state — mirrors and the index are volumes, never baked into an image.
+dotnet/**/bin/
+dotnet/**/obj/
+dotnet/native/
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e/.work/
+
+stack/.env
+stack/.env.*
+stack/models/
+stack/backups/
+stack/config/argus/tls/*
 data/
 *.db
 *.db-wal
 *.db-shm
-
-# Real config carries a GitLab token. Only the example belongs in a build.
-config.yaml
-config.local.yaml
-.env
-
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-*.egg-info/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-
-docs/
-*.md
-!README.md
-
-.vscode/
-.idea/
-Thumbs.db
-desktop.ini
-
-# Real GitLab tokens and a multi-GB scratch tree. Neither belongs in an image
-# layer, and a layer keeps its contents even when a later step deletes them.
-# The Dockerfile copies scripts/agent_client_example.py explicitly rather than
-# the directory, so this is defence in depth rather than the only guard.
-scripts/test-gitlab/seeded.json
-scripts/test-gitlab/work/
-packs/

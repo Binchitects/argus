@@ -4,7 +4,7 @@ namespace Argus.Indexing;
 
 /// <summary>
 /// What a developer handed <c>which_repo</c>, and the evidence in it
-/// (argus/whichrepo.py). Detection order is load-bearing: a diff contains paths
+///. Detection order is load-bearing: a diff contains paths
 /// and a stack trace contains symbols, so the most specific shape is tested first.
 /// </summary>
 public static class WhichRepo

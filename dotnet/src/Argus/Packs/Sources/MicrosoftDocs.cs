@@ -12,7 +12,7 @@ public sealed class Meta : Dictionary<string, object>
     public List<string>? List(string key) => TryGetValue(key, out var v) ? v as List<string> : null;
 }
 
-/// <summary>Microsoft Learn markdown conventions (argus/packs/sources/microsoft_docs.py).</summary>
+/// <summary>Microsoft Learn markdown conventions.</summary>
 public static class MsLearn
 {
     const RegexOptions O = RegexOptions.CultureInvariant;

@@ -14,7 +14,7 @@ namespace Argus.Store;
 public class QueryError(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>
-/// Every read an MCP tool makes of the private index (argus/store/queries.py).
+/// Every read an MCP tool makes of the private index.
 ///
 /// Every public query takes the caller's allowlist as its FIRST argument. That is
 /// the access-control mechanism, not a convention: there is no way to call one of

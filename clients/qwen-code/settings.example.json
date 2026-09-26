@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "argus": {
-      "httpUrl": "https://argus.llm.localhost/mcp",
+      "httpUrl": "http://llm.example.lan:8080/mcp",
       "headers": {
-        "Authorization": "Bearer <gitlab-pat>"
+        "Authorization": "Bearer ak_your_code_index_key"
       },
       "trust": true,
       "description": "Organisation code index"

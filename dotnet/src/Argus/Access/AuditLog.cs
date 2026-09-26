@@ -5,8 +5,8 @@ namespace Argus.Access;
 
 /// <summary>
 /// The audit trail as a log stream: one JSON line per tool call or refusal
-/// (argus/auditlog.py). The audit table stays the record; this puts the same
-/// fact on stdout so Promtail/Loki can chart and search it. ARGUS_AUDIT_LOG=0
+///. The audit table stays the record; this puts the same
+/// fact on stdout so a log collector can chart and search it. ARGUS_AUDIT_LOG=0
 /// turns the stream off.
 /// </summary>
 public static class AuditLog

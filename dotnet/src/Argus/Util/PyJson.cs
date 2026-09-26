@@ -6,7 +6,8 @@ using System.Text.Json.Nodes;
 namespace Argus.Util;
 
 /// <summary>
-/// JSON written the way the Python implementation writes it.
+/// JSON written byte-for-byte the way Argus has always written it (Python's json module
+/// conventions), because a model reads these strings and a changed byte is a changed prompt.
 ///
 /// Two writers, because Python has two and a client sees both:
 /// <list type="bullet">

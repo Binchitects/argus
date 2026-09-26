@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: dotnet/global.json
+      - name: Universal Ctags (it decides which symbols exist)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends universal-ctags
+      - name: sqlite-vec (pinned, SHA-256 checked)
+        run: dotnet/scripts/fetch-sqlite-vec.sh linux-x64
+      - name: Build and test
+        run: |
+          git config --global user.email ci@argus.invalid && git config --global user.name ci
+          dotnet test dotnet/Argus.sln -c Release
+
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Typecheck and build
+        working-directory: frontend
+        run: npm ci && npm run build
+
+  browser:
+    # The real backend and the built app, driven in Chromium, with fake GitLab,
+    # LiteLLM and embeddings on real sockets.
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: dotnet/global.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends universal-ctags
+      - run: dotnet/scripts/fetch-sqlite-vec.sh linux-x64 && dotnet build dotnet/Argus.sln -c Release
+      - name: Build the app and install Chromium
+        working-directory: frontend
+        run: npm ci && npm run build && npx playwright install --with-deps chromium
+      - name: Browser suite
+        working-directory: frontend
+        run: |
+          git config --global user.email ci@argus.invalid && git config --global user.name ci
+          npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screens-and-traces
+          path: |
+            frontend/e2e/.work/screens
+            frontend/test-results
+          if-no-files-found: ignore
+
+  stack:
+    # Every sample must resolve into a complete compose file.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose config, per sample
+        working-directory: stack
+        run: |
+          for sample in env-samples/*.env; do
+            cp "$sample" .env
+            awk '/^# SECRETS/{s=1} /^# APP/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' .env > .env.new && mv .env.new .env
+            docker compose config --quiet && echo "$sample resolves"
+          done
+      - name: Scripts parse
+        run: for f in stack/scripts/*.sh scripts/*.sh clients/claude-code/*.sh; do bash -n "$f"; done

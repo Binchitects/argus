@@ -43,11 +43,11 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # The suite runs inside the image before anything is published. This is
-      # the gate, not a formality: the `test` stage installs the same pinned
-      # ctags the runtime uses, so a distro change that breaks symbol
+      # The xUnit suite runs inside the image before anything is published.
+      # This is the gate, not a formality: the `test` stage installs the same
+      # pinned ctags the runtime uses, so a distro change that breaks symbol
       # extraction fails here rather than silently producing an index with no
-      # symbols in it.
+      # symbols in it. The frontend is built in the same Dockerfile.
       - name: Run the full suite inside the image
         uses: docker/build-push-action@v6
         with:

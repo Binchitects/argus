@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "argus": {
-      "url": "https://argus.llm.localhost/mcp",
+      "url": "http://llm.example.lan:8080/mcp",
       "headers": {
-        "Authorization": "Bearer <gitlab-pat>"
+        "Authorization": "Bearer ak_your_code_index_key"
       }
     }
   }

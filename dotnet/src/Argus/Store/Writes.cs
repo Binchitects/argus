@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 namespace Argus.Store;
 
 /// <summary>
-/// Every write the indexer and the server make, ported from argus/store/writes.py.
+/// Every write the indexer and the server make.
 ///
 /// Each public method is one transaction, which is the unit the Python module
 /// commits at. Python's sqlite3 opens an implicit transaction before the first

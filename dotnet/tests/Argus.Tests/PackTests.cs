@@ -176,6 +176,34 @@ public class PackTests
 
         (rc, _, _) = Capture(() => Program.Run(["verify", "--config", cfg, "--text", "MessageBoxW lives in User32.dll.", "--quiet"]));
         Assert.Equal(0, rc);
+
+        // As a Claude Code Stop hook: the payload names the transcript; the LAST assistant text is the draft.
+        string Transcript(params string[] assistantTexts)
+        {
+            var lines = new List<string> { """{"type":"user","message":{"role":"user","content":"where is MessageBoxW?"}}""" };
+            foreach (var t in assistantTexts)
+                lines.Add(new JsonObject { ["type"] = "assistant", ["message"] = new JsonObject { ["role"] = "assistant",
+                    ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = t }) } }.ToJsonString());
+            return dir.File($"t{Guid.NewGuid():n}.jsonl", string.Join("\n", lines) + "\n");
+        }
+        int Hook(string payload, out string err)
+        {
+            var oldIn = Console.In;
+            Console.SetIn(new StringReader(payload));
+            try
+            {
+                var (code, _, e) = Capture(() => Program.Run(["verify", "--config", cfg, "--claude-hook"]));
+                err = e;
+                return code;
+            }
+            finally { Console.SetIn(oldIn); }
+        }
+        var wrong = Transcript("Let me check.", "MessageBoxW lives in shell32.dll.");
+        Assert.Equal(2, Hook(new JsonObject { ["transcript_path"] = wrong }.ToJsonString(), out var reason));
+        Assert.Contains("you said 'shell32.dll'", reason);
+        Assert.Equal(0, Hook(new JsonObject { ["transcript_path"] = Transcript("MessageBoxW lives in shell32.dll.", "It is in User32.dll.") }.ToJsonString(), out _));
+        Assert.Equal(0, Hook("not json", out _));
+        Assert.Equal(0, Hook("""{"transcript_path":"/nonexistent/x.jsonl"}""", out _));
     }
 
     static (int Rc, string Out, string Err) Capture(Func<int> run)

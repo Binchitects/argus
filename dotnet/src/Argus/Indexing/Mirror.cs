@@ -11,7 +11,7 @@ public sealed class GitError(string message) : Exception(message);
 public readonly record struct Change(string Status, string Path);
 
 /// <summary>
-/// Bare mirrors and detached worktrees (argus/mirror.py). The token reaches git
+/// Bare mirrors and detached worktrees. The token reaches git
 /// only through GIT_ASKPASS and an environment variable -- never an argument,
 /// never a file, never a URL -- and is redacted from every error.
 /// </summary>

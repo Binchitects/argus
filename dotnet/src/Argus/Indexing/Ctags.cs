@@ -13,7 +13,7 @@ public sealed class CtagsUnavailable(string message) : Exception(message);
 /// <summary>
 /// The result of one ctags invocation, including what it did NOT process.
 /// Every path handed in lands in exactly one of <see cref="Covered"/> and
-/// <see cref="Uncovered"/>; see argus/parse/ctags.py for why the symbol map
+/// <see cref="Uncovered"/>; the symbol map
 /// alone cannot answer "was this path processed".
 /// </summary>
 public sealed record SymbolBatch(
@@ -25,7 +25,7 @@ public sealed record SymbolBatch(
     public static SymbolBatch Empty() => new(new(StringComparer.Ordinal), new(StringComparer.Ordinal), new(StringComparer.Ordinal), new(StringComparer.Ordinal));
 }
 
-/// <summary>Symbol extraction with universal-ctags (argus/parse/ctags.py).</summary>
+/// <summary>Symbol extraction with universal-ctags.</summary>
 public static class Ctags
 {
     public static readonly HashSet<string> PrivateScopes = new(StringComparer.Ordinal) { "detail", "internal", "impl", "anonymous" };

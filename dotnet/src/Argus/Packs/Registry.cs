@@ -17,7 +17,7 @@ public sealed record InstalledPack(
 public sealed record IndexEntry(string Name, string Version, string Url, string Sha256, long SizeBytes, string License);
 
 /// <summary>
-/// Installing, listing and publishing packs (argus/packs/registry.py). A pack
+/// Installing, listing and publishing packs. A pack
 /// names its own file from its metadata, so the name is validated before it is
 /// used as a path; an install stages to a temp file and renames into place, so a
 /// failed download never replaces a working pack.
@@ -258,7 +258,7 @@ public static class Registry
 }
 
 /// <summary>
-/// A persistent cache of chunk embeddings for pack builds (argus/packs/embcache.py).
+/// A persistent cache of chunk embeddings for pack builds.
 /// Every failure degrades to "not cached": the cache is an accelerator, never a
 /// dependency.
 /// </summary>

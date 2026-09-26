@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Argus.Indexing;
 
-/// <summary>Health indicators computed from the index (argus/kpi.py).</summary>
+/// <summary>Health indicators computed from the index.</summary>
 public static class Kpi
 {
     public static readonly HashSet<string> LowerIsBetter = new(StringComparer.Ordinal)

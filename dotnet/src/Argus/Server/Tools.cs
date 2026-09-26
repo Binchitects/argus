@@ -29,7 +29,7 @@ public sealed class AccessNotice(string message) : ToolError(message);
 public sealed class NotFoundError(string message) : ToolError(message);
 
 /// <summary>
-/// The seventeen MCP tools (argus/mcpsrv/tools.py). Every private-code tool is
+/// The seventeen MCP tools. Every private-code tool is
 /// scoped to the caller's allowlist, audited in the sidecar database and on the
 /// log stream, and turns a storage failure into "do not retry" rather than a
 /// stack trace; the documentation tools read the installed packs.

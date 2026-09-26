@@ -12,41 +12,68 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
-## Unreleased
+## Unreleased — v3.0.0
 
 ### :rocket: Epics and highlights
 
-- **Argus in .NET.** `dotnet/` is a complete second implementation on .NET 10 —
-  indexer, all 17 MCP tools, admin/webhook/metrics, packs, CLI — that serves
-  the same database and packs and answers byte for byte like the Python one.
-  A conformance run compares the two on a real C corpus (index tables, 45 tool
-  calls × 4 identities, HTTP surface, 14 pack sources); an end-to-end run
-  drives the admin console against it in Chromium. First index pass 14.1 s
-  against Python's 21.1 s on the same corpus. Select it with
-  `ARGUS_DOCKERFILE=dotnet/Dockerfile`
+- **One app, three parts.** The project is now a .NET 10 backend serving a
+  React frontend, llama.cpp for the models, and LiteLLM for the gateway. The
+  Python package, Open WebUI, the Python admin console, the identity proxy,
+  Traefik, Authelia, Prometheus, Grafana, Alertmanager, Loki, Langfuse, vLLM,
+  Ollama and Redis are gone, with their configuration and scripts
+- **A chat that searches your code as it answers.** The app's chat streams the
+  model's reasoning and every code-index tool call as it happens; tools run in
+  the backend as the signed-in person, with their GitLab access, and every chat
+  goes to the gateway with that person's own key, so their budget binds
+- **Accounts in the app.** People, roles, passwords (PBKDF2-SHA256, 600k
+  iterations), sessions, and two kinds of personal key — code index keys for
+  MCP clients and model keys for the gateway — managed on People and Settings
+- **Tested in a browser.** A Playwright suite drives the built app against the
+  real backend with fake GitLab, LiteLLM and embeddings on real sockets, from
+  sign-in to a spent budget; CI runs it with the xUnit suite and the compose
+  checks
 
 ### :sparkles: New features & Enhancements
 
-- Grafana *Indexing*: an index-health row from Argus's own metrics — scrape
-  status, repositories, stale, errored, oldest pass, symbols — with a
-  per-repository freshness table and trends
-- Grafana *LLM overview*: KV-cache usage and prompt-processing speed read from
-  llama.cpp as well as vLLM
-- `argus healthcheck`, so the .NET image's health probe needs no Python
+- Chat: conversations saved and reloaded exactly, model picker, tools switch,
+  Stop (ends generation upstream), rename, delete, Markdown without raw HTML
+- Administration under `/manage`: overview with service health, people (add
+  with a generated password, role, GitLab link, budget, reset, disable,
+  delete), indexing, explore, knowledge packs; light and dark themes
+- `argus user add|list|passwd|role|disable|enable`; the first administrator
+  is created from `ARGUS_ADMIN_*` on first start
+- Embeddings from llama.cpp (`llamacpp-embed`, nomic-embed-text on CPU) over
+  the OpenAI protocol (`ARGUS_EMBED_URL`)
+- `argus backup` includes the app database; `make backup` adds the gateway's
+  database and `.env`, with checksums
+- `argus verify --claude-hook` is a complete Claude Code Stop hook
+- Optional HTTPS from PEM files (`ARGUS_TLS_CERT`, `ARGUS_TLS_KEY`)
+- `make health` and `make smoke` (and PowerShell equivalents) check a live
+  deployment end to end
 
 ### :bug: Bugs fixed
 
-- `argus verify` never exited 2: it looked for a `status` on each finding,
-  which `verify_text` nests under `corrections`, so the Stop hook built on it
-  passed every contradicted draft. Its message now quotes what the draft said
+- `argus verify` never exited 2: it read a `status` that `verify_text` nests
+  under `corrections`, so the Stop hook passed every contradicted draft. Its
+  message now quotes what the draft said
 - `docs_verify` reported the description as part of the last contract field
-  (`User32.dll -- Displays a modal dialog box.`); the contract now ends at the
-  ` -- ` marker, and contradicted fields carry `stated`
+  (`User32.dll -- Displays a modal dialog box.`); contradicted fields carry
+  `stated`
 - Python docstrings never reached the index: ctags was not asked for each
-  symbol's language, which the docstring reader is keyed on. Symbol contract
-  version 3 re-extracts existing indexes on their next pass
-- Admin console alerts that mix bold text, line breaks and a link were laid out
-  as side-by-side columns; they read as one paragraph again
+  symbol's language. Symbol contract version 3 re-extracts on the next pass
+
+### :boom: Breaking changes & Deprecations
+
+- Sign-in is the app's own. Existing Authelia accounts are not migrated: add
+  people on People (or with `argus user add`); their gateway spend history in
+  LiteLLM is kept, keyed by the same email
+- The stack is plain HTTP on `ARGUS_HTTP_PORT` (default 8080) unless
+  `ARGUS_TLS_*` is set; there is no reverse proxy and no `*.llm.localhost`
+- MCP clients authenticate with a code index key (`ak_…`) from Settings, or a
+  GitLab token as before; the Open WebUI chat-client token is gone
+- `.env` is shorter: regenerate it from `stack/env-samples/`
+- Monitoring and tracing are no longer part of the stack; `/admin/metrics`
+  still serves the index's Prometheus metrics for anyone who scrapes it
 
 ## v2.9.0 (2026-09-18)
 

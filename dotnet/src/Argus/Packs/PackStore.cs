@@ -26,7 +26,7 @@ public sealed class Pack(string name, string path, SqliteConnection conn, Dictio
 }
 
 /// <summary>
-/// Reading installed packs (argus/store/packs.py): exact lookup, full-text and
+/// Reading installed packs: exact lookup, full-text and
 /// semantic search, the hybrid "find by behaviour" ranking, the contract sheet
 /// for a source file, and verify-after for a draft.
 /// </summary>

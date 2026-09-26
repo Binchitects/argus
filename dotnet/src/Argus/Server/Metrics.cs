@@ -9,7 +9,7 @@ namespace Argus.Server;
 
 /// <summary>
 /// Prometheus metrics for the index, so it cannot go stale unnoticed
-/// (argus/mcpsrv/metrics.py). The exporter decides what "stale" means
+///. The exporter decides what "stale" means
 /// (ARGUS_INDEX_STALE_AFTER, default 3600s) and exports the raw timestamps too.
 ///
 /// One difference from the Python exposition, deliberately: HELP and TYPE are

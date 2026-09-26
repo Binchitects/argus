@@ -6,8 +6,8 @@ namespace Argus.Packs;
 public sealed record Chunk(string HeadingPath, string? Anchor, int StartLine, string Body);
 
 /// <summary>
-/// Markdown (and reStructuredText, converted) into retrieval chunks
-/// (argus/packs/chunk.py): split at headings, keep fenced blocks whole, pack
+/// Markdown (and reStructuredText, converted) into retrieval chunks:
+/// split at headings, keep fenced blocks whole, pack
 /// paragraphs up to a size, and carry the heading trail and a stable anchor.
 /// </summary>
 public static class Chunker

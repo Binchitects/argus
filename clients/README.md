@@ -1,241 +1,79 @@
-# Connecting an agent to Argus
+# Connecting an editor or agent
 
-One directory per client, each holding the smallest file that makes that client
-work. Argus speaks standard MCP, so most of this is your client's own syntax
-around the same two facts: **the URL** and **your GitLab token**.
+Argus speaks standard MCP at **`http://<host>:8080/mcp`** (`https://` when the
+server has `ARGUS_TLS_CERT`). Every client needs the same two facts:
 
-| client | file | status |
-|---|---|---|
-| [DeepSeek Harness](#deepseek-harness) | `deepseek-harness/argus-mcp.patch.yml` | **executed**, v2.1.2 |
-| [Qwen Code](#qwen-code) | `qwen-code/settings.example.json` | **executed**, qwen 0.23.3 on v2.1.2 |
-| [Claude Code](#claude-code) | `claude-code/add.sh` | transcribed, **not executed here** |
-| [Continue](#continue) | `continue/config.example.yaml` | transcribed, **not executed here** |
-| [anything else](#anything-else) | `generic-mcp/http.json`, `generic-mcp/stdio.json` | the HTTP shape is verified by the two above; stdio is exercised by the test suite |
+- **the URL** — use the host name listed in `ARGUS_HOSTNAME` (or `localhost`);
+  MCP's DNS-rebinding guard refuses any other `Host` with `421`;
+- **a credential** — a **code index key** from the app's *Settings & keys* page
+  (`ak_…`). It sees exactly the repositories your GitLab account can read. A
+  GitLab personal access token works too, for people without an account here.
 
-Say what you ran. The two that say "executed" were driven end to end against a
-live stack: the harness called `find_symbol`, got `root/eal-core` back, and
-Argus logged the call against the right person (`user=dev_alpha, outcome=ok`).
-The other three are written from each client's own documentation and are
-correct as far as that goes, but nobody has run them from this repository.
+For the model itself, the gateway is OpenAI-compatible at
+`http://<host>:4000/v1` with a **model API key** (`sk-…`) from the same page.
 
----
+| client | file |
+|---|---|
+| Claude Code | `claude-code/add.sh`, and `claude-code/verify-after.sh` as a Stop hook |
+| Qwen Code | `qwen-code/settings.example.json` |
+| DeepSeek Harness | `deepseek-harness/argus-mcp.patch.yml` |
+| Continue | `continue/config.example.yaml` |
+| anything else | `generic-mcp/http.json`, `generic-mcp/stdio.json` |
 
-## Before anything: two settings that are not the client's fault
+The HTTP configs are exercised by the browser suite (`frontend/e2e`), which
+connects to `/mcp` with a code index key; each client's own syntax around them
+is taken from that client's documentation.
 
-**TLS.** The stack serves a self-signed certificate. Node-based clients
-(DeepSeek Harness, Qwen Code) have **no per-server TLS option**, so trust has to
-be established before the process starts:
-
-```bash
-export NODE_EXTRA_CA_CERTS="$PWD/stack/config/traefik/certs/tls.crt"
-```
-
-`stack/scripts/with-ca.sh` prints the equivalents for curl, python and git.
-Clients that offer an "insecure" switch (Qwen Code's `--insecure`) work too, but
-that turns off verification for **every** connection the process makes, not just
-this one.
-
-**The hostname.** Use the name the reverse proxy forwards, `argus.<domain>` by
-default. Argus's DNS-rebinding guard compares the inbound `Host` header against
-a fixed allowlist, and a mismatch is `421 Invalid Host Header` on every `/mcp`
-call while `/healthz` still answers 200 -- so the service looks healthy and only
-the tool calls fail.
-
----
-
-## DeepSeek Harness
+## Claude Code
 
 ```bash
-ARGUS_TOKEN=<gitlab-pat> \
-NODE_EXTRA_CA_CERTS="$PWD/stack/config/traefik/certs/tls.crt" \
-  dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
-  "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
+export ARGUS_URL=http://llm.example.lan:8080/mcp ARGUS_KEY=ak_...
+clients/claude-code/add.sh
 ```
 
-Two details in that file are load-bearing and neither is guessable:
+### Forcing verify-after
 
-- **`insert:` is required.** A bare `- name: ...` entry is read as an *override*
-  of a server that does not exist yet, and dsh rejects the patch with
-  `id is required for non-insert patches`.
-- **`!!js` is required** around the token template. Without it the backticks
-  arrive as literal text and Argus answers 401. Taking the token from
-  `process.env` keeps a PAT out of the file, so it can live in this repository.
-
-`--profile headless "task"` is how to exercise an MCP server from a script: no
-browser, no server left running, the tool calls visible in the transcript.
+A model can answer an API question from memory with no tool call at all.
+`argus verify --claude-hook` is a Stop hook: when the model tries to finish,
+it checks the last answer against the installed documentation packs and, only
+when the documentation **contradicts** it, blocks the stop with the correction
+(for example *MessageBoxW dll: you said 'shell32.dll'; the documentation says
+'User32.dll'*). "Could not check" never blocks. It needs a local `argus` with
+the packs; see `claude-code/verify-after.sh` for the settings snippet.
 
 ## Qwen Code
 
 ```bash
-# let the CLI write it (this is how the sample was produced)
-qwen mcp add argus https://argus.llm.localhost/mcp -t http \
-  -H 'Authorization: Bearer <gitlab-pat>' --trust \
-  --description 'Organisation code index'
-
-NODE_EXTRA_CA_CERTS="$PWD/stack/config/traefik/certs/tls.crt" \
-  qwen --approval-mode yolo \
-  "Use the argus MCP tool find_symbol to look up the symbol DecodeFrame."
+qwen mcp add argus http://llm.example.lan:8080/mcp -t http -H "Authorization: Bearer ak_..."
 ```
 
-Or merge `qwen-code/settings.example.json` into `~/.qwen/settings.json`
-(user scope) or `<project>/.qwen/settings.json` (project scope). The keys it
-uses -- `httpUrl`, `headers`, `trust`, `description` -- are exactly what
-`qwen mcp add` writes.
+or merge `qwen-code/settings.example.json` into `~/.qwen/settings.json`. To use
+the local model as well: `--openai-base-url http://llm.example.lan:4000/v1
+--openai-api-key sk-...`.
 
-**Scope changes one thing.** A user-scope server connects as soon as it is
-added. A **project**-scope one starts as `Pending approval` and is not
-connected until:
+## DeepSeek Harness
 
 ```bash
-qwen mcp approve argus
+ARGUS_KEY=ak_... dsh --patch clients/deepseek-harness/argus-mcp.patch.yml "Use mcp__argus__find_symbol with name=DecodeFrame."
 ```
 
-That is deliberate on Qwen Code's part -- a server declared in a repository
-would otherwise be added silently by cloning it -- but it reads as a broken
-server if you are expecting it to just connect. Both scopes were exercised
-end to end here, and both called `find_symbol` correctly.
-
-**`trust: true` is not optional in a headless run.** Without it Qwen Code asks
-for confirmation before every Argus call, and nothing ever proceeds.
-
-**Pointing Qwen Code at the stack's own model**, which is worth doing because it
-needs no cloud key and exercises both halves at once:
-
-```bash
-qwen --auth-type openai \
-     --openai-base-url https://gateway.<domain>/v1 \
-     --openai-api-key "$LITELLM_MASTER_KEY" \
-     -m "$MODEL_NAME" --approval-mode yolo "<task>"
-```
-
-The gateway host is `gateway.<domain>` -- **not** `api.<domain>`, which routes
-to Authelia and answers with a login redirect that reads as a 401.
-
-## Claude Code
-
-`claude-code/add.sh <http|stdio>`. Not executed here; `claude` is not installed
-on the machine this was written on. Check it with `claude mcp list`.
-
-### Forcing verify-after
-
-`claude-code/verify-after.sh` is a `Stop` hook that checks the model's answer
-against the documentation packs **before the turn is allowed to end**, and hands
-back anything the documentation contradicts. Install it with:
-
-```bash
-cp clients/claude-code/verify-after.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/verify-after.sh
-```
-
-then add to `~/.claude/settings.json`, merging with whatever is there:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      { "hooks": [ { "type": "command",
-                     "command": "~/.claude/hooks/verify-after.sh" } ] }
-    ]
-  }
-}
-```
-
-This exists because of one measured failure. A model reviewing kernel code
-answered in 2.2 seconds with **zero tool calls**, naming `wcscpy_s` (user-mode),
-`<string.h>` (user-mode) and `ucrt.lib` (user-mode) — a real function, a real
-header, a real library, and the wrong answer to a question about kernel code.
-Telling the model to verify does not work; `SERVER_INSTRUCTIONS` already says to,
-and this is the model that ignored it. The hook puts the check outside the
-model's judgement.
-
-It calls `argus verify`, which is `docs_verify` with an exit code — hooks are
-shell commands and cannot call an MCP tool, so a command is the only interface
-that works. **Exit 2 is the only blocking outcome**, and only a genuine
-contradiction produces it. Exit 6 means "could not check" — no packs installed,
-or unreadable ones — and does **not** block, because a deployment without
-documentation packs must not become an agent that can never finish a sentence.
-Anything unexpected also fails open, for the same reason.
-
-Only the *last* assistant message is checked, so a claim the model already
-corrected in a later turn never blocks. A turn that produced no prose — a
-tool-only turn, an interrupted one — is nothing to check and never blocks.
-
-**Not executed against a real Claude Code**, like `add.sh` above: the hook
-protocol (stdin JSON, exit 2 blocks, stderr is the reason) is from
-[Anthropic's hooks reference](https://code.claude.com/docs/en/hooks), and the
-transcript shape is the part to verify against your own version. The script
-fails open when the transcript does not look as expected, so a version that
-renames a field stops checking rather than blocking every answer.
-
-## Continue
-
-Merge `continue/config.example.yaml` into `~/.continue/config.yaml`. The HTTP
-form takes the same `url`/`headers` shape as everything else.
+`insert:` is the append form, and `!!js` is required around the header
+template — without it the backticks arrive literally and Argus answers 401.
 
 ## Anything else
 
-`generic-mcp/http.json` and `generic-mcp/stdio.json` are the two transports in
-their lowest common denominator form. Rename the outer key to whatever your
-client documents -- `mcp`, `mcpServers`, `context_servers` -- and leave the
-object inside alone.
-
-| | HTTP | stdio |
-|---|---|---|
-| serves | many developers, one server | one client, one process |
-| credential | `Authorization: Bearer <pat>` per request | `ARGUS_TOKEN` in the environment |
-| identity | resolved per request | resolved once at startup |
-| needs | a running server, a port, TLS in production | nothing but the command |
-
----
-
-## What changed for agents: `doc` and `overview`
-
-Two additions an agent should be told about, because both change how it should
-search rather than what it can reach.
-
-**Symbol results now carry `doc`.** Argus reads each symbol's doc comment and
-uses it to match and to answer, so `semantic_search` finds a function by what it
-DOES rather than by what it is named. Every symbol-level result (`find_symbol`,
-`semantic_search`, `code_contracts`, the Explore page) includes it. An agent
-should read `doc` before choosing between two plausible results — on a fixture
-built to be falsifiable, ranking on names alone returned the wrong function and
-ranking with the doc returned the right one, for both directions of the same
-question.
-
-**`overview` describes what each repository IS** — README, layout, languages,
-the public symbols somebody documented, and cross-repo dependencies in both
-directions. Call it first in an unfamiliar estate, or on any question spanning
-several repositories. Names alone are not an architecture, and without this an
-agent's first move is guessing symbol names.
-
-Both are in the server's own `instructions`, which every MCP client forwards to
-the model, so clients that do nothing special still get the guidance. If your
-client lets you add system context, repeating those two habits is worthwhile.
-
----
-
-## What a client has to get right to be worth connecting
-
-**Pass the server's `instructions` through to the model.** Argus returns 1,803
-characters at connect time saying that recollection of headers, libraries and
-IRQLs is unreliable. Measured: passing it through took tool use from 3 of 20
-questions to 8, and accuracy from 12/20 to 14/20. A client that drops it leaves
-that on the table -- and dropping it is silent, because everything else works.
-
-**Use native function calling**, not a text protocol the model imitates. A text
-protocol scored 10/20 and *collapsed to 4/20* when told to check facts first,
-because the added prose broke the output format.
-
-Most clients do both by default. Hermes needed patches for the first; see
-`scripts/hermes-patch/`.
+`generic-mcp/http.json` is the shape most URL-based clients take.
+`generic-mcp/stdio.json` runs a local `argus` as a child process, with a GitLab
+token in `ARGUS_TOKEN`, for one person working against their own index.
 
 ## Checking the connection without an agent
 
 ```bash
-python scripts/smoke_test.py --url https://argus.<domain>/mcp --token <pat>
+curl -s http://llm.example.lan:8080/mcp -H "Authorization: Bearer ak_..." \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
 ```
 
-Seven checks: health, a bad token refused, the MCP handshake, the server
-instructions, tool registration, a pack fact, and the private index answering
-with the right repository count. If that passes and your agent still fails, the
-problem is in the client's configuration, not in Argus.
+A `200` with `"serverInfo":{"name":"argus"...}` means the URL, the host name
+and the key are all right; `401` names what is wrong with the key, `421` the
+host name.
