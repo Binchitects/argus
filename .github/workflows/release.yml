@@ -52,6 +52,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: src/Argus/Dockerfile
           target: test
           push: false
           no-cache: true          # a CACHED test layer proves nothing
@@ -68,6 +69,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: src/Argus/Dockerfile
           target: runtime
           push: true
           tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
@@ -77,6 +79,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: src/Argus/Dockerfile
           target: server
           push: true
           tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-server
@@ -89,6 +92,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: src/Argus/Dockerfile
           target: runtime
           push: true
           tags: ${{ steps.meta.outputs.image }}:latest

@@ -1,9 +1,0 @@
-bin/
-obj/
-web/node_modules/
-web/dist/
-web/test-results/
-web/playwright-report/
-src/Llm.Api/wwwroot/
-*.user
-web/e2e/.auth/

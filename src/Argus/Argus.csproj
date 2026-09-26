@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>argus</AssemblyName>
+    <RootNamespace>Argus</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Version Condition="'$(AppVersion)' == ''">3.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.12" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The schema is shared with the Python implementation, not copied: both
+         read the same files, so the two can never migrate an index differently. -->
+    <EmbeddedResource Include="Migrations/*.sql" LogicalName="migrations/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- sqlite-vec, fetched into native/ by tools/fetch-sqlite-vec.sh; copied under runtimes/<rid>/native
+         where PackFormat.VecExtensionPath looks for it. -->
+    <None Include="../../native/runtimes/**/vec0.*" Exclude="../../native/runtimes/**/*.sha256"
+          Link="runtimes/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

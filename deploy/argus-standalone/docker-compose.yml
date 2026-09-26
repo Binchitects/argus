@@ -1,0 +1,572 @@
+# ==============================================================================
+# Argus -- a team's chat, code index and documentation, on local models.
+#
+#   models    llama.cpp: the chat model (GPU) and the embedding model (CPU)
+#   gateway   LiteLLM + Postgres: one OpenAI-compatible endpoint, a key and a
+#             budget per person
+#   app       argus: the .NET backend serving the React app -- sign-in, chat
+#             with code-index tools, administration, MCP for editors
+#
+# Start:  cp env-samples/<one>.env .env, fill the SECRETS block, docker compose up -d
+# Then open http://localhost:${ARGUS_HTTP_PORT:-8080} and sign in as ARGUS_ADMIN_USERNAME.
+# ==============================================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-gpu: &gpu-reservation
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+networks:
+  llm-net:
+    name: llm-net
+    driver: bridge
+
+volumes:
+  argus-data:
+  postgres-data:
+  llamacpp-engine:
+  power-limits-state:
+
+services:
+  # ============================================================================
+  # MODELS
+  # ============================================================================
+
+  # Host tuning for the engine: GPU power cap, CPU package cap, vm.swappiness.
+  # Opt-in (COMPOSE_PROFILES=power-limits): it is PRIVILEGED -- treat it as root
+  # on the host. Every value it changes is recorded and restored when cleared.
+  power-limits:
+    image: utkuozdemir/nvidia_gpu_exporter:1.3.2
+    container_name: power-limits
+    profiles: [power-limits]
+    restart: unless-stopped
+    privileged: true
+    network_mode: none
+    environment:
+      GPU_POWER_LIMIT_W: ${GPU_POWER_LIMIT_W:-}
+      CPU_POWER_LIMIT_W: ${CPU_POWER_LIMIT_W:-}
+      HOST_SWAPPINESS: ${HOST_SWAPPINESS:-}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    volumes:
+      - power-limits-state:/state
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apply() {
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            for i in $$(nvidia-smi --query-gpu=index --format=csv,noheader); do
+              cur=$$(nvidia-smi -i $$i --query-gpu=power.limit --format=csv,noheader,nounits | cut -d. -f1)
+              if [ -n "$$GPU_POWER_LIMIT_W" ]; then want=$$GPU_POWER_LIMIT_W
+              elif [ -f /state/gpu$$i.applied ]; then want=$$(nvidia-smi -i $$i --query-gpu=power.default_limit --format=csv,noheader,nounits | cut -d. -f1)
+              else want=""; fi
+              if [ -n "$$want" ] && [ "$$cur" != "$$want" ]; then
+                nvidia-smi -i $$i -pl "$$want" >/dev/null && echo "gpu$$i: power limit $$cur W -> $$want W"
+                if [ -n "$$GPU_POWER_LIMIT_W" ]; then touch /state/gpu$$i.applied; else rm -f /state/gpu$$i.applied; fi
+              fi
+            done
+          fi
+          for d in /sys/class/powercap/intel-rapl:[0-9]; do
+            [ -w "$$d/constraint_0_power_limit_uw" ] || { [ -n "$$CPU_POWER_LIMIT_W" ] && [ ! -f /state/cpu-skip ] && echo "cpu: no writable RAPL limit at $$d; skipping" && touch /state/cpu-skip; continue; }
+            name=$$(basename $$d)
+            for c in 0 1; do
+              f="$$d/constraint_$${c}_power_limit_uw"; orig="/state/$$name.c$$c.orig"
+              [ -f "$$orig" ] || cat "$$f" > "$$orig"
+              if [ -n "$$CPU_POWER_LIMIT_W" ]; then want=$$((CPU_POWER_LIMIT_W * 1000000)); else want=$$(cat "$$orig"); fi
+              if [ "$$(cat $$f)" != "$$want" ]; then
+                echo "$$want" > "$$f" && echo "cpu $$name $$(cat $$d/constraint_$${c}_name): $$(( $$(cat $$orig) / 1000000 )) W originally -> $$(( want / 1000000 )) W"
+              fi
+            done
+          done
+          # vm.swappiness: how readily the host swaps idle program memory to keep
+          # file pages -- here, the model's weights -- in RAM. Same record-and-
+          # restore rule as the power caps.
+          sw=/proc/sys/vm/swappiness
+          if [ -w "$$sw" ]; then
+            [ -f /state/swappiness.orig ] || cat "$$sw" > /state/swappiness.orig
+            want=$${HOST_SWAPPINESS:-$$(cat /state/swappiness.orig)}
+            if [ "$$(cat $$sw)" != "$$want" ]; then
+              echo "$$want" > "$$sw" && echo "host: vm.swappiness $$(cat /state/swappiness.orig) originally -> $$want"
+            fi
+          fi
+        }
+        echo "power-limits: GPU=$${GPU_POWER_LIMIT_W:-default} W, CPU=$${CPU_POWER_LIMIT_W:-firmware} W, swappiness=$${HOST_SWAPPINESS:-unchanged}"
+        while true; do apply; sleep 60; done
+    <<: *gpu-reservation
+    logging: *default-logging
+
+
+  model-init:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG:-server-cuda}
+    container_name: model-init
+    # One-shot: the image's own healthcheck (for the long-running server) does not apply.
+    healthcheck:
+      disable: true
+    restart: "no"
+    networks: [llm-net]
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    environment:
+      LLAMACPP_HF_REPO: ${LLAMACPP_HF_REPO:-}
+      LLAMACPP_HF_FILES: ${LLAMACPP_HF_FILES:-}
+      LLAMACPP_MODEL_FILE: ${LLAMACPP_MODEL_FILE:?set LLAMACPP_MODEL_FILE in .env}
+      LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
+      LLAMACPP_ENGINE_URL: ${LLAMACPP_ENGINE_URL:-}
+      LLAMACPP_ENGINE_SHA256: ${LLAMACPP_ENGINE_SHA256:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+      EMBED_HF_REPO: ${EMBED_HF_REPO:-nomic-ai/nomic-embed-text-v1.5-GGUF}
+      EMBED_MODEL_FILE: ${EMBED_MODEL_FILE:-nomic-embed-text-v1.5.f16.gguf}
+    volumes:
+      - ${LLAMACPP_MODEL_DIR:?set LLAMACPP_MODEL_DIR in .env}:/gguf
+      - ${EMBED_MODEL_DIR:-./models}:/embed
+      - llamacpp-engine:/engine
+    command:
+      - |
+        set -euo pipefail
+        auth=(); [ -n "$$HF_TOKEN" ] && auth=(-H "Authorization: Bearer $$HF_TOKEN")
+        owner=$$(stat -c %u:%g /gguf)
+        offline=""
+        for f in $$LLAMACPP_HF_FILES; do
+          name=$$(basename "$$f"); url="https://huggingface.co/$$LLAMACPP_HF_REPO/resolve/main/$$f"
+          # Without the timeouts a firewall that drops packets stalled this for
+          # minutes per file; without `|| offline=1` set -e ended the script
+          # with no message, so on an air-gapped host the engine never started.
+          head=""
+          [ -n "$$offline" ] || head=$$(curl -sI --connect-timeout 10 --max-time 60 "$${auth[@]}" "$$url" | tr -d '\r') || offline=1
+          size=$$(printf '%s\n' "$$head" | sed -n 's/^x-linked-size: //Ip' | head -1)
+          [ -n "$$size" ] || size=$$(printf '%s\n' "$$head" | sed -n 's/^content-length: //Ip' | tail -1)
+          sha=$$(printf '%s\n' "$$head" | sed -n 's/^x-linked-etag: "\{0,1\}\([0-9a-f]\{64\}\)"\{0,1\}/\1/Ip' | head -1)
+          if [ -f "/gguf/$$name" ] && [ -n "$$offline" ]; then
+            echo "model-init: have $$name (Hugging Face unreachable: using the file on disk)"; continue
+          fi
+          if [ -f "/gguf/$$name" ] && [ "$$(stat -c %s "/gguf/$$name")" = "$$size" ]; then
+            echo "model-init: have $$name"; continue
+          fi
+          [ -z "$$offline" ] || { echo "model-init: $$name is not in LLAMACPP_MODEL_DIR and Hugging Face is unreachable; copy it there"; exit 1; }
+          [ -n "$$size" ] || { echo "model-init: $$LLAMACPP_HF_REPO/$$f not found on Hugging Face"; exit 1; }
+          echo "model-init: downloading $$name ($$((size / 1000000)) MB) from $$LLAMACPP_HF_REPO"
+          curl -fL --retry 20 --retry-delay 10 -C - "$${auth[@]}" -o "/gguf/$$name.part" "$$url"
+          if [ -n "$$sha" ]; then
+            echo "model-init: verifying $$name"
+            echo "$$sha  /gguf/$$name.part" | sha256sum -c --quiet
+          fi
+          mv "/gguf/$$name.part" "/gguf/$$name"; chown "$$owner" "/gguf/$$name" || true
+        done
+        # The embedding model the code index and the knowledge packs are built with.
+        if [ ! -f "/embed/$$EMBED_MODEL_FILE" ]; then
+          echo "model-init: downloading $$EMBED_MODEL_FILE from $$EMBED_HF_REPO"
+          curl -fL --retry 20 --retry-delay 10 -C - "$${auth[@]}" -o "/embed/$$EMBED_MODEL_FILE.part" \
+            "https://huggingface.co/$$EMBED_HF_REPO/resolve/main/$$EMBED_MODEL_FILE" \
+            && mv "/embed/$$EMBED_MODEL_FILE.part" "/embed/$$EMBED_MODEL_FILE" \
+            || { echo "model-init: could not fetch $$EMBED_MODEL_FILE; copy it into EMBED_MODEL_DIR"; exit 1; }
+        fi
+        [ -f "/gguf/$$LLAMACPP_MODEL_FILE" ] || { echo "model-init: LLAMACPP_MODEL_FILE=$$LLAMACPP_MODEL_FILE is not in LLAMACPP_MODEL_DIR (set LLAMACPP_HF_REPO/LLAMACPP_HF_FILES to download it)"; exit 1; }
+        [ -z "$$LLAMACPP_MTP_HEAD" ] || [ -f "/gguf/$$LLAMACPP_MTP_HEAD" ] || { echo "model-init: LLAMACPP_MTP_HEAD=$$LLAMACPP_MTP_HEAD is not in LLAMACPP_MODEL_DIR"; exit 1; }
+
+        if [ -n "$$LLAMACPP_ENGINE_URL" ]; then
+          if [ "$$(cat /engine/.source 2>/dev/null)" != "$$LLAMACPP_ENGINE_URL" ] || [ ! -x /engine/llama-server ]; then
+            echo "model-init: fetching engine $$LLAMACPP_ENGINE_URL"
+            curl -fL --retry 10 -o /tmp/engine.tgz "$$LLAMACPP_ENGINE_URL"
+            [ -z "$$LLAMACPP_ENGINE_SHA256" ] || echo "$$LLAMACPP_ENGINE_SHA256  /tmp/engine.tgz" | sha256sum -c --quiet
+            find /engine -mindepth 1 -delete; tar xzf /tmp/engine.tgz -C /engine
+            [ -x /engine/llama-server ] || { echo "model-init: no llama-server at the top of that tarball"; exit 1; }
+            echo "$$LLAMACPP_ENGINE_URL" > /engine/.source
+          fi
+          echo "model-init: engine $$(basename "$$LLAMACPP_ENGINE_URL")"
+        else
+          find /engine -mindepth 1 -delete 2>/dev/null || true
+          echo "model-init: engine = the image's own llama-server"
+        fi
+        echo "model-init: ready ($$LLAMACPP_MODEL_FILE$${LLAMACPP_MTP_HEAD:+, MTP head $$LLAMACPP_MTP_HEAD})"
+    logging: *default-logging
+
+  llamacpp:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG:-server-cuda}
+    container_name: llamacpp
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      # Wherever the big GGUFs actually live.
+      - ${LLM_MODELS_DIR:-./models}:/models
+      - ${LLAMACPP_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}:/gguf:ro
+      # Filled by model-init from LLAMACPP_ENGINE_URL; empty = stock server.
+      - llamacpp-engine:/engine:ro
+    # Which llama-server runs, and MTP. Both come from .env via model-init:
+    #
+    #   LLAMACPP_ENGINE_URL  a release tarball unpacked into /engine. Empty runs
+    #       the image's own /app/llama-server. It exists for MTP: mainline has
+    #       no MTP graph for the qwen4exp architecture yet (ggml-org/llama.cpp
+    #       #28243 is open), so the stock image accepts --spec-type draft-mtp
+    #       and silently does nothing. Unsloth's CUDA 12 build carries it.
+    #   LLAMACPP_MTP_DRAFT_MAX  multi-token prediction: tokens drafted per step.
+    #       0 = off. Needs a model with an MTP layer: Qwen3.8-27B carries its own
+    #       inside the main GGUF (the stock server handles it); Qwen3.8-Flash-Next
+    #       needs a separate draft head (LLAMACPP_MTP_HEAD, a file name in
+    #       LLAMACPP_MODEL_DIR) and the Unsloth engine above.
+    #       LLAMACPP_MTP_ARGS appends flags for the draft, e.g.
+    #       --spec-draft-cpu-moe to keep a draft head's experts in system RAM.
+    environment:
+      LLAMA_CACHE: /models/.llama-cache
+      LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
+      LLAMACPP_MTP_DRAFT_MAX: ${LLAMACPP_MTP_DRAFT_MAX:-0}
+      LLAMACPP_MTP_ARGS: ${LLAMACPP_MTP_ARGS:-}
+      # Keeping the weights in RAM. See the MEMORY block of the samples.
+      #   LLAMACPP_MLOCK    auto | on | off   pin the weights (--mlock)
+      #   LLAMACPP_PRELOAD  auto | on | off   read them into the page cache first
+      #   LLAMACPP_RAM_RESERVE_GB             RAM left for everything else
+      # `auto` pins only when the model's weights live (partly) in system RAM AND
+      # the whole model fits beside the reserve. A model entirely on the GPU needs
+      # no host copy, and a model larger than RAM cannot be pinned -- trying makes
+      # the kernel thrash or kill something. The decision is logged either way.
+      LLAMACPP_MLOCK: ${LLAMACPP_MLOCK:-auto}
+      LLAMACPP_PRELOAD: ${LLAMACPP_PRELOAD:-auto}
+      LLAMACPP_RAM_RESERVE_GB: ${LLAMACPP_RAM_RESERVE_GB:-8}
+      LLAMACPP_N_CPU_MOE: ${LLAMACPP_N_CPU_MOE:-0}
+      LLAMACPP_EXTRA_ARGS: ${LLAMACPP_EXTRA_ARGS:-}
+      LLAMACPP_MODEL_FILE: ${LLAMACPP_MODEL_FILE:-}
+    # mlock needs the locked-memory limit lifted; harmless when nothing is locked.
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        # ---- memory: pin and/or preload the weights, when that is possible ----
+        f="$$LLAMACPP_MODEL_FILE"
+        case "$$f" in *-00001-of-*) files=$$(ls /gguf/$${f%-00001-of-*}-000*-of-*.gguf 2>/dev/null) ;; *) files="/gguf/$$f" ;; esac
+        [ -z "$$LLAMACPP_MTP_HEAD" ] || files="$$files /gguf/$$LLAMACPP_MTP_HEAD"
+        model_kb=$$(du -ckL $$files 2>/dev/null | tail -1 | cut -f1)
+        ram_kb=$$(awk '/^MemTotal:/{print $$2}' /proc/meminfo)
+        budget_kb=$$(( ram_kb - $${LLAMACPP_RAM_RESERVE_GB:-8} * 1048576 ))
+        on_cpu=0
+        [ "$${LLAMACPP_N_CPU_MOE:-0}" -gt 0 ] && on_cpu=1
+        case "$$LLAMACPP_EXTRA_ARGS" in *=CPU*|*--cpu-moe*|*-ngl\ 0*) on_cpu=1 ;; esac
+        fits=0; [ "$${model_kb:-0}" -gt 0 ] && [ "$$model_kb" -le "$$budget_kb" ] && fits=1
+        gb() { echo "$$(( $$1 / 1048576 )) GB"; }
+        mlock=0
+        case "$${LLAMACPP_MLOCK:-auto}" in
+          on)  mlock=1; [ $$fits = 1 ] || echo "memory: WARNING pinning $$(gb $$model_kb) with only $$(gb $$budget_kb) to spare -- expect thrashing" ;;
+          off) echo "memory: pinning off (LLAMACPP_MLOCK=off)" ;;
+          *)   if [ $$on_cpu = 0 ]; then echo "memory: weights run on the GPU; nothing in RAM to pin"
+               elif [ $$fits = 1 ]; then mlock=1
+               else echo "memory: NOT pinning -- model $$(gb $$model_kb) exceeds RAM $$(gb $$ram_kb) minus the $${LLAMACPP_RAM_RESERVE_GB:-8} GB reserve; weights page in from disk on demand, so keep them on NVMe (more RAM removes the paging)"; fi ;;
+        esac
+        if [ $$mlock = 1 ]; then
+          echo "memory: pinning $$(gb $$model_kb) of weights in RAM (--mlock); $$(gb $$(( ram_kb - model_kb ))) left for the rest"
+          set -- "$$@" --mlock
+        fi
+        case "$${LLAMACPP_PRELOAD:-auto}" in
+          on|auto)
+            if [ $$mlock = 0 ] && [ $$fits = 1 ] && [ $$on_cpu = 1 ] || [ "$$LLAMACPP_PRELOAD" = on ]; then
+              t0=$$(date +%s); cat $$files > /dev/null
+              echo "memory: preloaded $$(gb $$model_kb) into the page cache in $$(( $$(date +%s) - t0 )) s"
+            fi ;;
+        esac
+        # ------------------------------------------------------------------------
+        bin=/app/llama-server
+        if [ -x /engine/llama-server ]; then bin=/engine/llama-server; echo "engine: $$(cat /engine/.source 2>/dev/null || echo /engine)"; fi
+        if [ "$${LLAMACPP_MTP_DRAFT_MAX:-0}" -gt 0 ]; then
+          echo "MTP: drafting $$LLAMACPP_MTP_DRAFT_MAX token(s) per step$${LLAMACPP_MTP_HEAD:+ with head /gguf/$$LLAMACPP_MTP_HEAD}"
+          [ -z "$$LLAMACPP_MTP_HEAD" ] || set -- "$$@" -md "/gguf/$$LLAMACPP_MTP_HEAD"
+          set -- "$$@" --spec-type draft-mtp --spec-draft-n-max "$$LLAMACPP_MTP_DRAFT_MAX" $$LLAMACPP_MTP_ARGS
+        fi
+        exec "$$bin" "$$@"
+      - llama-server
+    # The image entrypoint is llama-server, so this holds only flags.
+    #
+    # --api-key: the engine is reachable only on the compose network, but LiteLLM
+    # still has to present LLAMACPP_API_KEY, so nothing else on that network can use
+    # the GPU unannounced.
+    #
+    # --n-cpu-moe is the flag that matters: it keeps the routed experts of the
+    # last N layers in system RAM instead of VRAM. Attention, the shared expert
+    # and the embeddings stay on the GPU. Set it high enough that the GPU-side
+    # footprint fits your card; too low and the server dies with a CUDA OOM
+    # during weight loading.
+    command: >
+      -m /gguf/${LLAMACPP_MODEL_FILE:-SET_LLAMACPP_MODEL_FILE_IN_ENV.gguf}
+      --host 0.0.0.0
+      --port 8080
+      --api-key ${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}
+      --alias ${MODEL_NAME:?set MODEL_NAME in .env}
+      -c ${MODEL_CONTEXT:-32768}
+      -t ${LLAMACPP_THREADS:-8}
+      -ngl ${LLAMACPP_N_GPU_LAYERS:-99}
+      --n-cpu-moe ${LLAMACPP_N_CPU_MOE:-48}
+      --cache-type-k ${LLAMACPP_KV_TYPE:-q8_0}
+      --cache-type-v ${LLAMACPP_KV_TYPE:-q8_0}
+      --parallel ${LLAMACPP_PARALLEL:-1}
+      --jinja
+      --metrics
+      ${LLAMACPP_EXTRA_ARGS:-}
+    # mmap means the GGUF is paged from disk on demand rather than read whole.
+    # With 512 experts and 10 firing per token the hot set is far smaller than
+    # the file, so this is what makes a 94 GB model usable on 48 GB of RAM --
+    # provided the file is on NVMe. On a spinning disk it is unusable.
+    shm_size: "${LLAMACPP_SHM_SIZE:-2gb}"
+    # A ceiling on what the engine may hold, so the machine keeps a floor.
+    #
+    # Without it this container is unlimited: mmap'd model pages fill the page
+    # cache to whatever RAM exists, which is FINE in isolation (Linux evicts
+    # file-backed pages under pressure) but leaves no guaranteed room for
+    # anything else. With a cgroup limit the kernel reclaims inside this
+    # container instead of competing with the rest of the box.
+    #
+    # Set LLAMACPP_MEM_LIMIT in .env (e.g. 56g). Empty
+    # means unlimited, which is the previous behaviour.
+    #
+    # Do NOT set this below the model's working set or it will thrash: the
+    # limit bounds the cache, it does not make the model smaller.
+    mem_limit: ${LLAMACPP_MEM_LIMIT:-0}
+    # A CEILING ON CORES, matched to -t in LLAMACPP_EXTRA_ARGS.
+    #
+    # Without it the engine and any other CPU work (embedding, indexing) can
+    # together saturate all 24 logical CPUs. Measured on this box: an embedding
+    # batch at ~8 cores alongside the engine took the package to 94 C, which is
+    # a cooling problem long before it is a throughput one.
+    #
+    # 16 is the physical core count here and the value -t is set to; going
+    # higher does not help anyway (measured, see README: hyperthreads are 2.13x
+    # SLOWER). Leaves 8 logical CPUs for everything else.
+    cpus: ${LLAMACPP_CPUS:-16}
+    <<: *gpu-reservation
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      # A 94 GB model paging in from NVMe takes minutes on a cold cache.
+      start_period: 1800s
+      retries: 5
+    logging: *default-logging
+
+  # The embedding model: nomic-embed-text on CPU, over llama.cpp's
+  # OpenAI-compatible /v1/embeddings. The code index embeds every symbol with
+  # it and the knowledge packs were built with it, so it must stay the same
+  # model at the same dimension (768) -- a different one makes semantic search
+  # refuse the packs rather than answer wrongly.
+  #
+  # CPU on purpose: the chat model owns the GPU, and a 137M-parameter embedder
+  # buys little there while risking the engine's CUDA memory.
+  llamacpp-embed:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_EMBED_IMAGE_TAG:-server}
+    container_name: llamacpp-embed
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - ${EMBED_MODEL_DIR:-./models}:/embed:ro
+    command: >
+      -m /embed/${EMBED_MODEL_FILE:-nomic-embed-text-v1.5.f16.gguf}
+      --host 0.0.0.0
+      --port 8080
+      --alias ${ARGUS_EMBED_MODEL:-nomic-embed-text}
+      --embeddings
+      --pooling mean
+      -c 2048 -b 2048 -ub 2048
+      -t ${EMBED_THREADS:-4}
+      --parallel 2
+    cpus: ${EMBED_CPUS:-4}
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    logging: *default-logging
+
+  # ============================================================================
+  # GATEWAY
+  # ============================================================================
+
+  # LiteLLM: one OpenAI-compatible endpoint in front of the engine, with a
+  # virtual key and a budget per person. The app creates each person here and
+  # sends their chats with their own key, so the budget binds in the app and
+  # through the API alike. Published so editors and scripts can use it with a
+  # model key from the app's Settings page.
+  litellm:
+    image: ghcr.io/berriai/litellm:${LITELLM_IMAGE_TAG:-main-stable}
+    container_name: litellm
+    restart: unless-stopped
+    networks: [llm-net]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-4000}:4000"
+    volumes:
+      # A template: ${MODEL_NAME} and friends are filled in from the environment
+      # at startup (entrypoint below), because LiteLLM does not expand them.
+      - ./config/litellm/config.yaml:/app/config.template.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set LITELLM_SALT_KEY}
+      DATABASE_URL: postgresql://${LLM_PG_USER:-llmservice}:${LLM_PG_PASSWORD}@postgres:5432/litellm
+      # The price list bundled with the image, not a fetch from GitHub on every start.
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      CHECKPOINT_DISABLE: "1"
+      MODEL_NAME: ${MODEL_NAME:?set MODEL_NAME in .env}
+      MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
+      MODEL_MAX_OUTPUT: ${MODEL_MAX_OUTPUT:-32768}
+      # Per 1M tokens, in the currency budgets are in (USD by default).
+      PRICE_INPUT_PER_MTOK: ${PRICE_INPUT_PER_MTOK:-0.20}
+      PRICE_CACHED_INPUT_PER_MTOK: ${PRICE_CACHED_INPUT_PER_MTOK:-0.02}
+      PRICE_OUTPUT_PER_MTOK: ${PRICE_OUTPUT_PER_MTOK:-0.80}
+      # How hard the model thinks: the ENGINE's chat-template variables (see config.yaml).
+      MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-xhigh}
+      MODEL_ENABLE_THINKING: ${MODEL_ENABLE_THINKING:-true}
+      ENGINE_API_BASE: http://llamacpp:8080/v1
+      # `openai/` is the protocol; the rest must equal llama.cpp's --alias.
+      ENGINE_MODEL: openai/${MODEL_NAME}
+      ENGINE_API_KEY: ${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}
+      STORE_MODEL_IN_DB: "True"
+      LITELLM_DEFAULT_USER_BUDGET: ${LITELLM_DEFAULT_USER_BUDGET:-50}
+      LITELLM_BUDGET_DURATION: ${LITELLM_BUDGET_DURATION:-1mo}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        python3 - <<'PY'
+        import os, re
+        src = open("/app/config.template.yaml").read()
+        # Prices are set per 1M tokens in .env; LiteLLM wants per token.
+        for key, price in (("MODEL_COST_INPUT_TOKEN", "PRICE_INPUT_PER_MTOK"),
+                           ("MODEL_COST_CACHED_INPUT_TOKEN", "PRICE_CACHED_INPUT_PER_MTOK"),
+                           ("MODEL_COST_OUTPUT_TOKEN", "PRICE_OUTPUT_PER_MTOK")):
+            os.environ[key] = "%.12g" % (float(os.environ.get(price) or 0) / 1e6)
+        out = re.sub(r"\$\{(MODEL_NAME|MODEL_CONTEXT|MODEL_MAX_OUTPUT|MODEL_REASONING_EFFORT|MODEL_ENABLE_THINKING|MODEL_COST_INPUT_TOKEN|MODEL_COST_CACHED_INPUT_TOKEN|MODEL_COST_OUTPUT_TOKEN)\}", lambda m: os.environ[m.group(1)], src)
+        open("/tmp/config.yaml", "w").write(out)
+        PY
+        exec docker/prod_entrypoint.sh "$$@"
+      - litellm
+    command: ["--config", "/tmp/config.yaml", "--port", "4000", "--num_workers", "${LITELLM_WORKERS:-1}"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # The litellm image ships no curl or wget, only its venv python.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/liveliness',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    logging: *default-logging
+
+  # LiteLLM's database: people, keys, budgets, spend.
+  postgres:
+    # Stock postgres 16 plus pgvector: the same major version and data layout
+    # as earlier deployments of this stack, so an existing volume is reused.
+    image: pgvector/pgvector:0.8.0-pg16
+    container_name: postgres
+    restart: unless-stopped
+    networks: [llm-net]
+    cpus: ${POSTGRES_CPUS:-3}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      # LLM_PG_*, not POSTGRES_*: those names are common enough that a machine-wide
+      # variable from another project would silently win over .env.
+      POSTGRES_USER: ${LLM_PG_USER:-llmservice}
+      POSTGRES_PASSWORD: ${LLM_PG_PASSWORD:?set LLM_PG_PASSWORD}
+      POSTGRES_DB: litellm
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LLM_PG_USER:-llmservice} -d litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  # ============================================================================
+  # APP
+  # ============================================================================
+
+  # The .NET backend and the React app it serves, on one port: sign-in,
+  # chat, administration, the code index (GitLab), knowledge packs, and MCP
+  # for editors at /mcp. Built from the repository's Dockerfile the first time.
+  argus:
+    image: ${ARGUS_IMAGE:-argus}:${ARGUS_VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: src/Argus/Dockerfile
+      target: server
+    container_name: argus
+    restart: unless-stopped
+    networks: [llm-net]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${ARGUS_HTTP_PORT:-8080}:7700"
+    volumes:
+      - argus-data:/var/lib/argus
+      - ./config/argus/config.yaml:/etc/argus/config.yaml:ro
+      # PEM files for a GitLab on a private CA (ARGUS_GITLAB_CA_CERT) and for
+      # serving HTTPS (ARGUS_TLS_CERT / ARGUS_TLS_KEY).
+      - ./config/argus/tls:/etc/argus/tls:ro
+    environment:
+      # The first administrator, created on first start when nobody exists yet.
+      ARGUS_ADMIN_USERNAME: ${ARGUS_ADMIN_USERNAME:-admin}
+      ARGUS_ADMIN_EMAIL: ${ARGUS_ADMIN_EMAIL:?set ARGUS_ADMIN_EMAIL}
+      ARGUS_ADMIN_PASSWORD: ${ARGUS_ADMIN_PASSWORD:?set ARGUS_ADMIN_PASSWORD}
+      # The gateway, administered with the master key: people, keys, budgets.
+      ARGUS_GATEWAY_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      ARGUS_PUBLIC_GATEWAY_URL: ${ARGUS_PUBLIC_GATEWAY_URL:-http://localhost:4000/v1}
+      ARGUS_EMBED_URL: http://llamacpp-embed:8080
+      ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
+      ARGUS_LLAMACPP_HEALTH_URL: http://llamacpp:8080/health
+      # GitLab: the code index's source and the source of each person's access.
+      ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
+      ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:-}
+      ARGUS_GITLAB_AUTH: ${ARGUS_GITLAB_AUTH:-}
+      ARGUS_GITLAB_USERNAME: ${ARGUS_GITLAB_USERNAME:-}
+      ARGUS_GITLAB_PASSWORD: ${ARGUS_GITLAB_PASSWORD:-}
+      ARGUS_GITLAB_CA_CERT: ${ARGUS_GITLAB_CA_CERT:-}
+      ARGUS_GITLAB_VERIFY: ${ARGUS_GITLAB_VERIFY:-}
+      # Seconds between index passes; 0 = only when an administrator starts one.
+      ARGUS_INDEX_INTERVAL: ${ARGUS_INDEX_INTERVAL:-900}
+      ARGUS_INDEX_STALE_AFTER: ${ARGUS_INDEX_STALE_AFTER:-3600}
+      # GitLab push webhook secret; empty = no webhook route.
+      ARGUS_WEBHOOK_TOKEN: ${ARGUS_WEBHOOK_TOKEN:-}
+      # For scripts that call /admin/* without a session.
+      ARGUS_ADMIN_TOKEN: ${ARGUS_ADMIN_TOKEN:-}
+      ARGUS_PACK_INDEX_URL: ${ARGUS_PACK_INDEX_URL:-}
+      ARGUS_TLS_CERT: ${ARGUS_TLS_CERT:-}
+      ARGUS_TLS_KEY: ${ARGUS_TLS_KEY:-}
+    command:
+      - serve
+      - --config
+      - /etc/argus/config.yaml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "7700"
+      # MCP's DNS-rebinding guard: the names editors use to reach this server.
+      - --allowed-host
+      - "localhost:*"
+      - --allowed-host
+      - "127.0.0.1:*"
+      - --allowed-host
+      - "${ARGUS_HOSTNAME:-localhost}:*"
+    depends_on:
+      litellm:
+        condition: service_healthy
+      llamacpp-embed:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "argus", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    logging: *default-logging

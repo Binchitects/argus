@@ -1,0 +1,89 @@
+# ==============================================================================
+# LiteLLM gateway
+#
+# Why a gateway in front of llama.cpp:
+#   - one virtual API key per person, with a budget and spend attributed to them
+#     -- the app creates each person here (user_id = their email) and sends their
+#     chats with their own key, so one budget covers the app and the API alike
+#   - one OpenAI-compatible endpoint that can also front hosted providers later
+#
+# ONE MODEL, ONE NAME. The single entry's name, window and output limit come from
+# .env (MODEL_NAME, MODEL_CONTEXT, MODEL_MAX_OUTPUT). LiteLLM does not expand
+# variables in `model_name` or `model_info`, so the litellm service renders the
+# ${...} tokens in this file from its environment at startup (see its entrypoint
+# in docker-compose.yml). Changing model is an .env edit and `docker compose up -d`.
+# ==============================================================================
+
+model_list:
+  # The llama.cpp engine: ENGINE_API_BASE / ENGINE_API_KEY / ENGINE_MODEL are set
+  # by docker-compose.yml and resolved here through os.environ/. ENGINE_MODEL is
+  # openai/<llama.cpp's --alias>, which is MODEL_NAME.
+  - model_name: ${MODEL_NAME}
+    litellm_params:
+      model: os.environ/ENGINE_MODEL
+      api_base: os.environ/ENGINE_API_BASE
+      api_key: os.environ/ENGINE_API_KEY
+      # Prices from .env, per 1M tokens, converted to per-token at startup --
+      # DeepSeek-style: a prompt token served from the engine's prefix cache
+      # (a resent conversation, a system prompt) is priced separately from one
+      # the engine had to process. LiteLLM reads the cached count from the
+      # response's usage.prompt_tokens_details.cached_tokens.
+      input_cost_per_token: ${MODEL_COST_INPUT_TOKEN}
+      cache_read_input_token_cost: ${MODEL_COST_CACHED_INPUT_TOKEN}
+      output_cost_per_token: ${MODEL_COST_OUTPUT_TOKEN}
+      # ------------------------------------------------------- reasoning
+      # How hard the model thinks before it answers. These are the ENGINE's
+      # chat-template variables, not OpenAI's `reasoning_effort`.
+      #
+      # Why chat_template_kwargs and not the obvious field: llama-server runs
+      # with --jinja, so the model's own template decides what thinking means,
+      # and it reads `reasoning_effort` and `enable_thinking` out of Jinja
+      # variables. Passing OpenAI's top-level `reasoning_effort` looks like it
+      # should work and does not -- LiteLLM drops it for a custom `openai/`
+      # api_base. Measured both ways: a top-level reasoning_effort of "minimal"
+      # is accepted by the gateway and never reaches the template, while the
+      # same value inside chat_template_kwargs reaches it and raises
+      # "Unexpected reasoning effort". That one test is the whole reason this
+      # block looks unusual.
+      #
+      # Rendered from .env by the litellm entrypoint, because LiteLLM does not
+      # expand variables in nested values.
+      chat_template_kwargs:
+        # xhigh (the model's own default), medium, or low.
+        reasoning_effort: ${MODEL_REASONING_EFFORT}
+        # A real YAML boolean after substitution, deliberately: the template
+        # tests `enable_thinking is false`, and the STRING "false" is not false
+        # in Jinja, so a quoted value here would silently keep thinking on.
+        enable_thinking: ${MODEL_ENABLE_THINKING}
+    model_info:
+      mode: chat
+      # Advertise the REAL window: clients cache /model/info, and a stale
+      # number there makes them refuse prompts the engine would accept.
+      max_input_tokens: ${MODEL_CONTEXT}
+      max_output_tokens: ${MODEL_MAX_OUTPUT}
+      max_tokens: ${MODEL_CONTEXT}
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
+  timeout: 600
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+
+  # ------------------------------------------------------------ spend limits
+  # A default ceiling for every person who is never given an explicit budget.
+  # These are USD figures derived from token counts and the prices in .env; on a
+  # local engine the "cost" is notional, but it is still what stops one person
+  # holding the GPU for a month. Raise it per person on the app's People page.
+  #
+  # 0 would block every request rather than allow unlimited, so the default is a
+  # real number.
+  max_internal_user_budget: os.environ/LITELLM_DEFAULT_USER_BUDGET
+  internal_user_budget_duration: os.environ/LITELLM_BUDGET_DURATION
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true

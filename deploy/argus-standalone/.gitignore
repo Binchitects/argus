@@ -1,0 +1,22 @@
+# Secrets: never commit. Copy a file from env-samples/ as the template.
+.env
+.env.*
+
+# Model weights (large, re-downloadable)
+models/*
+!models/.gitkeep
+
+# Backups hold .env and every account
+backups/
+
+# Whatever an operator drops here (a GitLab CA, a TLS key) belongs to their
+# environment. The README keeps the directory in a fresh clone, so the bind
+# mount never has to be created by Docker as an empty root-owned directory.
+config/argus/tls/*
+!config/argus/tls/README.md
+
+Thumbs.db
+.DS_Store
+*.swp
+.idea/
+.vscode/

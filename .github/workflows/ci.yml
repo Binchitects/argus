@@ -1,5 +1,9 @@
 name: CI
 
+# Every push and pull request: the API and Argus (.NET), both web apps, each
+# in a real browser, the deployment's tooling, and every env sample resolving
+# into a complete compose file.
+
 on:
   push:
     branches: ["**"]
@@ -9,81 +13,165 @@ permissions:
   contents: read
 
 jobs:
-  backend:
+  api:
+    # The API and its core, against real Postgres, OpenLDAP and LiteLLM's
+    # schema (Testcontainers).
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: dotnet/global.json
-      - name: Universal Ctags (it decides which symbols exist)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends universal-ctags
-      - name: sqlite-vec (pinned, SHA-256 checked)
-        run: dotnet/scripts/fetch-sqlite-vec.sh linux-x64
+        with: { global-json-file: global.json }
+      - run: dotnet test tests/Llm.Tests -c Release --logger "console;verbosity=normal"
+
+  argus:
+    # The code index service. Universal Ctags decides which symbols exist, and
+    # sqlite-vec is the pinned release, checked against its SHA-256.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: global.json }
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends universal-ctags
+      - run: tools/fetch-sqlite-vec.sh linux-x64
       - name: Build and test
         run: |
           git config --global user.email ci@argus.invalid && git config --global user.name ci
-          dotnet test dotnet/Argus.sln -c Release
+          dotnet test tests/Argus.Tests -c Release
 
-  frontend:
+  web:
     runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: src/web } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+        with: { node-version: 22, cache: npm, cache-dependency-path: src/web/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  argus-web:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: src/argus-web } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: src/argus-web/package-lock.json }
       - name: Typecheck and build
-        working-directory: frontend
         run: npm ci && npm run build
 
-  browser:
-    # The real backend and the built app, driven in Chromium, with fake GitLab,
-    # LiteLLM and embeddings on real sockets.
+  web-browser:
+    # The API and web images behind Traefik, as deployed, driven by Playwright
+    # on desktop and phone (no model behind the gateway: E2E_NO_GATEWAY).
+    needs: [api, web]
     runs-on: ubuntu-24.04
-    needs: [backend, frontend]
+    env:
+      E2E_PASSWORD: ci admin password for tests
+      E2E_BASE_URL: https://llm.localhost:8443
+      E2E_NO_GATEWAY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the images
+        run: |
+          docker build -t llm-app:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} -f src/Llm.Api/Dockerfile .
+          docker build -t llm-web:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} src/web
+      - name: Start Postgres, the app, the web and Traefik
+        run: |
+          echo "127.0.0.1 llm.localhost" | sudo tee -a /etc/hosts
+          mkdir -p certs
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=llm.localhost \
+            -addext "subjectAltName=DNS:llm.localhost,DNS:*.llm.localhost" -keyout certs/tls.key -out certs/tls.crt
+          chmod 644 certs/*
+          docker network create e2e
+          docker run -d --name postgres --network e2e -e POSTGRES_USER=app -e POSTGRES_PASSWORD=ci \
+            --health-cmd "pg_isready -U app" --health-interval 2s pgvector/pgvector:0.8.0-pg16
+          until [ "$(docker inspect -f '{{.State.Health.Status}}' postgres)" = healthy ]; do sleep 1; done
+          docker exec postgres psql -U app -d postgres -qc "create database litellm"
+          docker exec -i postgres psql -U app -d litellm -q < tests/Llm.Tests/Resources/litellm-schema.sql
+          mkdir -p ci-settings && chmod 777 ci-settings
+          docker run -d --name app --network e2e --read-only --tmpfs /tmp \
+            -v "$PWD/deploy/config/dashboards:/dashboards:ro" -v "$PWD/deploy/env-samples:/env-samples:ro" \
+            -v "$PWD/ci-settings:/settings" \
+            -e Database__Host=postgres -e Database__Username=app -e Database__Password=ci \
+            -e Auth__Domain=llm.localhost -e Auth__HttpsPort=8443 -e "Auth__AdminPassword=$E2E_PASSWORD" \
+            -e Auth__DataKey=ci-data-key -e Gateway__Url=http://127.0.0.1:9 llm-app:ci
+          docker run -d --name web --network e2e --read-only --tmpfs /tmp --cap-drop ALL \
+            --security-opt no-new-privileges:true llm-web:ci
+          docker run -d --name traefik --network e2e -p 8443:8443 -v "$PWD/certs:/certs:ro" \
+            -v "$PWD/src/web/ci/traefik.yml:/etc/traefik/traefik.yml:ro" \
+            -v "$PWD/src/web/ci/routes.yml:/etc/traefik/routes.yml:ro" traefik:v3.6.7
+          for i in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' app)" = healthy ] && \
+            [ "$(docker inspect -f '{{.State.Health.Status}}' web)" = healthy ] && \
+            curl -sfk https://llm.localhost:8443/api/info >/dev/null && exit 0
+            sleep 2
+          done
+          docker logs app; docker logs web; docker logs traefik; exit 1
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: src/web/package-lock.json }
+      - working-directory: src/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run e2e
+      - name: The app logged no errors
+        run: |
+          if docker logs app 2>&1 | grep -E '"LogLevel":"(Error|Critical)"'; then exit 1; fi
+      - if: failure()
+        run: docker logs app; docker logs web; docker logs traefik
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: web-playwright-report, path: src/web/playwright-report }
+
+  argus-browser:
+    # Argus's own app against its real backend, with fake GitLab, LiteLLM and
+    # embeddings on real sockets, driven in Chromium.
+    needs: [argus, argus-web]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: dotnet/global.json
+        with: { global-json-file: global.json }
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+        with: { node-version: 22, cache: npm, cache-dependency-path: src/argus-web/package-lock.json }
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends universal-ctags
-      - run: dotnet/scripts/fetch-sqlite-vec.sh linux-x64 && dotnet build dotnet/Argus.sln -c Release
+      - run: tools/fetch-sqlite-vec.sh linux-x64 && dotnet build src/Argus -c Release
       - name: Build the app and install Chromium
-        working-directory: frontend
+        working-directory: src/argus-web
         run: npm ci && npm run build && npx playwright install --with-deps chromium
       - name: Browser suite
-        working-directory: frontend
+        working-directory: src/argus-web
         run: |
           git config --global user.email ci@argus.invalid && git config --global user.name ci
           npx playwright test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: screens-and-traces
+          name: argus-screens-and-traces
           path: |
-            frontend/e2e/.work/screens
-            frontend/test-results
+            src/argus-web/e2e/.work/screens
+            src/argus-web/test-results
           if-no-files-found: ignore
 
-  stack:
-    # Every sample must resolve into a complete compose file.
+  deploy:
+    # The deployment's own tooling, and every sample resolving into a complete
+    # compose file (for the platform and for Argus alone).
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - name: Tests of the deployment tooling
+        run: pip install pytest pyyaml && pytest -q tests/deploy
       - name: docker compose config, per sample
-        working-directory: stack
         run: |
-          for sample in env-samples/*.env; do
-            cp "$sample" .env
-            awk '/^# SECRETS/{s=1} /^# APP/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' .env > .env.new && mv .env.new .env
-            docker compose config --quiet && echo "$sample resolves"
+          fill() { awk '/^# SECRETS/{s=1} /^# APP/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' "$1" > "$2"; }
+          for dir in deploy deploy/argus-standalone; do
+            for sample in "$dir"/env-samples/*.env; do
+              fill "$sample" "$dir/.env"
+              (cd "$dir" && docker compose config --quiet) && echo "$sample resolves"
+            done
           done
       - name: Scripts parse
-        run: for f in stack/scripts/*.sh scripts/*.sh clients/claude-code/*.sh; do bash -n "$f"; done
+        run: for f in deploy/scripts/*.sh deploy/argus-standalone/scripts/*.sh tools/*.sh tools/test-gitlab/*.sh clients/claude-code/*.sh tools/dn; do bash -n "$f"; done

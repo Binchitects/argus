@@ -16,64 +16,57 @@ Sections used:
 
 ### :rocket: Epics and highlights
 
-- **One app, three parts.** The project is now a .NET 10 backend serving a
-  React frontend, llama.cpp for the models, and LiteLLM for the gateway. The
-  Python package, Open WebUI, the Python admin console, the identity proxy,
-  Traefik, Authelia, Prometheus, Grafana, Alertmanager, Loki, Langfuse, vLLM,
-  Ollama and Redis are gone, with their configuration and scripts
-- **A chat that searches your code as it answers.** The app's chat streams the
-  model's reasoning and every code-index tool call as it happens; tools run in
-  the backend as the signed-in person, with their GitLab access, and every chat
-  goes to the gateway with that person's own key, so their budget binds
-- **Accounts in the app.** People, roles, passwords (PBKDF2-SHA256, 600k
-  iterations), sessions, and two kinds of personal key — code index keys for
-  MCP clients and model keys for the gateway — managed on People and Settings
-- **Tested in a browser.** A Playwright suite drives the built app against the
-  real backend with fake GitLab, LiteLLM and embeddings on real sockets, from
-  sign-in to a spent budget; CI runs it with the xUnit suite and the compose
-  checks
+- **A platform around the model.** The enterprise app (`src/Llm.Api`,
+  `src/web`) signs everyone in (accounts, LDAP or Active Directory, two-factor,
+  OIDC for the services with their own login), runs the chat with its tools
+  (Argus, a Python sandbox, the web, image generation, files and Office
+  documents), manages people, groups, models and every setting, and shows ten
+  dashboards, every service's logs and the alerts. Grafana and the Python admin
+  console are gone; the plan and its phases are in `docs/plan.md`
+- **Argus in .NET.** Every part of the Python Argus has a C# counterpart in
+  `src/Argus`: the indexer, ACL, knowledge packs, the query engine, the MCP
+  server with its seventeen tools, the admin surface, the scheduler and the CLI.
+  A conformance run drove both against the same fake GitLab and embeddings and
+  compared every index table, tool call, HTTP answer and pack build: identical.
+  The Python package is gone
+- **Argus alone** is still a deployment of its own (`deploy/argus-standalone/`):
+  its own small app with accounts, a chat that searches the code, and keys for
+  MCP clients and the gateway
+- **One repository layout**: `src/`, `tests/`, `deploy/`, `tools/` and `docs/`,
+  one .NET solution (`LlmService.slnx`) and one CI workflow for every part
 
 ### :sparkles: New features & Enhancements
 
-- Chat: conversations saved and reloaded exactly, model picker, tools switch,
-  Stop (ends generation upstream), rename, delete, Markdown without raw HTML
-- Administration under `/manage`: overview with service health, people (add
-  with a generated password, role, GitLab link, budget, reset, disable,
-  delete), indexing, explore, knowledge packs; light and dark themes
-- `argus user add|list|passwd|role|disable|enable`; the first administrator
-  is created from `ARGUS_ADMIN_*` on first start
-- Embeddings from llama.cpp (`llamacpp-embed`, nomic-embed-text on CPU) over
-  the OpenAI protocol (`ARGUS_EMBED_URL`)
-- `argus backup` includes the app database; `make backup` adds the gateway's
-  database and `.env`, with checksums
-- `argus verify --claude-hook` is a complete Claude Code Stop hook
-- Optional HTTPS from PEM files (`ARGUS_TLS_CERT`, `ARGUS_TLS_KEY`)
-- `make health` and `make smoke` (and PowerShell equivalents) check a live
-  deployment end to end
+- Argus: `argus user` for the standalone app's accounts; embeddings from
+  llama.cpp over the OpenAI protocol (`ARGUS_EMBED_URL`); `argus backup`
+  includes the app database; `argus verify --claude-hook` is a complete Claude
+  Code Stop hook; optional HTTPS from PEM files; `argus healthcheck`
+- Dashboards: an index-health row on Indexing; KV cache and prompt throughput
+  for llama.cpp on LLM Overview
+- The image server's GPU budget is a fixed 2 GiB (`IMAGEGEN_MAX_VRAM`)
 
 ### :bug: Bugs fixed
 
 - `argus verify` never exited 2: it read a `status` that `verify_text` nests
-  under `corrections`, so the Stop hook passed every contradicted draft. Its
-  message now quotes what the draft said
-- `docs_verify` reported the description as part of the last contract field
-  (`User32.dll -- Displays a modal dialog box.`); contradicted fields carry
-  `stated`
+  under `corrections`, so the Stop hook passed every contradicted draft
+- `docs_verify` reported the description as part of the last contract field;
+  contradicted fields carry `stated`
 - Python docstrings never reached the index: ctags was not asked for each
   symbol's language. Symbol contract version 3 re-extracts on the next pass
+- A deploy on empty volumes: the sandbox image did not build (odfpy is published
+  only as source), and every picture failed because the image server filled the
+  empty GPU before the chat model
 
 ### :boom: Breaking changes & Deprecations
 
-- Sign-in is the app's own. Existing Authelia accounts are not migrated: add
-  people on People (or with `argus user add`); their gateway spend history in
-  LiteLLM is kept, keyed by the same email
-- The stack is plain HTTP on `ARGUS_HTTP_PORT` (default 8080) unless
-  `ARGUS_TLS_*` is set; there is no reverse proxy and no `*.llm.localhost`
-- MCP clients authenticate with a code index key (`ak_…`) from Settings, or a
-  GitLab token as before; the Open WebUI chat-client token is gone
-- `.env` is shorter: regenerate it from `stack/env-samples/`
-- Monitoring and tracing are no longer part of the stack; `/admin/metrics`
-  still serves the index's Prometheus metrics for anyone who scrapes it
+- The repository moved: `stack/` is `deploy/` (its `deploy/` is `services/`),
+  `app/` is `src/` and `tests/`, `scripts/` is `tools/`, `dotnet/` and
+  `frontend/` are `src/Argus` and `src/argus-web`. In `.env`,
+  `LLM_DEPLOY_DIR=./deploy` becomes `LLM_SERVICES_DIR=./services`
+- The Python Argus and its tests are gone; the .NET image is built from
+  `src/Argus/Dockerfile`
+- Grafana is gone: its dashboards are drawn by the app. Its data volume is no
+  longer used and can be deleted
 
 ## v2.9.0 (2026-09-18)
 

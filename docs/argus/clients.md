@@ -1,7 +1,7 @@
 # Connecting any MCP client
 
 Argus speaks standard MCP. Nothing in the protocol path is specific to one
-agent -- `scripts/smoke_test.py` and `scripts/agent_client_example.py` both use
+agent -- `tools/smoke_test.py` and `tools/agent_client_example.py` both use
 the vanilla `mcp` SDK, and both work unmodified.
 
 > **Copy-pasteable configs for specific clients live in [`clients/`](../../clients/).**
@@ -87,7 +87,7 @@ Executed end to end against a live stack; see
 [`clients/deepseek-harness/`](../../clients/deepseek-harness/).
 
 ```bash
-ARGUS_TOKEN=<pat> NODE_EXTRA_CA_CERTS=stack/config/traefik/certs/tls.crt \
+ARGUS_TOKEN=<pat> NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/tls.crt \
   dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
   "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
 ```
@@ -126,7 +126,7 @@ argus serve --config /etc/argus/config.yaml --host 0.0.0.0 --allowed-host argus.
 ## Verifying, whichever client
 
 ```bash
-python scripts/smoke_test.py --url https://argus.internal/mcp --token <pat>
+python tools/smoke_test.py --url https://argus.internal/mcp --token <pat>
 ```
 
 Seven checks: health, that a bad token is refused, the MCP handshake, the
@@ -147,4 +147,4 @@ protocol scored 10/20 and *collapsed to 4/20* when told to check facts first,
 because the added prose broke the output format.
 
 Most clients do both by default. Hermes needed patches for the first --
-see `scripts/hermes-patch/`.
+see `tools/hermes-patch/`.

@@ -80,7 +80,7 @@ it follows instructions the more convincing the refusal is.
 
 Both spellings are indexed now, which is most of the win32 pack's growth from
 87,206 symbols to 118,242. It was found by
-[the Windows-version evaluation](../../evals/README.md), not by a user.
+the Windows-version evaluation ([measurements](../measurements/pack-measurements.md)), not by a user.
 
 One detail worth keeping in mind if you change the contract format: 253 of
 those 52,506 values contain a semicolon — `Windows 10, version 1809 (10.0;
@@ -175,10 +175,12 @@ holds several versions.
 
 ## Building a pack
 
-Requires Ollama running with the pinned embedding model pulled:
+Requires the embedding server the stack runs (`llamacpp-embed`, nomic-embed-text)
+reachable at `ARGUS_EMBED_URL` -- the same model the index uses, so a pack's
+vectors and a query's vectors share one space:
 
 ```bash
-ollama pull nomic-embed-text
+export ARGUS_EMBED_URL=http://localhost:8081   # or wherever llamacpp-embed answers
 ```
 
 ```bash

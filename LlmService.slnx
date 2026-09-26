@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Llm.Api/Llm.Api.csproj" />
+    <Project Path="src/Llm.Core/Llm.Core.csproj" />
+    <Project Path="src/Argus/Argus.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Llm.Tests/Llm.Tests.csproj" />
+    <Project Path="tests/Argus.Tests/Argus.Tests.csproj" />
+  </Folder>
+</Solution>

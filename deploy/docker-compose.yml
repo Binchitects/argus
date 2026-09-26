@@ -1,0 +1,2337 @@
+# ==============================================================================
+# LLMService - a self-hosted LLM stack with full-stack observability.
+#
+#   inference   vLLM (OpenAI-compatible)
+#   gateway     LiteLLM (optional: routing, virtual keys, budgets)
+#   ui          Open WebUI
+#   metrics     Prometheus + Alertmanager (the app shows dashboards and alerts)
+#   hardware    node-exporter, cAdvisor, nvidia-smi exporter / DCGM
+#   logs        Loki + Promtail (optional)
+#   traces      Langfuse (optional)
+#
+# Start:  docker compose up -d          (profiles come from COMPOSE_PROFILES)
+# ==============================================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-gpu: &gpu-reservation
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+networks:
+  llm-net:
+    name: llm-net
+    driver: bridge
+  # The image server has no key of its own: only LiteLLM reaches it, and it
+  # has no way out (internal).
+  image-net:
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_image
+    internal: true
+  # The search engine's own network: out to the internet, and to the app, which
+  # is its only client. Nothing else of the stack is on it.
+  search-net:
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_search
+
+volumes:
+  argus-data:
+  ollama-models:
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_ollama-models
+
+  # vLLM's model and compile caches. These used to be `external: true`, so that
+  # `docker compose down -v` could never delete a multi-hour download -- but an
+  # external volume must exist BEFORE the first `up`, which broke "docker
+  # compose up is the whole deployment". They are ordinary named volumes now,
+  # with fixed names so a project rename does not orphan them.
+  #
+  # So: DO NOT run `down -v` on a vLLM deployment unless you mean to re-download
+  # the model. llama.cpp deployments are unaffected -- their GGUFs live in the
+  # host directory LLAMACPP_MODEL_DIR, which compose never deletes.
+  hf-cache:
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_hf-cache
+  vllm-cache:
+    name: ${COMPOSE_PROJECT_NAME:-llmservice}_vllm-cache
+  llamacpp-engine:
+  # Jobs for the Python sandbox and their results (the app writes, the sandbox runs).
+  sandbox-jobs:
+  open-webui-data:
+  prometheus-data:
+  prometheus-secrets:
+  traefik-certs:
+  power-limits-state:
+  alertmanager-data:
+  loki-data:
+  postgres-data:
+  redis-data:
+  clickhouse-data:
+  clickhouse-logs:
+  minio-data:
+
+services:
+
+  # ============================================================================
+  # REVERSE PROXY (profile: proxy)
+  #
+  # Terminates TLS and routes by hostname on *.${LLM_DOMAIN}. Services that have
+  # no authentication of their own (Prometheus, Alertmanager, cAdvisor, the
+  # exporters, the Traefik dashboard) sit behind the `protected-chain`
+  # basic-auth middleware; services with their own login use `default-chain`.
+  #
+  # The direct host ports stay published so the scripts, curl and Prometheus
+  # keep working without DNS tricks — *.localhost resolves in browsers but not
+  # in most CLI tools.
+  # ============================================================================
+
+  # Applies GPU and CPU power limits from .env, and keeps them applied.
+  #
+  #   GPU_POWER_LIMIT_W  watts per GPU (nvidia-smi -pl). Empty = driver default.
+  #   CPU_POWER_LIMIT_W  CPU package watts, as both RAPL limits (PL1 and PL2).
+  #                      Empty = whatever the firmware set before this ran.
+  #
+  # Why a CPU cap belongs here: plenty of boards ship with Intel's limits
+  # removed (the reference box read 4095 W for both), and an LLM whose experts
+  # run on the CPU then holds the package at 93-97 C under two users. Fewer
+  # threads did NOT help -- measured at 16, 12, 10 and 8 -- because the package
+  # temperature is the hottest core's, and every busy core runs flat out. Only
+  # power bounds heat.
+  #
+  # Both limits are volatile: a reboot or driver reload resets them. So this
+  # stays running and re-applies every minute, and restart: unless-stopped
+  # brings it back after a boot. The original CPU limits are recorded on first
+  # run, so clearing CPU_POWER_LIMIT_W restores them rather than leaving the
+  # cap in place.
+  #
+  # PRIVILEGED, which is the price of writing /sys/class/powercap: treat this
+  # container as root on the host. It has no network and runs a fixed script.
+  # AMD CPUs expose no writable RAPL limit; the CPU part then logs and skips.
+  power-limits:
+    image: utkuozdemir/nvidia_gpu_exporter:1.3.2
+    container_name: power-limits
+    restart: unless-stopped
+    privileged: true
+    network_mode: none
+    environment:
+      GPU_POWER_LIMIT_W: ${GPU_POWER_LIMIT_W:-}
+      CPU_POWER_LIMIT_W: ${CPU_POWER_LIMIT_W:-}
+      HOST_SWAPPINESS: ${HOST_SWAPPINESS:-}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    volumes:
+      - power-limits-state:/state
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apply() {
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            for i in $$(nvidia-smi --query-gpu=index --format=csv,noheader); do
+              cur=$$(nvidia-smi -i $$i --query-gpu=power.limit --format=csv,noheader,nounits | cut -d. -f1)
+              if [ -n "$$GPU_POWER_LIMIT_W" ]; then want=$$GPU_POWER_LIMIT_W
+              elif [ -f /state/gpu$$i.applied ]; then want=$$(nvidia-smi -i $$i --query-gpu=power.default_limit --format=csv,noheader,nounits | cut -d. -f1)
+              else want=""; fi
+              if [ -n "$$want" ] && [ "$$cur" != "$$want" ]; then
+                nvidia-smi -i $$i -pl "$$want" >/dev/null && echo "gpu$$i: power limit $$cur W -> $$want W"
+                if [ -n "$$GPU_POWER_LIMIT_W" ]; then touch /state/gpu$$i.applied; else rm -f /state/gpu$$i.applied; fi
+              fi
+            done
+          fi
+          for d in /sys/class/powercap/intel-rapl:[0-9]; do
+            [ -w "$$d/constraint_0_power_limit_uw" ] || { [ -n "$$CPU_POWER_LIMIT_W" ] && [ ! -f /state/cpu-skip ] && echo "cpu: no writable RAPL limit at $$d; skipping" && touch /state/cpu-skip; continue; }
+            name=$$(basename $$d)
+            for c in 0 1; do
+              f="$$d/constraint_$${c}_power_limit_uw"; orig="/state/$$name.c$$c.orig"
+              [ -f "$$orig" ] || cat "$$f" > "$$orig"
+              if [ -n "$$CPU_POWER_LIMIT_W" ]; then want=$$((CPU_POWER_LIMIT_W * 1000000)); else want=$$(cat "$$orig"); fi
+              if [ "$$(cat $$f)" != "$$want" ]; then
+                echo "$$want" > "$$f" && echo "cpu $$name $$(cat $$d/constraint_$${c}_name): $$(( $$(cat $$orig) / 1000000 )) W originally -> $$(( want / 1000000 )) W"
+              fi
+            done
+          done
+          # vm.swappiness: how readily the host swaps idle program memory to keep
+          # file pages -- here, the model's weights -- in RAM. Same record-and-
+          # restore rule as the power caps.
+          sw=/proc/sys/vm/swappiness
+          if [ -w "$$sw" ]; then
+            [ -f /state/swappiness.orig ] || cat "$$sw" > /state/swappiness.orig
+            want=$${HOST_SWAPPINESS:-$$(cat /state/swappiness.orig)}
+            if [ "$$(cat $$sw)" != "$$want" ]; then
+              echo "$$want" > "$$sw" && echo "host: vm.swappiness $$(cat /state/swappiness.orig) originally -> $$want"
+            fi
+          fi
+        }
+        echo "power-limits: GPU=$${GPU_POWER_LIMIT_W:-default} W, CPU=$${CPU_POWER_LIMIT_W:-firmware} W, swappiness=$${HOST_SWAPPINESS:-unchanged}"
+        while true; do apply; sleep 60; done
+    <<: *gpu-reservation
+    logging: *default-logging
+
+  # Generates the self-signed TLS certificate Traefik serves, then exits.
+  #
+  # Replaces a host-side certificate script and its private CA. That path needed a script run
+  # before the first `up` and a CA installed into every client's trust store,
+  # and each step was a place a fresh deployment went wrong.
+  #
+  # Not Traefik's built-in default certificate, deliberately: Traefik makes that
+  # one in memory and makes a NEW one on every restart, so nothing can ever trust
+  # it. Browsers would re-warn after each restart, and Open WebUI's single
+  # sign-on -- a server-side HTTPS call to auth.<domain> -- could only work with
+  # certificate verification switched off. This certificate is generated once,
+  # kept on a volume, and reused, so internal clients verify it properly.
+  #
+  # Regenerated automatically when LLM_DOMAIN changes. Covers the domain and
+  # *.domain, valid 10 years. Authelia's image is reused for its built-in
+  # generator: no extra image to pull.
+  #
+  # The public certificate is also copied to config/traefik/certs/tls.crt for
+  # host-side tools. The private key never leaves the volume.
+  #
+  # bundle.crt is what containers that call out trust (Argus, Open WebUI): the
+  # public CAs, this certificate, and every .crt/.pem in config/ca/ -- put the
+  # company CA there when GitLab or another internal service uses one.
+  tls-init:
+    image: authelia/authelia:4.39
+    container_name: tls-init
+    # One-shot: the image's own healthcheck (for the long-running server) does not apply.
+    healthcheck:
+      disable: true
+    restart: "no"
+    network_mode: none
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      LLM_DOMAIN: ${LLM_DOMAIN:-llm.localhost}
+    command:
+      - |
+        set -e
+        D=/certs
+        if [ ! -s "$$D/tls.crt" ] || [ ! -s "$$D/tls.key" ] || [ "$$(cat "$$D/domain" 2>/dev/null)" != "$$LLM_DOMAIN" ]; then
+          rm -f "$$D/public.crt" "$$D/private.pem"
+          authelia crypto certificate rsa generate --common-name "$$LLM_DOMAIN" \
+            --sans "$$LLM_DOMAIN,*.$$LLM_DOMAIN" --organization LLMService \
+            --duration 10y --directory "$$D" >/dev/null
+          mv "$$D/public.crt" "$$D/tls.crt"
+          mv "$$D/private.pem" "$$D/tls.key"
+          echo "$$LLM_DOMAIN" > "$$D/domain"
+          echo "tls-init: generated a self-signed certificate for $$LLM_DOMAIN and *.$$LLM_DOMAIN"
+        else
+          echo "tls-init: certificate for $$LLM_DOMAIN already present"
+        fi
+        # Public CAs, ours, and any extra CA the operator added (config/ca/).
+        cat /etc/ssl/certs/ca-certificates.crt "$$D/tls.crt" > "$$D/bundle.crt.new"
+        for ca in /extra-ca/*.crt /extra-ca/*.pem; do
+          [ -f "$$ca" ] || continue
+          grep -q "BEGIN CERTIFICATE" "$$ca" || { echo "tls-init: $$(basename "$$ca") in config/ca is not a PEM certificate"; exit 1; }
+          { echo; cat "$$ca"; } >> "$$D/bundle.crt.new"
+          echo "tls-init: trusting $$(basename "$$ca") from config/ca"
+        done
+        mv "$$D/bundle.crt.new" "$$D/bundle.crt"
+        chmod 644 "$$D/tls.crt" "$$D/bundle.crt"
+        chmod 600 "$$D/tls.key"
+        # Owned by whoever owns the directory, so the operator can delete it.
+        #
+        # BOTH files, because host-side tools differ in whether a CA variable
+        # ADDS to the public roots or REPLACES them. Node's
+        # NODE_EXTRA_CA_CERTS adds, so tls.crt is right there; OpenSSL's
+        # SSL_CERT_FILE, curl's CURL_CA_BUNDLE and git's GIT_SSL_CAINFO all
+        # replace, so those need bundle.crt or they stop trusting the public
+        # internet. scripts/with-ca.sh picks the right one per variable.
+        for f in tls.crt bundle.crt; do
+          if cp "$$D/$$f" "/export/$$f" 2>/dev/null; then
+            chmod 644 "/export/$$f"
+            chown "$$(stat -c %u:%g /export)" "/export/$$f" 2>/dev/null || true
+          fi
+        done
+    volumes:
+      - traefik-certs:/certs
+      - ${LLM_CONFIG_DIR:-./config}/traefik/certs:/export
+      - ${LLM_CONFIG_DIR:-./config}/ca:/extra-ca:ro
+    logging: *default-logging
+
+  traefik:
+    # v3.3 pins Docker API 1.24, which Engine 29 rejects (MinAPIVersion 1.40).
+    # v3.6 negotiates the API version with the daemon.
+    image: traefik:v3.6.7
+    container_name: traefik
+    depends_on:
+      tls-init: { condition: service_completed_successfully }
+    # traefik.yml limits discovery to THIS compose project, and Traefik's static
+    # config cannot read environment variables. So the project name is filled in
+    # at startup: a hard-coded `llmservice` meant any other COMPOSE_PROJECT_NAME
+    # got a 404 on every hostname, with every container healthy.
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-llmservice}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed "s/@COMPOSE_PROJECT_NAME@/$$COMPOSE_PROJECT_NAME/g" /etc/traefik/traefik.yml > /tmp/traefik.yml
+        exec /entrypoint.sh traefik --configFile=/tmp/traefik.yml
+    profiles: [proxy]
+    restart: unless-stopped
+    networks:
+      llm-net:
+        # The OIDC token exchange is server-to-server: Open WebUI and
+        # Langfuse call the issuer (the app, at the bare domain) directly, not
+        # through the browser. Without this alias the domain does not resolve
+        # inside a container and every login fails at the token step. The alias
+        # points the name at Traefik, which terminates TLS with the same certificate.
+        aliases:
+          - ${LLM_DOMAIN:-llm.localhost}
+    ports:
+      # BIND_ADDRESS existed in .env but was referenced nowhere, so a file that
+      # said 127.0.0.1 published on 0.0.0.0 and the whole stack answered the
+      # LAN -- a security control that reads as set and does nothing. Default
+      # stays 0.0.0.0 so existing deployments keep the behaviour they have;
+      # setting BIND_ADDRESS now actually binds.
+      - "${BIND_ADDRESS:-0.0.0.0}:${TRAEFIK_HTTP_PORT:-80}:80"
+      - "${BIND_ADDRESS:-0.0.0.0}:${TRAEFIK_HTTPS_PORT:-443}:443"
+    volumes:
+      # LONG SYNTAX for one reason: create_host_path: false.
+      #
+      # Short-syntax bind mounts make Docker CREATE a missing source directory,
+      # empty and root-owned. If this checkout is on a volume that is not
+      # mounted yet -- a removable disk, an automount that lost a race with
+      # dockerd at boot -- `restart: unless-stopped` then brings the stack up
+      # against empty directories: Traefik with no routes, the app with no
+      # config, and stub dirs left squatting on the mountpoint so the real disk
+      # cannot mount there afterwards. Observed exactly that after a reboot.
+      #
+      # With create_host_path: false the container refuses to start instead.
+      # Traefik is the only ingress, so its failure is immediately obvious,
+      # which is the whole point: a loud failure rather than a quiet wrong one.
+      - type: bind
+        source: ${LLM_CONFIG_DIR:-./config}/traefik/traefik.yml
+        target: /etc/traefik/traefik.yml
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${LLM_CONFIG_DIR:-./config}/traefik/dynamic
+        target: /etc/traefik/dynamic
+        read_only: true
+        bind: { create_host_path: false }
+      # Generated by tls-init on first `up`; nothing to create or trust by hand.
+      - type: volume
+        source: traefik-certs
+        target: /etc/traefik/certs
+        read_only: true
+      - type: bind
+        source: ${LLM_CONFIG_DIR:-./config}/traefik/auth
+        target: /etc/traefik/auth
+        read_only: true
+        bind: { create_host_path: false }
+      # Read-only: Traefik only watches container events for label changes.
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:${DOCKER_SOCKET:-/var/run/docker.sock}:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    labels:
+      # No routers: nothing about Traefik itself is published. It only proxies
+      # for other containers.
+      - "traefik.enable=false"
+    logging: *default-logging
+
+  # ============================================================================
+  # SIGN-IN (profile: auth)
+  #
+  # The app (below, at the bare domain) is the identity provider: people sign in
+  # there once, Open WebUI and Langfuse sign in through it over OIDC,
+  # and Traefik asks it about every request to services that have no sign-in of
+  # their own (forwardAuth, see config/traefik/dynamic/middlewares.yml).
+  # ============================================================================
+
+  # Prepares files other services read, then exits. The Authelia image is used
+  # only as a toolbox (bcrypt), as tls-init does for certificates.
+  #
+  #   traefik/auth/users.htpasswd  basic auth for protected-chain (PROXY_AUTH_*)
+  #   authelia/directory/          who is who for Argus, written by the app
+  #
+  # The app runs as LLM_UID:LLM_GID. It must write directory/ and, once, read
+  # authelia/users.yml (the accounts of an Authelia install it imports), so both
+  # are handed to that user here.
+  auth-init:
+    image: authelia/authelia:4.39
+    container_name: auth-init
+    healthcheck:
+      disable: true
+    profiles: [auth]
+    restart: "no"
+    network_mode: none
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      PROXY_AUTH_USER: ${PROXY_AUTH_USER:-admin}
+      PROXY_AUTH_PASSWORD: ${PROXY_AUTH_PASSWORD:?set PROXY_AUTH_PASSWORD in .env}
+      APP_UID: ${LLM_UID:-1000}
+      APP_GID: ${LLM_GID:-1000}
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/authelia:/config
+      - ${LLM_CONFIG_DIR:-./config}/traefik/auth:/traefik-auth
+      - ${LLM_CONFIG_DIR:-./config}/app:/app-settings
+      - ${LLM_CONFIG_DIR:-./config}/engine:/engine-config
+    command:
+      - |
+        set -e
+        owner=$$(stat -c %u:%g /config)
+        hash() { authelia crypto hash generate "$$@" | sed 's/^Digest: //'; }
+        printf '%s:%s\n' "$$PROXY_AUTH_USER" "$$(hash bcrypt --password "$$PROXY_AUTH_PASSWORD")" > /traefik-auth/users.htpasswd
+        chmod 600 /traefik-auth/users.htpasswd
+        chown "$$owner" /traefik-auth/users.htpasswd 2>/dev/null || true
+
+        mkdir -p /config/directory
+        chmod 755 /config/directory
+        chown -R "$$APP_UID:$$APP_GID" /config/directory
+        # The Settings page writes pending .env changes here (scripts/apply-settings.sh applies them).
+        chmod 700 /app-settings
+        chown -R "$$APP_UID:$$APP_GID" /app-settings
+        # Admin -> Models writes the engine's presets here; the engine and Prometheus read them.
+        chmod 755 /engine-config
+        chown -R "$$APP_UID:$$APP_GID" /engine-config
+        if [ -f /config/users.yml ]; then chown "$$APP_UID:$$APP_GID" /config/users.yml; fi
+        if [ "$$owner" != "$$APP_UID:$$APP_GID" ]; then
+          echo "auth-init: note: config/ belongs to $$owner but the app runs as $$APP_UID:$$APP_GID."
+          echo "auth-init: set LLM_UID and LLM_GID in .env to $$owner to keep every file yours."
+        fi
+        echo "auth-init: users.htpasswd rebuilt; directory ready for the app"
+    logging: *default-logging
+
+  # ============================================================================
+  # INFERENCE
+  # ============================================================================
+
+  vllm:
+    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
+    container_name: vllm
+    # Profile-gated so that exactly one engine runs. vLLM and llama.cpp both
+    # claim the whole GPU; starting both means whichever loses the race dies
+    # with a CUDA OOM that names neither culprit.
+    #
+    # This service used to be unprofiled (always on). Existing .env files may
+    # therefore have no `vllm` in COMPOSE_PROFILES -- add it there
+    # rather than silently leaving the engine stopped after an upgrade.
+    profiles: [vllm]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - vllm-cache:/root/.cache/vllm
+      # Drop GGUF/safetensors here to serve a local model without HuggingFace.
+      - ${LLM_MODELS_DIR:-./models}:/models
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /root/.cache/huggingface
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+      # HuggingFace's Xet CDN is chunk-based and gives up on a reset instead of
+      # resuming. Plain HTTPS transfers are slower but far more tolerant of a
+      # flaky link, which matters for multi-GB weight files.
+      HF_HUB_DISABLE_XET: "1"
+      # The default read timeout is 10s, and a first pull of a multi-GB
+      # checkpoint over a slow link spends most of its time hitting it: the
+      # log fills with "The read operation timed out / Trying to resume
+      # download", and throughput falls as each retry restarts the HTTP
+      # request rather than the transfer. Measured here: 4.6 MB/s decaying to
+      # ~1 MB/s. A longer timeout does not make the link faster; it stops a
+      # slow-but-alive connection being abandoned and retried into the ground.
+      HF_HUB_DOWNLOAD_TIMEOUT: "${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
+      # Emits per-request histograms Prometheus can scrape.
+      VLLM_LOGGING_LEVEL: INFO
+      # vLLM >= 0.27 defaults to GPUModelRunnerV2, which allocates Unified
+      # Virtual Addressing buffers. WSL2's GPU driver does not expose UVA, so
+      # the engine dies at startup with "RuntimeError: UVA is not available".
+      # Forcing the V1 runner is the fix. On bare-metal Linux you can drop this
+      # (or set it to 1) to get the faster V2 path.
+      VLLM_USE_V2_MODEL_RUNNER: "${VLLM_USE_V2_MODEL_RUNNER:-0}"
+    # NOTE: the image entrypoint is already the OpenAI API server, so `command`
+    # holds only flags. Compose shell-splits this string, which means an empty
+    # ${VLLM_EXTRA_ARGS} contributes zero arguments instead of an empty one.
+    command: >
+      --model ${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      --served-model-name ${VLLM_SERVED_MODEL_NAME:-default}
+      --host 0.0.0.0
+      --port 8000
+      --api-key ${VLLM_API_KEY:-${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}}
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
+      --dtype ${VLLM_DTYPE:-auto}
+      --tensor-parallel-size ${VLLM_TENSOR_PARALLEL_SIZE:-1}
+      --max-num-seqs ${VLLM_MAX_NUM_SEQS:-256}
+      --trust-remote-code
+      ${VLLM_EXTRA_ARGS:-}
+    # 64 MB (the Docker default) is too small for the tokenizer pool, but 8 GB is
+    # sized for multi-GPU NCCL. 2 GB is plenty for a single engine and this is
+    # host RAM, so the difference is real.
+    shm_size: "${VLLM_SHM_SIZE:-2gb}"
+    <<: *gpu-reservation
+    healthcheck:
+      # The image has no curl; python3 is guaranteed to be there.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      # Cold start pulls + loads weights; allow a long grace period.
+      start_period: 900s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.vllm.loadbalancer.server.port=8000"
+      - "traefik.http.routers.vllm.rule=Host(`api.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.vllm.entrypoints=websecure"
+      - "traefik.http.routers.vllm.tls=true"
+      - "traefik.http.routers.vllm.service=vllm"
+      # Credential swap: the app (forwardAuth) authenticates the caller, then Traefik
+      # replaces the Authorization header with vLLM's internal key before
+      # proxying. Middleware order is significant - the app must inspect
+      # the original header before it is overwritten.
+      - "traefik.http.middlewares.vllm-key.headers.customrequestheaders.Authorization=Bearer ${VLLM_API_KEY:-${LLAMACPP_API_KEY}}"
+      - "traefik.http.routers.vllm.middlewares=${PROTECTED_CHAIN:-protected-chain@file},vllm-key@docker"
+      # /metrics carries no bearer-token check, so guard it at the edge. This
+      # does not affect Prometheus, which scrapes vllm:8000 directly on the
+      # internal network and never traverses the proxy.
+      - "traefik.http.routers.vllm-metrics.rule=Host(`api.${LLM_DOMAIN:-llm.localhost}`) && PathPrefix(`/metrics`)"
+      - "traefik.http.routers.vllm-metrics.entrypoints=websecure"
+      - "traefik.http.routers.vllm-metrics.tls=true"
+      - "traefik.http.routers.vllm-metrics.service=vllm"
+      - "traefik.http.routers.vllm-metrics.priority=100"
+      - "traefik.http.routers.vllm-metrics.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  # ============================================================================
+  # CPU TEMPERATURE (profile: smi -- alongside the other hardware exporters)
+  #
+  # Exists because neither existing exporter can report it:
+  #   node-exporter reads /sys/class/hwmon, which is EMPTY under WSL2 -- the
+  #     kernel Docker Desktop runs exposes no thermal sensors, so
+  #     node_hwmon_temp_celsius has zero series on a Windows host.
+  #   windows_exporter has no CPU core temperature collector at all. Its ACPI
+  #     `thermalzone` reading was measured at a fixed 27.85 C with all sixteen
+  #     cores saturated -- a board sensor, not the package.
+  #
+  # On LINUX this works out of the box: /sys is mounted read-only and the
+  # exporter reads coretemp/k10temp directly.
+  #
+  # On WINDOWS the container cannot see host hardware at all, so it falls back
+  # to scraping LibreHardwareMonitor on the host (LHM ships the signed kernel
+  # driver that reads Intel DTS). Without LHM it reports
+  # cpu_temperature_available 0 rather than inventing a number.
+  # ============================================================================
+  cpu-temp-exporter:
+    image: python:3.13-slim
+    container_name: cpu-temp-exporter
+    profiles: [smi]
+    restart: unless-stopped
+    networks: [llm-net]
+    command: ["python", "/app/exporter.py"]
+    volumes:
+      - ${LLM_SERVICES_DIR:-./services}/cpu-temp-exporter:/app:ro
+      # No /sys mount: on Linux a container's own /sys already IS the host's
+      # sysfs, so the exporter reads /sys/class/hwmon directly. (An earlier
+      # version bind-mounted it to /host/sys, a path nothing reads.) Under WSL2
+      # that same /sys simply has no thermal sensors, and the exporter falls
+      # through to LibreHardwareMonitor.
+    environment:
+      LISTEN_PORT: "9110"
+      LHM_URL: ${LHM_URL:-http://host.docker.internal:8085/data.json}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:9110/metrics',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    logging: *default-logging
+
+  # ============================================================================
+  # ALTERNATIVE INFERENCE ENGINE (profile: llamacpp)
+  #
+  # Why a second engine exists at all: vLLM cannot serve every model this stack
+  # is asked to run. Qwen3.8-Flash-Next is the case that forced it -- a 177B
+  # mixture-of-experts with only 2.66B active per token. Its vLLM-loadable
+  # builds are 135 GB (NVFP4, Blackwell-only) and 180 GB (W4A16); the GGUF is
+  # 93.7 GB. On anything short of a very large card, GGUF is the only build that
+  # fits, and llama.cpp is the only engine that reads it for this architecture.
+  #
+  # llama.cpp also offloads MoE experts to system RAM (--n-cpu-moe), which is
+  # what makes a 177B model run on a 24 GB card: only 10 of 512 experts fire per
+  # token, so the compute is that of a ~3B model even though the weights are not.
+  #
+  # It is NOT a replacement for vLLM. vLLM batches far better and is the right
+  # engine whenever the model fits. Run exactly one.
+  # ============================================================================
+  # Puts the model (and, if configured, a replacement llama-server build) in
+  # place from .env, then exits. The engine waits for it.
+  #
+  #   LLAMACPP_HF_REPO + LLAMACPP_HF_FILES   Hugging Face repo and the files to
+  #       fetch into LLAMACPP_MODEL_DIR (space-separated paths inside the repo;
+  #       they land flat, by file name). Files already present at the published
+  #       size are skipped, downloads resume, and every LFS file is checked
+  #       against the SHA-256 Hugging Face publishes before it is used.
+  #       Offline (an air gap, or Hugging Face down) files already on disk are
+  #       used as they are: a download only takes its final name once complete
+  #       and verified, so a present file is a finished one.
+  #   LLAMACPP_ENGINE_URL (+ _SHA256)        a llama.cpp release tarball to run
+  #       instead of the image's own server -- for MTP, which mainline llama.cpp
+  #       lacks for Qwen3.8 (ggml-org/llama.cpp#28243). Unpacked into the
+  #       llamacpp-engine volume; empty clears it and the stock server runs.
+  #
+  # With both empty it only verifies that LLAMACPP_MODEL_FILE (and the MTP
+  # head, if set) exist -- so a typo in a path fails HERE, with the path in the
+  # message, instead of as a crash loop in the engine.
+  #
+  # A first start of a large model is a long download (Qwen3.8-Flash-Next
+  # IQ4_XS is 94 GB). Follow it with:  docker logs -f model-init
+  model-init:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG:-server-cuda}
+    container_name: model-init
+    # One-shot: the image's own healthcheck (for the long-running server) does not apply.
+    healthcheck:
+      disable: true
+    profiles: [llamacpp]
+    restart: "no"
+    networks: [llm-net]
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    environment:
+      LLAMACPP_HF_REPO: ${LLAMACPP_HF_REPO:-}
+      LLAMACPP_HF_FILES: ${LLAMACPP_HF_FILES:-}
+      LLAMACPP_MODEL_FILE: ${LLAMACPP_MODEL_FILE:?set LLAMACPP_MODEL_FILE in .env}
+      LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
+      LLAMACPP_ENGINE_URL: ${LLAMACPP_ENGINE_URL:-}
+      LLAMACPP_ENGINE_SHA256: ${LLAMACPP_ENGINE_SHA256:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ${LLAMACPP_MODEL_DIR:?set LLAMACPP_MODEL_DIR in .env}:/gguf
+      - llamacpp-engine:/engine
+    command:
+      - |
+        set -euo pipefail
+        auth=(); [ -n "$$HF_TOKEN" ] && auth=(-H "Authorization: Bearer $$HF_TOKEN")
+        owner=$$(stat -c %u:%g /gguf)
+        offline=""
+        for f in $$LLAMACPP_HF_FILES; do
+          name=$$(basename "$$f"); url="https://huggingface.co/$$LLAMACPP_HF_REPO/resolve/main/$$f"
+          # Without the timeouts a firewall that drops packets stalled this for
+          # minutes per file; without `|| offline=1` set -e ended the script
+          # with no message, so on an air-gapped host the engine never started.
+          head=""
+          [ -n "$$offline" ] || head=$$(curl -sI --connect-timeout 10 --max-time 60 "$${auth[@]}" "$$url" | tr -d '\r') || offline=1
+          size=$$(printf '%s\n' "$$head" | sed -n 's/^x-linked-size: //Ip' | head -1)
+          [ -n "$$size" ] || size=$$(printf '%s\n' "$$head" | sed -n 's/^content-length: //Ip' | tail -1)
+          sha=$$(printf '%s\n' "$$head" | sed -n 's/^x-linked-etag: "\{0,1\}\([0-9a-f]\{64\}\)"\{0,1\}/\1/Ip' | head -1)
+          if [ -f "/gguf/$$name" ] && [ -n "$$offline" ]; then
+            echo "model-init: have $$name (Hugging Face unreachable: using the file on disk)"; continue
+          fi
+          if [ -f "/gguf/$$name" ] && [ "$$(stat -c %s "/gguf/$$name")" = "$$size" ]; then
+            echo "model-init: have $$name"; continue
+          fi
+          [ -z "$$offline" ] || { echo "model-init: $$name is not in LLAMACPP_MODEL_DIR and Hugging Face is unreachable; copy it there"; exit 1; }
+          [ -n "$$size" ] || { echo "model-init: $$LLAMACPP_HF_REPO/$$f not found on Hugging Face"; exit 1; }
+          echo "model-init: downloading $$name ($$((size / 1000000)) MB) from $$LLAMACPP_HF_REPO"
+          curl -fL --retry 20 --retry-delay 10 -C - "$${auth[@]}" -o "/gguf/$$name.part" "$$url"
+          if [ -n "$$sha" ]; then
+            echo "model-init: verifying $$name"
+            echo "$$sha  /gguf/$$name.part" | sha256sum -c --quiet
+          fi
+          mv "/gguf/$$name.part" "/gguf/$$name"; chown "$$owner" "/gguf/$$name" || true
+        done
+        [ -f "/gguf/$$LLAMACPP_MODEL_FILE" ] || { echo "model-init: LLAMACPP_MODEL_FILE=$$LLAMACPP_MODEL_FILE is not in LLAMACPP_MODEL_DIR (set LLAMACPP_HF_REPO/LLAMACPP_HF_FILES to download it)"; exit 1; }
+        [ -z "$$LLAMACPP_MTP_HEAD" ] || [ -f "/gguf/$$LLAMACPP_MTP_HEAD" ] || { echo "model-init: LLAMACPP_MTP_HEAD=$$LLAMACPP_MTP_HEAD is not in LLAMACPP_MODEL_DIR"; exit 1; }
+
+        if [ -n "$$LLAMACPP_ENGINE_URL" ]; then
+          if [ "$$(cat /engine/.source 2>/dev/null)" != "$$LLAMACPP_ENGINE_URL" ] || [ ! -x /engine/llama-server ]; then
+            echo "model-init: fetching engine $$LLAMACPP_ENGINE_URL"
+            curl -fL --retry 10 -o /tmp/engine.tgz "$$LLAMACPP_ENGINE_URL"
+            [ -z "$$LLAMACPP_ENGINE_SHA256" ] || echo "$$LLAMACPP_ENGINE_SHA256  /tmp/engine.tgz" | sha256sum -c --quiet
+            find /engine -mindepth 1 -delete; tar xzf /tmp/engine.tgz -C /engine
+            [ -x /engine/llama-server ] || { echo "model-init: no llama-server at the top of that tarball"; exit 1; }
+            echo "$$LLAMACPP_ENGINE_URL" > /engine/.source
+          fi
+          echo "model-init: engine $$(basename "$$LLAMACPP_ENGINE_URL")"
+        else
+          find /engine -mindepth 1 -delete 2>/dev/null || true
+          echo "model-init: engine = the image's own llama-server"
+        fi
+        echo "model-init: ready ($$LLAMACPP_MODEL_FILE$${LLAMACPP_MTP_HEAD:+, MTP head $$LLAMACPP_MTP_HEAD})"
+    logging: *default-logging
+
+  llamacpp:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG:-server-cuda}
+    container_name: llamacpp
+    profiles: [llamacpp]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      # Same bind mount as vLLM, plus wherever the big GGUFs actually live.
+      - ${LLM_MODELS_DIR:-./models}:/models
+      - ${LLAMACPP_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}:/gguf:ro
+      # Filled by model-init from LLAMACPP_ENGINE_URL; empty = stock server.
+      - llamacpp-engine:/engine:ro
+      # Router mode (services/llamacpp/router.sh): the models the app added
+      # (config/engine/models.ini), the one to keep loaded (active), and the
+      # library they come from.
+      - ${LLM_SERVICES_DIR:-./services}/llamacpp/router.sh:/router.sh:ro
+      - ${LLM_CONFIG_DIR:-./config}/engine:/presets:ro
+      - ${LLAMACPP_LIBRARY_DIR:-${LLAMACPP_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}}:/library:ro
+    # Which llama-server runs, and MTP. Both come from .env via model-init:
+    #
+    #   LLAMACPP_ENGINE_URL  a release tarball unpacked into /engine. Empty runs
+    #       the image's own /app/llama-server. It exists for MTP: mainline has
+    #       no MTP graph for the qwen4exp architecture yet (ggml-org/llama.cpp
+    #       #28243 is open), so the stock image accepts --spec-type draft-mtp
+    #       and silently does nothing. Unsloth's CUDA 12 build carries it.
+    #   LLAMACPP_MTP_DRAFT_MAX  multi-token prediction: tokens drafted per step.
+    #       0 = off. Needs a model with an MTP layer: Qwen3.8-27B carries its own
+    #       inside the main GGUF (the stock server handles it); Qwen3.8-Flash-Next
+    #       needs a separate draft head (LLAMACPP_MTP_HEAD, a file name in
+    #       LLAMACPP_MODEL_DIR) and the Unsloth engine above.
+    #       LLAMACPP_MTP_ARGS appends flags for the draft, e.g.
+    #       --spec-draft-cpu-moe to keep a draft head's experts in system RAM.
+    environment:
+      LLAMA_CACHE: /models/.llama-cache
+      # The .env model's preset (router.sh), with what single-model mode took
+      # on its command line.
+      MODEL_NAME: ${MODEL_NAME:?set MODEL_NAME in .env}
+      MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
+      LLAMACPP_API_KEY: ${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}
+      LLAMACPP_THREADS: ${LLAMACPP_THREADS:-8}
+      LLAMACPP_N_GPU_LAYERS: ${LLAMACPP_N_GPU_LAYERS:-99}
+      LLAMACPP_KV_TYPE: ${LLAMACPP_KV_TYPE:-q8_0}
+      LLAMACPP_PARALLEL: ${LLAMACPP_PARALLEL:-1}
+      # How many models stay loaded at once; one GPU usually holds one.
+      LLAMACPP_MODELS_MAX: ${LLAMACPP_MODELS_MAX:-1}
+      LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
+      LLAMACPP_MTP_DRAFT_MAX: ${LLAMACPP_MTP_DRAFT_MAX:-0}
+      LLAMACPP_MTP_ARGS: ${LLAMACPP_MTP_ARGS:-}
+      # Keeping the weights in RAM. See the MEMORY block of the samples.
+      #   LLAMACPP_MLOCK    auto | on | off   pin the weights (--mlock)
+      #   LLAMACPP_PRELOAD  auto | on | off   read them into the page cache first
+      #   LLAMACPP_RAM_RESERVE_GB             RAM left for everything else
+      # `auto` pins only when the model's weights live (partly) in system RAM AND
+      # the whole model fits beside the reserve. A model entirely on the GPU needs
+      # no host copy, and a model larger than RAM cannot be pinned -- trying makes
+      # the kernel thrash or kill something. The decision is logged either way.
+      LLAMACPP_MLOCK: ${LLAMACPP_MLOCK:-auto}
+      LLAMACPP_PRELOAD: ${LLAMACPP_PRELOAD:-auto}
+      LLAMACPP_RAM_RESERVE_GB: ${LLAMACPP_RAM_RESERVE_GB:-8}
+      LLAMACPP_N_CPU_MOE: ${LLAMACPP_N_CPU_MOE:-0}
+      LLAMACPP_EXTRA_ARGS: ${LLAMACPP_EXTRA_ARGS:-}
+      LLAMACPP_MODEL_FILE: ${LLAMACPP_MODEL_FILE:-}
+    # mlock needs the locked-memory limit lifted; harmless when nothing is locked.
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    # llama.cpp in router mode: several models, one loaded at a time, switched
+    # live from Admin -> Models without a restart. The script builds the .env
+    # model's preset (pinning and preloading its weights as before), adds the
+    # app's models, and restarts llama-server when the app changes that list.
+    entrypoint: ["/bin/sh", "/router.sh"]
+    # mmap means the GGUF is paged from disk on demand rather than read whole.
+    # With 512 experts and 10 firing per token the hot set is far smaller than
+    # the file, so this is what makes a 94 GB model usable on 48 GB of RAM --
+    # provided the file is on NVMe. On a spinning disk it is unusable.
+    shm_size: "${LLAMACPP_SHM_SIZE:-2gb}"
+    # A ceiling on what the engine may hold, so the machine keeps a floor.
+    #
+    # Without it this container is unlimited: mmap'd model pages fill the page
+    # cache to whatever RAM exists, which is FINE in isolation (Linux evicts
+    # file-backed pages under pressure) but leaves no guaranteed room for
+    # anything else. With a cgroup limit the kernel reclaims inside this
+    # container instead of competing with the rest of the box.
+    #
+    # Set LLAMACPP_MEM_LIMIT in .env (e.g. 56g). Empty
+    # means unlimited, which is the previous behaviour.
+    #
+    # Do NOT set this below the model's working set or it will thrash: the
+    # limit bounds the cache, it does not make the model smaller.
+    mem_limit: ${LLAMACPP_MEM_LIMIT:-0}
+    # A CEILING ON CORES, matched to -t in LLAMACPP_EXTRA_ARGS.
+    #
+    # Without it the engine and any other CPU work (embedding, indexing) can
+    # together saturate all 24 logical CPUs. Measured on this box: an embedding
+    # batch at ~8 cores alongside the engine took the package to 94 C, which is
+    # a cooling problem long before it is a throughput one.
+    #
+    # 16 is the physical core count here and the value -t is set to; going
+    # higher does not help anyway (measured, see README: hyperthreads are 2.13x
+    # SLOWER). Leaves 8 logical CPUs for everything else.
+    cpus: ${LLAMACPP_CPUS:-16}
+    <<: *gpu-reservation
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      # A 94 GB model paging in from NVMe takes minutes on a cold cache.
+      start_period: 1800s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.llamacpp.loadbalancer.server.port=8080"
+      - "traefik.http.routers.llamacpp.rule=Host(`api.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.llamacpp.entrypoints=websecure"
+      - "traefik.http.routers.llamacpp.tls=true"
+      - "traefik.http.routers.llamacpp.service=llamacpp"
+      - "traefik.http.middlewares.llamacpp-key.headers.customrequestheaders.Authorization=Bearer ${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}"
+      - "traefik.http.routers.llamacpp.middlewares=${PROTECTED_CHAIN:-protected-chain@file},llamacpp-key@docker"
+    logging: *default-logging
+
+  # SECOND INFERENCE ENGINE (profile: multi-model)
+  #
+  # One vLLM process serves exactly one model ("vllm serve [model_tag]"), so a
+  # second warm model means a second engine. Both stay resident; LiteLLM picks
+  # between them by the `model` field of the request, so switching costs nothing
+  # at request time.
+  #
+  # THE CONSTRAINT THAT MATTERS: --gpu-memory-utilization is a fraction of the
+  # WHOLE card, and each engine pre-allocates its share up front. The two
+  # fractions must sum to less than 1.0 or the second engine will fail to start.
+  # With 24 GB, 0.45 + 0.45 leaves ~2 GB of headroom.
+  #
+  # Note --cpu-offload-gb cannot rescue you here: it is implemented with UVA,
+  # which WSL2 does not expose (the same reason VLLM_USE_V2_MODEL_RUNNER is 0).
+  # ============================================================================
+
+  vllm-secondary:
+    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-latest}
+    container_name: vllm-secondary
+    profiles: [multi-model]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      # Same caches as the primary: a shared base model is downloaded once.
+      - hf-cache:/root/.cache/huggingface
+      - vllm-cache:/root/.cache/vllm
+      - ${LLM_MODELS_DIR:-./models}:/models
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /root/.cache/huggingface
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+      # HuggingFace's Xet CDN is chunk-based and gives up on a reset instead of
+      # resuming. Plain HTTPS transfers are slower but far more tolerant of a
+      # flaky link, which matters for multi-GB weight files.
+      HF_HUB_DISABLE_XET: "1"
+      # The default read timeout is 10s, and a first pull of a multi-GB
+      # checkpoint over a slow link spends most of its time hitting it: the
+      # log fills with "The read operation timed out / Trying to resume
+      # download", and throughput falls as each retry restarts the HTTP
+      # request rather than the transfer. Measured here: 4.6 MB/s decaying to
+      # ~1 MB/s. A longer timeout does not make the link faster; it stops a
+      # slow-but-alive connection being abandoned and retried into the ground.
+      HF_HUB_DOWNLOAD_TIMEOUT: "${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
+      VLLM_LOGGING_LEVEL: INFO
+      VLLM_USE_V2_MODEL_RUNNER: "${VLLM_USE_V2_MODEL_RUNNER:-0}"
+    command: >
+      --model ${VLLM2_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+      --served-model-name ${VLLM2_SERVED_MODEL_NAME:-fast}
+      --host 0.0.0.0
+      --port 8000
+      --api-key ${VLLM_API_KEY:-${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}}
+      --max-model-len ${VLLM2_MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization ${VLLM2_GPU_MEMORY_UTILIZATION:-0.35}
+      --dtype ${VLLM2_DTYPE:-auto}
+      --tensor-parallel-size 1
+      --max-num-seqs ${VLLM2_MAX_NUM_SEQS:-128}
+      --trust-remote-code
+      ${VLLM2_EXTRA_ARGS:-}
+    shm_size: "8gb"
+    <<: *gpu-reservation
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 900s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.vllm-secondary.loadbalancer.server.port=8000"
+      - "traefik.http.routers.vllm-secondary.rule=Host(`api2.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.vllm-secondary.entrypoints=websecure"
+      - "traefik.http.routers.vllm-secondary.tls=true"
+      - "traefik.http.routers.vllm-secondary.service=vllm-secondary"
+      - "traefik.http.routers.vllm-secondary.middlewares=default-chain@file"
+      - "traefik.http.routers.vllm2-metrics.rule=Host(`api2.${LLM_DOMAIN:-llm.localhost}`) && PathPrefix(`/metrics`)"
+      - "traefik.http.routers.vllm2-metrics.entrypoints=websecure"
+      - "traefik.http.routers.vllm2-metrics.tls=true"
+      - "traefik.http.routers.vllm2-metrics.service=vllm-secondary"
+      - "traefik.http.routers.vllm2-metrics.priority=100"
+      - "traefik.http.routers.vllm2-metrics.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  # ============================================================================
+  # GATEWAY (profile: gateway)
+  # Put LiteLLM in front of vLLM when you want virtual API keys, per-team
+  # budgets, spend tracking, fallbacks, or to mix in hosted providers.
+  # ============================================================================
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: litellm
+    profiles: [gateway]
+    restart: unless-stopped
+    networks: [llm-net, image-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      # A template: ${MODEL_NAME}, ${MODEL_CONTEXT}, ${MODEL_MAX_OUTPUT} are filled
+      # in from the environment at startup (entrypoint below).
+      - ${LLM_CONFIG_DIR:-./config}/litellm/config.yaml:/app/config.template.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set LITELLM_SALT_KEY}
+      DATABASE_URL: postgresql://${LLM_PG_USER:-llmservice}:${LLM_PG_PASSWORD}@postgres:5432/litellm
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      # The price list bundled with the image, not a fetch from GitHub on every
+      # start (which waits out its timeout on an air-gapped host).
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      # Prisma's CLI reports to checkpoint.prisma.io on every migrate at start.
+      CHECKPOINT_DISABLE: "1"
+      VLLM_API_KEY: ${VLLM_API_KEY:-${LLAMACPP_API_KEY}}
+      # ---- which engine the gateway talks to -------------------------------
+      # config/litellm/config.yaml reads these through `os.environ/`, so the
+      # gateway config is engine-agnostic and .env alone decides the backend.
+      #
+      # The defaults reproduce the vLLM wiring exactly, so an .env written
+      # before llama.cpp existed keeps working untouched; the samples set them
+      # explicitly from here on.
+      MODEL_NAME: ${MODEL_NAME:?set MODEL_NAME in .env}
+      MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
+      MODEL_MAX_OUTPUT: ${MODEL_MAX_OUTPUT:-32768}
+      # Per 1M tokens, in the currency your budgets are in (USD by default).
+      PRICE_INPUT_PER_MTOK: ${PRICE_INPUT_PER_MTOK:-0.20}
+      PRICE_CACHED_INPUT_PER_MTOK: ${PRICE_CACHED_INPUT_PER_MTOK:-0.02}
+      PRICE_OUTPUT_PER_MTOK: ${PRICE_OUTPUT_PER_MTOK:-0.80}
+      # How hard the model thinks before answering. Rendered into
+      # config/litellm/config.yaml as the ENGINE's chat-template variables;
+      # see the note there for why OpenAI's own reasoning_effort field cannot
+      # be used for this.
+      MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-medium}
+      MODEL_ENABLE_THINKING: ${MODEL_ENABLE_THINKING:-true}
+      ENGINE_API_BASE: ${ENGINE_API_BASE:-http://llamacpp:8080/v1}
+      # `openai/` is the PROTOCOL, not the vendor -- it means "speak the OpenAI
+      # API to api_base". The part after it must equal the engine's served
+      # model name (vLLM --served-model-name / llama.cpp --alias) or the engine
+      # answers 404 to every request.
+      ENGINE_MODEL: ${ENGINE_MODEL:-openai/${MODEL_NAME}}
+      ENGINE_API_KEY: ${ENGINE_API_KEY:-${LLAMACPP_API_KEY}}
+      STORE_MODEL_IN_DB: "True"
+      # config/litellm/config.yaml reads these through `os.environ/`. This
+      # service has no env_file, so a variable that is not named here does not
+      # exist inside the container -- and LiteLLM resolves a missing
+      # `os.environ/` reference to None rather than failing on it, so
+      # `max_internal_user_budget` became float(None) and the gateway would
+      # not start at all. A default budget that silently does not arrive is
+      # worse than one that is wrong, so both are passed explicitly.
+      LITELLM_DEFAULT_USER_BUDGET: ${LITELLM_DEFAULT_USER_BUDGET:-50}
+      LITELLM_BUDGET_DURATION: ${LITELLM_BUDGET_DURATION:-1mo}
+      # The picture model (profile image): listed only when that profile runs.
+      COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+      IMAGEGEN_MODEL_NAME: ${IMAGEGEN_MODEL_NAME:-FLUX.2-klein-4B}
+    # One worker is ample for a small team and costs ~700 MB instead of ~3 GB.
+    # Raise LITELLM_WORKERS only if the gateway itself becomes a bottleneck.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        python3 - <<'PY'
+        import os, re
+        src = open("/app/config.template.yaml").read()
+        # Prices are set per 1M tokens in .env; LiteLLM wants per token.
+        for key, price in (("MODEL_COST_INPUT_TOKEN", "PRICE_INPUT_PER_MTOK"),
+                           ("MODEL_COST_CACHED_INPUT_TOKEN", "PRICE_CACHED_INPUT_PER_MTOK"),
+                           ("MODEL_COST_OUTPUT_TOKEN", "PRICE_OUTPUT_PER_MTOK")):
+            os.environ[key] = "%.12g" % (float(os.environ.get(price) or 0) / 1e6)
+        # The image model's entry only when its server runs (profile image).
+        if "image" not in [p.strip() for p in os.environ.get("COMPOSE_PROFILES", "").split(",")] or not os.environ.get("IMAGEGEN_MODEL_NAME"):
+            src = re.sub(r"\n *#<image>.*?#</image>", "", src, flags=re.S)
+        out = re.sub(r"\$\{(MODEL_NAME|MODEL_CONTEXT|MODEL_MAX_OUTPUT|MODEL_REASONING_EFFORT|MODEL_ENABLE_THINKING|MODEL_COST_INPUT_TOKEN|MODEL_COST_CACHED_INPUT_TOKEN|MODEL_COST_OUTPUT_TOKEN|IMAGEGEN_MODEL_NAME)\}", lambda m: os.environ[m.group(1)], src)
+        open("/tmp/config.yaml", "w").write(out)
+        PY
+        exec docker/prod_entrypoint.sh "$$@"
+      - litellm
+    command: ["--config", "/tmp/config.yaml", "--port", "4000", "--num_workers", "${LITELLM_WORKERS:-1}"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The litellm image ships no curl or wget, only the venv python.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/liveliness',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.litellm.loadbalancer.server.port=4000"
+      - "traefik.http.routers.litellm.rule=Host(`gateway.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.litellm.entrypoints=websecure"
+      - "traefik.http.routers.litellm.tls=true"
+      # NO forwardAuth and NO key injection here on purpose. LiteLLM validates its
+      # own virtual keys, so the caller's key must survive the proxy untouched -
+      # injecting the master key would attribute every request to one identity
+      # and destroy per-user usage tracking.
+      - "traefik.http.routers.litellm.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # IMAGE GENERATION (profile: image)
+  #
+  # stable-diffusion.cpp's server, OpenAI-style (/v1/images/generations),
+  # behind LiteLLM as IMAGEGEN_MODEL_NAME: the chat's image tool and API keys
+  # use it like any model, with the spend attributed to the person.
+  #
+  # It shares the GPU with the chat model. --auto-fit (the default) keeps the
+  # weights in RAM and streams them to the GPU for each step, within
+  # IMAGEGEN_MAX_VRAM GiB, so the chat model's memory is never taken. A fixed
+  # budget, not "leave N GiB free" (a negative value): on a from-zero start
+  # both load at once, and with -1 this server filled the empty GPU first
+  # (2.8 GB), the chat model took the rest, and no picture had room to stream
+  # (measured). With 2 GiB a 1024x1024 picture takes the same 20 s beside a
+  # 20 GB chat model on an RTX 5090, and 27 s on a 3090 beside a 21 GB one.
+  #
+  # Models (Apache 2.0), into IMAGEGEN_MODEL_DIR:
+  #   flux-2-klein-4b-Q4_0.gguf   huggingface.co/leejet/FLUX.2-klein-4B-GGUF
+  #   Qwen3-4B-Q4_K_M.gguf        huggingface.co/unsloth/Qwen3-4B-GGUF
+  #   flux2-vae.safetensors       huggingface.co/Comfy-Org/flux2-klein-4B (split_files/vae)
+  # ============================================================================
+  imagegen:
+    image: ${IMAGEGEN_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede}
+    container_name: imagegen
+    profiles: [image]
+    restart: unless-stopped
+    networks: [image-net]
+    <<: *gpu-reservation
+    user: "65534:65534"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ${IMAGEGEN_MODEL_DIR:-./models/image}:/models:ro
+    entrypoint: ["/sd-server"]
+    command:
+      - --listen-ip
+      - 0.0.0.0
+      - --listen-port
+      - "1234"
+      - --diffusion-model
+      - /models/${IMAGEGEN_DIFFUSION_MODEL:-flux-2-klein-4b-Q4_0.gguf}
+      - --llm
+      - /models/${IMAGEGEN_TEXT_ENCODER:-Qwen3-4B-Q4_K_M.gguf}
+      - --vae
+      - /models/${IMAGEGEN_VAE:-flux2-vae.safetensors}
+      - --max-vram
+      - "${IMAGEGEN_MAX_VRAM:-2}"
+      - --diffusion-fa
+      - --cfg-scale
+      - "${IMAGEGEN_CFG_SCALE:-1.0}"
+      - --steps
+      - "${IMAGEGEN_STEPS:-4}"
+      - -W
+      - "1024"
+      - -H
+      - "1024"
+    healthcheck:
+      # No curl in the image: bash opens the port.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/1234"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    logging: *default-logging
+
+  # ============================================================================
+  # PYTHON SANDBOX (profile: sandbox)
+  #
+  # The chat's Python tool runs code here. No network at all, a read-only root,
+  # only the capabilities needed to run each job as its own unprivileged user,
+  # with CPU, memory, file and process limits (services/sandbox/runner.py). The
+  # app hands it jobs through the sandbox-jobs volume: no Docker socket, no port.
+  # ============================================================================
+  sandbox:
+    build: ${LLM_SERVICES_DIR:-./services}/sandbox
+    image: llmservice-sandbox:latest
+    container_name: sandbox
+    profiles: [sandbox]
+    restart: unless-stopped
+    # An init as PID 1 reaps what a job orphaned: zombies would count against
+    # the next job's process limit (found by scripts/sandbox-check.py).
+    init: true
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    # Root in the container only to hand each job to its own user and clean up after it.
+    cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: ${SANDBOX_MEMORY:-3g}
+    cpus: ${SANDBOX_CPUS:-2}
+    tmpfs:
+      - /work:size=${SANDBOX_DISK:-1g},mode=0711
+      - /tmp:size=64m,mode=0700
+    volumes:
+      - sandbox-jobs:/jobs
+    environment:
+      SANDBOX_OWNER_UID: ${LLM_UID:-1000}
+      SANDBOX_OWNER_GID: ${LLM_GID:-1000}
+      SANDBOX_SLOTS: ${SANDBOX_SLOTS:-2}
+      SANDBOX_JOB_MEMORY_MB: ${SANDBOX_JOB_MEMORY_MB:-1536}
+      SANDBOX_MAX_TIMEOUT: "300"
+    logging: *default-logging
+
+  # ============================================================================
+  # WEB SEARCH (profile: websearch)
+  #
+  # SearXNG for the chat's Web tool: it asks public search engines and answers
+  # the app in JSON. No port and no route: the app is its only client, on
+  # search-net. Needs SEARXNG_SECRET in .env (openssl rand -hex 32); without it
+  # SearXNG refuses to start. The Web tool itself stays off until an admin turns
+  # it on and allows sites (Settings -> Python and web).
+  # ============================================================================
+  searxng:
+    image: ${SEARXNG_IMAGE:-ghcr.io/searxng/searxng@sha256:cfbf1eac79dac3044a510e0f671bdad499b3dc4914cd2a77dfc9328238035add}
+    container_name: searxng
+    profiles: [websearch]
+    restart: unless-stopped
+    networks: [search-net]
+    user: "977:977"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /var/cache/searxng:uid=977,gid=977,mode=0700
+      - /tmp
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    healthcheck:
+      test: ["CMD", "/usr/local/searxng/.venv/bin/python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8080/healthz', headers={'X-Real-IP': '127.0.0.1'}), timeout=4)"]
+      interval: 30s
+      timeout: 6s
+      start_period: 20s
+      retries: 3
+    logging: *default-logging
+
+  # ============================================================================
+  # ARGUS (profile: argus)
+  #
+  # Semi-RAG code index and documentation server. Indexes repositories from a
+  # GitLab instance, serves a symbol/dependency graph plus knowledge packs, and
+  # exposes them to an agent harness as tools.
+  #
+  # Built from E:/Projects/CodeAssistant; the image is also shipped as an
+  # offline tarball in dist/ so a target host needs no build toolchain.
+  # ============================================================================
+
+  # ============================================================================
+  # EMBEDDINGS (profiles: argus, embed)
+  #
+  # Argus's semantic layer calls Ollama for every vector -- argus/embed.py
+  # defaults to http://localhost:11434 -- but Ollama appeared in no compose
+  # file, no env template and no config.yaml. The semantic index was therefore
+  # not buildable from this stack at all, whichever database stores the result.
+  #
+  # CPU ON PURPOSE. The inference engine already holds ~20.5 GB of a 24 GB
+  # card, and nomic-embed-text is a 137M-parameter model: putting it on the GPU
+  # buys little and risks a CUDA OOM in the engine, which is the service people
+  # actually notice. Embedding is batch work where throughput matters and
+  # latency does not.
+  #
+  # Not routed through Traefik: nothing outside the compose network needs it.
+  # ============================================================================
+  ollama:
+    image: ollama/ollama:0.5.7
+    container_name: ollama
+    profiles: [argus, embed]
+    restart: unless-stopped
+    networks: [llm-net]
+    # Embeddings belong on the GPU.
+    #
+    # This service was CPU-only, capped at OLLAMA_CPUS=2, while a 3090 with
+    # 3.4 GB free sat next to it. Measured warm on the CPU: a 137M-parameter
+    # embedder took a median 94 ms per call. That is not slow in isolation, but
+    # it is the WHOLE cost of a semantic search -- the query itself is tens of
+    # milliseconds -- so the embedder, not the index, decided what retrieval
+    # latency was. The model is ~275 MB in fp16 and needs well under a gigabyte
+    # with its CUDA context, which is a quarter of what is free.
+    #
+    # It is also the fix that helps the OTHER problem: the CPU caps below exist
+    # because embedding ran at 767% CPU and drove the package to 94 C. Offload
+    # removes that load rather than rationing it.
+    <<: *gpu-reservation
+    environment:
+      # One model, kept resident: the alternative is paying the load cost on
+      # every batch during a full index build.
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      # Threads inside Ollama as well as the cgroup cap below: the cap alone
+      # throttles, but the process still spawns a thread per core and thrashes.
+      OLLAMA_NUM_PARALLEL: "1"
+      # How many layers to offload. Empty means "let Ollama decide", which puts
+      # the whole model on the GPU when it fits. Set it to an integer to force a
+      # partial offload on a card that is too full for the whole model -- the
+      # escape hatch for a deployment sharing one GPU with a large engine.
+      OLLAMA_GPU_LAYERS: ${OLLAMA_GPU_LAYERS:-}
+      # Pinned explicitly rather than left to the runtime. The engine and the
+      # embedder share one card, and which one gets scheduled first should not
+      # be a race.
+      NVIDIA_VISIBLE_DEVICES: ${OLLAMA_GPU_DEVICE:-all}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    # Embedding is throughput work with no latency requirement, and it ran at
+    # 767% CPU unbounded -- the single biggest contributor to a 94 C package.
+    # THE CEILINGS MUST SUM UNDER THE CORE COUNT. llamacpp 16 + ollama 4 +
+    # postgres 6 is 26 of 24 logical CPUs -- they oversubscribe, and running an
+    # index build, an embedding pass and the engine together took the package to
+    # 92 C. 16 + 2 + 3 = 21, or 87%, leaves headroom.
+    #
+    # Serving gets the cores because it is the continuous, user-facing workload;
+    # embedding is a rare bulk pass. For a large one-off index build, stop the
+    # engine and raise OLLAMA_CPUS for the duration rather than oversubscribing
+    # both at once.
+    #
+    # Much less load-bearing now that the model is on the GPU: tokenisation and
+    # the HTTP layer are all that is left on the CPU. Kept because the ceiling
+    # is what stops a runaway batch pass from starving the engine's own
+    # host-side work, and because a deployment with no GPU still runs this way.
+    cpus: ${OLLAMA_CPUS:-2}
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    logging: *default-logging
+
+  argus:
+    image: argus:${ARGUS_VERSION:-latest}
+    # Not a public image: `docker compose up` builds it from this repository
+    # the first time (a few minutes), then reuses the local image.
+    build:
+      context: ${LLM_SOURCE_DIR:-..}
+      dockerfile: src/Argus/Dockerfile
+      target: server
+    container_name: argus
+    profiles: [argus]
+    restart: unless-stopped
+    networks: [llm-net]
+    # Argus validates the Host header. Its own default only allows
+    # `argus.internal`, so the proxy hostname must be added explicitly or every
+    # request through Traefik is rejected before it reaches a handler.
+    command:
+      - serve
+      - --config=/etc/argus/config.yaml
+      - --host=0.0.0.0
+      - --port=7700
+      - --allowed-host=argus.${LLM_DOMAIN:-llm.localhost}
+      - --allowed-host=argus.${LLM_DOMAIN:-llm.localhost}:*
+      - --allowed-host=argus
+      - --allowed-host=argus:*
+    environment:
+      # Without this argus/embed.py falls back to localhost:11434, which inside
+      # a container is the container itself.
+      # Enables POST /admin/index. Unset -> the routes are not registered and
+      # the prefix is not exempted from bearer auth, i.e. the surface does not
+      # exist. Generate one and share it with the admin panel only.
+      ARGUS_ADMIN_TOKEN: ${ARGUS_ADMIN_TOKEN:-}
+      # The GitLab push webhook's secret, configured on the webhook itself in
+      # GitLab and sent back as X-Gitlab-Token. Unset -- the default -- means
+      # the route does not exist at all, so an unconfigured deployment has no
+      # unauthenticated way to make the indexer run.
+      #
+      # Deliberately NOT the admin token: this one is stored in GitLab and
+      # travels through GitLab's own configuration, so it is the lower
+      # privilege credential. Leaking it lets somebody cause an index pass;
+      # leaking the admin token lets them read the estate.
+      #
+      # It is the accelerator, not the mechanism. ARGUS_INDEX_INTERVAL is what
+      # guarantees freshness -- a missed delivery, a webhook nobody configured,
+      # and a repository no webhook fires for are all still covered by the poll.
+      ARGUS_WEBHOOK_TOKEN: ${ARGUS_WEBHOOK_TOKEN:-}
+      # Open WebUI's credential. With it, Argus answers for the person signed
+      # into chat -- their GitLab membership, read with the read-only service
+      # token; no admin or sudo. Empty = chat cannot use Argus.
+      ARGUS_CHAT_CLIENT_TOKEN: ${ARGUS_CHAT_CLIENT_TOKEN:-}
+      # Maps a chat user's email to their sign-in username, which must equal
+      # their GitLab username (GitLab's public email is the fallback). The
+      # admin panel's hash-free copy of the account list, not users.yml.
+      ARGUS_AUTHELIA_USERS_FILE: /authelia/users.yml
+      ARGUS_OLLAMA_URL: ${ARGUS_OLLAMA_URL:-http://ollama:11434}
+      ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
+      ARGUS_EMBED_DIM: ${ARGUS_EMBED_DIM:-768}
+      # How often the server reindexes by itself, in seconds. 0 or unset means
+      # NEVER, which is what this stack shipped with: the index only advanced
+      # when an operator pressed "Index now", so every answer was served from
+      # whatever was indexed the last time somebody remembered. 900 is the
+      # documented cadence.
+      #
+      # It runs inside the serve process rather than as a second container on
+      # purpose -- see mcpsrv.server._scheduler. Two writers on one SQLite
+      # index would fail each other with "database is locked".
+      ARGUS_INDEX_INTERVAL: ${ARGUS_INDEX_INTERVAL:-900}
+      # When a repository counts as stale, for the metric and the alert. Four
+      # times the interval above, so one slow or skipped pass is not an
+      # incident but an hour of silence is. Raise it on an estate where a
+      # single pass legitimately takes longer than the interval.
+      ARGUS_INDEX_STALE_AFTER: ${ARGUS_INDEX_STALE_AFTER:-3600}
+      # Which GitLab, overriding config/argus/config.yaml. Empty = that file's URL.
+      ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
+      # Privileged service token: reads every repository the index covers.
+      ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:-}
+      # A way in when no token can be issued for the account. `password` mode
+      # signs in through GitLab's web form and mints a personal access token
+      # from it; the password itself never leaves that one request.
+      #
+      # ARGUS_GITLAB_AUTH is inferred when empty: a token alone means token
+      # mode, and a username alone means password mode. It is inferred in that
+      # order of precedence -- a username WINS over a token -- so state
+      # `ARGUS_GITLAB_AUTH=token` explicitly if a username is left here from
+      # an earlier experiment and the token is the credential that should be
+      # used.
+      #
+      # Prefer a token wherever one is possible. A password is reusable
+      # everywhere that account signs in, and anything that reads this
+      # container's environment (`docker inspect`, a crash dump) reads it too.
+      ARGUS_GITLAB_AUTH: ${ARGUS_GITLAB_AUTH:-}
+      ARGUS_GITLAB_USERNAME: ${ARGUS_GITLAB_USERNAME:-}
+      ARGUS_GITLAB_PASSWORD: ${ARGUS_GITLAB_PASSWORD:-}
+      # TLS, for a GitLab that is not on a public CA. Both apply to the API AND
+      # to every clone, because Argus reaches GitLab over two transports that
+      # cannot see each other's configuration -- getting one right and the
+      # other wrong reads as a bad credential.
+      #
+      # Two ways to do it, and they compose rather than compete:
+      #
+      #   config/ca/            stack-wide. tls-init appends every PEM dropped
+      #                         there to /certs/bundle.crt, which the two
+      #                         variables at the bottom of this block point at.
+      #                         httpx honours SSL_CERT_FILE, so this covers
+      #                         Argus's API calls and its clones alike.
+      #   ARGUS_GITLAB_CA_CERT  this GitLab only, and it WINS over the above
+      #                         when set: mirror.py overwrites the inherited
+      #                         GIT_SSL_CAINFO, and httpx gets an explicit
+      #                         context. A path INSIDE the container; drop the
+      #                         PEM in config/argus/tls/ and use
+      #                         /etc/argus/tls/<name>.
+      ARGUS_GITLAB_CA_CERT: ${ARGUS_GITLAB_CA_CERT:-}
+      # Last resort, for a self-signed GitLab with NO CA file available
+      # anywhere: ARGUS_GITLAB_VERIFY=false. It disables certificate
+      # verification for every request and clone to that GitLab, so anything
+      # able to answer on the hostname can read the access token. Setting it
+      # alongside a CA is refused at startup rather than silently resolved.
+      ARGUS_GITLAB_VERIFY: ${ARGUS_GITLAB_VERIFY:-}
+      # API calls (httpx) and git clones both verify GitLab's certificate
+      # against this bundle: public CAs plus config/ca/.
+      SSL_CERT_FILE: /certs/bundle.crt
+      GIT_SSL_CAINFO: /certs/bundle.crt
+    volumes:
+      # Config travels with the repo, so a fresh host needs nothing extra.
+      - ${LLM_CONFIG_DIR:-./config}/argus/config.yaml:/etc/argus/config.yaml:ro
+      # Where a private CA goes. The directory exists in the repo and is empty
+      # by default, so the mount never depends on an operator creating it --
+      # and a PEM dropped here is reachable as /etc/argus/tls/<name>, which is
+      # what ARGUS_GITLAB_CA_CERT points at.
+      - ${LLM_CONFIG_DIR:-./config}/argus/tls:/etc/argus/tls:ro
+      # A named volume by default: drop-in deployments start with an empty
+      # index and populate it by running the indexer. To reuse an index and
+      # pack estate that already exist on the host, add the override file:
+      #   docker compose -f docker-compose.yml -f services/argus-local.yml up -d
+      - argus-data:/var/lib/argus
+      # The directory, not the file: a single-file mount pins an inode, and the
+      # app replaces the file atomically. Only the
+      # hash-free copy: Argus has no business reading password hashes.
+      - ${LLM_CONFIG_DIR:-./config}/authelia/directory:/authelia:ro
+      # The CAs to trust when calling GitLab (see tls-init): a GitLab behind a
+      # company CA works once that CA is in config/ca/.
+      - traefik-certs:/certs:ro
+    depends_on:
+      tls-init: { condition: service_completed_successfully }
+    # GitLab runs on the host, not in this compose project.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7700/healthz', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # The first request opens every installed pack; the estate is over a GB.
+      start_period: 90s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.argus.loadbalancer.server.port=7700"
+      - "traefik.http.routers.argus.rule=Host(`argus.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.argus.entrypoints=websecure"
+      - "traefik.http.routers.argus.tls=true"
+      # No forwardAuth: Argus authenticates each caller with their own GitLab PAT
+      # as a bearer token, and that token must reach it untouched - the same
+      # reasoning as the LiteLLM gateway route.
+      - "traefik.http.routers.argus.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # WEB UI
+  # ============================================================================
+
+  # Turns Open WebUI's forwarded identity header into the `user` field that
+  # LiteLLM enforces budgets against. Measured on this stack: the header
+  # alone attributes spend but does NOT stop an over-budget person, because
+  # an internal-user budget binds a key that user owns and the web UI uses
+  # one shared key for everyone. See services/identity-proxy/app.py.
+  #
+  # In the `gateway` profile because it is pointless without LiteLLM: with no
+  # gateway there is no budget to enforce.
+  identity-proxy:
+    # Explicit, NOT derived from the compose project name.
+    #
+    # Without this, compose names the built image `<project>-identity-proxy`,
+    # which ties it to COMPOSE_PROJECT_NAME -- and that breaks any deployment
+    # that renames the project. Measured: an airgap bundle built with the
+    # default `llmservice`, loaded on a target whose .env said
+    # `COMPOSE_PROJECT_NAME=airgaptest`, died at
+    #
+    #     No such image: airgaptest-identity-proxy:latest
+    #
+    # partway through `up`, with the other services already created. The
+    # prebuilt image WAS in the bundle; compose was looking for a different
+    # name. `argus` already declares an image for exactly this reason.
+    image: llmservice-identity-proxy:latest
+    build: ${LLM_SERVICES_DIR:-./services}/identity-proxy
+    container_name: identity-proxy
+    profiles: ["gateway"]
+    restart: unless-stopped
+    environment:
+      UPSTREAM_URL: http://litellm:4000
+      IDENTITY_HEADER: X-OpenWebUI-User-Email
+    networks: [llm-net]
+    depends_on:
+      litellm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:8080/healthz',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+
+  # ============================================================================
+  # THE APP (profile: gateway) -- https://<LLM_DOMAIN>
+  #
+  # The all-in-one app (docs/plan.md): sign-in for everything (own
+  # accounts and LDAP / Active Directory, 2FA), the OIDC provider for Open WebUI
+  # and Langfuse, Traefik's forwardAuth, people, API keys and credit, usage and
+  # cost, dashboards, logs and alerts, and the admin pages (model, code index,
+  # packs, services).
+  # Its data lives in its own `llmapp` database on the shared Postgres.
+  # ============================================================================
+  app:
+    image: llmservice-app:latest
+    build:
+      context: ${LLM_SOURCE_DIR:-..}
+      dockerfile: src/Llm.Api/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-0.2.0}
+    container_name: app
+    profiles: ["gateway"]
+    restart: unless-stopped
+    # The owner of config/: the files the app writes stay yours (see auth-init).
+    user: "${LLM_UID:-1000}:${LLM_GID:-1000}"
+    # search-net: the websearch profile's SearXNG (the Web tool's search).
+    networks: [llm-net, search-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Parts, not a connection string: see src/Llm.Api/DatabaseSettings.cs.
+      Database__Host: postgres
+      Database__Name: llmapp
+      Database__Username: ${LLM_PG_USER:-llmservice}
+      Database__Password: ${LLM_PG_PASSWORD:?set LLM_PG_PASSWORD}
+      Auth__Domain: ${LLM_DOMAIN:-llm.localhost}
+      Auth__HttpsPort: ${TRAEFIK_HTTPS_PORT:-443}
+      Auth__AdminEmail: ${ADMIN_EMAIL:-admin@example.com}
+      # Sets the first admin's password when nobody exists yet; never afterwards.
+      Auth__AdminPassword: ${ADMIN_PASSWORD:-${AUTHELIA_ADMIN_PASSWORD:-}}
+      Auth__AdminGroup: ${ADMIN_GROUP:-admins}
+      # Encrypts the app's key ring (session and OIDC keys) in the database.
+      Auth__DataKey: ${APP_DATA_KEY:?set APP_DATA_KEY in .env (openssl rand -hex 32; never change it)}
+      # An Authelia install's accounts, imported once with their passwords.
+      Auth__ImportUsersFile: /legacy/users.yml
+      Auth__DirectoryFile: /directory/users.yml
+      Oidc__OpenWebUiSecret: ${OPENWEBUI_OIDC_CLIENT_SECRET:-}
+      Oidc__LangfuseSecret: ${LANGFUSE_OIDC_CLIENT_SECRET:-}
+      Oidc__ApiSecret: ${API_OIDC_CLIENT_SECRET:-}
+      Gateway__Url: http://litellm:4000
+      Gateway__MasterKey: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      # Company directory. Off while LDAP_URL is empty. See the .env samples.
+      Ldap__Url: ${LDAP_URL:-}
+      Ldap__StartTls: ${LDAP_STARTTLS:-false}
+      Ldap__IgnoreCertificateErrors: ${LDAP_INSECURE_SKIP_VERIFY:-false}
+      Ldap__BindDn: ${LDAP_BIND_DN:-}
+      Ldap__BindPassword: ${LDAP_BIND_PASSWORD:-}
+      Ldap__UserBaseDn: ${LDAP_USER_BASE_DN:-}
+      Ldap__UserFilter: ${LDAP_USER_FILTER:-(&(|(objectClass=person)(objectClass=inetOrgPerson))(|(uid={0})(sAMAccountName={0})(mail={0})))}
+      Ldap__GroupBaseDn: ${LDAP_GROUP_BASE_DN:-}
+      Ldap__AdminGroup: ${LDAP_ADMIN_GROUP:-}
+      Ldap__RequiredGroup: ${LDAP_REQUIRED_GROUP:-}
+      Ldap__SyncInterval: ${LDAP_SYNC_INTERVAL:-00:15:00}
+      # The Model, Settings and Overview pages. Read here, shown there; the app
+      # changes none of it (no Docker socket: switching a model is shown as steps).
+      Stack__ComposeProfiles: ${COMPOSE_PROFILES:-}
+      Stack__ModelName: ${MODEL_NAME:-}
+      Stack__ModelFile: ${LLAMACPP_MODEL_FILE:-}
+      Stack__ModelContext: ${MODEL_CONTEXT:-}
+      Stack__ModelMaxOutput: ${MODEL_MAX_OUTPUT:-32768}
+      Stack__ModelReasoningEffort: ${MODEL_REASONING_EFFORT:-medium}
+      Stack__ModelEnableThinking: ${MODEL_ENABLE_THINKING:-true}
+      Stack__ThinkingPresets: ${THINKING_PRESETS:-xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking}
+      Stack__MtpDraftMax: ${LLAMACPP_MTP_DRAFT_MAX:-0}
+      Stack__GpuPowerLimitW: ${GPU_POWER_LIMIT_W:-}
+      Stack__CpuPowerLimitW: ${CPU_POWER_LIMIT_W:-}
+      Stack__PriceInputPerMtok: ${PRICE_INPUT_PER_MTOK:-0.20}
+      Stack__PriceCachedInputPerMtok: ${PRICE_CACHED_INPUT_PER_MTOK:-0.02}
+      Stack__PriceOutputPerMtok: ${PRICE_OUTPUT_PER_MTOK:-0.80}
+      Stack__DefaultUserBudget: ${LITELLM_DEFAULT_USER_BUDGET:-50}
+      # Argus's operator surface (Indexing, Packs, Explore). Empty token = those pages say "not set up".
+      Argus__Url: ${ARGUS_URL:-http://argus:7700}
+      Argus__AdminToken: ${ARGUS_ADMIN_TOKEN:-}
+      Argus__GitlabUrl: ${ARGUS_GITLAB_URL:-}
+      # llama.cpp's router (profile llamacpp): Admin -> Models loads and unloads models live.
+      Engine__Url: http://llamacpp:8080
+      Engine__ApiKey: ${LLAMACPP_API_KEY:-}
+      Engine__ConfigDir: /engine-config
+      Engine__LibraryDir: /library
+      Engine__EngineLibraryDir: /library
+      Argus__GitlabAuth: ${ARGUS_GITLAB_AUTH:-}
+      Argus__GitlabUsername: ${ARGUS_GITLAB_USERNAME:-}
+      # The chat's credential at Argus's MCP endpoint (with each person's email beside it).
+      Chat__ArgusChatToken: ${ARGUS_CHAT_CLIENT_TOKEN:-}
+      # Every .env value the Settings page can change, as the stack has it now
+      # (defaults as compose applies them). Secrets only say whether they are set.
+      # Held in step with src/Llm.Api/Settings/SettingsCatalog.cs by a test.
+      StackEnv__PRICE_INPUT_PER_MTOK: ${PRICE_INPUT_PER_MTOK:-0.20}
+      StackEnv__PRICE_CACHED_INPUT_PER_MTOK: ${PRICE_CACHED_INPUT_PER_MTOK:-0.02}
+      StackEnv__PRICE_OUTPUT_PER_MTOK: ${PRICE_OUTPUT_PER_MTOK:-0.80}
+      StackEnv__LITELLM_DEFAULT_USER_BUDGET: ${LITELLM_DEFAULT_USER_BUDGET:-50}
+      StackEnv__LITELLM_BUDGET_DURATION: ${LITELLM_BUDGET_DURATION:-1mo}
+      StackEnv__MODEL_NAME: ${MODEL_NAME:-}
+      StackEnv__MODEL_CONTEXT: ${MODEL_CONTEXT:-32768}
+      StackEnv__MODEL_MAX_OUTPUT: ${MODEL_MAX_OUTPUT:-32768}
+      StackEnv__MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-medium}
+      StackEnv__MODEL_ENABLE_THINKING: ${MODEL_ENABLE_THINKING:-true}
+      StackEnv__THINKING_PRESETS: ${THINKING_PRESETS:-xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking}
+      StackEnv__LLAMACPP_MODEL_FILE: ${LLAMACPP_MODEL_FILE:-}
+      StackEnv__LLAMACPP_HF_REPO: ${LLAMACPP_HF_REPO:-}
+      StackEnv__LLAMACPP_HF_FILES: ${LLAMACPP_HF_FILES:-}
+      StackEnv__LLAMACPP_MODEL_DIR: ${LLAMACPP_MODEL_DIR:-}
+      StackEnv__LLAMACPP_LIBRARY_DIR: ${LLAMACPP_LIBRARY_DIR:-}
+      StackEnv__LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
+      StackEnv__LLAMACPP_MTP_ARGS: ${LLAMACPP_MTP_ARGS:-}
+      StackEnv__LLAMACPP_ENGINE_URL: ${LLAMACPP_ENGINE_URL:-}
+      StackEnv__LLAMACPP_ENGINE_SHA256: ${LLAMACPP_ENGINE_SHA256:-}
+      StackEnv__ENGINE_API_BASE: ${ENGINE_API_BASE:-http://llamacpp:8080/v1}
+      StackEnv__LLAMACPP_N_GPU_LAYERS: ${LLAMACPP_N_GPU_LAYERS:-99}
+      StackEnv__LLAMACPP_N_CPU_MOE: ${LLAMACPP_N_CPU_MOE:-0}
+      StackEnv__LLAMACPP_KV_TYPE: ${LLAMACPP_KV_TYPE:-q8_0}
+      StackEnv__LLAMACPP_PARALLEL: ${LLAMACPP_PARALLEL:-1}
+      StackEnv__LLAMACPP_MODELS_MAX: ${LLAMACPP_MODELS_MAX:-1}
+      StackEnv__LLAMACPP_MTP_DRAFT_MAX: ${LLAMACPP_MTP_DRAFT_MAX:-0}
+      StackEnv__LLAMACPP_EXTRA_ARGS: ${LLAMACPP_EXTRA_ARGS:-}
+      StackEnv__LLAMACPP_THREADS: ${LLAMACPP_THREADS:-8}
+      StackEnv__LLAMACPP_CPUS: ${LLAMACPP_CPUS:-16}
+      StackEnv__LLAMACPP_MEM_LIMIT: ${LLAMACPP_MEM_LIMIT:-0}
+      StackEnv__LLAMACPP_MLOCK: ${LLAMACPP_MLOCK:-auto}
+      StackEnv__LLAMACPP_PRELOAD: ${LLAMACPP_PRELOAD:-auto}
+      StackEnv__LLAMACPP_RAM_RESERVE_GB: ${LLAMACPP_RAM_RESERVE_GB:-8}
+      StackEnv__GPU_POWER_LIMIT_W: ${GPU_POWER_LIMIT_W:-}
+      StackEnv__CPU_POWER_LIMIT_W: ${CPU_POWER_LIMIT_W:-}
+      StackEnv__HOST_SWAPPINESS: ${HOST_SWAPPINESS:-}
+      StackEnv__OLLAMA_CPUS: ${OLLAMA_CPUS:-2}
+      StackEnv__POSTGRES_CPUS: ${POSTGRES_CPUS:-3}
+      StackEnv__ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
+      StackEnv__ARGUS_GITLAB_TOKEN_SET: ${ARGUS_GITLAB_TOKEN:+yes}
+      StackEnv__ARGUS_GITLAB_AUTH: ${ARGUS_GITLAB_AUTH:-}
+      StackEnv__ARGUS_GITLAB_USERNAME: ${ARGUS_GITLAB_USERNAME:-}
+      StackEnv__ARGUS_GITLAB_PASSWORD_SET: ${ARGUS_GITLAB_PASSWORD:+yes}
+      StackEnv__ARGUS_GITLAB_CA_CERT: ${ARGUS_GITLAB_CA_CERT:-}
+      StackEnv__ARGUS_GITLAB_VERIFY: ${ARGUS_GITLAB_VERIFY:-}
+      StackEnv__HF_TOKEN_SET: ${HF_TOKEN:+yes}
+      StackEnv__SANDBOX_SLOTS: ${SANDBOX_SLOTS:-2}
+      StackEnv__SANDBOX_JOB_MEMORY_MB: ${SANDBOX_JOB_MEMORY_MB:-1536}
+      StackEnv__SANDBOX_MEMORY: ${SANDBOX_MEMORY:-3g}
+      StackEnv__SANDBOX_CPUS: ${SANDBOX_CPUS:-2}
+      StackEnv__IMAGEGEN_MODEL_NAME: ${IMAGEGEN_MODEL_NAME:-FLUX.2-klein-4B}
+      StackEnv__IMAGEGEN_MODEL_DIR: ${IMAGEGEN_MODEL_DIR:-}
+      StackEnv__IMAGEGEN_DIFFUSION_MODEL: ${IMAGEGEN_DIFFUSION_MODEL:-flux-2-klein-4b-Q4_0.gguf}
+      StackEnv__IMAGEGEN_TEXT_ENCODER: ${IMAGEGEN_TEXT_ENCODER:-Qwen3-4B-Q4_K_M.gguf}
+      StackEnv__IMAGEGEN_VAE: ${IMAGEGEN_VAE:-flux2-vae.safetensors}
+      StackEnv__IMAGEGEN_STEPS: ${IMAGEGEN_STEPS:-4}
+      StackEnv__IMAGEGEN_CFG_SCALE: ${IMAGEGEN_CFG_SCALE:-1.0}
+      StackEnv__IMAGEGEN_MAX_VRAM: ${IMAGEGEN_MAX_VRAM:-2}
+      StackEnv__COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+      StackEnv__PROMETHEUS_RETENTION_TIME: ${PROMETHEUS_RETENTION_TIME:-30d}
+      StackEnv__PROMETHEUS_RETENTION_SIZE: ${PROMETHEUS_RETENTION_SIZE:-20GB}
+      StackEnv__BACKUP_DIR: ${BACKUP_DIR:-./backups}
+      StackEnv__BACKUP_COPY_DIR: ${BACKUP_COPY_DIR:-}
+      StackEnv__BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      StackEnv__BACKUP_INCLUDE_LOGS: ${BACKUP_INCLUDE_LOGS:-1}
+      StackEnv__BACKUP_TIME: ${BACKUP_TIME:-03:30}
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/authelia/directory:/directory
+      - ${LLM_CONFIG_DIR:-./config}/authelia:/legacy:ro
+      # The dashboards, in Grafana's JSON format: the app runs every panel's query itself.
+      - ${LLM_CONFIG_DIR:-./config}/dashboards:/dashboards:ro
+      # The shipped deployments the Model page offers to switch to.
+      - ${LLM_ENV_SAMPLES_DIR:-./env-samples}:/env-samples:ro
+      # The Settings page's pending .env changes, for scripts/apply-settings.sh.
+      - ${LLM_CONFIG_DIR:-./config}/app:/settings
+      # Admin -> Models: the engine's presets, the model to keep loaded and
+      # Prometheus's targets (written here), and the model library (read only).
+      - ${LLM_CONFIG_DIR:-./config}/engine:/engine-config
+      - ${LLAMACPP_LIBRARY_DIR:-${LLAMACPP_MODEL_DIR:-${LLM_MODELS_DIR:-./models}}}:/library:ro
+      # The Python sandbox's jobs (profile sandbox): code and files in, results out.
+      - sandbox-jobs:/sandbox
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *default-logging
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.app.loadbalancer.server.port=8080"
+      # The API's paths on the bare domain; the web (next service) has the rest.
+      - "traefik.http.routers.app.rule=Host(`${LLM_DOMAIN:-llm.localhost}`) && (PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`))"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.service=app"
+      # The app signs people in itself; it never sits behind forwardAuth.
+      - "traefik.http.routers.app.middlewares=default-chain@file"
+      # The old admin panel's address: every page there now lives under /admin
+      # in the app, so bookmarks land on the same page (a 302, not permanent).
+      - "traefik.http.routers.admin-redirect.rule=Host(`admin.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.admin-redirect.entrypoints=websecure"
+      - "traefik.http.routers.admin-redirect.tls=true"
+      - "traefik.http.routers.admin-redirect.service=noop@internal"
+      - "traefik.http.routers.admin-redirect.middlewares=admin-redirect"
+      - "traefik.http.middlewares.admin-redirect.redirectregex.regex=^https?://admin\\.[^/]+(/(?:people|model|indexing|packs|explore|monitoring|settings)[^?]*)?.*$$"
+      - "traefik.http.middlewares.admin-redirect.redirectregex.replacement=https://${LLM_DOMAIN:-llm.localhost}:${TRAEFIK_HTTPS_PORT:-443}/admin$${1}"
+
+  # The web: React, served as static files by nginx. The bare domain is its,
+  # except /api, /connect and /.well-known, which the app's router takes.
+  web:
+    image: llmservice-web:latest
+    build:
+      context: ${LLM_SOURCE_DIR:-..}/src/web
+      args:
+        APP_VERSION: ${APP_VERSION:-0.2.0}
+    container_name: web
+    profiles: ["gateway"]
+    restart: unless-stopped
+    networks: [llm-net]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *default-logging
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.web.loadbalancer.server.port=8080"
+      - "traefik.http.routers.web.rule=Host(`${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls=true"
+      - "traefik.http.routers.web.service=web"
+      - "traefik.http.routers.web.middlewares=default-chain@file"
+      # next.<domain> was the new web's address while it was built: it now
+      # sends people to the same page on the bare domain.
+      - "traefik.http.routers.web-next.rule=Host(`next.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.web-next.entrypoints=websecure"
+      - "traefik.http.routers.web-next.tls=true"
+      - "traefik.http.routers.web-next.service=noop@internal"
+      - "traefik.http.routers.web-next.middlewares=web-next-redirect"
+      - "traefik.http.middlewares.web-next-redirect.redirectregex.regex=^https?://next\\.(.+)$$"
+      - "traefik.http.middlewares.web-next-redirect.redirectregex.replacement=https://$${1}"
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    # Argus as a tool in chat. Registered only when the argus profile is on and
+    # ARGUS_CHAT_CLIENT_TOKEN is set; otherwise chat simply has no Argus tool.
+    # Open WebUI connects inside the network (http://argus:7700) and forwards
+    # the signed-in person's email (ENABLE_FORWARD_USER_INFO_HEADERS), so Argus
+    # shows each person only the repositories their GitLab account can read.
+    # access_grants user:* read is what lets non-admins see it: Open WebUI lists
+    # an admin-configured tool server only to admins unless it is granted, so
+    # without it every developer found no Argus under Integrations.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        if [ -n "$$ARGUS_CHAT_CLIENT_TOKEN" ] && [[ ",$$COMPOSE_PROFILES," == *",argus,"* ]]; then
+          export TOOL_SERVER_CONNECTIONS='[{"type":"mcp","url":"http://argus:7700/mcp","path":"","auth_type":"bearer","key":"'"$$ARGUS_CHAT_CLIENT_TOKEN"'","config":{"enable":true,"access_grants":[{"principal_type":"user","principal_id":"*","permission":"read"}]},"info":{"id":"argus","name":"Argus","description":"Your organisation code (what your GitLab account can read) and SDK/WDK/C++ documentation"}}]'
+          # Open WebUI resolves every setting as "persisted row in webui.db,
+          # ELSE the environment" -- see Config.get in models/config.py. So a
+          # tool_server.connections row written on an earlier boot, when
+          # ARGUS_CHAT_CLIENT_TOKEN was empty (the argus profile off), SHADOWS
+          # the variable above for good.
+          #
+          # The failure is silent, which is why it needs a fix here rather than
+          # a note: this block runs, the variable really is set in the running
+          # process, every service is healthy, and the log still says
+          # "Initialized 0 tool server(s)". Chat then has no Argus tool and
+          # nothing anywhere reports an error. Observed exactly that, with the
+          # DB holding `tool_server.connections = []`.
+          #
+          # Delete just that one row so the environment wins. Confined to this
+          # branch on purpose: with Argus off the row is untouched, so a list
+          # built by hand in the UI survives. On a first boot there is no
+          # database yet, and this is a no-op.
+          # NOTE: the Python lines below sit at the SAME 8-space indentation as
+          # this script's first line, so that the YAML block scalar dedents them
+          # to column 0. Indenting them like the shell around them hands Python
+          # a script whose first line is flush and whose body is not, which is
+          # an IndentationError at startup and takes Open WebUI down with it.
+          python3 -c 'import os, sqlite3, sys
+        db = "/app/backend/data/webui.db"
+        if os.path.exists(db):
+            try:
+                con = sqlite3.connect(db)
+                with con:
+                    con.execute("DELETE FROM config WHERE key = ?", ("tool_server.connections",))
+                con.close()
+            except Exception as exc:
+                print("open-webui: could not clear persisted tool_server.connections:", exc, file=sys.stderr)' || true
+        fi
+        # Thinking level per chat. ONE PRESET PER LEVEL, chosen from the model
+        # picker, because that is the only per-chat control Open WebUI offers
+        # that can reach this engine: the `reasoning_effort` field its own
+        # params panel accepts goes out as a TOP-LEVEL field, and LiteLLM drops
+        # that for a custom `openai/` api_base. Measured, same prompt: 270
+        # chars of reasoning with and without it. `custom_params` is deep-merged
+        # into the outgoing body, so it does arrive.
+        #
+        # Backgrounded on purpose: a preset needs an owner, no user exists until
+        # someone signs in through SSO, and that happens after this starts. The
+        # script waits for the first admin and then creates them; on every later
+        # boot the wait is over at once. See deploy/services/seed-presets.py.
+        if [[ ",$$COMPOSE_PROFILES," == *",llamacpp,"* ]] && [ -n "$$THINKING_PRESETS" ]; then
+          python3 /seed-presets.py &
+        fi
+        exec bash start.sh
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - open-webui-data:/app/backend/data
+      - traefik-certs:/certs:ro
+      - ${LLM_SERVICES_DIR:-./services}/seed-presets.py:/seed-presets.py:ro
+    environment:
+      # Through LiteLLM rather than straight at vLLM: the gateway fronts EVERY
+      # engine, so each warm model shows up in the WebUI model picker. Point
+      # these back at http://vllm:8000/v1 + ${VLLM_API_KEY} to bypass it.
+      OPENAI_API_BASE_URL: ${WEBUI_BACKEND_URL:-http://identity-proxy:8080/v1}
+      OPENAI_API_KEY: ${WEBUI_BACKEND_KEY:-${LITELLM_MASTER_KEY}}
+      # The PLURAL forms as well, and ENABLE_OPENAI_API explicitly. Recent
+      # Open WebUI builds read the list variables; with only the singular set,
+      # a fresh install came up with no connections at all -- /api/models
+      # returned [] and every chat answered "Model not found", while the same
+      # base URL and key worked perfectly when curled from inside the same
+      # container. Setting all three makes it work across versions.
+      OPENAI_API_BASE_URLS: ${WEBUI_BACKEND_URL:-http://identity-proxy:8080/v1}
+      OPENAI_API_KEYS: ${WEBUI_BACKEND_KEY:-${LITELLM_MASTER_KEY}}
+      ENABLE_OPENAI_API: "true"
+      # Open WebUI talks to the gateway with ONE shared key, so without this
+      # every person's chat usage is spend against that single key: the
+      # gateway can say the web UI used $40 and not who used it. This forwards
+      # the signed-in identity as X-OpenWebUI-User-Email (and -User-Id,
+      # -User-Name, -User-Role), which config/litellm/config.yaml maps onto
+      # the internal user. It is the whole reason chat usage is attributable.
+      #
+      # It also means the gateway now receives the email address of everyone
+      # who chats. That is the point -- it cannot bill a person it cannot
+      # name -- but it is the one privacy-relevant thing this file forwards.
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      ARGUS_CHAT_CLIENT_TOKEN: ${ARGUS_CHAT_CLIENT_TOKEN:-}
+      COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+      # One Open WebUI model per thinking level, so the level is chosen per
+      # chat from the model picker. Empty turns it off; see
+      # services/seed-presets.py for why the picker and not a params field.
+      THINKING_PRESETS: ${THINKING_PRESETS:-xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking}
+      # Needed by the preset seeder: it names each preset after the model it is
+      # a preset OF. Open WebUI itself does not read this -- it talks to the
+      # gateway, which is what serves MODEL_NAME.
+      MODEL_NAME: ${MODEL_NAME:-}
+      ENABLE_OLLAMA_API: "false"
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY}
+      WEBUI_NAME: LLMService
+      # SSO is the only way in. chat.<domain> has no forwardAuth in front of it --
+      # Open WebUI signs people in itself, over OIDC -- and its own password
+      # login and self-signup were both on, so anyone who could reach it could
+      # create an account the app never saw. The first account made that way
+      # (by e2e-check.py, with a password written in this repository) had become
+      # the Open WebUI admin. First SSO sign-in still creates the account:
+      # that is ENABLE_OAUTH_SIGNUP below; ENABLE_SIGNUP governs only the form.
+      ENABLE_SIGNUP: "false"
+      ENABLE_LOGIN_FORM: "false"
+      ENABLE_PASSWORD_AUTH: "false"
+      DEFAULT_USER_ROLE: ${WEBUI_DEFAULT_ROLE:-user}
+      # Roles follow the app's groups at every sign-in: members
+      # of the admins group are Open WebUI admins, everyone else a user. Before,
+      # the role was whatever the account got when it was created, so the real
+      # admin was a plain user and nothing could correct it.
+      ENABLE_OAUTH_ROLE_MANAGEMENT: "true"
+      # Open WebUI makes the FIRST account ever created an administrator, and
+      # keeps re-promoting it while it is the only one -- whatever its SSO groups
+      # say. On a fresh install that was whoever opened chat first, admin or not.
+      # So the stack creates the real admin itself at startup (only when no
+      # account exists yet), with the same email as the app's first admin; that
+      # person's SSO login then merges into it (OAUTH_MERGE_ACCOUNTS_BY_EMAIL).
+      # Password sign-in is disabled below, so this password is never usable.
+      WEBUI_ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      WEBUI_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-${AUTHELIA_ADMIN_PASSWORD:-}}
+      WEBUI_ADMIN_NAME: Administrator
+      OAUTH_ROLES_CLAIM: groups
+      OAUTH_ALLOWED_ROLES: "*"
+      OAUTH_ADMIN_ROLES: ${ADMIN_GROUP:-admins}
+      # Keep everything local: no telemetry, no outbound embedding downloads.
+      SCARF_NO_ANALYTICS: "true"
+      DO_NOT_TRACK: "true"
+      ANONYMIZED_TELEMETRY: "false"
+      # Models for document search come from the image's cache in the data
+      # volume, never from Hugging Face; no version check, no pip installs for
+      # tools. Without it every start asked Hugging Face first.
+      OFFLINE_MODE: "true"
+      # Single sign-on through the app (OIDC).
+      ENABLE_OAUTH_SIGNUP: "true"
+      OAUTH_MERGE_ACCOUNTS_BY_EMAIL: "true"
+      OAUTH_PROVIDER_NAME: LLM Service
+      OPENID_PROVIDER_URL: https://${LLM_DOMAIN:-llm.localhost}/.well-known/openid-configuration
+      OAUTH_CLIENT_ID: open-webui
+      OAUTH_CLIENT_SECRET: ${OPENWEBUI_OIDC_CLIENT_SECRET:-}
+      OAUTH_SCOPES: openid email profile groups
+      OPENID_REDIRECT_URI: https://chat.${LLM_DOMAIN:-llm.localhost}/oauth/oidc/callback
+      WEBUI_URL: https://chat.${LLM_DOMAIN:-llm.localhost}
+      # .env is the source of truth. By default Open WebUI copies these into its
+      # own database on first boot and ignores the environment from then on,
+      # so a changed value in .env silently did nothing. Settings changed in its
+      # admin UI therefore do not survive a restart; change .env instead.
+      ENABLE_PERSISTENT_CONFIG: "false"
+      # Its built-in "Arena Model" appeared in everyone's model list next to
+      # the real one. The list should show the served model and nothing else.
+      ENABLE_EVALUATION_ARENA_MODELS: "false"
+      # Every signed-in person may use the served model. Open WebUI otherwise
+      # hides a connection's models from non-admins until an admin marks each
+      # one public in its UI -- a setting stored in its database under the model
+      # NAME, so it silently vanished for everyone the moment MODEL_NAME changed
+      # and people saw an empty model list. Access is already enforced where it
+      # matters: the gateway, per person, with their budget.
+      BYPASS_MODEL_ACCESS_CONTROL: "true"
+      DEFAULT_MODELS: ${MODEL_NAME:-}
+      # Python httpx honours SSL_CERT_FILE, so SSO verifies the stack's own
+      # certificate rather than skipping verification. bundle.crt is the public
+      # CAs plus ours (see tls-init), so outbound internet HTTPS still works.
+      SSL_CERT_FILE: /certs/bundle.crt
+      REQUESTS_CA_BUNDLE: /certs/bundle.crt
+    depends_on:
+      # required:false -- Open WebUI talks to LiteLLM, not to the engine, so it
+      # must still start when the engine is a different service (llamacpp) or
+      # when no engine profile is enabled at all. Without this, selecting the
+      # llamacpp profile makes the whole project fail to parse.
+      vllm:
+        condition: service_started
+        required: false
+      llamacpp:
+        condition: service_started
+        required: false
+      # SSO verifies the certificate tls-init writes; it must exist first.
+      tls-init:
+        condition: service_completed_successfully
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.open-webui.loadbalancer.server.port=8080"
+      - "traefik.http.routers.open-webui.rule=Host(`chat.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.open-webui.entrypoints=websecure"
+      - "traefik.http.routers.open-webui.tls=true"
+      - "traefik.http.routers.open-webui.middlewares=default-chain@file"
+    logging: *default-logging
+
+  # ============================================================================
+  # METRICS: collection, alerting, dashboards
+  # ============================================================================
+
+  # Copies Prometheus's scrape tokens onto a Docker volume it can read, then exits.
+  #
+  # The tokens are secrets, so on the host they are 0600 and owned by the
+  # operator. Prometheus runs as uid 65534 and cannot read that. The first fix
+  # was a POSIX ACL granting 65534 read; on an NTFS (ntfs3) project directory
+  # the ACL silently disappeared across a reboot, the llamacpp target went
+  # "permission denied", and every engine panel froze on its last value with
+  # nothing looking broken.
+  #
+  # A named volume lives under /var/lib/docker on the host's own filesystem, so
+  # ownership and mode stick regardless of where the project is checked out. This
+  # runs as root (which can read the 0600 source) on every `up`, so a rotated
+  # token lands without anyone remembering to copy it. Same image as Prometheus:
+  # no extra pull.
+  prometheus-secrets:
+    image: prom/prometheus:v3.1.0
+    container_name: prometheus-secrets
+    restart: "no"
+    network_mode: none
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        rm -f /dst/*.token
+        # The scrape token IS the engine's API key; take it straight from .env.
+        if [ -n "$$LLAMACPP_API_KEY" ]; then printf '%s' "$$LLAMACPP_API_KEY" > /dst/llamacpp.token; fi
+        # Argus's admin token doubles as its scrape credential: the same secret
+        # the panel sends in x-argus-admin-token, sent as a bearer instead.
+        if [ -n "$$ARGUS_ADMIN_TOKEN" ]; then printf '%s' "$$ARGUS_ADMIN_TOKEN" > /dst/argus.token; fi
+        for f in /src/*.token; do
+          [ -f "$$f" ] || continue
+          [ -f "/dst/$$(basename "$$f")" ] || cp "$$f" /dst/
+        done
+        chown -R 65534:65534 /dst
+        chmod 500 /dst
+        chmod 400 /dst/*.token 2>/dev/null || true
+        ls -ln /dst
+    environment:
+      LLAMACPP_API_KEY: ${LLAMACPP_API_KEY:-}
+      ARGUS_ADMIN_TOKEN: ${ARGUS_ADMIN_TOKEN:-}
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/prometheus/secrets:/src:ro
+      - prometheus-secrets:/dst
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: prometheus
+    restart: unless-stopped
+    networks: [llm-net]
+    depends_on:
+      prometheus-secrets:
+        condition: service_completed_successfully
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/prometheus:/etc/prometheus:ro
+      # Mounted OVER the bind-mounted secrets directory; see prometheus-secrets.
+      - prometheus-secrets:/etc/prometheus/secrets:ro
+      # The loaded model(s), for the llama.cpp job (written by the app).
+      - ${LLM_CONFIG_DIR:-./config}/engine:/engine-sd:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-20GB}
+      - --web.enable-lifecycle
+      - --web.enable-admin-api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.http.routers.prometheus.rule=Host(`metrics.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls=true"
+      - "traefik.http.routers.prometheus.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: alertmanager
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
+      - "traefik.http.routers.alertmanager.rule=Host(`alerts.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.alertmanager.entrypoints=websecure"
+      - "traefik.http.routers.alertmanager.tls=true"
+      - "traefik.http.routers.alertmanager.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  # ============================================================================
+  # HARDWARE / CONTAINER METRICS
+  # ============================================================================
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.0
+    container_name: node-exporter
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    pid: host
+    volumes:
+      - ${HOST_PROC:-/proc}:/host/proc:ro
+      - ${HOST_SYS:-/sys}:/host/sys:ro
+      - ${HOST_ROOT:-/}:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker)($$|/)
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.node-exporter.loadbalancer.server.port=9100"
+      - "traefik.http.routers.node-exporter.rule=Host(`node.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.node-exporter.entrypoints=websecure"
+      - "traefik.http.routers.node-exporter.tls=true"
+      - "traefik.http.routers.node-exporter.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    # OPT-IN. gcr.io answers 403 to this network (Google registries are
+    # geo-blocked here; Docker Hub and ghcr.io are fine), so pulling this
+    # aborted the whole `compose pull` and left every other image absent.
+    # The Docker Hub fallback google/cadvisor is v0.33 from 2019, which
+    # predates cgroups v2 and would report nothing on Ubuntu 26.04 --
+    # a scrape target that is up and empty is worse than one that is off.
+    # Re-enable with COMPOSE_PROFILES=...,cadvisor once a reachable,
+    # cgroups-v2-capable build is pinned.
+    profiles: [cadvisor]
+    container_name: cadvisor
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - ${HOST_ROOT:-/}:/rootfs:ro
+      - /var/run:/var/run:ro
+      - ${HOST_SYS:-/sys}:/sys:ro
+      - ${HOST_DOCKER_DIR:-/var/lib/docker}/:/var/lib/docker:ro
+      - ${HOST_DEV_DISK:-/dev/disk}/:/dev/disk:ro
+    command:
+      - --housekeeping_interval=10s
+      - --docker_only=true
+      - --store_container_labels=false
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.cadvisor.loadbalancer.server.port=8080"
+      - "traefik.http.routers.cadvisor.rule=Host(`cadvisor.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.cadvisor.entrypoints=websecure"
+      - "traefik.http.routers.cadvisor.tls=true"
+      - "traefik.http.routers.cadvisor.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  # GPU metrics via nvidia-smi. Works everywhere the driver works, including
+  # Docker Desktop on Windows/WSL2. (profile: smi)
+  nvidia-smi-exporter:
+    image: utkuozdemir/nvidia_gpu_exporter:1.3.2
+    container_name: nvidia-smi-exporter
+    profiles: [smi]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    <<: *gpu-reservation
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.nvidia-smi-exporter.loadbalancer.server.port=9835"
+      - "traefik.http.routers.nvidia-smi-exporter.rule=Host(`gpu.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.nvidia-smi-exporter.entrypoints=websecure"
+      - "traefik.http.routers.nvidia-smi-exporter.tls=true"
+      - "traefik.http.routers.nvidia-smi-exporter.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  # Richer GPU telemetry (SM occupancy, PCIe, NVLink, ECC) but requires the
+  # DCGM kernel interfaces — bare-metal Linux only, NOT WSL2. (profile: dcgm)
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
+    container_name: dcgm-exporter
+    profiles: [dcgm]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    cap_add: [SYS_ADMIN]
+    environment:
+      DCGM_EXPORTER_LISTEN: ":9400"
+      DCGM_EXPORTER_KUBERNETES: "false"
+    <<: *gpu-reservation
+    logging: *default-logging
+
+  # ============================================================================
+  # LOGS (profile: logging)
+  # ============================================================================
+
+  loki:
+    image: grafana/loki:3.4.1
+    container_name: loki
+    profiles: [logging]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/loki-config.yml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.loki.loadbalancer.server.port=3100"
+      - "traefik.http.routers.loki.rule=Host(`logs.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.loki.entrypoints=websecure"
+      - "traefik.http.routers.loki.tls=true"
+      - "traefik.http.routers.loki.middlewares=${PROTECTED_CHAIN:-protected-chain@file}"
+    logging: *default-logging
+
+  promtail:
+    image: grafana/promtail:3.4.1
+    container_name: promtail
+    profiles: [logging]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - ${LLM_CONFIG_DIR:-./config}/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ${HOST_DOCKER_DIR:-/var/lib/docker}/containers:${HOST_DOCKER_DIR:-/var/lib/docker}/containers:ro
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:${DOCKER_SOCKET:-/var/run/docker.sock}:ro
+    # `-config.expand-env` is what lets the config's `keep` filter name THIS
+    # compose project instead of every container on the daemon -- see the
+    # comment on that filter. COMPOSE_PROJECT_NAME has to be in the
+    # environment for the substitution to resolve.
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-llmservice}
+    command:
+      - -config.file=/etc/promtail/promtail-config.yml
+      - -config.expand-env=true
+    depends_on: [loki]
+    logging: *default-logging
+
+  # ============================================================================
+  # STATE (profiles: gateway, tracing)
+  # ============================================================================
+
+  postgres:
+    # A CPU ceiling here too. Building an HNSW index over 500k vectors is a
+    # parallel, sustained, floating-point workload -- unbounded it took the
+    # package to 92 C alongside the engine and the embedder. 6 of 24 logical
+    # is ample for the gateway's own query load and bounds the index builds.
+    cpus: ${POSTGRES_CPUS:-3}
+    # pgvector/pgvector:pg16 is the stock postgres:16 image plus the `vector`
+    # extension, same major version and data directory layout, so this is a
+    # drop-in for postgres:16-alpine as far as existing databases are concerned.
+    # Argus stores symbol embeddings here; without the extension `CREATE
+    # EXTENSION vector` fails and the semantic index cannot be created at all.
+    # Pinned to a digest-stable tag rather than :latest so a rebuild cannot
+    # move the server major version underneath the data directory.
+    image: pgvector/pgvector:0.8.0-pg16
+    container_name: postgres
+    profiles: [gateway, tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Creates the `litellm` and `langfuse` databases on first boot only.
+      - ${LLM_CONFIG_DIR:-./config}/postgres/init:/docker-entrypoint-initdb.d:ro
+    environment:
+      # Fed from LLM_PG_*, not POSTGRES_*, and that indirection is the fix
+      # for a measured outage-in-waiting. Compose gives the SHELL environment
+      # precedence over .env, and POSTGRES_USER / POSTGRES_PASSWORD are common
+      # enough names that an unrelated project's machine-wide variables were
+      # silently winning here: .env said `llmservice` while the stack ran as
+      # `myuser`, on a password that was not the generated one. It worked only
+      # because the volume had been initialised that way -- and would have
+      # broken the day that variable was cleared. LLM_PG_* collides with
+      # nothing.
+      POSTGRES_USER: ${LLM_PG_USER:-llmservice}
+      POSTGRES_PASSWORD: ${LLM_PG_PASSWORD:?set LLM_PG_PASSWORD}
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LLM_PG_USER:-llmservice}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    profiles: [gateway, tracing, auth]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  # ============================================================================
+  # LLM TRACING (profile: tracing)
+  # Langfuse v3 records every prompt, completion, latency and token count so you
+  # can debug quality — the thing Prometheus fundamentally cannot show you.
+  # ============================================================================
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12-alpine
+    container_name: clickhouse
+    profiles: [tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-${LLM_PG_PASSWORD}}
+      CLICKHOUSE_SKIP_USER_SETUP: "0"
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      # Use 127.0.0.1, not localhost: busybox wget prefers the ::1 AAAA record
+      # and ClickHouse binds IPv4 only, so "localhost" gets connection-refused.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+
+  minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    container_name: minio
+    profiles: [tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - minio-data:/data
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-${LLM_PG_PASSWORD}}
+    entrypoint: ["sh", "-c", "mkdir -p /data/langfuse && exec minio server /data --address :9000 --console-address :9001"]
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 0"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.minio.loadbalancer.server.port=9001"
+      - "traefik.http.routers.minio.rule=Host(`s3.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.minio.entrypoints=websecure"
+      - "traefik.http.routers.minio.tls=true"
+      - "traefik.http.routers.minio.middlewares=default-chain@file"
+    logging: *default-logging
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: langfuse-worker
+    profiles: [tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://${LLM_PG_USER:-llmservice}:${LLM_PG_PASSWORD}@postgres:5432/langfuse
+      SALT: ${LANGFUSE_SALT:-}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-${LLM_PG_PASSWORD}}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-${LLM_PG_PASSWORD}}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      minio: { condition: service_started }
+    logging: *default-logging
+
+  langfuse:
+    image: langfuse/langfuse:3
+    container_name: langfuse
+    profiles: [tracing]
+    restart: unless-stopped
+    networks: [llm-net]
+    # No published ports: Traefik is the only way in. Re-add a mapping
+    # here only if you need to bypass the proxy for debugging.
+    volumes:
+      - traefik-certs:/certs:ro
+    environment:
+      <<: *langfuse-env
+      # NextAuth derives the OAuth redirect_uri from this. It must be the proxy
+      # hostname registered in the app, not the direct port, or the
+      # authorization request is rejected for an invalid redirect_uri.
+      NEXTAUTH_URL: https://traces.${LLM_DOMAIN:-llm.localhost}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-}
+      LANGFUSE_INIT_ORG_ID: llmservice
+      LANGFUSE_INIT_ORG_NAME: LLMService
+      LANGFUSE_INIT_PROJECT_ID: local
+      LANGFUSE_INIT_PROJECT_NAME: Local
+      # Single sign-on through the app (OIDC; Langfuse calls it a custom provider).
+      AUTH_CUSTOM_CLIENT_ID: langfuse
+      AUTH_CUSTOM_CLIENT_SECRET: ${LANGFUSE_OIDC_CLIENT_SECRET:-}
+      AUTH_CUSTOM_ISSUER: https://${LLM_DOMAIN:-llm.localhost}/
+      AUTH_CUSTOM_NAME: LLM Service
+      AUTH_CUSTOM_SCOPE: openid email profile
+      # Existing accounts keep working after a provider change (matched by email, which the app owns).
+      AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING: "true"
+      AUTH_DISABLE_USERNAME_PASSWORD: "false"
+      # Node adds this to its trust store: the stack's generated certificate.
+      NODE_EXTRA_CA_CERTS: /certs/tls.crt
+    depends_on:
+      langfuse-worker: { condition: service_started }
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.langfuse.loadbalancer.server.port=3000"
+      - "traefik.http.routers.langfuse.rule=Host(`traces.${LLM_DOMAIN:-llm.localhost}`)"
+      - "traefik.http.routers.langfuse.entrypoints=websecure"
+      - "traefik.http.routers.langfuse.tls=true"
+      - "traefik.http.routers.langfuse.middlewares=default-chain@file"
+    logging: *default-logging

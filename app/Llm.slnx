@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Llm.Api/Llm.Api.csproj" />
-    <Project Path="src/Llm.Core/Llm.Core.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Llm.Tests/Llm.Tests.csproj" />
-  </Folder>
-</Solution>

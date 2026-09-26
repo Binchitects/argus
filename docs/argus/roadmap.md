@@ -180,7 +180,7 @@ whose file was edited afterwards.
 
 One project is indexed at trunk **and** at a release branch, with a
 branch-only symbol and different documentation for a shared name. Verified
-over MCP, and now part of `scripts/test-gitlab/verify_tools.py`:
+over MCP, and now part of `tools/test-gitlab/verify_tools.py`:
 
 - an unqualified question answers from **trunk**, and cannot see the branch-only
   symbol;
@@ -282,7 +282,7 @@ like-for-like comparison, and 5 ms is what the GPU buys over it.
 
 On a host where the engine needs the whole card, `OLLAMA_GPU_LAYERS` forces a
 partial offload and `OLLAMA_GPU_DEVICE` keeps the embedder on a different GPU.
-Both are documented in `docs/stack/CONFIGURATION.md`.
+Both are documented in `docs/configuration.md`.
 
 **More packs**, now that both fetch paths exist — a git clone and a release
 archive cover essentially every documentation corpus worth having.

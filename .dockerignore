@@ -1,24 +1,33 @@
-# The image builds from source: the frontend (npm ci) and the backend (restore,
-# test, publish). Nothing prebuilt, secret or large crosses into the context.
+# Context of the images built from the repository root: the API
+# (src/Llm.Api/Dockerfile) and Argus (src/Argus/Dockerfile). They build from
+# source; nothing prebuilt, secret or large crosses into the context.
 .git
 .github
 .claude
 .remember
+.config
 
-dotnet/**/bin/
-dotnet/**/obj/
-dotnet/native/
-frontend/node_modules/
-frontend/dist/
-frontend/test-results/
-frontend/playwright-report/
-frontend/e2e/.work/
+# Not needed by either image. deploy/ holds .env, backups and the models.
+deploy/
+docs/
+evals/
+clients/
+tools/*
+!tools/fetch-sqlite-vec.sh
+src/web/
+tests/Llm.Tests/
+tests/deploy/
 
-stack/.env
-stack/.env.*
-stack/models/
-stack/backups/
-stack/config/argus/tls/*
+**/bin/
+**/obj/
+native/
+**/node_modules/
+src/argus-web/dist/
+src/argus-web/test-results/
+src/argus-web/playwright-report/
+src/argus-web/e2e/.work/
+TestResults/
+
 data/
 *.db
 *.db-wal

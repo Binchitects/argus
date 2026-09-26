@@ -30,7 +30,7 @@ be established before the process starts:
 export NODE_EXTRA_CA_CERTS="$PWD/stack/config/traefik/certs/tls.crt"
 ```
 
-`stack/scripts/with-ca.sh` prints the equivalents for curl, python and git.
+`deploy/scripts/with-ca.sh` prints the equivalents for curl, python and git.
 Clients that offer an "insecure" switch (Qwen Code's `--insecure`) work too, but
 that turns off verification for **every** connection the process makes, not just
 this one.
@@ -227,12 +227,12 @@ protocol scored 10/20 and *collapsed to 4/20* when told to check facts first,
 because the added prose broke the output format.
 
 Most clients do both by default. Hermes needed patches for the first; see
-`scripts/hermes-patch/`.
+`tools/hermes-patch/`.
 
 ## Checking the connection without an agent
 
 ```bash
-python scripts/smoke_test.py --url https://argus.<domain>/mcp --token <pat>
+python tools/smoke_test.py --url https://argus.<domain>/mcp --token <pat>
 ```
 
 Seven checks: health, a bad token refused, the MCP handshake, the server
