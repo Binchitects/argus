@@ -7,6 +7,7 @@ using Argus.Indexing;
 using Argus.Store;
 using Argus.Util;
 using Microsoft.Data.Sqlite;
+using YamlDotNet.RepresentationModel;
 
 namespace Argus.Access;
 
@@ -237,6 +238,44 @@ public sealed class MemberDirectory(GitLabConfig cfg, HttpClient? client = null,
 
 public static class People
 {
+    /// <summary>
+    /// The sign-in username a users file gives this email (Authelia's format:
+    /// <c>users: {name: {email: ...}}</c>), if the file is readable. The platform
+    /// writes one without password hashes for Argus: its people's usernames are
+    /// their GitLab usernames, so a private GitLab email still finds the account.
+    /// </summary>
+    public static string? UsernameForEmail(string? usersFile, string email)
+    {
+        if (string.IsNullOrEmpty(usersFile)) return null;
+        YamlMappingNode? root;
+        try
+        {
+            var stream = new YamlStream();
+            using var reader = new StringReader(File.ReadAllText(usersFile));
+            stream.Load(reader);
+            root = stream.Documents.Count > 0 ? stream.Documents[0].RootNode as YamlMappingNode : null;
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException or YamlDotNet.Core.YamlException)
+        {
+            return null;
+        }
+        if (root is null) return null;
+        var addr = PyStr.Strip(email).ToLowerInvariant();
+        foreach (var (k, v) in root.Children)
+        {
+            if (k is not YamlScalarNode { Value: "users" } || v is not YamlMappingNode users) continue;
+            foreach (var (uk, uv) in users.Children)
+            {
+                if (uv is not YamlMappingNode entry) continue;
+                foreach (var (ek, ev) in entry.Children)
+                    if (ek is YamlScalarNode { Value: "email" } && ev is YamlScalarNode es
+                        && PyStr.Strip(es.Value ?? "").ToLowerInvariant() == addr)
+                        return (uk as YamlScalarNode)?.Value;
+            }
+        }
+        return null;
+    }
+
     const string CannotVerify = "Cannot verify your GitLab access right now and no recent cached " +
                                 "permission exists, so access is denied. Retry shortly.";
 

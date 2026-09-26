@@ -16,7 +16,7 @@ namespace Argus.Tests;
 public sealed class ServerTests : IDisposable
 {
     readonly TestIndex _ix = new();
-    readonly EnvScope _env = new(("ARGUS_ADMIN_TOKEN", "admin-secret"), ("ARGUS_WEBHOOK_TOKEN", "hook-secret"),
+    readonly EnvScope _env = new(("ARGUS_ADMIN_TOKEN", "admin-secret"), ("ARGUS_WEBHOOK_TOKEN", "hook-secret"), ("ARGUS_CHAT_CLIENT_TOKEN", "chat-secret"),
         ("ARGUS_ACCESS_NOTICES", "0"), ("ARGUS_AUDIT_LOG", "0"), ("ARGUS_INDEX_INTERVAL", "0"));
     readonly WebApplication _app;
     readonly HttpClient _http;
@@ -104,6 +104,41 @@ public sealed class ServerTests : IDisposable
         var audit = Db.ConnectAudit(_ix.DbPath);
         Assert.Equal("<auth_denied>", Util.Sql.Scalar(audit, "SELECT tool FROM audit ORDER BY id DESC LIMIT 1"));
         audit.Dispose();
+    }
+
+    [Fact]
+    public async Task The_chat_client_credential_works_only_inside_the_network_and_only_for_someone()
+    {
+        // Through the proxy, anyone could claim any email with the shared credential.
+        var viaProxy = Mcp(new { jsonrpc = "2.0", id = 1, method = "ping" }, token: "chat-secret");
+        viaProxy.Headers.Add("x-forwarded-for", "203.0.113.9");
+        viaProxy.Headers.Add(ArgusServer.ChatEmailHeader, "alice@example.com");
+        var resp = await _http.SendAsync(viaProxy);
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Contains("only from inside the stack's network", await resp.Content.ReadAsStringAsync());
+
+        resp = await _http.SendAsync(Mcp(new { jsonrpc = "2.0", id = 1, method = "ping" }, token: "chat-secret"));
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Contains("did not say who is asking", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public void A_users_file_maps_an_email_to_its_sign_in_name()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, "users:\n  alice:\n    displayname: Alice\n    email: Alice@Example.com\n  bob:\n    email: bob@example.com\n");
+            Assert.Equal("alice", People.UsernameForEmail(path, " alice@example.com "));
+            Assert.Equal("bob", People.UsernameForEmail(path, "BOB@example.com"));
+            Assert.Null(People.UsernameForEmail(path, "carol@example.com"));
+            Assert.Null(People.UsernameForEmail(path + ".missing", "alice@example.com"));
+            Assert.Null(People.UsernameForEmail(null, "alice@example.com"));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]

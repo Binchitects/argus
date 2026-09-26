@@ -47,6 +47,16 @@ public static class ArgusServer
     public const string WebhookPath = "/hook/gitlab";
     public const string WebhookTokenEnv = "ARGUS_WEBHOOK_TOKEN";
     public const string WebhookHeader = "x-gitlab-token";
+    /// <summary>
+    /// The platform's chat (and Open WebUI): one shared credential plus the
+    /// signed-in person's email, accepted only from inside the network. Argus
+    /// answers for that person, from their GitLab membership read with the
+    /// service token.
+    /// </summary>
+    public const string ChatTokenEnv = "ARGUS_CHAT_CLIENT_TOKEN";
+    public const string ChatEmailHeader = "x-openwebui-user-email";
+    public const string UsersFileEnv = "ARGUS_AUTHELIA_USERS_FILE";
+    static readonly string[] ProxyHeaders = ["x-forwarded-for", "x-forwarded-host", "x-real-ip"];
     public const int WebhookQueueLimit = 25;
     public const string DeniedAtGateTool = "<auth_denied>";
     public static readonly string[] DefaultAllowedHosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"];
@@ -264,11 +274,30 @@ public static class ArgusServer
                 }
                 if (token.StartsWith(Users.ApiKeyPrefix, StringComparison.Ordinal))
                     throw new AclDenied("That key is not valid, or its account is disabled.");
-                identity = await Task.Run(() =>
+                var chatToken = Environment.GetEnvironmentVariable(ChatTokenEnv) ?? "";
+                if (chatToken.Length > 0 && SecretEquals(token, chatToken))
                 {
-                    using var conn = Db.Connect(cfg.Index.DbPath);
-                    return Acl.Resolve(conn, cfg.GitLab, token);
-                });
+                    // Anyone who can reach the proxy could claim any email with it.
+                    if (ProxyHeaders.Any(h => ctx.Request.Headers.ContainsKey(h)))
+                        throw new AclDenied("The chat-client credential is accepted only from inside the stack's network, not through the proxy.");
+                    var email = PyStr.Strip(ctx.Request.Headers[ChatEmailHeader].ToString());
+                    if (email.Length == 0)
+                        throw new AclDenied("The chat client did not say who is asking, so access is denied.");
+                    identity = await Task.Run(() =>
+                    {
+                        using var conn = Db.Connect(cfg.Index.DbPath);
+                        return People.ResolvePerson(conn, directory.Value, email,
+                            People.UsernameForEmail(Environment.GetEnvironmentVariable(UsersFileEnv), email));
+                    });
+                }
+                else
+                {
+                    identity = await Task.Run(() =>
+                    {
+                        using var conn = Db.Connect(cfg.Index.DbPath);
+                        return Acl.Resolve(conn, cfg.GitLab, token);
+                    });
+                }
             }
         }
         catch (AclDenied exc)
