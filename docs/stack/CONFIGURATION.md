@@ -312,12 +312,15 @@ server with **FLUX.2 [klein] 4B** (Apache 2.0) by default. Its three files
 | `IMAGEGEN_MODEL_DIR` | — | the host folder with the files |
 | `IMAGEGEN_DIFFUSION_MODEL`, `IMAGEGEN_TEXT_ENCODER`, `IMAGEGEN_VAE` | klein's files | file names in that folder |
 | `IMAGEGEN_STEPS`, `IMAGEGEN_CFG_SCALE` | `4`, `1.0` | right for a distilled model like klein |
-| `IMAGEGEN_MAX_VRAM` | `-1` | GiB of GPU memory it may use; negative leaves that much free |
+| `IMAGEGEN_MAX_VRAM` | `2` | GiB of GPU memory it may use at most (negative: leave that much free, which races the chat model at start) |
 
 **Sharing the GPU.** The weights stay in RAM, and each step streams them to
 the GPU within `IMAGEGEN_MAX_VRAM`, so the chat model's memory is never taken.
 Measured on a 24 GB RTX 3090 beside a 21 GB chat model: 1024x1024 in about
-27 s, 768x768 in 20 s.
+27 s, 768x768 in 20 s; on an RTX 5090 beside a 20 GB one, 1024x1024 in 20 s.
+Keep the budget a fixed number of GiB. With `-1` (leave 1 GiB free) a
+from-zero start raced: this server filled the empty GPU first, the chat model
+took the rest, and every picture failed for want of room to stream one block.
 
 **Isolation.** The server has no key of its own. It sits on an internal network
 (`image-net`) that only LiteLLM joins, with no way out.

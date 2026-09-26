@@ -216,9 +216,16 @@ def main():
     env_row = next((m for m in rows if m.get("source") == "env"), {})
     rec("admin", "the Models page has the .env model, loaded",
         env_row.get("name") == MODEL and env_row.get("status") in ("loaded", None), f"HTTP {code} {env_row.get('status')}")
-    code, overview = admin.app("GET", "/api/admin/overview")
-    down = [x["name"] for x in overview.get("services", []) if not x.get("ok")]
-    rec("admin", "the Overview reaches the gateway, Prometheus, Alertmanager and Loki", code == 200 and not down, f"down: {down}" if down else "")
+    # A stack that has just started gets two minutes: on a from-zero start Loki
+    # is busy for a while taking (and refusing) every container's old log lines.
+    for attempt in range(25):
+        code, overview = admin.app("GET", "/api/admin/overview")
+        down = [x["name"] for x in overview.get("services", []) if not x.get("ok")]
+        if code == 200 and not down:
+            break
+        time.sleep(5)
+    rec("admin", "the Overview reaches the gateway, Prometheus, Alertmanager and Loki", code == 200 and not down,
+        f"down: {down}" if down else (f"after {attempt * 5} s" if attempt else ""))
     code = admin.req(u("admin", "/model"), follow=False)[0]
     loc = admin.req(u("admin", "/model"), follow=False)[2].get("Location", "")
     rec("admin", "the old admin panel address sends bookmarks to the app", code == 302 and loc.endswith("/admin/model"), f"HTTP {code} {loc}")

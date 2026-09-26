@@ -3,7 +3,9 @@
 # images, audio and video, scans), and the runner that isolates each job
 # (runner.py). Built once; at run time it has no network at all.
 #
-# Wheels only, versions pinned: nothing is compiled here.
+# Wheels only, versions pinned: nothing is compiled here. The one exception is
+# odfpy (OpenDocument, for pandas and .ods files), published only as source: it
+# is pure Python, so building it copies files and compiles nothing.
 FROM python:3.13-slim-bookworm
 
 # System tools, headless: LibreOffice (documents to PDF and between formats),
@@ -18,7 +20,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && fc-cache -f
 
-RUN pip install --no-cache-dir --only-binary=:all: \
+RUN pip install --no-cache-dir --only-binary=:all: --no-binary=odfpy \
       numpy==2.5.3 pandas==3.0.6 matplotlib==3.11.2 pillow==12.3.0 \
       openpyxl==3.1.5 scipy==1.18.1 sympy==1.14.0 \
       duckdb==1.5.5 pyarrow==25.0.1 statsmodels==0.15.0 scikit-learn==1.9.1 seaborn==0.13.2 \

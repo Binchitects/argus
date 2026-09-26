@@ -1001,9 +1001,12 @@ services:
   #
   # It shares the GPU with the chat model. --auto-fit (the default) keeps the
   # weights in RAM and streams them to the GPU for each step, within
-  # IMAGEGEN_MAX_VRAM (negative: leave that many GiB free), so the chat
-  # model's memory is never taken. Measured on a 24 GB RTX 3090 beside a 21 GB
-  # chat model: FLUX.2 [klein] 4B at 1024x1024 in 4 steps, 27 s.
+  # IMAGEGEN_MAX_VRAM GiB, so the chat model's memory is never taken. A fixed
+  # budget, not "leave N GiB free" (a negative value): on a from-zero start
+  # both load at once, and with -1 this server filled the empty GPU first
+  # (2.8 GB), the chat model took the rest, and no picture had room to stream
+  # (measured). With 2 GiB a 1024x1024 picture takes the same 20 s beside a
+  # 20 GB chat model on an RTX 5090, and 27 s on a 3090 beside a 21 GB one.
   #
   # Models (Apache 2.0), into IMAGEGEN_MODEL_DIR:
   #   flux-2-klein-4b-Q4_0.gguf   huggingface.co/leejet/FLUX.2-klein-4B-GGUF
@@ -1037,7 +1040,7 @@ services:
       - --vae
       - /models/${IMAGEGEN_VAE:-flux2-vae.safetensors}
       - --max-vram
-      - "${IMAGEGEN_MAX_VRAM:--1}"
+      - "${IMAGEGEN_MAX_VRAM:-2}"
       - --diffusion-fa
       - --cfg-scale
       - "${IMAGEGEN_CFG_SCALE:-1.0}"
@@ -1584,7 +1587,7 @@ services:
       StackEnv__IMAGEGEN_VAE: ${IMAGEGEN_VAE:-flux2-vae.safetensors}
       StackEnv__IMAGEGEN_STEPS: ${IMAGEGEN_STEPS:-4}
       StackEnv__IMAGEGEN_CFG_SCALE: ${IMAGEGEN_CFG_SCALE:-1.0}
-      StackEnv__IMAGEGEN_MAX_VRAM: ${IMAGEGEN_MAX_VRAM:--1}
+      StackEnv__IMAGEGEN_MAX_VRAM: ${IMAGEGEN_MAX_VRAM:-2}
       StackEnv__COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
       StackEnv__PROMETHEUS_RETENTION_TIME: ${PROMETHEUS_RETENTION_TIME:-30d}
       StackEnv__PROMETHEUS_RETENTION_SIZE: ${PROMETHEUS_RETENTION_SIZE:-20GB}

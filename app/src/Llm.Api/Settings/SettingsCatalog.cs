@@ -188,7 +188,7 @@ public static class SettingsCatalog
             { Default = "4", Min = 1, Max = 60, Optional = false, Impact = Image1 },
         new("IMAGEGEN_CFG_SCALE", Image, "Guidance (CFG) scale", "1.0 for distilled models like FLUX.2 klein.", SettingType.Number, SettingScope.Stack)
             { Default = "1.0", Min = 0, Max = 30, Optional = false, Impact = Image1 },
-        new("IMAGEGEN_MAX_VRAM", Image, "GPU memory budget (GiB)", "What the image server may use of the GPU. Negative: leave that much free for the chat model; 0: all that is free.", SettingType.Number, SettingScope.Stack)
+        new("IMAGEGEN_MAX_VRAM", Image, "GPU memory budget (GiB)", "What the image server may use of the GPU, at most. Keep it a fixed number: a negative value (leave that much free) races the chat model when both start at once; 0 takes all that is free.", SettingType.Number, SettingScope.Stack)
             { Default = "-1", Min = -24, Max = 192, Optional = false, Unit = "GiB", Impact = Image1 },
 
         new("SANDBOX_SLOTS", Tools, "Python runs at once", "More runs wait for a free slot. Each slot is its own user in the sandbox.", SettingType.WholeNumber, SettingScope.Stack)

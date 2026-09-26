@@ -515,11 +515,11 @@ Replaces: Grafana.
   and every rule. The app now probes Alertmanager and Loki, and Promtail lifts the
   app's own log level. `audit-dashboards.py` runs every panel's queries in the app:
   207 queries, 0 errors. Tests: 290 backend, 119 UI; the live stack passes functional
-  68/68, acceptance 32/0, the auth audit and the domain check. Browser: 158 passed,
-  including every new page in both themes on desktop and phone; the chat tests that
-  wait for the real model time out when run in parallel, because every browser signs
-  in as the same admin and fair use queues one person's chats (to fix: run them one
-  at a time). `enterprise-p5` is tagged once that suite is green.
+  68/68, acceptance 32/0, the auth audit and the domain check. Browser: 174 passed,
+  including every new page in both themes on desktop and phone (the chat tests run one
+  at a time: every browser signs in as the same admin, and fair use queues one
+  person's answers). All of it on a deploy from zero, after merging the cloud
+  session's .NET Argus into `main`.
 
 ### Phase 6 — Every setting live  *(M)*
 Makes the settings that still need "run this command" apply from the app, without

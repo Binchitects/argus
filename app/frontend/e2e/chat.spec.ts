@@ -5,6 +5,11 @@ import { expectAccessible, screenshot, watchConsole, withTheme } from './helpers
 // Without one (CI), only the "no gateway" behaviour is checked.
 const live = process.env.E2E_CHAT === '1'
 
+// Every test signs in as the same admin, and fair use runs one person's answers
+// one at a time: side by side, they queue behind each other past their timeouts.
+// So this file's tests run in order (a failure still leaves the rest to run).
+test.describe.configure({ mode: 'default' })
+
 async function ask(page: Page, text: string) {
   await page.getByRole('textbox', { name: 'Message' }).fill(text)
   await page.getByRole('textbox', { name: 'Message' }).press('Enter')
