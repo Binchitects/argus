@@ -375,7 +375,7 @@ clients cached `/model/info` and showed every alias as a separate model.
 
 | service | image | what it does |
 |---|---|---|
-| `web` | built from `src/web` (Alpine + nginx) | the web: static files only, non-root, read-only root, the same security headers as the API. The app itself serves only the API |
+| `web` | built from `src/web` (Alpine + nginx) | the web: static files only, non-root, read-only root, the same security headers as the API. It also serves the chat's preview runner (`/preview.html`), sandboxed into an origin of its own with no network ([chat.md](chat.md)). The app itself serves only the API |
 | `argus` | built from `src/Argus/Dockerfile` (`target: server`) | MCP code-search server over the private GitLab index, and the knowledge packs loaded from the pack library (`ARGUS_PACK_LIBRARY_DIR`, the repository's `packs/` by default). Every answer is also written as a JSON audit line — who asked, which repositories were consulted, what was returned — which is what the Argus dashboard reads |
 
 ### 7.6 Observability

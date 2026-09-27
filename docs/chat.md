@@ -78,6 +78,26 @@ setups to paste.
 - **Files panel.** Like Claude's: every attachment, every file Argus read (with
   **Open in GitLab**), and every file the model wrote in the branch on screen.
   It keeps the newest version of each and has a viewer.
+- **Previews.** Like Claude's artifacts and ChatGPT's canvas: code the model
+  writes as `html`, `svg`, `mermaid`, `jsx` or `tsx` has a **Preview** button.
+  It opens in the Files panel, running, with a **Code** tab beside it; the panel
+  can take half the page, and **Run again** starts it afresh.
+  - A page runs as written, scripts included. Tailwind's CDN script is served
+    from the stack instead.
+  - A React component is shown from its default export. It may import `react`,
+    `react-dom` and `lucide-react`, and style itself with Tailwind classes. Any
+    other import is refused with a sentence naming it.
+  - A Mermaid diagram and an SVG picture are drawn in the chat's theme.
+  - Errors, and anything the code tried to fetch, show under the preview.
+  - The model is told all of this in its system prompt, so it writes code that
+    previews.
+  - **The sandbox.** `/preview.html` is served with a `sandbox` policy (no
+    `allow-same-origin`), so it runs in an origin of its own: it cannot read
+    the app's cookies or storage, call its API, or reach any other address
+    (`connect-src 'none'`), and only the chat may frame it. The frame is
+    sandboxed on the chat's side too. The runner is its own build
+    (`vite.preview.config.ts`); React, the icons (0.75 MB) and Mermaid (5.5 MB)
+    load only when a preview needs them.
 - **Attachments.**
   - Files come by the paperclip, by pasting, or by dropping them anywhere on
     the page. Uploads show their progress.
@@ -252,6 +272,9 @@ branch.
   - reading Argus's answers: each tool's rows, GitLab links on the branch
     asked about, search matches without marking the code's own brackets, and
     files Argus read in the Files panel
+  - what previews (a fence's own language, a file name, an `<svg>` or a page
+    in bare `xml`), the page rewrite (reporter first, Tailwind and Mermaid from
+    the stack), compiling a component and refusing a library it lacks
   - the page on a fake API: a new chat with its settings, streaming with
     thinking, tokens and cost, tool cards and the no-access notice, stop, a
     failed answer, a message given back, an edit and its version arrows,
@@ -267,6 +290,12 @@ branch.
 - **Browser, against the real model:** the model calls the calculator and gets
   the exact product of two nine-digit numbers, and draws a picture with the
   image tool, which opens full size.
+- **Browser, the preview runner (in CI too, `e2e/preview.spec.ts`):** a page's
+  script runs and its Tailwind CDN script comes from the stack; a page can read
+  neither the app's cookies nor its storage, and both the app's API and another
+  site are refused (and reported); a React component with state, an icon and
+  Tailwind classes; a missing library named; an SVG and a Mermaid diagram; and
+  the runner's policy (sandboxed, no network, framed by the chat only).
 - **Browser, with or without a model (in CI too):** the Tools menu turns a
   tool off for a chat; the Tools and Groups pages pass axe in both themes; a
   very long title leaves no sideways scrolling; a chat forked, archived, found under Archived chats,
@@ -278,6 +307,7 @@ branch.
   - an edit keeping both versions
   - an attachment read by the model and shown in the Files panel
   - a code block's copy, download and highlighting
+  - a page the model wrote running in the Files panel, with its code a tab away
   - the chat list's rename, search and delete
   - a chat's instructions reaching the model
   - with the test GitLab, the no-access notice

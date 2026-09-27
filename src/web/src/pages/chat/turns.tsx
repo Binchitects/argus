@@ -135,6 +135,7 @@ export function AnswerTurn({
   onSwitch,
   onRegenerate,
   onOpenFile,
+  onPreview,
   onFork,
   approvals,
   onDecide,
@@ -152,6 +153,8 @@ export function AnswerTurn({
   onSwitch: (id: string) => void
   onRegenerate?: (question: Message, overrides?: { model?: string; thinking?: string }) => void
   onOpenFile: (name: string) => void
+  /** Show a code block that can run (a page, a picture, a diagram, a component) in the Files panel. */
+  onPreview?: (code: string) => void
   /** Fork into a new chat that ends with this answer. */
   onFork?: (messageId: string) => void
   /** Tool calls waiting for the person to allow them, and how to answer. */
@@ -254,7 +257,7 @@ export function AnswerTurn({
         return (
           <div key={a.id}>
             {a.reasoning && <Thinking text={a.reasoning} live={live && isLast && !a.content && !a.toolCalls?.length} ms={a.thinkingMs} since={isLast ? thinkingSince : null} />}
-            {a.content && <Markdown text={a.content} onOpenFile={onOpenFile} />}
+            {a.content && <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} />}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
             {a.toolCalls?.map((t) => (
               <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} onOpenFile={onOpenFile} />

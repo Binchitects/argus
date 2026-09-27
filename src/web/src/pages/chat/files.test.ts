@@ -4,12 +4,15 @@ import { collectFiles, parseFence } from './files'
 
 describe('files in a chat', () => {
   it('reads a file name from the fence, or from the first line', () => {
-    expect(parseFence('ts title="src/app.ts"', 'x')).toEqual({ lang: 'typescript', name: 'src/app.ts' })
-    expect(parseFence('python:tools/run.py', 'x')).toEqual({ lang: 'python', name: 'tools/run.py' })
-    expect(parseFence('src/main.rs', 'x')).toEqual({ lang: 'rust', name: 'src/main.rs' })
-    expect(parseFence('bash', '# file: deploy.sh\necho hi')).toEqual({ lang: 'bash', name: 'deploy.sh' })
-    expect(parseFence('js', 'console.log(1)')).toEqual({ lang: 'javascript', name: null })
-    expect(parseFence('', 'plain')).toEqual({ lang: null, name: null })
+    expect(parseFence('ts title="src/app.ts"', 'x')).toEqual({ lang: 'typescript', name: 'src/app.ts', preview: null })
+    expect(parseFence('python:tools/run.py', 'x')).toEqual({ lang: 'python', name: 'tools/run.py', preview: null })
+    expect(parseFence('src/main.rs', 'x')).toEqual({ lang: 'rust', name: 'src/main.rs', preview: null })
+    expect(parseFence('bash', '# file: deploy.sh\necho hi')).toEqual({ lang: 'bash', name: 'deploy.sh', preview: null })
+    expect(parseFence('js', 'console.log(1)')).toEqual({ lang: 'javascript', name: null, preview: null })
+    expect(parseFence('', 'plain')).toEqual({ lang: null, name: null, preview: null })
+    // What can run keeps its own language for the preview, while highlighting uses the alias.
+    expect(parseFence('tsx', 'export default () => <p/>')).toEqual({ lang: 'typescript', name: null, preview: 'react' })
+    expect(parseFence('html title="index.html"', '<p/>')).toEqual({ lang: 'xml', name: 'index.html', preview: 'html' })
   })
 
   it('collects attachments and code, the newest version of a named file once', () => {

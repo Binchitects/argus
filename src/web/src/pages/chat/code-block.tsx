@@ -1,15 +1,31 @@
-import { Check, ChevronDown, Copy, Download, PanelRightOpen, WrapText } from 'lucide-react'
+import { Check, ChevronDown, Copy, Download, PanelRightOpen, Play, WrapText } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { previewLabels, type PreviewKind } from '@/preview/kind'
 import { extensionFor, highlight } from './highlight'
 
 const COLLAPSE_OVER = 40
 const COLLAPSED_LINES = 24
 
-/** A code block: its language or file name, copy, wrap, download, open in the Files panel, line numbers; long ones fold. */
-export function CodeBlock({ code, lang, name, onOpen }: { code: string; lang: string | null; name?: string | null; onOpen?: (name: string) => void }) {
+/** A code block: its language or file name, copy, wrap, download, open in the Files panel, a live preview, line numbers; long ones fold. */
+export function CodeBlock({
+  code,
+  lang,
+  name,
+  onOpen,
+  preview,
+  onPreview,
+}: {
+  code: string
+  lang: string | null
+  name?: string | null
+  onOpen?: (name: string) => void
+  /** What the code can be previewed as, and how to show it. */
+  preview?: PreviewKind | null
+  onPreview?: () => void
+}) {
   const [wrap, setWrap] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -18,7 +34,8 @@ export function CodeBlock({ code, lang, name, onOpen }: { code: string; lang: st
   const long = lines.length > COLLAPSE_OVER
   const shown = long && !expanded ? lines.slice(0, COLLAPSED_LINES).join('\n') : text
   const html = useMemo(() => highlight(shown, lang), [shown, lang])
-  const label = name ?? lang ?? 'text'
+  // html and svg highlight as xml, and jsx as javascript: label them as what they are.
+  const label = name ?? (preview === 'react' ? (lang === 'typescript' ? 'tsx' : 'jsx') : (preview ?? lang ?? 'text'))
   const fileName = name?.split('/').pop() ?? `snippet.${extensionFor(lang)}`
 
   const copy = async () => {
@@ -35,7 +52,7 @@ export function CodeBlock({ code, lang, name, onOpen }: { code: string; lang: st
   }
 
   return (
-    <figure className="group/code my-3 min-w-0 overflow-hidden rounded-lg border bg-muted/40 not-first:mt-3" aria-label={`Code: ${label}`}>
+    <figure className="group/code @container my-3 min-w-0 overflow-hidden rounded-lg border bg-muted/40 not-first:mt-3" aria-label={`Code: ${label}`}>
       <figcaption className="flex h-9 items-center gap-1 border-b bg-muted/60 pr-1 pl-3 text-xs">
         <span className={cn('truncate font-mono text-muted-foreground', name && 'text-foreground')}>{label}</span>
         <span className="ml-auto flex items-center">
@@ -49,6 +66,13 @@ export function CodeBlock({ code, lang, name, onOpen }: { code: string; lang: st
               <Download />
             </Button>
           </Tooltip>
+          {preview && onPreview && (
+            <Tooltip content={`Preview the ${previewLabels[preview]}`}>
+              <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={onPreview} aria-label={`Preview ${name ?? `this ${previewLabels[preview]}`}`}>
+                <Play /> <span className="hidden @md:inline">Preview</span>
+              </Button>
+            </Tooltip>
+          )}
           {onOpen && name && (
             <Tooltip content="Open in the Files panel">
               <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => onOpen(name)} aria-label={`Open ${name} in the Files panel`}>
@@ -57,7 +81,7 @@ export function CodeBlock({ code, lang, name, onOpen }: { code: string; lang: st
             </Tooltip>
           )}
           <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={copy} aria-label={copied ? 'Copied' : 'Copy code'}>
-            {copied ? <Check /> : <Copy />} {copied ? 'Copied' : 'Copy'}
+            {copied ? <Check /> : <Copy />} <span className="hidden @md:inline">{copied ? 'Copied' : 'Copy'}</span>
           </Button>
         </span>
       </figcaption>

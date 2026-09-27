@@ -106,6 +106,9 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const uploads = useUploads(config.maxUploadBytes)
   const [filesOpen, setFilesOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  /** How a file that can run is shown, and whether the panel takes half the page (for a preview). */
+  const [fileView, setFileView] = useState<'preview' | 'code'>('preview')
+  const [panelWide, setPanelWide] = useState(false)
   const [dragging, setDragging] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -352,6 +355,15 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const openFile = (name: string) => {
     const f = [...files].reverse().find((x) => x.name === name)
     setSelectedFile(f?.key ?? null)
+    setFileView('code')
+    setFilesOpen(true)
+  }
+
+  const openPreview = (code: string) => {
+    const f = [...files].reverse().find((x) => x.kind === 'code' && x.code === code)
+    setSelectedFile(f?.key ?? null)
+    setFileView('preview')
+    setPanelWide(true)
     setFilesOpen(true)
   }
 
@@ -360,11 +372,28 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
 
   const empty = turns.length === 0
   const lastTurn = turns.length - 1
-  const panel = <FilesPanel files={files} selected={selectedFile} onSelect={setSelectedFile} onClose={() => setFilesOpen(false)} />
+  const panel = (
+    <FilesPanel
+      files={files}
+      selected={selectedFile}
+      onSelect={(key) => {
+        setSelectedFile(key)
+        setFileView('preview')
+      }}
+      onClose={() => setFilesOpen(false)}
+      view={fileView}
+      onView={setFileView}
+      wide={wide ? panelWide : undefined}
+      onWide={setPanelWide}
+    />
+  )
 
   return (
     <div
-      className={cn('relative grid min-h-0 min-w-0', filesOpen && wide && 'grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_34rem]')}
+      className={cn(
+        'relative grid min-h-0 min-w-0',
+        filesOpen && wide && (panelWide ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : 'grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_34rem]'),
+      )}
       onDragEnter={(e) => {
         if (e.dataTransfer.types.includes('Files')) {
           e.preventDefault()
@@ -459,6 +488,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                           onSwitch={switchTo}
                           onRegenerate={regenerate}
                           onOpenFile={openFile}
+                          onPreview={openPreview}
                           onFork={id ? (messageId) => void forkFrom(messageId) : undefined}
                           approvals={streaming && i === lastTurn ? view.waiting : undefined}
                           onDecide={(callId, allow) => void decide(callId, allow)}
@@ -496,7 +526,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
       {filesOpen && wide && <div className="min-h-0 border-l">{panel}</div>}
       {!wide && (
         <Sheet open={filesOpen} onOpenChange={setFilesOpen}>
-          <SheetContent side="right" className="gap-0 p-0">
+          <SheetContent side="right" className={cn('gap-0 p-0', fileView === 'preview' && 'sm:max-w-3xl')}>
             <SheetTitle className="sr-only">Files</SheetTitle>
             <SheetDescription className="sr-only">Files in this chat</SheetDescription>
             {panel}

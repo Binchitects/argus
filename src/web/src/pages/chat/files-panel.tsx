@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Download, ExternalLink, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, X } from 'lucide-react'
+import { ArrowLeft, Download, ExternalLink, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, Maximize2, Minimize2, Play, X } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { attachmentUrl, configQuery, downloadUrl } from './api'
@@ -12,10 +14,35 @@ import { CodeBlock } from './code-block'
 import type { FileItem } from './files'
 import { parseFence } from './files'
 import { ImageViewer } from './image-viewer'
+import { LivePreview } from './live-preview'
 
-/** Like Claude's: every file in the branch on screen, and a viewer for the one chosen. */
-export function FilesPanel({ files, selected, onSelect, onClose }: { files: FileItem[]; selected: string | null; onSelect: (key: string | null) => void; onClose: () => void }) {
+/**
+ * Like Claude's: every file in the branch on screen, and a viewer for the one
+ * chosen. Code that can run (a page, a picture, a diagram, a component) shows
+ * live or as code; `wide` (on a wide screen) gives the panel half the page.
+ */
+export function FilesPanel({
+  files,
+  selected,
+  onSelect,
+  onClose,
+  view = 'preview',
+  onView,
+  wide,
+  onWide,
+}: {
+  files: FileItem[]
+  selected: string | null
+  onSelect: (key: string | null) => void
+  onClose: () => void
+  view?: 'preview' | 'code'
+  onView?: (view: 'preview' | 'code') => void
+  wide?: boolean
+  onWide?: (wide: boolean) => void
+}) {
   const current = files.find((f) => f.key === selected) ?? null
+  const runnable = current?.kind === 'code' && current.preview ? current : null
+  const previewing = runnable !== null && view === 'preview'
   return (
     <aside aria-label="Files" className="flex h-full min-h-0 flex-col bg-card">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -26,12 +53,35 @@ export function FilesPanel({ files, selected, onSelect, onClose }: { files: File
         ) : (
           <h2 className="text-sm font-semibold">Files ({files.length})</h2>
         )}
-        <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={onClose} aria-label="Close files">
-          <X />
-        </Button>
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          {runnable && (
+            <Tabs value={view} onValueChange={(v) => onView?.(v as 'preview' | 'code')}>
+              <TabsList className="h-8">
+                <TabsTrigger value="preview" className="px-2 text-xs">
+                  Preview
+                </TabsTrigger>
+                <TabsTrigger value="code" className="px-2 text-xs">
+                  Code
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
+          {wide !== undefined && onWide && (
+            <Tooltip content={wide ? 'Narrow the panel' : 'Widen the panel'}>
+              <Button variant="ghost" size="icon-sm" onClick={() => onWide(!wide)} aria-label={wide ? 'Narrow the panel' : 'Widen the panel'} aria-pressed={wide}>
+                {wide ? <Minimize2 /> : <Maximize2 />}
+              </Button>
+            </Tooltip>
+          )}
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close files">
+            <X />
+          </Button>
+        </span>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {current ? (
+      <div className={cn('min-h-0 flex-1 p-3', previewing ? 'flex flex-col' : 'overflow-y-auto')}>
+        {previewing ? (
+          <LivePreview kind={runnable.preview!} code={runnable.code} name={runnable.name} />
+        ) : current ? (
           <Viewer file={current} />
         ) : files.length === 0 ? (
           <EmptyState icon={FileCode2} title="No files yet" className="border-0">
@@ -47,7 +97,7 @@ export function FilesPanel({ files, selected, onSelect, onClose }: { files: File
                   className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring"
                 >
                   <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-md', f.kind === 'attachment' ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary-ink')}>
-                    {f.kind === 'code' ? <FileCode2 className="size-4" /> : f.kind === 'repo' ? <FileSearch className="size-4" /> : f.attachment.kind === 'image' ? <ImageIcon className="size-4" /> : f.attachment.kind === 'file' ? <FileDown className="size-4" /> : <FileText className="size-4" />}
+                    {f.kind === 'code' && f.preview ? <Play className="size-4" /> : f.kind === 'code' ? <FileCode2 className="size-4" /> : f.kind === 'repo' ? <FileSearch className="size-4" /> : f.attachment.kind === 'image' ? <ImageIcon className="size-4" /> : f.attachment.kind === 'file' ? <FileDown className="size-4" /> : <FileText className="size-4" />}
                   </span>
                   <span className="grid min-w-0">
                     <span className="truncate text-sm font-medium">{f.name}</span>

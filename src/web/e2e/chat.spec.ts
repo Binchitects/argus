@@ -232,6 +232,20 @@ test.describe('chat with the model', () => {
     await screenshot(page, info, 'chat-code')
   })
 
+  test('a page the model writes runs in the Files panel, and its code is a tab away', async ({ page }, info) => {
+    await page.goto('/chat')
+    await thinking(page, 'No thinking')
+    await ask(page, 'Reply with only this, exactly, including the three backticks on their own lines:\n```html\n<!doctype html><html><body><h1 id="t">waiting</h1><script>document.getElementById("t").textContent = "PREVIEW " + (40 + 2)</script></body></html>\n```')
+    await done(page)
+    const code = page.getByRole('region', { name: 'Answer' }).last().getByRole('figure', { name: 'Code: html' })
+    await code.getByRole('button', { name: 'Preview this page' }).click()
+    const panel = page.getByRole('complementary', { name: 'Files' })
+    await expect(panel.frameLocator('iframe[title^="Preview of"]').getByRole('heading', { name: 'PREVIEW 42' })).toBeVisible()
+    await screenshot(page, info, 'chat-preview')
+    await panel.getByRole('tab', { name: 'Code' }).click()
+    await expect(panel.getByRole('figure', { name: /^Code: snippet-\d+\.html$/ })).toContainText('PREVIEW')
+  })
+
   test('chats are listed, searchable, renamed and deleted', async ({ page, isMobile }) => {
     await page.goto('/chat')
     await thinking(page, 'No thinking')

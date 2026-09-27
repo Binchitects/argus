@@ -1,5 +1,6 @@
 import { Marked, type Token, type Tokens } from 'marked'
 import { argsOf, parseResult, toHits } from './argus'
+import { previewKindOf, type PreviewKind } from '@/preview/kind'
 import { extensionFor, languageOf } from './highlight'
 import type { Attachment, Message } from './types'
 
@@ -8,7 +9,7 @@ import type { Attachment, Message } from './types'
  * ```ts:src/a.ts```, ```src/a.ts```, and a first line that names the file
  * (// file: src/a.ts, # path/to/x.py).
  */
-export function parseFence(info: string | undefined, code: string): { lang: string | null; name: string | null } {
+export function parseFence(info: string | undefined, code: string): { lang: string | null; name: string | null; preview: PreviewKind | null } {
   const raw = (info ?? '').trim()
   let lang: string | null = null
   let name: string | null = null
@@ -30,13 +31,13 @@ export function parseFence(info: string | undefined, code: string): { lang: stri
     if (line) name = line[1]!
   }
   if (!lang && name) lang = name.split('.').pop() ?? null
-  return { lang: lang && (languageOf(lang) ?? lang), name }
+  return { lang: lang && (languageOf(lang) ?? lang), name, preview: previewKindOf(lang, name, code) }
 }
 
 export type FileItem =
   /** made: a picture a tool made (image generation), not something attached. */
   | { kind: 'attachment'; key: string; name: string; attachment: Attachment; made?: boolean }
-  | { kind: 'code'; key: string; name: string; lang: string | null; code: string; messageId: string }
+  | { kind: 'code'; key: string; name: string; lang: string | null; code: string; messageId: string; preview: PreviewKind | null }
   | { kind: 'repo'; key: string; name: string; repo: string | null; path: string; branch: string | null; lang: string | null; code: string; truncated: boolean }
 
 const lexer = new Marked({ gfm: true })
@@ -78,12 +79,20 @@ export function collectFiles(path: Message[]): FileItem[] {
     if (m.role !== 'assistant' || !m.content.includes('```')) continue
     codeTokens(lexer.lexer(m.content)).forEach((t, i) => {
       if (!t.text.trim()) return
-      const { lang, name } = parseFence(t.lang, t.text)
-      items.push({ kind: 'code', key: `c-${m.id}-${i}`, name: name ?? `snippet-${++snippet}.${extensionFor(lang)}`, lang, code: t.text, messageId: m.id })
+      const { lang, name, preview } = parseFence(t.lang, t.text)
+      items.push({ kind: 'code', key: `c-${m.id}-${i}`, name: name ?? `snippet-${++snippet}.${snippetExtension(lang, preview)}`, lang, code: t.text, messageId: m.id, preview })
     })
   }
   // A file the model rewrote shows once: its latest version.
   const latest = new Map<string, FileItem>()
   for (const f of items) latest.set(f.kind === 'code' && !f.name.startsWith('snippet-') ? `code:${f.name}` : f.key, f)
   return [...latest.values()]
+}
+
+/** A file name's extension for an unnamed fence: what it will be previewed as, else its language's. */
+function snippetExtension(lang: string | null, preview: PreviewKind | null): string {
+  if (preview === 'react') return lang === 'typescript' ? 'tsx' : 'jsx'
+  if (preview === 'svg') return 'svg'
+  if (preview === 'mermaid') return 'mmd'
+  return extensionFor(lang)
 }

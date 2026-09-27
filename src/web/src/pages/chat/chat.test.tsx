@@ -140,6 +140,24 @@ describe('chat', () => {
     expect(screen.getByRole('button', { name: 'Files (1)', hidden: true })).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('a page the model writes has a Preview that runs it sandboxed, beside its code', async () => {
+    const page = '<!doctype html><html><body><h1>Hi</h1></body></html>'
+    const saved = [answered[0]!, { ...answered[1]!, content: 'Here:\n\n```html\n' + page + '\n```\n\nAnd a plain one:\n\n```js\nconsole.log(1)\n```' }]
+    backend({ start: conversation({ messages: saved, currentLeafId: saved.at(-1)!.id, title: 'A page' }) })
+    renderApp('/chat/c1')
+    const html = await screen.findByRole('figure', { name: 'Code: html' })
+    // Only code that can run offers it.
+    expect(screen.getByRole('figure', { name: 'Code: javascript' })).not.toHaveTextContent('Preview')
+    await userEvent.click(within(html).getByRole('button', { name: 'Preview this page' }))
+    const panel = await screen.findByRole('complementary', { name: 'Files' })
+    const frame = within(panel).getByTitle('Preview of snippet-1.html')
+    expect(frame).toHaveAttribute('src', '/preview.html')
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-forms allow-modals')
+    await userEvent.click(within(panel).getByRole('tab', { name: 'Code' }))
+    expect(within(panel).getByRole('figure', { name: 'Code: snippet-1.html' })).toHaveTextContent('<h1>Hi</h1>')
+    expect(within(panel).queryByTitle('Preview of snippet-1.html')).not.toBeInTheDocument()
+  })
+
   it('shows tool use as a card, and a no-access notice naming whom to ask', async () => {
     backend({
       events: [

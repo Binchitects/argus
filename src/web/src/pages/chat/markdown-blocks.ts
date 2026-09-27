@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify'
 import { Marked, type Token, type TokensList } from 'marked'
 import markedKatex from 'marked-katex-extension'
+import type { PreviewKind } from '@/preview/kind'
 import { parseFence } from './files'
 import { highlight } from './highlight'
 
@@ -33,7 +34,7 @@ export function sanitize(html: string): string {
   return purify.sanitize(html, { FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed'], ADD_ATTR: ['target'] })
 }
 
-type Block = { kind: 'html'; html: string } | { kind: 'code'; code: string; lang: string | null; name: string | null }
+type Block = { kind: 'html'; html: string } | { kind: 'code'; code: string; lang: string | null; name: string | null; preview: PreviewKind | null }
 
 /** Markdown in blocks: top-level code fences become components, the rest sanitised HTML. */
 export function toBlocks(text: string): Block[] {
@@ -49,8 +50,8 @@ export function toBlocks(text: string): Block[] {
   for (const t of tokens) {
     if (t.type === 'code' && (t as { codeBlockStyle?: string }).codeBlockStyle !== 'indented') {
       flush()
-      const { lang, name } = parseFence((t as { lang?: string }).lang, (t as { text: string }).text)
-      out.push({ kind: 'code', code: (t as { text: string }).text, lang, name })
+      const { lang, name, preview } = parseFence((t as { lang?: string }).lang, (t as { text: string }).text)
+      out.push({ kind: 'code', code: (t as { text: string }).text, lang, name, preview })
     } else {
       pending.push(t)
     }

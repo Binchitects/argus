@@ -38,6 +38,12 @@ public sealed partial class ChatService(
     /// <summary>An image counts as this many characters of the context budget (roughly 1,000 tokens).</summary>
     private const int ImageWeight = 3_500;
 
+    /// <summary>What the chat can run, so the model writes code that previews (src/web/src/preview).</summary>
+    internal const string PreviewNote =
+        "The chat shows a live preview of code blocks fenced as html, svg, mermaid, jsx or tsx. " +
+        "Previews have no network: use no CDN or API calls. A page may use Tailwind (its CDN script is served locally). " +
+        "A React component (jsx or tsx) is shown from its default export and may import only react, react-dom and lucide-react; style it with Tailwind classes.";
+
     public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {
         var email = user.Email!.ToLowerInvariant();
@@ -433,7 +439,7 @@ public sealed partial class ChatService(
             }
         }
 
-        var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC).";
+        var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC)." + "\n\n" + PreviewNote;
         if (!string.IsNullOrWhiteSpace(toolInstructions))
         {
             system += "\n\n" + toolInstructions;
