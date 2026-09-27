@@ -441,6 +441,23 @@ test.describe('tools', () => {
     await done(page)
     await expect(answer).toContainText(/5,?500/)
   })
+
+  test('an interactive chart Python writes opens running in the Files panel', async ({ page, request }) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    const tools = (await (await request.get('/api/chat/config')).json()) as { tools: { id: string }[] }
+    test.skip(!tools.tools.some((t) => t.id === 'python'), 'no Python sandbox (profile sandbox)')
+    test.setTimeout(300_000)
+    await page.goto('/chat')
+    await thinking(page, 'No thinking')
+    await ask(page, 'Use run_python: with plotly.express make a bar chart of fruit counts (apples 3, pears 5, plums 2) titled "Fruit" and save it with fig.write_html("fruit.html"). Then say done.')
+    const answer = page.getByRole('region', { name: 'Answer' }).last()
+    const made = answer.getByRole('list', { name: 'Files made' })
+    await made.getByRole('button', { name: 'Open fruit.html in the Files panel' }).click({ timeout: 180_000 })
+    const frame = page.getByRole('complementary', { name: 'Files' }).frameLocator('iframe[title="Preview of fruit.html"]')
+    // plotly.js is inside the page (write_html's default): drawn with no network.
+    await expect(frame.locator('.plot-container svg.main-svg').first()).toBeVisible({ timeout: 30_000 })
+    await expect(frame.getByText('Fruit', { exact: true }).first()).toBeVisible()
+  })
 })
 
 // With the Argus test fixture up and a person who cannot read eal-core:

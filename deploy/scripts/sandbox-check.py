@@ -110,6 +110,33 @@ def main():
         and r["made"]["figure-1.png"].startswith("89504e47"), str(list(r.get("made", {}))))
     rec("the files it was given do not come back", "sales.csv" not in r.get("made", {}))
 
+    # The libraries the tool promises the model, used for real under the job's limits
+    # (its own user, a memory ceiling, a read-only image): a JIT, native code and data files.
+    r = run("""
+        import numpy as np, cv2, skimage.filters, polars as pl, plotly.express as px, xgboost, lightgbm, geopandas as gpd
+        from numba import njit
+        from PIL import Image
+        import pillow_heif
+        from shapely.geometry import Point
+        @njit
+        def total(n):
+            t = 0
+            for i in range(n):
+                t += i
+            return t
+        img = np.zeros((64, 64), np.uint8); img[16:48, 16:48] = 255
+        edges = int(cv2.Canny(img, 50, 150).sum() > 0) + int(skimage.filters.sobel(img).max() > 0)
+        x, y = np.random.rand(60, 3), np.arange(60) % 2
+        xgboost.XGBClassifier(n_estimators=3).fit(x, y); lightgbm.LGBMClassifier(n_estimators=3, verbose=-1).fit(x, y)
+        g = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(10, 10)], crs="EPSG:4326").to_crs("EPSG:3857")
+        px.bar(pl.DataFrame({"k": ["a", "b"], "v": [1, 2]}).to_pandas(), x="k", y="v").write_html("chart.html")
+        Image.fromarray(img).save("square.png")
+        print(total(10), edges, round(g.geometry.x.iloc[1]), pillow_heif.__version__ > "")
+    """, timeout=90)
+    rec("image, model, map and chart libraries work under the limits", r.get("exit_code") == 0 and r.get("stdout", "").split()[:3] == ["45", "2", "1113195"],
+        (r.get("stdout", "") + r.get("stderr", ""))[-300:])
+    rec("an interactive chart comes back as a page", {"chart.html", "square.png"} <= set(r.get("made", {})), str(list(r.get("made", {}))))
+
     r = run("""
         import socket
         for host in [("1.1.1.1", 53), ("app", 8080), ("172.17.0.1", 80)]:

@@ -45,7 +45,7 @@ SLOTS = max(1, int(os.environ.get("SANDBOX_SLOTS", "2")))
 OWNER_UID = int(os.environ.get("SANDBOX_OWNER_UID", "1000"))
 OWNER_GID = int(os.environ.get("SANDBOX_OWNER_GID", str(OWNER_UID)))
 MAX_TIMEOUT = int(os.environ.get("SANDBOX_MAX_TIMEOUT", "300"))
-MEMORY_MB = int(os.environ.get("SANDBOX_JOB_MEMORY_MB", "2048"))
+MEMORY_MB = int(os.environ.get("SANDBOX_JOB_MEMORY_MB", "3072"))
 MAX_FILE_MB = 64
 MAX_OUT_FILES, MAX_OUT_FILE_MB, MAX_OUT_TOTAL_MB = 20, 16, 32
 MAX_STREAM = 64 * 1024
@@ -167,7 +167,11 @@ def run_job(slot, job_id):
         env = {
             "PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": work, "TMPDIR": os.path.join(work, ".tmp"), "LANG": "C.UTF-8",
             "MPLBACKEND": "Agg", "MPLCONFIGDIR": "/opt/mplconfig",
+            # One thread each: a run gets one CPU, and every pool a library starts per host core (and every
+            # malloc arena per thread) reserves address space, which is what the run's memory limit counts.
             "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "NUMEXPR_NUM_THREADS": "1",
+            "POLARS_MAX_THREADS": "1", "RAYON_NUM_THREADS": "1", "NUMBA_NUM_THREADS": "1", "OPENCV_FOR_THREADS_NUM": "1",
+            "MALLOC_ARENA_MAX": "2",
         }
         out_path, err_path = os.path.join(PRIVATE, f"{slot}.out"), os.path.join(PRIVATE, f"{slot}.err")
         # The streams are files in the runner's own directory, handed to the child open.

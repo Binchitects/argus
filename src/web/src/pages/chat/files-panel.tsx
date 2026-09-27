@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { previewKindOf, type PreviewKind } from '@/preview/kind'
 import { attachmentUrl, configQuery, downloadUrl } from './api'
 import { gitlabLink } from './argus'
 import { CodeBlock } from './code-block'
@@ -41,8 +42,8 @@ export function FilesPanel({
   onWide?: (wide: boolean) => void
 }) {
   const current = files.find((f) => f.key === selected) ?? null
-  const runnable = current?.kind === 'code' && current.preview ? current : null
-  const previewing = runnable !== null && view === 'preview'
+  const kind = current ? previewOf(current) : null
+  const previewing = kind !== null && view === 'preview'
   return (
     <aside aria-label="Files" className="flex h-full min-h-0 flex-col bg-card">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -54,7 +55,7 @@ export function FilesPanel({
           <h2 className="text-sm font-semibold">Files ({files.length})</h2>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-1">
-          {runnable && (
+          {kind && (
             <Tabs value={view} onValueChange={(v) => onView?.(v as 'preview' | 'code')}>
               <TabsList className="h-8">
                 <TabsTrigger value="preview" className="px-2 text-xs">
@@ -79,8 +80,12 @@ export function FilesPanel({
         </span>
       </header>
       <div className={cn('min-h-0 flex-1 p-3', previewing ? 'flex flex-col' : 'overflow-y-auto')}>
-        {previewing ? (
-          <LivePreview kind={runnable.preview!} code={runnable.code} name={runnable.name} />
+        {previewing && current ? (
+          current.kind === 'attachment' ? (
+            <AttachmentPreview kind={kind} attachment={current.attachment} />
+          ) : (
+            <LivePreview kind={kind} code={current.code} name={current.name} />
+          )
         ) : current ? (
           <Viewer file={current} />
         ) : files.length === 0 ? (
@@ -97,7 +102,7 @@ export function FilesPanel({
                   className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring"
                 >
                   <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-md', f.kind === 'attachment' ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary-ink')}>
-                    {f.kind === 'code' && f.preview ? <Play className="size-4" /> : f.kind === 'code' ? <FileCode2 className="size-4" /> : f.kind === 'repo' ? <FileSearch className="size-4" /> : f.attachment.kind === 'image' ? <ImageIcon className="size-4" /> : f.attachment.kind === 'file' ? <FileDown className="size-4" /> : <FileText className="size-4" />}
+                    {previewOf(f) ? <Play className="size-4" /> : f.kind === 'code' ? <FileCode2 className="size-4" /> : f.kind === 'repo' ? <FileSearch className="size-4" /> : f.attachment.kind === 'image' ? <ImageIcon className="size-4" /> : f.attachment.kind === 'file' ? <FileDown className="size-4" /> : <FileText className="size-4" />}
                   </span>
                   <span className="grid min-w-0">
                     <span className="truncate text-sm font-medium">{f.name}</span>
@@ -117,6 +122,33 @@ export function FilesPanel({
       </div>
     </aside>
   )
+}
+
+/** What a file can be previewed as: code by its fence, a text file (a page Python wrote, one attached) by its name. */
+function previewOf(f: FileItem): PreviewKind | null {
+  if (f.kind === 'code') return f.preview
+  if (f.kind === 'attachment' && f.attachment.kind === 'text') return previewKindOf(null, f.attachment.fileName, '')
+  return null
+}
+
+/** A file shown running: its own bytes when kept (a whole page, past what the model reads), else its text. */
+function AttachmentPreview({ kind, attachment }: { kind: PreviewKind; attachment: Extract<FileItem, { kind: 'attachment' }>['attachment'] }) {
+  const text = useAttachmentText(attachment.id, attachment.fileName, attachment.original === true)
+  if (text.isPending) return <Skeleton className="h-64" />
+  if (text.error) return <p className="text-sm text-destructive-ink">{text.error.message}</p>
+  return <LivePreview kind={kind} code={text.data} name={attachment.fileName} />
+}
+
+function useAttachmentText(id: string, name: string, original: boolean) {
+  return useQuery({
+    queryKey: ['chat', 'attachment', id, original ? 'original' : 'text'],
+    queryFn: async ({ signal }) => {
+      const res = await fetch(original ? downloadUrl(id) : attachmentUrl(id), { signal, credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
+      if (!res.ok) throw new Error(`Could not open ${name} (HTTP ${res.status}).`)
+      return res.text()
+    },
+    staleTime: Infinity,
+  })
 }
 
 function Viewer({ file }: { file: FileItem }) {
@@ -189,15 +221,7 @@ function RepoViewer({ file }: { file: Extract<FileItem, { kind: 'repo' }> }) {
 }
 
 function TextViewer({ id, name, truncated }: { id: string; name: string; truncated: boolean }) {
-  const text = useQuery({
-    queryKey: ['chat', 'attachment', id],
-    queryFn: async ({ signal }) => {
-      const res = await fetch(attachmentUrl(id), { signal, credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
-      if (!res.ok) throw new Error(`Could not open ${name} (HTTP ${res.status}).`)
-      return res.text()
-    },
-    staleTime: Infinity,
-  })
+  const text = useAttachmentText(id, name, false)
   if (text.isPending) return <Skeleton className="h-64" />
   if (text.error) return <p className="text-sm text-destructive-ink">{text.error.message}</p>
   return (

@@ -29,6 +29,10 @@ RUN pip install --no-cache-dir --only-binary=:all: --no-binary=odfpy \
       pyyaml==6.0.3 jinja2==3.1.6 tabulate==0.10.0 chardet==7.6.0 rapidfuzz==3.14.6 networkx==3.7 \
       pint==0.26.1 holidays==0.105 tzdata==2026.4 numpy-financial==1.1.0 \
       qrcode==8.2 graphviz==0.21 pytesseract==0.3.13 \
+      opencv-python-headless==5.0.0.93 scikit-image==0.26.0 imageio==2.37.4 tifffile==2026.9.20 \
+      pywavelets==1.10.0 pillow-heif==1.8.0 \
+      polars==1.44.2 plotly==7.1.0 xgboost-cpu==3.4.1 lightgbm==4.7.0 numba==0.67.0 llvmlite==0.49.0 \
+      geopandas==1.1.4 shapely==2.1.2 pyproj==3.8.0 pyogrio==0.13.0 \
  # Matplotlib's font cache, built now: at run time its directory is read only.
  && MPLCONFIGDIR=/opt/mplconfig python -c "import matplotlib.pyplot" \
  && chmod -R a+rX /opt/mplconfig \

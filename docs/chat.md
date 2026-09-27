@@ -41,12 +41,18 @@ setups to paste.
   - **Calculator**: exact arithmetic to 28 digits, so the model does not
     guess. Functions like sqrt and sin are good to 15 digits.
   - **Date and time**: the time in any time zone, and the days between dates.
-  - **Python**: code run in the sandbox (the `sandbox` profile) with numpy,
-    pandas, matplotlib, scipy, sympy and openpyxl. The chat's files are in its
-    working directory under their names (the original .xlsx, not its text);
-    what it writes comes back: charts as pictures in the answer, other files
-    in the Files panel and on the card, to open or download. Each run starts
-    afresh, has no network, and stops at its time limit (60 s unless changed).
+  - **Python**: code run in the sandbox (the `sandbox` profile). It has data
+    libraries (numpy, pandas, polars, pyarrow, duckdb, scipy, statsmodels,
+    scikit-learn, xgboost, lightgbm, numba, sympy, networkx), charts
+    (matplotlib, seaborn, plotly), images (pillow with HEIC, OpenCV,
+    scikit-image, imageio, tesseract OCR), maps (geopandas, shapely, pyproj),
+    office and PDF files, and LibreOffice, pandoc, ffmpeg, ImageMagick and
+    graphviz. The chat's files are in its working directory under their names
+    (the original .xlsx, not its text); what it writes comes back: charts as
+    pictures in the answer, other files in the Files panel and on the card, to
+    open or download, and a plotly chart saved as HTML opens running. Each run
+    starts afresh, has one CPU and no network, and stops at its time limit (60 s
+    unless changed).
   - **Reading files**: a long attachment goes into the question only up to a
     budget (30,000 characters), with a note saying how long it really is; the
     model reads on by lines, or searches it, when it needs more. Files a tool
@@ -88,6 +94,9 @@ setups to paste.
     `react-dom` and `lucide-react`, and style itself with Tailwind classes. Any
     other import is refused with a sentence naming it.
   - A Mermaid diagram and an SVG picture are drawn in the chat's theme.
+  - A page or picture Python wrote, or one attached, previews too, from the
+    file itself (a plotly chart carries its 4.7 MB library, past the text the
+    model reads).
   - Errors, and anything the code tried to fetch, show under the preview.
   - The model is told all of this in its system prompt, so it writes code that
     previews.
@@ -308,6 +317,7 @@ branch.
   - an attachment read by the model and shown in the Files panel
   - a code block's copy, download and highlighting
   - a page the model wrote running in the Files panel, with its code a tab away
+  - a plotly chart Python wrote, opened running from the file it made
   - the chat list's rename, search and delete
   - a chat's instructions reaching the model
   - with the test GitLab, the no-access notice

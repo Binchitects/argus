@@ -409,6 +409,30 @@ describe('chat', () => {
     expect(within(panel).getByText(/made in this chat/)).toBeInTheDocument()
   })
 
+  it('a page a Python run wrote opens running, from its own bytes', async () => {
+    const chart = { id: 'f3', fileName: 'chart.html', size: 5_000_000, truncated: true, kind: 'text' as const, contentType: 'text/plain', original: true }
+    const messages = [
+      msg('q1', null, 'user', { content: 'chart it' }),
+      msg('a1', 'q1', 'assistant', { toolCalls: [{ id: 'c1', function: { name: 'run_python', arguments: '{"code":"fig.write_html()"}' } }] }),
+      msg('t1', 'a1', 'tool', { toolCallId: 'c1', toolName: 'run_python', content: '{"exit_code":0}', attachments: [chart] }),
+      msg('a2', 't1', 'assistant', { content: 'Here is the chart.' }),
+    ]
+    const asked: string[] = []
+    backend({
+      start: conversation({ messages, currentLeafId: 'a2' }),
+      extra: { 'GET /api/chat/attachments/f3/content': (_body, _init, url) => (asked.push(url.search), { json: '<html><body>whole page</body></html>' }) },
+    })
+    renderApp('/chat/c1')
+    const made = within(await screen.findByRole('region', { name: 'Answer' })).getByRole('list', { name: 'Files made' })
+    await userEvent.click(within(made).getByRole('button', { name: 'Open chart.html in the Files panel' }))
+    const panel = await screen.findByRole('complementary', { name: 'Files' })
+    expect(await within(panel).findByTitle('Preview of chart.html')).toHaveAttribute('src', '/preview.html')
+    // The whole file, not the text the model read (cut at a million characters).
+    expect(asked.some((u) => u.includes('download'))).toBe(true)
+    await userEvent.click(within(panel).getByRole('tab', { name: 'Code' }))
+    expect(await within(panel).findByText(/whole page/)).toBeInTheDocument()
+  })
+
   it('files a Python run wrote: text opens in the Files panel, anything else is there to download', async () => {
     const csv = { id: 'f1', fileName: 'summary.csv', size: 20, truncated: false, kind: 'text' as const, contentType: 'text/plain' }
     const zip = { id: 'f2', fileName: 'export.zip', size: 2048, truncated: false, kind: 'file' as const, contentType: 'application/octet-stream', original: true }

@@ -173,7 +173,13 @@ public sealed class PythonTool(SandboxClient sandbox, AppDbContext db, IOptionsM
 
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(new LocalRun(
         [Schema.Function("run_python",
-            $"Runs a Python 3.13 program and returns what it prints. Installed: numpy, pandas, matplotlib, scipy, sympy, openpyxl, pillow. " +
+            "Runs a Python 3.13 program and returns what it prints. Installed: " +
+            "data: numpy, pandas, polars, pyarrow, duckdb, scipy, statsmodels, scikit-learn, xgboost, lightgbm, numba, sympy, networkx; " +
+            "charts: matplotlib, seaborn, plotly (fig.write_html; no image export); " +
+            "images: pillow (with HEIC), opencv (cv2), scikit-image, imageio, pytesseract (OCR); " +
+            "maps: geopandas, shapely, pyproj; " +
+            "files: openpyxl, xlsxwriter, python-docx, python-pptx, reportlab, pypdf, pdfplumber, lxml, beautifulsoup4, pyyaml; " +
+            "commands: ffmpeg, imagemagick, pandoc, libreoffice, graphviz, tesseract. " +
             $"No network. At most {options.CurrentValue.TimeoutSeconds} seconds a run. Each run starts afresh: nothing is kept between runs but the files. " +
             "The chat's files are in the working directory under their names. Files the program writes there are given to the person.",
             new JsonObject { ["code"] = Schema.Text("The whole program. print() what you need to read.") }, "code")],
@@ -266,10 +272,13 @@ public sealed class PythonTool(SandboxClient sandbox, AppDbContext db, IOptionsM
         try
         {
             var (text, truncated, converted) = Attachments.Extract(f.Name, "", f.Bytes, 1_000_000);
+            // A page or picture keeps its bytes too: the chat previews it whole (a plotly chart carries
+            // its library, past what the model reads), and it downloads as it was written.
+            var page = Path.GetExtension(f.Name).ToLowerInvariant() is ".html" or ".htm" or ".svg";
             return new ChatAttachment
             {
                 UserId = userId, FileName = f.Name, ContentType = converted ? "application/octet-stream" : "text/plain", Size = f.Bytes.Length,
-                Kind = "text", Text = text, Truncated = truncated, Data = converted ? f.Bytes : null,
+                Kind = "text", Text = text, Truncated = truncated, Data = converted || page ? f.Bytes : null,
             };
         }
         catch (AttachmentException)

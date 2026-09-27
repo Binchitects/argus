@@ -1040,7 +1040,7 @@ services:
     cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
     security_opt: [no-new-privileges:true]
     pids_limit: 256
-    mem_limit: ${SANDBOX_MEMORY:-3g}
+    mem_limit: ${SANDBOX_MEMORY:-4g}
     cpus: ${SANDBOX_CPUS:-2}
     tmpfs:
       - /work:size=${SANDBOX_DISK:-1g},mode=0711
@@ -1051,7 +1051,7 @@ services:
       SANDBOX_OWNER_UID: ${LLM_UID:-1000}
       SANDBOX_OWNER_GID: ${LLM_GID:-1000}
       SANDBOX_SLOTS: ${SANDBOX_SLOTS:-2}
-      SANDBOX_JOB_MEMORY_MB: ${SANDBOX_JOB_MEMORY_MB:-1536}
+      SANDBOX_JOB_MEMORY_MB: ${SANDBOX_JOB_MEMORY_MB:-3072}
       SANDBOX_MAX_TIMEOUT: "300"
     logging: *default-logging
 
@@ -1488,8 +1488,8 @@ services:
       StackEnv__ARGUS_GITLAB_VERIFY: ${ARGUS_GITLAB_VERIFY:-}
       StackEnv__HF_TOKEN_SET: ${HF_TOKEN:+yes}
       StackEnv__SANDBOX_SLOTS: ${SANDBOX_SLOTS:-2}
-      StackEnv__SANDBOX_JOB_MEMORY_MB: ${SANDBOX_JOB_MEMORY_MB:-1536}
-      StackEnv__SANDBOX_MEMORY: ${SANDBOX_MEMORY:-3g}
+      StackEnv__SANDBOX_JOB_MEMORY_MB: ${SANDBOX_JOB_MEMORY_MB:-3072}
+      StackEnv__SANDBOX_MEMORY: ${SANDBOX_MEMORY:-4g}
       StackEnv__SANDBOX_CPUS: ${SANDBOX_CPUS:-2}
       StackEnv__IMAGEGEN_MODEL_NAME: ${IMAGEGEN_MODEL_NAME:-FLUX.2-klein-4B}
       StackEnv__IMAGEGEN_MODEL_DIR: ${IMAGEGEN_MODEL_DIR:-}

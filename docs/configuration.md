@@ -442,8 +442,8 @@ verification failed`.
 | variable | default | what it does |
 |---|---|---|
 | `SANDBOX_SLOTS` | `2` | Python runs at once; more wait for a free slot |
-| `SANDBOX_JOB_MEMORY_MB` | `1536` | memory one run may use (its address space); more is a `MemoryError` |
-| `SANDBOX_MEMORY` | `3g` | the sandbox container's memory, all runs together |
+| `SANDBOX_JOB_MEMORY_MB` | `3072` | memory one run may use, as address space; more is a `MemoryError`. Address space is what libraries reserve, well above what they use: importing the image, model and map libraries takes about 1.5 GB of it and 0.3 GB of real memory. Each run gets one thread per library pool, which keeps the reservation down |
+| `SANDBOX_MEMORY` | `4g` | the sandbox container's real memory, all runs together |
 | `SANDBOX_CPUS` | `2` | its CPUs; a run uses one |
 | `SEARXNG_SECRET` | *(secret)* | the search engine's key (§9) |
 

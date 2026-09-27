@@ -193,10 +193,10 @@ public static class SettingsCatalog
 
         new("SANDBOX_SLOTS", Tools, "Python runs at once", "More runs wait for a free slot. Each slot is its own user in the sandbox.", SettingType.WholeNumber, SettingScope.Stack)
             { Default = "2", Min = 1, Max = 8, Optional = false, Impact = Sandbox1 },
-        new("SANDBOX_JOB_MEMORY_MB", Tools, "Memory per Python run", "A run that needs more fails with MemoryError.", SettingType.WholeNumber, SettingScope.Stack)
-            { Default = "1536", Min = 256, Max = 65536, Unit = "MB", Optional = false, Impact = Sandbox1 },
-        new("SANDBOX_MEMORY", Tools, "Memory for the whole sandbox", "All runs together, e.g. 3g. Less than the runs at once times the memory per run is usually enough: most runs use little.", SettingType.Text, SettingScope.Stack)
-            { Default = "3g", Pattern = @"\d+(m|g)", PatternHelp = "a number and m or g", Optional = false, Impact = Sandbox1 },
+        new("SANDBOX_JOB_MEMORY_MB", Tools, "Memory per Python run", "Its address space: what the libraries reserve, more than they use (the image, model and map libraries need about 1.5 GB of it before any work). A run that needs more fails with MemoryError.", SettingType.WholeNumber, SettingScope.Stack)
+            { Default = "3072", Min = 256, Max = 65536, Unit = "MB", Optional = false, Impact = Sandbox1 },
+        new("SANDBOX_MEMORY", Tools, "Memory for the whole sandbox", "All runs together, e.g. 4g. Less than the runs at once times the memory per run is usually enough: most runs use little.", SettingType.Text, SettingScope.Stack)
+            { Default = "4g", Pattern = @"\d+(m|g)", PatternHelp = "a number and m or g", Optional = false, Impact = Sandbox1 },
         new("SANDBOX_CPUS", Tools, "CPUs for the sandbox", "All runs together; a run uses one.", SettingType.Number, SettingScope.Stack)
             { Default = "2", Min = 0.5m, Max = 64, Optional = false, Impact = Sandbox1 },
 

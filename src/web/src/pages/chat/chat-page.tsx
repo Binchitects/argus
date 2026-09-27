@@ -355,7 +355,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const openFile = (name: string) => {
     const f = [...files].reverse().find((x) => x.name === name)
     setSelectedFile(f?.key ?? null)
-    setFileView('code')
+    setFileView('preview')
     setFilesOpen(true)
   }
 
