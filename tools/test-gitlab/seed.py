@@ -5,6 +5,10 @@ Creates:
   * three PRIVATE projects containing real C/C++ with cross-repo #includes
   * two developers, each a Reporter on exactly one project
   * a personal access token for each developer, plus an admin token
+  * argus_reader: the account Argus indexes with, Reporter on every project,
+    its token read_api + read_repository only (never write, never admin)
+  * with SEED_PERSON_EMAIL, a person of the platform: Reporter on eal-core and
+    etl-decoder, not driver-shim, the address public so a read-only token finds it
 
 The point is to make the access-control claim falsifiable. Developer alpha is a
 member of eal-core only; developer beta of etl-decoder only. Neither is a member
@@ -20,6 +24,7 @@ Writes the resulting tokens to tools/test-gitlab/seeded.json (gitignored).
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -275,6 +280,26 @@ def _ok(r: Response, what: str) -> Response:
     return r
 
 
+def _user(c: "Client", username: str, email: str, public: bool = False) -> int:
+    """A user by that name, made if missing (again safe to run)."""
+    r = c.post("/users", json={"email": email, "username": username, "name": username,
+                               "password": "Kt5wQ9rBz3Xm7Yv2Np8D", "skip_confirmation": True})
+    if r.status_code == 409 or (r.status_code == 400 and "has already been taken" in r.text):
+        uid = _ok(c.get("/users", params={"username": username}), "user lookup").json()[0]["id"]
+    else:
+        uid = _ok(r, f"create user {username}").json()["id"]
+    if public:
+        # Argus's token is not an admin's: GitLab finds a person by email only when it is public.
+        _ok(c.put(f"/users/{uid}", json={"public_email": email}), f"make {email} public")
+    return uid
+
+
+def _member(c: "Client", project_id: int, user_id: int, what: str) -> None:
+    m = c.post(f"/projects/{project_id}/members", json={"user_id": user_id, "access_level": REPORTER})
+    if not (m.status_code == 409 or (m.status_code == 400 and "already exists" in m.text)):
+        _ok(m, f"add {what}")
+
+
 def main() -> int:
     wait_for_api()
     admin = admin_token()
@@ -368,9 +393,30 @@ def main() -> int:
         users[username] = {"id": uid, "token": r.json()["token"], "member_of": project}
         print(f"created {username} (id={uid}) -> Reporter on {project}")
 
+    # --- the account Argus indexes with: read only -------------------------
+    # Reporter on every project; a token that can read the API and clone, and nothing more.
+    reader_id = _user(c, "argus_reader", "argus_reader@argus.test")
+    for project, pid in project_ids.items():
+        _member(c, pid, reader_id, f"argus_reader to {project}")
+    reader = _ok(c.post(f"/users/{reader_id}/impersonation_tokens", json={
+        "name": "argus-index", "scopes": ["read_api", "read_repository"], "expires_at": "2027-01-01",
+    }), "mint the reader's token").json()["token"]
+    print("created argus_reader -> Reporter on every project, token read_api + read_repository")
+
+    # --- a person of the platform, to see per-person access in its chat ------
+    person = os.environ.get("SEED_PERSON_EMAIL", "").strip()
+    if person:
+        name = "platform-" + person.split("@")[0].replace(".", "-")
+        person_id = _user(c, name, person, public=True)
+        for project in ("eal-core", "etl-decoder"):
+            _member(c, project_ids[project], person_id, f"{name} to {project}")
+        users[name] = {"id": person_id, "email": person, "member_of": "eal-core, etl-decoder"}
+        print(f"created {name} ({person}) -> Reporter on eal-core and etl-decoder, not driver-shim")
+
     OUT.write_text(json.dumps({
         "gitlab_url": GITLAB,
         "admin_token": admin,
+        "reader_token": reader,
         "projects": project_ids,
         "users": users,
     }, indent=2), encoding="utf-8")

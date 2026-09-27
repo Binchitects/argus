@@ -141,7 +141,7 @@ say "the API is serving"
 # the socket and a docker binary that can reach it.
 say "seeding the fixtures"
 docker run --rm --user root --network host \
-  -e HOME=/tmp \
+  -e HOME=/tmp -e SEED_PERSON_EMAIL="${SEED_PERSON_EMAIL:-}" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(command -v docker)":/usr/local/bin/docker \
   -v "$ROOT/tools/test-gitlab:/t" -w /t \
