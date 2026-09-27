@@ -51,6 +51,72 @@ public sealed class ModelAdvisorTests : IDisposable
         Assert.Equal(1024, tight.Recommended.Ubatch);
     }
 
+    /// <summary>Two GPUs of <paramref name="each"/> for models (the first also runs the image server's <paramref name="image"/>).</summary>
+    private static Hardware TwoGpus(long each, long image = 0, long ram = 64 * GiB) =>
+        new("GPU A", 2, 2 * (each + Hardware.FitMargin) + image, 0, image, ram, 0,
+            Devices: [new GpuDevice(0, "GPU A", each + Hardware.FitMargin + image, 0), new GpuDevice(1, "GPU B", each + Hardware.FitMargin, 0)]);
+
+    [Fact]
+    public void A_model_on_some_gpus_sees_only_those_and_the_image_server_only_on_the_first()
+    {
+        var hw = TwoGpus(10 * GiB, image: 2 * GiB);
+        Assert.Equal(20 * GiB, hw.GpuForModels);
+        var second = hw.On([1]);
+        Assert.Equal(1, second.Gpus);
+        Assert.Equal("GPU B", second.GpuName);
+        Assert.Equal(10 * GiB, second.GpuForModels);
+        Assert.Equal(0, second.ImageReserve);
+        Assert.Equal(10 * GiB, hw.On([0]).GpuForModels);
+        Assert.Same(hw, hw.On(null));
+        Assert.Equal([0, 1], Hardware.ParseDevices(" 1, 0,1"));
+        Assert.Null(Hardware.ParseDevices("CUDA0"));
+
+        // The estimate follows: 3 GiB of layers fit one GPU of 10, not a machine with 2 left.
+        var (model, all) = Library("dense/Gpu-Q8_0.gguf", GgufFile.Language("llama", layers: 12, layerBytes: 256 * MiB));
+        var m = new LocalModel { Name = "g", File = model.File.Path, Context = 8192, Devices = "1" };
+        Assert.Equal("gpu", ModelAdvisor.Advise(m, model, all, hw).Estimate!.Fit);
+        Assert.Equal(10 * GiB, ModelAdvisor.Advise(m, model, all, hw).Estimate!.GpuBudget);
+    }
+
+    [Fact]
+    public void Kept_models_on_one_gpu_that_holds_one_warn_and_on_two_gpus_fit()
+    {
+        var (model, all) = Library("dense/Kept-Q8_0.gguf", GgufFile.Language("llama", layers: 24, layerBytes: 256 * MiB));
+        var hw = TwoGpus(8 * GiB);
+        LocalModel On(string name, string? devices) => new() { Name = name, File = model.File.Path, Context = 8192, Devices = devices };
+
+        var shared = ModelAdvisor.PlanKept([(On("a", "0"), model), (On("b", "0"), model)], all, hw);
+        var warning = Assert.Single(shared.Problems);
+        Assert.False(warning.Error);
+        Assert.Contains("On GPU 0 (GPU A)", warning.Message, StringComparison.Ordinal);
+        Assert.Equal(["a", "b"], shared.Gpus[0].Models);
+        Assert.Empty(shared.Gpus[1].Models);
+
+        var apart = ModelAdvisor.PlanKept([(On("a", "0"), model), (On("b", "1"), model)], all, hw);
+        Assert.Empty(apart.Problems);
+        Assert.All(apart.Gpus, g => Assert.True(g.Need <= g.Budget));
+
+        // Across both GPUs, a model counts on each by what each has.
+        var split = ModelAdvisor.PlanKept([(On("c", null), model)], all, hw);
+        Assert.InRange(split.Gpus[0].Need, split.Gpus[1].Need - MiB, split.Gpus[1].Need + MiB);
+
+        // Caches and buffers that cannot fit the GPUs and RAM together: one would not load.
+        var tiny = new Hardware("small", 1, Hardware.FitMargin + (16 * MiB), 0, 0, 16 * MiB, 0);
+        Assert.NotNull(ModelAdvisor.PlanKept([(On("h1", null), model), (On("h2", null), model)], all, tiny).FirstError);
+
+        // A model whose file is outside the library is said, not guessed.
+        Assert.Contains(ModelAdvisor.PlanKept([(On("x", null), null)], all, hw).Problems, p => p.Message.Contains("outside the model library", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_model_on_chosen_gpus_names_them_as_the_engine_numbers_them()
+    {
+        var m = new LocalModel { Name = "g", File = "g/G.gguf", Devices = "0,2" };
+        Assert.Contains("device = CUDA0,CUDA2\n", ModelCatalog.Preset(m, "/library"), StringComparison.Ordinal);
+        Assert.DoesNotContain("device", ModelCatalog.Preset(new LocalModel { Name = "g", File = "g/G.gguf" }, "/library"), StringComparison.Ordinal);
+        Assert.Contains("is set by the form", ModelCatalog.CheckExtra("device = CUDA1"), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void A_dense_model_too_big_for_the_gpu_runs_layers_from_ram_with_a_warning()
     {

@@ -128,6 +128,18 @@ describe('chat', () => {
     expect(screen.getByText(/answers once an admin loads it/)).toBeInTheDocument()
   })
 
+  it('a model that loads when asked can be chosen, and says its first answer waits', async () => {
+    backend({ config: { models: [config.models[0], { ...config.models[1], loaded: false, onRequest: true }] } })
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: /^Model:/ }))
+    const eyes = await screen.findByRole('menuitem', { name: /Eyes-Model/ })
+    expect(eyes).not.toHaveAttribute('aria-disabled', 'true')
+    expect(within(eyes).getByText('Loads when asked')).toBeInTheDocument()
+    expect(screen.getByText(/first answer wait while it loads/)).toBeInTheDocument()
+    await userEvent.click(eyes)
+    expect(await screen.findByRole('button', { name: 'Model: Eyes-Model' })).toHaveTextContent('Loads when asked')
+  })
+
   it('code the model writes is in the Files panel, and a code block can be copied and downloaded', async () => {
     backend({ start: conversation({ messages: answered, currentLeafId: 'a1', title: 'Hello there' }) })
     renderApp('/chat/c1')

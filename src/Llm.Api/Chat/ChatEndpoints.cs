@@ -78,7 +78,7 @@ public static class ChatEndpoints
             model = first?.Name ?? stack.Value.ModelName,
             models = list.Select(m => new
             {
-                m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, loaded = policy.Ready(m.Name, onEngine),
+                m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, loaded = policy.Loaded(m.Name, onEngine), onRequest = policy.OnRequest(m.Name, onEngine),
                 prices = new { input = m.InputPerMtok, cachedInput = m.CachedInputPerMtok, output = m.OutputPerMtok },
             }),
             presets = ThinkingPresets.Parse(stack.Value.ThinkingPresets),

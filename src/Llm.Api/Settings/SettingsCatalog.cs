@@ -142,7 +142,7 @@ public static class SettingsCatalog
         new("LLAMACPP_KV_TYPE", Engine, "KV cache precision", "q8_0 halves the cache against f16 for little quality cost.", SettingType.Choice, SettingScope.Stack)
             { Options = ["f16", "bf16", "q8_0", "q5_1", "q5_0", "q4_1", "q4_0"], Impact = Engine1 },
         new("LLAMACPP_PARALLEL", Engine, "People served at once", "Parallel slots. More slots share the context window.", SettingType.WholeNumber, SettingScope.Stack) { Min = 1, Max = 64, Impact = Engine1 },
-        new("LLAMACPP_MODELS_MAX", Engine, "Models loaded at once", "Loading one more unloads the least recently used. One GPU usually holds one large model.", SettingType.WholeNumber, SettingScope.Stack)
+        new("LLAMACPP_MODELS_MAX", Engine, "Models loaded at once", "The ones kept loaded included (Admin → Models). A place beyond them lets other models load when asked for; at the limit the one used least recently unloads.", SettingType.WholeNumber, SettingScope.Stack)
             { Default = "1", Min = 1, Max = 8, Optional = false, Impact = Engine1 },
         new("LLAMACPP_MTP_DRAFT_MAX", Engine, "Multi-token prediction", "Tokens drafted per step; 0 is off.", SettingType.WholeNumber, SettingScope.Stack) { Min = 0, Max = 16, Impact = Engine1 },
         new("LLAMACPP_EXTRA_ARGS", Engine, "Extra engine flags", "Anything else for llama-server. A wrong flag stops the engine from starting.", SettingType.Text, SettingScope.Stack)

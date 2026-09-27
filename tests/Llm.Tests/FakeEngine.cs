@@ -8,12 +8,18 @@ namespace Llm.Tests;
 /// <summary>
 /// llama.cpp's router, as the app sees it: its models are the default one and
 /// the sections of the presets file the app writes (the real one reads it when
-/// it restarts), one loaded at a time.
+/// it restarts), up to <see cref="Max"/> loaded at once: loading one more first
+/// unloads the one used least recently.
 /// </summary>
 public sealed class FakeEngine : HttpMessageHandler
 {
     public const string Key = "engine-key-for-tests";
     private readonly Dictionary<string, string> _status = [];
+    /// <summary>Loaded models, least recently used first.</summary>
+    private readonly List<string> _used = [];
+
+    /// <summary>--models-max.</summary>
+    public int Max { get; set; } = 1;
 
     public string DefaultModel { get; set; } = "Qwen3.8-Flash-Next";
     public string? PresetsFile { get; set; }
@@ -27,9 +33,12 @@ public sealed class FakeEngine : HttpMessageHandler
         lock (_status)
         {
             _status.Clear();
+            _used.Clear();
             _status[DefaultModel] = "loaded";
+            _used.Add(DefaultModel);
             Calls.Clear();
             Broken.Clear();
+            Max = 1;
         }
         PresetsFile = presetsFile;
     }
@@ -43,6 +52,7 @@ public sealed class FakeEngine : HttpMessageHandler
             {
                 _status[k] = "unloaded";
             }
+            _used.Clear();
         }
     }
 
@@ -105,14 +115,22 @@ public sealed class FakeEngine : HttpMessageHandler
                         })]),
                     }.ToJsonString());
                 case "/models/load" when model is not null && _status.ContainsKey(model):
-                    foreach (var k in _status.Keys.ToList())
+                    _used.Remove(model);
+                    // At the limit, the one used least recently makes room.
+                    while (_used.Count >= Max && _used.Count > 0)
                     {
-                        _status[k] = "unloaded";
+                        _status[_used[0]] = "unloaded";
+                        _used.RemoveAt(0);
                     }
                     _status[model] = Broken.Contains(model) ? "failed" : "loaded";
+                    if (_status[model] == "loaded")
+                    {
+                        _used.Add(model);
+                    }
                     return Json(HttpStatusCode.OK, """{"success":true}""");
                 case "/models/unload" when model is not null && _status.ContainsKey(model):
                     _status[model] = "unloaded";
+                    _used.Remove(model);
                     return Json(HttpStatusCode.OK, """{"success":true}""");
                 default:
                     return Json(HttpStatusCode.BadRequest, """{"error":{"message":"model not found"}}""");

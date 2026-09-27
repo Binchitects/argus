@@ -1,15 +1,19 @@
 #!/bin/sh
-# llama.cpp in router mode: one server, several models, one loaded at a time
-# (LLAMACPP_MODELS_MAX). Switching between models is an API call and needs no
-# restart; that is what makes Admin -> Models switch live.
+# llama.cpp in router mode: one server, several models, up to
+# LLAMACPP_MODELS_MAX loaded at once. Loading and unloading is an API call and
+# needs no restart; that is what makes Admin -> Models live.
 #
 #   - The default model's preset comes from .env (LLAMACPP_*, MODEL_*), with the
 #     same arguments single-model mode used, LLAMACPP_EXTRA_ARGS translated.
 #   - More models come from the app, which writes /presets/models.ini.
 #   - Presets are read only when llama-server starts, so a change to that file
 #     restarts it here (a few seconds, then the model loads again).
-#   - At start it loads the model the app chose last (/presets/active), else
-#     the default. The app keeps it loaded from then on.
+#   - At start it loads the models kept loaded (/presets/keep, one a line),
+#     else the default. The app keeps them loaded from then on.
+#   - When a place is left beside the kept models, any other model loads when a
+#     request asks for it (the least recently used unloads first). When every
+#     place is kept, none does: a change of the kept list that flips this
+#     restarts llama-server.
 #   - A model list llama-server refuses (an option it does not know stops the
 #     whole router) does not stop the default model: it runs alone until the
 #     app writes the list again.
@@ -21,7 +25,7 @@ set -u
 key="${LLAMACPP_API_KEY:?set LLAMACPP_API_KEY in .env}"
 name="${MODEL_NAME:?set MODEL_NAME in .env}"
 extra=/presets/models.ini
-active=/presets/active
+keep=/presets/keep
 presets=/tmp/presets.ini
 
 bin=/app/llama-server
@@ -116,6 +120,17 @@ app_presets() {
 }
 
 stamp() { stat -c %Y "$extra" 2>/dev/null || echo none; }
+max="${LLAMACPP_MODELS_MAX:-1}"
+# The models to keep loaded that the engine has: the app's list, else the default.
+kept() {
+  if [ -f "$keep" ]; then
+    while IFS= read -r m; do [ -n "$m" ] && grep -qxF "[$m]" "$presets" && echo "$m"; done < "$keep"
+  else
+    echo "$name"
+  fi
+}
+# Load on request only while a place is left beside the kept models.
+autoload() { if [ "$(kept | wc -l)" -lt "$max" ]; then echo --models-autoload; else echo --no-models-autoload; fi; }
 
 pid=
 # The stamp of a models.ini llama-server refused (an option it does not know stops
@@ -133,16 +148,24 @@ while true; do
   fi
   started=$(date +%s)
   echo "router: $(grep -c '^\[' "$presets") model(s): $(grep '^\[' "$presets" | tr -d '[]' | tr '\n' ' ')"
-  "$bin" --models-preset "$presets" --models-max "${LLAMACPP_MODELS_MAX:-1}" --no-models-autoload \
+  mode=$(autoload)
+  echo "router: up to $max model(s) at once; kept loaded: $(kept | tr '\n' ' ')($mode)"
+  "$bin" --models-preset "$presets" --models-max "$max" "$mode" \
     --host 0.0.0.0 --port 8080 --api-key "$key" &
   pid=$!
   (
     for _ in $(seq 1 120); do curl -fs -o /dev/null --max-time 2 http://localhost:8080/health && break; sleep 1; done
-    want=$(cat "$active" 2>/dev/null || true)
-    grep -qxF "[$want]" "$presets" || want="$name"
-    echo "router: loading $want"
-    curl -fsS -o /dev/null -X POST -H "Authorization: Bearer $key" -H 'Content-Type: application/json' \
-      --data "{\"model\":\"$want\"}" http://localhost:8080/models/load || echo "router: could not ask for $want"
+    # One after another: each load fits itself into what the one before left free.
+    kept | while IFS= read -r want; do
+      echo "router: loading $want"
+      curl -fsS -o /dev/null -X POST -H "Authorization: Bearer $key" -H 'Content-Type: application/json' \
+        --data "{\"model\":\"$want\"}" http://localhost:8080/models/load || { echo "router: could not ask for $want"; continue; }
+      for _ in $(seq 1 600); do
+        curl -fs -H "Authorization: Bearer $key" http://localhost:8080/models 2>/dev/null \
+          | grep -q "\"id\":\"$want\"[^}]*\"value\":\"loading\"" || break
+        sleep 1
+      done
+    done
   ) &
   restart=0
   while kill -0 "$pid" 2>/dev/null; do
@@ -150,6 +173,11 @@ while true; do
     if [ "$(stamp)" != "$seen" ]; then
       echo "router: the app changed the model list; restarting llama-server"
       restart=1
+    elif [ "$(autoload)" != "$mode" ]; then
+      echo "router: the kept models changed whether others load on request; restarting llama-server"
+      restart=1
+    fi
+    if [ $restart = 1 ]; then
       kill -TERM "$pid" 2>/dev/null
       wait "$pid"
       break

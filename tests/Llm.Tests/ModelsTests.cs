@@ -18,7 +18,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
     /// <summary>Its own app, database and engine files, with a library of real (small) GGUF files of every kind.</summary>
-    private (WebApplicationFactory<Program> App, FakeGateway Gateway) NewApp()
+    private (WebApplicationFactory<Program> App, FakeGateway Gateway) NewApp(int max = 1)
     {
         GgufFile.Language("qwen3", name: "Tiny", context: 40960).Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"));
         new GgufFile().Text("general.architecture", "clip").Bool("clip.has_vision_encoder", true).U32("clip.vision.projection_dim", 64)
@@ -38,12 +38,13 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         GgufFile.Language("qwen3", name: "Part").Write(Path.Combine(Library, "part", "Part-00001-of-00003.gguf"));
         Directory.CreateDirectory(Config);
         app.Engine.Reset(Path.Combine(Config, "models.ini"));
+        app.Engine.Max = max;
         var gateway = new FakeGateway();
         gateway.Models.Add(new GatewayModel("FLUX.2-klein-4B", null, null, false, false, false, null, null, null, Mode: "image_generation"));
         var f = app.Create(app.ConnectionStringFor("models_" + Guid.NewGuid().ToString("N")[..8]), gateway, new Dictionary<string, string?>
         {
             ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = Config, ["Engine:LibraryDir"] = Library,
-            ["StackEnv:LLAMACPP_THREADS"] = "12",
+            ["StackEnv:LLAMACPP_THREADS"] = "12", ["StackEnv:LLAMACPP_MODELS_MAX"] = max.ToString(System.Globalization.CultureInfo.InvariantCulture),
         });
         return (f, gateway);
     }
@@ -226,36 +227,67 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         Assert.Contains("model.remove", audit);
     }
 
+    private static string[] Names(JsonElement array) => [.. array.EnumerateArray().Select(x => x.GetString()!)];
+
+    private static Task<HttpResponseMessage> KeepAsync(TestBrowser admin, string model, bool keep) =>
+        admin.Http.PutAsJsonAsync(new Uri($"/api/admin/models/{model}/keep", UriKind.Relative), new { keep });
+
     [Fact]
-    public async Task A_switch_is_live_remembered_and_kept_after_the_engine_restarts()
+    public async Task Kept_models_stay_loaded_through_a_restart_and_another_loads_beside_them()
     {
-        var (f, _) = NewApp();
+        var (f, _) = NewApp(max: 2);
         await using var _f = f;
         var admin = await AdminAsync(f);
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
         await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("status").GetString() == "unloaded", "the engine lists tiny-b");
+        var engine = (await ModelsAsync(admin)).GetProperty("engine");
+        Assert.Equal(["Qwen3.8-Flash-Next"], Names(engine.GetProperty("kept")));
+        Assert.Equal(2, engine.GetProperty("max").GetInt32());
+        // A place beside the kept model: tiny-b loads when a chat asks for it.
+        Assert.True(engine.GetProperty("onRequest").GetBoolean());
+        var chatModel = (await admin.JsonAsync(await admin.GetAsync("/api/chat/config"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "tiny-b");
+        Assert.False(chatModel.GetProperty("loaded").GetBoolean());
+        Assert.True(chatModel.GetProperty("onRequest").GetBoolean());
 
-        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
-        Assert.Equal("loaded", app.Engine.StatusOf("tiny-b"));
-        Assert.Equal("unloaded", app.Engine.StatusOf("Qwen3.8-Flash-Next"));
-        Assert.Equal("tiny-b", await File.ReadAllTextAsync(Path.Combine(Config, "active")));
-        await EventuallyAsync(async () => (await ModelsAsync(admin)).GetProperty("engine").GetProperty("loaded").EnumerateArray().Select(x => x.GetString()).SequenceEqual(["tiny-b"]), "the page shows tiny-b loaded");
+        // Kept: loaded now, beside the .env model, and written for the engine's next start.
+        await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "tiny-b", true));
+        Assert.Equal("Qwen3.8-Flash-Next\ntiny-b\n", await File.ReadAllTextAsync(Path.Combine(Config, "keep")));
+        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("tiny-b") == "loaded" && app.Engine.StatusOf("Qwen3.8-Flash-Next") == "loaded"), "both kept models loaded");
         await EventuallyAsync(async () => (await File.ReadAllTextAsync(Path.Combine(Config, "targets.json"))).Contains("\"model\":\"tiny-b\"", StringComparison.Ordinal), "Prometheus scrapes tiny-b");
 
-        // The engine restarts with nothing loaded: the watcher loads the model chosen last.
-        app.Engine.Restart();
-        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("tiny-b") == "loaded"), "tiny-b loaded again after the restart");
+        // Every place kept: no other loads, and no other can be kept.
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new { name = "plain", file = "plain/Plain-Q8_0.gguf", context = 8192, kvType = "f16", thinking = false, tools = false }));
+        await EventuallyAsync(async () => Row(await ModelsAsync(admin), "plain").GetProperty("status").GetString() == "unloaded", "the engine lists plain");
+        Assert.False((await ModelsAsync(admin)).GetProperty("engine").GetProperty("onRequest").GetBoolean());
+        await StatusAssert.Is(HttpStatusCode.Conflict, await KeepAsync(admin, "plain", true));
+        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/models/plain/load"));
 
-        // Unloaded on purpose: nothing comes back.
-        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/unload"));
-        Assert.Equal("-", await File.ReadAllTextAsync(Path.Combine(Config, "active")));
+        // The engine restarts with nothing loaded: the kept models come back.
+        app.Engine.Restart();
+        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("tiny-b") == "loaded" && app.Engine.StatusOf("Qwen3.8-Flash-Next") == "loaded"), "both loaded again after the restart");
+
+        // No longer kept, tiny-b stays loaded for now. A load at the limit unloads the model used least
+        // recently; when that is a kept one, it comes back and the one not kept makes room.
+        await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "tiny-b", false));
+        Assert.Equal("Qwen3.8-Flash-Next\n", await File.ReadAllTextAsync(Path.Combine(Config, "keep")));
+        Assert.Equal("loaded", app.Engine.StatusOf("tiny-b"));
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/plain/load"));
+        await EventuallyAsync(
+            () => Task.FromResult(app.Engine.StatusOf("plain") == "loaded" && app.Engine.StatusOf("Qwen3.8-Flash-Next") == "loaded" && app.Engine.StatusOf("tiny-b") == "unloaded"),
+            "the kept model back, beside the one loaded last");
+
+        // Unloaded on purpose: it does not come back.
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/plain/unload"));
         await Task.Delay(1500);
-        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-b"));
+        Assert.Equal("unloaded", app.Engine.StatusOf("plain"));
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.PostAsync("/api/admin/models/nothing-like-it/load"));
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().Select(e => e.GetProperty("action").GetString()).ToList();
+        Assert.Contains("model.keep", audit);
+        Assert.Contains("model.unkeep", audit);
     }
 
     [Fact]
-    public async Task A_model_that_fails_to_load_is_not_tried_again_and_the_env_model_takes_its_place()
+    public async Task A_kept_model_that_fails_to_load_is_not_tried_again_and_the_env_model_takes_its_place()
     {
         var (f, _) = NewApp();
         await using var _f = f;
@@ -263,20 +295,22 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
         await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("status").GetString() == "unloaded", "the engine lists tiny-b");
 
-        // Its file is incomplete: the load unloads the model before it, then fails.
+        // Its file is incomplete: kept in the .env model's place, its load unloads that model, then fails.
         app.Engine.Broken.Add("tiny-b");
-        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
-        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("Qwen3.8-Flash-Next") == "loaded"), "the .env model loaded in its place");
-        Assert.Equal("Qwen3.8-Flash-Next", await File.ReadAllTextAsync(Path.Combine(Config, "active")));
+        await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "Qwen3.8-Flash-Next", false));
+        await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "tiny-b", true));
         await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("status").GetString() == "failed", "the page shows tiny-b failed");
+        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("Qwen3.8-Flash-Next") == "loaded"), "the .env model loaded in its place");
+        await Task.Delay(1500);
         Assert.Equal(1, app.Engine.LoadsOf("tiny-b"));
 
-        // Nothing else to fall back to: it is not tried again every few seconds.
+        // Nothing else to fall back to: neither is tried again every few seconds.
         app.Engine.Broken.Add("Qwen3.8-Flash-Next");
-        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/Qwen3.8-Flash-Next/load"));
+        app.Engine.Restart();
+        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("Qwen3.8-Flash-Next") == "failed"), "the .env model failed too");
+        var loads = (app.Engine.LoadsOf("tiny-b"), app.Engine.LoadsOf("Qwen3.8-Flash-Next"));
         await Task.Delay(1500);
-        Assert.Equal(2, app.Engine.LoadsOf("Qwen3.8-Flash-Next"));
-        Assert.Equal("failed", Row(await ModelsAsync(admin), "Qwen3.8-Flash-Next").GetProperty("status").GetString());
+        Assert.Equal(loads, (app.Engine.LoadsOf("tiny-b"), app.Engine.LoadsOf("Qwen3.8-Flash-Next")));
     }
 
     [Fact]
@@ -313,6 +347,9 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         var answer = await (await member.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello" })).Content.ReadAsStringAsync();
         Assert.Contains("tiny-b is not loaded right now", answer, StringComparison.Ordinal);
 
+        // The one place is kept for the .env model: until it is not, tiny-b cannot load.
+        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/models/tiny-b/load"));
+        await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "Qwen3.8-Flash-Next", false));
         // Loaded (the .env model goes), a chat that chose no model gets the loaded one.
         await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
         await EventuallyAsync(async () => (await ChatModelsAsync(member)).GetValueOrDefault("tiny-b"), "tiny-b loaded for the chat");

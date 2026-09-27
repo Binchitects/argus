@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
@@ -68,7 +69,17 @@ interface Advice {
     approximate: boolean
   } | null
   problems: { field: string; message: string; error: boolean }[]
-  hardware: { gpuName: string | null; gpus: number; gpuTotal: number; imageReserve: number; ramTotal: number; gpuForModels: number; ramForModels: number } | null
+  hardware: {
+    gpuName: string | null
+    gpus: number
+    gpuTotal: number
+    imageReserve: number
+    ramTotal: number
+    gpuForModels: number
+    ramForModels: number
+    /** Each GPU the model may use, by nvidia-smi's index. */
+    devices?: { index: number; name: string; total: number; reserved: number }[] | null
+  } | null
 }
 
 /** A local model as the API lists it: what the form edits. */
@@ -79,6 +90,8 @@ export interface SavedModel {
   context?: number | null
   maxOutput?: number | null
   placement?: 'auto' | 'manual'
+  /** The GPUs it runs on ("0,1"); empty: all. */
+  devices?: string | null
   gpuLayers?: number
   cpuMoe?: number
   kvType?: string
@@ -125,6 +138,7 @@ function initial(saved: SavedModel | null) {
     context: s(saved?.context ?? 32768),
     maxOutput: s(saved?.maxOutput),
     placement: saved?.placement ?? 'auto',
+    devices: saved?.devices ?? '',
     gpuLayers: s(saved?.gpuLayers ?? 99),
     cpuMoe: s(saved?.cpuMoe ?? 0),
     kvType: saved?.kvType ?? 'q8_0',
@@ -148,7 +162,7 @@ function initial(saved: SavedModel | null) {
 }
 
 const numeric = ['context', 'maxOutput', 'gpuLayers', 'cpuMoe', 'parallel', 'draftMax', 'temperature', 'topP', 'topK', 'minP', 'presencePenalty', 'inputPerMtok', 'outputPerMtok'] as const
-const clearable = ['maxOutput', 'ubatch', 'draftHead', 'temperature', 'topP', 'topK', 'minP', 'presencePenalty', 'inputPerMtok', 'outputPerMtok'] as const
+const clearable = ['devices', 'maxOutput', 'ubatch', 'draftHead', 'temperature', 'topP', 'topK', 'minP', 'presencePenalty', 'inputPerMtok', 'outputPerMtok'] as const
 
 /** What the API takes, from the form; an emptied field is named in "clear" (a missing one is left as it was). */
 function body(form: FormState) {
@@ -159,6 +173,7 @@ function body(form: FormState) {
     context: n(form.context),
     maxOutput: n(form.maxOutput),
     placement: form.placement,
+    devices: form.devices,
     gpuLayers: n(form.gpuLayers),
     cpuMoe: n(form.cpuMoe),
     kvType: form.kvType,
@@ -189,7 +204,7 @@ function body(form: FormState) {
  * fit this machine, and estimates the memory as it is filled in. The API runs
  * the same checks on save.
  */
-export function ModelForm({ saved, onClose }: { saved: SavedModel | null; onClose: () => void }) {
+export function ModelForm({ saved, onClose, gpus = [] }: { saved: SavedModel | null; onClose: () => void; /** The machine's GPUs: a choice is offered with two or more. */ gpus?: { index: number; name: string; total: number }[] }) {
   const queryClient = useQueryClient()
   const library = useQuery({ queryKey: ['admin', 'models', 'library'], queryFn: ({ signal }) => api<LibraryFile[]>('/api/admin/models/library', { signal }) })
   const [form, setForm] = useState(() => initial(saved))
@@ -413,6 +428,7 @@ export function ModelForm({ saved, onClose }: { saved: SavedModel | null; onClos
             </div>
 
             <Section title="Placement" description="Where the layers go: the GPU is fastest; what does not fit there runs from RAM.">
+              {gpus.length > 1 && <GpuPicker gpus={gpus} value={form.devices} onChange={(v) => set('devices', v)} error={errors.devices} />}
               <Field label="Placement" error={errors.placement}>
                 <Select value={form.placement} onValueChange={(v) => set('placement', v as 'auto' | 'manual')}>
                   <SelectTrigger className="min-w-0 [&>span]:truncate">
@@ -571,6 +587,38 @@ export function ModelForm({ saved, onClose }: { saved: SavedModel | null; onClos
         </DialogFooter>
       </form>
     </>
+  )
+}
+
+/**
+ * The GPUs a model runs on: all of them (llama.cpp splits it by layer across them), or
+ * some. Two models kept loaded side by side run best on different GPUs.
+ */
+function GpuPicker({ gpus, value, onChange, error }: { gpus: { index: number; name: string; total: number }[]; value: string; onChange: (v: string) => void; error?: string }) {
+  const chosen = new Set(value.split(',').filter(Boolean).map(Number))
+  const all = chosen.size === 0
+  const toggle = (i: number, on: boolean) => {
+    const next = new Set(all ? gpus.map((g) => g.index) : chosen)
+    if (on) next.add(i)
+    else next.delete(i)
+    // Every GPU ticked is the same as all; none ticked is not allowed.
+    onChange(next.size === 0 || next.size === gpus.length ? '' : [...next].sort((a, b) => a - b).join(','))
+  }
+  return (
+    <fieldset className="grid gap-2">
+      <legend className="mb-1 text-sm font-medium">GPUs</legend>
+      <div className="flex flex-wrap gap-x-5 gap-y-2">
+        {gpus.map((g) => (
+          <Label key={g.index} className="flex items-center gap-2 font-normal">
+            <Checkbox checked={all || chosen.has(g.index)} onCheckedChange={(on) => toggle(g.index, on === true)} />
+            GPU {g.index} · {g.name} · {bytes(g.total)}
+          </Label>
+        ))}
+      </div>
+      <p className={cn('text-xs', error ? 'text-destructive-ink' : 'text-muted-foreground')}>
+        {error ?? (all ? 'All of them: the layers are split across the GPUs.' : 'Only these. Models kept loaded side by side run best on different GPUs.')}
+      </p>
+    </fieldset>
   )
 }
 

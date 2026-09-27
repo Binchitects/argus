@@ -635,7 +635,7 @@ services:
       # Filled by model-init from LLAMACPP_ENGINE_URL; empty = stock server.
       - llamacpp-engine:/engine:ro
       # Router mode (services/llamacpp/router.sh): the models the app added
-      # (config/engine/models.ini), the one to keep loaded (active), and the
+      # (config/engine/models.ini), those to keep loaded (keep), and the
       # library they come from.
       - ${LLM_SERVICES_DIR:-./services}/llamacpp/router.sh:/router.sh:ro
       - ${LLM_CONFIG_DIR:-./config}/engine:/presets:ro
@@ -656,6 +656,9 @@ services:
     #       --spec-draft-cpu-moe to keep a draft head's experts in system RAM.
     environment:
       LLAMA_CACHE: /models/.llama-cache
+      # CUDA0, CUDA1... in nvidia-smi's order: a model placed on GPU 1 in
+      # Admin -> Models runs on the card nvidia-smi calls 1.
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
       # The .env model's preset (router.sh), with what single-model mode took
       # on its command line.
       MODEL_NAME: ${MODEL_NAME:?set MODEL_NAME in .env}
@@ -665,7 +668,8 @@ services:
       LLAMACPP_N_GPU_LAYERS: ${LLAMACPP_N_GPU_LAYERS:-99}
       LLAMACPP_KV_TYPE: ${LLAMACPP_KV_TYPE:-q8_0}
       LLAMACPP_PARALLEL: ${LLAMACPP_PARALLEL:-1}
-      # How many models stay loaded at once; one GPU usually holds one.
+      # How many models may be loaded at once, those kept loaded included. A place
+      # beyond the kept ones lets other models load when asked for.
       LLAMACPP_MODELS_MAX: ${LLAMACPP_MODELS_MAX:-1}
       LLAMACPP_MTP_HEAD: ${LLAMACPP_MTP_HEAD:-}
       LLAMACPP_MTP_DRAFT_MAX: ${LLAMACPP_MTP_DRAFT_MAX:-0}
@@ -984,6 +988,10 @@ services:
     security_opt: [no-new-privileges:true]
     volumes:
       - ${IMAGEGEN_MODEL_DIR:-./models/image}:/models:ro
+    # The first GPU in nvidia-smi's order, as the engine numbers them: the app
+    # counts IMAGEGEN_MAX_VRAM on that GPU only.
+    environment:
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
     entrypoint: ["/sd-server"]
     command:
       - --listen-ip

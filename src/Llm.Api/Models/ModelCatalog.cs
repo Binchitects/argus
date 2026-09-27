@@ -36,17 +36,15 @@ public sealed class EngineState
 
 /// <summary>
 /// The models the engine can load: the .env one and those admins added. Writes
-/// the engine's presets (config/engine/models.ini), which model to keep loaded
-/// (config/engine/active), Prometheus's scrape targets (config/engine/targets.json),
-/// and keeps the gateway's list in step.
+/// the engine's presets (config/engine/models.ini), the models to keep loaded
+/// (config/engine/keep, one name a line), Prometheus's scrape targets
+/// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
 public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
-    public const string ActiveFile = "active";
+    public const string KeepFile = "keep";
     public const string TargetsFile = "targets.json";
-    /// <summary>What <see cref="ActiveFile"/> holds when an admin unloaded every model on purpose.</summary>
-    public const string None = "-";
 
     /// <summary>Preset keys a model may not set: they belong to the router, or would reach outside the library.</summary>
     private static readonly HashSet<string> Reserved = new(StringComparer.Ordinal)
@@ -62,7 +60,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     private static readonly HashSet<string> Managed = new(StringComparer.Ordinal)
     {
         "ctx-size", "n-gpu-layers", "gpu-layers", "n-cpu-moe", "cpu-moe", "cache-type-k", "cache-type-v", "parallel", "jinja", "metrics", "kv-unified", "no-kv-unified",
-        "threads", "ubatch-size", "batch-size", "fit", "rope-scaling", "rope-scale", "yarn-orig-ctx", "spec-type", "spec-draft-n-max", "draft-max", "draft-n",
+        "threads", "ubatch-size", "batch-size", "fit", "device", "rope-scaling", "rope-scale", "yarn-orig-ctx", "spec-type", "spec-draft-n-max", "draft-max", "draft-n",
         "temp", "temperature", "top-p", "top-k", "min-p", "presence-penalty", "embedding", "embeddings", "pooling", "rerank", "reranking",
     };
 
@@ -151,6 +149,11 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             // llama.cpp fits the layers and experts to the GPU memory free when it loads.
             sb.Append("fit = on\n");
         }
+        if (Hardware.ParseDevices(m.Devices) is { Count: > 0 } devices)
+        {
+            // CUDA numbers GPUs as nvidia-smi does: the engine runs with CUDA_DEVICE_ORDER=PCI_BUS_ID.
+            sb.Append("device = ").Append(string.Join(',', devices.Select(d => "CUDA" + d.ToString(inv)))).Append('\n');
+        }
         if (threads is > 0)
         {
             sb.Append(inv, $"threads = {threads}\n");
@@ -223,10 +226,13 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         Write(PresetsFile, text);
     }
 
-    /// <summary>The model to keep loaded: an admin's last choice, the .env model, or none (<see cref="None"/>).</summary>
-    public string Active() => Read(ActiveFile) is { Length: > 0 } a ? a : options.Value.DefaultModel ?? None;
+    /// <summary>The models kept loaded (loaded at start, and again whenever one is not): admins' choice, else the .env model.</summary>
+    public IReadOnlyList<string> Kept() =>
+        Read(KeepFile) is { } text
+            ? [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal)]
+            : options.Value.DefaultModel is { Length: > 0 } d ? [d] : [];
 
-    public void SetActive(string model) => Write(ActiveFile, model);
+    public void SetKept(IEnumerable<string> models) => Write(KeepFile, string.Join('\n', models.Distinct(StringComparer.Ordinal)) + "\n");
 
     /// <summary>Prometheus scrapes each loaded model's metrics (/metrics?model=NAME).</summary>
     public void WriteTargets(IEnumerable<string> loaded)
@@ -322,7 +328,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 }
 
 /// <summary>Who may use which model, and whether it can answer now.</summary>
-public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineState engine, IOptions<EngineOptions> options)
+public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineState engine, ModelCatalog catalog, IOptions<EngineOptions> options)
 {
     /// <summary>The models on the engine: the .env one and the app's. Their answers need them loaded.</summary>
     public async Task<HashSet<string>> OnEngineAsync(CancellationToken ct = default)
@@ -347,17 +353,28 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
         return [.. models.Where(m => !rules.TryGetValue(m, out var r) || member.May(r.Audience, r.Groups))];
     }
 
-    /// <summary>Whether a model can answer now: always, unless it is the engine's and not loaded.</summary>
-    public bool Ready(string model, IReadOnlySet<string> onEngine) =>
+    /// <summary>Whether a model is there to answer: always, unless it is the engine's and not loaded.</summary>
+    public bool Loaded(string model, IReadOnlySet<string> onEngine) =>
         !onEngine.Contains(model) || engine.Now is not { Error: null, At: not null } || engine.StatusOf(model) == "loaded";
 
-    /// <summary>The chat's models this person may use, and the one a chat uses when it chose none: the first that is ready.</summary>
+    /// <summary>
+    /// An engine model that is not loaded but loads when asked for: the engine has a place
+    /// besides the models kept loaded (the least recently used unloads to make room).
+    /// </summary>
+    public bool OnRequest(string model, IReadOnlySet<string> onEngine) =>
+        onEngine.Contains(model) && !Loaded(model, onEngine) && engine.StatusOf(model) is "unloaded" or "loading"
+        && catalog.Kept().Count < options.Value.ModelsMax;
+
+    /// <summary>Whether a model can answer: loaded, or loaded on request.</summary>
+    public bool Ready(string model, IReadOnlySet<string> onEngine) => Loaded(model, onEngine) || OnRequest(model, onEngine);
+
+    /// <summary>The chat's models this person may use, and the one a chat uses when it chose none: the first loaded, else the first that loads when asked.</summary>
     public async Task<(IReadOnlyList<GatewayModel> Models, GatewayModel? Default, HashSet<string> OnEngine)> ForAsync(AppUser user, IReadOnlyList<GatewayModel> chatModels, CancellationToken ct = default)
     {
         var allowed = await AllowedAsync(user, chatModels.Select(m => m.Name), ct);
         var onEngine = await OnEngineAsync(ct);
         var mine = chatModels.Where(m => allowed.Contains(m.Name)).ToList();
-        return (mine, mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? mine.FirstOrDefault(), onEngine);
+        return (mine, mine.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? mine.FirstOrDefault(), onEngine);
     }
 
     /// <summary>Why this person cannot have an answer from this model now, or null.</summary>
@@ -368,13 +385,14 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
             return $"You may not use {model}. Choose another model.";
         }
         // Only when the engine answered its last check: an engine that cannot be reached says so in its own error.
-        if ((await OnEngineAsync(ct)).Contains(model) && engine.Now is { Error: null, At: not null } && engine.StatusOf(model) is not "loaded")
+        var onEngine = await OnEngineAsync(ct);
+        if (onEngine.Contains(model) && engine.Now is { Error: null, At: not null } && !Ready(model, onEngine))
         {
             return engine.StatusOf(model) == "loading"
                 ? $"{model} is loading. Try again in a minute, or choose another model."
                 : engine.StatusOf(model) == "failed"
                     ? $"{model} could not be loaded. Choose another model; an admin can see why under Admin → Models."
-                    : $"{model} is not loaded right now. An admin can load it under Admin → Models, or choose another model.";
+                    : $"{model} is not loaded right now, and the engine has no place for it beside the models kept loaded. An admin can load it under Admin → Models, or choose another model.";
         }
         return null;
     }

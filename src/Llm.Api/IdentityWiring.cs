@@ -318,6 +318,27 @@ public static class IdentityWiring
             {
                 o.DefaultModelFile ??= modelDir == "." ? modelFile : modelDir + "/" + modelFile;
             }
+            if (int.TryParse(config["StackEnv:LLAMACPP_MODELS_MAX"], inv, out var max) && max > 0)
+            {
+                o.ModelsMax = max;
+            }
+            int Int(string key, int fallback) => int.TryParse(config[key], inv, out var v) ? v : fallback;
+            if (o.DefaultModel is { Length: > 0 } defaultModel && o.DefaultSettings is null)
+            {
+                o.DefaultSettings = new Llm.Core.Models.LocalModel
+                {
+                    Name = defaultModel, File = o.DefaultModelFile ?? "", Placement = "manual",
+                    Context = Int("StackEnv:MODEL_CONTEXT", 32768), GpuLayers = Int("StackEnv:LLAMACPP_N_GPU_LAYERS", 99),
+                    CpuMoe = Int("StackEnv:LLAMACPP_N_CPU_MOE", 0), Parallel = Int("StackEnv:LLAMACPP_PARALLEL", 1),
+                    KvType = config["StackEnv:LLAMACPP_KV_TYPE"] is { Length: > 0 } kv ? kv : "q8_0",
+                    Mtp = Int("StackEnv:LLAMACPP_MTP_DRAFT_MAX", 0) > 0, DraftMax = Math.Max(1, Int("StackEnv:LLAMACPP_MTP_DRAFT_MAX", 3)),
+                    // Its GPUs and prompt step, when LLAMACPP_EXTRA_ARGS sets them (--device CUDA1, -ub 1024).
+                    Ubatch = System.Text.RegularExpressions.Regex.Match(config["StackEnv:LLAMACPP_EXTRA_ARGS"] ?? "", @"(?:^|\s)(?:-ub|--ubatch-size)[ =](\d+)") is { Success: true } ub
+                        ? int.Parse(ub.Groups[1].Value, inv) : null,
+                    Devices = System.Text.RegularExpressions.Regex.Match(config["StackEnv:LLAMACPP_EXTRA_ARGS"] ?? "", @"(?:^|\s)(?:-dev|--device)[ =]((?:CUDA\d+,?)+)") is { Success: true } dev
+                        ? string.Join(',', dev.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(d => d[4..])) : null,
+                };
+            }
         });
         services.AddHttpClient<Models.EngineClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddSingleton<Models.EngineState>();

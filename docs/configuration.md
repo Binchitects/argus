@@ -212,7 +212,7 @@ as a string and the engine never sees a variable it recognises.
 | `LLAMACPP_MODEL_DIR` | *required* | host directory holding the GGUFs. **Put it on NVMe** — the weights are memory-mapped and paged in on demand |
 | `LLAMACPP_MODEL_FILE` | *required* | the model file; for a split GGUF, the **first** shard |
 | `LLAMACPP_LIBRARY_DIR` | `LLAMACPP_MODEL_DIR` | the **model library**: the host folder Admin → Models adds more models from, searched three levels deep. Usually the folder that holds `LLAMACPP_MODEL_DIR` |
-| `LLAMACPP_MODELS_MAX` | `1` | models loaded at once. Loading one more unloads the least recently used. One GPU usually holds one large model |
+| `LLAMACPP_MODELS_MAX` | `1` | models loaded at once, the kept ones included. With a place beyond the kept ones, other models load when asked for (the least recently used unloads first); with every place kept, none does. Which are kept is Admin → Models (`config/engine/keep`) |
 | `LLAMACPP_HF_REPO` | empty | Hugging Face repo to download from on first start. Empty means the files must already be present |
 | `LLAMACPP_HF_FILES` | empty | space-separated paths inside that repo. They land flat in `LLAMACPP_MODEL_DIR` and are SHA-256 checked |
 | `LLAMACPP_ENGINE_URL` | empty | a llama.cpp release tarball to run instead of the stock server. Exists for MTP: mainline has no MTP graph for some architectures, so the stock image accepts `--spec-type draft-mtp` and silently does nothing |
@@ -232,7 +232,11 @@ The engine runs llama.cpp in **router mode** (`services/llamacpp/router.sh`):
 the variables above become the `.env` model's preset (`LLAMACPP_EXTRA_ARGS`
 translated to preset keys), the models added in Admin → Models come from
 `config/engine/models.ini`, and a change to that file restarts llama-server so
-it reads it. See [admin.md](admin.md#models).
+it reads it. At start it loads the models kept loaded (`config/engine/keep`),
+one after another. GPUs are numbered as `nvidia-smi` numbers them
+(`CUDA_DEVICE_ORDER=PCI_BUS_ID`, for the engine and the image server alike), so
+`device = CUDA1` in a model's preset is the card `nvidia-smi` calls 1. See
+[admin.md](admin.md#models).
 
 `LLAMACPP_MODEL_DIR` and `LLAMACPP_MODEL_FILE` are required **by compose itself**
 (`:?`), so a missing one fails at `docker compose up` with the variable named,

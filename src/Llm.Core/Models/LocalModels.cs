@@ -21,6 +21,8 @@ public sealed class LocalModel
     /// <summary>"auto": llama.cpp fits the model to the GPU when it loads (layers or experts to RAM as needed); "manual": <see cref="GpuLayers"/> and <see cref="CpuMoe"/>.</summary>
     public string Placement { get; set; } = "auto";
     public int GpuLayers { get; set; } = 99;
+    /// <summary>The GPUs it runs on, by index as nvidia-smi numbers them ("0,1"); null: all of them.</summary>
+    public string? Devices { get; set; }
     /// <summary>Mixture-of-experts layers whose experts stay in RAM (llama.cpp --n-cpu-moe).</summary>
     public int CpuMoe { get; set; }
     public string KvType { get; set; } = "q8_0";

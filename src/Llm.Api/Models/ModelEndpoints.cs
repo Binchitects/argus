@@ -15,7 +15,7 @@ namespace Llm.Api.Models;
 public sealed record LocalModelRequest(
     string? Name, string? File, string? Projector, int? Context, int? MaxOutput, string? Placement, int? GpuLayers, int? CpuMoe, string? KvType, int? Parallel,
     int? Ubatch, bool? Mtp, string? DraftHead, int? DraftMax, bool? Yarn, double? Temperature, double? TopP, int? TopK, double? MinP, double? PresencePenalty,
-    string? ExtraPreset, bool? Thinking, bool? Tools, decimal? InputPerMtok, decimal? OutputPerMtok, string[]? Clear = null)
+    string? ExtraPreset, bool? Thinking, bool? Tools, decimal? InputPerMtok, decimal? OutputPerMtok, string[]? Clear = null, string? Devices = null)
 {
     /// <summary>A value to empty: a missing one is left as it is.</summary>
     public bool Clears(string field) => Clear?.Contains(field, StringComparer.OrdinalIgnoreCase) == true;
@@ -23,10 +23,12 @@ public sealed record LocalModelRequest(
 
 public sealed record ModelAccessRequest(Audience Audience, Guid[]? Groups);
 
+public sealed record KeepRequest(bool Keep);
+
 /// <summary>
-/// Admin → Models: every model at the gateway; for the engine's, loading and
-/// unloading them (live: llama.cpp's router) and adding more from the library;
-/// and for each, who may use it.
+/// Admin → Models: every model at the gateway; for the engine's, which to keep
+/// loaded, loading and unloading them (live: llama.cpp's router), the GPUs each
+/// runs on, and adding more from the library; and for each, who may use it.
 /// </summary>
 public static class ModelEndpoints
 {
@@ -41,11 +43,12 @@ public static class ModelEndpoints
         g.MapDelete("/{name}", RemoveAsync);
         g.MapPost("/{name}/load", LoadAsync);
         g.MapPost("/{name}/unload", UnloadAsync);
+        g.MapPut("/{name}/keep", KeepAsync);
         g.MapPut("/{name}/access", AccessAsync);
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
-        IOptions<EngineOptions> engine, IOptions<StackOptions> stack, CancellationToken ct)
+        HardwareProbe hardware, IOptions<EngineOptions> engine, IOptions<StackOptions> stack, CancellationToken ct)
     {
         var e = engine.Value;
         var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
@@ -58,12 +61,15 @@ public static class ModelEndpoints
             : new { Audience = Audience.Everyone, groups = Enumerable.Empty<object>() };
         GatewayModel? At(string name) => atGateway.FirstOrDefault(m => m.Name == name);
         var now = state.Now;
+        var kept = e.Enabled ? catalog.Kept() : [];
+        var hw = e.Enabled ? await hardware.GetAsync(ct) : null;
         var rows = new List<object>();
         if (e.Enabled && e.DefaultModel is { Length: > 0 } d)
         {
             rows.Add(new
             {
-                name = d, source = "env", mode = "chat", status = state.StatusOf(d), file = stack.Value.ModelFile,
+                name = d, source = "env", mode = "chat", status = state.StatusOf(d), file = stack.Value.ModelFile, kept = kept.Contains(d),
+                devices = e.DefaultSettings?.Devices,
                 context = int.TryParse(stack.Value.ModelContext, CultureInfo.InvariantCulture, out var c) ? c : (int?)null,
                 vision = At(d)?.Vision ?? false, access = Access(d),
                 profile = e.DefaultModelFile is { } df ? files.GetValueOrDefault(df) : null,
@@ -75,7 +81,7 @@ public static class ModelEndpoints
             {
                 name = m.Name, source = "local", mode = "chat",
                 // Not in the engine's list although it answered: not read yet (it restarts), or its preset refused.
-                status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null),
+                status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null), kept = kept.Contains(m.Name), m.Devices,
                 file = m.File, m.Projector, context = m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
                 m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
                 m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.OutputPerMtok,
@@ -91,9 +97,13 @@ public static class ModelEndpoints
         {
             engine = new
             {
-                enabled = e.Enabled, error = now.Error, checkedAt = now.At, active = e.Enabled ? catalog.Active() : null,
+                enabled = e.Enabled, error = now.Error, checkedAt = now.At, kept, max = e.ModelsMax,
+                // A place left besides the kept models: the others load when asked for (the least recently used unloads first).
+                onRequest = e.Enabled && kept.Count < e.ModelsMax,
                 loaded = now.Models.Where(m => m.Status == "loaded").Select(m => m.Name),
                 loading = now.Models.Where(m => m.Status == "loading").Select(m => m.Name),
+                gpus = hw?.Devices?.Select(g => new { g.Index, g.Name, g.Total }) ?? [],
+                plan = e.Enabled ? Plan(kept, local, e, library, hw) : null,
             },
             models = rows,
         });
@@ -184,9 +194,9 @@ public static class ModelEndpoints
         db.LocalModels.Remove(model);
         await db.ModelAccess.Where(a => a.Model == name).ExecuteDeleteAsync(ct);
         await db.SaveChangesAsync(ct);
-        if (catalog.Active() == name)
+        if (catalog.Kept().Contains(name))
         {
-            catalog.SetActive(engine.Value.DefaultModel ?? ModelCatalog.None);
+            catalog.SetKept(catalog.Kept().Where(k => k != name));
         }
         await audit.WriteAsync("model.remove", name);
         return Results.Ok(await AfterChangeAsync(catalog, watcher, null, ct));
@@ -208,16 +218,21 @@ public static class ModelEndpoints
         }
     }
 
+    /// <summary>Loads a model now, beside the kept ones: at the engine's limit, the one used least recently unloads (a kept one comes back).</summary>
     private static async Task<IResult> LoadAsync(string name, EngineClient engine, EngineState state, ModelCatalog catalog, EngineWatcher watcher,
-        ChatModels chatModels, Audit audit, CancellationToken ct)
+        ChatModels chatModels, IOptions<EngineOptions> options, Audit audit, CancellationToken ct)
     {
         if (!await KnownAsync(name, engine, state, ct))
         {
             return AuthEndpoints.Problem(404, "unknown", $"The engine has no model named {name} (yet: a model just added is there once the engine has restarted).");
         }
+        var kept = catalog.Kept();
+        if (!kept.Contains(name) && kept.Count >= options.Value.ModelsMax)
+        {
+            return AuthEndpoints.Problem(409, "full", FullMessage(kept.Count, options.Value.ModelsMax));
+        }
         try
         {
-            catalog.SetActive(name);
             await engine.LoadAsync(name, ct);
         }
         catch (EngineException ex)
@@ -239,9 +254,10 @@ public static class ModelEndpoints
         }
         try
         {
-            if (catalog.Active() == name)
+            // Unloaded on purpose: not kept any more, or it would come straight back.
+            if (catalog.Kept().Contains(name))
             {
-                catalog.SetActive(ModelCatalog.None);
+                catalog.SetKept(catalog.Kept().Where(k => k != name));
             }
             await engine.UnloadAsync(name, ct);
         }
@@ -253,6 +269,68 @@ public static class ModelEndpoints
         watcher.Wake();
         await audit.WriteAsync("model.unload", name);
         return Results.Accepted();
+    }
+
+    /// <summary>
+    /// Keeps a model loaded (loaded now, and again after a restart or when a model loaded on
+    /// request pushed it out), or stops keeping it. Refused when the engine's places are all
+    /// kept already, or when the kept models would not fit the GPUs and RAM together.
+    /// </summary>
+    private static async Task<IResult> KeepAsync(string name, KeepRequest body, AppDbContext db, EngineClient engine, EngineState state, ModelCatalog catalog,
+        ModelLibrary library, HardwareProbe hardware, EngineWatcher watcher, ChatModels chatModels, IOptions<EngineOptions> options, Audit audit, CancellationToken ct)
+    {
+        if (!await KnownAsync(name, engine, state, ct))
+        {
+            return AuthEndpoints.Problem(404, "unknown", $"The engine has no model named {name}.");
+        }
+        var e = options.Value;
+        var kept = catalog.Kept().ToList();
+        string? warning = null;
+        if (body.Keep && !kept.Contains(name))
+        {
+            if (kept.Count >= e.ModelsMax)
+            {
+                return AuthEndpoints.Problem(409, "full", $"The engine holds {e.ModelsMax} model{(e.ModelsMax == 1 ? "" : "s")} at once, and {(kept.Count == 1 ? "one is" : $"{kept.Count} are")} kept loaded already. Stop keeping one, or raise \"Models loaded at once\" (LLAMACPP_MODELS_MAX) under Settings.");
+            }
+            var plan = Plan([.. kept, name], await db.LocalModels.AsNoTracking().ToListAsync(ct), e, library, await hardware.GetAsync(ct));
+            if (plan.FirstError is { } error)
+            {
+                return AuthEndpoints.Problem(409, "memory", error.Message);
+            }
+            warning = plan.Problems.Count > 0 ? plan.Problems[0].Message : null;
+            kept.Add(name);
+        }
+        else if (!body.Keep)
+        {
+            kept.Remove(name);
+        }
+        catalog.SetKept(kept);
+        chatModels.Forget();
+        watcher.Wake();
+        await audit.WriteAsync(body.Keep ? "model.keep" : "model.unkeep", name);
+        return Results.Ok(new { kept, warning });
+    }
+
+    private static string FullMessage(int kept, int max) =>
+        $"Every place in the engine ({max}) keeps a model loaded, so no other can load beside them. Stop keeping one, or raise \"Models loaded at once\" (LLAMACPP_MODELS_MAX) under Settings.";
+
+    /// <summary>Whether these models, kept loaded together, fit the machine (the .env model's settings come from .env).</summary>
+    private static KeptPlan Plan(IReadOnlyList<string> kept, IReadOnlyList<LocalModel> local, EngineOptions e, ModelLibrary library, Hardware? hw)
+    {
+        var entries = library.List();
+        var models = new List<(LocalModel, LibraryEntry?)>();
+        foreach (var name in kept)
+        {
+            if (local.FirstOrDefault(m => m.Name == name) is { } m)
+            {
+                models.Add((m, library.Find(m.File)));
+            }
+            else if (name == e.DefaultModel && e.DefaultSettings is { } d)
+            {
+                models.Add((d, e.DefaultModelFile is { } f ? library.Find(f) : null));
+            }
+        }
+        return ModelAdvisor.PlanKept(models, entries, hw);
     }
 
     /// <summary>Whether the engine has the model: its last answer, or a fresh one when that did not know it.</summary>
@@ -325,6 +403,15 @@ public static class ModelEndpoints
         {
             return (AuthEndpoints.Problem(400, "extra", bad), null);
         }
+        if (body.Devices is { Length: > 0 } devices)
+        {
+            var chosen = Hardware.ParseDevices(devices);
+            if (chosen is null || (hardware?.Devices is { Count: > 0 } known && chosen.Any(i => known.All(g => g.Index != i))))
+            {
+                var have = hardware?.Devices is { Count: > 0 } k ? string.Join(", ", k.Select(g => g.Index)) : "0";
+                return (AuthEndpoints.Problem(400, "devices", $"Choose GPUs by their numbers, separated by commas: this machine has {have}."), null);
+            }
+        }
         var draft = Copy(m);
         Merge(draft, body, file);
         var advice = ModelAdvisor.Advise(draft, entry, library.List(), hardware);
@@ -342,7 +429,7 @@ public static class ModelEndpoints
         Name = m.Name, File = m.File, Projector = m.Projector, Context = m.Context, MaxOutput = m.MaxOutput, Placement = m.Placement, GpuLayers = m.GpuLayers,
         CpuMoe = m.CpuMoe, KvType = m.KvType, Parallel = m.Parallel, Ubatch = m.Ubatch, Mtp = m.Mtp, DraftHead = m.DraftHead, DraftMax = m.DraftMax, Yarn = m.Yarn,
         Temperature = m.Temperature, TopP = m.TopP, TopK = m.TopK, MinP = m.MinP, PresencePenalty = m.PresencePenalty, ExtraPreset = m.ExtraPreset,
-        Thinking = m.Thinking, Tools = m.Tools, InputPerMtok = m.InputPerMtok, OutputPerMtok = m.OutputPerMtok,
+        Thinking = m.Thinking, Tools = m.Tools, InputPerMtok = m.InputPerMtok, OutputPerMtok = m.OutputPerMtok, Devices = m.Devices,
     };
 
     /// <summary>The request's values over the model's: a missing value is kept, one named in "clear" emptied.</summary>
@@ -354,6 +441,8 @@ public static class ModelEndpoints
         m.MaxOutput = body.Clears("maxOutput") ? null : body.MaxOutput ?? m.MaxOutput;
         m.Placement = body.Placement ?? m.Placement;
         m.GpuLayers = body.GpuLayers ?? m.GpuLayers;
+        // "" or cleared: every GPU.
+        m.Devices = body.Clears("devices") ? null : body.Devices is { } dv ? (Hardware.ParseDevices(dv) is { } list ? string.Join(',', list) : null) : m.Devices;
         m.CpuMoe = body.CpuMoe ?? m.CpuMoe;
         m.KvType = body.KvType ?? m.KvType;
         m.Parallel = body.Parallel ?? m.Parallel;

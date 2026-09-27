@@ -42,26 +42,51 @@ they say that Argus is not set up, and how to turn it on.
 ### Models
 
 llama.cpp runs in **router mode**: one server that knows several models and
-loads one at a time (`LLAMACPP_MODELS_MAX`, default 1, since one GPU holds one
-large model). Switching is an API call, not a restart.
+holds up to `LLAMACPP_MODELS_MAX` of them loaded at once (default 1; **Models
+loaded at once** under Settings). Loading and unloading is an API call, not a
+restart. The page opens with **the engine**: how many it holds, which are kept
+loaded, and how full each GPU would be with them.
 
-- **Load** a model and the one before it unloads, for everyone. Answers wait
-  while it loads: seconds when its weights are in the page cache, minutes from
-  disk. **Unload** leaves the engine with none until one is loaded again. The
-  app remembers the last one loaded and loads it again after a restart.
+- **Keep loaded** (a switch on each engine model) pins a model: it loads now,
+  loads again when the engine starts, and comes back whenever it is not loaded.
+  At most `LLAMACPP_MODELS_MAX` can be kept. Keeping one is refused when their
+  caches and buffers together cannot fit the GPUs and RAM; when they fit only
+  by putting layers in RAM (two on one GPU that holds one, say), it is kept
+  with that warning. The list is `config/engine/keep`, which the engine reads
+  when it starts; without it, the `.env` model is kept.
+- **Loaded on request.** While a place is left beside the kept models, any other
+  model loads when someone asks for it: a chat, an API key, a coding agent. Its
+  first answer waits while it loads. At the limit, the model used least
+  recently unloads first; when that is a kept one, it comes back, and the one
+  not kept makes room. In the chat such a model reads **Loads when asked**.
+  When every place is kept, no other model loads on request, and the chat says
+  so. A change of the kept list that flips this restarts llama-server (the kept
+  models load again, one after another).
+- **Load** loads a model now, beside the kept ones (refused when every place is
+  kept). **Unload** unloads it, and stops keeping it. Answers wait while a
+  model loads: seconds when its weights are in the page cache, minutes from
+  disk.
+- **GPUs.** With two or more GPUs, a model's form asks which it runs on: all of
+  them (llama.cpp splits it by layer), or some (`device = CUDA0,...` in its
+  preset). The engine numbers GPUs as `nvidia-smi` does
+  (`CUDA_DEVICE_ORDER=PCI_BUS_ID`). The memory estimate uses only the GPUs
+  chosen, and the image server's share only on the first. Two models kept side
+  by side run best on different GPUs. The `.env` model runs on all of them
+  unless `LLAMACPP_EXTRA_ARGS` has `--device CUDA1`.
 - A model that **could not load** (an incomplete download, a file this
   llama.cpp cannot read, too little GPU memory) says so on its card; the reason
   is in the engine's log (`docker compose logs llamacpp`). It is not tried
-  again on its own: the `.env` model is loaded in its place, and the chat
-  works on.
+  again on its own; when every kept model failed, the `.env` model is loaded
+  in their place, and the chat works on.
 - **Add a model** picks a GGUF from the **model library** (`LLAMACPP_LIBRARY_DIR`,
   searched three levels deep; a split model is listed once, by its first part).
   **Each file is read for what it is** (its header and tensor table, not its
   name): a dense or mixture-of-experts language model, with full, hybrid
   (a cache in some layers only), sliding-window or recurrent attention; or an
   embedding model, reranker, vision projector, draft head, image model or LoRA
-  adapter. Only language models can be added: the engine serves one model at a
-  time, so the rest are listed with what they are for. A split model with a
+  adapter. Only language models can be added (the engine serves chat models;
+  the others belong to Argus, the image server or a model's own settings), so
+  the rest are listed with what they are for. A split model with a
   part missing is refused as incomplete.
 - **The form asks what that kind of model has, within its limits**, and shows
   them: the context from 4,096 to what it was trained for (up to 4× with YaRN,

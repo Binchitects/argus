@@ -6,13 +6,18 @@ import { admin, fakeApi, renderApp } from '@/test/utils'
 const everyone = { audience: 'Everyone', groups: [] }
 
 const view = (over: object = {}) => ({
-  engine: { enabled: true, error: null, checkedAt: '2026-09-25T10:00:00Z', active: 'Big-Model', loaded: ['Big-Model'], loading: [], ...over },
+  engine: {
+    enabled: true, error: null, checkedAt: '2026-09-25T10:00:00Z', kept: ['Big-Model'], max: 2, onRequest: true, loaded: ['Big-Model'], loading: [],
+    gpus: [{ index: 0, name: 'NVIDIA GeForce RTX 3090', total: 25.7e9 }],
+    plan: { problems: [], gpus: [{ index: 0, name: 'NVIDIA GeForce RTX 3090', budget: 22.5e9, need: 18e9, models: ['Big-Model'] }] },
+    ...over,
+  },
   models: [
-    { name: 'Big-Model', source: 'env', mode: 'chat', status: 'loaded', file: 'big/Big-Q4.gguf', context: 131072, vision: false, access: everyone },
+    { name: 'Big-Model', source: 'env', mode: 'chat', status: 'loaded', file: 'big/Big-Q4.gguf', context: 131072, vision: false, access: everyone, kept: true },
     {
       name: 'Small-Model', source: 'local', mode: 'chat', status: 'unloaded', file: 'small/Small-Q8.gguf', projector: null, context: 32768, maxOutput: null,
       gpuLayers: 99, cpuMoe: 0, kvType: 'q8_0', parallel: 1, extraPreset: null, thinking: true, tools: true, inputPerMtok: null, outputPerMtok: null,
-      vision: false, atGateway: true, access: { audience: 'Admins', groups: [] },
+      vision: false, atGateway: true, access: { audience: 'Admins', groups: [] }, kept: false, devices: null,
     },
     { name: 'flux-image', source: 'gateway', mode: 'image_generation', status: null, context: null, vision: false, access: everyone },
   ],
@@ -156,6 +161,56 @@ describe('admin models', () => {
     expect(within(dialog).getByLabelText('Name')).toHaveValue('mine')
   })
 
+  it('a model is kept loaded; with every place kept, no other loads', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: view() }),
+      'PUT /api/admin/models/Small-Model/keep': () => ({ json: { kept: ['Big-Model', 'Small-Model'], warning: null } }),
+    })
+    renderApp('/admin/models')
+    const engine = await screen.findByText(/Up to 2 models loaded at once, 1 kept loaded \(Big-Model\)/)
+    expect(engine).toHaveTextContent(/Any other loads when someone asks for it/)
+    expect(screen.getByRole('meter', { name: 'GPU 0: the models kept loaded' })).toHaveAttribute('aria-valuenow', String(18e9))
+    const small = screen.getByRole('heading', { name: /Small-Model/ }).closest('section')!
+    const big = screen.getByRole('heading', { name: /Big-Model/ }).closest('section')!
+    expect(within(big).getByText('Kept loaded')).toBeInTheDocument()
+    expect(within(big).getByRole('switch', { name: /Keep loaded/ })).toBeChecked()
+    await userEvent.click(within(small).getByRole('switch', { name: /Keep loaded/ }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path.endsWith('/keep'))?.body).toEqual({ keep: true }))
+  })
+
+  it('with every place kept, a model that is not kept cannot load', async () => {
+    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: view({ max: 1, onRequest: false }) }) })
+    renderApp('/admin/models')
+    expect(await screen.findByText(/Every place is kept, so no other model loads on request/)).toBeInTheDocument()
+    const small = screen.getByRole('heading', { name: /Small-Model/ }).closest('section')!
+    expect(within(small).getByRole('button', { name: /Load/ })).toBeDisabled()
+    expect(within(small).getByText('Otherwise it loads only when an admin loads it.')).toBeInTheDocument()
+  })
+
+  it('with two GPUs, a model runs on the ones chosen', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({
+        json: view({ gpus: [{ index: 0, name: 'RTX 3090', total: 25.7e9 }, { index: 1, name: 'RTX 4090', total: 25.7e9 }] }),
+      }),
+      'GET /api/admin/models/library': () => ({ json: library }),
+      'POST /api/admin/models/advice': (body) => ({ json: advice(body as { file: string }) }),
+      'POST /api/admin/models': () => ({ status: 201, json: { restarting: true, warning: null } }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
+    await userEvent.click(await screen.findByRole('option', { name: /Qwen-27B-Q4_K_M\.gguf/ }))
+    const gpus = within(dialog).getByRole('group', { name: 'GPUs' })
+    expect(within(gpus).getByRole('checkbox', { name: /GPU 0 · RTX 3090/ })).toBeChecked()
+    expect(within(gpus).getByText(/split across the GPUs/)).toBeInTheDocument()
+    await userEvent.click(within(gpus).getByRole('checkbox', { name: /GPU 0 · RTX 3090/ }))
+    expect(within(gpus).getByRole('checkbox', { name: /GPU 0/ })).not.toBeChecked()
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Add model' })).toBeEnabled())
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add model' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/models')?.body).toMatchObject({ devices: '1' }))
+  })
+
   it('a model that could not load says so, and where to find why', async () => {
     const v = view()
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: v.models.map((m) => (m.name === 'Small-Model' ? { ...m, status: 'failed' } : m)) } }) })
@@ -177,7 +232,7 @@ describe('admin models', () => {
   })
 
   it('without the llama.cpp engine, only who may use each model is set', async () => {
-    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...view({ enabled: false, active: null, loaded: [] }), models: view().models.slice(2) } }) })
+    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...view({ enabled: false, kept: [], loaded: [], plan: null }), models: view().models.slice(2) } }) })
     renderApp('/admin/models')
     expect(await screen.findByText(/needs the llama.cpp engine/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add a model' })).not.toBeInTheDocument()

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
+using Llm.Core.Models;
 using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Models;
@@ -35,6 +36,10 @@ public sealed class EngineOptions
     public string? ImageTextEncoder { get; set; }
     /// <summary>The .env model's file relative to the library, when it is inside it.</summary>
     public string? DefaultModelFile { get; set; }
+    /// <summary>LLAMACPP_MODELS_MAX: how many models may be loaded at once, those kept loaded included.</summary>
+    public int ModelsMax { get; set; } = 1;
+    /// <summary>The .env model's settings (MODEL_CONTEXT, LLAMACPP_*), for the memory of the models kept loaded together.</summary>
+    public LocalModel? DefaultSettings { get; set; }
 }
 
 /// <summary>A model in the engine's list, and whether it is loaded.</summary>

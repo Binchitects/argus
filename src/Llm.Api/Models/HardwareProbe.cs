@@ -63,12 +63,29 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
         var names = await QueryAsync("nvidia_smi_gpu_info", ct);
         var cap = await QueryAsync("nvidia_smi_power_limit_watts", ct);
         var own = await QueryAsync("nvidia_smi_power_default_limit_watts", ct);
+        var index = await QueryAsync("nvidia_smi_index", ct);
         var o = engine.Value;
+        // One GPU per uuid, numbered as nvidia-smi numbers them (the engine runs with CUDA_DEVICE_ORDER=PCI_BUS_ID, so CUDA0 is index 0).
+        static Dictionary<string, (Dictionary<string, string> Labels, double Value)> ByUuid(List<(Dictionary<string, string> Labels, double Value)> rows) =>
+            rows.GroupBy(r => r.Labels.GetValueOrDefault("uuid") ?? "").ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var indexOf = ByUuid(index);
+        var nameOf = ByUuid(names);
+        var reservedOf = ByUuid(reserved);
+        var devices = gpus.Select((g, i) =>
+            {
+                var uuid = g.Labels.GetValueOrDefault("uuid") ?? "";
+                return new GpuDevice(
+                    indexOf.TryGetValue(uuid, out var x) ? (int)x.Value : i,
+                    nameOf.TryGetValue(uuid, out var n) ? n.Labels.GetValueOrDefault("name") ?? "GPU" : "GPU",
+                    (long)g.Value,
+                    reservedOf.TryGetValue(uuid, out var r) ? (long)r.Value : 0);
+            })
+            .OrderBy(d => d.Index).ToList();
         return new Hardware(
             names.Select(n => n.Labels.GetValueOrDefault("name")).FirstOrDefault(n => !string.IsNullOrEmpty(n)),
             gpus.Count, (long)gpus.Sum(g => g.Value), (long)reserved.Sum(r => r.Value), o.ImageReserveBytes,
             (long)ram[0].Value, o.RamReserveBytes,
-            cap.Count > 0 ? cap.Min(c => c.Value) : null, own.Count > 0 ? own.Min(c => c.Value) : null);
+            cap.Count > 0 ? cap.Min(c => c.Value) : null, own.Count > 0 ? own.Min(c => c.Value) : null, devices);
     }
 
     private async Task<List<(Dictionary<string, string> Labels, double Value)>> QueryAsync(string query, CancellationToken ct)

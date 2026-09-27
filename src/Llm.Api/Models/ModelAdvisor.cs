@@ -8,15 +8,56 @@ namespace Llm.Api.Models;
 /// <param name="ImageReserve">What the image server may take (IMAGEGEN_MAX_VRAM) when it runs.</param>
 /// <param name="RamReserve">RAM kept for everything else (LLAMACPP_RAM_RESERVE_GB).</param>
 /// <param name="PowerLimit">The GPU's power cap in watts (GPU_POWER_LIMIT_W), and <paramref name="PowerDefault"/> its own.</param>
+/// <param name="Devices">Each GPU, by nvidia-smi's index (the engine's CUDA0, CUDA1... in the same order).</param>
 public sealed record Hardware(string? GpuName, int Gpus, long GpuTotal, long GpuReserved, long ImageReserve, long RamTotal, long RamReserve,
-    double? PowerLimit = null, double? PowerDefault = null)
+    double? PowerLimit = null, double? PowerDefault = null, IReadOnlyList<GpuDevice>? Devices = null)
 {
     /// <summary>What llama.cpp's fit leaves free on each GPU (its --fit-target, 1024 MiB).</summary>
     public const long FitMargin = 1024L << 20;
 
     public long GpuForModels => Math.Max(0, GpuTotal - GpuReserved - ImageReserve - (FitMargin * Math.Max(1, Gpus)));
     public long RamForModels => Math.Max(0, RamTotal - RamReserve);
+
+    /// <summary>
+    /// The machine as a model placed on these GPUs sees it (null or empty: all). The image
+    /// server runs on the first GPU, so only a model that uses it gives up its share.
+    /// </summary>
+    public Hardware On(IReadOnlyCollection<int>? indices)
+    {
+        if (indices is not { Count: > 0 } || Devices is not { Count: > 0 } all)
+        {
+            return this;
+        }
+        var chosen = all.Where(d => indices.Contains(d.Index)).ToList();
+        if (chosen.Count == 0)
+        {
+            return this;
+        }
+        return this with
+        {
+            GpuName = chosen[0].Name, Gpus = chosen.Count, GpuTotal = chosen.Sum(d => d.Total), GpuReserved = chosen.Sum(d => d.Reserved),
+            ImageReserve = chosen.Any(d => d.Index == all[0].Index) ? ImageReserve : 0, Devices = chosen,
+        };
+    }
+
+    /// <summary>A model's GPUs from its setting ("0,1"); null: all (or a setting that is not a list of indices).</summary>
+    public static IReadOnlyList<int>? ParseDevices(string? devices)
+    {
+        var list = new List<int>();
+        foreach (var d in (devices ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!int.TryParse(d, NumberStyles.None, CultureInfo.InvariantCulture, out var i))
+            {
+                return null;
+            }
+            list.Add(i);
+        }
+        return list.Count == 0 ? null : [.. list.Distinct().Order()];
+    }
 }
+
+/// <summary>One GPU: its index as nvidia-smi numbers it, its name, and its memory.</summary>
+public sealed record GpuDevice(int Index, string Name, long Total, long Reserved);
 
 public sealed record Bounds(int Min, int Max);
 
@@ -39,6 +80,15 @@ public sealed record MemoryEstimate(
     long GpuWeights, long GpuCache, long GpuCompute, long GpuTotal, long? GpuBudget,
     long RamWeights, long RamCache, long RamTotal, long? RamBudget,
     int GpuLayers, int Layers, int ExpertLayersInRam, int MoeLayers, string Fit, bool Approximate);
+
+/// <summary>What one GPU would hold of the models kept loaded: its budget for models, their estimate, and which they are.</summary>
+public sealed record GpuUse(int Index, string Name, long Budget, long Need, IReadOnlyList<string> Models);
+
+/// <summary>Whether the models kept loaded fit together, and how full each GPU would be.</summary>
+public sealed record KeptPlan(IReadOnlyList<ModelProblem> Problems, IReadOnlyList<GpuUse> Gpus)
+{
+    public ModelProblem? FirstError => Problems.FirstOrDefault(p => p.Error);
+}
 
 /// <summary>A setting that cannot be used (an error), or one to know about (a warning).</summary>
 public sealed record ModelProblem(string Field, string Message, bool Error);
@@ -72,8 +122,12 @@ public static class ModelAdvisor
 
     private sealed record Inputs(int Context, int Parallel, double CacheBytes, int Ubatch, bool Mtp, long DraftBytes, long ProjectorBytes);
 
+    private static string G(long b) => (b / (double)(1L << 30)).ToString("0.0", CultureInfo.InvariantCulture) + " GiB";
+
     public static ModelAdvice Advise(LocalModel m, LibraryEntry file, IReadOnlyList<LibraryEntry> library, Hardware? hw)
     {
+        // The machine as this model sees it: the GPUs it may use.
+        hw = hw?.On(Hardware.ParseDevices(m.Devices));
         var p = file.Profile;
         var problems = new List<ModelProblem>();
         if (p.Kind != ModelKind.Language)
@@ -211,9 +265,67 @@ public static class ModelAdvisor
         }
     }
 
+    /// <summary>
+    /// Whether the models kept loaded fit together. Each one's estimate (alone, on its GPUs)
+    /// is spread over its GPUs by what each has for models. Their caches and buffers must
+    /// fit the GPUs and RAM together, or one would not load; past that, a GPU asked for more
+    /// than it has means the last to load puts layers in RAM, and RAM asked for more means
+    /// weights page in from disk: slower, not broken.
+    /// </summary>
+    public static KeptPlan PlanKept(IReadOnlyList<(LocalModel Model, LibraryEntry? File)> kept, IReadOnlyList<LibraryEntry> library, Hardware? hw)
+    {
+        var problems = new List<ModelProblem>();
+        if (hw is null || kept.Count == 0)
+        {
+            return new KeptPlan(problems, []);
+        }
+        var devices = hw.Devices is { Count: > 0 } d ? d : [new GpuDevice(0, hw.GpuName ?? "GPU", hw.GpuTotal, hw.GpuReserved)];
+        var budget = devices.ToDictionary(x => x.Index,
+            x => Math.Max(0, x.Total - x.Reserved - Hardware.FitMargin - (x.Index == devices[0].Index ? hw.ImageReserve : 0)));
+        var need = devices.ToDictionary(x => x.Index, _ => 0L);
+        var users = devices.ToDictionary(x => x.Index, _ => new List<string>());
+        long buffers = 0, ram = 0;
+        foreach (var (m, file) in kept)
+        {
+            if (file is null)
+            {
+                problems.Add(new("memory", $"{m.Name}'s file is outside the model library, so its memory is not counted here.", false));
+                continue;
+            }
+            if (Advise(m, file, library, hw).Estimate is not { Fit: not "unknown" } e)
+            {
+                continue;
+            }
+            var on = Hardware.ParseDevices(m.Devices);
+            var mine = devices.Where(x => on is null || on.Contains(x.Index)).ToList();
+            var capacity = mine.Sum(x => budget[x.Index]);
+            foreach (var x in mine)
+            {
+                need[x.Index] += capacity > 0 ? (long)(e.GpuTotal * ((double)budget[x.Index] / capacity)) : e.GpuTotal / mine.Count;
+                users[x.Index].Add(m.Name);
+            }
+            buffers += e.GpuCache + e.GpuCompute + e.RamCache;
+            ram += e.RamTotal;
+        }
+        var gpus = devices.Select(x => new GpuUse(x.Index, x.Name, budget[x.Index], need[x.Index], users[x.Index])).ToList();
+        if (buffers > hw.GpuForModels + hw.RamForModels)
+        {
+            problems.Add(new("memory", $"Together their caches and buffers need {G(buffers)}, and the GPUs and RAM have {G(hw.GpuForModels + hw.RamForModels)} for models: one would not load. Keep fewer loaded, or give them smaller contexts.", true));
+        }
+        foreach (var g in gpus.Where(g => g.Need > g.Budget))
+        {
+            problems.Add(new("memory", $"On GPU {g.Index} ({g.Name}) they would use about {G(g.Need)} of its {G(g.Budget)}: the last to load puts layers in RAM and answers slower. Place them on different GPUs, or keep fewer loaded.", false));
+        }
+        if (ram > hw.RamForModels)
+        {
+            problems.Add(new("memory", $"Together they keep about {G(ram)} in RAM, which has {G(hw.RamForModels)} for models: weights page in from disk and answers slow down.", false));
+        }
+        return new KeptPlan(problems, gpus);
+    }
+
     private static void MemoryProblems(MemoryEstimate e, bool manual, List<ModelProblem> problems)
     {
-        string G(long b) => (b / (double)(1L << 30)).ToString("0.0", CultureInfo.InvariantCulture) + " GiB";
+
         if (e.GpuBudget is not { } budget || e.RamBudget is not { } ram)
         {
             return;
