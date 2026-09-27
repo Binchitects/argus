@@ -186,9 +186,15 @@ themselves; **curl, Python, Node and every SDK on another machine do not** — r
 
 Each person sets up their own tools from **Connect your tools** (`/setup`, in the
 sidebar and on the home page): it makes their API key (shown once), gives the
-gateway's address and the models, the exact lines for Claude Code, Qwen Code and
-the OpenAI SDK, the Argus MCP command, and the stack's certificate to download
-when the deployment uses its own. An admin can also make a key for someone under
+gateway's address and the models, and for the tool they choose, numbered steps
+with this deployment's address, the model and its limits filled in: where the
+settings live, what to put there, how to start it, Argus over MCP (with their
+own GitLab token) and how it trusts the certificate, which is there to download
+when the deployment uses its own. The tools: Claude Code, Codex CLI (the gateway
+serves the Responses API it uses), Qwen Code, OpenCode, Aider, Hermes, OpenClaw,
+DeepSeek Harness, Continue, Cline and Roo Code, Python and curl. The formats
+follow each tool's documentation (`src/web/src/pages/setup-tools.ts`); a tool
+that changes its format needs that file changed. An admin can also make a key for someone under
 **Admin → People**. Every OpenAI-compatible tool needs the same four things:
 
 | setting | value |

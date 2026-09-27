@@ -9,115 +9,17 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field } from '@/components/ui/field'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, errorMessage } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
+import { certificateHint, GITLAB, KEY, tools, type Context, type Step, type Tool } from './setup-tools'
 
 interface ChatConfig {
   model: string | null
   models: { name: string; context: number | null; maxOutput: number | null; vision: boolean; tools: boolean; thinking: boolean; loaded: boolean }[]
   argus: boolean
   gitlabUrl: string | null
-}
-
-/** Where the key is kept in each snippet: an environment variable, never pasted into a file. */
-const KEY = 'LLM_SERVICE_API_KEY'
-
-/** Setups for each tool, from the gateway's address and the chosen model. */
-function setups(root: string, model: string) {
-  const base = `${root}/v1`
-  return [
-    {
-      id: 'claude',
-      title: 'Claude Code',
-      note: 'The gateway speaks Anthropic\'s API too, so Claude Code runs on this model.',
-      code: `export ANTHROPIC_BASE_URL=${root}
-export ANTHROPIC_AUTH_TOKEN="$${KEY}"
-export ANTHROPIC_MODEL=${model}
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=${model}
-claude`,
-    },
-    {
-      id: 'qwen',
-      title: 'Qwen Code',
-      note: 'Qwen Code reads the OpenAI variables.',
-      code: `export OPENAI_BASE_URL=${base}
-export OPENAI_API_KEY="$${KEY}"
-export OPENAI_MODEL=${model}
-qwen`,
-    },
-    {
-      id: 'opencode',
-      title: 'OpenCode',
-      note: 'In opencode.json (the project) or ~/.config/opencode/opencode.json.',
-      code: JSON.stringify(
-        {
-          $schema: 'https://opencode.ai/config.json',
-          provider: {
-            'llm-service': {
-              npm: '@ai-sdk/openai-compatible',
-              name: 'LLM Service',
-              options: { baseURL: base, apiKey: `{env:${KEY}}` },
-              models: { [model]: { name: model } },
-            },
-          },
-          model: `llm-service/${model}`,
-        },
-        null,
-        2,
-      ),
-    },
-    {
-      id: 'continue',
-      title: 'Continue',
-      note: 'In ~/.continue/config.yaml, with your key in place of the placeholder.',
-      code: `models:
-  - name: ${model}
-    provider: openai
-    model: ${model}
-    apiBase: ${base}
-    apiKey: <your API key>
-    roles: [chat, edit, apply]`,
-    },
-    {
-      id: 'python',
-      title: 'Python',
-      note: 'The OpenAI SDK, pointed at the gateway.',
-      code: `import os
-from openai import OpenAI
-
-client = OpenAI(base_url="${base}", api_key=os.environ["${KEY}"])
-reply = client.chat.completions.create(
-    model="${model}",
-    messages=[{"role": "user", "content": "Hello"}],
-)
-print(reply.choices[0].message.content)`,
-    },
-    {
-      id: 'curl',
-      title: 'curl',
-      note: 'Any OpenAI-compatible client works the same way.',
-      code: `curl ${base}/chat/completions \\
-  -H "Authorization: Bearer $${KEY}" \\
-  -H "Content-Type: application/json" \\
-  -d '{"model": "${model}", "messages": [{"role": "user", "content": "Hello"}]}'`,
-    },
-  ]
-}
-
-/** Argus over MCP, for a coding agent: each person with their own GitLab token, so it sees what they may read. */
-function argusSetups(url: string) {
-  return [
-    { id: 'claude', title: 'Claude Code', code: `claude mcp add --transport http argus ${url} \\\n  --header "Authorization: Bearer $GITLAB_TOKEN"` },
-    { id: 'qwen', title: 'Qwen Code', code: `qwen mcp add argus ${url} -t http \\\n  -H "Authorization: Bearer $GITLAB_TOKEN" --trust` },
-    {
-      id: 'json',
-      title: 'Other MCP clients',
-      code: JSON.stringify({ mcpServers: { argus: { url, headers: { Authorization: 'Bearer <your GitLab token>' } } } }, null, 2),
-    },
-  ]
 }
 
 const tokens = (n: number | null) => (n ? n.toLocaleString('en-US') : '—')
@@ -131,10 +33,22 @@ export function ConnectPage() {
   const config = useQuery({ queryKey: ['chat', 'config'], queryFn: ({ signal }) => api<ChatConfig>('/api/chat/config', { signal }) })
   const connect = useQuery({ queryKey: ['account', 'connect'], queryFn: ({ signal }) => api<{ certificate: boolean }>('/api/account/connect', { signal }) })
   const [chosen, setChosen] = useState<string | null>(null)
+  const [toolId, setToolId] = useState(remembered)
   const root = serviceUrl('gateway').replace(/\/$/, '')
   const models = config.data?.models ?? []
   const model = chosen ?? config.data?.model ?? models[0]?.name ?? 'your-model'
+  const current = models.find((m) => m.name === model)
   const argusUrl = `${serviceUrl('argus')}mcp`
+  const tool = tools.find((t) => t.id === toolId) ?? tools[0]!
+  const context: Context = { root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, argusUrl }
+  const choose = (id: string) => {
+    setToolId(id)
+    try {
+      localStorage.setItem(TOOL_KEY, id)
+    } catch {
+      // private window: the choice lasts for this page only
+    }
+  }
   return (
     <>
       <PageHeader
@@ -178,41 +92,50 @@ export function ConnectPage() {
           <CardHeader>
             <CardTitle>Set up your tool</CardTitle>
             <CardDescription>
-              Put your key in <code className="font-mono">{KEY}</code> first (<code className="font-mono">export {KEY}=…</code>), then paste the setup.
+              Put your key in <code className="font-mono">{KEY}</code> first (<code className="font-mono">export {KEY}=…</code>), choose your tool, and follow its steps.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4">
-            {models.length > 1 && (
-              <Field label="Model" className="max-w-sm">
-                <Select value={model} onValueChange={setChosen}>
+          <CardContent className="grid gap-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Your tool">
+                <Select value={tool.id} onValueChange={choose}>
                   <SelectTrigger className="min-w-0 [&>span]:truncate">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {models.map((m) => (
-                      <SelectItem key={m.name} value={m.name}>
-                        {m.name}
-                      </SelectItem>
+                    {groups.map((g) => (
+                      <SelectGroup key={g}>
+                        <SelectLabel>{g}</SelectLabel>
+                        {tools
+                          .filter((t) => t.group === g)
+                          .map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.title}
+                            </SelectItem>
+                          ))}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
-            )}
-            <Tabs defaultValue="claude" className="grid grid-cols-[minmax(0,1fr)]">
-              <TabsList className="grid h-auto w-full grid-cols-3 gap-1 sm:inline-flex sm:h-9 sm:w-fit">
-                {setups(root, model).map((s) => (
-                  <TabsTrigger key={s.id} value={s.id} className="h-7">
-                    {s.title}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              {setups(root, model).map((s) => (
-                <TabsContent key={s.id} value={s.id} className="grid gap-2">
-                  <p className="text-sm text-muted-foreground">{s.note}</p>
-                  <CodeBlock code={s.code} label={`the ${s.title} setup`} />
-                </TabsContent>
-              ))}
-            </Tabs>
+              {models.length > 1 && (
+                <Field label="Model">
+                  <Select value={model} onValueChange={setChosen}>
+                    <SelectTrigger className="min-w-0 [&>span]:truncate">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {models.map((m) => (
+                        <SelectItem key={m.name} value={m.name}>
+                          {m.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+            </div>
+            <Tutorial tool={tool} context={context} argus={config.data?.argus === true} certificate={connect.data?.certificate === true} />
           </CardContent>
         </Card>
 
@@ -233,20 +156,11 @@ export function ConnectPage() {
                   </a>
                 </Button>
               )}
-              <Tabs defaultValue="claude" className="grid grid-cols-[minmax(0,1fr)]">
-                <TabsList>
-                  {argusSetups(argusUrl).map((s) => (
-                    <TabsTrigger key={s.id} value={s.id}>
-                      {s.title}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                {argusSetups(argusUrl).map((s) => (
-                  <TabsContent key={s.id} value={s.id}>
-                    <CodeBlock code={s.code} label={`the Argus setup for ${s.title}`} />
-                  </TabsContent>
-                ))}
-              </Tabs>
+              <p className="text-sm text-muted-foreground">
+                Your tool's steps above include Argus. For another MCP client, the address and this header are all it needs; keep the token in{' '}
+                <code className="font-mono">{GITLAB}</code>, not in a file you share.
+              </p>
+              <CodeBlock code={JSON.stringify({ mcpServers: { argus: { url: argusUrl, headers: { Authorization: 'Bearer <your GitLab token>' } } } }, null, 2)} label="the Argus setup for other MCP clients" />
             </CardContent>
           </Card>
         )}
@@ -274,9 +188,9 @@ export function ConnectPage() {
                 Node adds a certificate to the ones it trusts; Python and curl replace them, so they take the bundle (the public CAs as well).
               </p>
               <CodeBlock
-                code={`# Node tools (Claude Code, Qwen Code, OpenCode)
+                code={`# Node tools (Claude Code, Qwen Code, OpenCode, OpenClaw, DeepSeek Harness, editors)
 export NODE_EXTRA_CA_CERTS=~/llm-service-ca.crt
-# Python (the OpenAI SDK)
+# Python (the OpenAI SDK, Aider) and Codex
 export SSL_CERT_FILE=~/llm-service-bundle.crt
 # curl
 curl --cacert ~/llm-service-bundle.crt …`}
@@ -287,5 +201,61 @@ curl --cacert ~/llm-service-bundle.crt …`}
         )}
       </div>
     </>
+  )
+}
+
+const TOOL_KEY = 'setup.tool'
+const groups = [...new Set(tools.map((t) => t.group))]
+
+function remembered(): string {
+  try {
+    return localStorage.getItem(TOOL_KEY) ?? 'claude'
+  } catch {
+    return 'claude'
+  }
+}
+
+/** One tool's steps, numbered: its settings with this deployment filled in, Argus where it speaks MCP, and its certificate setting. */
+function Tutorial({ tool, context, argus, certificate }: { tool: Tool; context: Context; argus: boolean; certificate: boolean }) {
+  const steps: Step[] = [...tool.steps(context)]
+  const argusSteps = argus && typeof tool.argus === 'function' ? tool.argus(context) : []
+  const hint = certificateHint[tool.certificate as keyof typeof certificateHint] ?? tool.certificate
+  return (
+    <section aria-label={`Setting up ${tool.title}`} className="grid gap-4">
+      <p className="text-sm text-muted-foreground">{tool.about}</p>
+      <StepList steps={steps} tool={tool.title} start={1} />
+      {argus && (
+        <div className="grid gap-3 border-t pt-4">
+          <h3 className="text-sm font-medium">Argus, with your GitLab token in {GITLAB}</h3>
+          {argusSteps.length > 0 ? (
+            <StepList steps={argusSteps} tool={tool.title} start={steps.length + 1} />
+          ) : (
+            <p className="text-sm text-muted-foreground">{tool.argus as string}</p>
+          )}
+        </div>
+      )}
+      {certificate && <p className="text-xs text-muted-foreground">If {tool.title} rejects the certificate: {hint.charAt(0).toLowerCase() + hint.slice(1)}</p>}
+    </section>
+  )
+}
+
+function StepList({ steps, tool, start }: { steps: Step[]; tool: string; start: number }) {
+  return (
+    <ol className="grid gap-4" start={start}>
+      {steps.map((s, i) => (
+        <li key={i} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2 gap-y-1.5">
+          <span aria-hidden="true" className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary-ink">
+            {start + i}
+          </span>
+          <p className="text-sm">{s.text}</p>
+          {s.code && (
+            <div className="col-start-2 grid gap-1">
+              {s.file && s.file !== 'shell' && <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">{s.file}</p>}
+              <CodeBlock code={s.code} label={`${tool}: ${s.file === 'shell' || !s.file ? 'the commands' : s.file}`} />
+            </div>
+          )}
+        </li>
+      ))}
+    </ol>
   )
 }
