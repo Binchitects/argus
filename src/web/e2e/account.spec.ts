@@ -31,8 +31,16 @@ test('connect your tools: the address, the setups and the certificate are the re
   const gateway = `${url.protocol}//gateway.${url.host}`
   await expect(page.getByText(`${gateway}/v1`, { exact: true })).toBeVisible()
   await expect(page.getByText(/export ANTHROPIC_BASE_URL=/)).toContainText(`ANTHROPIC_BASE_URL=${gateway}`)
-  // The certificate the page offers is the one the stack serves, and the bundle carries it with the public CAs.
   const cert = await page.request.get('/api/account/certificate')
+  const offered = page.getByRole('link', { name: /The certificate/ })
+  if (!(await (await page.request.get('/api/account/connect')).json()).certificate) {
+    // No certificate exported (the app without its proxy, as in CI): nothing is offered.
+    await expect(offered).toHaveCount(0)
+    expect(cert.status()).toBe(404)
+    return
+  }
+  // The certificate offered is the one the stack serves, and the bundle carries it with the public CAs.
+  await expect(offered).toBeVisible()
   expect(cert.status()).toBe(200)
   const pem = await cert.text()
   expect(pem).toContain('BEGIN CERTIFICATE')
