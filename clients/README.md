@@ -27,7 +27,7 @@ correct as far as that goes, but nobody has run them from this repository.
 be established before the process starts:
 
 ```bash
-export NODE_EXTRA_CA_CERTS="$PWD/stack/config/traefik/certs/tls.crt"
+export NODE_EXTRA_CA_CERTS="$PWD/deploy/config/traefik/certs/tls.crt"
 ```
 
 `deploy/scripts/with-ca.sh` prints the equivalents for curl, python and git.
@@ -47,7 +47,7 @@ the tool calls fail.
 
 ```bash
 ARGUS_TOKEN=<gitlab-pat> \
-NODE_EXTRA_CA_CERTS="$PWD/stack/config/traefik/certs/tls.crt" \
+NODE_EXTRA_CA_CERTS="$PWD/deploy/config/traefik/certs/tls.crt" \
   dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
   "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
 ```
@@ -72,7 +72,7 @@ qwen mcp add argus https://argus.llm.localhost/mcp -t http \
   -H 'Authorization: Bearer <gitlab-pat>' --trust \
   --description 'Organisation code index'
 
-NODE_EXTRA_CA_CERTS="$PWD/stack/config/traefik/certs/tls.crt" \
+NODE_EXTRA_CA_CERTS="$PWD/deploy/config/traefik/certs/tls.crt" \
   qwen --approval-mode yolo \
   "Use the argus MCP tool find_symbol to look up the symbol DecodeFrame."
 ```

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bring the throwaway GitLab up, prove Argus against it, and take it down again.
+# Bring the throwaway GitLab up, seed it, and take it down again.
 #
 # WHY THIS EXISTS
 #
@@ -14,7 +14,7 @@
 # instance down on the way out -- INCLUDING when seeding or verification fails,
 # because the run that leaves it up is precisely the one nobody comes back to.
 #
-#   ./tools/test-gitlab/run.sh                 # up, seed, verify, down
+#   ./tools/test-gitlab/run.sh                 # up, seed, down
 #   ./tools/test-gitlab/run.sh --keep          # leave it up when finished
 #   ./tools/test-gitlab/run.sh --skip-verify   # up and seed only
 #   ./tools/test-gitlab/run.sh --down          # stop it and delete its data
@@ -154,71 +154,8 @@ if [ "$SKIP_VERIFY" = 1 ]; then
   exit 0
 fi
 
-# Two things the verification needs and the host cannot give it.
-#
-# Where it runs. `llm-net`, the stack's own network, rather than the host's:
-# the embedding backend is `ollama` on that network and is not published on the
-# host, so a host-network run cannot reach it and the vector half of the index
-# can never be exercised. From `llm-net` the fixture GitLab, which IS published
-# on 8929, is reached as `host.docker.internal` -- hence the extra host, which
-# Docker Desktop provides for free and Linux needs told.
-#
-# What it is told. ARGUS_TEST_WORK keeps the mirrors and index off the checkout,
-# because SQLite in WAL mode cannot open its shared-memory file on some
-# bind-mounted filesystems: on an NTFS checkout `argus index` dies with "disk
-# I/O error" before indexing a single file, which is why this verification had
-# only ever been run by hand from a different directory. ARGUS_TEST_GITLAB_URL
-# rebases the GitLab the seed recorded onto the address that works from here.
-#
-# ARGUS_OLLAMA_URL is passed only when the stack's embedder is actually up, so
-# "no embedder" is reported as a gap rather than turning into a failure about a
-# component that was never part of the fixture.
-ollama_up=0
-if command -v docker >/dev/null 2>&1 && \
-   [ -n "$(docker ps -q -f 'name=^ollama$' 2>/dev/null)" ]; then
-  ollama_up=1
-fi
-
-verify_in_image() {
-  local script="$1"
-  say "verifying: ${script##*/}  (embedder: ${2})"
-  docker run --rm --user root \
-    --network llm-net --add-host host.docker.internal:host-gateway \
-    -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 \
-    -e ARGUS_TEST_WORK=/argus-test-work \
-    -e ARGUS_TEST_GITLAB_URL=http://host.docker.internal:8929 \
-    -e ARGUS_OLLAMA_URL="$2" \
-    -v argus-test-work:/argus-test-work \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "$(command -v docker)":/usr/local/bin/docker \
-    -v "$ROOT:/src" -w /src \
-    --entrypoint python argus:latest "/src/tools/test-gitlab/$script"
-}
-
-if [ "$ollama_up" = 1 ]; then
-  # 11434 is ollama's port on llm-net; the name resolves because this container
-  # is attached to that network.
-  EMBED_URL="http://ollama:11434"
-else
-  warn "the stack's ollama is not running, so the vector index cannot be built."
-  warn "semantic_search and which_repo will be reported as NOT COVERED."
-  warn "Start it with: docker compose -f deploy/docker-compose.yml up -d ollama"
-  EMBED_URL=""
-fi
-
-# The verifiers ran inside the Python Argus image and drove the Python package.
-# That implementation is retired (src/Argus is its .NET port, conformance-tested
-# against it); until they are ported, this harness brings the GitLab up and seeds
-# it, which is what the chat's Argus browser tests need.
-if [ -f "$ROOT/tools/test-gitlab/verify.py" ] && docker image inspect argus:latest >/dev/null 2>&1 \
-   && docker run --rm --entrypoint python argus:latest -c "import argus" >/dev/null 2>&1; then
-  # In-process query-layer verification: the ACL, the include graph, the counts.
-  verify_in_image verify.py "$EMBED_URL"
-  # Every MCP tool over the wire, with its declared shape and the ACL applied.
-  # This is the only thing that proves the SYSTEM filters rather than the code.
-  verify_in_image verify_tools.py "$EMBED_URL"
-  say "verified"
-else
-  warn "not verified: the verifiers need the Python Argus, which is retired (see README)."
-  warn "The GitLab is seeded; tools/test-gitlab/seeded.json has its people and tokens."
-fi
+# The verifiers (verify_tools.py, the per-tool contract) drove the retired
+# Python Argus in-process. Until they drive the .NET service, this harness
+# brings the GitLab up and seeds it, which the chat's Argus browser tests need.
+warn "not verified: the verifiers are not yet ported to the .NET Argus (see README)."
+warn "The GitLab is seeded; tools/test-gitlab/seeded.json has its people and tokens."

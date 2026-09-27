@@ -6,7 +6,7 @@ console and dashboards. **The whole deployment is one `.env` file and
 `docker compose up`.** There is no setup script.
 
 **24 services** are enabled by the default profile set, with 15 profiles to
-choose from — `argus` adds the code index, `embed` adds Ollama, `tracing` adds
+choose from — `argus` adds the code index (with its embedder), `tracing` adds
 Langfuse, and `logging` (Loki + Promtail) is **on by default**.
 
 ## Deploying — read this part
@@ -108,7 +108,7 @@ them:
 | container images | `docker save` / `docker load`, including the three built locally, so the target never builds and never pulls |
 | the GGUF weights | `--with-models`; `LLAMACPP_MODEL_DIR` is rewritten to a **relative** path, so the bundle runs from wherever it is unpacked |
 | `model-init`'s Hugging Face check | `LLAMACPP_HF_FILES` is emptied. This is not tidiness: it asks the remote for the file size *before* accepting a local file, so with no network it exits 1 even when every weight is already on disk — and `llamacpp` declares it `service_completed_successfully`, so that exit 1 means the **engine never starts** |
-| Ollama's embedding model | included, and restored into its volume. It is a Docker **volume**, not a bind mount, so nothing in the checkout hints that it is missing — and without it `docs_search` cannot embed a query |
+| Argus's embedding model | included in `.airgap/embed/`, and the shipped `.env.airgap` points `EMBED_MODEL_DIR` at it, so `embed-init` finds it rather than trying to download it |
 
 **A fifth one is not a download at all: an image that is simply absent.**
 The bundle carries the images for the profiles that were enabled where it was
@@ -238,7 +238,7 @@ setting; its own docs state it neither sets nor validates one. It reads
 nothing — it has to be in the environment that launches it:
 
 ```bash
-NODE_EXTRA_CA_CERTS="/path/to/stack/config/traefik/certs/tls.crt" dsh web
+NODE_EXTRA_CA_CERTS="/path/to/llm-service/deploy/config/traefik/certs/tls.crt" dsh web
 ```
 
 Then add a provider with base URL `https://gateway.llm.localhost/v1` and the
@@ -255,7 +255,7 @@ curl --cacert deploy/config/traefik/certs/tls.crt https://gateway.llm.localhost/
 {
   "env": {
     "LOCAL_LLM_API_KEY": "sk-YOURKEY",
-    "NODE_EXTRA_CA_CERTS": "/path/to/stack/config/traefik/certs/tls.crt"
+    "NODE_EXTRA_CA_CERTS": "/path/to/llm-service/deploy/config/traefik/certs/tls.crt"
   },
   "modelProviders": {
     "openai": [
@@ -487,9 +487,9 @@ recreates exactly the containers the change affects.
 | domain | `LLM_DOMAIN` | certificate and single sign-on follow; check with `./scripts/domain-check.sh --old <previous>` |
 | reachable from the network | `BIND_ADDRESS=0.0.0.0` | default `127.0.0.1` is this machine only |
 | ports | `TRAEFIK_HTTP_PORT`, `TRAEFIK_HTTPS_PORT` | |
-| which services run | `COMPOSE_PROFILES` | `argus` code index, `embed` Ollama, `tracing` Langfuse, `cadvisor`, `dcgm`. `logging` (Loki + Promtail) is **on by default** — remove it to stop collecting logs |
+| which services run | `COMPOSE_PROFILES` | `argus` code index and its embedder, `tracing` Langfuse, `cadvisor`, `dcgm`. `logging` (Loki + Promtail) is **on by default** — remove it to stop collecting logs |
 | GPU / CPU power cap | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | empty restores the hardware default; see [Measured](#measured) for what these do and do not buy |
-| CPU threads and ceilings | `LLAMACPP_THREADS`, `LLAMACPP_CPUS`, `OLLAMA_CPUS`, `POSTGRES_CPUS` | threads = physical cores; ceilings must sum under the core count |
+| CPU threads and ceilings | `LLAMACPP_THREADS`, `LLAMACPP_CPUS`, `EMBED_CPUS`, `POSTGRES_CPUS` | threads = physical cores; ceilings must sum under the core count |
 | engine RAM ceiling | `LLAMACPP_MEM_LIMIT` | e.g. `56g`; `0` = none |
 | pin the model in RAM | `LLAMACPP_MLOCK`, `LLAMACPP_PRELOAD`, `LLAMACPP_RAM_RESERVE_GB` | `auto` pins when the weights fit; see RAM |
 | host swappiness | `HOST_SWAPPINESS` | empty = system default |
@@ -740,10 +740,10 @@ Three settings, none optional, each of which silently degrades the index:
 - **`SET`, not `SET LOCAL`** — autocommit gives every statement its own
   transaction, so `LOCAL` expires before the query that needed it.
 
-Argus's semantic layer also needs an embedding provider. Ollama is in the compose
-file under the `embed` profile; without it there is nowhere for vectors to come
-from, whichever database stores them. The embedder is the latency users feel, so
-it is worth a GPU: measured warm, GPU embedding is **94 ms → 5 ms** median per
-embed, 18×, for 849 MB of VRAM.
+Argus's semantic layer also needs an embedding provider: `llamacpp-embed`, in the
+`argus` profile, serving `nomic-embed-text-v1.5` over the OpenAI protocol on the
+CPU. Without it there is nowhere for vectors to come from, whichever database
+stores them. The CPU is deliberate (the engine keeps the whole GPU), and cheap:
+measured warm, a query embeds in **15 ms** median on 4 cores.
 
 ---

@@ -1,7 +1,7 @@
 # DeepSeek Harness -> Argus, tested 2026-09-16 against v2.1.2.
 #
 #   ARGUS_TOKEN=<gitlab-pat> \
-#   NODE_EXTRA_CA_CERTS=<checkout>/stack/config/traefik/certs/tls.crt \
+#   NODE_EXTRA_CA_CERTS=<checkout>/deploy/config/traefik/certs/tls.crt \
 #     dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
 #     "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
 #

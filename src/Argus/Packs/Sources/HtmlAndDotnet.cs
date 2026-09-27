@@ -8,7 +8,7 @@ using Argus.Util;
 namespace Argus.Packs.Sources;
 
 /// <summary>
-/// HTML to markdown-ish text (html_docs.py's _Extractor over html.parser).
+/// HTML to markdown-ish text.
 ///
 /// A small tokenizer with html.parser's leniency where it matters here: tags are
 /// case-insensitive, script and style are raw text, comments, doctypes and

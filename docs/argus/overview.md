@@ -345,10 +345,9 @@ Everything here is measured on real corpora, not estimated. Full detail in [docs
 | `which_repo` p95 (10,212 files) | **1.92 ms** |
 | `docs_search`, 17.9k chunks | **88.6 ms** |
 | `docs_search`, 364.8k chunks | **460 ms** |
-| **query embedding (CPU Ollama)** | **2,254 ms** |
-| **query embedding (GPU Ollama)** | **5 ms** median, 18× |
+| **query embedding (`llamacpp-embed`, 4 CPU cores)** | **15 ms** median |
 
-5.2× cost for 20.4× the corpus — sublinear. **The embedder sets the latency users feel, not the index** — which is why it now runs on the GPU, and why that was the single biggest improvement available.
+5.2× cost for 20.4× the corpus — sublinear. **The embedder sets the latency users feel, not the index**: it was 2,254 ms cold on the Python Argus's CPU Ollama, and is 15 ms on llama.cpp's CPU server.
 
 ### Scale
 

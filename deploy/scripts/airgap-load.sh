@@ -2,7 +2,7 @@
 # Load an offline bundle and start the stack. Runs ON THE AIRGAPPED HOST.
 #
 #   ./load.sh --check     verify everything, change nothing
-#   ./load.sh             load the images and restore Ollama's models
+#   ./load.sh             load the images
 #   ./load.sh --up        ...and then start the stack
 #   ./load.sh --force     reload images even if they are already present
 #
@@ -17,8 +17,8 @@
 # than shipped -- the bundle carries .env.airgap with the secrets emptied and
 # the download settings already disabled. See AIRGAP-README.md.
 #
-# Images load first, then Ollama's model volume is restored, then the preflight
-# runs, and only then does anything start. The preflight is the same one
+# Images load first, then the preflight runs, and only then does anything
+# start. The preflight is the same one
 # `make up` runs: it checks that every bind mount resolves to real content
 # before compose creates empty directories where the real ones should be.
 # ---------------------------------------------------------------------------
@@ -31,7 +31,6 @@ AIRGAP="$BUNDLE_DIR/.airgap"
 IMAGES_DIR="$AIRGAP/images"
 IMAGES_LIST="$AIRGAP/images.list"
 CHECKSUMS="$AIRGAP/images.sha256"
-OLLAMA_TAR="$AIRGAP/ollama-models.tar"
 
 CHECK_ONLY=0
 DO_UP=0
@@ -157,62 +156,6 @@ else
   fi
 fi
 
-# ------------------------------------------------------- ollama's volume --
-# It is a VOLUME, not a bind mount, so `docker compose up` cannot create it
-# from the checkout and nothing in the tree hints that it is missing. Without
-# it docs_search cannot embed a query, and the embedding model cannot be
-# fetched afterwards.
-step "Ollama model volume"
-if [ ! -f "$OLLAMA_TAR" ]; then
-  warn "no ollama-models.tar in this bundle; skipping"
-else
-  # From .env when it exists, else from the shipped template -- `--check` is
-  # expected to run before anyone has made the .env, and the project name is
-  # not a secret.
-  #
-  # The explicit -f guard is not decoration. `sed` on a missing file exits 2,
-  # and with `set -e` plus `pipefail` that kills the whole script from inside a
-  # command substitution: no error, no message, just a step heading and a
-  # prompt. That is exactly what this cost the first time it was run.
-  volume_source=""
-  if [ -f deploy/.env ]; then
-    volume_source="deploy/.env"
-  elif [ -f deploy/.env.airgap ]; then
-    volume_source="deploy/.env.airgap"
-  fi
-
-  volume=""
-  if [ -n "$volume_source" ]; then
-    volume="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$volume_source" | head -1)"
-  fi
-  volume="${volume:-llmservice}_ollama-models"
-
-  if [ "$CHECK_ONLY" = 0 ] || [ "$FORCE" = 1 ]; then
-    docker volume create "$volume" >/dev/null
-
-    # A helper image that is IN the bundle, so this needs no pull either.
-    # python:3.13-slim is the first choice because the stack already runs it;
-    # alpine is the fallback for a bundle built with --no-images.
-    helper=""
-    for candidate in python:3.13-slim alpine:3 redis:7-alpine; do
-      if docker image inspect "$candidate" >/dev/null 2>&1; then helper="$candidate"; break; fi
-    done
-
-    if [ -z "$helper" ]; then
-      warn "no helper image available to unpack $OLLAMA_TAR into volume $volume"
-      warn "do it by hand once any image is loaded:"
-      warn "  docker volume create $volume"
-      warn "  docker run --rm -v $volume:/to -v $BUNDLE_DIR/.airgap:/from:ro alpine:3 tar -xf /from/ollama-models.tar -C /to"
-    else
-      docker run --rm -v "$volume":/to -v "$AIRGAP":/from:ro "$helper" \
-        tar -xf /from/ollama-models.tar -C /to
-      say "  restored into $volume"
-    fi
-  else
-    docker volume inspect "$volume" >/dev/null 2>&1 \
-      && say "  $volume exists" || warn "$volume does not exist yet"
-  fi
-fi
 
 # ------------------------------------------------------------------ .env --
 step "Configuration"
@@ -263,7 +206,7 @@ if [ "$DO_UP" = 1 ]; then
   say "Then open https://admin.<LLM_DOMAIN> (see LLM_DOMAIN in deploy/.env)."
 else
   say ""
-  say "Images are loaded and Ollama's models are in place."
+  say "Images are loaded."
   say "Start the stack with:"
   say "    ./load.sh --up"
   say "or:"

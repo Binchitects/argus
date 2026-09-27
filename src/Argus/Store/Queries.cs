@@ -165,7 +165,7 @@ public static class Queries
     {
         var ids = Ids(allowed);
         // A point lookup: the membership test runs BEFORE the query, so a row from
-        // a disallowed repo is never fetched (see queries.py).
+        // a disallowed repo is never fetched.
         if (!ids.Contains(repoId)) return null;
         var row = Sql.One(conn,
             "SELECT f.repo_id, r.path_with_namespace, f.path, f.lang, f.size, f.content" +

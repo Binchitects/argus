@@ -249,7 +249,12 @@ text the server no longer served. Clearing it is a required step after any
 description change. Nothing warns; the tool simply behaves as it did before
 the change, which reads as the change not working.
 
-**~~GPU embedding.~~ DONE.** Query embedding was **2,254 ms median** on
+**~~GPU embedding.~~ DONE, then superseded.** The .NET Argus embeds with
+`llamacpp-embed` (llama.cpp on the CPU, OpenAI protocol) at **15 ms median** per
+query on 4 cores, so the engine keeps the whole GPU and Ollama is gone. The record
+of the Ollama step, kept as measured:
+
+Query embedding was **2,254 ms median** on
 CPU-only Ollama, roughly 25× the entire search — the latency a user actually
 feels, and hardware rather than code. `ollama` now carries the same
 `gpu-reservation` anchor the engines use, and `ollama ps` reports **100% GPU**.

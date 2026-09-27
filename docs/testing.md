@@ -57,7 +57,7 @@ Each of the 34 services against the test entry points, by name:
 | ❌ | **auth-init** | nothing |
 | ❌ | **identity-proxy** | nothing |
 | ❌ | **prometheus-secrets** | nothing |
-| ❌ | **ollama** | nothing |
+| ⚠️ | llamacpp-embed, embed-init | acceptance (the embedder answers with `ARGUS_EMBED_DIM` dimensions) |
 | ❌ | **cpu-temp-exporter** | nothing |
 | ❌ | **dcgm-exporter** | nothing |
 | ❌ | **langfuse-worker** | nothing |
@@ -74,7 +74,7 @@ Eleven services are named by no test at all.
 `FAIL` for a service whose profile is off, and the exit code stays 0. On the
 default deployment (`gateway,proxy,auth,smi,llamacpp,argus`) that means the
 whole of `tracing` (langfuse, langfuse-worker, clickhouse, minio), `logging`
-(loki, promtail), `cadvisor`, `dcgm`, `vllm`, `vllm-secondary` and `ollama`
+(loki, promtail), `cadvisor`, `dcgm`, `vllm` and `vllm-secondary`
 are **reported green without being exercised**. A green run says "nothing
 failed", not "everything passed".
 
@@ -143,8 +143,7 @@ For **every** service, not just the 22 today:
 
 **Specifically missing:** `auth-init` (its three output files exist, are parseable
 and have the right modes), `prometheus-secrets` (the token is 0600 and non-empty),
-`identity-proxy` (it actually rewrites the `user` field), `ollama` (the embedding
-model is present and returns a 768-vector), `cpu-temp-exporter` (a reading is
+`identity-proxy` (it actually rewrites the `user` field), `cpu-temp-exporter` (a reading is
 emitted), `dcgm-exporter`, `promtail` (a log line reaches Loki), `langfuse-worker`
 (a trace reaches ClickHouse), `minio` (a bucket exists), `vllm-secondary`
 (`api2.<domain>` serves its model).
@@ -496,9 +495,9 @@ because all of this is temporary:
    `dev_beta@argus.test`. Argus matches the chat user by that email.
 3. Afterwards:
    - put the old `.env` back and run `docker compose up -d --remove-orphans`
-   - run `docker compose --profile argus rm -sf argus ollama`
+   - run `docker compose --profile argus rm -sf argus llamacpp-embed embed-init`
    - delete `dev_beta` from the app
    - run `./tools/test-gitlab/run.sh --down`
 
 **Read the SKIP lines.** A green `acceptance.py` on the default profiles has not
-exercised tracing, logging, cadvisor, dcgm, the second model or Ollama.
+exercised tracing, logging, cadvisor, dcgm or the second model.

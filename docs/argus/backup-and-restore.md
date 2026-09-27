@@ -11,7 +11,7 @@ is the whole procedure.
 | `index.db` — files, symbols, includes, `repo_deps` | yes, from GitLab | **yes** |
 | `index.db` — the `audit` table | **no** | **yes** — the reason this exists |
 | `config.yaml` | from memory, badly | **yes** |
-| Knowledge packs | yes, with Ollama + sources + an hour | **yes** |
+| Knowledge packs | yes, with the embedder + sources + an hour | **yes** |
 | `mirrors/`, `trees/` | yes, from GitLab | **no** |
 
 `audit` records what the assistant showed which developer. No rebuild recovers
@@ -103,7 +103,7 @@ estate. Time your first production pass and write the number here — that
 number *is* your recovery time objective, and until it exists this section is
 a guess.
 
-Knowledge packs rebuild separately and need Ollama with the pinned model:
+Knowledge packs rebuild separately and need the embedder (`llamacpp-embed`) with the pinned model:
 
 ```bash
 argus pack build --source python --work-dir /tmp/cpython \

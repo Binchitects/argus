@@ -8,8 +8,8 @@ using Argus.Util;
 namespace Argus.Server;
 
 /// <summary>
-/// Background work the server runs on the operator's behalf (server.py's
-/// _index_job / _pack_job): one index run at a time as a child `argus index`
+/// Background work the server runs on the operator's behalf: one index run at
+/// a time as a child `argus index`
 /// process, webhook pushes queued behind it, the interval scheduler, and pack
 /// install/update/remove.
 /// </summary>

@@ -337,9 +337,8 @@ own section. They are also what keeps a 24 GB card from cooking itself.
 |---|---|---|
 | `LLAMACPP_THREADS` | sample `16` | physical core count for the engine. Hyperthreads measured *slower*, not faster |
 | `LLAMACPP_CPUS` | `16` | CPU ceiling for the engine container. Keep it equal to `LLAMACPP_THREADS` |
-| `OLLAMA_CPUS` | sample `2` | CPU ceiling for the embedding model. Far less load-bearing since the model moved to the GPU — tokenisation and the HTTP layer are all that remain on the CPU |
-| `OLLAMA_GPU_LAYERS` | empty | how many layers of the embedding model to offload. Empty lets Ollama decide, which is "all of it" when it fits. Set an integer to force a partial offload, or `0` to keep it on the CPU |
-| `OLLAMA_GPU_DEVICE` | `all` | which GPU the embedder is pinned to (`NVIDIA_VISIBLE_DEVICES`). Set a device id on a multi-GPU host to keep the embedder off the card the engine is using |
+| `EMBED_CPUS` / `EMBED_THREADS` | `4` / `4` | CPU ceiling and threads of Argus's embedder (`llamacpp-embed`), which runs on the CPU on purpose: the engine keeps the GPU. A query embeds in ~15 ms on 4 cores |
+| `EMBED_MODEL_DIR` / `EMBED_MODEL_FILE` | `LLM_MODELS_DIR` / `nomic-embed-text-v1.5.f16.gguf` | where `embed-init` keeps the embedding model it fetches once (~260 MB) |
 | `POSTGRES_CPUS` | sample `3` | CPU ceiling for Postgres |
 | `LLAMACPP_MEM_LIMIT` | `0` | engine RAM ceiling, e.g. `56g`. `0` is no limit |
 | `GPU_POWER_LIMIT_W` | sample `150` | GPU power cap in watts (`nvidia-smi -pl`). Empty leaves the driver default |
@@ -539,7 +538,6 @@ overwritten in meaning if you set them independently.
 | `ENGINE_MODEL` | `openai/${MODEL_NAME}` unless overridden |
 | `ENGINE_API_KEY` | `LLAMACPP_API_KEY` unless overridden |
 | `STORE_MODEL_IN_DB` | `"True"` |
-| `OLLAMA_KEEP_ALIVE` | `-1` — keep the embedding model resident |
 | `LHM_URL` | `http://host.docker.internal:8085/data.json` — one of three sources `cpu-temp-exporter` tries, in order: Linux `/sys/class/hwmon`, then LibreHardwareMonitor, then ACPI thermal zones. It exists because node-exporter's `node_hwmon_temp_celsius` has **zero series** on a Windows/WSL2 host — the kernel exposes no thermal sensors — and `windows_exporter` has no core-temperature collector at all |
 | `COMPOSE_PROJECT_NAME` (in Traefik) | `@COMPOSE_PROJECT_NAME@` in `traefik.yml`, replaced by `sed` at startup |
 | `POSTGRES_USER` / `POSTGRES_DB` | `LLM_PG_USER` / `llmservice` |
@@ -564,8 +562,7 @@ for what each brings up; this is the short reference:
 | `llamacpp` | `llamacpp`, `model-init` |
 | `vllm` | `vllm` |
 | `multi-model` | `vllm-secondary` |
-| `argus` | `argus`, `ollama` |
-| `embed` | `ollama` |
+| `argus` | `argus`, `llamacpp-embed`, `embed-init` |
 | `image` | `imagegen` (picture generation; see §7) |
 | `sandbox` | `sandbox` (the chat's Python; see §11a) |
 | `websearch` | `searxng` (search for the chat's Web tool; see §11a) |
@@ -670,13 +667,13 @@ The `.ps1` equivalents are for Windows hosts.
 ## 18. Airgap bundles
 
 `scripts/airgap-bundle.sh` produces a self-contained zip; `load.sh` inside it
-loads every image, restores Ollama's model volume, runs the preflight and
+loads every image, runs the preflight and
 starts. The generated `AIRGAP-README.md` and `.env.airgap` in the bundle are the
 authoritative instructions for a given build.
 
 Only four things reach the network on a normal first start — container images,
-the GGUF weights, `model-init`'s Hugging Face size check, and Ollama's embedding
-model — and the bundle closes all four. That third one matters more than
+the GGUF weights, `model-init`'s Hugging Face size check, and Argus's embedding
+model (`embed-init`) — and the bundle closes all four. That third one matters more than
 it looks: `llamacpp` declares `model-init` as `service_completed_successfully`,
 so a size check that cannot reach Hugging Face stops **the engine itself**
 from starting, even with every weight already on disk.

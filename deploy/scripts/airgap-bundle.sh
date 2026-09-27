@@ -42,9 +42,9 @@
 #   3. The llama.cpp engine tarball, when LLAMACPP_ENGINE_URL is set. Same
 #      reasoning, same fix.
 #
-#   4. Ollama's embedding model, which lives in a Docker VOLUME rather than a
-#      bind mount and is therefore easy to forget. Without it `docs_search`
-#      cannot embed a query. Always included; it is small (hundreds of MB).
+#   4. Argus's embedding model (EMBED_MODEL_FILE in EMBED_MODEL_DIR), which
+#      embed-init would otherwise download: offline it cannot, and llamacpp-embed
+#      waits on it. Always included when present; it is small (~260 MB).
 #
 # The bundle is validated before it is zipped: every bind mount the compose
 # file asks for is checked to exist inside the staged tree. A missing
@@ -244,9 +244,10 @@ say "  copied $(du -sh "$STAGE" | cut -f1)"
 
 # Generated at first start on the target, but the DIRECTORIES must exist or the
 # bind mount creates an empty root-owned one instead.
-mkdir -p "$STAGE/stack/config/authelia/secrets"
-[ -f "$REPO_ROOT/stack/models/.gitkeep" ] \
-  && cp "$REPO_ROOT/stack/models/.gitkeep" "$STAGE/stack/models/.gitkeep"
+mkdir -p "$STAGE/deploy/config/authelia/secrets"
+mkdir -p "$STAGE/deploy/models"
+[ -f "$REPO_ROOT/deploy/models/.gitkeep" ] \
+  && cp "$REPO_ROOT/deploy/models/.gitkeep" "$STAGE/deploy/models/.gitkeep"
 
 # ------------------------------------------------------------ big extras --
 if [ "$WITH_PACKS" = 1 ]; then
@@ -277,34 +278,20 @@ if [ "$WITH_MODELS" = 1 ]; then
   say "  models: $(du -sh "$STAGE/.airgap/models" | cut -f1)"
 fi
 
-# ------------------------------------------------------- ollama embeddings --
-# A Docker VOLUME, not a bind mount, which is exactly why it gets forgotten:
-# nothing in the checkout hints that it exists. Without it docs_search cannot
-# embed a query, and on an airgapped host there is no pulling it later.
-step "Including Ollama's model volume"
-project="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$STACK_DIR/.env" | head -1)"
-project="${project:-llmservice}"
-ollama_volume="${project}_ollama-models"
-if docker volume inspect "$ollama_volume" >/dev/null 2>&1; then
-  # A single tar rather than a directory of files. The loader then needs one
-  # command to restore it, and can use any image the bundle already carries --
-  # no network, and no dependency on a helper image being present.
-  ollama_tar="$STAGE/.airgap/ollama-models.tar"
-  helper=""
-  for candidate in python:3.13-slim alpine:3 redis:7-alpine busybox:latest; do
-    if docker image inspect "$candidate" >/dev/null 2>&1; then helper="$candidate"; break; fi
-  done
-  if [ -z "$helper" ]; then
-    warn "no usable image to pack $ollama_volume; docs_search will not work until the embedding model is present"
-  elif docker run --rm -v "$ollama_volume":/from:ro "$helper" tar -cf - -C /from . \
-        > "$ollama_tar" 2>/dev/null; then
-    say "  $ollama_volume: $(du -sh "$ollama_tar" | cut -f1) (via $helper)"
-  else
-    rm -f "$ollama_tar"
-    warn "could not pack $ollama_volume; docs_search will not work until the embedding model is present"
-  fi
+# ------------------------------------------------------ embedding model --
+# embed-init downloads it on a connected host; on an airgapped one it can only
+# find it already there, or Argus's embedder never starts. Small, so always in.
+step "Including Argus's embedding model"
+env_value() { sed -n "s/^$1=//p" "$STACK_DIR/.env" | head -1; }
+embed_file="$(env_value EMBED_MODEL_FILE)"; embed_file="${embed_file:-nomic-embed-text-v1.5.f16.gguf}"
+embed_dir="$(env_value EMBED_MODEL_DIR)"; [ -n "$embed_dir" ] || embed_dir="$(env_value LLM_MODELS_DIR)"; embed_dir="${embed_dir:-./models}"
+case "$embed_dir" in /*) ;; *) embed_dir="$STACK_DIR/$embed_dir" ;; esac
+if [ -f "$embed_dir/$embed_file" ]; then
+  mkdir -p "$STAGE/.airgap/embed"
+  cp -L "$embed_dir/$embed_file" "$STAGE/.airgap/embed/"
+  say "  $embed_file: $(du -sh "$STAGE/.airgap/embed/$embed_file" | cut -f1)"
 else
-  warn "volume $ollama_volume not found; docs_search will not work until the embedding model is present"
+  warn "$embed_file is not in $embed_dir; with the argus profile, copy it there on the target before starting"
 fi
 
 # ------------------------------------------------------------------ .env --
@@ -314,7 +301,7 @@ step "Preparing .env for the target"
 #   .env.airgap  always written. The live .env with secrets EMPTIED and the
 #                download settings neutralised. Safe to ship, ready to fill in.
 #   .env         only with --with-env. The live .env verbatim, secrets and all.
-airgap_env="$STAGE/stack/.env.airgap"
+airgap_env="$STAGE/deploy/.env.airgap"
 secrets_list="$STAGE/.airgap/secrets-to-fill.txt"
 : > "$secrets_list"
 awk -v list="$secrets_list" '
@@ -360,6 +347,14 @@ neutralise 'LLAMACPP_HF_FILES'
 neutralise 'LLAMACPP_ENGINE_URL'
 neutralise 'LLAMACPP_ENGINE_SHA256'
 neutralise 'HF_TOKEN'
+# The embedding model travels in .airgap/embed; relative, like the models below.
+if [ -d "$STAGE/.airgap/embed" ]; then
+  if grep -q '^EMBED_MODEL_DIR=' "$airgap_env"; then
+    sed -i -E "s|^EMBED_MODEL_DIR=.*|EMBED_MODEL_DIR=../.airgap/embed|" "$airgap_env"
+  else
+    printf '\n# Argus embedding model, shipped in the bundle.\nEMBED_MODEL_DIR=../.airgap/embed\n' >> "$airgap_env"
+  fi
+fi
 
 if [ "$WITH_MODELS" = 1 ]; then
   # Relative on purpose: compose resolves a relative bind source against the
@@ -371,8 +366,8 @@ if [ "$WITH_MODELS" = 1 ]; then
 fi
 
 if [ "$WITH_ENV" = 1 ]; then
-  cp "$STACK_DIR/.env" "$STAGE/stack/.env"
-  chmod 600 "$STAGE/stack/.env"
+  cp "$STACK_DIR/.env" "$STAGE/deploy/.env"
+  chmod 600 "$STAGE/deploy/.env"
   warn "--with-env copied the live .env into the bundle. It contains every secret in this deployment."
 fi
 
@@ -480,9 +475,9 @@ from outside this deployment, and tells you which those are.
 
 * **Every container image**, including the three built locally (argus,
   the app, identity-proxy). The target never builds and never pulls.
-* **Ollama's embedding model** is in \`.airgap/ollama-models.tar\` and \`load.sh\`
-  restores it. It lives in a Docker volume, so it is easy to forget -- and
-  without it \`docs_search\` cannot embed a query.
+* **Argus's embedding model** is in \`.airgap/embed/\`, and the shipped .env
+  points \`EMBED_MODEL_DIR\` at it, so \`embed-init\` finds it instead of
+  downloading it.
 * **\`LLAMACPP_HF_FILES\` and \`LLAMACPP_ENGINE_URL\` are empty** in the shipped
   .env. This is not tidiness. \`model-init\` asks Hugging Face for the file size
   before it will accept a local file, so with no network it exits 1 even when
@@ -523,7 +518,7 @@ EOF
 # there and which holds every secret in the deployment.
 step "Making the payload readable"
 chmod -R a+rX "$STAGE"
-[ -f "$STAGE/stack/.env" ] && chmod 600 "$STAGE/stack/.env"
+[ -f "$STAGE/deploy/.env" ] && chmod 600 "$STAGE/deploy/.env"
 say "  payload is world-readable (a live .env, if shipped, stays 0600)"
 
 step "Zipping"

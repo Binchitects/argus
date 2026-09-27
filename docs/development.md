@@ -25,7 +25,7 @@ deploy/                 the platform: docker-compose, config, env samples, scrip
   argus-standalone/     Argus alone: its own compose, config and scripts
 tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, the test GitLab, Hermes add-ons
 clients/                editor and agent configurations (MCP)
-evals/                  evaluation question sets and results
+evals/                  evaluation harnesses and their results
 docs/                   this documentation; docs/plan.md is the plan and its phases
 ```
 

@@ -22,7 +22,7 @@ public static class SettingsCatalog
     private const string Backup = "Backup";
 
     public static readonly IReadOnlyList<string> Profiles =
-        ["gateway", "proxy", "auth", "llamacpp", "vllm", "multi-model", "argus", "embed", "image", "sandbox", "websearch", "logging", "tracing", "smi", "dcgm", "cadvisor"];
+        ["gateway", "proxy", "auth", "llamacpp", "vllm", "multi-model", "argus", "image", "sandbox", "websearch", "logging", "tracing", "smi", "dcgm", "cadvisor"];
 
     private const string Engine1 = "The engine restarts and reloads the model: chat and the API pause for a few minutes.";
     private const string Image1 = "The image server restarts (under a minute); the chat model is not touched.";
@@ -157,7 +157,7 @@ public static class SettingsCatalog
         new("GPU_POWER_LIMIT_W", Engine, "GPU power cap", "Watts (nvidia-smi -pl). Empty: the card's default.", SettingType.WholeNumber, SettingScope.Stack) { Min = 50, Max = 2000 },
         new("CPU_POWER_LIMIT_W", Engine, "CPU power cap", "Watts (Intel RAPL). Many boards ship with no limit.", SettingType.WholeNumber, SettingScope.Stack) { Min = 15, Max = 1000 },
         new("HOST_SWAPPINESS", Engine, "Host swappiness", "vm.swappiness. Empty leaves the host's.", SettingType.WholeNumber, SettingScope.Stack) { Min = 0, Max = 200 },
-        new("OLLAMA_CPUS", Engine, "Embedder CPU limit", "For the embed and argus profiles.", SettingType.WholeNumber, SettingScope.Stack) { Min = 1, Max = 64 },
+        new("EMBED_CPUS", Engine, "Embedder CPU limit", "Argus's embedding server (llamacpp-embed), on the CPU.", SettingType.WholeNumber, SettingScope.Stack) { Min = 1, Max = 64 },
         new("POSTGRES_CPUS", Engine, "Database CPU limit", "", SettingType.WholeNumber, SettingScope.Stack) { Min = 1, Max = 64, Impact = "The database restarts: everything pauses for a few seconds." },
 
         new("ARGUS_GITLAB_URL", Argus, "GitLab address", "https://gitlab.example.com", SettingType.Url, SettingScope.Stack)

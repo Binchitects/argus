@@ -52,7 +52,7 @@ COPY_DIR="$(env_get BACKUP_COPY_DIR)"
 case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
 
 # Named volumes that are caches or models, not state.
-SKIP_VOLUMES=" hf-cache vllm-cache ollama-models llamacpp-engine postgres-data "
+SKIP_VOLUMES=" hf-cache vllm-cache llamacpp-engine postgres-data "
 LOG_VOLUMES=" loki-data prometheus-data alertmanager-data clickhouse-logs "
 
 ACTION=backup; FROM=""; WITH_CONFIG=0; VERIFY_DIR=""
