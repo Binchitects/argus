@@ -20,7 +20,6 @@ failures=0
 
 # name | internal url | required-profile ("" = always on)
 CHECKS=(
-  "Open WebUI|http://open-webui:8080/health|"
   "Prometheus|http://prometheus:9090/-/healthy|"
   "Alertmanager|http://alertmanager:9093/-/healthy|"
   "node-exporter|http://node-exporter:9100/metrics|"

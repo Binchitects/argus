@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { Markdown } from '@/pages/chat/markdown'
 import { NotConfigured } from './argus'
 
 interface Explore {
@@ -439,6 +440,12 @@ interface DocContent {
   attribution: string | null
 }
 
+/** A page's YAML front matter is metadata, not text to read: the preview starts after it. */
+function withoutFrontMatter(text: string) {
+  const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(text)
+  return m ? text.slice(m[0].length) : text
+}
+
 function DocView({ path, source }: { path: string; source: string }) {
   const d = useQuery({
     queryKey: ['admin', 'argus', 'explore', 'doc', source, path],
@@ -462,10 +469,23 @@ function DocView({ path, source }: { path: string; source: string }) {
         </a>
       )}
       {d.data && (
-        <ScrollRegion label={`The text of ${d.data.title ?? path}`} className="max-h-[70dvh] rounded-lg border bg-muted/30 p-4 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
-          {d.data.text}
-          {d.data.truncated && <p className="mt-3 text-muted-foreground">The rest of the page is not shown.</p>}
-        </ScrollRegion>
+        <Tabs defaultValue="preview" className="grid grid-cols-[minmax(0,1fr)]">
+          <TabsList>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsTrigger value="source">Source</TabsTrigger>
+          </TabsList>
+          <TabsContent value="preview" className="mt-3">
+            <ScrollRegion label={`${d.data.title ?? path}, formatted`} className="max-h-[65dvh] rounded-lg border p-4 sm:p-6">
+              <Markdown text={withoutFrontMatter(d.data.text)} />
+              {d.data.truncated && <p className="mt-3 text-sm text-muted-foreground">The rest of the page is not shown.</p>}
+            </ScrollRegion>
+          </TabsContent>
+          <TabsContent value="source" className="mt-3">
+            <ScrollRegion label={`The text of ${d.data.title ?? path}`} className="max-h-[65dvh] rounded-lg border bg-muted/30 p-4 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">
+              {d.data.text}
+            </ScrollRegion>
+          </TabsContent>
+        </Tabs>
       )}
     </>
   )

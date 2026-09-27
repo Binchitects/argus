@@ -31,7 +31,8 @@ PORT="$(get TRAEFIK_HTTPS_PORT)"; PORT="${PORT:-443}"
 SECRET="$(get API_OIDC_CLIENT_SECRET)"
 [[ -n "$SECRET" ]] || { echo "API_OIDC_CLIENT_SECRET missing - set it in .env" >&2; exit 1; }
 
-CA="config/traefik/certs/tls.crt"
+CFG="$(get LLM_CONFIG_DIR)"; CFG="${CFG:-./config}"
+CA="$CFG/traefik/certs/tls.crt"
 
 # --resolve + --ssl-no-revoke are only needed because *.localhost does not
 # resolve in CLI tools and Windows curl cannot check revocation for a self-signed certificate.

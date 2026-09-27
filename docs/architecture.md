@@ -26,12 +26,11 @@ machine's network interface belong to Traefik:
    ┌────────────┬───────────────┼───────────────┬─────────────┐
    │            │               │               │             │
 ┌──▼───┐   ┌────▼────┐    ┌─────▼─────┐   ┌─────▼─────┐  ┌────▼─────┐
-│ auth │   │ gateway │    │ inference │   │    ui     │  │  observ. │
-│authel│   │ litellm │    │ llamacpp  │   │ open-webui│  │ prometh. │
-│admin │   │ +pg+red │    │ vllm      │   │ admin-pnl │  │ alertmgr │
-│redis │   │identity-│    │ embed     │   │ argus     │  │ loki ... │
-└──────┘   │ proxy   │    └───────────┘   └───────────┘  └──────────┘
-           └─────────┘
+│ app  │   │ gateway │    │ inference │   │   tools   │  │  observ. │
+│ web  │   │ litellm │    │ llamacpp  │   │ argus     │  │ prometh. │
+│ (IdP)│   │ postgres│    │ vllm      │   │ sandbox   │  │ alertmgr │
+│      │   │ redis   │    │ imagegen  │   │ searxng   │  │ loki ... │
+└──────┘   └─────────┘    └───────────┘   └───────────┘  └──────────┘
 ```
 
 Nothing but Traefik has a `ports:` entry. The inference engines, the databases
@@ -54,13 +53,10 @@ with it (see §9).
 | hostname | service | auth in front of it |
 |---|---|---|
 | `<domain>` | the web (`web`): chat, usage and cost, admin, settings; `/api`, `/connect` and `/.well-known` go to the app (sign-in, OIDC, the API) | none (the app *is* the sign-in) |
-| `next.<domain>` | a redirect to the same page on `<domain>` (the web's address while it was built) | none |
-| `chat.<domain>` | Open WebUI (until the app's chat is signed off) | OIDC (its own session) |
-| `admin.<domain>` | a redirect into the app's `/admin` (the old admin panel) | none |
 | `gateway.<domain>` | LiteLLM | none in front — LiteLLM checks each person's key |
 | `api.<domain>` | llama.cpp **or** vLLM | forwardAuth (machine token), plus a key-injecting middleware |
 | `api2.<domain>` | vLLM secondary (`multi-model`) | none in front — no forwardAuth and **no key injection**, so the caller presents `VLLM_API_KEY` itself |
-| `argus.<domain>` | Argus MCP | none — per-caller GitLab PAT |
+| `argus.<domain>` | Argus MCP (`argus` profile) | none — per-caller GitLab PAT |
 | `traces.<domain>` | Langfuse | OIDC (its own session) |
 | `metrics.<domain>` | Prometheus | `sso-chain` |
 | `alerts.<domain>` | Alertmanager | `sso-chain` |
@@ -68,8 +64,7 @@ with it (see §9).
 | `node.<domain>` | node-exporter | `sso-chain` |
 | `gpu.<domain>` | nvidia-smi-exporter | `sso-chain` |
 | `cadvisor.<domain>` | cAdvisor | `sso-chain` |
-| `s3.<domain>` | MinIO console | `default-chain` only |
-| `<domain>` | nothing — the SSO landing redirect | — |
+| `s3.<domain>` | MinIO console (`tracing`) | `default-chain` only |
 
 `api.<domain>` is special: both `llamacpp` and `vllm` claim it, and only one of
 them runs (they are in mutually exclusive profiles). The same is true of the
@@ -85,10 +80,9 @@ key always starts; everything else needs its profile named.
 
 | profile | brings up | why it is separate |
 |---|---|---|
-| *(always)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `node-exporter`, `power-limits`, `open-webui` | the minimum that is useful and cheap; TLS is not optional, and an LLM stack nobody can monitor is one nobody notices breaking |
+| *(always)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `node-exporter`, `power-limits` | the minimum that is useful and cheap; TLS is not optional, and an LLM stack nobody can monitor is one nobody notices breaking |
 | `proxy` | `traefik` | the ingress. Separate so a machine can run the engines without 80/443 |
-| `auth` | `auth-init`, `redis` | the basic-auth fallback file and the Argus directory |
-| `gateway` | `app`, `litellm`, `postgres`, `redis`, `identity-proxy` | the app (sign-in for everything), the API gateway, per-person keys and budgets |
+| `gateway` | `app-init`, `app`, `web`, `litellm`, `postgres`, `redis` | the app (sign-in for everything, chat, admin), the web, the API gateway, per-person keys and budgets |
 | `llamacpp` | `llamacpp`, `model-init` | one of the two engine choices |
 | `vllm` | `vllm` | the other engine. Mutually exclusive with `llamacpp` for the GPU |
 | `multi-model` | `vllm-secondary` | a second, small model on the same card |
@@ -105,7 +99,7 @@ key always starts; everything else needs its profile named.
 `postgres` and `redis` appear in several profiles on purpose: they are shared,
 and compose starts a service if **any** enabled profile names it.
 
-The default sample is `gateway,proxy,auth,smi,llamacpp,argus`. Adding a profile
+The samples start with `gateway,proxy,smi,llamacpp,logging`. Adding a profile
 is an `.env` edit and `docker compose up -d`; compose then creates only the new
 containers.
 
@@ -120,8 +114,8 @@ service reaches every other by its **service name** (`http://litellm:4000`,
 Three names are *also* resolvable, deliberately:
 
 * `<domain>` → Traefik. Traefik carries an explicit network alias for it,
-  because the OIDC token exchange is server-to-server: Open WebUI and
-  Langfuse call the issuer (the app) **directly** rather than through the browser.
+  because the OIDC token exchange is server-to-server: Langfuse calls the issuer
+  (the app) **directly** rather than through the browser.
   Without that alias `<domain>` does not resolve inside a container and
   every login fails at the token step — while `/healthz` on every service still
   looks perfect.
@@ -131,7 +125,7 @@ Three names are *also* resolvable, deliberately:
   machine, and `cpu-temp-exporter`, for the hardware monitor it reads CPU
   temperature from. Inside a container `localhost` means the container itself.
 
-**Eighteen named volumes.** They are prefixed with `COMPOSE_PROJECT_NAME`, so
+**Sixteen named volumes.** They are prefixed with `COMPOSE_PROJECT_NAME`, so
 the real names are `llmservice_postgres-data` and so on. `.env` is the only
 place the project name is set, and changing it after the first start gives you
 a stack that boots with none of its data.
@@ -141,7 +135,6 @@ a stack that boots with none of its data.
 | `traefik-certs` | the TLS certificate and key, generated by `tls-init` | yes — regenerated, and browsers re-warn |
 | `postgres-data` | the app's people, 2FA, audit log and chats (`llmapp`), LiteLLM's keys/spend, **and Langfuse's traces** | no — this is the accounts, billing and audit history |
 | `argus-data` | the code index, symbol embeddings, audit and ACL cache | yes — rebuilt by re-indexing (minutes to hours) |
-| `open-webui-data` | chat history, accounts, uploaded files | no |
 | `prometheus-data` | 30 days of metrics by default | yes — the history, not the config |
 | `prometheus-secrets` | the engine scrape token, generated on every `up` | yes |
 | `alertmanager-data` | silences and the notification log | yes |
@@ -152,6 +145,7 @@ a stack that boots with none of its data.
 | `hf-cache` | Hugging Face downloads for the vLLM path | yes, re-downloads |
 | `vllm-cache` | vLLM's compilation cache | yes, recompiles |
 | `llamacpp-engine` | a downloaded llama.cpp engine tarball, when `LLAMACPP_ENGINE_URL` is set | yes |
+| `sandbox-jobs` | the chat's Python jobs and their results, between the app and the sandbox | yes |
 | `power-limits-state` | the "original" power limits, so they can be restored | yes |
 
 `make backup` archives them (`scripts/backup.sh`). `make clean` deletes all of
@@ -184,36 +178,28 @@ browser → traefik → (forwardAuth) app:8080/api/authz/forward-auth
 The middleware is `app-auth@file`; the chain that wraps it with security headers
 is `sso-chain@file`. The rule per hostname lives in the app
 (`src/Llm.Api/Oidc/ForwardAuth.cs`): infrastructure hosts are admins only,
-`admin.` is anyone signed in, `api.` takes a machine token, and a hostname not
-listed there is closed.
-
-**`PROTECTED_CHAIN` in `.env` is the switch.** It is `sso-chain@file` normally;
-`protected-chain@file` falls back to HTTP basic auth against a file `auth-init`
-writes from `PROXY_AUTH_USER`/`PROXY_AUTH_PASSWORD`.
+`api.` takes a machine token (or a signed-in person, for its docs), and a
+hostname not listed there is closed.
 
 ### 5.2 OIDC, for services with their own session
 
-Open WebUI and Langfuse each have their own user database and their own
-sign-in screen. Rather than deleting those, they delegate the *sign-in* to the
-app and keep the session:
+Langfuse (`tracing`) has its own user database and sign-in screen. It delegates
+the *sign-in* to the app and keeps its own session:
 
 ```
-browser → chat.<domain>/oauth/oidc → https://<domain>/connect/authorize → back with a code
-                                   → the app exchanges the code server-to-server
+browser → traces.<domain> → https://<domain>/connect/authorize → back with a code
+                          → Langfuse exchanges the code server-to-server
 ```
 
-The app registers the clients itself on every start from the
-`*_OIDC_CLIENT_SECRET` values in `.env`, stored hashed in its database. Its
-signing key is generated once and kept, encrypted with `APP_DATA_KEY`.
+The app registers its clients itself on every start from the
+`*_OIDC_CLIENT_SECRET` values in `.env` (Langfuse, and `api` for machines),
+stored hashed in its database, and deletes any client the configuration does
+not name. Its signing key is generated once and kept, encrypted with
+`APP_DATA_KEY`.
 
-Two consequences worth knowing:
-
-* The server-to-server token exchange is why `<domain>` itself must resolve
-  inside the network (§4), and why every such container carries the stack's
-  certificate as a trusted CA.
-* Grafana signed in the same way until phase 5, when its dashboards moved into
-  the app. A `grafana` client left by an older version is deleted at start, so
-  its secret stops working.
+The server-to-server token exchange is why `<domain>` itself must resolve
+inside the network (§4), and why every such container carries the stack's
+certificate as a trusted CA.
 
 ### 5.3 Bearer credentials, for machines and for Argus
 
@@ -233,10 +219,10 @@ The gateway, the engine and Argus authenticate the caller, not a browser session
   session would erase the per-caller identity the ACL is built on.
 
   Argus still has to map a chat user's email to a GitLab username, so the app
-  publishes a list without any passwords into
-  `config/authelia/directory/users.yml` (usernames, emails, display names;
-  disabled people left out) and Argus mounts only that directory. The app
-  rewrites it at start and on every change to a person.
+  publishes a list without any passwords into `config/directory/users.yml`
+  (usernames, emails, display names; disabled people left out) and Argus mounts
+  only that directory (`ARGUS_USERS_FILE`). The app rewrites it at start and on
+  every change to a person.
 
 ---
 
@@ -245,22 +231,22 @@ The gateway, the engine and Argus authenticate the caller, not a browser session
 ### 6.1 A person chats in the browser
 
 ```
-browser ──https──► traefik ──► open-webui ──http──► identity-proxy ──► litellm ──► llamacpp
-                                   │                                      │
-                    OIDC sign-in via the app                    spend rows in postgres
-                    forwards X-OpenWebUI-User-Email            per-person budget enforced
+browser ──https──► traefik ──► web (the page) ──► app /api/chat ──http──► litellm ──► engine
+                                                    │                        │
+                                   signed-in session (cookie)      spend rows in postgres
+                                   X-LLM-User-Email + body `user`  per-person budget enforced
 ```
 
-Open WebUI talks to LiteLLM with **one shared key**, which is why it also
-forwards the signed-in person's email. LiteLLM maps that header onto its
-internal user (`user_header_mappings` in `config/litellm/config.yaml`), so chat
-spend lands on the same identity as the person's API key and their total is one
-number instead of two.
+The app talks to LiteLLM with **its own chat key** (alias `chat`, made once,
+kept encrypted), which is why it also names the signed-in person. Two
+mechanisms, one per job:
 
-`identity-proxy` sits in that path for the enforcement half: the internal-user
-role *attributes* spend, but the shared key has no budget attached, so an
-over-budget person was still served on the web UI. The proxy plus an end-user
-budget is what actually returns 429.
+* the `X-LLM-User-Email` header, which LiteLLM maps onto its internal user
+  (`user_header_mappings` in `config/litellm/config.yaml`), *attributes* the
+  spend: chat spend lands on the same identity as the person's API key, and
+  their total is one number instead of two;
+* the body's `user` field *enforces* the ceiling: the chat key has no budget of
+  its own, and the end-user budget on the person's email is what returns 429.
 
 ### 6.2 A tool or agent calls the API
 
@@ -269,9 +255,11 @@ curl/agent ──https──► traefik ──► litellm ──► engine
    Authorization: Bearer sk-<person's key>
 ```
 
-No Open WebUI, no identity proxy: the key *is* the identity. The admin panel
-mints it with `user_id` set to the person's email, which is the identifier the
-whole stack agrees on.
+The key *is* the identity. People make their own under **Connect your tools**
+(`/setup`, also on the Account page), and the app mints it with `user_id` set to
+the person's email, which is the identifier the whole stack agrees on. The
+gateway speaks OpenAI's `/v1/chat/completions` and Anthropic's `/v1/messages`,
+so Qwen Code, Claude Code and the SDKs all point at `gateway.<domain>`.
 
 ### 6.3 A developer's agent uses Argus
 
@@ -287,9 +275,9 @@ and their maintainers instead of answering "nothing found".
 ### 6.4 Chat uses Argus
 
 ```
-open-webui ──http (inside llm-net)──► argus
+app (the chat's Argus tool) ──http (inside llm-net)──► argus
    Authorization: Bearer <ARGUS_CHAT_CLIENT_TOKEN>
-   X-OpenWebUI-User-Email: <the signed-in person>
+   X-LLM-User-Email: <the signed-in person>
 ```
 
 This path deliberately does not go through Traefik. The chat-client token is
@@ -310,9 +298,7 @@ prometheus ──scrape──► node-exporter, nvidia-smi-exporter, cpu-temp-ex
 The app draws every dashboard itself (Observe → Dashboards): the files in
 `config/dashboards/` are Grafana's JSON format, and the app runs each panel's
 query against Prometheus, Loki or the gateway's database, with Grafana's rules
-for steps, macros, variables and series names. Before Grafana was removed, every
-one of the 153 panels gave the same data in both (`compare-dashboards.py`,
-commit 8c07f7b). The Logs page reads Loki; the Alerts page reads Alertmanager
+for steps, macros, variables and series names. The Logs page reads Loki; the Alerts page reads Alertmanager
 (what fires now), Prometheus's rules, and its `ALERTS` series (what fired before).
 
 Per-person token usage is **not** scraped: LiteLLM's `/metrics` is an
@@ -329,7 +315,7 @@ the LiteLLM admin UI reads, in Postgres.
 | service | image | what it does |
 |---|---|---|
 | `traefik` | `traefik:v3.6.7` | the only published ports. Terminates TLS, routes by `Host(...)` label, applies middleware chains. Docker provider scoped to this compose project by label, file provider watches `config/traefik/dynamic/` |
-| `tls-init` | `authelia/authelia:4.39` | one-shot. Generates the self-signed certificate for `<domain>` and `*.<domain>` into `traefik-certs`, reuses it, and regenerates it when `LLM_DOMAIN` changes. Also builds `/certs/bundle.crt` — the public roots, this certificate, and **every `.crt`/`.pem` dropped in `config/ca/`** — so one company CA can be trusted stack-wide, and copies the public cert and the bundle to `config/traefik/certs/` for host-side tools |
+| `tls-init` | `python:3.13-slim` (with `openssl`) | one-shot. Generates the self-signed certificate for `<domain>` and `*.<domain>` into `traefik-certs`, reuses it, and regenerates it when `LLM_DOMAIN` changes. Also builds `/certs/bundle.crt` — the public roots, this certificate, and **every `.crt`/`.pem` dropped in `config/ca/`** — so one company CA can be trusted stack-wide, and copies the public cert and the bundle to `config/traefik/certs/` for host-side tools |
 
 Traefik's Docker provider is constrained by
 ``Label(`com.docker.compose.project`, ...)``. Without that, router names are a
@@ -345,10 +331,9 @@ restart**, so nothing could ever trust it.
 
 | service | image | what it does |
 |---|---|---|
-| `app` | built from `app/` | the identity provider (sign-in, local and LDAP, 2FA, OIDC, forwardAuth), people, API keys and credit through LiteLLM, the audit log, usage and cost (the SQL dashboards, drawn by the app), and the admin area (model, Argus index and packs, services, settings). Its own `llmapp` database; runs as `LLM_UID`, read-only root |
-| `auth-init` | `authelia/authelia:4.39` (as a toolbox) | one-shot. Writes Traefik's `users.htpasswd` and hands the app the directory it writes for Argus |
+| `app` | built from `src/Llm.Api/Dockerfile` | the identity provider (sign-in, local and LDAP, 2FA, OIDC, forwardAuth), the chat (its tools: Argus, Python, the web, pictures), people, API keys and credit through LiteLLM, the audit log, usage and cost (the SQL dashboards, drawn by the app), and the admin area (model, Argus index and packs, services, settings). Its own `llmapp` database; runs as `LLM_UID`, read-only root |
+| `app-init` | `python:3.13-slim` | one-shot. Hands the app the folders it writes (`config/directory`, `config/app`, `config/engine`) as `LLM_UID:LLM_GID` |
 | `redis` | `redis:7-alpine` | LiteLLM's response and auth caches |
-| `identity-proxy` | built from `deploy/services/identity-proxy/` | turns Open WebUI's forwarded identity header into the `user` field LiteLLM enforces budgets against |
 
 ### 7.3 Inference
 
@@ -391,8 +376,7 @@ clients cached `/model/info` and showed every alias as a separate model.
 | service | image | what it does |
 |---|---|---|
 | `web` | built from `src/web` (Alpine + nginx) | the web: static files only, non-root, read-only root, the same security headers as the API. The app itself serves only the API |
-| `open-webui` | `ghcr.io/open-webui/open-webui:main` | chat. OIDC login, forwards the person's identity to the gateway, and registers Argus as an MCP tool when `ARGUS_CHAT_CLIENT_TOKEN` is set |
-| `argus` | built from this repository (`target: server`) | MCP code-search server over the private GitLab index. Every answer is also written as a JSON audit line — who asked, which repositories were consulted, what was returned — which is what the Argus dashboard reads |
+| `argus` | built from `src/Argus/Dockerfile` (`target: server`) | MCP code-search server over the private GitLab index, and the knowledge packs loaded from the pack library (`ARGUS_PACK_LIBRARY_DIR`, the repository's `packs/` by default). Every answer is also written as a JSON audit line — who asked, which repositories were consulted, what was returned — which is what the Argus dashboard reads |
 
 ### 7.6 Observability
 
@@ -434,13 +418,14 @@ and be referenced nowhere, so a file that said `127.0.0.1` published on
 
 ## 9. Startup order
 
-Compose starts what it can in parallel; five services are **one-shot** and exist
-to prepare state. Their ordering is the only ordering the stack depends on:
+Compose starts what it can in parallel; the **one-shot** services exist to
+prepare state. Their ordering is the only ordering the stack depends on:
 
 ```
-tls-init ──────────────► traefik        (service_completed_successfully)
-auth-init ─────────────► (writes users.htpasswd, prepares the Argus directory)
-postgres ──────────────► app            (service_healthy)
+tls-init ──────────────► traefik, argus (service_completed_successfully)
+app-init ──────────────► app            (service_completed_successfully)
+postgres ──────────────► app, litellm   (service_healthy)
+embed-init ────────────► llamacpp-embed (service_completed_successfully)
 prometheus-secrets ────► prometheus     (service_completed_successfully)
 model-init ────────────► llamacpp       (service_completed_successfully)
 power-limits ──────────► (no dependents)
@@ -455,11 +440,6 @@ which is why the airgap bundle empties `LLAMACPP_HF_FILES`.
 
 `tls-init` runs on **every** `up`, not just the first: it is what regenerates
 the certificate when `LLM_DOMAIN` changes.
-
-`open-webui` declares `llamacpp` and `vllm` as dependencies but only
-`service_started`, and compose enforces a dependency only when that service is
-in an active profile — so a gateway-only deployment without an engine profile
-still brings the chat UI up.
 
 Everything long-running has `restart: unless-stopped`, so a crash loop is
 visible as a container that keeps returning to `Restarting` rather than as a
@@ -480,11 +460,11 @@ rather than designed. This table is the short path from symptom to cause.
 | Every hostname 404s, every container healthy | Traefik's `constraints:` no longer matches `COMPOSE_PROJECT_NAME` |
 | Sign-in fails at the token step, no error in any log | `<domain>` does not resolve inside the network (the Traefik alias) |
 | Several unrelated services crash-loop naming files that exist on disk | the checkout **moved**, and the containers still bind the old path. `make preflight` |
-| Open WebUI says `Initialized 0 tool server(s)` with the token set | a persisted `tool_server.connections` row in `webui.db` shadows `.env` |
+| The chat has no Argus tool with the `argus` profile on | `ARGUS_CHAT_CLIENT_TOKEN` is empty, or differs between the app and Argus (recreate both with `up -d`) |
 | A model is served but `/model/info` shows a stale window | `MODEL_CONTEXT`/`MODEL_MAX_OUTPUT` changed without `up -d`, so LiteLLM did not re-render its config |
 | The engine never starts, and `model-init` exited 1 | it could not fetch or verify the weights. **On a machine with no network this happens even when every file is already in `LLAMACPP_MODEL_DIR`** — `model-init` asks Hugging Face for the size first. Clear `LLAMACPP_HF_FILES` |
 | Loading the model hits CUDA out of memory | raise `LLAMACPP_N_CPU_MOE` to keep more expert layers in system RAM |
-| An over-budget person is refused on the API and still served in chat | `identity-proxy` is not in the path, or the end-user budget is missing |
+| An over-budget person is refused on the API and still served in chat | the person's end-user budget is missing at the gateway (Admin → People re-provisions it) |
 | `argus index` enumerates projects then every clone fails | the GitLab certificate is not trusted by **git** — a separate transport from the API |
 | Nobody can log in after a reboot on a removable disk | the volume mounted after dockerd, so containers started against empty directories |
 
@@ -497,13 +477,12 @@ rather than designed. This table is the short path from symptom to cause.
 | `.env` | no | **yes — this is the configuration** |
 | `docker-compose.yml` | no | rarely; it is the wiring |
 | `config/**/*.yml` | no | yes, for behaviour the `.env` does not cover (alert rules, dashboards, scrape jobs) |
-| `config/authelia/users.yml` | only on an install that ran Authelia | no — the app imports it once at its first start |
-| `config/traefik/auth/users.htpasswd` | **yes**, every `up` | no |
 | `config/traefik/certs/*.crt` | **yes**, by `tls-init` | no |
 | `config/prometheus/secrets/llamacpp.token` | **yes** | no |
 | `config/engine/` (`models.ini`, `active`, `targets.json`) | **yes**, by the app (Admin → Models) | no; the engine and Prometheus read it |
 | `config/searxng/settings.yml` | no | rarely: the search engine's settings (engines, safe search); its key comes from `SEARXNG_SECRET` |
-| `config/authelia/directory/` | **yes** — the list of people (no passwords) the app publishes for Argus | no; the directory itself is kept with a `.gitkeep` |
+| `config/directory/` | **yes** — the list of people (no passwords) the app publishes for Argus | no; the directory itself is kept with a `.gitkeep` |
+| `config/app/` | **yes** — the Settings page's pending `.env` changes | no |
 | `config/argus/tls/` | empty; you drop a CA here | yes, in the airgap/private-CA case |
 | `env-samples/*.env` | no | they are templates; copy one to `.env` |
 

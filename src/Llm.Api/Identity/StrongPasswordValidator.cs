@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Identity;
 namespace Llm.Api.Identity;
 
 /// <summary>
-/// zxcvbn score 3 or more, the same bar Authelia enforced. It scores realistically
+/// zxcvbn score 3 or more. It scores realistically
 /// (rejects "Password1!", accepts a long passphrase) instead of counting character
 /// classes. The person's own names count against the password.
 /// </summary>

@@ -8,4 +8,4 @@ Written by the app (Admin → Models); nothing here is edited by hand.
 | `active` | the engine | the model to load when it starts: an admin's last choice, or `-` for none. |
 | `targets.json` | Prometheus (read only) | the loaded model(s), whose metrics it scrapes (`/metrics?model=NAME`). |
 
-`auth-init` makes the folder the app's (755). See `deploy/services/llamacpp/router.sh`.
+`app-init` makes the folder the app's (755). See `deploy/services/llamacpp/router.sh`.

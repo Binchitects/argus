@@ -10,14 +10,14 @@ namespace Llm.Tests;
 [Collection(nameof(AppCollection))]
 public sealed class OidcTests(AppFixture app)
 {
-    private const string WebUiCallback = "https://chat.llm.test/oauth/oidc/callback";
+    private const string Callback = "https://traces.llm.test/api/auth/callback/custom";
 
     private TestBrowser Browser() => new(app.Factory);
 
-    private static string AuthorizeUrl(string state = "s1", string? prompt = null, string redirect = WebUiCallback) =>
+    private static string AuthorizeUrl(string state = "s1", string? prompt = null, string redirect = Callback) =>
         QueryHelpers.AddQueryString("/connect/authorize", new Dictionary<string, string?>
         {
-            ["client_id"] = "open-webui",
+            ["client_id"] = "langfuse",
             ["response_type"] = "code",
             ["redirect_uri"] = redirect,
             ["scope"] = "openid profile email groups",
@@ -25,8 +25,8 @@ public sealed class OidcTests(AppFixture app)
             ["prompt"] = prompt,
         }.Where(kv => kv.Value is not null));
 
-    /// <summary>Runs the authorization-code flow as Open WebUI would and returns the token response.</summary>
-    private async Task<JsonElement> SignInToWebUiAsync(string user, string password)
+    /// <summary>Runs the authorization-code flow as a signed-in app (Langfuse) would and returns the token response.</summary>
+    private async Task<JsonElement> SignInThroughAppAsync(string user, string password)
     {
         var b = Browser();
         var start = await b.GetAsync(AuthorizeUrl());
@@ -42,10 +42,10 @@ public sealed class OidcTests(AppFixture app)
         var authorized = await b.GetAsync(back);
         Assert.Equal(HttpStatusCode.Redirect, authorized.StatusCode);
         var callback = authorized.Headers.Location!;
-        Assert.StartsWith(WebUiCallback, callback.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith(Callback, callback.ToString(), StringComparison.Ordinal);
         var query = QueryHelpers.ParseQuery(callback.Query);
         Assert.Equal("s1", query["state"].ToString());
-        return await ExchangeAsync(query["code"].ToString(), AppFixture.OpenWebUiSecret, HttpStatusCode.OK);
+        return await ExchangeAsync(query["code"].ToString(), AppFixture.LangfuseSecret, HttpStatusCode.OK);
     }
 
     private async Task<JsonElement> ExchangeAsync(string code, string secret, HttpStatusCode expected)
@@ -56,10 +56,10 @@ public sealed class OidcTests(AppFixture app)
             {
                 ["grant_type"] = "authorization_code",
                 ["code"] = code,
-                ["redirect_uri"] = WebUiCallback,
+                ["redirect_uri"] = Callback,
             }),
         };
-        req.Headers.Authorization = TestBrowser.Basic("open-webui", secret);
+        req.Headers.Authorization = TestBrowser.Basic("langfuse", secret);
         var res = await Browser().Http.SendAsync(req);
         await StatusAssert.Is(expected, res);
         return JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
@@ -101,9 +101,9 @@ public sealed class OidcTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Open_webui_signs_in_an_admin_with_the_admin_group()
+    public async Task An_app_signing_in_through_the_app_gets_an_admin_with_the_admin_group()
     {
-        var tokens = await SignInToWebUiAsync("admin", AppFixture.AdminPassword);
+        var tokens = await SignInThroughAppAsync("admin", AppFixture.AdminPassword);
         var id = Payload(tokens.GetProperty("id_token").GetString()!);
         Assert.Equal("admin", id.GetProperty("preferred_username").GetString());
         Assert.Equal("admin@llm.test", id.GetProperty("email").GetString());
@@ -117,7 +117,7 @@ public sealed class OidcTests(AppFixture app)
     {
         var admin = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
         var (email, password, _) = await PersonAsync(admin);
-        var tokens = await SignInToWebUiAsync(email, password);
+        var tokens = await SignInThroughAppAsync(email, password);
         var info = await UserInfoAsync(tokens.GetProperty("access_token").GetString()!);
         Assert.Equal(["users"], info.GetProperty("groups").EnumerateArray().Select(g => g.GetString()!).ToArray());
         Assert.Equal(email, info.GetProperty("email").GetString());
@@ -128,7 +128,7 @@ public sealed class OidcTests(AppFixture app)
     {
         var admin = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
         var (email, password, id) = await PersonAsync(admin);
-        var tokens = await SignInToWebUiAsync(email, password);
+        var tokens = await SignInThroughAppAsync(email, password);
         await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/people/{id}", UriKind.Relative), new { disabled = true });
         await UserInfoAsync(tokens.GetProperty("access_token").GetString()!, HttpStatusCode.Unauthorized);
     }
@@ -149,8 +149,8 @@ public sealed class OidcTests(AppFixture app)
         var b = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
         var res = await b.GetAsync(AuthorizeUrl());
         var code = QueryHelpers.ParseQuery(res.Headers.Location!.Query)["code"].ToString();
-        await ExchangeAsync(code, AppFixture.OpenWebUiSecret, HttpStatusCode.OK);
-        var again = await ExchangeAsync(code, AppFixture.OpenWebUiSecret, HttpStatusCode.BadRequest);
+        await ExchangeAsync(code, AppFixture.LangfuseSecret, HttpStatusCode.OK);
+        var again = await ExchangeAsync(code, AppFixture.LangfuseSecret, HttpStatusCode.BadRequest);
         Assert.Equal("invalid_grant", again.GetProperty("error").GetString());
     }
 
@@ -168,36 +168,36 @@ public sealed class OidcTests(AppFixture app)
     {
         var res = await Browser().GetAsync(AuthorizeUrl(prompt: "none"));
         Assert.Equal(HttpStatusCode.Redirect, res.StatusCode);
-        Assert.StartsWith(WebUiCallback, res.Headers.Location!.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith(Callback, res.Headers.Location!.ToString(), StringComparison.Ordinal);
         Assert.Equal("login_required", QueryHelpers.ParseQuery(res.Headers.Location!.Query)["error"].ToString());
     }
 
     [Fact]
     public async Task Unregistered_clients_do_not_exist()
     {
-        // Langfuse has no secret in the test configuration, so it must not be a client at all.
         var b = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
-        var res = await b.GetAsync(AuthorizeUrl().Replace("client_id=open-webui", "client_id=langfuse", StringComparison.Ordinal));
+        var res = await b.GetAsync(AuthorizeUrl().Replace("client_id=langfuse", "client_id=not-a-client", StringComparison.Ordinal));
         Assert.NotEqual(HttpStatusCode.Redirect, res.StatusCode);
     }
 
     [Fact]
-    public async Task A_retired_client_left_by_an_older_version_is_removed_at_start()
+    public async Task A_client_the_configuration_does_not_name_is_removed_at_start()
     {
-        // Grafana signed in through the app until its dashboards moved into the app.
         using (var scope = app.Factory.Services.CreateScope())
         {
             var apps = scope.ServiceProvider.GetRequiredService<OpenIddict.Abstractions.IOpenIddictApplicationManager>();
             await apps.CreateAsync(new OpenIddict.Abstractions.OpenIddictApplicationDescriptor
             {
-                ClientId = "grafana", ClientSecret = "old-grafana-secret", ClientType = OpenIddict.Abstractions.OpenIddictConstants.ClientTypes.Confidential,
-                RedirectUris = { new Uri("https://grafana.llm.test/login/generic_oauth") },
+                ClientId = "unconfigured", ClientSecret = "its-secret", ClientType = OpenIddict.Abstractions.OpenIddictConstants.ClientTypes.Confidential,
+                RedirectUris = { new Uri("https://unconfigured.llm.test/callback") },
             });
             await scope.ServiceProvider.GetRequiredService<Llm.Api.Oidc.OidcClients>().RunAsync();
-            Assert.Null(await apps.FindByClientIdAsync("grafana"));
+            Assert.Null(await apps.FindByClientIdAsync("unconfigured"));
+            Assert.NotNull(await apps.FindByClientIdAsync("langfuse"));
+            Assert.NotNull(await apps.FindByClientIdAsync("api"));
         }
         var b = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
-        var res = await b.GetAsync(AuthorizeUrl(redirect: "https://grafana.llm.test/login/generic_oauth").Replace("client_id=open-webui", "client_id=grafana", StringComparison.Ordinal));
+        var res = await b.GetAsync(AuthorizeUrl(redirect: "https://unconfigured.llm.test/callback").Replace("client_id=langfuse", "client_id=unconfigured", StringComparison.Ordinal));
         Assert.NotEqual(HttpStatusCode.Redirect, res.StatusCode);
     }
 
@@ -223,7 +223,7 @@ public sealed class OidcTests(AppFixture app)
         Assert.Equal("llm-api", claims.GetProperty("aud").GetString());
         Assert.InRange(claims.GetProperty("exp").GetInt64() - claims.GetProperty("iat").GetInt64(), 3000, 3600);
         await MachineTokenAsync(b, "api", "wrong", expected: HttpStatusCode.Unauthorized);
-        await MachineTokenAsync(b, "open-webui", AppFixture.OpenWebUiSecret, expected: HttpStatusCode.BadRequest); // not allowed that grant
+        await MachineTokenAsync(b, "langfuse", AppFixture.LangfuseSecret, expected: HttpStatusCode.BadRequest); // not allowed that grant
     }
 }
 
@@ -273,7 +273,7 @@ public sealed class ForwardAuthTests(AppFixture app)
     public async Task Admins_reach_infrastructure_with_their_identity_attached()
     {
         var admin = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
-        foreach (var host in new[] { "metrics", "alerts", "logs", "cadvisor", "node", "gpu", "s3", "admin" })
+        foreach (var host in new[] { "metrics", "alerts", "logs", "cadvisor", "node", "gpu", "s3", "api2" })
         {
             var res = await AskAsync(admin, $"{host}.llm.test");
             await StatusAssert.Is(HttpStatusCode.OK, res);
@@ -284,13 +284,13 @@ public sealed class ForwardAuthTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Members_reach_the_admin_panel_but_not_infrastructure()
+    public async Task Members_reach_the_engine_api_docs_but_not_infrastructure()
     {
         var member = await MemberAsync();
-        var panel = await AskAsync(member, "admin.llm.test");
-        await StatusAssert.Is(HttpStatusCode.OK, panel);
-        Assert.Equal("users", panel.Headers.GetValues("Remote-Groups").Single());
-        foreach (var host in new[] { "metrics", "alerts", "logs", "s3" })
+        var docs = await AskAsync(member, "api.llm.test");
+        await StatusAssert.Is(HttpStatusCode.OK, docs);
+        Assert.Equal("users", docs.Headers.GetValues("Remote-Groups").Single());
+        foreach (var host in new[] { "metrics", "alerts", "logs", "s3", "api2", "admin" })
         {
             await StatusAssert.Is(HttpStatusCode.Forbidden, await AskAsync(member, $"{host}.llm.test"));
         }

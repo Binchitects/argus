@@ -2,8 +2,8 @@
 
 Everything an operator does happens in the app at `https://<LLM_DOMAIN>`. The
 **Admin** area needs the admin role; **Usage & cost** and **Your account** are
-for everyone. (The old admin panel at `https://admin.<LLM_DOMAIN>` is gone; that
-address redirects each old page to its place here, so bookmarks keep working.)
+for everyone, as is **Connect your tools** (each person's API key and the
+setups for their tools).
 
 People are a table with filters, bulk actions (credit, disable, enable, sign
 out) and a page each. The audit log has filters, paging and CSV export. The
@@ -146,8 +146,7 @@ over time and by model.
 ### Dashboards
 
 The dashboards are files in Grafana's JSON format, in `deploy/config/dashboards/`,
-and the app draws them itself (Grafana was removed in phase 5 of the
-[plan](plan.md)). Each panel's query runs on the app's server:
+and the app draws them itself. Each panel's query runs on the app's server:
 
 - **PostgreSQL** (the usage panels read the gateway's spend tables): Grafana's
   macros are reproduced (`$__timeFilter`, `$__timeGroupAlias`, `$__interval`,
@@ -167,12 +166,8 @@ Live dashboards (those with a refresh in their file) refresh themselves, and
 can pause. Edit a dashboard file and the next request uses it: the app reads
 the files on every request.
 
-Before Grafana was removed, every panel was queried in both over the same range
-and gave the same data: 153 of 153, over 30 days for usage and 6 hours for
-metrics, over 7 days and 24 hours, and over 2 days and 1 hour. The script that
-did it, `compare-dashboards.py`, is in the history (commit 8c07f7b).
-`scripts/audit-dashboards.py` now runs every panel's queries in the app and
-reports errors, empty panels, null values and percentages out of range:
+`scripts/audit-dashboards.py` runs every panel's queries in the app and reports
+errors, empty panels, null values and percentages out of range:
 
 ```bash
 python3 scripts/audit-dashboards.py 6h

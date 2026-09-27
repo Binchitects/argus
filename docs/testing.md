@@ -16,15 +16,16 @@ Every number here was measured against the tree, not estimated.
 
 | layer | entry point | asserts | needs |
 |---|---|---|---|
-| **Unit** | `pytest tests/` — **928 tests** | the Argus Python package: config, credentials, gitlab, mirror, tls, acl, access, resolve, worker, cli, packs, parse, store, mcpsrv, auditlog — plus `check_mounts.py`, the stack's preflight guard | nothing running; no Docker |
-| **App** | `./dn test` (xUnit), `npm test` (Vitest) and `npm run e2e` (Playwright) in `app/`, and CI on every push | sign-in, OIDC, forwardAuth, LDAP against a real OpenLDAP, people and keys, the dashboard engine running every SQL panel against LiteLLM's real schema and every Prometheus and Loki panel against a fake of both (every query fully expanded), the Logs and Alerts APIs, the admin pages including Indexing's exit-code meanings and the partial-enumeration opt-in, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
-| **Dashboard audit** | `scripts/audit-dashboards.py` | every panel's queries run in the app: no errors; empty panels, null values and percentages out of range are reported. (Parity with Grafana, 153 of 153 panels, was proven before Grafana was removed: `compare-dashboards.py`, commit 8c07f7b.) | a running stack |
+| **Argus** | `./tools/dn test tests/Argus.Tests` — **138 tests**; also the image's `test` stage and CI | config and credentials, the parser against Universal Ctags, the index store (FTS, the allowlist on every scoped query, references, impact), indexing against a git fixture, packs (build, install, verify, load from the library), the server (MCP, the admin surface, the chat-client token) and the standalone app | nothing running |
+| **Deploy helpers** | `python3 -m pytest tests/deploy` | `check_mounts.py` (the preflight guard) and acceptance's helpers | Python with pytest |
+| **App** | `./tools/dn test tests/Llm.Tests` (xUnit, **296 tests**), `npm test` (Vitest, **127**) and `npm run e2e` (Playwright) in `src/web`, and CI on every push | sign-in, OIDC, forwardAuth, LDAP against a real OpenLDAP, people and keys, the dashboard engine running every SQL panel against LiteLLM's real schema and every Prometheus and Loki panel against a fake of both (every query fully expanded), the Logs and Alerts APIs, the admin pages including Indexing's exit-code meanings and the partial-enumeration opt-in, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
+| **Dashboard audit** | `scripts/audit-dashboards.py` | every panel's queries run in the app: no errors; empty panels, null values and percentages out of range are reported. | a running stack |
 | **Acceptance** | `scripts/acceptance.py` | 7 groups — `config`, `routes`, `identity`, `infra`, `obs`, `ops`, `e2e`. Routes answer, OIDC discovery documents exist, scraping works, alert rules load, Alertmanager and Loki answer | a running stack |
 | **E2E** | `scripts/e2e-check.py` | from **inside** the network: the engine serves the model the gateway advertises, an API call is attributed to the key that made it, a chat is attributed to the same person, an over-budget person is refused | a running stack |
-| **Functional** | `scripts/functional-test.py` | 68 checks of what a *person* does: SSO sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, self-signup refusal, per-person billing on both surfaces, access per model, fair use (a key's third request at once is refused), and the dashboards, logs and alerts answering the admin and nobody else | `auth`,`gateway` profiles |
+| **Functional** | `scripts/functional-test.py` | the checks of what a *person* does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, self-signup refusal, per-person billing on both surfaces, access per model, fair use (a key's third request at once is refused), and the dashboards, logs and alerts answering the admin and nobody else | `gateway` profile |
 | **Sandbox** | `scripts/sandbox-check.py` | 17 checks against the running sandbox, sending jobs as the app does: code runs with its files and they come back; no network; no reading the jobs, other runs or the runner, no writing the image; time, memory, file size and process limits bind; nothing a run starts outlives it, not even as a zombie; a stop stops it | `sandbox` profile |
-| **Auth audit** | `scripts/audit-auth.sh` | a **real** OAuth2 authorization-code exchange per OIDC client, then the claims actually delivered | `auth` profile |
-| **Domain** | `scripts/domain-check.sh` | every hostname routes, TLS serves the right certificate, and the *old* domain is gone | `proxy` |
+| **Auth audit** | `scripts/audit-auth.sh` | a **real** OAuth2 authorization-code exchange per OIDC client, then the claims actually delivered | `gateway` profile |
+| **Domain** | `scripts/domain-check.sh` | every hostname routes, TLS serves the right certificate, and (with `--old`) a previous domain is gone | `proxy` |
 | **Smoke** | `scripts/smoke-test.sh` | model listing, auth enforcement, a completion, a streaming completion, Prometheus saw the traffic | `gateway` |
 | **Health** | `scripts/health.sh` | Docker healthchecks plus an in-network probe, per enabled service | any |
 | **Benchmarks** | `benchmark.py`, `multiuser-bench.py` | throughput and latency under concurrency — **measurement, not assertion** | `vllm`/`llamacpp` |
@@ -36,26 +37,23 @@ uniform coverage of the stack.
 
 ## 2. Coverage per service, measured
 
-Each of the 34 services against the test entry points, by name:
+Each of the 33 services against the test entry points, by name:
 
 | covered | service | by |
 |---|---|---|
-| ✅ | argus | acceptance, e2e-check, health, domain-check |
-| ✅ | app (sign-in, OIDC, forwardAuth, people) | app tests (xUnit, Vitest, Playwright), acceptance, functional-test, health, domain-check, audit-auth |
-| ✅ | open-webui | acceptance, e2e-check, functional-test, health, domain-check, audit-auth |
+| ✅ | argus | Argus tests, acceptance, e2e-check, health, domain-check, `tools/test-gitlab/run.sh` |
 | ✅ | litellm | acceptance, e2e-check, functional-test, health |
 | ✅ | traefik | acceptance, functional-test, health, domain-check, audit-auth |
 | ✅ | langfuse | acceptance, health, audit-auth |
 | ✅ | prometheus, alertmanager, loki | acceptance, health, functional-test and audit-dashboards (through the app's dashboards, Logs and Alerts) |
 | ✅ | node-exporter, nvidia-smi-exporter, cadvisor, redis, postgres, power-limits, clickhouse | acceptance/health only |
 | ✅ | llamacpp, vllm | e2e-check, health, smoke/bench |
-| ✅ | app | app tests, CI, acceptance, functional-test, audit-auth, audit-dashboards |
+| ✅ | app (sign-in, OIDC, forwardAuth, people, chat, models) | app tests (xUnit, Vitest, Playwright), CI, acceptance, functional-test, health, domain-check, audit-auth, audit-dashboards |
 | ✅ | web | Playwright (every page, desktop and phone, both themes, axe), domain-check |
 | ✅ | sandbox | sandbox-check (17 checks against the real container), app tests (with a fake) |
 | ⚠️ | imagegen | functional-test (access per model) |
 | ⚠️ | model-init, tls-init | one script each |
-| ❌ | **auth-init** | nothing |
-| ❌ | **identity-proxy** | nothing |
+| ❌ | **app-init** | nothing |
 | ❌ | **prometheus-secrets** | nothing |
 | ⚠️ | llamacpp-embed, embed-init | acceptance (the embedder answers with `ARGUS_EMBED_DIM` dimensions) |
 | ❌ | **cpu-temp-exporter** | nothing |
@@ -66,16 +64,16 @@ Each of the 34 services against the test entry points, by name:
 | ❌ | **vllm-secondary** | nothing |
 | ❌ | **searxng** | nothing against the real one (the app's web tool is tested with a fake) |
 
-Eleven services are named by no test at all.
+Nine services are named by no test at all.
 
 ### The bigger caveat: skipped is not passed
 
 `acceptance.py` is deliberately profile-aware — it emits `SKIP` rather than
 `FAIL` for a service whose profile is off, and the exit code stays 0. On the
-default deployment (`gateway,proxy,auth,smi,llamacpp,argus`) that means the
-whole of `tracing` (langfuse, langfuse-worker, clickhouse, minio), `logging`
-(loki, promtail), `cadvisor`, `dcgm`, `vllm` and `vllm-secondary`
-are **reported green without being exercised**. A green run says "nothing
+samples' profiles (`gateway,proxy,smi,llamacpp,logging`) that means `argus`,
+the whole of `tracing` (langfuse, langfuse-worker, clickhouse, minio),
+`cadvisor`, `dcgm`, `vllm` and `vllm-secondary` are **reported green without
+being exercised**. A green run says "nothing
 failed", not "everything passed".
 
 ---
@@ -84,14 +82,14 @@ failed", not "everything passed".
 
 | # | gap | why it matters |
 |---|---|---|
-| G1 | **Ten services have no test** | auth-init and prometheus-secrets build files other services depend on; if they regress, everything downstream fails confusingly |
+| G1 | **Some services have no test** | app-init and prometheus-secrets prepare files other services depend on; if they regress, everything downstream fails confusingly |
 | G2 | **Profile-gated stacks are skipped by default** | tracing, logging, cadvisor, dcgm, multi-model are shipped and claimed, never run |
 | G3 | **Restore has no test** | `backup.sh --restore` is the highest-risk operation in the repository and the only one that can destroy data. `--verify` runs its checksums, but nothing restores and compares |
 | G4 | **The airgap round trip is manual** | bundle → transfer → `load.sh` was verified by hand once. Nothing keeps it working |
 | G5 | **`preflight.sh` / `check_mounts.py` are manual** | only synthetic payloads I ran by hand; no test in the suite |
 | G6 | **`with-ca.sh` is manual** | the host-trust path for `dsh`, curl, python and git |
-| G7 | **Built images other than Argus and the app** | identity-proxy and the cpu-temp-exporter image have no build-time test |
-| G8 | ~~No browser tests for chat~~ **closed** | the app's chat runs in a real browser against the real model, desktop and phone: streaming, thinking, stop and regenerate, attachments, code copy, history, and Argus's no-access notice for a person without access (`src/web/e2e/chat.spec.ts`, [chat.md](chat.md)). Open WebUI itself stays untested and goes when the app's chat is signed off |
+| G7 | **Built images other than Argus and the app** | the sandbox and cpu-temp-exporter images have no build-time test |
+| G8 | ~~No browser tests for chat~~ **closed** | the app's chat runs in a real browser against the real model, desktop and phone: streaming, thinking, stop and regenerate, attachments, code copy, history, and Argus's no-access notice for a person without access (`src/web/e2e/chat.spec.ts`, [chat.md](chat.md)) |
 | G9 | **Two clients executed, three transcribed** | DSH and Qwen Code now run end to end and their configs are in `clients/`, marked as executed. Claude Code and Continue are written from their own documentation and marked as such; Hermes is unexercised; the OpenAI SDK has no test at all. The distinction is recorded per file in `clients/README.md` so a transcribed config is never mistaken for a verified one |
 | G10 | **No upgrade or rollback test** | changing `ARGUS_VERSION` or an image tag and rolling back is untested |
 | G11 | **Disaster recovery is untested** | restore onto a *clean host*, which is the actual scenario |
@@ -112,10 +110,10 @@ contract. None of these need a browser.
 | S1.2 | every bind mount resolves to real content, live **and** on a fresh clone | exists (`check_mounts.py planned`/`containers`) |
 | S1.3 | a missing required variable names the variable | manual only |
 | S1.4 | every profile combination renders | **missing** |
-| S1.5 | `env-samples/*.env` each render against the current compose | **missing** — a sample that no longer matches is invisible today |
+| S1.5 | `env-samples/*.env` each render against the current compose | exists — `acceptance.py` ("every env-sample is a complete deployment") |
 
-`check_mounts.py` now has its own unit tests in `tests/deploy/test_check_mounts.py`
-(run with the Argus suite; the file is copied into the image's test stage).
+`check_mounts.py` has its own unit tests in `tests/deploy/test_check_mounts.py`
+(`python3 -m pytest tests/deploy`).
 
 They exist because enabling `logging` by default turned `preflight.sh` red on a
 perfectly healthy host. `/var/lib/docker` is mode 0710 root:root, so an ordinary
@@ -141,9 +139,8 @@ For **every** service, not just the 22 today:
 | S2.3 | it logs no `ERROR`/`FATAL` in the first 60 s |
 | S2.4 | it is absent when its profile is off, and present when on |
 
-**Specifically missing:** `auth-init` (its three output files exist, are parseable
-and have the right modes), `prometheus-secrets` (the token is 0600 and non-empty),
-`identity-proxy` (it actually rewrites the `user` field), `cpu-temp-exporter` (a reading is
+**Specifically missing:** `app-init` (the app's folders exist with the right owner
+and modes), `prometheus-secrets` (the token is 0600 and non-empty), `cpu-temp-exporter` (a reading is
 emitted), `dcgm-exporter`, `promtail` (a log line reaches Loki), `langfuse-worker`
 (a trace reaches ClickHouse), `minio` (a bucket exists), `vllm-secondary`
 (`api2.<domain>` serves its model).
@@ -154,8 +151,8 @@ emitted), `dcgm-exporter`, `promtail` (a log line reaches Loki), `langfuse-worke
 |---|---|
 | S3.1 | OIDC discovery + real code exchange per client, claims correct | exists |
 | S3.2 | forwardAuth allows/bypasses/denies per hostname per the access rules | exists — `ForwardAuthTests` (every host, member vs admin, machine token, unknown and look-alike hosts) and `audit-auth.sh` steps 3-5 |
-| S3.3 | `PROTECTED_CHAIN=protected-chain@file` (basic auth, `auth` profile off) | **missing** |
-| S3.4 | `config/authelia/directory/users.yml` is hash-free and Argus can read it | exists — `IdentityTests.The_directory_for_argus_lists_people_without_passwords` |
+| S3.3 | the registered OIDC clients are exactly the configured ones | exists — `OidcTests.A_client_the_configuration_does_not_name_is_removed_at_start` |
+| S3.4 | `config/directory/users.yml` is hash-free and Argus can read it | exists — `IdentityTests.The_directory_for_argus_lists_people_without_passwords` |
 | S3.5 | a changed `APP_DATA_KEY` makes the app refuse to start instead of resetting its keys | exists — `KeyRingTests` |
 
 ### S4 — Gateway *(good)*
@@ -165,76 +162,26 @@ to spend), and behaviour when the engine is down (retry, then a clear error).
 
 ### S5 — Argus *(strong unit, weak integration)*
 
-Unit is 928 tests. Missing at the stack level: index → MCP → per-token ACL end to
-end against a real GitLab (the `tools/test-gitlab/` fixture exists but is not
-wired into a suite), and the audit JSON stream actually reaching Loki.
+`tests/Argus.Tests` has 138 tests (§1). Missing at the stack level: index →
+MCP → per-token ACL end to end against a real GitLab **in CI** (the
+`tools/test-gitlab/` fixture runs it on demand, below), and the audit JSON
+stream actually reaching Loki.
 
-**The Indexing card was broken in three separate ways at once**, and every one
-of them was found by using the running stack rather than by reading it:
+One lesson from the Python Argus is kept in the .NET tests: **a test fixture
+that is more permissive than production hides exactly the failures that only
+production can have.** `impact_of` was once dead for every caller, because the
+server opens the index read-only and the tool wrote a temporary table, while
+the unit fixture's connection was writable. The allowlist now travels as one
+JSON parameter, and `Impact_of_walks_reverse_includes_only_through_allowed_repos`
+and `Every_scoped_query_filters_by_the_allowlist` pin the behaviour. Any query
+that touches the connection should be exercised the way the server opens it.
 
-1. **The log was thrown away the moment a run ended.** The card kept the
-   child's output only while `state == "running"`; afterwards it rendered
-   "exit 3" and nothing else. The reason was in the tail the whole time. This
-   is what "I press Index and always get an error" actually was — the error was
-   real, and the explanation was discarded by the UI.
-2. **`/admin/index/status` raised `NameError`.** `connect_readonly` was never
-   imported, so the per-repo freshness table was *always* empty, and the broad
-   `except` that caught it stored the message in a field the panel did not
-   render. "Never worked" looked exactly like "nothing indexed yet".
-3. **`impact_of` was dead for everyone** — see the note below, which belongs to
-   the same class of finding.
-
-There was also a dead end: Argus refuses to index when the token cannot see the
-whole estate, and its refusal says "re-run with `--allow-partial-enumeration`" —
-a flag the panel had no way to pass. The card now has an explicit opt-in,
-unchecked by default, and exit 3 points at it.
-
-The admin panel that had this card is gone; the app's Indexing page keeps the
-opt-in and the exit-code meanings, and its UI test asserts on both.
-
-**A whole tool was dead, and the suite said it was fine.** `impact_of` built its
-allowlist in a `TEMP TABLE`, but the server opens the index with
-`PRAGMA query_only = ON`, so the first statement raised *attempt to write a
-readonly database* for **every caller who had access**. `run_readonly`'s
-catch-all turned that into "The index is unavailable; do not retry this query",
-which reads as a storage fault and sends people to look at the disk. The unit
-tests passed because the shared fixture connection is *writable*, and a temp
-table is perfectly legal there — the one connection they never used is the one
-production uses.
-
-Found by exercising the tool against the running stack, not by reading it. The
-allowlist now travels as a JSON array joined with `json_each`, which needs no
-write and, as a bonus, is a single host parameter — so the recursive walk is no
-longer near `SQLITE_MAX_VARIABLE_NUMBER` either. The three tests that pin it
-(`test_impact_of_works_on_the_servers_readonly_connection`,
-`test_impact_of_allowlist_larger_than_parameter_limit`,
-`test_impact_of_excludes_a_repo_outside_the_allowlist`) all go through
-`connect_readonly`, which is what the MCP server uses; the first two fail with
-the exact production error against the old code.
-
-The general lesson is worth keeping: **a test fixture that is more permissive
-than production hides exactly the failures that only production can have.** Any
-query function that touches the connection should be exercised through
-`connect_readonly` at least once.
-
-Within that unit count, the GitLab **credential modes** are covered properly,
-because both failure directions here are expensive and neither is visible from
-the outside:
-
-| test | asserts |
-|---|---|
-| `test_a_token_goes_in_the_private_token_header`, `test_a_password_becomes_a_bearer_token` | the header follows the mode. A minted token presented as `PRIVATE-TOKEN` works, but the mirror image — an OAuth-shaped value in the wrong header — reads as an ACL problem |
-| `test_password_mode_signs_in_and_mints_a_token` and friends | the sign-in → mint sequence, that a token from a previous run is revoked first, and that the minted token carries `read_api` + `read_repository` and not full `api` |
-| `test_the_password_is_sent_in_the_body_not_the_url` | the password is in a POST body, never in a query string |
-| `test_a_rejected_sign_in_does_not_echo_the_password`, `test_a_transport_failure_does_not_echo_the_password` | no failure path — including an `httpx` exception, which carries the request — puts the password into a message |
-| `test_a_401_re_mints_and_retries_once`, `test_a_401_that_survives_the_re_mint_is_returned_as_is`, `test_token_mode_never_re_mints` | a minted token that GitLab has expired or revoked is replaced and the read retried **once**; a second `401` is reported rather than looped on; static tokens are never retried |
-| `test_a_server_that_will_not_mint_tokens_says_so`, `test_two_factor_is_named_rather_than_reported_as_a_bad_password` | the two failures that are *not* a wrong password are named as such, because changing the password does not fix either |
-
-The measured facts those tests encode — the sign-in form endpoint, the CSRF
-token's two names, the flat `name` + repeated `scopes[]` parameters, the
-`unsupported_grant_type` that retired the old OAuth password grant, and the one
-year default expiry on a blank `expires_at` — were each read off a live GitLab
-(`tools/test-gitlab/`) before being written down, not inferred from the docs.
+The GitLab **credential modes** are covered in `ConfigTests` (a username implies
+password mode and needs the password; a password in the config file is
+refused; the environment wins over the file), and the facts they encode (the
+sign-in form, the minted token's `read_api` + `read_repository` scopes, the
+removed OAuth password grant) were each read off a live GitLab
+(`tools/test-gitlab/`) before being written down.
 
 ### S6 — Data and disaster recovery
 
@@ -295,10 +242,9 @@ The repo has been bitten by idempotency before; nothing asserts it now.
 
 ## 5. Client-side tests
 
-"Client side" = a consumer **outside** the stack. These are the tests that would
-have caught the two problems this session opened with — DSH unable to reach the
-API and Open WebUI unable to register Argus — because both were client-side
-failures that every server-side check called healthy.
+"Client side" = a consumer **outside** the stack: the failures every
+server-side check calls healthy, such as a harness that cannot reach the API
+because it does not trust the certificate.
 
 ### C1 — HTTP API clients
 
@@ -329,8 +275,8 @@ variable:
 |---|---|
 | C3.1 | DeepSeek Harness reaches the API with `NODE_EXTRA_CA_CERTS` set before launch. **Verified, and re-verified on v2.1.2** — `dsh --profile headless` with `NODE_EXTRA_CA_CERTS` and `--patch` called `mcp__argus__find_symbol`, got `root/eal-core` back, and Argus logged `tool=find_symbol user=dev_alpha outcome=ok`. The variable is read at process start, so it cannot be set afterwards. Config: `clients/deepseek-harness/` |
 | C3.2 | Qwen Code connects to Argus, calls a tool and completes. **Now verified** on v2.1.2 with qwen 0.23.3, against the stack's own gateway (`--auth-type openai --openai-base-url https://gateway.<domain>/v1`) rather than a cloud key: it called `find_symbol`, distinguished the definition in `src/decoder.c` from the declaration in `include/eal/decoder.h`, and Argus logged `user=dev_alpha outcome=ok`. Two things had to be learned: `--trust` is required in a headless run or every call waits for confirmation, and the gateway host is `gateway.<domain>` — `api.<domain>` routes to the sign-in and answers with a login redirect that reads as a 401. Config: `clients/qwen-code/` |
-| C3.3 | Hermes connects, lists tools and completes (see `docs/HERMES.md`) |
-| C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik, and Open WebUI's MCP client lists 16 tools |
+| C3.3 | Hermes connects, lists tools and completes (see [hermes.md](hermes.md)) |
+| C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik and lists 16 tools |
 | C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `tools/test-gitlab/` exists to answer. **Verified and now automated** against a real GitLab CE by `./tools/test-gitlab/run.sh`, which is one command from a cold start: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. `verify_tools.py` extends it to **all sixteen MCP tools over the wire**, checks each result's declared shape, and asserts that no structured field names a repository the caller cannot read |
 
 ### C4 — Browser *(G8, now covered by the app's Playwright suite)*
@@ -340,7 +286,7 @@ original minimum set, and where each item stands:
 
 | test | asserts |
 |---|---|
-| C4.1 | `https://admin.<domain>` follows the SSO redirect chain to the panel and back |
+| C4.1 | `https://<domain>/admin` sends a signed-out browser to sign in and back |
 | C4.2 | the self-signed certificate produces a warning that can be accepted, and the page then loads |
 | C4.3 | a chat renders a streamed answer incrementally: **done in the app's chat** (`chat.spec.ts`) |
 | C4.4 | Argus is offered to a non-admin: **done in the app's chat**, with the no-access notice for someone without access |
@@ -389,8 +335,9 @@ first time, which had been the largest untested claim in the project:
 ./tools/test-gitlab/run.sh          # up, seed, verify, down
 ```
 
-That one command replaces the sequence below, and takes the fixture down again
-when it is finished — including when verification fails. The fixture is
+That one command replaces the sequence below (up and seed; the per-tool
+verifier is not yet ported to the .NET Argus), and takes the fixture down again
+when it is finished — including when seeding fails. The fixture is
 `restart: "no"` now; it used to be `unless-stopped`, which meant it survived
 reboots and sat at 2.63 GiB of RAM and 2.17% CPU indefinitely on a host whose
 whole job is to keep the GPU busy with something else.
@@ -403,33 +350,29 @@ docker compose -f tools/test-gitlab/docker-compose.yml up -d   # first boot: min
 # `healthy` several minutes before the API can answer, and seeding against a
 # GitLab that is still reconfiguring fails in ways that look like a bad seed.
 # seed.py shells out to `docker exec`, so it needs the CLI and the socket
-docker run --rm --user root --network host \
+docker run --rm --user root --network host -e HOME=/tmp \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(command -v docker)":/usr/local/bin/docker \
-  -v "$PWD/tools/test-gitlab:/t" -w /t --entrypoint python argus:latest /t/seed.py
+  -v "$PWD/tools/test-gitlab:/t" -w /t python:3.13-slim python /t/seed.py
 docker exec argus argus index --config /etc/argus/config.yaml
 docker compose -f tools/test-gitlab/docker-compose.yml down -v   # do not skip this
 ```
 
-`verify.py` additionally needs `ARGUS_TEST_WORK` set to a path outside the
-checkout on an NTFS host — SQLite in WAL mode cannot open its shared-memory file
-over that filesystem and `argus index` dies with `disk I/O error`. `run.sh`
-points it at a Docker volume for exactly that reason.
+An index outside a container needs its work directory off an NTFS checkout:
+SQLite in WAL mode cannot open its shared-memory file over that filesystem and
+`argus index` dies with `disk I/O error`.
 
-Three things that had to be right first, all now recorded in the code:
+Two things that had to be right first, all now recorded in the code:
 
 * Argus could not reach GitLab at all until the fixture was running, and every
-  Open WebUI tool connection came back **401** — Argus rejects a chat user it
-  cannot resolve access for, and Open WebUI drops the tool silently.
+  chat's Argus call came back **401** — Argus rejects a chat user it cannot
+  resolve access for.
 * The clone URL had to be rebased onto the configured GitLab: GitLab advertises
   `http://localhost:8929`, which inside a container is the container itself.
-* `verify.py` wrote its report to `docs/verification-report.md`, a path the
-  repository restructure left behind. It never failed — it just stopped updating
-  the report anybody reads, which is the worst way for a document to break.
 
 Note that a deployment pointed at this fixture (`ARGUS_GITLAB_URL` in `.env`)
 has nothing to index while the fixture is down, so `ArgusIndexStale` fires and
-the admin console's Overview says the repositories are out of date. That is the
+the app's Overview says the repositories are out of date. That is the
 system being right, not broken: the index genuinely cannot refresh.
 
 ---
@@ -441,11 +384,11 @@ Ordered by (risk × likelihood), not by effort:
 | # | test | why first |
 |---|---|---|
 | 1 | **S6.2 restore round trip** | the only operation that can destroy data, and untested |
-| 2 | **S1.5 env-samples render** | cheap; every sample is a promise the compose file has not broken |
+| ~~2~~ | ~~**S1.5 env-samples render**~~ — **done** in `acceptance.py` | |
 | 3 | **S2 for the ten unreferenced services** | closes the largest named hole |
 | 4 | **C2 TLS trust per runtime** | this is the failure users actually hit; four small tests |
 | 5 | **S9.3 genuinely offline start** | the offline commits claim it; nothing checks it |
-| 6 | **S3.4 hash-free account list** | just added, verified once by hand |
+| ~~6~~ | ~~**S3.4 hash-free account list**~~ — **done** (`IdentityTests`) | |
 | 7 | **S9.1/S9.2 airgap round trip** | verified once by hand, easy to regress |
 | ~~8~~ | ~~**Automate C3.5**~~ — **done.** `./tools/test-gitlab/run.sh` runs the whole lifecycle, and `ARGUS_TEST_WORK` moves the index off the NTFS volume that SQLite's WAL mode cannot use. All sixteen tools are contract-tested over the wire; the six `docs_*` tools are reported as NOT COVERED because the fixture has no documentation pack installed |
 | 9 | **S10 idempotency** | two `up`s, two indexes, one `down`/`up` |
@@ -458,8 +401,10 @@ Ordered by (risk × likelihood), not by effort:
 ```bash
 cd deploy
 
-# unit (no stack needed)
-docker build --target test -t argus:test .. && docker run --rm argus:test
+# unit (no stack needed), from the repository root
+../tools/dn test tests/Llm.Tests -c Release
+../tools/dn test tests/Argus.Tests -c Release
+python3 -m pytest ../tests/deploy
 
 # with the stack up
 make health          # container state + in-network probes

@@ -203,7 +203,7 @@ if [ "$DO_UP" = 1 ]; then
   ( cd deploy && docker compose ps --format 'table {{.Name}}\t{{.Status}}' )
   say ""
   say "Watch the model come up:  cd deploy && docker logs -f model-init"
-  say "Then open https://admin.<LLM_DOMAIN> (see LLM_DOMAIN in deploy/.env)."
+  say "Then open https://<LLM_DOMAIN> (see LLM_DOMAIN in deploy/.env) and sign in as admin."
 else
   say ""
   say "Images are loaded."

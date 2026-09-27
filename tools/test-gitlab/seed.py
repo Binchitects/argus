@@ -24,8 +24,52 @@ import pathlib
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
-import httpx
+
+class Response:
+    def __init__(self, status: int, text: str):
+        self.status_code = status
+        self.text = text
+
+    @property
+    def is_error(self) -> bool:
+        return self.status_code >= 400
+
+    def json(self):
+        return json.loads(self.text)
+
+
+class Client:
+    """The little of httpx the seed needs, on the standard library, so it runs
+    in a stock python image."""
+
+    def __init__(self, base_url: str = "", headers: dict | None = None, timeout: float = 60):
+        self.base_url, self.headers, self.timeout = base_url, headers or {}, timeout
+
+    def request(self, method: str, path: str, body=None, params: dict | None = None) -> Response:
+        if params:  # booleans as httpx sends them: true / false
+            params = {k: str(v).lower() if isinstance(v, bool) else v for k, v in params.items()}
+        url = self.base_url + path + ("?" + urllib.parse.urlencode(params) if params else "")
+        data = json.dumps(body).encode() if body is not None else None
+        headers = {**self.headers, **({"Content-Type": "application/json"} if data else {})}
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                return Response(r.status, r.read().decode())
+        except urllib.error.HTTPError as e:
+            return Response(e.code, e.read().decode())
+
+    def get(self, path: str, params: dict | None = None) -> Response:
+        return self.request("GET", path, params=params)
+
+    def post(self, path: str, json=None) -> Response:
+        return self.request("POST", path, body=json)
+
+    def put(self, path: str, json=None) -> Response:
+        return self.request("PUT", path, body=json)
 
 GITLAB = "http://localhost:8929"
 
@@ -186,7 +230,7 @@ def wait_for_api(timeout_s: int = 1800) -> None:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            r = httpx.get(f"{GITLAB}/api/v4/version", timeout=10)
+            r = Client(timeout=10).get(f"{GITLAB}/api/v4/version")
             if r.status_code in (200, 401):
                 print("gitlab: API is serving")
                 return
@@ -219,7 +263,7 @@ def admin_token() -> str:
     return out.splitlines()[-1].strip()
 
 
-def _ok(r: httpx.Response, what: str) -> httpx.Response:
+def _ok(r: Response, what: str) -> Response:
     """raise_for_status, but show GitLab's actual complaint.
 
     A bare 400 from /api/v4/users is unactionable; the body says exactly which
@@ -235,7 +279,7 @@ def main() -> int:
     wait_for_api()
     admin = admin_token()
     print(f"admin token: {admin[:12]}...")
-    c = httpx.Client(base_url=f"{GITLAB}/api/v4",
+    c = Client(base_url=f"{GITLAB}/api/v4",
                      headers={"PRIVATE-TOKEN": admin}, timeout=60)
 
     # --- projects, PRIVATE on purpose -------------------------------------

@@ -45,4 +45,3 @@ The numbers behind the claims, kept as evidence:
 [packs](measurements/pack-measurements.md),
 [KPIs](measurements/kpis.md),
 [verification report](measurements/verification-report.md).
-[archive/](archive/phase3-checklist.md) holds superseded pages.

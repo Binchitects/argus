@@ -68,7 +68,7 @@ public sealed class ChatTests(AppFixture app)
 
         var (body, headers) = app.Model.Requests.Last();
         Assert.Equal(email, body["user"]!.GetValue<string>());
-        Assert.Equal(email, headers["X-OpenWebUI-User-Email"]);
+        Assert.Equal(email, headers[Llm.Api.Chat.GatewayChat.UserEmailHeader]);
         // The chat's own key (alias "chat"), never the master key.
         Assert.StartsWith("Bearer sk-chat-", headers["Authorization"], StringComparison.Ordinal);
         Assert.Contains(headers["Authorization"][7..], app.Gateway.ServiceKeys);

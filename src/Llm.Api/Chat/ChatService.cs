@@ -122,7 +122,7 @@ public sealed partial class ChatService(
                 ["messages"] = messages.DeepClone(),
                 ["stream"] = true,
                 ["stream_options"] = new JsonObject { ["include_usage"] = true },
-                // Enforcement: the end-user budget binds on this field (see services/identity-proxy).
+                // Enforcement: the end-user budget binds on this field (the header only attributes).
                 ["user"] = email,
             };
             if (conversation.Temperature is { } temperature)

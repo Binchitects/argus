@@ -11,8 +11,6 @@ namespace Llm.Api.Oidc;
 public enum HostPolicy
 {
     Deny,
-    /// <summary>Any signed-in person.</summary>
-    Person,
     /// <summary>Signed-in admins only.</summary>
     Admin,
     /// <summary>A machine token with the "api" scope, or a signed-in person (a browser on /docs).</summary>
@@ -21,7 +19,7 @@ public enum HostPolicy
 
 /// <summary>
 /// Traefik's forwardAuth target: decides for services that have no sign-in of
-/// their own, and tells the admin panel who is calling (Remote-* headers,
+/// their own, and tells them who is calling (Remote-* headers,
 /// which Traefik overwrites so a browser cannot forge them).
 /// </summary>
 public static class ForwardAuth
@@ -35,7 +33,6 @@ public static class ForwardAuth
         return host[..^(domain.Length + 1)].ToLowerInvariant() switch
         {
             "metrics" or "alerts" or "logs" or "cadvisor" or "node" or "gpu" or "s3" or "api2" => HostPolicy.Admin,
-            "admin" => HostPolicy.Person,
             "api" => HostPolicy.ApiOrPerson,
             _ => HostPolicy.Deny,
         };

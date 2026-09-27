@@ -5,8 +5,9 @@ Asserts the things that are easy to believe without evidence:
 
   * the engine serves the model the gateway advertises
   * an API call attributes spend to the person whose key made it
-  * a chat through Open WebUI attributes to the SAME person, so their total
-    spans both surfaces rather than being two unrelated numbers
+  * a chat-style request (the app's shared key, the person named in
+    X-LLM-User-Email and in `user`) attributes to the SAME person, so their
+    total spans both surfaces rather than being two unrelated numbers
   * a person over their ceiling is refused on the chat path, not merely
     recorded -- attribution without enforcement is the failure this stack
     spent the longest getting wrong
@@ -26,7 +27,6 @@ import urllib.error
 import urllib.request
 
 GW = os.environ.get("GATEWAY_URL", "http://litellm:4000")
-WEBUI = os.environ.get("WEBUI_URL", "http://open-webui:8080")
 # The engine is whichever one is actually serving. Both run as compose
 # services and only one of them can hold the GPU. Naming only vLLM here made
 # this check engine-specific when its intent -- "something is really serving
@@ -329,43 +329,37 @@ def main() -> int:
     record("API usage attributed to the person", after > before,
            f"${before:.6f} -> ${after:.6f}")
 
-    # --- chat path attributes to the SAME person -------------------------
-    try:
-        tok = call(WEBUI, "/api/v1/auths/signup",
-                   {"name": "E2E", "email": email, "password": "Str0ng-E2E-Passw0rd"})["token"]
-        before = spend(email)
-        call(WEBUI, "/api/chat/completions",
-             {"model": model, "messages": [{"role": "user", "content": prompt}],
-              "max_tokens": 24, "stream": False}, token=tok)
-        after = wait_for_spend(email, before)
-        record("chat usage attributed to the same person", after > before,
-               f"${before:.6f} -> ${after:.6f}")
+    # --- the chat's path attributes to the SAME person -------------------
+    # As the app's chat calls the gateway: a shared key that is not the
+    # person's, the person named in X-LLM-User-Email (attribution) and in the
+    # body's `user` (enforcement: their end-user ceiling binds on it).
+    shared = call(GW, "/key/generate", {"key_alias": f"e2e-chat-{stamp}"}, token=MASTER)["key"]
+    as_chat = {"X-LLM-User-Email": email}
+    before = spend(email)
+    call(GW, "/chat/completions",
+         {"model": model, "messages": [{"role": "user", "content": prompt}],
+          "max_tokens": 24, "user": email}, token=shared, headers=as_chat)
+    after = wait_for_spend(email, before)
+    record("chat usage attributed to the same person", after > before,
+           f"${before:.6f} -> ${after:.6f}")
 
-        # --- and the ceiling binds there too -----------------------------
-        refused = False
-        for _ in range(5):
-            try:
-                call(WEBUI, "/api/chat/completions",
-                     {"model": model,
-                      "messages": [{"role": "user", "content": prompt + " again"}],
-                      "max_tokens": 16, "stream": False}, token=tok)
-            except urllib.error.HTTPError as exc:
-                refused = "budget" in exc.read().decode("utf-8", "replace").lower()
-                break
-            time.sleep(5)
-        record("over-budget person refused in chat", refused,
-               "attribution without enforcement is the failure mode this catches")
-    except urllib.error.HTTPError as exc:
-        # Open WebUI is SSO-only (ENABLE_PASSWORD_AUTH, ENABLE_SIGNUP off), so a
-        # local signup is refused -- as it must be: when it was allowed, the
-        # account this made became the Open WebUI admin, with the password
-        # above. functional-test.py covers the chat path through the app's sign-in.
-        if exc.code == 403:
-            print(f"  [{YELLOW}SKIP{OFF}] chat path: Open WebUI is SSO-only, no local signup "
-                  f"-- functional-test.py covers chat attribution through SSO",
-                  flush=True)
-        else:
-            record("chat path", False, f"HTTP {exc.code}")
+    # --- and the ceiling binds there too ---------------------------------
+    refused = False
+    for _ in range(5):
+        try:
+            call(GW, "/chat/completions",
+                 {"model": model, "messages": [{"role": "user", "content": prompt + " again"}],
+                  "max_tokens": 16, "user": email}, token=shared, headers=as_chat)
+        except urllib.error.HTTPError as exc:
+            refused = "budget" in exc.read().decode("utf-8", "replace").lower()
+            break
+        time.sleep(5)
+    record("over-budget person refused in chat", refused,
+           "attribution without enforcement is the failure mode this catches")
+    try:
+        call(GW, "/key/delete", {"keys": [shared]}, token=MASTER)
+    except urllib.error.HTTPError:
+        pass
 
     # --- argus, if it is running -----------------------------------------
     try:

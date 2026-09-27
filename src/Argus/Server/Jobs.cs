@@ -223,6 +223,7 @@ public sealed class Jobs(ArgusConfig cfg)
             ["size_bytes"] = p.SizeBytes, ["license"] = p.License, ["commit"] = p.SourceCommit,
             ["compatible"] = p.Compatible, ["incompatible_reason"] = p.IncompatibleReason,
             ["source"] = Registry.LinkedFrom(p.Path) is null ? "installed" : "library",
+            ["details"] = Details(p),
         });
         return new JsonArray(rows.ToArray());
     }
@@ -234,7 +235,22 @@ public sealed class Jobs(ArgusConfig cfg)
             ["file"] = l.File, ["name"] = l.Pack.Name, ["version"] = l.Pack.Version, ["model"] = l.Pack.EmbeddingModel, ["dim"] = l.Pack.EmbeddingDim,
             ["size_bytes"] = l.Pack.SizeBytes, ["license"] = l.Pack.License, ["commit"] = l.Pack.SourceCommit,
             ["compatible"] = l.Pack.Compatible, ["incompatible_reason"] = l.Pack.IncompatibleReason, ["loaded"] = l.Loaded,
+            ["details"] = Details(l.Pack),
         })]);
+
+    /// <summary>What a pack says of itself beyond the columns above: its contents and where it came from.</summary>
+    static JsonObject Details(InstalledPack p)
+    {
+        var meta = p.Meta ?? new Dictionary<string, string>();
+        long? Count(string key) => long.TryParse(meta.GetValueOrDefault(key), out var n) ? n : null;
+        string? Text(string key) => meta.GetValueOrDefault(key) is { Length: > 0 } v ? v : null;
+        return new JsonObject
+        {
+            ["docs"] = Count("doc_count"), ["chunks"] = Count("chunk_count"), ["symbols"] = Count("symbol_count"),
+            ["source_repo"] = Text("source_repo"), ["source_branch"] = Text("source_branch"), ["attribution"] = Text("attribution"),
+            ["license_url"] = Text("license_url"), ["builder_version"] = Text("builder_version"),
+        };
+    }
 
     public bool StartPackJob(string action, string? source = null, string? sha256 = null, string? name = null, string? indexUrl = null)
     {

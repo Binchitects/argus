@@ -48,7 +48,7 @@ public static class ArgusServer
     public const string WebhookTokenEnv = "ARGUS_WEBHOOK_TOKEN";
     public const string WebhookHeader = "x-gitlab-token";
     /// <summary>
-    /// The platform's chat (and Open WebUI): one shared credential plus the
+    /// The platform's chat: one shared credential plus the
     /// signed-in person's email, accepted only from inside the network. Argus
     /// answers for that person, from their GitLab membership read with the
     /// service token.
@@ -61,8 +61,8 @@ public static class ArgusServer
     /// </summary>
     public const string AppEnv = "ARGUS_APP";
     public static bool AppEnabled() => !string.Equals(Environment.GetEnvironmentVariable(AppEnv), "off", StringComparison.OrdinalIgnoreCase);
-    public const string ChatEmailHeader = "x-openwebui-user-email";
-    public const string UsersFileEnv = "ARGUS_AUTHELIA_USERS_FILE";
+    public const string ChatEmailHeader = "x-llm-user-email";
+    public const string UsersFileEnv = "ARGUS_USERS_FILE";
     static readonly string[] ProxyHeaders = ["x-forwarded-for", "x-forwarded-host", "x-real-ip"];
     public const int WebhookQueueLimit = 25;
     public const string DeniedAtGateTool = "<auth_denied>";

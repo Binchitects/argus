@@ -42,7 +42,7 @@ export function HomePage() {
       <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <QuickAction to="/chat" icon={<MessageSquare />} title="Start a chat" description="Ask the model, with Argus searching the code you can read." />
         <QuickAction to="/usage" icon={<BarChart3 />} title="Your usage" description="Tokens, cache hits and cost, over time and by model." />
-        <QuickAction to="/account" icon={<KeyRound />} title="API key" description="Connect Qwen Code, your IDE or scripts." />
+        <QuickAction to="/setup" icon={<KeyRound />} title="Connect your tools" description="Your API key, and setups for Claude Code, Qwen Code, your editor or scripts." />
       </div>
       <Card>
         <CardHeader>

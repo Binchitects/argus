@@ -146,8 +146,8 @@ Each of these used to be a script you had to run in the right order.
 | service | does, from `.env` |
 |---|---|
 | `tls-init` | generates the self-signed certificate for `LLM_DOMAIN` and `*.LLM_DOMAIN`, keeps it, regenerates it if the domain changes |
-| `auth-init` | builds Traefik's basic-auth file and hands the app the directory it writes for Argus |
-| `app` (at start) | creates its database, the first admin from `ADMIN_PASSWORD`, and the OIDC clients from the `*_OIDC_CLIENT_SECRET` values; imports an Authelia install's people once |
+| `app-init` | hands the app the folders it writes (`config/directory`, `config/app`, `config/engine`) as `LLM_UID:LLM_GID` |
+| `app` (at start) | creates its database, the first admin from `ADMIN_PASSWORD`, and the OIDC clients from the `*_OIDC_CLIENT_SECRET` values (removing any other) |
 | `model-init` | downloads and verifies the model; fails with the path in the message if a file is missing |
 | `prometheus-secrets` | gives Prometheus the engine's scrape token |
 | `power-limits` | applies `GPU_POWER_LIMIT_W` and `CPU_POWER_LIMIT_W`, and re-applies them after a reboot |
@@ -168,8 +168,7 @@ Each of these used to be a script you had to run in the right order.
 | address | what | sign-in |
 |---|---|---|
 | `https://llm.localhost` | **the app**: sign-in for everything, **chat** (models, thinking, branches, files, Argus), usage and cost, people, API keys, credit, 2FA, **every setting**, the model, the code index, packs, audit log, **dashboards, logs and alerts** | its own sign-in; Admin needs `admins` |
-| `https://chat.llm.localhost` | Open WebUI, with Argus as a tool, until the app's chat is signed off ([chat.md](chat.md)) | SSO |
-| `https://gateway.llm.localhost/v1` | OpenAI-compatible API for tools | **the person's own API key** |
+| `https://gateway.llm.localhost/v1` | OpenAI- and Anthropic-compatible API for tools; each person's key and setup are under **Connect your tools** (`/setup`) | **the person's own API key** |
 | `https://argus.llm.localhost/mcp` | Argus MCP server (profile `argus`) | **the person's own GitLab token** |
 | `https://metrics.llm.localhost` · `alerts.` | Prometheus, Alertmanager | SSO, `admins` only |
 
@@ -185,8 +184,12 @@ themselves; **curl, Python, Node and every SDK on another machine do not** — r
 
 ### Connecting tools to the API
 
-Create the person under **Admin → People**; it shows their API key once. Every
-OpenAI-compatible tool needs the same four things:
+Each person sets up their own tools from **Connect your tools** (`/setup`, in the
+sidebar and on the home page): it makes their API key (shown once), gives the
+gateway's address and the models, the exact lines for Claude Code, Qwen Code and
+the OpenAI SDK, the Argus MCP command, and the stack's certificate to download
+when the deployment uses its own. An admin can also make a key for someone under
+**Admin → People**. Every OpenAI-compatible tool needs the same four things:
 
 | setting | value |
 |---|---|
@@ -242,7 +245,7 @@ NODE_EXTRA_CA_CERTS="/path/to/llm-service/deploy/config/traefik/certs/tls.crt" d
 ```
 
 Then add a provider with base URL `https://gateway.llm.localhost/v1` and the
-person's key from **Admin → People**. (The wrapper form above does the same thing
+person's key from **Connect your tools**. (The wrapper form above does the same thing
 without exporting anything permanent.)
 
 ```bash
@@ -282,6 +285,17 @@ Then `qwen -m Qwen3.8-Flash-Next`.
 **Hermes** — see [docs/hermes.md](hermes.md); use the model's
 real name and append `tls.crt` to Hermes's own CA bundle.
 
+**Claude Code** speaks Anthropic's protocol, which the gateway also serves
+(`/v1/messages`):
+
+```bash
+export ANTHROPIC_BASE_URL=https://gateway.llm.localhost
+export ANTHROPIC_AUTH_TOKEN=sk-YOURKEY
+export ANTHROPIC_MODEL=Qwen3.8-Flash-Next
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=Qwen3.8-Flash-Next
+NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/tls.crt claude
+```
+
 **Anything else** (OpenAI SDK, IDE plugins, other agents) takes the same base URL,
 key and model.
 
@@ -320,7 +334,7 @@ Qwen Code: the `mcpServers` block above. Any other MCP client: the same URL and 
 ### GitLab on a private CA
 
 Argus reaches GitLab over **two transports that cannot see each other's TLS
-configuration**: `httpx` for the API, and the `git` binary for clones. Configuring
+configuration**: .NET's HTTP client for the API, and the `git` binary for clones. Configuring
 one and not the other is the failure that costs the most time, because it reads as a
 bad credential — the API enumerates every project, and the first clone then dies with
 `server certificate verification failed`.
@@ -341,21 +355,21 @@ the service token — the most privileged string in the deployment. Use the CA w
 one exists. Setting **both** is refused at startup rather than silently resolved,
 because a CA bundle is exactly what makes verification possible.
 
-### Argus in Open WebUI
+### Argus in the chat
 
 With the `argus` profile on and `ARGUS_CHAT_CLIENT_TOKEN` set (the samples list it
-under SECRETS), Open WebUI registers Argus as a tool. In a chat, enable **Argus**
-from the tools button beside the message box.
+under SECRETS), the app's chat has an **Argus** tool: turn it on from the tools
+button beside the message box, or make it on by default under **Admin → Tools**.
 
-It answers **per person**, like the developer path. Open WebUI can send only one
-shared credential, so it proves it is the chat client with `ARGUS_CHAT_CLIENT_TOKEN`
-and forwards the signed-in person's email; Argus reads that person's GitLab project
-memberships with the read-only service token. Two rules follow:
+It answers **per person**, like the developer path. The app proves it is the
+chat client with `ARGUS_CHAT_CLIENT_TOKEN` and names the signed-in person in
+`X-LLM-User-Email`; Argus reads that person's GitLab project memberships with the
+read-only service token. Two rules follow:
 
-- **Argus matches the person by their email address.** That address is what
-  Open WebUI forwards and the one identifier the whole stack agrees on, so the
-  chat account and the GitLab account do **not** have to share a username. What
-  the lookup can see depends on your GitLab token, and nothing in the API
+- **Argus matches the person by their email address**, then by the username the
+  app publishes for that email in `config/directory/users.yml`. So the chat
+  account and the GitLab account do **not** have to share a username. What the
+  email lookup can see depends on your GitLab token, and nothing in the API
   response says which case you are in:
 
   | service token | what `search=` can match |
@@ -364,9 +378,8 @@ memberships with the read-only service token. Two rules follow:
   | read-only *(recommended)* | only the **public** email, which is empty by default |
 
   So with a read-only token, either set the address as the profile's public
-  email, or name the chat account after the GitLab account — that path is still
-  tried, second. With an admin token, nothing needs matching.
-- **The chat-client token only works from inside the stack.** Open WebUI calls
+  email, or name the chat account after the GitLab account.
+- **The chat-client token only works from inside the stack.** The app calls
   `http://argus:7700` on the compose network; the same token arriving through
   Traefik is refused, so a leaked token cannot claim someone else's email.
 
@@ -388,17 +401,13 @@ Only repository names and maintainers are disclosed, never a path, symbol or lin
 Reading a file or repository map in an unreadable repository gives the same message.
 `ARGUS_ACCESS_NOTICES=0` on the argus service restores a plain "nothing found".
 
-### "Failed to connect to Argus" in Open WebUI
+### "No GitLab account matches" in the chat
 
-**Usually it is not a connection problem.** Argus answers `401`, and Open WebUI
-renders any 401 as a connection failure, so the obvious next step — checking DNS,
-the network, whether Argus is up — finds everything healthy and explains nothing.
-
-The usual cause is that **the person has no GitLab account**. Argus identifies a
-chat user by their email, falling back to their username, because the chat token
-is one shared credential and cannot say who is asking. If neither matches a GitLab
-account, Argus cannot know which repositories that person may read, so it refuses
-rather than guess.
+The usual cause is that **the person has no GitLab account** Argus can find.
+Argus identifies a chat user by their email, then by their username, because the
+chat token is one shared credential and cannot say who is asking by itself. If
+neither matches a GitLab account, Argus cannot know which repositories that
+person may read, so it refuses rather than guess, and the chat shows the reason.
 
 ```bash
 docker compose logs argus | grep denied
@@ -414,45 +423,50 @@ docker compose logs argus | grep denied
 which is true:
 
 - **They should have GitLab access** — create the account, or make its email or
-  username match their SSO identity. Add them to the projects they need at
+  username match their account here. Add them to the projects they need at
   Reporter or above.
 - **They should not** — that is the ACL working. An operator who only runs the
   stack and should not read the estate's code should not be given a GitLab
   account for Argus's sake.
 
-To check a mapping without going through the UI, use the same path Open WebUI
-does — the chat token plus the email header:
+To check a mapping without going through the chat, use the same path the app
+does (the chat token plus the email header) from a throwaway container on the
+stack's network:
 
 ```bash
-docker compose exec identity-proxy python - <<'PY'
-import json, urllib.request
-tok = "<ARGUS_CHAT_CLIENT_TOKEN from .env>"
+docker run --rm --network llm-net --env-file <(grep ^ARGUS_CHAT_CLIENT_TOKEN= .env) \
+  python:3.13-slim python - someone@example.com <<'PY'
+import json, os, sys, urllib.request
 req = urllib.request.Request("http://argus:7700/mcp",
     data=json.dumps({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "protocolVersion":"2025-06-18","capabilities":{},
         "clientInfo":{"name":"probe","version":"1"}}}).encode(),
-    headers={"Authorization": "Bearer " + tok,
-             "x-openwebui-user-email": "someone@example.com",
+    headers={"Authorization": "Bearer " + os.environ["ARGUS_CHAT_CLIENT_TOKEN"],
+             "X-LLM-User-Email": sys.argv[1],
              "Content-Type": "application/json",
              "Accept": "application/json, text/event-stream"}, method="POST")
-print(urllib.request.urlopen(req, timeout=30).status,
-      urllib.request.urlopen(req, timeout=30).headers.get("mcp-session-id"))
+try:
+    print(urllib.request.urlopen(req, timeout=30).status)
+except urllib.error.HTTPError as e:
+    print(e.code, e.read().decode()[:300])
 PY
 ```
 
-A `401` names the reason. Anything else means the identity resolved and the
-problem is elsewhere.
+A `401` names the reason. A `200` means the identity resolved and the problem is
+elsewhere.
 
 ### Admin, usage and cost
 
-Everything an operator does is in the app at `https://llm.localhost`: **Admin**
-(admins only) has Overview, People, Model, Indexing, Packs, Explore, Monitoring,
-Settings, the audit log and sign-in settings; **Usage & cost** shows everyone's
-usage to admins and each person their own. The old `https://admin.llm.localhost`
-redirects there, page for page.
+Everything an operator does is in the app at `https://llm.localhost`:
+**Administration** (admins only) has Overview, People, Groups, Sign-in, Models,
+Deployment, Tools, Settings and the audit log; **Argus** has Indexing, Packs and
+Explore; **Observe** has Monitoring, Dashboards, Logs and Alerts. **Usage & cost**
+shows everyone's usage to admins and each person their own.
 
-The Model page **shows** the steps for switching a model rather than performing
-them: performing them would need the Docker socket, and a socket in a web app is
+**Models** loads and switches models through the engine's own API (router mode),
+with no restart. What still needs a restart (engine-wide settings, profiles)
+**Deployment** and **Settings** show as the one command to run rather than
+performing it: that would need the Docker socket, and a socket in a web app is
 root on the host for anyone who reaches it.
 
 Details: [docs/admin.md](admin.md).
@@ -494,13 +508,13 @@ recreates exactly the containers the change affects.
 | pin the model in RAM | `LLAMACPP_MLOCK`, `LLAMACPP_PRELOAD`, `LLAMACPP_RAM_RESERVE_GB` | `auto` pins when the weights fit; see RAM |
 | host swappiness | `HOST_SWAPPINESS` | empty = system default |
 | prices | `PRICE_INPUT_PER_MTOK`, `PRICE_CACHED_INPUT_PER_MTOK`, `PRICE_OUTPUT_PER_MTOK` | per 1M tokens; cache hits priced separately (DeepSeek-style) |
-| the admin's email | `ADMIN_EMAIL` | the app's first admin and Open WebUI's administrator |
+| the admin's email | `ADMIN_EMAIL` | the app's first admin |
 | company directory | `LDAP_URL`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_USER_BASE_DN`, `LDAP_ADMIN_GROUP`, `LDAP_REQUIRED_GROUP` | LDAP or Active Directory sign-in next to local accounts; see [AUTHENTICATION](authentication.md) |
 | default credit per person | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | per person under **Admin → People** |
 | a different llama.cpp build | `LLAMACPP_ENGINE_URL`, `LLAMACPP_ENGINE_SHA256` | a release tarball; empty = the image's own server |
 | vLLM instead of llama.cpp | `COMPOSE_PROFILES` (`vllm` instead of `llamacpp`), the `VLLM_*` values with `VLLM_SERVED_MODEL_NAME` equal to `MODEL_NAME`, `ENGINE_API_BASE=http://vllm:8000/v1` | exactly one engine profile at a time; **not re-tested since the compose-only change** — the shipped samples are llama.cpp |
 | gated Hugging Face repos | `HF_TOKEN` | |
-| updating knowledge packs | `ARGUS_PACK_INDEX_URL` | the published index JSON the **Update** button on **Admin → Packs** reads. Unset = install and remove still work and Update is absent, not broken |
+| knowledge packs | `ARGUS_PACK_LIBRARY_DIR`, `ARGUS_PACK_INDEX_URL` | the folder **Admin → Packs → Add a pack** lists built packs from (the repository's `packs/` by default); and a published index JSON for its **Update** button. Unset = adding and removing still work and Update is absent |
 | backups | `BACKUP_DIR`, `BACKUP_COPY_DIR`, `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`, `BACKUP_TIME` | `./scripts/backup.sh` takes a complete, verified backup (pg_dumpall, SQLite online copies, config with secrets); `sudo ./scripts/backup.sh --install-timer` runs it daily; `--restore --from <dir>` puts it back; `BACKUP_COPY_DIR` keeps a verified second copy on another disk |
 
 Config files, for what `.env` does not cover: alert rules in
@@ -514,8 +528,10 @@ decided by the app; see [AUTHENTICATION](authentication.md).
 sample, the exact `.env` block to paste and the command. Every model setting sits
 between `# >>> MODEL` and `# <<< MODEL`; replace that block, keep your own
 `LLAMACPP_MODEL_DIR`, and run `docker compose up -d`. A model not yet on disk is
-downloaded first. The engine, gateway and Open WebUI all take the name from
-`MODEL_NAME`, so they cannot disagree.
+downloaded first. The engine, the gateway and the chat all take the name from
+`MODEL_NAME`, so they cannot disagree. Further models are added under
+**Admin → Models** from `LLAMACPP_LIBRARY_DIR`, each read for what it is (dense or
+MoE, embedding, image, …) with the settings its kind has.
 
 ### Measured
 
@@ -663,9 +679,6 @@ conversation hit the prefix cache (a repeated 14,000-token prompt answered in 0.
 **`docker compose down -v` deletes vLLM's model cache.** llama.cpp models live in
 `LLAMACPP_MODEL_DIR` on the host and are never deleted.
 
-**Open WebUI settings come from `.env` only.** `ENABLE_PERSISTENT_CONFIG=false`, so
-changes made in its admin UI do not survive a restart.
-
 **Set `BIND_ADDRESS`.** The samples use `127.0.0.1`. `0.0.0.0` serves everything to
 your network.
 
@@ -681,24 +694,21 @@ with context × ubatch and appears in no weights-plus-KV calculation; at 256K co
 `reasoning_content` field. With a small `max_tokens` the whole budget goes to
 reasoning and the reply is empty. Give it 300+ tokens.
 
-**Thinking level.** Chosen per chat from the model dropdown, because the stack
-creates one Open WebUI model per level:
+**Thinking level.** Chosen per chat, from the thinking control beside the model:
 
-| picker entry | what it does |
+| level | what it does |
 |---|---|
-| `… · Deep think` | `reasoning_effort: xhigh` — the engine's own default |
-| `… · Balanced` | `reasoning_effort: medium` |
-| `… · Quick` | `reasoning_effort: low` |
-| `… · No thinking` | `enable_thinking: false` — answers immediately |
+| Deep think | `reasoning_effort: xhigh` — the engine's own default |
+| Balanced | `reasoning_effort: medium` |
+| Quick | `reasoning_effort: low` |
+| No thinking | `enable_thinking: false` — answers immediately |
 
 Measured on the same prompt: 2654 / 1251 / 0 characters of reasoning. Set
 `THINKING_PRESETS` in `.env` to change the list, or leave it empty for none.
 
-**The `Reasoning Effort` field in Open WebUI's own params panel does nothing
-here** — it goes out as a top-level field, and LiteLLM drops that for a custom
-`openai/` api_base. Measured identical to setting nothing at all. Use the
-picker. See
-[docs/configuration.md](configuration.md#changing-the-thinking-level-per-chat).
+**A top-level `reasoning_effort` from an API client does nothing here**: LiteLLM
+drops it for a custom `openai/` api_base. Send it inside `chat_template_kwargs`.
+See [docs/configuration.md](configuration.md#changing-the-thinking-level-per-chat).
 
 **Low GPU utilisation with Flash-Next.** Expected: the experts run on the CPU, and the
 card idles between attention layers.
@@ -723,9 +733,8 @@ python3 scripts/functional-test.py
 `acceptance.py` checks wiring, and that `.env` and every sample resolve completely.
 `functional-test.py` does what people do, for real: creates a person in the app,
 signs them in, uses their key, proves a credit limit binds and a rotated key dies,
-signs into Open WebUI with the right role, reads the dashboards, logs and alerts as the
-admin (and is refused as the person), and confirms a chat is billed to whoever typed
-it — 68 checks. `domain-check.sh` proves the running stack answers
+reads the dashboards, logs and alerts as the admin (and is refused as the person),
+and confirms a chat is billed to whoever typed it. `domain-check.sh` proves the running stack answers
 for `LLM_DOMAIN`. `audit-auth.sh`, `multiuser-bench.py` and `qwen-code-realworld.py`
 go deeper on login, concurrency and agent work.
 

@@ -208,12 +208,12 @@ public static class Mcp
 
 /// <summary>
 /// Argus's MCP server, as the chat uses it: the chat token and the person's
-/// email beside it, accepted only from inside the network, exactly as Open WebUI
-/// calls it. Argus answers with that person's GitLab access.
+/// email beside it, accepted only from inside the network. Argus answers with
+/// that person's GitLab access.
 /// </summary>
 public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat)
 {
-    public const string EmailHeader = "x-openwebui-user-email";
+    public const string EmailHeader = "x-llm-user-email";
 
     public bool Enabled => argus.Value.Deployed && !string.IsNullOrWhiteSpace(argus.Value.Url) && !string.IsNullOrWhiteSpace(chat.CurrentValue.ArgusChatToken);
 

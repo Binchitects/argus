@@ -7,7 +7,6 @@ namespace Llm.Api.Oidc;
 /// </summary>
 public sealed class OidcOptions
 {
-    public string? OpenWebUiSecret { get; set; }
     public string? LangfuseSecret { get; set; }
 
     /// <summary>Machine clients: client_credentials for the engine API (scope "api").</summary>

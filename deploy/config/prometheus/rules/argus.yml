@@ -77,8 +77,8 @@ groups:
 
       # Argus is up and healthy and knows about no repositories at all. That is
       # not "everything is indexed"; it is the GitLab token or the ACL lookup
-      # having quietly stopped working, and it used to present as an empty table
-      # that looked like a fresh install.
+      # having quietly stopped working, which otherwise presents as an empty
+      # table that looks like a fresh install.
       - alert: ArgusIndexEmpty
         expr: argus_index_repos == 0
         for: 30m

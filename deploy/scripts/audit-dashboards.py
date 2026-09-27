@@ -39,7 +39,7 @@ def env(key, default=""):
 DOM = env("LLM_DOMAIN", "llm.localhost")
 PORT = env("TRAEFIK_HTTPS_PORT", "443")
 BASE = f"https://{DOM}" + ("" if PORT == "443" else f":{PORT}")
-CTX = ssl.create_default_context(cafile=str(ROOT / "config/traefik/certs/tls.crt"))
+CTX = ssl.create_default_context(cafile=str(ROOT / (env("LLM_CONFIG_DIR") or "config") / "traefik/certs/tls.crt"))
 OPENER = urllib.request.build_opener(urllib.request.HTTPSHandler(context=CTX),
                                      urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
@@ -96,7 +96,7 @@ def main():
         dump = args[i + 1]
         del args[i:i + 2]
     window = args[0].removeprefix("now-") if args else "30m"
-    code, body = call("/api/auth/login", {"userName": "admin", "password": env("ADMIN_PASSWORD") or env("AUTHELIA_ADMIN_PASSWORD")})
+    code, body = call("/api/auth/login", {"userName": "admin", "password": env("ADMIN_PASSWORD")})
     if code != 200 or body.get("status") != "ok":
         sys.exit(f"cannot sign in to the app: HTTP {code} {body.get('error', '')}")
 

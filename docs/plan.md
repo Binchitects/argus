@@ -2,8 +2,8 @@
 
 Worked on the `enterprise-solution` branch through phase 5, then merged into `main`
 with the cloud session's .NET Argus (phase 4's port), and the repository reorganised
-around the app (`src/`, `tests/`, `deploy/`, `tools/`, `docs/`). What remains of the
-cutover (phase 7) is deleting the legacy services once their replacements are signed off.
+around the app (`src/`, `tests/`, `deploy/`, `tools/`, `docs/`). The cutover
+(phase 7) is done: the services the app replaced are gone from the deployment.
 
 ## Target
 
@@ -33,7 +33,7 @@ swaps must never take the app down, and vice versa.
 | Topic | Decision |
 |---|---|
 | Sign-in | The app is its own OIDC provider (OpenIddict). Users are local accounts or come from LDAP / Active Directory (bind + group → role mapping). Other tools (the CLI, Qwen Code, IDEs) sign in through it. |
-| Dashboards | All ten dashboards are drawn by the app from the same files (Grafana's JSON format). Grafana was removed in Phase 5. |
+| Dashboards | All ten dashboards are drawn by the app from the same files (Grafana's JSON format). |
 | Alerts | Prometheus rules stay; the app shows firing alerts and history. Alertmanager stays as plumbing. |
 | Repo | `main`, organised as `src/` (the API, Argus, both web apps), `tests/`, `deploy/` (the platform and Argus alone), `tools/` and `docs/`; one .NET solution and one CI workflow. |
 | Stack | .NET 10 LTS, EF Core + Npgsql, OpenIddict, YARP, xUnit + Testcontainers; React 19 + Vite + TypeScript, TanStack Query, ECharts, Vitest, Playwright. |
@@ -56,15 +56,14 @@ swaps must never take the app down, and vice versa.
 
 ## Phases
 
-Status: **Phase 5 done** (every dashboard, the logs and the alerts in the app;
-Grafana removed), after **Phase 3D** (the Python sandbox, the web, reading files
-in parts, Office documents, models at runtime, groups, the tool registry, image
-generation, MCP servers, ask before running, fair use). **Phase 4a's port is
-done** (the cloud session's .NET Argus, conformance-tested against the Python one,
-merged into `main`); next is running it as the platform's `argus` service (the chat's
-per-person path and llama.cpp embeddings), then 3E (assistants and knowledge). The first chat UI and its
-[checklist](archive/phase3-checklist.md) are superseded: sign-off happens on the new web
-at the end of 3F, then Open WebUI goes and `enterprise-p3` is tagged.
+Status: **Phase 7 done** (the cutover: only the app, the web and the model
+server remain), after **Phase 5** (every dashboard, the logs and the alerts in
+the app), **Phase 4** (the .NET Argus is the platform's `argus` service, with
+the chat's per-person path, CPU embeddings, and packs loaded from a library) and
+**Phase 3D** (the Python sandbox, the web, reading files in parts, Office
+documents, models at runtime, groups, the tool registry, image generation, MCP
+servers, ask before running, fair use). Next are 3E (assistants and knowledge),
+3F (organise and share) and 6 (every setting live).
 
 ### Phase 0 — Foundations  *(S)*
 - Solution skeleton: `Llm.Api`, `Llm.Core`, test projects, `web/` (React).
@@ -105,7 +104,7 @@ Replaces: the rest of the admin panel and the "Usage by person" dashboard.
   only on the server (the browser never sends raw SQL or PromQL).
 - **Done when:** a comparison test shows every usage panel matches the Grafana panel on the
   same data, and the admin-panel container is gone.
-- **Result:** the admin panel is gone (its address redirects page for page). The dashboard
+- **Result:** the admin panel is gone. The dashboard
   engine runs the SQL panels of the provisioned files itself; `compare-dashboards.py` shows
   34/34 panels identical to Grafana over 1, 7 and 30 days. Prices stay in `.env` (shown in
   the app, edited there): LiteLLM reads them from its config at start, and editing them in
@@ -134,14 +133,13 @@ Replaces: Open WebUI (it runs at `chat.<domain>` until this phase is accepted).
     The browser tests include the no-access case against the test GitLab.
   - On the live stack: functional 61/61, acceptance 33/0, auth audit, domain
     check, and dashboards 34/34.
-  - Open WebUI stays at `chat.<domain>` until the checklist is signed.
   - A from-zero deploy (sample `.env`, generated secrets, empty volumes) passes the
     same suites: functional 61/61, acceptance 33/0, auth audit, domain check,
     dashboards 34/34, browser 50/50.
 
 Phases 3A–3F rebuild the web from zero as its own container and extend the chat.
 Each is deployed and tested before the next starts. Until 3C the new web ran
-at `next.<domain>`, which now redirects to `llm.<domain>`.
+at a preview address beside the old one.
 
 ### Phase 3A — The new web: container, design system, shell  *(M)*
 - `src/web/`: Vite + React 19 + TypeScript, built into its own image (Alpine +
@@ -282,7 +280,7 @@ at `next.<domain>`, which now redirects to `llm.<domain>`.
     - Traefik sends `llm.<domain>` to the web, and `/api`, `/connect` and
       `/.well-known` to the app.
     - The API image has no UI stage and answers 404 for anything else.
-    - `next.<domain>` redirects to the same page.
+    - The preview address redirected to the same page until the cutover.
     - `app/web` and its CI jobs are deleted.
   - **Found on the way:**
     - Argus sends a list as one text block per row, which joined is not JSON.
@@ -486,8 +484,7 @@ Pulled forward from phase 6.
 - Folders, pins, tags, archive and bulk actions; read-only share links inside the
   organisation (revocable); export as Markdown or JSON.
 - The sign-off checklist rewritten for the new web.
-- **Done when:** you sign it off; then Open WebUI is removed and `enterprise-p3` is
-  tagged.
+- **Done when:** you sign it off and `enterprise-p3` is tagged.
 
 ### Phase 4 — Argus in .NET  *(XL)*
 Replaces: the Python Argus (about 47k lines including tests).
@@ -540,3 +537,10 @@ giving any web container the Docker socket.
 - Delete the legacy services and their config. (The repository was reorganised around the app early, with the merge into `main`.)
 - Rewrite the README and docs; one `.env` sample per hardware setup still works.
 - Full from-zero deploy plus every test suite; tag a major release; merge to `main`.
+- **Result:** the replaced services, their settings, profiles, routes, middlewares,
+  secrets and import paths are deleted, with no compatibility path: the chat is the
+  app's, sign-in is the app's (forwardAuth for the internal services, OIDC for
+  Langfuse), and the gateway attributes and limits chat spend from the app's own
+  `X-LLM-User-Email` and `user`. People connect their tools from **Connect your
+  tools** (`/setup`). The `.env` samples, the docs and the scripts describe only
+  this stack.

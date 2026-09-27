@@ -18,16 +18,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$ROOT"
 export MSYS_NO_PATHCONV=1
 
 get() { grep -E "^$1=" .env | head -n1 | cut -d= -f2- | tr -d '[:space:]'; }
-CA="config/traefik/certs/tls.crt"
+CFG="$(get LLM_CONFIG_DIR)"; CFG="${CFG:-./config}"
+CA="$CFG/traefik/certs/tls.crt"
 DOM="$(get LLM_DOMAIN)"; DOM="${DOM:-llm.localhost}"
 USER_NAME="admin"
-PASS="$(get ADMIN_PASSWORD)"; PASS="${PASS:-$(get AUTHELIA_ADMIN_PASSWORD)}"
+PASS="$(get ADMIN_PASSWORD)"
 APP="https://$DOM"
 JAR="$(mktemp)"
 trap 'rm -f "$JAR"' EXIT
 
 RES=(--ssl-no-revoke --cacert "$CA" --resolve "$DOM:443:127.0.0.1")
-for h in chat traces api gateway metrics alerts admin; do RES+=(--resolve "$h.$DOM:443:127.0.0.1"); done
+for h in traces api gateway metrics alerts; do RES+=(--resolve "$h.$DOM:443:127.0.0.1"); done
 XRW=(-H 'X-Requested-With: audit')
 
 FAILS=0
@@ -46,9 +47,7 @@ echo
 # in when it was created. If those drift, the audit passes while every real
 # sign-in fails.
 echo "0. Container secrets match .env (drift check)"
-for pair in "app:Oidc__OpenWebUiSecret:OPENWEBUI_OIDC_CLIENT_SECRET" \
-            "app:Oidc__ApiSecret:API_OIDC_CLIENT_SECRET" \
-            "open-webui:OAUTH_CLIENT_SECRET:OPENWEBUI_OIDC_CLIENT_SECRET" \
+for pair in "app:Oidc__ApiSecret:API_OIDC_CLIENT_SECRET" \
             "langfuse:AUTH_CUSTOM_CLIENT_SECRET:LANGFUSE_OIDC_CLIENT_SECRET"; do
   c=${pair%%:*}; rest=${pair#*:}; ev=${rest%%:*}; fv=${rest#*:}
   # A container that is not running cannot hold a stale secret: its profile is off.
@@ -101,23 +100,22 @@ sys.exit(0 if c.get("email") else 2)
     --data-urlencode "code=$code" --data-urlencode "redirect_uri=$uri" "$APP/connect/token")
   echo "$again" | grep -q '"invalid_grant"' && green OK "$id: a used code is refused" || red FAIL "$id: code reuse: ${again:0:80}"
 }
-flow open-webui "https://chat.$DOM/oauth/oidc/callback"    "openid profile email groups" "$(get OPENWEBUI_OIDC_CLIENT_SECRET)"
 if profile_on tracing; then
   flow langfuse "https://traces.$DOM/api/auth/callback/custom" "openid email profile" "$(get LANGFUSE_OIDC_CLIENT_SECRET)"
 else
   skip "langfuse (tracing profile off)"
 fi
-c=$(curl -s "${RES[@]}" -u "open-webui:not-the-secret" -d "grant_type=client_credentials" "$APP/connect/token")
+c=$(curl -s "${RES[@]}" -u "api:not-the-secret" -d "grant_type=client_credentials" "$APP/connect/token")
 echo "$c" | grep -q '"invalid_client"' && green OK "a wrong client secret is refused" || red FAIL "wrong secret: ${c:0:80}"
-loc=$(curl -s -o /dev/null -w '%{redirect_url}' "${RES[@]}" -b "$JAR" -G --data-urlencode "client_id=open-webui" \
+loc=$(curl -s -o /dev/null -w '%{redirect_url}' "${RES[@]}" -b "$JAR" -G --data-urlencode "client_id=api" \
   --data-urlencode "redirect_uri=https://evil.example/cb" --data-urlencode "response_type=code" \
   --data-urlencode "scope=openid" "$APP/connect/authorize")
 [[ "$loc" != https://evil.example* ]] && green OK "an unregistered redirect URI is never followed" || red FAIL "redirected to $loc"
-# Grafana signed in here until its dashboards moved into the app: its client must be gone.
-loc=$(curl -s -o /dev/null -w '%{redirect_url}' "${RES[@]}" -b "$JAR" -G --data-urlencode "client_id=grafana" \
-  --data-urlencode "redirect_uri=https://grafana.$DOM/login/generic_oauth" --data-urlencode "response_type=code" \
+# Only the configured clients exist: the app deletes any other at start.
+loc=$(curl -s -o /dev/null -w '%{redirect_url}' "${RES[@]}" -b "$JAR" -G --data-urlencode "client_id=not-a-client" \
+  --data-urlencode "redirect_uri=https://unknown.$DOM/cb" --data-urlencode "response_type=code" \
   --data-urlencode "scope=openid" "$APP/connect/authorize")
-[[ "$loc" != https://grafana.* ]] && green OK "the retired Grafana client is gone" || red FAIL "grafana still signs in: $loc"
+[[ "$loc" != https://unknown.* ]] && green OK "an unknown client cannot sign in" || red FAIL "an unknown client was redirected: $loc"
 
 # ---------------------------------------------------------------------------
 echo
@@ -143,8 +141,11 @@ done
 c=$(status -H 'Accept: application/json' "https://metrics.$DOM/-/healthy")
 [ "$c" = "401" ] && green OK "a program without credentials -> 401" || red FAIL "metrics for a program -> $c"
 
-loc=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "${RES[@]}" "https://admin.$DOM/people?x=1")
-[[ "$loc" == "302 $APP:443/admin/people" || "$loc" == "302 $APP/admin/people" ]] && green OK "the old admin address redirects into the app" || red FAIL "admin. -> $loc"
+# A hostname nothing serves has no route at all: not a redirect, not a page.
+for h in chat admin next; do
+  c=$(curl -s -o /dev/null -w '%{http_code}' "${RES[@]}" --resolve "$h.$DOM:443:127.0.0.1" "https://$h.$DOM/")
+  [ "$c" = "404" ] && green OK "$h. -> 404 (no route)" || red FAIL "$h. -> $c"
+done
 
 echo
 echo "5. Same services with the admin's session"

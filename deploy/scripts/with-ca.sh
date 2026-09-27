@@ -33,7 +33,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-CERT_DIR="$PWD/config/traefik/certs"
+# config/ can live elsewhere (LLM_CONFIG_DIR in .env, relative to this folder).
+CFG="$(grep -E '^LLM_CONFIG_DIR=' .env 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '\r"' || true)"
+CFG="${CFG:-./config}"
+case "$CFG" in /*) ;; *) CFG="$PWD/${CFG#./}" ;; esac
+CERT_DIR="$CFG/traefik/certs"
 CA="$CERT_DIR/tls.crt"
 BUNDLE="$CERT_DIR/bundle.crt"
 

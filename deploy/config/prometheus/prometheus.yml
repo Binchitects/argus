@@ -181,7 +181,7 @@ scrape_configs:
   # Bearer, not a custom header: Prometheus can only send a credential it reads
   # from a file (`authorization.credentials_file`), and this endpoint names
   # every repository in the estate. prometheus-secrets writes the token from
-  # ARGUS_ADMIN_TOKEN -- the same value the admin panel uses, so there is one
+  # ARGUS_ADMIN_TOKEN -- the same value the app uses, so there is one
   # secret to rotate rather than two.
   - job_name: argus
     metrics_path: /admin/metrics

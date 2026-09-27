@@ -237,27 +237,14 @@ curl -s --cacert config/argus/tls/gitlab-ca.pem \
 
 ---
 
-## Storage: drop-in vs. reusing an existing index
+## Storage
 
 The base `docker-compose.yml` is **self-contained**. Argus gets a named volume
-(`argus-data`) and a config file that travels with the repo
-(`config/argus/config.yaml`), so a fresh host starts with an empty index and
-populates it by running the indexer. Nothing points at a path outside the
-project.
-
-To reuse an index and pack estate that already exist on this machine — the
-index is ~305 MB and the pack estate ~3.7 GB, so re-indexing is not free — add
-the overlay:
-
-```bash
-docker compose -f docker-compose.yml -f services/argus-local.yml up -d
-```
-
-`deploy/services/argus-local.yml` bind-mounts `${ARGUS_HOME}/tools/test-gitlab/work/index.db`
-and `${ARGUS_HOME}/packs` in place of the volume, and fails fast if `ARGUS_HOME`
-is unset. **The index is mounted read-write, not read-only**: the server writes
-audit and ACL-cache rows on every authenticated request, so a read-only mount
-makes it fail at request time rather than at startup.
+(`argus-data`: the index, the installed packs, the audit log) and a config file
+that travels with the repo (`config/argus/config.yaml`), so a fresh host starts
+with an empty index and populates it by running the indexer. Built knowledge
+packs are loaded from the pack library (the repository's `packs/`, or
+`ARGUS_PACK_LIBRARY_DIR`) under **Admin → Packs**.
 
 ---
 
@@ -339,8 +326,8 @@ Promtail ships these lines to Loki — `logging` is in the default
 `outcome` and `tool` as labels. The app's **Argus** dashboard (Observe → Dashboards) shows calls
 by tool and by person, no-access answers, errors, refusals, p95 latency, and a
 searchable audit trail with each call's arguments. Calls from Qwen Code, Claude
-Code or any MCP client and from Open WebUI all appear under the person's GitLab
-username.
+Code or any MCP client and from the platform's chat all appear under the
+person's GitLab username.
 
 Indexing writes to the same stream, which is what gives a pass a history
 instead of only an exit code. `argus index` emits one line per event —
@@ -559,8 +546,6 @@ from the command line.
 |---|---|
 | `401` on every MCP call | No bearer token, or the GitLab PAT is expired |
 | Host-validation error | Proxy hostname missing from `--allowed-host` |
-| `readonly database` | Index bind-mounted `:ro`; it must be `:rw` |
 | Container unhealthy for ~90 s at boot | Normal — the first request opens every pack |
-| Empty `repo_map`, no symbols | Index is empty; run the indexer, or use `deploy/services/argus-local.yml` |
+| Empty `repo_map`, no symbols | Index is empty; run the indexer (Admin → Indexing) |
 | Connection error from a client | `NO_PROXY` missing the domain, or hosts entry absent |
-| `ARGUS_HOME` error on `up` | The overlay is in use but the variable is unset |

@@ -106,7 +106,7 @@ def test_the_real_docker_root_is_handled_on_this_host():
 
 def test_an_empty_directory_inside_the_project_is_a_problem(tmp_path):
     """The signature of a moved checkout: Docker created an empty stub."""
-    empty = tmp_path / "config" / "authelia"
+    empty = tmp_path / "config" / "directory"
     empty.mkdir(parents=True)
     reason = check_mounts.why_not_real(str(empty), str(tmp_path))
     assert reason and "EMPTY" in reason

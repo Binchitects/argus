@@ -61,13 +61,12 @@ public static class IdentityWiring
             .AddDefaultTokenProviders()
             .AddClaimsPrincipalFactory<AppClaimsFactory>()
             .AddPasswordValidator<StrongPasswordValidator>();
-        services.Replace(ServiceDescriptor.Scoped<IPasswordHasher<AppUser>, LegacyAwarePasswordHasher>());
 
         services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
         services.ConfigureApplicationCookie(o =>
         {
             o.Cookie.Name = "llm_session";
-            // The parent domain: one sign-in covers the admin panel and the other subdomains.
+            // The parent domain: one sign-in covers every subdomain.
             o.Cookie.Domain = auth.Domain;
             o.Cookie.HttpOnly = true;
             o.Cookie.SecurePolicy = CookieSecurePolicy.Always;

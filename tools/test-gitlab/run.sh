@@ -136,17 +136,16 @@ done
 say "the API is serving"
 
 # ------------------------------------------------------------------ seed ----
-# Run inside the argus image, which is the only place on this machine that has
-# httpx; seed.py also shells out to the docker CLI to run `gitlab-rails runner`,
-# so it needs the socket and a docker binary that can reach it. Same
-# incantation TESTING.md documents, for the same reason.
+# seed.py needs only the standard library, so a stock python image runs it; it
+# also shells out to the docker CLI to run `gitlab-rails runner`, so it needs
+# the socket and a docker binary that can reach it.
 say "seeding the fixtures"
 docker run --rm --user root --network host \
   -e HOME=/tmp \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(command -v docker)":/usr/local/bin/docker \
   -v "$ROOT/tools/test-gitlab:/t" -w /t \
-  --entrypoint python argus:latest /t/seed.py
+  python:3.13-slim python /t/seed.py
 
 # ---------------------------------------------------------------- verify ----
 if [ "$SKIP_VERIFY" = 1 ]; then

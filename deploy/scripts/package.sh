@@ -74,21 +74,15 @@ cp services/*.py "$PKG/services/" 2>/dev/null
 # Directories under services/ that the compose file BUILDS or BIND-MOUNTS, found
 # by reading the compose file rather than by listing them here.
 #
-# The hardcoded list was `identity-proxy` alone, and the comment above it
-# correctly warned that "anything compose builds has to travel with it" --
-# while the list itself was already wrong. The archive went out without
-# `services/admin-panel` (so the admin console could not build on the target) and
-# without `services/cpu-temp-exporter` (so the `smi` profile had no exporter.py
-# to mount). Deriving the list means adding a service cannot silently leave its
-# directory behind again.
+# Deriving the list means adding a service cannot silently leave its directory
+# behind: anything compose builds or mounts has to travel with it.
 built_dirs="$(grep -oE '\$\{LLM_SERVICES_DIR:-\./services\}/[A-Za-z0-9._-]+' docker-compose.yml \
              | sed 's|.*/||' | sort -u)"
 for d in $built_dirs; do
   if [[ -d "services/$d" ]]; then
     cp -r "services/$d" "$PKG/services/"
   elif [[ -f "services/$d" ]]; then
-    # A single mounted file (seed-presets.py): directories were all this handled,
-    # so a mounted file failed the whole package as "does not exist".
+    # A single mounted file.
     cp "services/$d" "$PKG/services/"
   else
     printf '  %sERROR: compose wants services/%s but it does not exist%s\n' "$red" "$d" "$off"
@@ -99,11 +93,11 @@ say "services/: $(echo $built_dirs | tr '\n' ' ')"
 touch "$PKG/models/.gitkeep"
 
 # Config: templates and provisioning only. Anything generated or secret is
-# rebuilt on the target by the tls-init and auth-init services.
+# rebuilt on the target by the tls-init and app-init services.
 #
 # Copied by TRACKED FILE, not by directory. The services write real secrets
 # into these trees at runtime -- config/prometheus/secrets/llamacpp.token,
-# config/authelia/users.yml, config/traefik/certs/tls.crt -- and .gitignore
+# config/directory/users.yml, config/traefik/certs/tls.crt -- and .gitignore
 # already names every one of them. `cp -r` ignored that list, so `make package`
 # on any machine where the stack had ever run copied a real bearer token into
 # the staging tree and then refused to package its own output, with a message
@@ -128,7 +122,7 @@ else
     [[ -d "config/$d" ]] && cp -r "config/$d" "$PKG/config/"
   done
 fi
-mkdir -p "$PKG/config/traefik/dynamic" "$PKG/config/traefik/certs" "$PKG/config/traefik/auth"
+mkdir -p "$PKG/config/traefik/dynamic" "$PKG/config/traefik/certs"
 # The app (sign-in, admin, dashboards) and the web build from the repository's
 # src/, so they go NEXT TO the stack folder in the archive: unzipped,
 # llmservice/ and src/ sit side by side and compose finds them at its default
@@ -142,9 +136,9 @@ done
 
 cp config/traefik/traefik.yml "$PKG/config/traefik/" 2>/dev/null
 cp config/traefik/dynamic/*.yml "$PKG/config/traefik/dynamic/" 2>/dev/null
-touch "$PKG/config/traefik/certs/.gitkeep" "$PKG/config/traefik/auth/.gitkeep"
+touch "$PKG/config/traefik/certs/.gitkeep"
 
-mkdir -p "$PKG/config/authelia/directory"
+mkdir -p "$PKG/config/directory"
 
 # ---------------------------------------------------------------------------
 if [[ $INCLUDE_IMAGE -eq 1 ]]; then

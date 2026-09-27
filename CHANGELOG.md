@@ -21,8 +21,10 @@ Sections used:
   OIDC for the services with their own login), runs the chat with its tools
   (Argus, a Python sandbox, the web, image generation, files and Office
   documents), manages people, groups, models and every setting, and shows ten
-  dashboards, every service's logs and the alerts. Grafana and the Python admin
-  console are gone; the plan and its phases are in `docs/plan.md`
+  dashboards, every service's logs and the alerts. Only the app, the web and
+  the model server remain: the services it replaced are gone from the
+  deployment with no compatibility path; the plan and its phases are in
+  `docs/plan.md`
 - **Argus in .NET.** Every part of the Python Argus has a C# counterpart in
   `src/Argus`: the indexer, ACL, knowledge packs, the query engine, the MCP
   server with its seventeen tools, the admin surface, the scheduler and the CLI.
@@ -44,6 +46,19 @@ Sections used:
 - Dashboards: an index-health row on Indexing; KV cache and prompt throughput
   for llama.cpp on LLM Overview
 - The image server's GPU budget is a fixed 2 GiB (`IMAGEGEN_MAX_VRAM`)
+- **Connect your tools** (`/setup`): each person makes their own API key and
+  gets the exact setup for Claude Code (the gateway serves `/v1/messages`),
+  Qwen Code and the OpenAI SDK, the Argus MCP command, and the stack's
+  certificate to download
+- Models: each file is read for what it is (dense or MoE, attention type,
+  embedding, reranker, image, projector, draft) and offered only the settings
+  its kind has, with its real context and output limits and a memory estimate
+  checked against the engine's own fit
+- Argus packs are added like models: **Add a pack** lists the built packs in
+  the pack library (`ARGUS_PACK_LIBRARY_DIR`), shows what each holds, and
+  loads it by linking, nothing copied
+- Argus Explore searches references, code and docs across every repository and
+  pack, and shows a document as rendered Markdown or its source
 
 ### :bug: Bugs fixed
 
@@ -67,6 +82,17 @@ Sections used:
   `src/Argus/Dockerfile`
 - Grafana is gone: its dashboards are drawn by the app. Its data volume is no
   longer used and can be deleted
+- The services the app replaced are gone, with their settings: Open WebUI
+  (`chat.` and the `openwebui` profile, `WEBUI_*`, `OPENWEBUI_OIDC_CLIENT_SECRET`),
+  `identity-proxy`, the `admin.` and `next.` redirects, the `auth` profile with
+  `auth-init` and its basic-auth fallback (`PROXY_AUTH_*`, `PROTECTED_CHAIN`,
+  `protected-chain`), the one-time import of an Authelia user file and its
+  password hashes, and `services/argus-local.yml`. Start from an env sample:
+  none of these keys is read any more
+- `AUTHELIA_ADMIN_PASSWORD` is `ADMIN_PASSWORD`; `config/authelia/directory`
+  is `config/directory` (Argus reads it through `ARGUS_USERS_FILE`); the
+  gateway's identity header is `X-LLM-User-Email`
+- An OIDC client the configuration does not name is deleted at start
 
 ## v2.9.0 (2026-09-18)
 

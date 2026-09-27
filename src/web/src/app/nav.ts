@@ -1,25 +1,4 @@
-import {
-  Activity,
-  BarChart3,
-  Boxes,
-  Cpu,
-  Database,
-  Home,
-  KeyRound,
-  LayoutDashboard,
-  LineChart,
-  Logs,
-  MessageSquare,
-  Package,
-  ScrollText,
-  Siren,
-  Settings,
-  Telescope,
-  Users,
-  UsersRound,
-  Wrench,
-  type LucideIcon,
-} from 'lucide-react'
+import { Activity, BarChart3, Boxes, Cpu, Database, Home, KeyRound, LayoutDashboard, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, Telescope, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -42,6 +21,7 @@ export const navigation: NavSection[] = [
       { title: 'Home', path: '/', icon: Home },
       { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'] },
       { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'] },
+      { title: 'Connect your tools', path: '/setup', icon: Plug, keywords: ['api key', 'token', 'claude code', 'qwen code', 'opencode', 'continue', 'mcp', 'harness', 'sdk', 'certificate'] },
     ],
   },
   {
@@ -73,7 +53,7 @@ export const navigation: NavSection[] = [
     adminOnly: true,
     items: [
       { title: 'Monitoring', path: '/admin/monitoring', icon: Activity, keywords: ['prometheus', 'probes', 'health', 'services'] },
-      { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['grafana', 'gpu', 'performance', 'metrics', 'charts'] },
+      { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['gpu', 'performance', 'metrics', 'charts'] },
       { title: 'Logs', path: '/admin/logs', icon: Logs, keywords: ['loki', 'errors', 'containers', 'tail'] },
       { title: 'Alerts', path: '/admin/alerts', icon: Siren, keywords: ['alertmanager', 'firing', 'rules', 'incidents'] },
     ],

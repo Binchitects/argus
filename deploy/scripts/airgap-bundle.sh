@@ -27,8 +27,8 @@
 # rather than left to be discovered on a machine that cannot fix it:
 #
 #   1. Container images. Saved with `docker save`, restored with `docker load`.
-#      That includes the images built locally (argus, the app,
-#      identity-proxy) -- shipping them is what lets the target run with no
+#      That includes the images built locally (the app, the web, argus, the
+#      sandbox) -- shipping them is what lets the target run with no
 #      build context, no base images and no registry.
 #
 #   2. The model weights. `model-init` downloads them from Hugging Face. Worse:
@@ -222,12 +222,8 @@ tar_excludes=(
   --exclude='./deploy/.pkgstage'
   --exclude='./deploy/config/traefik/certs/tls.crt'
   --exclude='./deploy/config/traefik/certs/bundle.crt'
-  --exclude='./deploy/config/traefik/auth/users.htpasswd'
-  --exclude='./deploy/config/authelia/clients.yml'
-  --exclude='./deploy/config/authelia/users.yml'
-  --exclude='./deploy/config/authelia/users.yml.bak'
-  --exclude='./deploy/config/authelia/secrets/*'
   --exclude='./deploy/config/prometheus/secrets/llamacpp.token'
+  --exclude='./deploy/config/directory/users.yml'
   --exclude='*/__pycache__'
   --exclude='*.pyc'
   --exclude='./deploy/models/*'
@@ -244,7 +240,7 @@ say "  copied $(du -sh "$STAGE" | cut -f1)"
 
 # Generated at first start on the target, but the DIRECTORIES must exist or the
 # bind mount creates an empty root-owned one instead.
-mkdir -p "$STAGE/deploy/config/authelia/secrets"
+mkdir -p "$STAGE/deploy/config/directory"
 mkdir -p "$STAGE/deploy/models"
 [ -f "$REPO_ROOT/deploy/models/.gitkeep" ] \
   && cp "$REPO_ROOT/deploy/models/.gitkeep" "$STAGE/deploy/models/.gitkeep"
@@ -313,21 +309,17 @@ awk -v list="$secrets_list" '
     value = substr($0, index($0, "=") + 1)
 
     # Secret by POSITION or by NAME. Position alone is not enough: the SECRETS
-    # block ends at PEOPLE, and eight real secrets live past it -- among them
+    # block ends at PEOPLE, and more real secrets live past it -- among them
     # ARGUS_GITLAB_TOKEN, which the README calls the most sensitive string in
     # the deployment, and the ClickHouse, MinIO and Langfuse credentials that
     # only exist when those profiles are on. Emitting those into a bundle that
     # travels between sites is exactly the leak this file exists to prevent.
     #
-    # `*_USER` is excluded from the position rule: PROXY_AUTH_USER lives in the
-    # SECRETS block and is `admin`. It is a username, its value is not secret,
-    # and regenerating it would hand the operator a random hex string as their
-    # basic-auth login with nothing saying so.
+    # `*_USER` is excluded from the position rule: a username is not a secret.
     secretish = (insecrets && name !~ /_USER$/) || name ~ /(TOKEN|SECRET|PASSWORD|_KEY)$/
 
-    # ...but a compose VARIABLE REFERENCE is wiring, not a secret.
-    # WEBUI_BACKEND_KEY is literally ${LITELLM_MASTER_KEY}; emptying it would
-    # break the stack in a way that reads as a wrong master key.
+    # ...but a compose VARIABLE REFERENCE (a value like ${OTHER}) is wiring,
+    # not a secret: emptying it would break the stack.
     if (secretish && value !~ /^\$\{/) {
       if (value != "") print name >> list
       sub(/=.*/, "=")
@@ -458,7 +450,7 @@ cp deploy/.env.airgap deploy/.env
 ./load.sh --up
 \`\`\`
 
-Then open \`https://admin.<LLM_DOMAIN>\` and sign in as \`admin\` with
+Then open \`https://<LLM_DOMAIN>\` and sign in as \`admin\` with
 \`ADMIN_PASSWORD\` from the .env. The browser warns once about the
 self-signed certificate; accept it.
 
@@ -473,8 +465,8 @@ from outside this deployment, and tells you which those are.
 
 ## What is already handled
 
-* **Every container image**, including the three built locally (argus,
-  the app, identity-proxy). The target never builds and never pulls.
+* **Every container image**, including the ones built locally (the app, the
+  web, argus, the sandbox). The target never builds and never pulls.
 * **Argus's embedding model** is in \`.airgap/embed/\`, and the shipped .env
   points \`EMBED_MODEL_DIR\` at it, so \`embed-init\` finds it instead of
   downloading it.

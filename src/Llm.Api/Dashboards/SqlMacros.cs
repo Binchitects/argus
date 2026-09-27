@@ -6,8 +6,7 @@ namespace Llm.Api.Dashboards;
 
 /// <summary>
 /// Grafana's PostgreSQL macros, expanded the way Grafana expands them, so a
-/// panel's SQL gives the same rows here as in Grafana (compare-dashboards.py
-/// held every panel to that before Grafana was removed: commit 8c07f7b).
+/// panel's SQL gives the same rows here as in Grafana.
 /// </summary>
 public static partial class SqlMacros
 {

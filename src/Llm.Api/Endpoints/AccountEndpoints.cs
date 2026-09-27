@@ -26,7 +26,20 @@ public static class AccountEndpoints
         me.MapGet("/keys", KeysAsync);
         me.MapPost("/keys/rotate", async (ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people) =>
             Results.Ok(await people.RotateKeyAsync((await users.GetUserAsync(p))!)));
+        // For tools that must be told to trust the stack's certificate: the public
+        // certificate only (tls-init exports it; its key never leaves Traefik).
+        me.MapGet("/connect", (IConfiguration config) => Results.Ok(new { certificate = File.Exists(CertificatePath(config)) }));
+        // bundle=true: the public CAs as well, for settings that REPLACE the trust store (SSL_CERT_FILE, curl --cacert).
+        me.MapGet("/certificate", (IConfiguration config, bool? bundle) =>
+        {
+            var path = bundle == true ? Path.Combine(Path.GetDirectoryName(CertificatePath(config))!, "bundle.crt") : CertificatePath(config);
+            return File.Exists(path)
+                ? Results.File(path, "application/x-pem-file", bundle == true ? "llm-service-bundle.crt" : "llm-service-ca.crt")
+                : Results.NotFound();
+        });
     }
+
+    private static string CertificatePath(IConfiguration config) => config["Connect:CertificatePath"] ?? "/tls/tls.crt";
 
     private static async Task<IResult> ChangePasswordAsync(ChangePasswordRequest body, ClaimsPrincipal p, UserManager<AppUser> users,
         SignInManager<AppUser> signIn, Audit audit)

@@ -239,8 +239,8 @@ public sealed class MemberDirectory(GitLabConfig cfg, HttpClient? client = null,
 public static class People
 {
     /// <summary>
-    /// The sign-in username a users file gives this email (Authelia's format:
-    /// <c>users: {name: {email: ...}}</c>), if the file is readable. The platform
+    /// The sign-in username a users file gives this email
+    /// (<c>users: {name: {email: ...}}</c>), if the file is readable. The platform
     /// writes one without password hashes for Argus: its people's usernames are
     /// their GitLab usernames, so a private GitLab email still finds the account.
     /// </summary>

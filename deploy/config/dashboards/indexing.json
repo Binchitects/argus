@@ -724,7 +724,7 @@
     {
       "type": "logs",
       "title": "Indexer output (plain lines)",
-      "description": "The human-readable half of the same run — the lines the admin panel's tail shows. Useful when the structured fields are not enough, e.g. a git error's full text.",
+      "description": "The human-readable half of the same run — the lines Admin → Indexing shows. Useful when the structured fields are not enough, e.g. a git error's full text.",
       "datasource": {
         "type": "loki",
         "uid": "loki"

@@ -17,7 +17,7 @@ public sealed class AppFixture : IAsyncLifetime
 {
     public const string Domain = "llm.test";
     public const string AdminPassword = "correct horse battery staple admin";
-    public const string OpenWebUiSecret = "open-webui-secret-for-tests";
+    public const string LangfuseSecret = "langfuse-secret-for-tests";
     public const string ApiSecret = "api-secret-for-tests";
 
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:0.8.0-pg16").Build();
@@ -72,7 +72,7 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Auth:AdminEmail", "admin@llm.test");
             b.UseSetting("Auth:SessionRecheck", "00:00:00");
             b.UseSetting("Auth:DirectoryFile", DirectoryPath);
-            b.UseSetting("Oidc:OpenWebUiSecret", OpenWebUiSecret);
+            b.UseSetting("Oidc:LangfuseSecret", LangfuseSecret);
             b.UseSetting("Oidc:ApiSecret", ApiSecret);
             b.UseSetting("Dashboards:Path", DashboardsPath);
             b.UseSetting("Dashboards:SqlDatabase", "litellm_test");

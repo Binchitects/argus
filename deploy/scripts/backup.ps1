@@ -33,7 +33,6 @@ foreach ($line in $envLines) {
 }
 
 $volumes = @(
-    'open-webui-data',
     'prometheus-data',
     'alertmanager-data',
     'postgres-data',

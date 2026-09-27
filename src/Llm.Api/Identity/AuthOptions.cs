@@ -15,11 +15,8 @@ public sealed class AuthOptions
     /// <summary>Sets the first admin's password when nobody exists yet; never changes it afterwards.</summary>
     public string? AdminPassword { get; set; }
 
-    /// <summary>Group name other services see for admins (Open WebUI maps it to its admin role).</summary>
+    /// <summary>Group name other services see for admins (in the OIDC groups claim and forwardAuth's Remote-Groups).</summary>
     public string AdminGroup { get; set; } = "admins";
-
-    /// <summary>Authelia's users.yml, imported once so existing people keep their passwords.</summary>
-    public string? ImportUsersFile { get; set; }
 
     /// <summary>Hash-free list of people for Argus (email -> username), rewritten on every change.</summary>
     public string? DirectoryFile { get; set; }

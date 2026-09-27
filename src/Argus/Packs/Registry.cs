@@ -12,7 +12,8 @@ public sealed class RegistryError(string message, Exception? inner = null) : Exc
 
 public sealed record InstalledPack(
     string Name, string Version, string Path, string EmbeddingModel, string EmbeddingDim, long SizeBytes,
-    string License, string Attribution, string SourceCommit, bool Compatible, string IncompatibleReason = "");
+    string License, string Attribution, string SourceCommit, bool Compatible, string IncompatibleReason = "",
+    IReadOnlyDictionary<string, string>? Meta = null);
 
 public sealed record IndexEntry(string Name, string Version, string Url, string Sha256, long SizeBytes, string License);
 
@@ -105,7 +106,7 @@ public static class Registry
             packs.Add(new InstalledPack(meta.GetValueOrDefault("source_name", stem), meta.GetValueOrDefault("pack_version", ""), path,
                 meta.GetValueOrDefault("embedding_model", ""), meta.GetValueOrDefault("embedding_dim", ""), new FileInfo(path).Length,
                 meta.GetValueOrDefault("license", ""), meta.GetValueOrDefault("attribution", ""), meta.GetValueOrDefault("source_commit", ""),
-                compatible, reason));
+                compatible, reason, meta));
         }
         return packs;
     }
@@ -133,7 +134,8 @@ public static class Registry
                 pack = new InstalledPack(meta.GetValueOrDefault("source_name", Path.GetFileNameWithoutExtension(path)), meta.GetValueOrDefault("pack_version", ""), path,
                     meta.GetValueOrDefault("embedding_model", ""), meta.GetValueOrDefault("embedding_dim", ""), new FileInfo(path).Length,
                     meta.GetValueOrDefault("license", ""), meta.GetValueOrDefault("attribution", ""), meta.GetValueOrDefault("source_commit", ""),
-                    compatible && NameRe.IsMatch(meta.GetValueOrDefault("source_name", "")), compatible ? (NameRe.IsMatch(meta.GetValueOrDefault("source_name", "")) ? "" : "its name is not a valid pack name") : reason);
+                    compatible && NameRe.IsMatch(meta.GetValueOrDefault("source_name", "")), compatible ? (NameRe.IsMatch(meta.GetValueOrDefault("source_name", "")) ? "" : "its name is not a valid pack name") : reason,
+                    meta);
             }
             catch (RegistryError exc)
             {

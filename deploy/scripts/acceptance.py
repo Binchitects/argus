@@ -25,6 +25,7 @@ import re
 import ssl
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -99,7 +100,8 @@ DOMAIN = env("LLM_DOMAIN", "llm.localhost")
 HTTPS_PORT = env("TRAEFIK_HTTPS_PORT", "443")
 HTTP_PORT = env("TRAEFIK_HTTP_PORT", "80")
 PROFILES = env("COMPOSE_PROFILES", "")
-CA = ROOT / "config/traefik/certs/tls.crt"
+CFG = ROOT / env("LLM_CONFIG_DIR", "config")
+CA = CFG / "traefik/certs/tls.crt"
 SUFFIX = "" if HTTPS_PORT == "443" else f":{HTTPS_PORT}"
 
 
@@ -144,7 +146,7 @@ def check_config() -> None:
 
     # Traefik must not adopt containers from other compose projects: router
     # names are global, so a neighbouring project's router silently wins.
-    tf = (ROOT / "config/traefik/traefik.yml").read_text(encoding="utf-8", errors="replace")
+    tf = (CFG / "traefik/traefik.yml").read_text(encoding="utf-8", errors="replace")
     record("config", "Traefik discovery scoped to this project",
            "PASS" if "constraints:" in tf else "FAIL",
            "" if "constraints:" in tf else "an unrelated project can steal routes")
@@ -152,7 +154,7 @@ def check_config() -> None:
 
 # ------------------------------------------------------- B. infrastructure ---
 EXPECTED = {
-    "": ["open-webui", "prometheus", "alertmanager", "node-exporter", "power-limits"],
+    "": ["prometheus", "alertmanager", "node-exporter", "power-limits"],
     "cadvisor": ["cadvisor"],
     "proxy": ["traefik"],
     "gateway": ["litellm", "postgres", "redis", "app"],
@@ -209,17 +211,8 @@ def check_infra() -> None:
 
 # ------------------------------------------------------- C. TLS and routes ---
 ROUTES = [
-    ("chat", "/", {200, 302}, ""),
     ("gateway", "/v1/models", {200, 401}, ""),
     ("", "/readyz", {200}, "gateway"),
-    # The old admin panel address: a redirect into the app's /admin, for bookmarks.
-    # This client follows redirects, so it sees the app's page at the end (200).
-    ("admin", "/", {200, 302}, "gateway"),
-    # Denied, and never 200: this request carries no session. The app answers
-    # a browser (Accept: text/html, or curl's */*) with a 302 to the portal and
-    # a bare client like this one with 401 -- both are refusals. A 200 would mean
-    # forward-auth was bypassed and an anonymous caller reached a page that can
-    # mint API keys, which is exactly the failure worth catching automatically.
     ("argus", "/healthz", {200, 401}, "argus"),
 ]
 
@@ -328,11 +321,17 @@ def check_observability() -> None:
     code, _ = sh("docker", "compose", "exec", "-T", "alertmanager", "wget", "-qO-", "http://localhost:9093/-/healthy")
     record("obs", "Alertmanager healthy", "PASS" if code == 0 else "FAIL")
     if "logging" in PROFILES:
-        code, _ = sh("docker", "compose", "exec", "-T", "loki", "wget", "-qO-", "http://localhost:3100/ready")
+        # Loki answers "not ready" until its ring settles, a minute or two after
+        # a start; a stack just brought up is given that long.
+        for _ in range(12):
+            code, _ = sh("docker", "compose", "exec", "-T", "loki", "wget", "-qO-", "http://localhost:3100/ready")
+            if code == 0:
+                break
+            time.sleep(10)
         record("obs", "Loki ready", "PASS" if code == 0 else "FAIL")
     else:
         record("obs", "Loki", "SKIP", "logging profile off")
-    dashboards = sorted(p.stem for p in (ROOT / "config" / "dashboards").glob("*.json"))
+    dashboards = sorted(p.stem for p in (CFG / "dashboards").glob("*.json"))
     record("obs", "dashboard files for the app", "PASS" if len(dashboards) >= 10 else "FAIL", f"{len(dashboards)}: {dashboards[:4]}")
 
 

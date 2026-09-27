@@ -3,16 +3,6 @@
 http:
   middlewares:
 
-    # Guards the components that ship with no authentication of their own:
-    # Prometheus, Alertmanager, cAdvisor, Loki, the exporters, and the Traefik
-    # dashboard. Credentials live in a directory outside this watched one, so
-    # the file provider does not try to parse the htpasswd as configuration.
-    internal-auth:
-      basicAuth:
-        usersFile: /etc/traefik/auth/users.htpasswd
-        realm: LLMService internal
-        removeHeader: true
-
     security-headers:
       headers:
         contentTypeNosniff: true
@@ -35,13 +25,6 @@ http:
           - security-headers
           - compress
 
-    # Applied to the unauthenticated internals.
-    protected-chain:
-      chain:
-        middlewares:
-          - security-headers
-          - internal-auth
-
     # Ask the app about every request before it reaches the backend. It
     # answers 200 (allow, with who is calling), 302 (send the browser to sign
     # in), 401 (a program without valid credentials) or 403 (not allowed).
@@ -57,8 +40,8 @@ http:
           - 'Remote-Email'
           - 'Remote-Name'
 
-    # Used instead of protected-chain when the `auth` profile is enabled.
-    # Swap between them with PROTECTED_CHAIN in .env.
+    # On every service with no sign-in of its own (Prometheus, Alertmanager,
+    # the exporters, the engines): the app decides.
     sso-chain:
       chain:
         middlewares:

@@ -22,7 +22,7 @@ public static class SettingsCatalog
     private const string Backup = "Backup";
 
     public static readonly IReadOnlyList<string> Profiles =
-        ["gateway", "proxy", "auth", "llamacpp", "vllm", "multi-model", "argus", "image", "sandbox", "websearch", "logging", "tracing", "smi", "dcgm", "cadvisor"];
+        ["gateway", "proxy", "llamacpp", "vllm", "multi-model", "argus", "image", "sandbox", "websearch", "logging", "tracing", "smi", "dcgm", "cadvisor"];
 
     private const string Engine1 = "The engine restarts and reloads the model: chat and the API pause for a few minutes.";
     private const string Image1 = "The image server restarts (under a minute); the chat model is not touched.";
@@ -116,7 +116,7 @@ public static class SettingsCatalog
         new("MODEL_ENABLE_THINKING", Model, "Thinking at all", "Off makes every answer skip thinking.", SettingType.Choice, SettingScope.Stack)
             { Options = ["true", "false"], Impact = Engine1 },
         new("THINKING_PRESETS", Model, "Thinking levels offered", "level:Label pairs, comma-separated. The chat offers them per conversation.", SettingType.Text, SettingScope.Stack)
-            { Pattern = @"[a-z]+:[^,:]+(,[a-z]+:[^,:]+)*", PatternHelp = "e.g. xhigh:Deep think,low:Quick,off:No thinking", Impact = "The app and Open WebUI restart." },
+            { Pattern = @"[a-z]+:[^,:]+(,[a-z]+:[^,:]+)*", PatternHelp = "e.g. xhigh:Deep think,low:Quick,off:No thinking", Impact = "The app restarts." },
         new("LLAMACPP_MODEL_FILE", Model, "Model file", "The GGUF file in the model directory (for a split model, the first part).", SettingType.Text, SettingScope.Stack)
             { Optional = false, Pattern = @"[^/\s]+\.gguf", PatternHelp = "a file name ending in .gguf", Dangerous = true, Impact = Engine1 },
         new("LLAMACPP_HF_REPO", Model, "Download from", "Hugging Face repository to download the model from when it is not on disk. Empty: never download.", SettingType.Text, SettingScope.Stack)

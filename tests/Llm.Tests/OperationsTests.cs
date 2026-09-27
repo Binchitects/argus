@@ -61,7 +61,7 @@ public sealed class OperationsTests(AppFixture app)
         Assert.Contains("0.20", text, StringComparison.Ordinal);
         Assert.DoesNotContain(AppFixture.AdminPassword, text, StringComparison.Ordinal);
         Assert.DoesNotContain(FakeArgus.Token, text, StringComparison.Ordinal);
-        Assert.DoesNotContain(AppFixture.OpenWebUiSecret, text, StringComparison.Ordinal);
+        Assert.DoesNotContain(AppFixture.LangfuseSecret, text, StringComparison.Ordinal);
     }
 
     [Fact]

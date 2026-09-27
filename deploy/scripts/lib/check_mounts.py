@@ -19,8 +19,7 @@ errors. Compose reports every container "up".
 What it looks like afterwards is four unrelated failures, three of them naming
 files that plainly exist on the host:
 
-  * Authelia crash-looping on a missing configuration.template.yml, which it
-    then tries to GENERATE and reports as "read-only file system";
+  * Traefik starting with no routes, its dynamic configuration an empty stub;
   * Alertmanager crash-looping on a missing alertmanager.yml;
   * the CPU temperature exporter crash-looping on a missing exporter.py;
   * Traefik exiting 127 without ever logging a reason.
@@ -216,7 +215,7 @@ def check_staged(original: str, staged: str,
     asks whether the bundle actually carries it.
 
     Worth doing at bundle time because the alternative is discovering it at the
-    far end of an airgap transfer: a missing `config/authelia/secrets`
+    far end of an airgap transfer: a missing `config/directory`
     directory, or a `.gitkeep` that a `.gitignore`-respecting copy dropped,
     produces exactly the empty-mount crash loop this module exists to catch --
     except now it is on a machine with no way to fetch what is missing.
@@ -267,8 +266,8 @@ _BUNDLE_ADVICE = (
     "",
     "  On the far side of an airgap transfer there is no way to fetch what is",
     "  missing, and an empty config directory produces exactly the crash loops",
-    "  the preflight exists to catch -- Authelia regenerating a config it",
-    "  cannot find, Alertmanager missing its alertmanager.yml.",
+    "  the preflight exists to catch -- Traefik with no routes, Alertmanager",
+    "  missing its alertmanager.yml.",
     "",
     "  Almost always this is a placeholder a .gitignore-respecting copy",
     "  dropped. Check that the source checkout still has them, then rebuild:",

@@ -2,8 +2,8 @@
 # Prove the running stack answers for LLM_DOMAIN -- and only for it.
 #
 # The domain lives in .env and nowhere else: Traefik routes, the TLS
-# certificate (tls-init), Authelia's issuer, cookie domain, access rules and
-# OIDC redirect URIs all derive from it at startup. This checks each of those
+# certificate (tls-init), the app's OIDC issuer, cookie domain, access rules
+# and OIDC redirect URIs all derive from it at startup. This checks each of those
 # against the live stack, so "I changed the domain and ran up" can be verified
 # rather than assumed.
 #
@@ -21,14 +21,15 @@ OLD=""
 get() { grep -E "^$1=" .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r[:space:]'; }
 DOM="$(get LLM_DOMAIN)"; DOM="${DOM:-llm.localhost}"
 PORT="$(get TRAEFIK_HTTPS_PORT)"; PORT="${PORT:-443}"
-CRT="config/traefik/certs/tls.crt"
+CFG="$(get LLM_CONFIG_DIR)"; CFG="${CFG:-./config}"
+CRT="$CFG/traefik/certs/tls.crt"
 FAILS=0
 
 ok()   { printf '  \033[32mOK\033[0m    %s\n' "$*"; }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; FAILS=$((FAILS+1)); }
 
 resolve=()
-for h in "" chat admin gateway api metrics alerts argus; do
+for h in "" gateway api metrics alerts argus; do
   name="${h:+$h.}$DOM"; resolve+=(--resolve "$name:$PORT:127.0.0.1")
 done
 C=(curl -s --max-time 20 --cacert "$CRT" "${resolve[@]}")
@@ -54,8 +55,6 @@ expect() {  # host path expected-codes-regex label
 }
 expect "" /readyz 200
 expect gateway /health/liveliness 200
-expect chat / "200|302"
-expect admin / 302   # the old admin panel address, redirected into the app
 expect metrics / 302
 expect alerts / 302
 expect api /v1/models "302|401"
@@ -69,21 +68,20 @@ iss="$(printf '%s' "$disc" | python3 -c 'import json,sys; print(json.load(sys.st
 [[ "$iss" == "$APP/" ]] && ok "OIDC issuer $iss" || bad "OIDC issuer '${iss}'"
 loc="$("${B[@]}" -o /dev/null -w '%{redirect_url}' "$(u metrics /)")"
 [[ "$loc" == "$APP/login?rd="* ]] && ok "forward-auth sends the browser to sign in at $APP" || bad "forward-auth redirect: $loc"
-loc="$("${C[@]}" -o /dev/null -w '%{redirect_url}' "$(u chat /oauth/oidc/login)")"
-[[ "$loc" == "$APP/connect/authorize"*"redirect_uri=https%3A%2F%2Fchat.$DOM"* ]] \
-  && ok "Open WebUI SSO starts at the app with its own redirect URI" || bad "Open WebUI SSO redirect: ${loc:0:140}"
 
 echo "4. inside the network"
-if docker exec open-webui python -c "import socket; socket.gethostbyname('$DOM')" 2>/dev/null; then
+# A service that signs in against the issuer (Langfuse) must reach it by name:
+# Traefik's network alias makes the domain resolve inside the stack.
+if docker run --rm --network llm-net python:3.13-slim python -c "import socket; socket.gethostbyname('$DOM')" >/dev/null 2>&1; then
   ok "containers resolve $DOM (the issuer) to Traefik"
 else
-  bad "open-webui cannot resolve $DOM"
+  bad "containers on llm-net cannot resolve $DOM"
 fi
 
 if [[ -n "$OLD" && "$OLD" != "$DOM" ]]; then
   echo "5. old domain $OLD is gone"
-  code="$(curl -sk --max-time 10 --resolve "chat.$OLD:$PORT:127.0.0.1" -o /dev/null -w '%{http_code}' "https://chat.$OLD/")"
-  [[ "$code" == 404 ]] && ok "chat.$OLD -> 404 (no route)" || bad "chat.$OLD -> $code"
+  code="$(curl -sk --max-time 10 --resolve "$OLD:$PORT:127.0.0.1" -o /dev/null -w '%{http_code}' "https://$OLD/")"
+  [[ "$code" == 404 ]] && ok "$OLD -> 404 (no route)" || bad "$OLD -> $code"
 fi
 
 echo

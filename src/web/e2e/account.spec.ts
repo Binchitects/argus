@@ -23,3 +23,20 @@ test('a new key must be confirmed; cancelling keeps the current one', async ({ p
   await expect(page.getByRole('alertdialog')).toBeHidden()
   await expect(page.getByText('shown only this once')).toBeHidden()
 })
+
+test('connect your tools: the address, the setups and the certificate are the real ones', async ({ page, baseURL }) => {
+  await page.goto('/setup')
+  await expect(page.getByRole('heading', { level: 1, name: 'Connect your tools' })).toBeVisible()
+  const url = new URL(baseURL!)
+  const gateway = `${url.protocol}//gateway.${url.host}`
+  await expect(page.getByText(`${gateway}/v1`, { exact: true })).toBeVisible()
+  await expect(page.getByText(/export ANTHROPIC_BASE_URL=/)).toContainText(`ANTHROPIC_BASE_URL=${gateway}`)
+  // The certificate the page offers is the one the stack serves, and the bundle carries it with the public CAs.
+  const cert = await page.request.get('/api/account/certificate')
+  expect(cert.status()).toBe(200)
+  const pem = await cert.text()
+  expect(pem).toContain('BEGIN CERTIFICATE')
+  const bundle = await (await page.request.get('/api/account/certificate?bundle=true')).text()
+  expect(bundle).toContain(pem.trim().split('\n')[1])
+  expect(bundle.match(/BEGIN CERTIFICATE/g)!.length).toBeGreaterThan(10)
+})

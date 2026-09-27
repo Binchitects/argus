@@ -24,11 +24,9 @@ Thumbs.db
 .idea/
 .vscode/
 
-# The exported TLS certificate (tls-init) and basic-auth hash (auth-init)
+# The exported TLS certificate (tls-init)
 config/traefik/certs/*
 !config/traefik/certs/.gitkeep
-config/traefik/auth/*
-!config/traefik/auth/.gitkeep
 
 # Argus's private CA for a GitLab that is not on a public one. Whatever an
 # operator drops here belongs to their environment, not to this repository --
@@ -37,12 +35,6 @@ config/traefik/auth/*
 # mount in docker-compose.yml never has to be created by Docker.
 config/argus/tls/*
 !config/argus/tls/README.md
-
-# Authelia: generated secrets, OIDC signing key and user password hashes
-config/authelia/secrets/*
-config/authelia/clients.yml
-# contains no secrets. users.yml holds the password hashes and is not.
-config/authelia/users.yml
 
 # Issued API keys - never commit
 .keys/
@@ -55,26 +47,20 @@ dist/
 # redeploy-test.sh artefacts
 .redeploy-setup*.log
 redeploy-report.txt
-config/authelia/configuration.yml
 
 # Prometheus needs a bearer token to scrape llama.cpp, which protects every
 # path except /health. Written by the prometheus-secrets service from LLAMACPP_API_KEY.
 config/prometheus/secrets/*
 !config/prometheus/secrets/.gitkeep
 
-# The admin panel keeps a backup each time it rewrites the user database.
-# It holds password hashes and must not be committed.
-config/authelia/users.yml.bak
-config/authelia/users.yml.tmp
-# The hash-free account list the admin panel publishes for Argus to read.
+# The hash-free account list the app writes for Argus to read.
 #
 # The DIRECTORY is kept in the repository with a placeholder, and only its
 # CONTENTS are ignored. Without that, a fresh clone has no source for the argus
-# and admin-panel bind mounts, so Docker creates a root-owned empty directory
-# there instead -- which is exactly the failure `make preflight` exists to name,
-# and it would refuse `make up` on every clean deployment.
-config/authelia/directory/*
-!config/authelia/directory/.gitkeep
+# and app bind mounts, so Docker creates a root-owned empty directory there
+# instead -- which is exactly the failure `make preflight` exists to name.
+config/directory/*
+!config/directory/.gitkeep
 config/ca/*.crt
 config/ca/*.pem
 

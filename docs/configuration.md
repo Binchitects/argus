@@ -118,8 +118,8 @@ of as a parse error.
 
 ## 4. MODEL
 
-**`MODEL_NAME`** — *required.* The one name every client sees: the gateway, Open
-WebUI, Qwen Code, the OpenAI SDK. LiteLLM advertises exactly one model under
+**`MODEL_NAME`** — *required.* The one name every client sees: the gateway, the
+chat, Qwen Code, Claude Code, the OpenAI SDK. LiteLLM advertises exactly one model under
 exactly this name; aliases were removed because clients cached `/model/info` and
 listed every one of them as a separate model.
 
@@ -146,23 +146,20 @@ and applied to every request through the gateway.
 
 ### Changing the thinking level per chat
 
-**Pick it from the model dropdown.** The stack creates one Open WebUI model per
-level on every start, so the level is chosen per chat the same way the model is:
+**Pick it in the chat.** Each conversation has a thinking control beside the
+model picker, offering the levels in `THINKING_PRESETS` (`level:Label`,
+comma-separated; empty turns the control off). A new chat starts at the
+deployment's default (`MODEL_REASONING_EFFORT`, or off when
+`MODEL_ENABLE_THINKING=false`).
 
-| picker entry | what it sends |
+| level | what the chat sends in `chat_template_kwargs` |
 |---|---|
-| `Qwen3.8-Flash-Next · Deep think` | `reasoning_effort: xhigh` (the model's own default) |
-| `Qwen3.8-Flash-Next · Balanced` | `reasoning_effort: medium` |
-| `Qwen3.8-Flash-Next · Quick` | `reasoning_effort: low` |
-| `Qwen3.8-Flash-Next · No thinking` | `enable_thinking: false` |
+| `xhigh` · Deep think | `reasoning_effort: xhigh` (the model's own default) |
+| `medium` · Balanced | `reasoning_effort: medium` |
+| `low` · Quick | `reasoning_effort: low` |
+| `off` · No thinking | `enable_thinking: false` |
 
-Configured by `THINKING_PRESETS` (`level:Label`, comma-separated); empty turns
-the presets off. They are created by `deploy/services/seed-presets.py`, which the
-open-webui entrypoint starts in the background — it waits for the first admin to
-sign in, because Open WebUI will not list a model that has no owner, and on a
-fresh deployment no user exists until someone signs in through SSO.
-
-Measured end to end through Open WebUI, same prompt, three picker entries:
+Measured end to end, same prompt:
 
 ```
 Deep think    reasoning=2654 chars   completion_tokens=1319
@@ -170,13 +167,11 @@ Quick         reasoning=1251 chars   completion_tokens= 667
 No thinking   reasoning=   0 chars   completion_tokens= 910
 ```
 
-#### Why the field Open WebUI already has does not work
+#### Why not OpenAI's `reasoning_effort`
 
-Open WebUI has a `reasoning_effort` parameter, offered in the chat controls'
-Advanced Params and in the model editor, and it looks like exactly the right
-control. **It does nothing here.** It goes out as a top-level field, and LiteLLM
-drops a top-level `reasoning_effort` when the backend is a custom `openai/`
-api_base — which this stack is. Measured, same prompt:
+A top-level `reasoning_effort` looks like exactly the right control. **It does
+nothing here.** LiteLLM drops a top-level `reasoning_effort` when the backend is
+a custom `openai/` api_base, which this stack is. Measured, same prompt:
 
 | request | reasoning | honoured? |
 |---|---|---|
@@ -187,19 +182,15 @@ api_base — which this stack is. Measured, same prompt:
 
 `--jinja` means the model's own template decides what thinking means, and it
 reads `reasoning_effort` and `enable_thinking` as Jinja variables. Only
-`chat_template_kwargs` reaches it. A typo there is loud — the template raises
-`Unexpected reasoning effort` — which is the one mercy in this arrangement.
+`chat_template_kwargs` reaches it. A typo there is loud (the template raises
+`Unexpected reasoning effort`), which is the one mercy in this arrangement.
 
-This is why the presets carry the value in `custom_params`, which Open WebUI
-deep-merges into the outgoing body (see `apply_model_params_to_body_openai`).
+#### From an API client
 
-#### Doing it by hand
-
-Any request whose params carry `chat_template_kwargs` works, so the API and a
-model preset both do:
+Send the same object in the request body:
 
 ```json
-{ "custom_params": { "chat_template_kwargs": { "reasoning_effort": "low" } } }
+{ "chat_template_kwargs": { "reasoning_effort": "low" } }
 ```
 
 The value must be a real object, not a string. A JSON string is passed through
@@ -211,10 +202,6 @@ as a string and the engine never sees a variable it recognises.
 | balanced | `{"reasoning_effort": "medium"}` |
 | quick answers | `{"reasoning_effort": "low"}` |
 | no thinking at all | `{"enable_thinking": false}` |
-
-Verified end-to-end through Open WebUI's own `/api/chat/completions`, not only
-at the gateway: a bogus `reasoning_effort` sent this way reaches the template and
-raises, while the same value sent as `reasoning_effort` is dropped.
 
 ---
 
@@ -357,20 +344,16 @@ rotating it.
 
 | variable | generate with | notes |
 |---|---|---|
-| `ADMIN_PASSWORD` | a few unrelated words, or `openssl rand -hex 24` | the first admin's password, used on the very first start only; change it in the app afterwards. (An install from before the app may still have `AUTHELIA_ADMIN_PASSWORD`; it is read as a fallback.) |
+| `ADMIN_PASSWORD` | a few unrelated words, or `openssl rand -hex 24` | the first admin's password, used on the very first start only; change it in the app afterwards. |
 | `APP_DATA_KEY` | `openssl rand -hex 32` | **never change after first start**: encrypts the app's session and OIDC signing keys in its database |
-| `PROXY_AUTH_USER` | — (a username) | basic-auth user for the internal services when the `auth` profile is **off** |
-| `PROXY_AUTH_PASSWORD` | `openssl rand -hex 32` | the matching password |
 | `LLAMACPP_API_KEY` | `openssl rand -hex 32` | the engine's own key, injected by Traefik |
 | `LITELLM_MASTER_KEY` | `echo sk-$(openssl rand -hex 24)` | mints per-person keys. **Must start with `sk-`** |
 | `SEARXNG_SECRET` | `openssl rand -hex 32` | only with the `websearch` profile (SearXNG refuses to start without it); free to rotate |
 | `LITELLM_SALT_KEY` | `echo sk-$(openssl rand -hex 24)` | **never change after first start** |
 | `LLM_PG_PASSWORD` | `openssl rand -hex 32` | the Postgres password; also the default for ClickHouse and MinIO |
-| `WEBUI_SECRET_KEY` | `openssl rand -hex 32` | Open WebUI's session signing key |
-| `OPENWEBUI_OIDC_CLIENT_SECRET` | `openssl rand -hex 32` | Open WebUI's OIDC client |
 | `API_OIDC_CLIENT_SECRET` | `openssl rand -hex 32` | the `client_credentials` client machine callers use |
 | `ARGUS_ADMIN_TOKEN` | `openssl rand -hex 32` | enables Argus's `/admin/index` route; unset means the surface does not exist |
-| `ARGUS_CHAT_CLIENT_TOKEN` | `openssl rand -hex 32` | lets Open WebUI use Argus per person |
+| `ARGUS_CHAT_CLIENT_TOKEN` | `openssl rand -hex 32` | lets the chat search Argus as the person asking (the app sends their email beside it) |
 
 **Rotating a `*_OIDC_CLIENT_SECRET` invalidates that app's existing sessions**
 until both sides have the new value: `docker compose up -d` recreates the app
@@ -390,15 +373,14 @@ into `postgres-data`. Both encrypt data at rest:
 
 ### Secrets outside the SECRETS block
 
-Eight more exist further down `.env`, because they belong to optional profiles
-and are documented next to them: `ARGUS_GITLAB_TOKEN`, `VLLM_API_KEY`,
-`CLICKHOUSE_PASSWORD`, `MINIO_ROOT_PASSWORD`, `LANGFUSE_ENCRYPTION_KEY`,
-`LANGFUSE_NEXTAUTH_SECRET`, `LANGFUSE_OIDC_CLIENT_SECRET` and
-`WEBUI_BACKEND_KEY`.
+More exist further down `.env`, because they belong to optional profiles and
+are documented next to them: `ARGUS_GITLAB_TOKEN` (or `ARGUS_GITLAB_PASSWORD`),
+`LDAP_BIND_PASSWORD`, `VLLM_API_KEY`, `CLICKHOUSE_PASSWORD`,
+`MINIO_ROOT_PASSWORD`, `LANGFUSE_ENCRYPTION_KEY`, `LANGFUSE_NEXTAUTH_SECRET` and
+`LANGFUSE_OIDC_CLIENT_SECRET`.
 
-Worth knowing if you ever script over `.env`: the airgap bundler's first version
-emptied only the SECRETS block and shipped all eight of those. It now matches by
-name as well as position.
+Worth knowing if you ever script over `.env`: the airgap bundler empties secrets
+by name as well as by position, so none of these ship in a bundle.
 
 ---
 
@@ -409,13 +391,9 @@ name as well as position.
 | `LITELLM_DEFAULT_USER_BUDGET` | `50` | default monthly credit per person, in USD. `0` would **block** every request rather than mean unlimited, which is why the default is a real number |
 | `LITELLM_BUDGET_DURATION` | `1mo` | the window that ceiling applies to |
 | `LITELLM_WORKERS` | `1` | LiteLLM worker processes |
-| `WEBUI_DEFAULT_ROLE` | `user` | what a newly signed-in person gets. Never `admin`: behind SSO anyone who can authenticate would otherwise self-promote |
-| `WEBUI_BACKEND_URL` | `http://identity-proxy:8080/v1` | where Open WebUI sends completions |
-| `WEBUI_BACKEND_KEY` | `${LITELLM_MASTER_KEY}` | the **single shared key** Open WebUI uses. Because it is shared, per-person attribution depends on the forwarded email header, and enforcement depends on `identity-proxy` |
-| `PROTECTED_CHAIN` | `sso-chain@file` | the middleware chain on the unauthenticated internals. Use `protected-chain@file` when the `auth` profile is off |
 | `PROMETHEUS_RETENTION_TIME` | `30d` | how long metrics are kept |
 | `PROMETHEUS_RETENTION_SIZE` | `20GB` | and how much disk they may take. Whichever hits first |
-| `ADMIN_GROUP` | `admins` | the group name the app gives admins in OIDC and forwardAuth; Open WebUI maps it to its admin role |
+| `ADMIN_GROUP` | `admins` | the group name admins carry in what the app tells other services (the OIDC `groups` claim, forwardAuth headers) |
 | `HF_TOKEN` | empty | only needed for gated Hugging Face repositories |
 
 ---
@@ -436,6 +414,7 @@ name as well as position.
 | `ARGUS_EMBED_MODEL` | `nomic-embed-text` | the embedding model's name, recorded in the index and in every pack |
 | `ARGUS_EMBED_DIM` | `768` | its output dimension. Must match the model, or the pack vectors are unusable |
 | `ARGUS_PACK_LIBRARY_DIR` | the repository's `packs/` | the **pack library**: built knowledge packs (`tools/build-packs.sh` writes them there), mounted read-only; **Admin → Packs** loads them. Loading links a pack, so nothing is copied |
+| `ARGUS_PACK_INDEX_URL` | empty | a published pack index (JSON) for the **Update** button on **Admin → Packs**. Empty = adding and removing still work and Update is absent |
 | `ARGUS_INDEX_INTERVAL` | `900` | seconds between automatic index passes. **`0` turns automatic reindexing off**, and then the index only advances when somebody presses **Index now** under **Admin → Indexing** |
 | `ARGUS_INDEX_STALE_AFTER` | `3600` | seconds without a successful pass before a repository counts as stale. Feeds `argus_index_stale`, the `ArgusIndexStale` alert and the number on **Admin → Overview**. Default is 4 × the interval above |
 | `ARGUS_WEBHOOK_TOKEN` | empty | the GitLab push webhook's secret. **Empty means the webhook route does not exist at all.** Set it here and put the same value in GitLab's webhook configuration; see [ARGUS.md](argus/README.md#indexing-on-push). Deliberately not the admin token — this one is stored in GitLab, so it is the lower-privilege credential |
@@ -541,8 +520,6 @@ overwritten in meaning if you set them independently.
 | `LHM_URL` | `http://host.docker.internal:8085/data.json` — one of three sources `cpu-temp-exporter` tries, in order: Linux `/sys/class/hwmon`, then LibreHardwareMonitor, then ACPI thermal zones. It exists because node-exporter's `node_hwmon_temp_celsius` has **zero series** on a Windows/WSL2 host — the kernel exposes no thermal sensors — and `windows_exporter` has no core-temperature collector at all |
 | `COMPOSE_PROJECT_NAME` (in Traefik) | `@COMPOSE_PROJECT_NAME@` in `traefik.yml`, replaced by `sed` at startup |
 | `POSTGRES_USER` / `POSTGRES_DB` | `LLM_PG_USER` / `llmservice` |
-| `OAUTH_ADMIN_ROLES` | `ADMIN_GROUP` (default `admins`) — the app's group that becomes an Open WebUI admin |
-| `OAUTH_ALLOWED_ROLES` | `*` — anyone the app signs in may use chat; authorisation comes from the group claim |
 | `OFFLINE_MODE`, `CHECKPOINT_DISABLE`, `LITELLM_LOCAL_MODEL_COST_MAP` | LiteLLM does not phone home and uses its bundled model cost map instead of fetching one |
 
 ---
@@ -555,10 +532,9 @@ for what each brings up; this is the short reference:
 
 | profile | brings up |
 |---|---|
-| *(none needed)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `node-exporter`, `power-limits`, `open-webui` |
+| *(none needed)* | `tls-init`, `prometheus-secrets`, `prometheus`, `alertmanager`, `node-exporter`, `power-limits` |
 | `proxy` | `traefik` |
-| `auth` | `auth-init`, `redis` |
-| `gateway` | `app`, `litellm`, `postgres`, `redis`, `identity-proxy` |
+| `gateway` | `app-init`, `app`, `web`, `litellm`, `postgres`, `redis` |
 | `llamacpp` | `llamacpp`, `model-init` |
 | `vllm` | `vllm` |
 | `multi-model` | `vllm-secondary` |
@@ -588,8 +564,7 @@ knowing before something looks broken:
   in this deployment's Loki.
 
 Running **without** `proxy` is supported but means reaching services by their
-internal names; without `auth`, `PROTECTED_CHAIN` must be set to
-`protected-chain@file`.
+internal names, with no sign-in in front of the internal services.
 
 ---
 
@@ -604,7 +579,7 @@ place to go for behaviour the `.env` does not expose.
 | file | what it configures |
 |---|---|
 | `traefik/traefik.yml` | static config: entrypoints, the Docker and file providers, the project-scoping constraint, Prometheus metrics, access-log filters. **Cannot read the environment** — `@COMPOSE_PROJECT_NAME@` is substituted at startup |
-| `traefik/dynamic/middlewares.yml` | the middleware chains: `internal-auth` (basic auth), `security-headers`, `compress` (which never compresses SSE), `default-chain`, `protected-chain`, `app-auth` (forwardAuth to the app), `sso-chain` |
+| `traefik/dynamic/middlewares.yml` | the middleware chains: `security-headers`, `compress` (which never compresses SSE), `default-chain`, `app-auth` (forwardAuth to the app), `sso-chain` (sign-in in front of every internal service) |
 | `traefik/dynamic/tls.yml` | the certificate store and TLS options: minimum version TLS 1.2, and a restricted cipher list |
 | `litellm/config.yaml` | the model list and its advertised window, router retries and timeout, the default per-person budget, the Redis cache policy (`mode: default_off`), and `user_header_mappings` — the mapping that makes chat spend and API spend one number |
 | `prometheus/prometheus.yml` | the 14 scrape jobs and their intervals |
@@ -622,19 +597,20 @@ place to go for behaviour the `.env` does not expose.
 
 | file | written by | when |
 |---|---|---|
-| `traefik/auth/users.htpasswd` | `auth-init` | every `up`, from `PROXY_AUTH_USER`/`PROXY_AUTH_PASSWORD` |
 | `traefik/certs/tls.crt`, `bundle.crt` | `tls-init` | every `up`. Copies for host-side tools; the private key never leaves the volume |
 | `prometheus/secrets/llamacpp.token` | `prometheus-secrets` | every `up` |
-| `authelia/directory/users.yml` | the app | at start and on every change to a person. What Argus mounts (`config/authelia/directory` → `/authelia`): usernames, emails and display names only, never passwords. The directory keeps its old name so Argus needs no change; it is kept in the tree with a `.gitkeep` and only its contents are ignored |
+| `directory/users.yml` | the app | at start and on every change to a person. What Argus mounts (`config/directory` → `/directory`, `ARGUS_USERS_FILE`) to map a GitLab identity to a person: usernames, emails and display names only, never passwords. Kept in the tree with a `.gitkeep`; only its contents are ignored |
+| `app/` | the app | the Settings page's pending `.env` changes |
+| `engine/` | the app | Admin → Models: the engine's presets (`models.ini`), the model to load, and Prometheus's scrape targets. See `config/engine/README.md` |
 
 ### The `deploy/services/` directory
 
 | path | what it is |
 |---|---|
 | `src/` (repository root) | the app (`Llm.Api`, `Llm.Core`), the web and Argus, built by compose from `LLM_SOURCE_DIR`. See [development.md](development.md) |
-| `deploy/services/identity-proxy/` | turns Open WebUI's forwarded identity header into the `user` field LiteLLM enforces budgets against |
 | `deploy/services/cpu-temp-exporter/` | a small exporter for CPU package temperature, which NVML does not report |
-| `deploy/services/argus-local.yml` | an **override**: reuse an existing Argus index and pack estate instead of the named volume. Requires `ARGUS_HOME` |
+| `deploy/services/llamacpp/` | the engine's entrypoint (`router.sh`): llama.cpp in router mode over the presets in `config/engine/models.ini` |
+| `deploy/services/sandbox/` | the chat's Python sandbox image |
 | `tools/test-gitlab/` | a throwaway GitLab CE for verifying Argus end to end. Not for production |
 
 ---

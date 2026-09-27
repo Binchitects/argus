@@ -23,7 +23,7 @@
 #                          the Argus index and audit) are copied
 #                          with SQLite's online backup, so a write in progress cannot tear them.
 #   config/                .env, every compose file named in COMPOSE_FILE, and config/ with
-#                          links FOLLOWED: users, OIDC key and client secrets, basic-auth.
+#                          links FOLLOWED: the directory, the OIDC key, the TLS certificate.
 #   MANIFEST, SHA256SUMS   what was taken, from which commit; a checksum for every file.
 #
 # The backup directory holds every secret of the stack: it is created 0700 and
@@ -37,6 +37,7 @@ umask 077
 env_get() { grep -E "^$1=" .env 2>/dev/null | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
 say() { printf '%s\n' "$*"; }
 die() { printf 'backup: ERROR: %s\n' "$*" >&2; exit 1; }
+CFG="$(env_get LLM_CONFIG_DIR)"; CFG="${CFG:-./config}"   # where config/ lives (relative to deploy/)
 
 PROJECT="$(env_get COMPOSE_PROJECT_NAME)"; PROJECT="${PROJECT:-llmservice}"
 BACKUP_DIR="$(env_get BACKUP_DIR)"; BACKUP_DIR="${BACKUP_DIR:-./backups}"
@@ -163,7 +164,7 @@ if [[ $ACTION == restore ]]; then
     say "==> config (written through links, so files land where the live ones are)"
     cp "$FROM/config/.env" .env
     while IFS= read -r f; do
-      rel="${f#"$FROM/config/stack-config/"}"; mkdir -p "config/$(dirname "$rel")"; cp -p "$f" "config/$rel"
+      rel="${f#"$FROM/config/stack-config/"}"; mkdir -p "$CFG/$(dirname "$rel")"; cp -p "$f" "$CFG/$rel"
     done < <(find "$FROM/config/stack-config" -type f)
     for f in "$FROM"/config/compose/*; do
       [[ -f "$f" ]] || continue
@@ -225,7 +226,7 @@ for f in "${CFILES[@]}"; do
   [[ -f "$f" ]] && cp -L "$f" "$OUT/config/compose/" || fail "compose file $f"
 done
 [[ ${#CFILES[@]} -eq 0 ]] && cp docker-compose.yml "$OUT/config/compose/"
-cp -rL config "$OUT/config/stack-config" 2>/dev/null || fail "config/ (a link that points nowhere?)"
+cp -rL "$CFG" "$OUT/config/stack-config" 2>/dev/null || fail "config/ (a link that points nowhere?)"
 { git -C "$ROOT" rev-parse HEAD; git -C "$ROOT" status --short; } > "$OUT/config/git-state.txt" 2>/dev/null || true
 git -C "$ROOT" diff > "$OUT/config/git-local-changes.patch" 2>/dev/null || true
 say "  $(find "$OUT/config" -type f | wc -l) files (.env, $(ls "$OUT/config/compose" | wc -l) compose file(s), config/ with links followed)"

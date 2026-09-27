@@ -1,8 +1,9 @@
 # Chat
 
-The chat is at `https://<LLM_DOMAIN>/chat`, for everyone who can sign in. Open
-WebUI still runs at `https://chat.<LLM_DOMAIN>` until the new web is signed off
-([plan](plan.md), 3F). The two don't share chats.
+The chat is at `https://<LLM_DOMAIN>/chat`, for everyone who can sign in. To use
+the models from your own tools (Claude Code, Qwen Code, an editor, a script),
+see **Connect your tools** (`/setup`): your API key, the gateway's address and
+setups to paste.
 
 ## What it does
 

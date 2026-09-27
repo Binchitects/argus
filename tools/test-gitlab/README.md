@@ -2,10 +2,9 @@
 
 > **State:** `run.sh` brings the GitLab up and seeds it (projects, people, and
 > their tokens in `seeded.json`), which is what the chat's Argus browser tests
-> use. Its verifiers (`verify.py`, `verify_tools.py`) drove the Python Argus,
-> which is retired: `src/Argus` is its .NET port, conformance-tested against it.
-> Until they are ported to drive the .NET service, `run.sh` skips them and says
-> so; `verify.py` is no longer in the repository.
+> use. Its per-tool verifier (`verify_tools.py`) drove the retired Python Argus
+> in-process; `src/Argus` is its .NET port, conformance-tested against it. Until
+> the verifier drives the .NET service, `run.sh` skips it and says so.
 
 A disposable GitLab CE instance for proving things unit tests structurally cannot.
 
@@ -49,8 +48,8 @@ has failed, and the check says so rather than passing quietly.
 ```
 
 That is the whole lifecycle in one command: start the instance, wait for the API
-to actually be ready, seed the fixtures, run `verify.py`, and take the instance
-down again — including when seeding or verification fails, because the run that
+to actually be ready, seed the fixtures, verify (once the verifier is ported),
+and take the instance down again — including when seeding or verification fails, because the run that
 leaves it up is the one nobody comes back to.
 
 | flag | what it does |
@@ -85,21 +84,15 @@ First boot takes several minutes and the container reports `healthy` well before
 the API is ready, so wait for `curl -fsS http://localhost:8929/-/readiness`
 rather than for the healthcheck.
 
-Then seed and verify:
+Then seed:
 
 ```bash
-python tools/test-gitlab/seed.py
-python tools/test-gitlab/verify.py
+python3 tools/test-gitlab/seed.py
 ```
 
-Both need `httpx`, which the `argus` image has and a bare host usually does not;
-`seed.py` additionally shells out to the `docker` CLI to run `gitlab-rails
-runner`. `run.sh` wraps both in the `docker run` invocation that supplies them.
-
-`verify.py` exits non-zero if any check fails and writes
-`docs/argus/verification-report.md` with the index measurements (wall-clock,
-file/symbol/**public-symbol** counts — that last one is the Phase 4 vector
-estimate) alongside the pass/fail table.
+`seed.py` needs only Python's standard library, and shells out to the `docker`
+CLI to run `gitlab-rails runner`. `run.sh` runs it in `python:3.13-slim` with the
+socket and the CLI mounted.
 
 `verify_tools.py` is the per-tool contract, and it is the one that cannot rot.
 It drives the real MCP protocol over the wire with real developer tokens and
@@ -120,21 +113,11 @@ tools, which need a documentation pack installed and fail with an actionable
 message when there is none — the absence of a pack is not something an empty
 result should be allowed to hide.
 
-Set `ARGUS_TEST_WORK` to move the mirrors and index out of the checkout:
-
-```bash
-ARGUS_TEST_WORK=/var/lib/argus-test-work python tools/test-gitlab/verify.py
-```
-
-The default is `tools/test-gitlab/work`, inside the checkout, and SQLite in
-WAL mode cannot open its shared-memory file on some bind-mounted filesystems —
-on an NTFS checkout `argus index` dies with `disk I/O error` before indexing
-anything. `run.sh` always sets it, to a Docker volume.
-
-Set `ARGUS_TEST_GITLAB_URL` to reach the same GitLab from a different network
-position (`run.sh` uses `http://host.docker.internal:8929` from `llm-net`), and
-`ARGUS_OLLAMA_URL` to the stack's embedder so the vector half of the index is
-built and `semantic_search` is exercised rather than skipped.
+When it is ported, it keeps two settings: `ARGUS_TEST_WORK` moves the mirrors
+and index out of the checkout (SQLite in WAL mode cannot open its shared-memory
+file on some bind-mounted filesystems; on an NTFS checkout indexing dies with
+`disk I/O error`), and `ARGUS_TEST_GITLAB_URL` reaches the same GitLab from a
+different network position (`http://host.docker.internal:8929` from `llm-net`).
 
 ## Tear down
 

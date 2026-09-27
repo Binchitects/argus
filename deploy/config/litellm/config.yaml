@@ -16,10 +16,8 @@
 # `model_info`, so the litellm service renders ${MODEL_NAME}-style tokens in
 # this file from its environment at startup -- see its entrypoint in
 # docker-compose.yml. Changing model is an .env edit and `docker compose up -d`.
-#
-# There used to be three entries here -- `local`, the served name and a stale
-# `qwen3.8-9b` alias -- all pointing at the same engine, and every client showed
-# all three. Aliases are gone: clients see the model's real name only.
+# No aliases: clients see the model's real name only. The models added under
+# Admin -> Models are registered by the app, beside this one.
 # ==============================================================================
 
 model_list:
@@ -113,17 +111,14 @@ litellm_settings:
   # PRICE_OUTPUT_PER_MTOK in .env to make the figure mean money.
   #
   # 0 would block every request rather than allow unlimited, so the default is
-  # a real number. Raise per-person in the admin panel (Credit).
+  # a real number. Raise per-person under Admin -> People (credit).
   max_internal_user_budget: os.environ/LITELLM_DEFAULT_USER_BUDGET
   internal_user_budget_duration: os.environ/LITELLM_BUDGET_DURATION
-  # Response cache in Redis, OFF unless a request asks for it.
-  #
-  # It used to be on for every request. The cache key is the model plus the
-  # messages -- not the person, not the temperature -- so it returned a stored
-  # answer for any repeat of the same conversation for an hour: "regenerate" in
-  # Open WebUI gave back the identical reply, two people who asked the same
-  # thing got one sampled answer between them, and a benchmark's second round
-  # measured Redis instead of the model.
+  # Response cache in Redis, OFF unless a request asks for it. Its key is the
+  # model plus the messages -- not the person, not the temperature -- so on for
+  # every request it would replay a stored answer for any repeat of the same
+  # conversation: "regenerate" would give back the identical reply, and two
+  # people who asked the same thing would get one sampled answer between them.
   #
   # What it was meant to speed up, a resent system prompt, is already handled a
   # layer down: the engine's prefix cache reuses those tokens without
@@ -146,46 +141,24 @@ general_settings:
   store_model_in_db: true
 
   # ---------------------------------------------------------------- identity
-  # This is what makes one person's API usage and their chat usage add up to
-  # ONE number instead of two unrelated ones.
+  # One person's API usage and their chat usage add up to ONE number. The
+  # app's chat calls this gateway with its own key and names the person in
+  # X-LLM-User-Email; mapping that header to `internal_user` makes LiteLLM's
+  # internal user id the person's email -- and the app mints each person's API
+  # key with `user_id: <same email>`. One identity, both surfaces.
   #
-  # The problem it solves: Open WebUI authenticates to this gateway with a
-  # SINGLE shared key (see WEBUI_BACKEND_KEY in docker-compose.yml). Without
-  # the mapping below, every chat message from every person is spend against
-  # that one key -- the gateway can tell you the web UI used $40 this month
-  # and cannot tell you who used it. Per-person API keys were attributable all
-  # along; the web UI was the hole.
+  # Two jobs, two mechanisms, measured on this stack:
   #
-  # Open WebUI forwards the signed-in identity as headers when
-  # ENABLE_FORWARD_USER_INFO_HEADERS is set. Mapping the EMAIL header to
-  # `internal_user` makes LiteLLM's internal user id the person's email
-  # address -- and the admin panel mints each API key with
-  # `user_id: <same email>`. One identity, both surfaces.
+  #   internal_user  ATTRIBUTES the spend (this header mapping).
+  #   end user       ENFORCES the ceiling: the chat puts the email in the body's
+  #                  `user` field too, because a budget on an internal user binds
+  #                  only keys that user owns, and the chat's key is not theirs.
   #
-  # Email rather than X-OpenWebUI-User-Id deliberately: the user id is an
-  # Open WebUI database row id, which exists nowhere else. Email is what
-  # Authelia issues over OIDC, what the admin panel already records, and therefore
-  # the only identifier the whole stack agrees on.
-  # BOTH roles, from the one header, because they do different jobs. Measured
-  # on this stack rather than assumed:
-  #
-  #   internal_user  ATTRIBUTES the spend. It makes chat usage land on the
-  #                  same identity as the person's API key, which is what
-  #                  makes their total one number instead of two.
-  #
-  #   customer       ENFORCES the ceiling. With internal_user alone, an
-  #                  over-budget person was refused on the API path (429) and
-  #                  still served on the web UI -- tracked but not stopped.
-  #                  The internal-user budget binds a key owned by that user;
-  #                  the web UI holds a SHARED key, so nothing bound. End-user
-  #                  budgets are the mechanism that checks a shared key
-  #                  against the caller named in the request.
-  #
-  # The admin panel therefore provisions each person twice, with the
-  # same email and the same ceiling: once as an internal user, once as an end
-  # user. Drop either half and you lose either the total or the limit.
+  # So the app provisions each person twice, with the same email and the same
+  # ceiling: once as an internal user, once as an end user. Drop either half
+  # and you lose either the total or the limit.
   user_header_mappings:
-    - header_name: X-OpenWebUI-User-Email
+    - header_name: X-LLM-User-Email
       litellm_user_role: internal_user
   # /metrics is an enterprise feature on current builds; the Prometheus job for
   # it is commented out in config/prometheus/prometheus.yml.

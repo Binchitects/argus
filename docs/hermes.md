@@ -146,7 +146,7 @@ Two fixes, and both belong in place:
 
 * The gateway now **advertises** the window (`model_info.max_input_tokens` in
   `config/litellm/config.yaml`). That is what stops any client — Hermes,
-  Open WebUI, an SDK — from having to guess and then cache the guess.
+  the chat, an SDK — from having to guess and then cache the guess.
 * `model.context_length: 131072` in Hermes' own config, as belt and braces.
 
 Set the override only when it is **true**. Declaring 64K while the engine
@@ -290,8 +290,7 @@ the master key in `api_key`, or a repeated prompt served from cache.
 ## What the local model can and cannot do
 
 Tool calling needs a model that can hold context across several tool calls and
-choose sensibly. Open WebUI's own documentation names current frontier models
-as a reasonable minimum and says small models will not manage it. An 8B will
+choose sensibly. Small models will not manage it well. An 8B will
 struggle to drive Argus well; the 27B is better but still not a frontier
 model. If Argus tool use disappoints, that is a model limit rather than a
 wiring fault — check the wiring with the curl above before concluding

@@ -69,7 +69,7 @@ public sealed class FakeArgus : HttpMessageHandler
             throw new HttpRequestException("connection refused (test)");
         }
         var auth = request.Headers.Authorization?.Parameter;
-        var email = request.Headers.TryGetValues("x-openwebui-user-email", out var e) ? e.Single() : null;
+        var email = request.Headers.TryGetValues(Llm.Api.Chat.ArgusMcp.EmailHeader, out var e) ? e.Single() : null;
         var session = request.Headers.TryGetValues("mcp-session-id", out var s) ? s.Single() : null;
         var method = body!.Value.GetProperty("method").GetString()!;
         McpCalls.Add((method, email, session, body.Value.TryGetProperty("params", out var p) ? p : null));

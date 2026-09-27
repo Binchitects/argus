@@ -39,7 +39,7 @@ public static class LitellmSeed
               ('bob@example.test',   'bob@example.test',   0.0005, null);
             insert into "LiteLLM_VerificationToken" (token, key_alias, key_name, user_id, spend) values
               ('hash-alice', 'app-alice', 'sk-...alic', 'alice@example.test', 0.0016),
-              ('hash-webui', 'open-webui', 'sk-...webu', null, 0.0005);
+              ('hash-agent', 'coding-agent', 'sk-...agnt', null, 0.0005);
             insert into "LiteLLM_SpendLogs"
               (request_id, call_type, api_key, spend, total_tokens, prompt_tokens, completion_tokens,
                "startTime", "endTime", "completionStartTime", model, "user", metadata, end_user) values
@@ -47,8 +47,8 @@ public static class LitellmSeed
                '{"user_api_key_user_id":"alice@example.test","user_api_key_alias":"app-alice","usage_object":{"prompt_tokens_details":{"cached_tokens":40}}}', ''),
               ('r2', 'acompletion', 'hash-alice', 0.0006,  66,  60,  6, '2026-09-06 11:00:00', '2026-09-06 11:00:03', '2026-09-06 11:00:01', 'qwen', '',
                '{"user_api_key_user_id":"alice@example.test","user_api_key_alias":"app-alice"}', ''),
-              ('r3', 'acompletion', 'hash-webui', 0.0005,  55,  50,  5, '2026-09-05 12:00:00', '2026-09-05 12:00:01', '2026-09-05 12:00:00.5', 'qwen', '',
-               '{"user_api_key_alias":"open-webui"}', 'bob@example.test'),
+              ('r3', 'acompletion', 'hash-agent', 0.0005,  55,  50,  5, '2026-09-05 12:00:00', '2026-09-05 12:00:01', '2026-09-05 12:00:00.5', 'qwen', '',
+               '{"user_api_key_alias":"coding-agent"}', 'bob@example.test'),
               ('r4', 'acompletion', 'master',     0.0001,  11,  10,  1, '2026-09-07 09:00:00', '2026-09-07 09:00:01', '2026-09-07 09:00:00.2', 'qwen', '',
                '{}', ''),
               ('r5', 'acompletion', 'hash-alice', 0.999,  1098, 999, 99, '2026-08-01 00:00:00', '2026-08-01 00:00:09', '2026-08-01 00:00:01', 'qwen', '',

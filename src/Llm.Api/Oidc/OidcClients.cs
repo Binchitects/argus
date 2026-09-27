@@ -7,7 +7,9 @@ namespace Llm.Api.Oidc;
 
 /// <summary>
 /// Registers the apps that sign in through the app, from .env, on every start:
-/// a changed secret or domain takes effect with a restart, like Authelia's clients.yml.
+/// a changed secret or domain takes effect with a restart. The registered
+/// clients are exactly the configured ones: any other client in the database
+/// is deleted, so a client nobody configures cannot keep accepting a secret.
 /// </summary>
 public sealed class OidcClients(
     IOpenIddictApplicationManager apps,
@@ -22,15 +24,29 @@ public sealed class OidcClients(
 
         var d = auth.Value.Domain;
         var o = oidc.Value;
-        await UpsertAppAsync("open-webui", "Open WebUI", o.OpenWebUiSecret, $"https://chat.{d}/oauth/oidc/callback", $"https://chat.{d}/auth", ct);
         await UpsertAppAsync("langfuse", "Langfuse", o.LangfuseSecret, $"https://traces.{d}/api/auth/callback/custom", $"https://traces.{d}/", ct);
         await UpsertMachineAsync("api", "Model API (machine clients)", o.ApiSecret, ct);
 
-        // Apps this service no longer has: a client an older version registered
-        // must not keep accepting its secret. Grafana went when its dashboards moved into the app.
-        foreach (var retired in new[] { "grafana" })
+        var configured = new HashSet<string>(StringComparer.Ordinal);
+        if (!string.IsNullOrEmpty(o.LangfuseSecret))
         {
-            await UpsertAsync(retired, null, new OpenIddictApplicationDescriptor(), ct);
+            configured.Add("langfuse");
+        }
+        if (!string.IsNullOrEmpty(o.ApiSecret))
+        {
+            configured.Add("api");
+        }
+        var others = new List<object>();
+        await foreach (var app in apps.ListAsync(count: null, offset: null, ct))
+        {
+            if (await apps.GetClientIdAsync(app, ct) is not { } id || !configured.Contains(id))
+            {
+                others.Add(app);
+            }
+        }
+        foreach (var app in others)
+        {
+            await apps.DeleteAsync(app, ct);
         }
     }
 
@@ -42,7 +58,7 @@ public sealed class OidcClients(
             ClientSecret = secret,
             DisplayName = name,
             ClientType = ClientTypes.Confidential,
-            // First-party apps of this service: no consent screen, like Authelia's consent_mode implicit.
+            // First-party apps of this service: no consent screen.
             ConsentType = ConsentTypes.Implicit,
             RedirectUris = { new Uri(redirect) },
             PostLogoutRedirectUris = { new Uri(postLogout) },

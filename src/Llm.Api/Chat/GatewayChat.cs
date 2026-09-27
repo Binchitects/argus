@@ -21,6 +21,9 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 /// <summary>Streams a chat completion from LiteLLM and turns its SSE lines into events.</summary>
 public sealed class GatewayChat(HttpClient http, ChatKey key)
 {
+    /// <summary>The person a request is for, as LiteLLM attributes spend (its user_header_mappings).</summary>
+    public const string UserEmailHeader = "X-LLM-User-Email";
+
     public async IAsyncEnumerable<StreamEvent> StreamAsync(JsonObject request, string personEmail, [EnumeratorCancellation] CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
@@ -77,9 +80,9 @@ public sealed class GatewayChat(HttpClient http, ChatKey key)
         {
             Content = new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json"),
         };
-        // Attribution (LiteLLM's user_header_mappings) and enforcement (the `user`
-        // field, set by the caller): the same two signals identity-proxy gives chat.
-        req.Headers.Add("X-OpenWebUI-User-Email", personEmail);
+        // Attribution (LiteLLM's user_header_mappings); enforcement is the body's
+        // `user` field, set by the caller.
+        req.Headers.Add(UserEmailHeader, personEmail);
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
         try
         {
