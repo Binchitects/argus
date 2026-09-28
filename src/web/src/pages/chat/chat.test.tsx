@@ -502,6 +502,39 @@ describe('chat', () => {
     expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/stop')).toBe(true)
   })
 
+  it('/compact summarizes the chat; the page marks where, and shows the summary on demand', async () => {
+    const summary = 'The person said hello; the assistant wrote hello.py.'
+    let compacted = false
+    const calls = backend({
+      extra: {
+        'GET /api/chat/conversations/c1': () => ({
+          json: conversation({ messages: compacted ? [answered[0]!, { ...answered[1]!, summary }] : answered, currentLeafId: 'a1' }),
+        }),
+        'POST /api/chat/conversations/c1/compact': () => {
+          compacted = true
+          return { events: [{ type: 'compacting' }, { type: 'compacted', id: 'a1', summary, auto: false, covered: 2 }, { type: 'done', id: 'a1' }] }
+        },
+      },
+    })
+    renderApp('/chat/c1')
+    await screen.findByText('Hi! Here is code:')
+    await ask('/compact')
+    expect(await screen.findByText('Compacted: 2 messages summarized. The next answers read the summary.')).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true)
+    expect(calls.some((c) => c.path === '/api/chat/conversations/c1/messages')).toBe(false)
+    const mark = await screen.findByRole('note', { name: 'Chat compacted' })
+    await userEvent.click(within(mark).getByRole('button', { name: /Show summary/ }))
+    expect(within(mark).getByText(/the assistant wrote hello\.py/)).toBeInTheDocument()
+  })
+
+  it('a chat half full shows how full, and compacts from there', async () => {
+    const full = [answered[0]!, { ...answered[1]!, promptTokens: 20_000, completionTokens: 200 }]
+    const calls = backend({ start: conversation({ messages: full, currentLeafId: 'a1' }), extra: { 'POST /api/chat/conversations/c1/compact': () => ({ events: [{ type: 'done', id: 'a1' }] }) } })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: '62% of context · Compact' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true))
+  })
+
   it('shows why an answer failed', async () => {
     backend({
       events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'error', message: 'You have used all your credit. Ask an admin to raise it.' }],

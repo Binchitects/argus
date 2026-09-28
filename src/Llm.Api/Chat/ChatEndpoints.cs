@@ -35,6 +35,9 @@ public sealed record ForkRequest(Guid? MessageId = null);
 /// </summary>
 public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false);
 
+/// <summary>Compact the branch down to this message (default: the end of the branch on screen).</summary>
+public sealed record CompactRequest(Guid? MessageId = null);
+
 /// <summary>Answer a question again (default: the last one on the branch), optionally with another model or thinking level.</summary>
 public sealed record Regenerate(Guid? MessageId = null, string? Model = null, string? Thinking = null);
 
@@ -60,6 +63,7 @@ public static class ChatEndpoints
         g.MapPost("/conversations/{id:guid}/regenerate", RegenerateAsync);
         g.MapGet("/conversations/{id:guid}/stream", WatchAsync);
         g.MapPost("/conversations/{id:guid}/stop", StopAsync);
+        g.MapPost("/conversations/{id:guid}/compact", CompactAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync);
         g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
@@ -247,7 +251,7 @@ public static class ChatEndpoints
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
             status = m.Status.ToString().ToLowerInvariant(), m.Error, m.Model,
-            m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt,
+            m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
         }), jobs.IsAnswering(id)));
     }
@@ -335,7 +339,7 @@ public static class ChatEndpoints
                 Content = m.Content, Reasoning = m.Reasoning, ToolCallsJson = m.ToolCallsJson, ToolCallId = m.ToolCallId, ToolName = m.ToolName,
                 AttachmentsJson = m.AttachmentsJson, Model = m.Model, PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens,
                 CompletionTokens = m.CompletionTokens, ThinkingMs = m.ThinkingMs, DurationMs = m.DurationMs, Status = m.Status, Error = m.Error,
-                CreatedAt = m.CreatedAt,
+                Summary = m.Summary, CreatedAt = m.CreatedAt,
             };
             copies[m.Id] = copy.Id;
             db.ChatMessages.Add(copy);
@@ -543,6 +547,38 @@ public static class ChatEndpoints
             job.Emit(new { type = "title", title = c.Title });
         }
         jobs.Start(job, question.Id, overrides);
+        await StreamAsync(http, job);
+    }
+
+    /// <summary>
+    /// Compacts the branch (default: the one on screen): the model summarizes it, and
+    /// the next answers read the summary instead. Streams as an answer does.
+    /// </summary>
+    private static async Task CompactAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
+    {
+        var me = await Me(http.User, users);
+        if (await Owned(db, id, me) is not { } c)
+        {
+            http.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+        var body = await ReadBodyAsync<CompactRequest>(http) ?? new CompactRequest();
+        if ((body.MessageId ?? c.CurrentLeafId) is not { } leaf || !await db.ChatMessages.AnyAsync(m => m.ConversationId == id && m.Id == leaf))
+        {
+            await Problem(http, 400, "message", c.CurrentLeafId is null ? "This chat has nothing to compact yet." : "That message is not in this chat.");
+            return;
+        }
+        if (await db.ChatMessages.AnyAsync(m => m.Id == leaf && (m.Role == "tool" || m.ToolCallsJson != null)))
+        {
+            await Problem(http, 400, "message", "Compact at a question or a finished answer.");
+            return;
+        }
+        if (jobs.Reserve(c.Id, me.Id) is not { } job)
+        {
+            await Problem(http, 409, "busy", "This chat is answering. Compact it when the answer is done.");
+            return;
+        }
+        jobs.StartCompaction(job, leaf);
         await StreamAsync(http, job);
     }
 

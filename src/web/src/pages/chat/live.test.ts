@@ -88,6 +88,18 @@ describe('live answer', () => {
     expect(s.messages[1]).toMatchObject({ status: 'stopped', content: 'half' })
   })
 
+  it('a compaction keeps its summary on the message it ends at, and its failure never lands on the last answer', () => {
+    const saved = play([{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' }, { type: 'content', text: 'old answer' }])
+    let s: LiveState = { ...saved, mode: 'compact' }
+    s = reduce(s, { type: 'compacting' }, null)
+    expect(s.compacting).toBe(true)
+    s = reduce(s, { type: 'compacted', id: 'a1', summary: 'In short.', auto: false, covered: 2 }, null)
+    expect(s).toMatchObject({ compacting: false, mode: 'compact' })
+    expect(s.messages[1]!.summary).toBe('In short.')
+    const failed = reduce({ ...saved, mode: 'compact' }, { type: 'error', message: 'No model.' }, null)
+    expect(failed.messages[1]).toMatchObject({ status: 'complete', error: null })
+  })
+
   it('keeps notices and the new title', () => {
     const s = play([{ type: 'title', title: 'Hello' }, { type: 'notice', kind: 'no_vision', text: 'Cannot see.' }])
     expect(s.title).toBe('Hello')

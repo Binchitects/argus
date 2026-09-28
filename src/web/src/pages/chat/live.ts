@@ -20,6 +20,10 @@ export interface LiveState {
   queued?: number | null
   /** The answer being written: text and tool calls go to it. */
   current?: string | null
+  /** The older messages are being summarized. */
+  compacting?: boolean
+  /** "compact": this stream only compacts the chat (no answer is written). */
+  mode?: 'answer' | 'compact'
 }
 
 export const blank = (id: string, role: Message['role'], parentId: string | null, content = ''): Message => ({
@@ -58,7 +62,14 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       // The server's id replaces the one the question was shown under.
       const i = messages.findIndex((m) => m.id === localId)
       if (i >= 0) messages[i] = { ...messages[i]!, id: e.id, parentId: e.parentId }
-      return { ...state, messages, leaf: e.id }
+      return { ...state, messages, leaf: e.id, mode: 'answer' }
+    }
+    case 'compacting':
+      return { ...state, compacting: true, mode: state.mode ?? 'compact' }
+    case 'compacted': {
+      const i = messages.findIndex((m) => m.id === e.id)
+      if (i >= 0) messages[i] = { ...messages[i]!, summary: e.summary }
+      return { ...state, messages, compacting: false }
     }
     case 'title':
       return { ...state, title: e.title }
@@ -105,6 +116,8 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     case 'notice':
       return { ...state, notices: [...state.notices, { kind: e.kind, text: e.text }] }
     case 'error': {
+      // A compaction the person asked for has no answer to carry it: the page says it.
+      if (state.mode === 'compact') return { ...state, compacting: false }
       const a = lastAssistant()
       if (a) Object.assign(a, { status: 'failed', error: e.message })
       return { ...state, messages, thinkingSince: null }

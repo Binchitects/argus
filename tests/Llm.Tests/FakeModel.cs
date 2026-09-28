@@ -14,6 +14,8 @@ namespace Llm.Tests;
 ///   [noaccess]  asks for find_symbol on something the person cannot read
 ///   [slow]      streams 400 small pieces, 25 ms apart (for stop)
 ///   [steady]    streams 60 small pieces, 25 ms apart (for leaving the page mid-answer)
+/// Asked to compact a chat (the summarizer's system prompt), it answers
+/// "Summary of N characters." (N: the length of what it was given).
 ///   [budget]    refuses as LiteLLM does when credit is used up
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
 /// Its /v1/images/generations answers with a small PNG.
@@ -64,6 +66,11 @@ public sealed class FakeModel : HttpMessageHandler
         }
         IEnumerable<string> chunks;
         var delay = TimeSpan.Zero;
+        if (messages[0]!["content"]?.GetValue<string>().StartsWith("You compact a conversation", StringComparison.Ordinal) == true)
+        {
+            chunks = [Delta(new JsonObject { ["content"] = $"Summary of {lastUser.Length} characters." }), Finish("stop"), Usage(lastUser.Length / 4, 0, 8)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         var call = System.Text.RegularExpressions.Regex.Match(lastUser, @"\[call (\S+) (\{.*\})\]", System.Text.RegularExpressions.RegexOptions.Singleline);
         if (call.Success && !toolAnswered)
         {

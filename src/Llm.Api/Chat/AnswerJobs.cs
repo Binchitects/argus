@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -184,11 +185,29 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         return true;
     }
 
-    /// <summary>Answers <paramref name="question"/> in the background, with services of its own (the request that asked may end first).</summary>
-    public void Start(Job job, Guid question, AnswerOverrides overrides) =>
-        job.Running = Task.Run(() => RunAsync(job, question, overrides));
+    /// <summary>Answers <paramref name="questionId"/> in the background, with services of its own (the request that asked may end first).</summary>
+    public void Start(Job job, Guid questionId, AnswerOverrides overrides) =>
+        Start(job, async (services, user, conversation, ct) =>
+        {
+            var db = services.GetRequiredService<AppDbContext>();
+            var question = await db.ChatMessages.SingleOrDefaultAsync(m => m.Id == questionId && m.ConversationId == conversation.Id, CancellationToken.None);
+            if (question is null)
+            {
+                job.Emit(new { type = "error", message = "The question is gone." });
+                return;
+            }
+            await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question, overrides, job.EmitAsync, ct);
+        });
 
-    private async Task RunAsync(Job job, Guid questionId, AnswerOverrides overrides)
+    /// <summary>Compacts the branch down to <paramref name="leafId"/> in the background (the model writes a summary: it waits its turn as an answer does).</summary>
+    public void StartCompaction(Job job, Guid leafId) =>
+        Start(job, (services, user, conversation, ct) =>
+            services.GetRequiredService<ChatService>().CompactAsync(user, conversation, leafId, job.EmitAsync, ct));
+
+    private void Start(Job job, Func<IServiceProvider, AppUser, Conversation, CancellationToken, Task> work) =>
+        job.Running = Task.Run(() => RunAsync(job, work));
+
+    private async Task RunAsync(Job job, Func<IServiceProvider, AppUser, Conversation, CancellationToken, Task> work)
     {
         var ct = job.Stopping.Token;
         try
@@ -198,10 +217,9 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
             var db = services.GetRequiredService<AppDbContext>();
             var user = await services.GetRequiredService<UserManager<AppUser>>().FindByIdAsync(job.Person.ToString());
             var conversation = await db.Conversations.SingleOrDefaultAsync(c => c.Id == job.Conversation, CancellationToken.None);
-            var question = await db.ChatMessages.SingleOrDefaultAsync(m => m.Id == questionId && m.ConversationId == job.Conversation, CancellationToken.None);
-            if (user is null || conversation is null || question is null)
+            if (user is null || conversation is null)
             {
-                job.Emit(new { type = "error", message = "This chat or its question is gone." });
+                job.Emit(new { type = "error", message = "This chat is gone." });
                 return;
             }
 
@@ -218,7 +236,7 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
             }
             using (place)
             {
-                await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question, overrides, job.EmitAsync, ct);
+                await work(services, user, conversation, ct);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

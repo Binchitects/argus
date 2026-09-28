@@ -7,6 +7,13 @@ public sealed class ChatOptions
     public string GatewayUrl { get; set; } = "http://litellm:4000";
 
     public int MaxToolRounds { get; set; } = 8;
+
+    /// <summary>
+    /// A chat is compacted (its older messages summarized) before an answer when it
+    /// fills more than this share of the model's context, in percent. 0: never; the
+    /// oldest messages are left out instead.
+    /// </summary>
+    public int AutoCompactPercent { get; set; } = 80;
     /// <summary>Text kept per attachment (what the Files panel shows and read_file reads).</summary>
     public int MaxAttachmentChars { get; set; } = 1_000_000;
     /// <summary>What of one attachment goes into the question itself; the rest is read in parts.</summary>

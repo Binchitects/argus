@@ -73,6 +73,8 @@ export interface Message {
   durationMs: number | null
   createdAt: string
   noAccess: boolean
+  /** The chat was compacted here: the model reads this summary instead of the branch down to this message. */
+  summary?: string | null
 }
 
 export interface ConversationSummary {
@@ -130,6 +132,10 @@ export type ChatEvent =
   /** Waiting for a turn: the model serves few at once, in turn (fair use). */
   | { type: 'queued'; ahead: number }
   | { type: 'error'; message: string }
+  /** The older messages are being summarized (compaction), before an answer or because the person asked. */
+  | { type: 'compacting' }
+  /** Compacted at message `id`: `covered` messages became `summary`. */
+  | { type: 'compacted'; id: string; summary: string; auto: boolean; covered: number }
   /** Stopped (by the person, from any tab): what was written is kept. */
   | { type: 'stopped'; id: string | null }
   | { type: 'done'; id: string }
