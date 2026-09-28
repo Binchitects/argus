@@ -9,16 +9,23 @@ permissions. Nothing leaves your network.**
 
 - **A chat** for everyone: the models you run, thinking levels, branches and
   edits, files and Office documents, and tools that run on the server: Argus
-  (your code and documentation), Python in a sandbox with no network, the web
-  (sites you allow), image generation, a calculator and dates. Tools ask before
-  they run when you want them to.
-- **An API** for editors, agents and scripts: OpenAI-compatible, a key per
-  person, spend and budgets per person, and fair use when the GPU is shared.
+  (your code and documentation), Python in a sandbox with no network (data,
+  image, map and chart libraries), the web (sites you allow), image generation,
+  a calculator and dates. Tools ask before they run when you want them to.
+  Pages, pictures, diagrams and React components the model writes run live in
+  a sandboxed preview.
+- **An API** for editors, agents and scripts: OpenAI-compatible (and Anthropic's
+  and OpenAI's Responses API), a key per person, spend and budgets per person,
+  and fair use when the GPU is shared. **Connect your tools** walks each person
+  through Claude Code, Codex, Qwen Code, OpenCode, Aider, Hermes, OpenClaw,
+  DeepSeek Harness, Continue, Cline and more.
 - **Sign-in** for the whole stack: accounts, LDAP or Active Directory, two-factor,
   single sign-on for the services that have their own login, groups that decide
   who may use which model and tool.
-- **Administration**: people and groups, models loaded and unloaded at runtime,
-  every setting in one place, the audit log, the code index and knowledge packs.
+- **Administration**: people and groups; models read for what they are, several
+  loaded at once (kept loaded, or loaded on request), each on the GPUs chosen
+  for it, and models on other GPU servers behind the same gateway; every
+  setting in one place, the audit log, the code index and knowledge packs.
 - **Observability** in the app: ten dashboards, every service's logs, and the
   alerts, what fires now and what fired before.
 - **Argus**, the code index: it mirrors your GitLab, extracts symbols and
@@ -51,7 +58,8 @@ flowchart LR
   traefik --> web[Web<br/>src/web]
   traefik --> api[API<br/>src/Llm.Api]
   traefik --> gateway[LiteLLM<br/>keys, budgets]
-  api --> gateway --> engine[llama.cpp<br/>the models, on the GPU]
+  api --> gateway --> engine[llama.cpp<br/>the models, on the GPUs]
+  gateway --> remote[(Other GPU servers)]
   api --> argus[Argus<br/>src/Argus]
   api --> sandbox[Python sandbox<br/>no network]
   api --> obs[Prometheus, Loki,<br/>Alertmanager]
@@ -88,7 +96,7 @@ observability): [deploy/argus-standalone/](deploy/argus-standalone/README.md).
 | [`tests/`](tests/) | `Llm.Tests` and `Argus.Tests` (xUnit), `deploy` (the deployment tooling) |
 | [`deploy/`](deploy/) | the platform's deployment: compose, config, env samples, scripts; `argus-standalone/` |
 | [`tools/`](tools/) | development and operations tools: `dn`, the test GitLab, pack builds |
-| [`clients/`](clients/) | MCP configurations for Claude Code, Qwen Code, Continue, DeepSeek Harness and others |
+| [`clients/`](clients/) | MCP configurations for Claude Code, Qwen Code, Continue, DeepSeek Harness and others (the app's **Connect your tools** page has each tool's full setup) |
 | [`docs/`](docs/README.md) | the documentation |
 | [`evals/`](evals/) | the evaluation question sets and results |
 

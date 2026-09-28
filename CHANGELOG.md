@@ -36,6 +36,14 @@ Sections used:
   MCP clients and the gateway
 - **One repository layout**: `src/`, `tests/`, `deploy/`, `tools/` and `docs/`,
   one .NET solution (`LlmService.slnx`) and one CI workflow for every part
+- **Several models at once, on any GPU, on any server.** Models are kept loaded
+  or loaded on request, up to `LLAMACPP_MODELS_MAX`, each on the GPUs chosen for
+  it, with a memory check per GPU; and models on other machines' GPU servers
+  sit behind the same gateway, as models of their own or as second copies of
+  one here
+- **Live previews in the chat**: pages, pictures, Mermaid diagrams and React
+  components the model writes run in a sandbox with no network and no access
+  to the app
 
 ### :sparkles: New features & Enhancements
 
@@ -47,9 +55,11 @@ Sections used:
   for llama.cpp on LLM Overview
 - The image server's GPU budget is a fixed 2 GiB (`IMAGEGEN_MAX_VRAM`)
 - **Connect your tools** (`/setup`): each person makes their own API key and
-  gets the exact setup for Claude Code (the gateway serves `/v1/messages`),
-  Qwen Code and the OpenAI SDK, the Argus MCP command, and the stack's
-  certificate to download
+  follows numbered steps for their tool, with this deployment's address and the
+  model's limits filled in, Argus over MCP and the certificate: Claude Code
+  (the gateway serves `/v1/messages`), Codex CLI (`/v1/responses`), Qwen Code,
+  OpenCode, Aider, Hermes, OpenClaw, DeepSeek Harness, Continue, Cline and Roo
+  Code, Python and curl
 - Models: each file is read for what it is (dense or MoE, attention type,
   embedding, reranker, image, projector, draft) and offered only the settings
   its kind has, with its real context and output limits and a memory estimate
@@ -59,6 +69,12 @@ Sections used:
   loads it by linking, nothing copied
 - Argus Explore searches references, code and docs across every repository and
   pack, and shows a document as rendered Markdown or its source
+- The Python sandbox adds OpenCV, scikit-image, pillow-heif, polars, plotly,
+  XGBoost, LightGBM, Numba and geopandas; each run gets one thread per library
+  pool, and a run's address-space limit is 3072 MB by default. A plotly chart
+  Python writes opens running in the Files panel
+- The test GitLab seeds a read-only account for Argus and, with
+  `SEED_PERSON_EMAIL`, a person of the platform, for demos
 
 ### :bug: Bugs fixed
 
@@ -93,6 +109,9 @@ Sections used:
   is `config/directory` (Argus reads it through `ARGUS_USERS_FILE`); the
   gateway's identity header is `X-LLM-User-Email`
 - An OIDC client the configuration does not name is deleted at start
+- `config/engine/active` is `config/engine/keep` (a list); the engine numbers
+  GPUs as `nvidia-smi` does (`CUDA_DEVICE_ORDER=PCI_BUS_ID`)
+- `SANDBOX_JOB_MEMORY_MB` defaults to 3072 and `SANDBOX_MEMORY` to 4g
 
 ## v2.9.0 (2026-09-18)
 
