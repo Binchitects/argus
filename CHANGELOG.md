@@ -12,7 +12,7 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
-## Unreleased — v3.0.0
+## v3.0.0 (2026-09-28)
 
 ### :rocket: Epics and highlights
 
