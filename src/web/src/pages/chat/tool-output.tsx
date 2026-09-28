@@ -4,11 +4,14 @@ import { useMemo, useState } from 'react'
 import { ScrollRegion } from '@/components/app/scroll-region'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { configQuery } from './api'
 import { gitlabLink, isRow, snippetParts, toHits, type CodeHit, type Row } from './argus'
 import { CodeBlock } from './code-block'
+import { seconds } from './format'
 import { highlight } from './highlight'
 import { Markdown } from './markdown'
+import { runOutput, type RunOutput } from './tool-args'
 
 const extension = (path: string) => (path.includes('.') ? path.split('.').pop()! : path.split('/').pop()!)
 
@@ -119,17 +122,44 @@ function RowTable({ rows }: { rows: Row[] }) {
   )
 }
 
-/** An object that is not a file (overview, impact_of): its fields, nested ones as JSON. */
+/** An object that is not a file (overview, impact_of): short fields as a list; nested ones and text over a line as code blocks. */
 function Fields({ value }: { value: Row }) {
+  const entries = Object.entries(value).filter(([, v]) => v !== null && v !== undefined)
+  const block = ([, v]: [string, unknown]) => isRow(v) || Array.isArray(v) || (typeof v === 'string' && v.includes('\n'))
+  const short = entries.filter((e) => !block(e))
   return (
-    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-      {Object.entries(value).map(([k, v]) => (
-        <div key={k} className="contents">
-          <dt className="text-muted-foreground">{k}</dt>
-          <dd className="font-mono break-words whitespace-pre-wrap">{isRow(v) || Array.isArray(v) ? JSON.stringify(v, null, 2) : cell(v)}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="grid gap-2">
+      {short.length > 0 && (
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
+          {short.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="font-mono break-words whitespace-pre-wrap">{cell(v)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {entries.filter(block).map(([k, v]) =>
+        typeof v === 'string' ? <CodeBlock key={k} code={v} lang={null} label={k} /> : <CodeBlock key={k} code={JSON.stringify(v, null, 2)} lang="json" label={k} />,
+      )}
+    </div>
+  )
+}
+
+/** A program's run: what it printed and its errors as a console would show them, then how it ended. */
+function Run({ run }: { run: RunOutput }) {
+  const failed = (run.exitCode ?? 0) !== 0 || run.problem !== null
+  return (
+    <div className="grid gap-2">
+      {run.stdout ? <CodeBlock code={run.stdout} lang={null} label="Output" /> : !run.stderr && <p className="text-xs text-muted-foreground">It printed nothing.</p>}
+      {run.stderr && <CodeBlock code={run.stderr} lang={null} label={failed ? 'Error' : 'Messages (stderr)'} />}
+      {run.problem && <p className="text-xs text-destructive-ink">{run.problem}</p>}
+      <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground tabular-nums">
+        {run.exitCode !== null && <span className={cn(failed && 'text-destructive-ink')}>Exit code {run.exitCode}</span>}
+        {run.seconds !== null && <span>· {seconds(run.seconds * 1000)}</span>}
+      </p>
+      {Object.keys(run.rest).length > 0 && <Fields value={run.rest} />}
+    </div>
   )
 }
 
@@ -143,7 +173,8 @@ export function ToolOutput({ text, value, args, failed }: { text: string; value:
   const gitlab = useQuery(configQuery).data?.gitlabUrl ?? null
   const branch = typeof args.branch === 'string' ? args.branch : null
   const query = typeof args.query === 'string' ? args.query : typeof args.name === 'string' ? args.name : null
-  if (failed || value === undefined) {
+  const run = runOutput(value)
+  if (value === undefined || (failed && !run)) {
     return <Markdown text={text || '(nothing)'} />
   }
   const hits = toHits(value)
@@ -152,6 +183,8 @@ export function ToolOutput({ text, value, args, failed }: { text: string; value:
   let body
   if (raw) {
     body = <CodeBlock code={JSON.stringify(value, null, 2)} lang="json" />
+  } else if (run) {
+    body = <Run run={run} />
   } else if (file) {
     body = (
       <div className="grid gap-2">

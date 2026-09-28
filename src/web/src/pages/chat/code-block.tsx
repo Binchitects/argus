@@ -17,10 +17,13 @@ export function CodeBlock({
   onOpen,
   preview,
   onPreview,
+  label: shownLabel,
 }: {
   code: string
   lang: string | null
   name?: string | null
+  /** What the bar says instead of the language (a tool's "Output"); downloads keep a file name. */
+  label?: string
   onOpen?: (name: string) => void
   /** What the code can be previewed as, and how to show it. */
   preview?: PreviewKind | null
@@ -35,7 +38,7 @@ export function CodeBlock({
   const shown = long && !expanded ? lines.slice(0, COLLAPSED_LINES).join('\n') : text
   const html = useMemo(() => highlight(shown, lang), [shown, lang])
   // html and svg highlight as xml, and jsx as javascript: label them as what they are.
-  const label = name ?? (preview === 'react' ? (lang === 'typescript' ? 'tsx' : 'jsx') : (preview ?? lang ?? 'text'))
+  const label = shownLabel ?? name ?? (preview === 'react' ? (lang === 'typescript' ? 'tsx' : 'jsx') : (preview ?? lang ?? 'text'))
   const fileName = name?.split('/').pop() ?? `snippet.${extensionFor(lang)}`
 
   const copy = async () => {

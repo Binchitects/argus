@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -186,6 +186,7 @@ export function ChatHeader({
   onToggleFiles,
   onOpenList,
   chat,
+  onCompact,
 }: {
   config: ChatConfig
   settings: ChatSettings
@@ -198,6 +199,8 @@ export function ChatHeader({
   onOpenList: () => void
   /** The chat on screen, once it exists: fork, archive and delete it from here too. */
   chat?: { id: string; title: string; archived: boolean }
+  /** Summarize the branch on screen (undefined: nothing to compact now). */
+  onCompact?: () => void
 }) {
   const [name, setName] = useState<string | null>(null)
   return (
@@ -233,13 +236,13 @@ export function ChatHeader({
             <FolderOpen /> <span className="tabular-nums">{filesCount}</span>
           </Button>
         </Tooltip>
-        {chat && <ChatMenu chat={chat} />}
+        {chat && <ChatMenu chat={chat} onCompact={onCompact} />}
       </span>
     </header>
   )
 }
 
-function ChatMenu({ chat }: { chat: { id: string; title: string; archived: boolean } }) {
+function ChatMenu({ chat, onCompact }: { chat: { id: string; title: string; archived: boolean }; onCompact?: () => void }) {
   const { fork, archive, askDelete } = useChatActions(chat, true)
   return (
     <DropdownMenu>
@@ -253,6 +256,9 @@ function ChatMenu({ chat }: { chat: { id: string; title: string; archived: boole
       <DropdownMenuContent align="end">
         <DropdownMenuItem onSelect={() => fork.mutate()}>
           <GitFork /> Fork
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!onCompact} onSelect={() => onCompact?.()}>
+          <FoldVertical /> Compact
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => archive.mutate(!chat.archived)}>
           {chat.archived ? <ArchiveRestore /> : <Archive />} {chat.archived ? 'Unarchive' : 'Archive'}

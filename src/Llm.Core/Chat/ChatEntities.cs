@@ -73,6 +73,12 @@ public sealed class ChatMessage
     public int? DurationMs { get; set; }
     public MessageStatus Status { get; set; }
     public string? Error { get; set; }
+    /// <summary>
+    /// Set when the chat was compacted here: a summary of its branch from the first
+    /// message down to this one. The model reads it instead of those messages (the
+    /// person still sees them); a branch that does not pass here is not affected.
+    /// </summary>
+    public string? Summary { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

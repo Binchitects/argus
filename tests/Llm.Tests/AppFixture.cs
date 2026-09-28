@@ -20,7 +20,15 @@ public sealed class AppFixture : IAsyncLifetime
     public const string LangfuseSecret = "langfuse-secret-for-tests";
     public const string ApiSecret = "api-secret-for-tests";
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("pgvector/pgvector:0.8.0-pg16").Build();
+    /// <summary>
+    /// A Postgres server of your own instead of a container, for a machine without
+    /// Docker: LLM_TEST_POSTGRES=Host=localhost;Username=postgres;Password=... Each run
+    /// makes its own databases there (named with <see cref="_run"/>).
+    /// </summary>
+    private static readonly string? External = Environment.GetEnvironmentVariable("LLM_TEST_POSTGRES") is { Length: > 0 } cs ? cs : null;
+    private readonly string _run = External is null ? "" : "_" + Guid.NewGuid().ToString("N")[..8];
+    private readonly PostgreSqlContainer? _postgres = External is null ? new PostgreSqlBuilder("pgvector/pgvector:0.8.0-pg16").Build() : null;
+    private string Server => External ?? _postgres!.GetConnectionString();
     private readonly string _webRoot = Directory.CreateTempSubdirectory("llm-webroot-").FullName;
 
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
@@ -53,15 +61,18 @@ public sealed class AppFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await _postgres.StartAsync();
-        AppConnectionString = ConnectionStringFor("llmapp_test");
-        await LitellmSeed.CreateAsync(_postgres.GetConnectionString(), "litellm_test");
+        if (_postgres is not null)
+        {
+            await _postgres.StartAsync();
+        }
+        AppConnectionString = ConnectionStringFor("llmapp_test" + _run);
+        await LitellmSeed.CreateAsync(Server, "litellm_test" + _run);
         Factory = Create(AppConnectionString, Gateway);
         _ = Factory.Server; // start the app now, so migration failures surface here
     }
 
     public string ConnectionStringFor(string database) =>
-        new Npgsql.NpgsqlConnectionStringBuilder(_postgres.GetConnectionString()) { Database = database }.ConnectionString;
+        new Npgsql.NpgsqlConnectionStringBuilder(Server) { Database = database }.ConnectionString;
 
     /// <summary>A separate app on its own database, for tests that need a fresh start (imports, LDAP).</summary>
     public WebApplicationFactory<Program> Create(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings = null) =>
@@ -76,7 +87,7 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Oidc:LangfuseSecret", LangfuseSecret);
             b.UseSetting("Oidc:ApiSecret", ApiSecret);
             b.UseSetting("Dashboards:Path", DashboardsPath);
-            b.UseSetting("Dashboards:SqlDatabase", "litellm_test");
+            b.UseSetting("Dashboards:SqlDatabase", "litellm_test" + _run);
             b.UseSetting("Dashboards:StatementTimeout", "00:00:03");
             b.UseSetting("Argus:Url", "http://argus:7700");
             b.UseSetting("Argus:AdminToken", FakeArgus.Token);
@@ -120,7 +131,10 @@ public sealed class AppFixture : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await Factory.DisposeAsync();
-        await _postgres.DisposeAsync();
+        if (_postgres is not null)
+        {
+            await _postgres.DisposeAsync();
+        }
         Directory.Delete(_webRoot, recursive: true);
     }
 }

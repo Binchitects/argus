@@ -8,7 +8,9 @@ import { attachmentUrl, downloadUrl } from './api'
 import { ImageViewer } from './image-viewer'
 import { cn } from '@/lib/utils'
 import { argsOf, parseResult, resultCount } from './argus'
+import { CodeBlock } from './code-block'
 import { seconds, toolTitle } from './format'
+import { argsSummary, splitArgs } from './tool-args'
 import { ToolOutput } from './tool-output'
 import type { Message, ToolCall } from './types'
 
@@ -62,12 +64,28 @@ const toolIcons: [RegExp, LucideIcon][] = [
   [/outline|structure/, ListTree],
 ]
 
-function argsSummary(raw: string): [string, string][] {
-  try {
-    return Object.entries(JSON.parse(raw) as Record<string, unknown>).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])
-  } catch {
-    return raw ? [['arguments', raw]] : []
-  }
+/** What a tool was asked: code as code blocks (highlighted, to copy), short values as a list, the rest as JSON. */
+function ToolArgsView({ name, raw }: { name: string; raw: string }) {
+  const a = useMemo(() => splitArgs(name, raw), [name, raw])
+  return (
+    <div className="grid gap-2">
+      {a.plain.length > 0 && (
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+          {a.plain.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="font-mono break-all">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {a.code.map((c) => (
+        <CodeBlock key={c.key} code={c.code} lang={c.lang} label={c.lang ? `${c.key} · ${c.lang}` : c.key} />
+      ))}
+      {a.nested && <CodeBlock code={JSON.stringify(a.nested, null, 2)} lang="json" label="json" />}
+      {a.unparsed && <CodeBlock code={a.unparsed} lang={null} label="arguments" />}
+    </div>
+  )
 }
 
 /**
@@ -91,7 +109,9 @@ export function ToolCard({
   waiting?: boolean
   onDecide?: (allow: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  // Open while it waits for the person: they read what it would run before they allow it.
+  const [chosen, setOpen] = useState<boolean | null>(null)
+  const open = chosen ?? !!waiting
   const [viewing, setViewing] = useState<number | null>(null)
   const pictures = result?.attachments.filter((a) => a.kind === 'image') ?? []
   const made = result?.attachments.filter((a) => a.kind !== 'image') ?? []
@@ -100,7 +120,7 @@ export function ToolCard({
   const running = !result && live && !waiting
   const declined = result?.status === 'declined'
   const failed = result?.status === 'failed' || declined
-  const value = useMemo(() => (result && !failed ? parseResult(result.content) : undefined), [result, failed])
+  const value = useMemo(() => (result && !declined ? parseResult(result.content) : undefined), [result, declined])
   const count = resultCount(value)
   return (
     <div className="my-2">
@@ -149,14 +169,7 @@ export function ToolCard({
             {args.length > 0 && (
               <div>
                 <p className="mb-1 text-xs font-medium text-muted-foreground">Asked with</p>
-                <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-                  {args.map(([k, v]) => (
-                    <div key={k} className="contents">
-                      <dt className="text-muted-foreground">{k}</dt>
-                      <dd className="font-mono break-all">{v}</dd>
-                    </div>
-                  ))}
-                </dl>
+                <ToolArgsView name={call.function.name} raw={call.function.arguments} />
               </div>
             )}
             {result && (

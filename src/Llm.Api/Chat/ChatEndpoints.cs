@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Text.Json;
 using Llm.Api.Access;
@@ -36,6 +35,9 @@ public sealed record ForkRequest(Guid? MessageId = null);
 /// </summary>
 public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false);
 
+/// <summary>Compact the branch down to this message (default: the end of the branch on screen).</summary>
+public sealed record CompactRequest(Guid? MessageId = null);
+
 /// <summary>Answer a question again (default: the last one on the branch), optionally with another model or thinking level.</summary>
 public sealed record Regenerate(Guid? MessageId = null, string? Model = null, string? Thinking = null);
 
@@ -45,8 +47,8 @@ public static class ChatEndpoints
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    /// <summary>One answer at a time per conversation: a second tab cannot interleave two.</summary>
-    private static readonly ConcurrentDictionary<Guid, byte> Answering = new();
+    /// <summary>How often a quiet stream says it is still there, so proxies keep it open.</summary>
+    private static readonly TimeSpan Heartbeat = TimeSpan.FromSeconds(15);
 
     public static void MapChat(this IEndpointRouteBuilder app)
     {
@@ -59,6 +61,9 @@ public static class ChatEndpoints
         g.MapDelete("/conversations/{id:guid}", DeleteAsync);
         g.MapPost("/conversations/{id:guid}/messages", SendAsync);
         g.MapPost("/conversations/{id:guid}/regenerate", RegenerateAsync);
+        g.MapGet("/conversations/{id:guid}/stream", WatchAsync);
+        g.MapPost("/conversations/{id:guid}/stop", StopAsync);
+        g.MapPost("/conversations/{id:guid}/compact", CompactAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync);
         g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
@@ -103,7 +108,7 @@ public static class ChatEndpoints
         db.Conversations.SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id);
 
     /// <summary>The person's chats, newest first; archived ones only when asked for.</summary>
-    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, string? q = null, bool archived = false)
+    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, string? q = null, bool archived = false)
     {
         var me = await Me(p, users);
         var query = db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id && (archived ? c.ArchivedAt != null : c.ArchivedAt == null));
@@ -111,8 +116,8 @@ public static class ChatEndpoints
         {
             query = query.Where(c => EF.Functions.ILike(c.Title, "%" + q.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
         }
-        return Results.Ok(await query.OrderByDescending(c => c.UpdatedAt).Take(300)
-            .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt }).ToListAsync());
+        var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300).Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt }).ToListAsync();
+        return Results.Ok(list.Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, answering = jobs.IsAnswering(c.Id) }));
     }
 
     private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
@@ -131,7 +136,7 @@ public static class ChatEndpoints
         }
         db.Conversations.Add(c);
         await db.SaveChangesAsync(ct);
-        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, OnFor(c, allowed), null, []));
+        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, OnFor(c, allowed), null, [], false));
     }
 
     /// <summary>The ids of the tools a chat has on, of those the person may use.</summary>
@@ -224,7 +229,8 @@ public static class ChatEndpoints
     private static bool ValidThinking(string level, StackOptions stack) =>
         level == "off" || ThinkingPresets.Parse(stack.ThinkingPresets).Any(p => p.Level == level);
 
-    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolRegistry registry, AccessService access, CancellationToken ct)
+    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolRegistry registry, AccessService access, AnswerJobs jobs,
+        CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me) is not { } c)
@@ -245,16 +251,17 @@ public static class ChatEndpoints
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
             status = m.Status.ToString().ToLowerInvariant(), m.Error, m.Model,
-            m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt,
+            m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
-        })));
+        }), jobs.IsAnswering(id)));
     }
 
-    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages) =>
+    /// <param name="answering">An answer is being written: the page watches it (GET …/stream).</param>
+    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering) =>
         new
         {
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
-            c.CurrentLeafId, c.ArchivedAt, forkedFrom, c.CreatedAt, c.UpdatedAt, messages,
+            c.CurrentLeafId, c.ArchivedAt, forkedFrom, c.CreatedAt, c.UpdatedAt, answering, messages,
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
@@ -332,7 +339,7 @@ public static class ChatEndpoints
                 Content = m.Content, Reasoning = m.Reasoning, ToolCallsJson = m.ToolCallsJson, ToolCallId = m.ToolCallId, ToolName = m.ToolName,
                 AttachmentsJson = m.AttachmentsJson, Model = m.Model, PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens,
                 CompletionTokens = m.CompletionTokens, ThinkingMs = m.ThinkingMs, DurationMs = m.DurationMs, Status = m.Status, Error = m.Error,
-                CreatedAt = m.CreatedAt,
+                Summary = m.Summary, CreatedAt = m.CreatedAt,
             };
             copies[m.Id] = copy.Id;
             db.ChatMessages.Add(copy);
@@ -400,7 +407,7 @@ public static class ChatEndpoints
         return Results.NoContent();
     }
 
-    private static async Task SendAsync(Guid id, NewMessage body, HttpContext http, UserManager<AppUser> users, AppDbContext db, ChatService chat)
+    private static async Task SendAsync(Guid id, NewMessage body, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
     {
         var me = await Me(http.User, users);
         if (await Owned(db, id, me) is not { } c)
@@ -428,7 +435,7 @@ public static class ChatEndpoints
             await Problem(http, 400, "parent", "That message is not in this chat.");
             return;
         }
-        await RunAsync(http, c, me, db, chat, new AnswerOverrides(), async () =>
+        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(), async () =>
         {
             var next = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
             var first = next == 0;
@@ -450,7 +457,7 @@ public static class ChatEndpoints
     }
 
     /// <summary>A new answer beside the old one (which stays, as another branch).</summary>
-    private static async Task RegenerateAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, ChatService chat, IOptions<StackOptions> stack, ChatModels models)
+    private static async Task RegenerateAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, IOptions<StackOptions> stack, ChatModels models)
     {
         var me = await Me(http.User, users);
         if (await Owned(db, id, me) is not { } c)
@@ -471,7 +478,7 @@ public static class ChatEndpoints
             await Problem(http, 400, "model", $"The gateway does not serve {model}.");
             return;
         }
-        await RunAsync(http, c, me, db, chat, new AnswerOverrides(body.Model, body.Thinking), async () =>
+        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(body.Model, body.Thinking), async () =>
         {
             var all = await db.ChatMessages.Where(m => m.ConversationId == c.Id).ToDictionaryAsync(m => m.Id);
             var question = body.MessageId is { } asked
@@ -503,70 +510,126 @@ public static class ChatEndpoints
         }
     }
 
-    /// <summary>Server-sent events: one JSON object per event, flushed as it happens.</summary>
-    private static async Task RunAsync(HttpContext http, Conversation c, AppUser me, AppDbContext db, ChatService chat, AnswerOverrides overrides, Func<Task<(ChatMessage Question, bool Titled)>> prepare)
+    /// <summary>
+    /// Starts the answer and streams it as server-sent events. The answer runs on
+    /// its own (AnswerJobs): this request only watches it, so closing the page
+    /// leaves it to finish, and the page picks it up again from GET …/stream.
+    /// </summary>
+    private static async Task RunAsync(HttpContext http, Conversation c, AppUser me, AppDbContext db, AnswerJobs jobs, AnswerOverrides overrides,
+        Func<Task<(ChatMessage Question, bool Titled)>> prepare)
     {
-        if (!Answering.TryAdd(c.Id, 0))
+        if (jobs.Reserve(c.Id, me.Id) is not { } job)
         {
             await Problem(http, 409, "busy", "This chat is already answering. Stop it first, or wait.");
             return;
         }
+        ChatMessage question;
+        bool titled;
         try
         {
-            ChatMessage question;
-            bool titled;
-            try
-            {
-                (question, titled) = await prepare();
-            }
-            catch (InvalidOperationException ex)
+            (question, titled) = await prepare();
+            // What else changed (an archived chat back in the list) is saved before the answer reads the chat.
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            jobs.Release(job);
+            if (ex is InvalidOperationException)
             {
                 await Problem(http, 400, "invalid", ex.Message);
                 return;
             }
-            http.Response.ContentType = "text/event-stream";
-            http.Response.Headers.CacheControl = "no-cache";
-            // Tell proxies not to buffer: every token should reach the browser at once.
-            http.Response.Headers["X-Accel-Buffering"] = "no";
-            await http.Response.Body.FlushAsync();
-            async Task Emit(object e)
+            throw;
+        }
+        job.Emit(new { type = "question", id = question.Id, parentId = question.ParentId });
+        if (titled)
+        {
+            job.Emit(new { type = "title", title = c.Title });
+        }
+        jobs.Start(job, question.Id, overrides);
+        await StreamAsync(http, job);
+    }
+
+    /// <summary>
+    /// Compacts the branch (default: the one on screen): the model summarizes it, and
+    /// the next answers read the summary instead. Streams as an answer does.
+    /// </summary>
+    private static async Task CompactAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
+    {
+        var me = await Me(http.User, users);
+        if (await Owned(db, id, me) is not { } c)
+        {
+            http.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+        var body = await ReadBodyAsync<CompactRequest>(http) ?? new CompactRequest();
+        if ((body.MessageId ?? c.CurrentLeafId) is not { } leaf || !await db.ChatMessages.AnyAsync(m => m.ConversationId == id && m.Id == leaf))
+        {
+            await Problem(http, 400, "message", c.CurrentLeafId is null ? "This chat has nothing to compact yet." : "That message is not in this chat.");
+            return;
+        }
+        if (await db.ChatMessages.AnyAsync(m => m.Id == leaf && (m.Role == "tool" || m.ToolCallsJson != null)))
+        {
+            await Problem(http, 400, "message", "Compact at a question or a finished answer.");
+            return;
+        }
+        if (jobs.Reserve(c.Id, me.Id) is not { } job)
+        {
+            await Problem(http, 409, "busy", "This chat is answering. Compact it when the answer is done.");
+            return;
+        }
+        jobs.StartCompaction(job, leaf);
+        await StreamAsync(http, job);
+    }
+
+    /// <summary>The answer being written, from its start and then live; 204 when the chat is not answering.</summary>
+    private static async Task WatchAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
+    {
+        var me = await Me(http.User, users);
+        if (await Owned(db, id, me) is null)
+        {
+            http.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+        if (jobs.Find(id) is not { } job)
+        {
+            http.Response.StatusCode = StatusCodes.Status204NoContent;
+            return;
+        }
+        await StreamAsync(http, job);
+    }
+
+    /// <summary>Stops the chat's answer; it keeps what it has, marked stopped.</summary>
+    private static async Task<IResult> StopAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
+    {
+        var me = await Me(p, users);
+        if (await Owned(db, id, me) is null)
+        {
+            return Results.NotFound();
+        }
+        return jobs.Stop(id) ? Results.Accepted() : AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
+    }
+
+    /// <summary>Server-sent events: one JSON object per event, flushed as it happens. Leaving stops the watching, not the answer.</summary>
+    private static async Task StreamAsync(HttpContext http, AnswerJobs.Job job)
+    {
+        http.Response.ContentType = "text/event-stream";
+        http.Response.Headers.CacheControl = "no-cache";
+        // Tell proxies not to buffer: every token should reach the browser at once.
+        http.Response.Headers["X-Accel-Buffering"] = "no";
+        try
+        {
+            await http.Response.Body.FlushAsync(http.RequestAborted);
+            await foreach (var line in job.WatchAsync(Heartbeat, http.RequestAborted))
             {
-                await http.Response.WriteAsync("data: " + JsonSerializer.Serialize(e, Json) + "\n\n", http.RequestAborted);
+                // A comment line: the page ignores it, a proxy sees the stream is alive.
+                await http.Response.WriteAsync(line.Length == 0 ? ": still answering\n\n" : "data: " + line + "\n\n", http.RequestAborted);
                 await http.Response.Body.FlushAsync(http.RequestAborted);
             }
-            await Emit(new { type = "question", id = question.Id, parentId = question.ParentId });
-            if (titled)
-            {
-                await Emit(new { type = "title", title = c.Title });
-            }
-            try
-            {
-                // Fair use: a place of the few the model serves at once, in turn (AnswerGate).
-                AnswerGate.Place place;
-                try
-                {
-                    place = await http.RequestServices.GetRequiredService<AnswerGate>().EnterAsync(me.Id,
-                        line => Emit(new { type = "queued", ahead = line.Ahead }), http.RequestAborted);
-                }
-                catch (TimeoutException ex)
-                {
-                    await Emit(new { type = "error", message = ex.Message });
-                    return;
-                }
-
-                using (place)
-                {
-                    await chat.AnswerAsync(me, c, question, overrides, Emit, http.RequestAborted);
-                }
-            }
-            catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
-            {
-                // The person left or pressed stop; ChatService saved what there was.
-            }
         }
-        finally
+        catch (Exception ex) when (ex is OperationCanceledException or IOException && http.RequestAborted.IsCancellationRequested)
         {
-            Answering.TryRemove(c.Id, out _);
+            // The page closed or went elsewhere: the answer goes on without it.
         }
     }
 
