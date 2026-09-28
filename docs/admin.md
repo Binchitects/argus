@@ -73,6 +73,29 @@ loaded, and how full each GPU would be with them.
   chosen, and the image server's share only on the first. Two models kept side
   by side run best on different GPUs. The `.env` model runs on all of them
   unless `LLAMACPP_EXTRA_ARGS` has `--device CUDA1`.
+- **Other GPU servers.** Another machine's OpenAI-compatible engine (llama.cpp,
+  vLLM, SGLang, another gateway) serves models beside this one's. **Add a
+  server** takes its address (usually ending in `/v1`) and its API key,
+  **finds its models** (with the window each reports), and the admin chooses
+  which the gateway serves, under which names, with their context, longest
+  answer, tools, thinking and images. The app registers them in LiteLLM with
+  the server's address and key; people use them from the chat, their API keys
+  and agents, with the same access rules and spend as any model.
+  - A name the gateway has already (a model here, or on another server) makes
+    it **a second copy** of that model: LiteLLM spreads requests between them,
+    and the chat can use the model while this machine's copy is not loaded.
+  - The key is kept encrypted with the app's key ring (`APP_DATA_KEY`) and never
+    shown again; leave it empty when editing to keep it.
+  - **Health.** Each server's card says whether it answers (checked every 30
+    seconds when the page asks), why not, and which chosen models it no longer
+    lists. A server must answer to be added.
+  - **https.** Its certificate is checked against the public roots and the
+    stack's bundle, so a server signed by a private CA is trusted once that CA
+    is in `config/ca` (then `docker compose up -d`). Only for a self-signed
+    server with no CA to trust, **Check its certificate** can be turned off for
+    that server.
+  - The gateway is brought in step every minute, so a gateway that was down
+    or restarted catches up by itself.
 - A model that **could not load** (an incomplete download, a file this
   llama.cpp cannot read, too little GPU memory) says so on its card; the reason
   is in the engine's log (`docker compose logs llamacpp`). It is not tried

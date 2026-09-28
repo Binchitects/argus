@@ -364,7 +364,7 @@ connection is made) is on the public internet.
 
 | service | image | what it does |
 |---|---|---|
-| `litellm` | `ghcr.io/berriai/litellm:main-stable` | `/v1` OpenAI-compatible endpoint. Per-person keys, spend, budgets, retries, optional Redis cache. Renders `${MODEL_NAME}`-style tokens in its config from the environment at startup |
+| `litellm` | `ghcr.io/berriai/litellm:main-stable` | `/v1` OpenAI-compatible endpoint (and Anthropic's `/v1/messages`, OpenAI's `/v1/responses`). Per-person keys, spend, budgets, retries, optional Redis cache. Renders `${MODEL_NAME}`-style tokens in its config from the environment at startup. Serves the engine's models and those chosen from other GPU servers (Admin → Models), which the app registers through its model API; it reads the stack's CA bundle (`config/traefik/certs/bundle.crt`, never the key) for servers behind https |
 | `imagegen` | `ghcr.io/leejet/stable-diffusion.cpp` (pinned by digest) | pictures: FLUX.2 [klein] 4B by default, OpenAI-style `/v1/images/generations`. Weights in RAM, streamed to the GPU within `IMAGEGEN_MAX_VRAM`. Non-root, read-only root, on an internal network only LiteLLM joins |
 | `postgres` | `pgvector/pgvector:0.8.0-pg16` | one instance, three databases: `litellm`, `langfuse`, `argus` (created by `config/postgres/init/01-create-databases.sql`, with the `vector` extension). Argus uses it only when `ARGUS_VECTOR_BACKEND=pgvector` |
 

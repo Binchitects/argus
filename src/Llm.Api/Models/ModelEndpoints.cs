@@ -89,7 +89,20 @@ public static class ModelEndpoints
                 profile = files.GetValueOrDefault(m.File),
             });
         }
-        foreach (var m in atGateway.Where(m => m.Name != e.DefaultModel && local.All(l => l.Name != m.Name)))
+        var servers = await db.RemoteServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
+        foreach (var s in servers)
+        {
+            foreach (var m in s.Models)
+            {
+                rows.Add(new
+                {
+                    name = m.Name, source = "remote", server = s.Name, remote = m.Remote, mode = "chat", status = (string?)null, context = m.Context,
+                    maxOutput = m.MaxOutput, vision = m.Vision, atGateway = At(m.Name) is not null, access = Access(m.Name),
+                });
+            }
+        }
+        var onServers = servers.SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var m in atGateway.Where(m => m.Name != e.DefaultModel && local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name)))
         {
             rows.Add(new { name = m.Name, source = "gateway", mode = m.Mode, status = (string?)null, context = m.Context, vision = m.Vision, access = Access(m.Name) });
         }

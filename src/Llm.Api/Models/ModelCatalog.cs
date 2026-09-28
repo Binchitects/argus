@@ -40,7 +40,8 @@ public sealed class EngineState
 /// (config/engine/keep, one name a line), Prometheus's scrape targets
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
-public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels, ILogger<ModelCatalog> logger)
+public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
+    RemoteServerClient remote, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
@@ -246,46 +247,90 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         Write(TargetsFile, targets.ToJsonString());
     }
 
-    /// <summary>Adds the app's models to the gateway, and takes away the ones removed or changed since.</summary>
+    /// <summary>
+    /// Brings the gateway in step with the app: the engine's models added here, and the models
+    /// chosen from other GPU servers. Each deployment is known by a fingerprint of everything
+    /// it is registered with, so a changed one is replaced and two of one name (a model here
+    /// and its copy on a server) are both kept: the gateway spreads requests between them.
+    /// </summary>
     public async Task SyncGatewayAsync(CancellationToken ct = default)
     {
-        var models = await db.LocalModels.AsNoTracking().ToListAsync(ct);
+        var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
+        foreach (var m in await db.LocalModels.AsNoTracking().ToListAsync(ct))
+        {
+            var info = Info(m.Context, m.MaxOutput ?? DefaultMaxOutput(m.Context), m.Projector is { Length: > 0 }, m.Tools, m.Thinking);
+            var litellm = new JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
+            Prices(litellm, m.InputPerMtok, m.OutputPerMtok);
+            wanted[Fingerprint("local", m.Name, m.File, m.Context, m.MaxOutput, m.Projector, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok)] = (m.Name, litellm, info);
+        }
+        foreach (var server in await db.RemoteServers.AsNoTracking().ToListAsync(ct))
+        {
+            var key = remote.Unprotect(server.ApiKeyProtected);
+            foreach (var m in server.Models)
+            {
+                var info = Info(m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking);
+                info["llm_app_server"] = server.Name;
+                var litellm = new JsonObject { ["model"] = "openai/" + m.Remote, ["api_base"] = server.BaseUrl, ["api_key"] = key ?? "none" };
+                if (server.BaseUrl.StartsWith("https:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // The stack's bundle (the public roots, its certificate and every CA in config/ca), or no check at all.
+                    litellm["ssl_verify"] = server.VerifyTls ? JsonValue.Create(GatewayBundle) : JsonValue.Create(false);
+                }
+                Prices(litellm, m.InputPerMtok, m.OutputPerMtok);
+                var keyPrint = key is null ? "" : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16];
+                wanted[Fingerprint("remote", server.Id, server.BaseUrl, keyPrint, server.VerifyTls, m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking,
+                    m.InputPerMtok, m.OutputPerMtok)] = (m.Name, litellm, info);
+            }
+        }
         var managed = await gateway.ManagedModelsAsync(ct);
-        var wanted = models.ToDictionary(m => m.Name, m => (Model: m, Fingerprint: Fingerprint(m)));
-        foreach (var old in managed.Where(g => !wanted.TryGetValue(g.Name, out var w) || w.Fingerprint != g.Fingerprint))
+        foreach (var old in managed.Where(g => g.Fingerprint is null || !wanted.ContainsKey(g.Fingerprint)))
         {
             await gateway.DeleteModelAsync(old.Id, ct);
         }
-        var kept = managed.Where(g => wanted.TryGetValue(g.Name, out var w) && w.Fingerprint == g.Fingerprint).Select(g => g.Name).ToHashSet();
-        foreach (var (name, w) in wanted.Where(w => !kept.Contains(w.Key)))
+        var kept = managed.Where(g => g.Fingerprint is not null && wanted.ContainsKey(g.Fingerprint)).Select(g => g.Fingerprint!).ToHashSet(StringComparer.Ordinal);
+        foreach (var (fingerprint, w) in wanted.Where(w => !kept.Contains(w.Key)))
         {
-            var m = w.Model;
-            var info = new JsonObject
-            {
-                ["mode"] = "chat", ["max_input_tokens"] = m.Context, ["max_output_tokens"] = m.MaxOutput ?? DefaultMaxOutput(m.Context),
-                ["max_tokens"] = m.Context, ["supports_vision"] = m.Projector is { Length: > 0 },
-                ["supports_function_calling"] = m.Tools, ["supports_reasoning"] = m.Thinking,
-            };
-            var litellm = new JsonObject { ["model"] = "openai/" + name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
-            if (m.InputPerMtok is { } input)
-            {
-                litellm["input_cost_per_token"] = input / 1_000_000m;
-            }
-            if (m.OutputPerMtok is { } output)
-            {
-                litellm["output_cost_per_token"] = output / 1_000_000m;
-            }
-            await gateway.AddModelAsync(name, litellm, info, w.Fingerprint, ct);
-            LogRegistered(logger, name);
+            await gateway.AddModelAsync(w.Name, w.Params, w.Info, fingerprint, ct);
+            LogRegistered(logger, w.Name);
         }
         chatModels.Forget();
+    }
+
+    /// <summary>Where the gateway finds the stack's CA bundle (tls-init writes it into traefik-certs, mounted read-only).</summary>
+    public const string GatewayBundle = "/certs/bundle.crt";
+
+    private static JsonObject Info(int? context, int? maxOutput, bool vision, bool tools, bool thinking)
+    {
+        var info = new JsonObject { ["mode"] = "chat", ["supports_vision"] = vision, ["supports_function_calling"] = tools, ["supports_reasoning"] = thinking };
+        if (context is { } c)
+        {
+            info["max_input_tokens"] = c;
+            info["max_tokens"] = c;
+        }
+        if (maxOutput is { } o)
+        {
+            info["max_output_tokens"] = o;
+        }
+        return info;
+    }
+
+    private static void Prices(JsonObject litellm, decimal? input, decimal? output)
+    {
+        if (input is { } i)
+        {
+            litellm["input_cost_per_token"] = i / 1_000_000m;
+        }
+        if (output is { } o)
+        {
+            litellm["output_cost_per_token"] = o / 1_000_000m;
+        }
     }
 
     /// <summary>The longest answer when none is set: half the context, at most 32,768 tokens.</summary>
     public static int DefaultMaxOutput(int context) => Math.Max(ModelAdvisor.MinOutput, Math.Min(32768, context / 2 / 1024 * 1024));
 
-    private static string Fingerprint(LocalModel m) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', m.Context, m.MaxOutput, m.Projector, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok))))[..16];
+    private static string Fingerprint(params object?[] parts) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', parts.Select(p => Convert.ToString(p, CultureInfo.InvariantCulture))))))[..16];
 
     private string? Read(string file)
     {
@@ -342,7 +387,9 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
         {
             names.Add(d);
         }
-        return [.. names];
+        // A model with a copy on another GPU server answers from there while it is not loaded here.
+        var elsewhere = (await db.RemoteServers.AsNoTracking().ToListAsync(ct)).SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
+        return [.. names.Where(n => !elsewhere.Contains(n))];
     }
 
     /// <summary>The names, of those given, this person may use.</summary>

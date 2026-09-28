@@ -211,6 +211,61 @@ describe('admin models', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/models')?.body).toMatchObject({ devices: '1' }))
   })
 
+  it('another GPU server is added: its models found, chosen and named, its key sent once', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: view() }),
+      'GET /api/admin/servers': () => ({ json: [] }),
+      'POST /api/admin/servers/probe': () => ({ json: { models: [{ id: 'org/Big-Remote', context: 65536 }, { id: 'small', context: null }] } }),
+      'POST /api/admin/servers': () => ({ status: 201, json: { id: 's1', warning: null } }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a server' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a server' })
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'GPU box')
+    await userEvent.type(within(dialog).getByLabelText('Address'), 'http://10.0.0.5:8000/v1')
+    await userEvent.type(within(dialog).getByLabelText('Its API key'), 'secret')
+    await userEvent.click(within(dialog).getByRole('button', { name: /Find its models/ }))
+    // Nothing is chosen until the admin says so; the name at the gateway starts from its id.
+    const big = await within(dialog).findByRole('checkbox', { name: 'Serve org/Big-Remote' })
+    expect(within(dialog).getByRole('button', { name: 'Add server' })).toBeDisabled()
+    await userEvent.click(big)
+    expect(within(dialog).getByLabelText('Name at the gateway for org/Big-Remote')).toHaveValue('Big-Remote')
+    expect(within(dialog).getByLabelText('Context for org/Big-Remote')).toHaveValue('65536')
+    await userEvent.clear(within(dialog).getByLabelText('Name at the gateway for org/Big-Remote'))
+    await userEvent.type(within(dialog).getByLabelText('Name at the gateway for org/Big-Remote'), 'big')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add server' }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/servers')?.body).toEqual({
+        name: 'GPU box', baseUrl: 'http://10.0.0.5:8000/v1', verifyTls: true, apiKey: 'secret',
+        models: [{ remote: 'org/Big-Remote', name: 'big', context: 65536, maxOutput: null, vision: false, tools: true, thinking: false }],
+      }),
+    )
+  })
+
+  it('a server that does not answer says why; its models are on the page with it', async () => {
+    const v = view()
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({
+        json: { ...v, models: [...v.models, { name: 'big', source: 'remote', server: 'GPU box', remote: 'org/Big-Remote', mode: 'chat', status: null, context: 65536, vision: false, access: everyone }] },
+      }),
+      'GET /api/admin/servers': () => ({
+        json: [{
+          id: 's1', name: 'GPU box', baseUrl: 'http://10.0.0.5:8000/v1', keySet: true, verifyTls: true,
+          status: { up: false, error: 'It cannot be reached: Connection refused', checkedAt: '', offers: [] },
+          models: [{ remote: 'org/Big-Remote', name: 'big', context: 65536, maxOutput: null, vision: false, tools: true, thinking: false, listed: true }],
+        }],
+      }),
+    })
+    renderApp('/admin/models')
+    const server = await screen.findByRole('region', { name: 'GPU box' })
+    expect(within(server).getByText('Does not answer')).toBeInTheDocument()
+    expect(within(server).getByText(/Connection refused/)).toBeInTheDocument()
+    expect(within(server).getByText(/big ← org\/Big-Remote/)).toBeInTheDocument()
+    const card = screen.getByRole('heading', { name: /^big/ }).closest('section')!
+    expect(within(card).getByText('On GPU box')).toBeInTheDocument()
+    expect(within(card).getByText(/org\/Big-Remote on GPU box/)).toBeInTheDocument()
+  })
+
   it('a model that could not load says so, and where to find why', async () => {
     const v = view()
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: v.models.map((m) => (m.name === 'Small-Model' ? { ...m, status: 'failed' } : m)) } }) })

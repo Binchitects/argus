@@ -344,6 +344,21 @@ public static class IdentityWiring
         services.AddSingleton<Models.EngineState>();
         services.AddSingleton<Models.ModelLibrary>();
         services.AddSingleton<Models.HardwareProbe>();
+        // Other GPU servers: their certificates are checked against the system's roots and the
+        // stack's own bundle (config/ca); a server an admin marked unchecked uses the other client.
+        var bundle = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(config["Connect:CertificatePath"] ?? "/tls/tls.crt")!, "bundle.crt");
+        services.AddHttpClient(Models.RemoteServerClient.Client).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            SslOptions = { RemoteCertificateValidationCallback = (_, cert, chain, errors) => Models.RemoteServerClient.Trusted(cert as System.Security.Cryptography.X509Certificates.X509Certificate2, chain, errors, bundle) },
+        });
+#pragma warning disable CA5359 // Only for a server an admin marked "do not check its certificate" (a self-signed one with no CA to trust); the page says what that gives up.
+        services.AddHttpClient(Models.RemoteServerClient.Unchecked).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            SslOptions = { RemoteCertificateValidationCallback = (_, _, _, _) => true },
+        });
+#pragma warning restore CA5359
+        services.AddSingleton<Models.RemoteServerClient>();
+        services.AddSingleton<Models.RemoteHealth>();
         services.AddScoped<Models.ModelCatalog>();
         services.AddScoped<Models.ModelPolicy>();
         services.AddScoped<Models.KeyAccess>();
@@ -422,6 +437,7 @@ public static class IdentityWiring
         Chat.ChatEndpoints.MapChat(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Models.ModelEndpoints.MapModels(app);
+        Models.RemoteServerEndpoints.MapRemoteServers(app);
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

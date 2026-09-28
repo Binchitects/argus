@@ -118,6 +118,8 @@ public sealed class FakeGateway : ILiteLlm
 
     /// <summary>Models the app added: the gateway's id, name, fingerprint and what it was added with.</summary>
     public ConcurrentDictionary<string, (string Name, string Fingerprint, System.Text.Json.Nodes.JsonObject Params, System.Text.Json.Nodes.JsonObject Info)> Managed { get; } = new();
+    /// <summary>The listed model each managed deployment added: removing one deployment leaves the others of its name.</summary>
+    private readonly ConcurrentDictionary<string, GatewayModel> _listed = new();
 
     public Task<IReadOnlyList<ManagedModel>> ManagedModelsAsync(CancellationToken ct = default)
     {
@@ -128,11 +130,14 @@ public sealed class FakeGateway : ILiteLlm
     public Task AddModelAsync(string name, System.Text.Json.Nodes.JsonObject litellmParams, System.Text.Json.Nodes.JsonObject modelInfo, string fingerprint, CancellationToken ct = default)
     {
         Check();
-        Managed[Guid.NewGuid().ToString()] = (name, fingerprint, litellmParams, modelInfo);
+        var id = Guid.NewGuid().ToString();
+        Managed[id] = (name, fingerprint, litellmParams, modelInfo);
+        var listed = new GatewayModel(name, modelInfo["max_input_tokens"]?.GetValue<int>(), modelInfo["max_output_tokens"]?.GetValue<int>(),
+            modelInfo["supports_vision"]?.GetValue<bool>() ?? false, true, true, null, null, null);
+        _listed[id] = listed;
         lock (Models)
         {
-            Models.Add(new GatewayModel(name, modelInfo["max_input_tokens"]?.GetValue<int>(), modelInfo["max_output_tokens"]?.GetValue<int>(),
-                modelInfo["supports_vision"]?.GetValue<bool>() ?? false, true, true, null, null, null));
+            Models.Add(listed);
         }
         return Task.CompletedTask;
     }
@@ -140,11 +145,11 @@ public sealed class FakeGateway : ILiteLlm
     public Task DeleteModelAsync(string id, CancellationToken ct = default)
     {
         Check();
-        if (Managed.TryRemove(id, out var gone))
+        if (Managed.TryRemove(id, out _) && _listed.TryRemove(id, out var listed))
         {
             lock (Models)
             {
-                Models.RemoveAll(m => m.Name == gone.Name);
+                Models.Remove(listed);
             }
         }
         return Task.CompletedTask;

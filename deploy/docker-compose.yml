@@ -853,6 +853,10 @@ services:
       # A template: ${MODEL_NAME}, ${MODEL_CONTEXT}, ${MODEL_MAX_OUTPUT} are filled
       # in from the environment at startup (entrypoint below).
       - ${LLM_CONFIG_DIR:-./config}/litellm/config.yaml:/app/config.template.yaml:ro
+      # The stack's CA bundle (tls-init): the public roots, its own certificate and every CA in
+      # config/ca, for models on other GPU servers behind https (Admin -> Models). The exported
+      # copy, never the traefik-certs volume: that one holds Traefik's private key.
+      - ${LLM_CONFIG_DIR:-./config}/traefik/certs:/certs:ro
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set LITELLM_SALT_KEY}
@@ -933,6 +937,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      tls-init:
+        condition: service_completed_successfully
     healthcheck:
       # The litellm image ships no curl or wget, only the venv python.
       test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/liveliness',timeout=5).status==200 else 1)"]

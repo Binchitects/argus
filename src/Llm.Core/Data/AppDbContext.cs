@@ -23,6 +23,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
     public DbSet<McpServer> McpServers => Set<McpServer>();
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
+    public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
     public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -126,6 +127,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.DraftHead).HasMaxLength(1000);
             e.Property(m => m.DraftMax).HasDefaultValue(3);
             e.Property(m => m.ExtraPreset).HasMaxLength(4000);
+        });
+        builder.Entity<RemoteServer>(e =>
+        {
+            e.ToTable("remote_servers");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.HasIndex(x => x.Name).IsUnique();
+            e.Property(x => x.BaseUrl).HasMaxLength(1000);
+            e.Property(x => x.ApiKeyProtected).HasMaxLength(4000);
+            e.OwnsMany(x => x.Models, m => m.ToJson());
         });
         builder.Entity<ModelAccess>(e =>
         {

@@ -36,9 +36,10 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
     {
         if (!options.Value.Enabled)
         {
+            await GatewayOnlyAsync(stoppingToken);
             return;
         }
-        var synced = false;
+        var nextSync = DateTimeOffset.MinValue;
         var loaded = "";
         string? reported = null;
         while (!stoppingToken.IsCancellationRequested)
@@ -48,11 +49,12 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
             {
                 await using var scope = scopes.CreateAsyncScope();
                 var catalog = scope.ServiceProvider.GetRequiredService<ModelCatalog>();
-                if (!synced)
+                // At start, then every minute: a gateway that was down, or restarted without the app's models, catches up.
+                if (DateTimeOffset.UtcNow >= nextSync)
                 {
                     await catalog.WritePresetsAsync(stoppingToken);
                     await catalog.SyncGatewayAsync(stoppingToken);
-                    synced = true;
+                    nextSync = DateTimeOffset.UtcNow.AddMinutes(1);
                 }
                 var models = await engine.ModelsAsync(stoppingToken);
                 state.Set(models);
@@ -120,6 +122,39 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
             try
             {
                 await _wake.WaitAsync(loading ? TimeSpan.FromSeconds(3) : TimeSpan.FromSeconds(10), stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>Without the llama.cpp engine, the other GPU servers' models still reach the gateway: every minute.</summary>
+    private async Task GatewayOnlyAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<ModelCatalog>().SyncGatewayAsync(stoppingToken);
+            }
+            catch (GatewayException ex)
+            {
+                LogGateway(logger, ex.Message);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                LogFailed(logger, ex);
+            }
+            try
+            {
+                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
             catch (OperationCanceledException)
             {

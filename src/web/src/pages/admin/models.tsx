@@ -18,10 +18,14 @@ import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { ModelForm, type SavedModel } from './model-form'
 import { bytes, summary, type ModelProfile } from './model-profile'
+import { ServersSection } from './servers'
 
 interface ModelRow extends SavedModel {
-  /** env: the .env model; local: added here; gateway: served by the gateway otherwise (cloud, pictures). */
-  source: 'env' | 'local' | 'gateway'
+  /** env: the .env model; local: added here; remote: on another GPU server; gateway: served by the gateway otherwise (cloud, pictures). */
+  source: 'env' | 'local' | 'remote' | 'gateway'
+  /** For a remote model: its server, and its id there. */
+  server?: string
+  remote?: string
   mode: string
   /** failed: its last load exited with an error (the engine's log says why); missing: the engine does not list it (yet). */
   status: 'loaded' | 'loading' | 'unloaded' | 'failed' | 'missing' | null
@@ -96,9 +100,10 @@ export function ModelsPage() {
         </Alert>
       )}
       {engine.enabled && <EngineSummary engine={engine} />}
+      <ServersSection onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })} />
       <div className="stagger grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
         {models.data.models.map((m) => (
-          <ModelCard key={m.name} model={m} engine={engine} onEdit={() => setEditing(m)} onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })} />
+          <ModelCard key={`${m.source}:${m.server ?? ''}:${m.name}`} model={m} engine={engine} onEdit={() => setEditing(m)} onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })} />
         ))}
       </div>
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
@@ -228,7 +233,9 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
         <div className="min-w-0 flex-1">
           <CardTitle className="flex flex-wrap items-center gap-2 [overflow-wrap:anywhere]">
             {m.name}
-            <Badge variant={m.source === 'local' ? 'default' : 'secondary'}>{m.source === 'env' ? '.env' : m.source === 'local' ? 'Added here' : 'Gateway'}</Badge>
+            <Badge variant={m.source === 'local' ? 'default' : 'secondary'}>
+              {m.source === 'env' ? '.env' : m.source === 'local' ? 'Added here' : m.source === 'remote' ? `On ${m.server}` : 'Gateway'}
+            </Badge>
             {image && <Badge variant="outline">Pictures</Badge>}
             {m.kept && (
               <Badge variant="outline">
@@ -242,7 +249,8 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
             )}
           </CardTitle>
           <CardDescription className="[overflow-wrap:anywhere]">
-            {[m.file, m.context ? `${m.context.toLocaleString('en-US')} tokens of context` : null].filter(Boolean).join(' · ') || (image ? 'An image model' : 'Served by the gateway')}
+            {[m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? `${m.context.toLocaleString('en-US')} tokens of context` : null].filter(Boolean).join(' · ') ||
+              (image ? 'An image model' : 'Served by the gateway')}
           </CardDescription>
           {m.profile && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary(m.profile)}</p>}
         </div>
