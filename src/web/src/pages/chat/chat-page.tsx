@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, streamChat } from './api'
+import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, stopChat, streamChat } from './api'
 import { Composer } from './composer'
 import { collectFiles } from './files'
 import { FilesPanel } from './files-panel'
@@ -79,6 +79,9 @@ export function ChatPage() {
     </div>
   )
 }
+
+/** Why a stream was let go: the page left the chat (the answer goes on). */
+const leaving = 'leaving'
 
 const suggestions = [
   { icon: Code2, text: 'Write a Python script that renames photos by the date they were taken.' },
@@ -254,12 +257,19 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     await queryClient.invalidateQueries({ queryKey: ['chat'] })
   }
 
-  /** Streams one answer; false when the question never reached the server (it goes back into the box). */
+  /**
+   * Streams one answer; false when the question never reached the server (it goes
+   * back into the box). The answer runs on the server: leaving the page only stops
+   * watching it. No body: watch the answer the chat is writing already.
+   */
   /** Which run is current: a run that ended tidies up only while no newer one has started. */
   const runs = useRef(0)
+  /** An answer was watched here already: the chat's own "answering" is not watched again. */
+  const attached = useRef(false)
   const run = useCallback(
-    async (conversationId: string, endpoint: string, body: object, start: LiveState, localId: string | null): Promise<boolean> => {
+    async (conversationId: string, endpoint: string, body: object | null, start: LiveState, localId: string | null): Promise<boolean> => {
       const me = ++runs.current
+      attached.current = true
       setLive(start)
       setStreaming(true)
       streamingIn.current = conversationId
@@ -280,6 +290,8 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
           controller.signal,
         )
       } catch (err) {
+        // The page left: the answer goes on without it, and nothing here is shown any more.
+        if (controller.signal.reason === leaving) return true
         wasStopped = err instanceof DOMException && err.name === 'AbortError'
         if (!wasStopped)
           setError(err instanceof ApiError ? err.message : received ? 'The answer was interrupted.' : 'The message did not reach the server. It is back in the box below: send it again.')
@@ -307,6 +319,25 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     },
     [queryClient],
   )
+
+  /** Stop: the server stops the answer and keeps what it has; this page stops watching at once. */
+  const stop = async () => {
+    const chat = streamingIn.current
+    const watching = abort.current
+    // Not answering any more (it ended as Stop was pressed): nothing to say.
+    if (chat) await stopChat(chat).catch((e) => !(e instanceof ApiError && e.http === 409) && toast.error(errorMessage(e, 'The answer could not be stopped. It goes on.')))
+    watching?.abort()
+  }
+
+  // Leaving the chat stops watching its answer, not the answer.
+  useEffect(() => () => abort.current?.abort(leaving), [])
+
+  // A chat answering already (its page was closed, or another tab asked): watch the answer from its start.
+  useEffect(() => {
+    if (!id || !data?.answering || attached.current || abort.current) return
+    attached.current = true
+    void run(id, 'stream', null, { messages: data.messages, leaf: data.currentLeafId, notices: [], title: null, thinkingSince: null }, null)
+  }, [id, data, run])
 
   /** The chat's id, making the chat first when this is its first message. */
   const ensureChat = async (): Promise<string | null> => {
@@ -433,7 +464,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                   {error}
                 </Alert>
               )}
-              <Composer streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} uploads={uploads} model={model} tools={toolsPicker} autoFocus big />
+              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} autoFocus big />
               <div className="stagger mt-4 grid gap-2 sm:grid-cols-3">
                 {(config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions).map((s) => (
                   <button
@@ -517,7 +548,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                   <ArrowDown />
                 </Button>
               )}
-              <Composer streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} uploads={uploads} model={model} tools={toolsPicker} autoFocus />
+              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} autoFocus />
             </div>
           </>
         )}

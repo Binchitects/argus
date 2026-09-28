@@ -91,7 +91,13 @@ function ChatItem({ chat, active, archived, onNavigate }: { chat: ConversationSu
         title={chat.title}
         className={cn('block truncate rounded-md py-1.5 pr-8 pl-2 text-sm transition-colors duration-150 outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring', active ? 'bg-accent font-medium text-foreground' : 'text-foreground/85')}
       >
-        {chat.title}
+        {chat.answering && (
+          <>
+            <span className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-primary align-middle" aria-hidden="true" />
+            <span className="sr-only">Answering: </span>
+          </>
+        )}
+        <bdi>{chat.title}</bdi>
       </NavLink>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

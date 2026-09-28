@@ -206,9 +206,10 @@ public sealed partial class ChatService(
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                // Stop: keep what arrived. The request is gone, so save without its token.
+                // Stop: keep what arrived. The stop cancelled the token, so save without it.
                 Keep(MessageStatus.Stopped);
                 await FinishAsync(conversation, CancellationToken.None);
+                await emit(new { type = "stopped", id = msg.Id });
                 return;
             }
             catch (ChatGatewayException ex)
@@ -229,7 +230,8 @@ public sealed partial class ChatService(
 
             if (calls.Count == 0 || runs.Count == 0)
             {
-                await FinishAsync(conversation, ct);
+                // Written in full: a stop now must not lose it.
+                await FinishAsync(conversation, CancellationToken.None);
                 await emit(new { type = "done", id = msg.Id });
                 return;
             }
@@ -285,6 +287,7 @@ public sealed partial class ChatService(
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     await FinishAsync(conversation, CancellationToken.None);
+                    await emit(new { type = "stopped", id = (Guid?)null });
                     return;
                 }
                 var (text, isError) = (outcome.Text, outcome.IsError);

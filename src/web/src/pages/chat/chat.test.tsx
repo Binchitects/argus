@@ -58,6 +58,7 @@ function backend(opts: { events?: object[]; saved?: Message[]; hang?: boolean; s
       answered = true
       return { events: opts.events ?? [], hang: opts.hang }
     },
+    'POST /api/chat/conversations/c1/stop': () => ({ status: 202 }),
     ...opts.extra,
   })
 }
@@ -479,6 +480,26 @@ describe('chat', () => {
     expect(await screen.findByText('Stopped.')).toBeInTheDocument()
     expect(screen.getByText('partial answer')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+  })
+
+  it('a chat still answering (its page was closed) is watched again from the start, and Stop asks the server', async () => {
+    const question = msg('q1', null, 'user', { content: 'long one' })
+    const calls = backend({
+      start: conversation({ messages: [question], currentLeafId: 'q1', answering: true }),
+      saved: [question, msg('a1', 'q1', 'assistant', { content: 'written while away', status: 'stopped' })],
+      extra: {
+        'GET /api/chat/conversations/c1/stream': () => ({
+          events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'written while away' }],
+          hang: true,
+        }),
+      },
+    })
+    renderApp('/chat/c1')
+    expect(await screen.findByText('written while away')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    expect(await screen.findByText('Stopped.')).toBeInTheDocument()
+    expect(calls.filter((c) => c.path === '/api/chat/conversations/c1/stream')).toHaveLength(1)
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/stop')).toBe(true)
   })
 
   it('shows why an answer failed', async () => {

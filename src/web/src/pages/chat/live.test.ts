@@ -58,6 +58,36 @@ describe('live answer', () => {
     expect(s.messages[1]).toMatchObject({ status: 'stopped', content: 'part' })
   })
 
+  it('an answer watched again from its start rebuilds over what was saved, without doubles', () => {
+    const events: ChatEvent[] = [
+      { type: 'question', id: 'q1', parentId: null },
+      { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' },
+      { type: 'content', text: 'Looking.' },
+      { type: 'tool_call', id: 'c1', name: 'find_symbol', arguments: '{}' },
+      { type: 'tool_result', id: 'c1', messageId: 't1', name: 'find_symbol', text: 'one', isError: false, noAccess: false, durationMs: 1 },
+      { type: 'assistant', id: 'a2', parentId: 't1', model: 'M' },
+      { type: 'tool_call', id: 'c2', name: 'find_symbol', arguments: '{}' },
+      { type: 'tool_result', id: 'c2', messageId: 't2', name: 'find_symbol', text: 'two', isError: false, noAccess: false, durationMs: 1 },
+      { type: 'assistant', id: 'a3', parentId: 't2', model: 'M' },
+      { type: 'content', text: 'It is in x.c' },
+    ]
+    const live = play(events)
+    // The saved chat already has the two finished rounds; the third is being written.
+    const saved = live.messages.slice(0, 5).map((m) => ({ ...m, content: m.id === 'a1' ? 'Looking.' : m.content }))
+    let s: LiveState = { ...start, messages: saved, leaf: 't2' }
+    for (const e of events) s = reduce(s, e, null, 1000)
+    expect(s.messages.map((m) => m.id)).toEqual(['q1', 'a1', 't1', 'a2', 't2', 'a3'])
+    expect(s.messages.find((m) => m.id === 'a1')).toMatchObject({ content: 'Looking.', toolCalls: [{ id: 'c1' }] })
+    expect(s.messages.find((m) => m.id === 'a2')!.content).toBe('')
+    expect(s.messages.find((m) => m.id === 'a3')!.content).toBe('It is in x.c')
+    expect(s.leaf).toBe('a3')
+  })
+
+  it('a stop from anywhere is kept on the answer', () => {
+    const s = play([{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' }, { type: 'content', text: 'half' }, { type: 'stopped', id: 'a1' }])
+    expect(s.messages[1]).toMatchObject({ status: 'stopped', content: 'half' })
+  })
+
   it('keeps notices and the new title', () => {
     const s = play([{ type: 'title', title: 'Hello' }, { type: 'notice', kind: 'no_vision', text: 'Cannot see.' }])
     expect(s.title).toBe('Hello')

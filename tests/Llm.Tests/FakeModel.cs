@@ -13,6 +13,7 @@ namespace Llm.Tests;
 ///   [tool]      asks for find_symbol, then answers "Found it." once the tool result is back
 ///   [noaccess]  asks for find_symbol on something the person cannot read
 ///   [slow]      streams 400 small pieces, 25 ms apart (for stop)
+///   [steady]    streams 60 small pieces, 25 ms apart (for leaving the page mid-answer)
 ///   [budget]    refuses as LiteLLM does when credit is used up
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
 /// Its /v1/images/generations answers with a small PNG.
@@ -86,6 +87,11 @@ public sealed class FakeModel : HttpMessageHandler
         {
             chunks = [Delta(new JsonObject { ["content"] = "Found it." }), Finish("stop")];
         }
+        else if (lastUser.Contains("[steady]", StringComparison.Ordinal))
+        {
+            chunks = [.. Enumerable.Range(0, 60).Select(i => Delta(new JsonObject { ["content"] = $"s{i} " })), Finish("stop")];
+            delay = TimeSpan.FromMilliseconds(25);
+        }
         else if (lastUser.Contains("[slow]", StringComparison.Ordinal))
         {
             chunks = [.. Enumerable.Range(0, 400).Select(i => Delta(new JsonObject { ["content"] = $"w{i} " })), Finish("stop")];
@@ -136,6 +142,41 @@ public sealed class FakeModel : HttpMessageHandler
         }
 
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => SerializeToStreamAsync(stream, context, CancellationToken.None);
+
+        /// <summary>
+        /// Read as it is written, as from a real server: HttpContent's own way reads
+        /// the whole answer into a buffer before the first piece can be read.
+        /// </summary>
+        protected override Task<Stream> CreateContentReadStreamAsync() => CreateContentReadStreamAsync(CancellationToken.None);
+
+        protected override Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken)
+        {
+            var pipe = new System.IO.Pipelines.Pipe();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    foreach (var c in chunks.Append("[DONE]"))
+                    {
+                        // The reader left (stopped, or the answer was abandoned): stop writing.
+                        if ((await pipe.Writer.WriteAsync(Encoding.UTF8.GetBytes($"data: {c}\n\n"))).IsCompleted)
+                        {
+                            return;
+                        }
+                        if (delay > TimeSpan.Zero)
+                        {
+                            await Task.Delay(delay);
+                        }
+                    }
+                    await pipe.Writer.CompleteAsync();
+                }
+                catch (Exception ex)
+                {
+                    await pipe.Writer.CompleteAsync(ex);
+                }
+            }, CancellationToken.None);
+            return Task.FromResult(pipe.Reader.AsStream());
+        }
 
         protected override bool TryComputeLength(out long length)
         {

@@ -22,11 +22,16 @@ export const listQuery = (search: string, archived = false) => ({
     if (archived) q.set('archived', 'true')
     return api<ConversationSummary[]>(`/api/chat/conversations${q.size ? `?${q}` : ''}`, { signal })
   },
+  // A chat answering on its own (its page was closed) shows so until it is done.
+  refetchInterval: (q: { state: { data?: ConversationSummary[] } }) => (q.state.data?.some((c) => c.answering) ? 4000 : false),
 })
 
 /** Forks a chat up to a message (default: the end of the branch on screen); the new chat's id and title. */
 export const forkChat = (id: string, messageId?: string) =>
   api<{ id: string; title: string }>(`/api/chat/conversations/${id}/fork`, { body: messageId ? { messageId } : {} })
+
+/** Stops the chat's answer on the server; it keeps what it has. */
+export const stopChat = (id: string) => api(`/api/chat/conversations/${id}/stop`, { body: {} })
 
 export const archiveChat = (id: string, archived: boolean) => api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { archived } })
 
@@ -35,15 +40,20 @@ export const conversationQuery = (id: string) => ({
   queryFn: ({ signal }: { signal: AbortSignal }) => api<Conversation>(`/api/chat/conversations/${id}`, { signal }),
 })
 
-/** Server-sent events: calls `on` for each as it arrives. Throws ApiError when the request is refused. */
-export async function streamChat(path: string, body: object, on: (e: ChatEvent) => void, signal: AbortSignal): Promise<void> {
+/**
+ * Server-sent events: calls `on` for each as it arrives. Throws ApiError when the
+ * request is refused. No body: watch the answer being written (GET), which ends at
+ * once when there is none. Aborting only stops watching: the answer goes on.
+ */
+export async function streamChat(path: string, body: object | null, on: (e: ChatEvent) => void, signal: AbortSignal): Promise<void> {
   const res = await fetch(path, {
-    method: 'POST',
+    method: body ? 'POST' : 'GET',
     signal,
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'X-Requested-With': 'fetch' },
-    body: JSON.stringify(body),
+    headers: { ...(body && { 'Content-Type': 'application/json' }), Accept: 'text/event-stream', 'X-Requested-With': 'fetch' },
+    body: body ? JSON.stringify(body) : undefined,
   })
+  if (res.status === 204) return
   if (!res.ok || !res.body) {
     const d = (await res.json().catch(() => ({}))) as { status?: string; error?: string }
     throw new ApiError(res.status, d.status ?? String(res.status), d.error ?? `Request failed (HTTP ${res.status}).`, d)

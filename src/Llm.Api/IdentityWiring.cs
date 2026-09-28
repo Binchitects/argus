@@ -282,6 +282,9 @@ public static class IdentityWiring
         services.AddScoped<Chat.Tools.ToolRegistry>();
         services.AddSingleton<Chat.Tools.ToolApprovals>();
         services.AddScoped<Chat.ChatService>();
+        // Answers outlive the page that asked: they run here, and a page re-attaches.
+        services.AddSingleton<Chat.AnswerJobs>();
+        services.AddHostedService(sp => sp.GetRequiredService<Chat.AnswerJobs>());
 
         // The engine's models (llama.cpp's router): Admin -> Models, and who may use which model.
         services.Configure<Models.EngineOptions>(config.GetSection("Engine"));

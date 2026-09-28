@@ -80,6 +80,8 @@ export interface ConversationSummary {
   title: string
   updatedAt: string
   archivedAt?: string | null
+  /** An answer is being written (it goes on when the page closes): the page watches it again. */
+  answering?: boolean
 }
 
 export interface Conversation extends ConversationSummary {
@@ -128,4 +130,6 @@ export type ChatEvent =
   /** Waiting for a turn: the model serves few at once, in turn (fair use). */
   | { type: 'queued'; ahead: number }
   | { type: 'error'; message: string }
+  /** Stopped (by the person, from any tab): what was written is kept. */
+  | { type: 'stopped'; id: string | null }
   | { type: 'done'; id: string }

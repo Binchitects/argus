@@ -189,41 +189,91 @@ public sealed class ChatTests(AppFixture app)
         Assert.Equal("failed", last.GetProperty("status").GetString());
     }
 
+    /// <summary>Starts an answer and reads its stream until <paramref name="until"/> has arrived; the stream stays open.</summary>
+    private static async Task<(HttpResponseMessage Response, string Seen)> StartAsync(TestBrowser b, Guid id, string text, string until, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri($"/api/chat/conversations/{id}/messages", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new { content = text }),
+        };
+        var res = await b.Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        var stream = await res.Content.ReadAsStreamAsync(ct);
+        var buffer = new byte[4096];
+        var seen = new StringBuilder();
+        while (!seen.ToString().Contains(until, StringComparison.Ordinal))
+        {
+            seen.Append(Encoding.UTF8.GetString(buffer, 0, await stream.ReadAsync(buffer, ct)));
+        }
+        return (res, seen.ToString());
+    }
+
+    /// <summary>The last message once it has <paramref name="status"/> (the answer runs on its own).</summary>
+    private async Task<JsonElement> LastOnceAsync(TestBrowser b, Guid id, string status)
+    {
+        JsonElement last = default;
+        for (var i = 0; i < 100; i++)
+        {
+            var conv = await ConversationAsync(b, id);
+            last = conv.GetProperty("messages").EnumerateArray().Last();
+            if (last.GetProperty("status").GetString() == status && !conv.GetProperty("answering").GetBoolean())
+            {
+                break;
+            }
+            await Task.Delay(100);
+        }
+        return last;
+    }
+
     [Fact]
     public async Task Stopping_keeps_what_arrived_and_marks_it_stopped()
     {
         var (b, _) = await PersonAsync();
         var id = await NewChatAsync(b, new { useArgus = false });
-        using var cts = new CancellationTokenSource();
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri($"/api/chat/conversations/{id}/messages", UriKind.Relative))
+        var (res, _) = await StartAsync(b, id, "Write a lot [slow]", "w5 ", CancellationToken.None);
+        using (res)
         {
-            Content = JsonContent.Create(new { content = "Write a lot [slow]" }),
-        };
-        var res = await b.Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-        var stream = await res.Content.ReadAsStreamAsync(cts.Token);
-        var buffer = new byte[4096];
-        var seen = new StringBuilder();
-        while (!seen.ToString().Contains("w5 ", StringComparison.Ordinal))
-        {
-            seen.Append(Encoding.UTF8.GetString(buffer, 0, await stream.ReadAsync(buffer, cts.Token)));
+            Assert.True((await ConversationAsync(b, id)).GetProperty("answering").GetBoolean());
+            await StatusAssert.Is(HttpStatusCode.Accepted, await b.PostAsync($"/api/chat/conversations/{id}/stop", new { }));
+            // The open stream says so, and ends.
+            var rest = Events(await res.Content.ReadAsStringAsync());
+            Assert.Equal("stopped", rest.Last().GetProperty("type").GetString());
         }
-        await cts.CancelAsync();
-        res.Dispose();
 
-        JsonElement last = default;
-        for (var i = 0; i < 50; i++)
-        {
-            await Task.Delay(100);
-            last = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().Last();
-            if (last.GetProperty("status").GetString() == "stopped")
-            {
-                break;
-            }
-        }
+        var last = await LastOnceAsync(b, id, "stopped");
         Assert.Equal("stopped", last.GetProperty("status").GetString());
         var content = last.GetProperty("content").GetString()!;
         Assert.StartsWith("w0 w1 w2 w3 w4 w5 ", content, StringComparison.Ordinal);
         Assert.DoesNotContain("w399", content, StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.Conflict, await b.PostAsync($"/api/chat/conversations/{id}/stop", new { }));
+    }
+
+    [Fact]
+    public async Task Closing_the_page_leaves_the_answer_to_finish_and_it_can_be_watched_again()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        using var cts = new CancellationTokenSource();
+        var (res, _) = await StartAsync(b, id, "Take your time [steady]", "s3 ", cts.Token);
+        // The page goes away mid-answer.
+        await cts.CancelAsync();
+        res.Dispose();
+
+        // Coming back: the answer so far in one go, then the rest live, to the end.
+        var watch = await b.GetAsync($"/api/chat/conversations/{id}/stream");
+        await StatusAssert.Is(HttpStatusCode.OK, watch);
+        var events = Events(await watch.Content.ReadAsStringAsync());
+        Assert.Equal("question", events[0].GetProperty("type").GetString());
+        var text = string.Concat(events.Where(e => e.GetProperty("type").GetString() == "content").Select(e => e.GetProperty("text").GetString()));
+        Assert.Equal(string.Concat(Enumerable.Range(0, 60).Select(i => $"s{i} ")), text);
+        Assert.Equal("done", events.Last().GetProperty("type").GetString());
+
+        var last = await LastOnceAsync(b, id, "complete");
+        Assert.Equal("complete", last.GetProperty("status").GetString());
+        Assert.EndsWith("s59 ", last.GetProperty("content").GetString()!, StringComparison.Ordinal);
+        // Nothing is being written now: nothing to watch.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await b.GetAsync($"/api/chat/conversations/{id}/stream"));
+        var listed = (await b.JsonAsync(await b.GetAsync("/api/chat/conversations"))).EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == id);
+        Assert.False(listed.GetProperty("answering").GetBoolean());
     }
 
     [Fact]
@@ -256,6 +306,7 @@ public sealed class ChatTests(AppFixture app)
         using var running = await b.Http.SendAsync(first, HttpCompletionOption.ResponseHeadersRead);
         var second = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "again" });
         await StatusAssert.Is(HttpStatusCode.Conflict, second);
+        await StatusAssert.Is(HttpStatusCode.Accepted, await b.PostAsync($"/api/chat/conversations/{id}/stop", new { }));
     }
 
     [Fact]
