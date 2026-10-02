@@ -137,6 +137,33 @@ def main():
         (r.get("stdout", "") + r.get("stderr", ""))[-300:])
     rec("an interactive chart comes back as a page", {"chart.html", "square.png"} <= set(r.get("made", {})), str(list(r.get("made", {}))))
 
+    # OCR in the languages promised (a line drawn in each, read back), and LibreOffice
+    # as a job runs it (its pipe and profile beside the job), with the CJK fonts.
+    r = run("""
+        import subprocess, pytesseract
+        from PIL import Image, ImageDraw, ImageFont
+        from docx import Document
+        cjk, arabic = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"
+        for lang, text, font in [("ara", "سلام عليكم", arabic), ("chi_sim", "你好世界", cjk), ("chi_tra", "你好世界今天天氣很好", cjk)]:
+            img = Image.new("L", (900, 160), 255)
+            d = ImageDraw.Draw(img)
+            if lang == "ara":
+                d.text((860, 40), text, font=ImageFont.truetype(font, 64), fill=0, anchor="ra", direction="rtl", language="ar")
+            else:
+                d.text((40, 40), text, font=ImageFont.truetype(font, 64), fill=0)
+            # One line of text (page segmentation 7); spaces as tesseract places them do not count.
+            read = pytesseract.image_to_string(img, lang=lang, config="--psm 7").strip()
+            print(lang, read.replace(" ", "") == text.replace(" ", ""), repr(read))
+        print("fas" in pytesseract.get_languages())
+        doc = Document(); doc.add_paragraph("中文 文档"); doc.save("zh.docx")
+        r = subprocess.run(["libreoffice", "--headless", "--convert-to", "pdf", "zh.docx"], capture_output=True, text=True, timeout=100)
+        print("pdf", r.returncode, "CJK" in subprocess.run(["pdffonts", "zh.pdf"], capture_output=True, text=True).stdout)
+    """, timeout=120)
+    out = r.get("stdout", "")
+    rec("OCR reads Arabic, Chinese simplified and traditional, and has Persian",
+        [l.split()[:2] for l in out.splitlines()[:3]] == [["ara", "True"], ["chi_sim", "True"], ["chi_tra", "True"]] and out.splitlines()[3:4] == ["True"], (out + r.get("stderr", ""))[-300:])
+    rec("LibreOffice converts in a job, with CJK fonts", "pdf 0 True" in out, (out + r.get("stderr", ""))[-300:])
+
     r = run("""
         import socket
         for host in [("1.1.1.1", 53), ("app", 8080), ("172.17.0.1", 80)]:

@@ -40,6 +40,23 @@ RUN pip install --no-cache-dir --only-binary=:all: --no-binary=odfpy \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
  && rm -rf /root/.cache
 
+# More languages: OCR data for Arabic, Persian and Chinese (simplified and
+# traditional), and the Noto CJK fonts, so documents and charts in Chinese,
+# Japanese and Korean show their letters. A layer of its own: the ones above stay
+# as they were built. Matplotlib's font cache again, to find the new fonts.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      tesseract-ocr-ara tesseract-ocr-fas tesseract-ocr-chi-sim tesseract-ocr-chi-tra fonts-noto-cjk \
+ && rm -rf /var/lib/apt/lists/* \
+ && fc-cache -f \
+ && rm -rf /opt/mplconfig && MPLCONFIGDIR=/opt/mplconfig python -c "import matplotlib.pyplot" \
+ && chmod -R a+rX /opt/mplconfig \
+ && find / -xdev -perm /6000 -type f -exec chmod a-s {} +
+
+# LibreOffice as a job can run it (soffice and libreoffice): see the script.
+COPY --chmod=755 soffice /usr/local/bin/soffice
+RUN ln -s soffice /usr/local/bin/libreoffice
+
 # The tools the chat calls by name (Math, Date and time, Data, Convert,
 # Diagrams): Python functions run here, like any other job.
 COPY sandbox_tools /opt/toolbox/sandbox_tools

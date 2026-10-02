@@ -176,7 +176,8 @@ public sealed class PythonTool(SandboxClient sandbox, AppDbContext db, IOptionsM
             "Runs a Python 3.13 program and returns what it prints. Installed: " +
             "data: numpy, pandas, polars, pyarrow, duckdb, scipy, statsmodels, scikit-learn, xgboost, lightgbm, numba, sympy, networkx; " +
             "charts: matplotlib, seaborn, plotly (fig.write_html; no image export); " +
-            "images: pillow (with HEIC), opencv (cv2), scikit-image, imageio, pytesseract (OCR); " +
+            "images: pillow (with HEIC), opencv (cv2), scikit-image, imageio, pytesseract (OCR in English, Arabic, Persian and Chinese: lang 'eng', 'ara', 'fas', 'chi_sim', 'chi_tra', or joined with +); " +
+            "fonts: Noto for most scripts, Noto Sans CJK SC/TC/JP/KR for Chinese, Japanese and Korean (matplotlib: set font.family to one); " +
             "maps: geopandas, shapely, pyproj; " +
             "files: openpyxl, xlsxwriter, python-docx, python-pptx, reportlab, pypdf, pdfplumber, lxml, beautifulsoup4, pyyaml; " +
             "commands: ffmpeg, imagemagick, pandoc, libreoffice, graphviz, tesseract. " +

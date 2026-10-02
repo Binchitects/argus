@@ -1,0 +1,16 @@
+#!/bin/sh
+# LibreOffice, as a job runs it: the sandbox's /tmp belongs to the runner and the
+# root is read-only, so its pipe goes beside the job (OSL_SOCKET_PATH), its profile
+# in the job's home, and a first start that only made the profile (exit 81) is
+# started again. Called as soffice or libreoffice, with the usual arguments.
+tmp="${TMPDIR:-${HOME:-$PWD}/.tmp}"
+mkdir -p "$tmp"
+export OSL_SOCKET_PATH="$tmp"
+profile="file://${HOME:-$PWD}/.lo-profile"
+code=0
+for _ in 1 2 3; do
+  /usr/lib/libreoffice/program/soffice.bin "-env:UserInstallation=$profile" "$@"
+  code=$?
+  [ "$code" -ne 81 ] && exit "$code"
+done
+exit "$code"

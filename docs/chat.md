@@ -62,9 +62,11 @@ setups to paste.
     libraries (numpy, pandas, polars, pyarrow, duckdb, scipy, statsmodels,
     scikit-learn, xgboost, lightgbm, numba, sympy, networkx), charts
     (matplotlib, seaborn, plotly), images (pillow with HEIC, OpenCV,
-    scikit-image, imageio, tesseract OCR), maps (geopandas, shapely, pyproj),
+    scikit-image, imageio, tesseract OCR in English, Arabic, Persian and
+    Chinese, simplified and traditional), maps (geopandas, shapely, pyproj),
     office and PDF files, and LibreOffice, pandoc, ffmpeg, ImageMagick and
-    graphviz. The chat's files are in its working directory under their names
+    graphviz; Noto fonts for most scripts, Chinese, Japanese and Korean
+    included. The chat's files are in its working directory under their names
     (the original .xlsx, not its text); what it writes comes back: charts as
     pictures in the answer, other files in the Files panel and on the card, to
     open or download, and a plotly chart saved as HTML opens running. Each run
