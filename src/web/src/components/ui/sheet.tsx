@@ -14,7 +14,16 @@ const sides = {
 }
 
 /** A panel that slides in from the side: details, filters, the phone navigation. */
-export function SheetContent({ className, children, side = 'right', onOpenAutoFocus, onCloseAutoFocus, ...props }: ComponentProps<typeof SheetPrimitive.Content> & { side?: keyof typeof sides }) {
+/** `hideClose`: the content has its own close button (two would overlap). */
+export function SheetContent({
+  className,
+  children,
+  side = 'right',
+  hideClose,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
+  ...props
+}: ComponentProps<typeof SheetPrimitive.Content> & { side?: keyof typeof sides; hideClose?: boolean }) {
   const focus = useReturnFocus(onOpenAutoFocus, onCloseAutoFocus)
   return (
     <SheetPrimitive.Portal>
@@ -30,10 +39,12 @@ export function SheetContent({ className, children, side = 'right', onOpenAutoFo
         {...props}
       >
         {children}
-        <SheetPrimitive.Close className="absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none">
-          <X className="size-4" />
-          <span className="sr-only">Close</span>
-        </SheetPrimitive.Close>
+        {!hideClose && (
+          <SheetPrimitive.Close className="absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none">
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </SheetPrimitive.Close>
+        )}
       </SheetPrimitive.Content>
     </SheetPrimitive.Portal>
   )

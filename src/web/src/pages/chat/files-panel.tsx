@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Download, ExternalLink, FileArchive, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, Maximize2, Minimize2, Play, X } from 'lucide-react'
+import { ArrowLeft, Download, ExternalLink, FileArchive, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, Maximize2, Minimize2, Play, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
-import { errorMessage } from '@/lib/api'
+import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { saveBlob } from '@/lib/zip'
 import { cn } from '@/lib/utils'
@@ -16,9 +16,11 @@ import { attachmentUrl, configQuery, downloadUrl } from './api'
 import { gitlabLink } from './argus'
 import { CodeBlock } from './code-block'
 import type { FileItem } from './files'
+import type { Attachment } from './types'
 import { parseFence } from './files'
 import { zipFiles, zipName } from './files-zip'
 import { ImageViewer } from './image-viewer'
+import { asViewerImages } from './viewer-images'
 import { LivePreview } from './live-preview'
 
 /**
@@ -178,10 +180,37 @@ function useAttachmentText(id: string, name: string, original: boolean) {
   })
 }
 
+/** A document with pages to show as pictures (its original kept): PDF, Word, PowerPoint, Excel, OpenDocument. */
+const paged = /\.(pdf|docx?|odt|rtf|pptx?|odp|xlsx?|ods)$/i
+const hasPages = (a: Attachment) => a.original === true && paged.test(a.fileName)
+
 function Viewer({ file }: { file: FileItem }) {
+  const [view, setView] = useState<'pages' | 'text'>('pages')
   if (file.kind === 'code') return <CodeBlock code={file.code} lang={file.lang} name={file.name} />
   if (file.kind === 'repo') return <RepoViewer file={file} />
   if (file.attachment.kind === 'image') return <ImageFile attachment={file.attachment} />
+  if (hasPages(file.attachment)) {
+    if (file.attachment.kind !== 'text') return <DocumentPages attachment={file.attachment} />
+    // Its pages as they look, or the text the model read.
+    return (
+      <Tabs value={view} onValueChange={(v) => setView(v as 'pages' | 'text')} className="gap-3">
+        <TabsList className="h-8">
+          <TabsTrigger value="pages" className="px-2 text-xs">
+            Pages
+          </TabsTrigger>
+          <TabsTrigger value="text" className="px-2 text-xs">
+            Text
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="pages">
+          <DocumentPages attachment={file.attachment} />
+        </TabsContent>
+        <TabsContent value="text">
+          <TextViewer id={file.attachment.id} name={file.name} truncated={file.attachment.truncated} />
+        </TabsContent>
+      </Tabs>
+    )
+  }
   if (file.attachment.kind === 'file') return <DownloadOnly attachment={file.attachment} />
   return (
     <div className="grid gap-2">
@@ -191,6 +220,76 @@ function Viewer({ file }: { file: FileItem }) {
         </a>
       )}
       <TextViewer id={file.attachment.id} name={file.name} truncated={file.attachment.truncated} />
+    </div>
+  )
+}
+
+/**
+ * A document's pages, drawn as pictures on first look (in the sandbox), one under
+ * the other: zoomed in the panel with the buttons, or opened one by one full size.
+ */
+function DocumentPages({ attachment }: { attachment: Attachment }) {
+  const pages = useQuery({
+    queryKey: ['chat', 'pages', attachment.id],
+    queryFn: ({ signal }) => api<{ total: number; drawn: number; pages: string[] }>(`/api/chat/attachments/${attachment.id}/pages`, { signal }),
+    staleTime: Infinity,
+    retry: false,
+  })
+  const [width, setWidth] = useState(100)
+  const [viewing, setViewing] = useState<number | null>(null)
+  if (pages.isPending) {
+    return (
+      <div className="grid gap-2" aria-busy="true">
+        <p className="text-xs text-muted-foreground">Drawing its pages…</p>
+        <Skeleton className="aspect-[1/1.414] w-full" />
+      </div>
+    )
+  }
+  if (pages.error) {
+    return (
+      <div className="grid gap-2">
+        <p className="text-sm text-destructive-ink">{errorMessage(pages.error)}</p>
+        <a href={downloadUrl(attachment.id)} download={attachment.fileName} className="flex w-fit items-center gap-1.5 text-xs font-medium text-primary-ink underline-offset-2 hover:underline">
+          <Download className="size-3.5" aria-hidden="true" /> Download {attachment.fileName}
+        </a>
+      </div>
+    )
+  }
+  const { total, drawn } = pages.data
+  const images = pages.data.pages.map((src, i) => ({
+    key: src, src, name: attachment.fileName, detail: `Page ${i + 1} of ${total}`, download: { href: downloadUrl(attachment.id), name: attachment.fileName },
+  }))
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-1">
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {total} page{total === 1 ? '' : 's'}
+          {drawn < total && ` · the first ${drawn} shown`}
+        </p>
+        <Button variant="ghost" size="icon-sm" onClick={() => setWidth((w) => Math.max(50, w - 25))} disabled={width <= 50} aria-label="Zoom out">
+          <ZoomOut />
+        </Button>
+        <Button variant="ghost" size="sm" className="h-8 w-14 px-1 text-xs tabular-nums" onClick={() => setWidth(100)} aria-label={`Zoom ${width}%: fit the panel`}>
+          {width}%
+        </Button>
+        <Button variant="ghost" size="icon-sm" onClick={() => setWidth((w) => Math.min(300, w + 25))} disabled={width >= 300} aria-label="Zoom in">
+          <ZoomIn />
+        </Button>
+        <a href={downloadUrl(attachment.id)} download={attachment.fileName} className="ml-1 flex items-center gap-1 text-xs font-medium text-primary-ink underline-offset-2 hover:underline">
+          <Download className="size-3.5" aria-hidden="true" /> Download
+        </a>
+      </div>
+      <ol className="grid gap-3 overflow-x-auto" aria-label={`Pages of ${attachment.fileName}`}>
+        {images.map((p, i) => (
+          <li key={p.key} style={{ width: `${width}%` }} className="mx-auto max-w-none">
+            <button type="button" onClick={() => setViewing(i)} className="block w-full cursor-zoom-in rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`Page ${i + 1}: view full size`}>
+              <img src={p.src} alt={`Page ${i + 1} of ${total}`} loading="lazy" className="w-full rounded-md border bg-white shadow-sm" />
+            </button>
+          </li>
+        ))}
+      </ol>
+      {drawn < total && <p className="text-center text-xs text-muted-foreground">Download it for the other {total - drawn} pages.</p>}
+      <ImageViewer images={images} index={viewing} onIndex={setViewing} />
     </div>
   )
 }
@@ -220,7 +319,7 @@ function ImageFile({ attachment }: { attachment: Extract<FileItem, { kind: 'atta
       <button type="button" onClick={() => setViewing(0)} className="block w-full cursor-zoom-in rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`View ${attachment.fileName}`}>
         <img src={attachmentUrl(attachment.id)} alt={attachment.fileName} className="w-full rounded-lg border" />
       </button>
-      <ImageViewer images={[attachment]} index={viewing} onIndex={setViewing} />
+      <ImageViewer images={asViewerImages([attachment])} index={viewing} onIndex={setViewing} />
     </>
   )
 }

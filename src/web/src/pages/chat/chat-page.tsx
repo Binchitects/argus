@@ -629,7 +629,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
       {filesOpen && wide && <div className="min-h-0 border-l">{panel}</div>}
       {!wide && (
         <Sheet open={filesOpen} onOpenChange={setFilesOpen}>
-          <SheetContent side="right" className={cn('gap-0 p-0', fileView === 'preview' && 'sm:max-w-3xl')}>
+          <SheetContent side="right" hideClose className={cn('gap-0 p-0', fileView === 'preview' && 'sm:max-w-3xl')}>
             <SheetTitle className="sr-only">Files</SheetTitle>
             <SheetDescription className="sr-only">Files in this chat</SheetDescription>
             {panel}

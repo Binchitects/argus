@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
+    public DbSet<AttachmentPage> AttachmentPages => Set<AttachmentPage>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
@@ -82,6 +83,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(a => a.Kind).HasMaxLength(20);
             e.HasIndex(a => a.UserId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<AttachmentPage>(e =>
+        {
+            e.ToTable("attachment_pages");
+            e.HasKey(p => new { p.AttachmentId, p.Number });
+            e.HasOne<ChatAttachment>().WithMany().HasForeignKey(p => p.AttachmentId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<Group>(e =>

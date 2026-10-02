@@ -9,6 +9,7 @@ import { formatValue, money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { attachmentUrl } from './api'
 import { ImageViewer } from './image-viewer'
+import { asViewerImages } from './viewer-images'
 import type { Notice, ToolRunning } from './live'
 import { Markdown } from './markdown'
 import { answerUsage, seconds } from './format'
@@ -109,7 +110,7 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
           )}
         </ul>
       )}
-      {images.length > 0 && <ImageViewer images={images} index={viewing} onIndex={setViewing} />}
+      {images.length > 0 && <ImageViewer images={asViewerImages(images)} index={viewing} onIndex={setViewing} />}
       {editing === null ? (
         m.content && <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">{m.content}</div>
       ) : (

@@ -1,6 +1,28 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { promises as fs } from 'node:fs'
 import { expectAccessible, screenshot, watchConsole, withTheme } from './helpers.ts'
+import { makeZip } from '../src/lib/zip.ts'
+
+/** The smallest PDF with one page and a line of text, offsets and all. */
+function onePagePdf(): Buffer {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    '<< /Length 44 >>\nstream\nBT /F1 24 Tf 72 720 Td (One page.) Tj ET\nendstream',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ]
+  let out = '%PDF-1.4\n'
+  const offsets: number[] = []
+  objects.forEach((o, i) => {
+    offsets.push(out.length)
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`
+  })
+  const xref = out.length
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+  return Buffer.from(out, 'latin1')
+}
 
 // With a real model behind the gateway (the deployed stack): E2E_CHAT=1.
 // Without one (CI), only the "no gateway" behaviour is checked.
@@ -124,6 +146,46 @@ test.describe("Argus's answers and images", () => {
       expect(errors).toEqual([])
     })
   }
+})
+
+// A Word file shown by its pages (drawn in the sandbox), zoomed in the panel and full size.
+const docChat = {
+  ...argusChat,
+  id: '00000000-0000-4000-8000-0000000d0c5a', title: 'The plan', useArgus: false, currentLeafId: 'w2',
+  messages: [
+    {
+      ...blank, id: 'w1', parentId: null, role: 'user', content: 'Summarize the plan.',
+      attachments: [{ id: '44444444-4444-4444-8444-444444444444', fileName: 'plan.docx', size: 18_000, truncated: false, kind: 'text', contentType: 'text/plain', original: true }],
+    },
+    { ...blank, id: 'w2', parentId: 'w1', role: 'assistant', model: 'Test-Model', content: 'The plan has two phases.' },
+  ],
+}
+
+test.describe('document pages', () => {
+  test('a Word file shows as its pages, zoomed in the panel and full size', async ({ page }, info) => {
+    const base = '/api/chat/attachments/44444444-4444-4444-8444-444444444444'
+    await page.route(`**/api/chat/conversations/${docChat.id}`, (route) => route.fulfill({ json: docChat }))
+    await page.route(`**${base}/pages`, (route) => route.fulfill({ json: { total: 23, drawn: 2, pages: [`${base}/pages/1`, `${base}/pages/2`] } }))
+    await page.route(`**${base}/pages/*`, (route) => route.fulfill({ body: png, contentType: 'image/png' }))
+    await page.goto(`/chat/${docChat.id}`)
+    await page.getByRole('button', { name: /^Files \(1\)$/ }).click()
+    const panel = page.getByRole('complementary', { name: 'Files' })
+    await panel.getByRole('button', { name: /plan\.docx/ }).click()
+    const pages = panel.getByRole('list', { name: 'Pages of plan.docx' })
+    await expect(pages.getByRole('img')).toHaveCount(2)
+    await expect(panel).toContainText('23 pages · the first 2 shown')
+    await panel.getByRole('button', { name: 'Zoom in' }).click()
+    await expect(panel.getByRole('button', { name: 'Zoom 125%: fit the panel' })).toBeVisible()
+    await expectAccessible(page, info, 'document-pages')
+    await screenshot(page, info, 'document-pages')
+    await pages.getByRole('button', { name: 'Page 2: view full size' }).click()
+    const viewer = page.getByRole('dialog', { name: 'plan.docx' })
+    await expect(viewer).toContainText('Page 2 of 23')
+    await viewer.getByRole('button', { name: 'Zoom in' }).click()
+    await expect(viewer.getByRole('button', { name: /^Zoom \d+%: fit to the screen$/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(viewer).toHaveCount(0)
+  })
 })
 
 // How full the context is, and what fills it: from the last answer's prompt tokens.
@@ -683,6 +745,32 @@ test.describe('tools', () => {
     for (const kind of ['System prompt and tool notes', 'Files', 'Your messages', 'Answers']) await expect(parts).toContainText(kind)
     await page.keyboard.press('Escape')
     expect((await page.request.delete(`/api/chat/conversations/${page.url().split('/').pop()}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
+  })
+
+  test('a Word file and a PDF are drawn as pages in the sandbox', async ({ page }) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    test.setTimeout(180_000)
+    const headers = { 'X-Requested-With': 'e2e' }
+    const xml = (body: string) => Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>${body}`)
+    const word = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    const docx = Buffer.from(await (await makeZip([
+      { name: '[Content_Types].xml', data: xml('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>') },
+      { name: '_rels/.rels', data: xml('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>') },
+      { name: 'word/document.xml', data: xml(`<w:document xmlns:w="${word}"><w:body><w:p><w:r><w:t>The plan has two phases.</w:t></w:r></w:p><w:p><w:r><w:br w:type="page"/><w:t>Phase two.</w:t></w:r></w:p></w:body></w:document>`) },
+    ])).arrayBuffer())
+    for (const [name, mimeType, buffer] of [['plan.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', docx], ['one.pdf', 'application/pdf', onePagePdf()]] as const) {
+      const made = await page.request.post('/api/chat/attachments', { multipart: { file: { name, mimeType, buffer } }, headers })
+      expect(made.ok(), await made.text()).toBe(true)
+      const id = (await made.json()).id
+      const pages = await page.request.get(`/api/chat/attachments/${id}/pages`, { headers, timeout: 150_000 })
+      expect(pages.ok(), await pages.text()).toBe(true)
+      const { total, drawn, pages: urls } = await pages.json()
+      expect(total).toBe(name === 'plan.docx' ? 2 : 1)
+      expect(drawn).toBe(total)
+      const first = await page.request.get(urls[0], { headers })
+      expect(first.headers()['content-type']).toBe('image/jpeg')
+      expect((await first.body()).length).toBeGreaterThan(2000)
+    }
   })
 
   test('an answer that finishes after the page left is in the bell', async ({ page }) => {

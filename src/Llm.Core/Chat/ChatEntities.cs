@@ -106,3 +106,17 @@ public sealed class ChatAttachment
     public byte[]? Data { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>A page of a document attachment (PDF, Word, PowerPoint...), drawn as a JPEG for its preview; made once, on first look.</summary>
+public sealed class AttachmentPage
+{
+    public Guid AttachmentId { get; set; }
+
+    /// <summary>From 1.</summary>
+    public int Number { get; set; }
+
+    /// <summary>How many pages the document has (only the first ones are drawn).</summary>
+    public int Total { get; set; }
+
+    public required byte[] Data { get; set; }
+}

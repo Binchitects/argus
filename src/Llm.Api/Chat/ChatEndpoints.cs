@@ -69,6 +69,8 @@ public static class ChatEndpoints
         g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
         g.MapPost("/attachments", UploadAsync).DisableAntiforgery();
         g.MapGet("/attachments/{id:guid}/content", ContentAsync);
+        g.MapGet("/attachments/{id:guid}/pages", PagesAsync);
+        g.MapGet("/attachments/{id:guid}/pages/{number:int}", PageAsync);
     }
 
     private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access, ModelPolicy policy,
@@ -716,5 +718,43 @@ public static class ChatEndpoints
         return a.Kind == "image" && a.Data is not null
             ? Results.File(a.Data, a.ContentType)
             : Results.Text(a.Text, "text/plain; charset=utf-8");
+    }
+
+    /// <summary>A document's pages as pictures (drawn on first look, in the sandbox): how many it has, and how many are drawn.</summary>
+    private static async Task<IResult> PagesAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, DocumentPages pages, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var a = await db.ChatAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.UserId == me.Id, ct);
+        if (a is null)
+        {
+            return Results.NotFound();
+        }
+        if (!DocumentPages.CanDraw(a))
+        {
+            return AuthEndpoints.Problem(400, "kind", "Only PDF, Word, PowerPoint, Excel and OpenDocument files have pages to show.");
+        }
+        try
+        {
+            var (total, drawn) = await pages.PagesAsync(a, ct);
+            return Results.Ok(new { total, drawn, pages = Enumerable.Range(1, drawn).Select(n => $"/api/chat/attachments/{id}/pages/{n}") });
+        }
+        catch (DocumentPagesException ex)
+        {
+            return AuthEndpoints.Problem(503, "pages", ex.Message);
+        }
+    }
+
+    private static async Task<IResult> PageAsync(Guid id, int number, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, HttpContext http, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var page = await db.AttachmentPages.AsNoTracking()
+            .Where(x => x.AttachmentId == id && x.Number == number && db.ChatAttachments.Any(a => a.Id == id && a.UserId == me.Id))
+            .Select(x => x.Data).SingleOrDefaultAsync(ct);
+        if (page is null)
+        {
+            return Results.NotFound();
+        }
+        http.Response.Headers.CacheControl = "private, max-age=86400";
+        return Results.File(page, "image/jpeg");
     }
 }

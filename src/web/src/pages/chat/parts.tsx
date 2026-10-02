@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { formatValue } from '@/lib/format'
 import { attachmentUrl, downloadUrl } from './api'
 import { ImageViewer } from './image-viewer'
+import { asViewerImages } from './viewer-images'
 import { cn } from '@/lib/utils'
 import { argsOf, parseResult, resultCount } from './argus'
 import { CodeBlock } from './code-block'
@@ -247,7 +248,7 @@ export function ToolCard({
               </button>
             </li>
           ))}
-          <ImageViewer images={pictures} index={viewing} onIndex={setViewing} />
+          <ImageViewer images={asViewerImages(pictures)} index={viewing} onIndex={setViewing} />
         </ul>
       )}
       {made.length > 0 && (

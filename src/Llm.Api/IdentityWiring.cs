@@ -216,6 +216,7 @@ public static class IdentityWiring
         services.AddSingleton<Dashboards.SqlDatasource>();
         services.AddScoped<Gateway.Ledger>();
         services.AddScoped<Notifications.Notifier>();
+        services.AddScoped<Chat.DocumentPages>();
         services.AddSingleton<Notifications.NewsWatch>();
         services.AddHostedService(sp => sp.GetRequiredService<Notifications.NewsWatch>());
         services.AddHttpClient<Dashboards.PromDatasource>(c => c.Timeout = TimeSpan.FromSeconds(30));

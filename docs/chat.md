@@ -139,7 +139,15 @@ setups to paste.
   follow what is typed. Code, code blocks and formulas stay left to right.
 - **Files panel.** Like Claude's: every attachment, every file Argus read (with
   **Open in GitLab**), and every file the model wrote in the branch on screen.
-  It keeps the newest version of each and has a viewer.
+  It keeps the newest version of each and has a viewer. Files made by a
+  tool or a sub-agent show as soon as they exist. **Download all** (the
+  archive icon) saves every file listed as one zip.
+  - **Documents** (PDF, Word, PowerPoint, Excel, OpenDocument) show as their
+    pages, drawn on first look in the sandbox (LibreOffice to PDF, then each
+    page a picture) and kept: the first 20 pages, the rest in the download.
+    **Text** beside **Pages** shows what the model read.
+  - **Zoom**: pages zoom in the panel; a picture or a page opens full size
+    with zoom in and out (the buttons, `+` `-` `0`, Ctrl and the wheel).
 - **Previews.** Like Claude's artifacts and ChatGPT's canvas: code the model
   writes as `html`, `svg`, `mermaid`, `jsx` or `tsx` has a **Preview** button.
   It opens in the Files panel, running, with a **Code** tab beside it; the panel

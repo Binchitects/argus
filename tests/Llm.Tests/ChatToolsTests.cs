@@ -469,6 +469,40 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Equal(["worker.log"], listed.EnumerateArray().Select(x => x.GetProperty("file").GetString()));
     }
 
+    [Fact]
+    public async Task A_document_shows_as_its_pages_drawn_once_in_the_sandbox_and_only_to_its_owner()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = NewApp(settings: new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var (b, _, _) = await PersonAsync(f);
+        var (other, _, _) = await PersonAsync(f);
+        var builder = new UglyToad.PdfPig.Writer.PdfDocumentBuilder();
+        builder.AddPage(595, 842).AddText("Page one", 12, new UglyToad.PdfPig.Core.PdfPoint(50, 700), builder.AddStandard14Font(UglyToad.PdfPig.Fonts.Standard14Fonts.Standard14Font.Helvetica));
+        using var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent(builder.Build());
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        form.Add(part, "file", "report.pdf");
+        var id = (await b.JsonAsync(await b.Http.PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), form))).GetProperty("id").GetGuid();
+
+        var pages = await b.JsonAsync(await b.GetAsync($"/api/chat/attachments/{id}/pages"));
+        Assert.Equal(3, pages.GetProperty("total").GetInt32());
+        Assert.Equal(2, pages.GetProperty("drawn").GetInt32());
+        Assert.Equal([$"/api/chat/attachments/{id}/pages/1", $"/api/chat/attachments/{id}/pages/2"], pages.GetProperty("pages").EnumerateArray().Select(x => x.GetString()));
+        var first = await b.GetAsync($"/api/chat/attachments/{id}/pages/1");
+        Assert.Equal("image/jpeg", first.Content.Headers.ContentType?.MediaType);
+        Assert.Equal([0xFF, 0xD8, 0xFF, 1], await first.Content.ReadAsByteArrayAsync());
+
+        // Drawn once: a second look reads what was kept.
+        await b.GetAsync($"/api/chat/attachments/{id}/pages");
+        var job = Assert.Single(sandbox.Jobs, j => j["code"]!.GetValue<string>().StartsWith("# pages", StringComparison.Ordinal));
+        Assert.Equal(["doc.pdf"], job["files"]!.AsArray().Select(x => x!.GetValue<string>()));
+
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/chat/attachments/{id}/pages"));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/chat/attachments/{id}/pages/1"));
+        var text = await UploadAsync(b, "notes.txt", "no pages here");
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.GetAsync($"/api/chat/attachments/{text}/pages"));
+    }
+
     private static async Task<Guid> UploadAsync(TestBrowser b, string name, string text)
     {
         using var form = new MultipartFormDataContent();
