@@ -73,6 +73,25 @@ public sealed class AppFixture : IAsyncLifetime
         _ = Factory.Server; // start the app now, so migration failures surface here
     }
 
+    /// <summary>
+    /// A chat request at the gateway that cost <paramref name="spend"/>, booked to <paramref name="email"/>
+    /// as LiteLLM books the chat (the end user). Long ago, out of every dashboard test's time range.
+    /// </summary>
+    public async Task SpendAsync(string email, decimal spend)
+    {
+        await using var conn = new Npgsql.NpgsqlConnection(ConnectionStringFor("litellm_test" + _run));
+        await conn.OpenAsync();
+        await using var insert = new Npgsql.NpgsqlCommand("""
+            insert into "LiteLLM_SpendLogs" (request_id, call_type, api_key, spend, total_tokens, prompt_tokens, completion_tokens,
+              "startTime", "endTime", model, "user", metadata, end_user)
+            values (@id, 'acompletion', 'hash-chat', @spend, 10, 9, 1, '2025-01-01', '2025-01-01', 'qwen', '', '{"user_api_key_alias":"chat"}', @email)
+            """, conn);
+        insert.Parameters.AddWithValue("id", Guid.NewGuid().ToString());
+        insert.Parameters.AddWithValue("spend", (double)spend);
+        insert.Parameters.AddWithValue("email", email);
+        await insert.ExecuteNonQueryAsync();
+    }
+
     public string ConnectionStringFor(string database) =>
         new Npgsql.NpgsqlConnectionStringBuilder(Server) { Database = database }.ConnectionString;
 

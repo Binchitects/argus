@@ -91,6 +91,15 @@ export interface AgentWork {
   status?: 'running' | 'done' | 'failed'
   error: string | null
   ms: number | null
+  /** The model it ran on, and the tokens it used (once done): the answer's cost counts them. */
+  model?: string | null
+  usage?: TokenUsage | null
+}
+
+export interface TokenUsage {
+  prompt: number
+  cached: number
+  completion: number
 }
 
 export interface ConversationSummary {
@@ -161,6 +170,9 @@ export type ChatEvent =
       files?: Attachment[] | null
       error?: string | null
       ms?: number | null
+      /** With done: the model it ran on and the tokens it used. */
+      model?: string | null
+      usage?: TokenUsage | null
     }
   | { type: 'notice'; kind: string; text: string }
   /** Waiting for a turn: the model serves few at once, in turn (fair use). */

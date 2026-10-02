@@ -99,7 +99,7 @@ describe('chat', () => {
     expect(within(a).getByText(/Here is code/)).toBeInTheDocument()
     // Tokens and cost from the model's prices: (600*0.2 + 400*0.02 + 200*0.8) / 1e6.
     expect(within(a).getByText(/1 K in · 200 out/)).toBeInTheDocument()
-    expect(within(a).getByText('· $0.00029')).toBeInTheDocument()
+    expect(within(a).getByText('· $0.000288')).toBeInTheDocument()
   })
 
   it('a chat that chose no model shows the one that answers: the default, not the first listed', async () => {

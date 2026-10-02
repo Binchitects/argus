@@ -404,7 +404,8 @@ public sealed partial class ChatService(
                     e => Say(new { type = "agent", id = callId, index, e.Event, e.Text, e.Call, e.IsError, e.Files }), ct);
                 var finished = Interlocked.Increment(ref done);
                 var ms = (int)took.Elapsed.TotalMilliseconds;
-                await Say(new { type = "agent", id = callId, index, @event = "done", error = run.Error, ms });
+                var usage = new JsonObject { ["prompt"] = run.Usage.Prompt, ["cached"] = run.Usage.Cached, ["completion"] = run.Usage.Completion };
+                await Say(new { type = "agent", id = callId, index, @event = "done", error = run.Error, ms, model = kit.Model, usage });
                 await kit.Progress.ReportAsync(new McpProgress(finished, parts.Count, $"{part.Title}: {(run.Error is null ? "done" : "failed")}"));
                 var result = new JsonObject { ["title"] = part.Title, ["result"] = Cut(run.Text, AgentResultChars), ["tool_calls"] = run.Steps.Count };
                 if (run.Error is not null)
@@ -414,7 +415,7 @@ public sealed partial class ChatService(
                 var shown = new JsonObject
                 {
                     ["title"] = part.Title, ["instructions"] = part.Instructions, ["text"] = run.Text, ["reasoning"] = Cut(run.Reasoning, AgentShownChars * 5),
-                    ["steps"] = new JsonArray([.. run.Steps]), ["error"] = run.Error, ["ms"] = ms,
+                    ["steps"] = new JsonArray([.. run.Steps]), ["error"] = run.Error, ["ms"] = ms, ["model"] = kit.Model, ["usage"] = usage.DeepClone(),
                 };
                 return (result, shown, run.Files);
             }
@@ -436,8 +437,8 @@ public sealed partial class ChatService(
     /// <summary>A step of a sub-agent's work, for the page: its thinking or words as they come, a tool call, a tool's result.</summary>
     private sealed record AgentStep(string Event, string? Text = null, JsonObject? Call = null, bool? IsError = null, JsonArray? Files = null);
 
-    /// <summary>What a sub-agent did: its last words, its thinking, its tool calls (each with its result), and why it stopped short, if so.</summary>
-    private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error, List<ChatAttachment> Files);
+    /// <summary>What a sub-agent did: its last words, its thinking, its tool calls (each with its result), and why it stopped short, if so; what it made, and the tokens it used.</summary>
+    private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error, List<ChatAttachment> Files, UsageReport Usage);
 
     /// <summary>One sub-agent: its own little answer loop, kept out of the chat (only its result goes to the model).</summary>
     private async Task<AgentRun> AgentAsync(AgentTask part, AgentKit kit, Dictionary<string, IToolRun> own, JsonArray tools, string notes, Func<string, Task> say,
@@ -454,6 +455,8 @@ public sealed partial class ChatService(
         var made = new List<ChatAttachment>();
         var reasoning = new StringBuilder();
         var text = new StringBuilder();
+        // Every round's tokens: the answer's cost counts its sub-agents' too.
+        var used = new UsageReport(0, 0, 0);
         for (var round = 0; ; round++)
         {
             var request = new JsonObject
@@ -490,16 +493,19 @@ public sealed partial class ChatService(
                             var slot = pending.TryGetValue(t.Index, out var existing) ? existing : (null, null, new StringBuilder());
                             pending[t.Index] = (t.Id ?? slot.Id, t.Name ?? slot.Name, slot.Args.Append(t.Arguments));
                             break;
+                        case UsageReport u:
+                            used = new UsageReport(used.Prompt + u.Prompt, used.Cached + u.Cached, used.Completion + u.Completion);
+                            break;
                     }
                 }
             }
             catch (ChatGatewayException ex)
             {
-                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message, made);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message, made, used);
             }
             if (pending.Count == 0)
             {
-                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null, made);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null, made, used);
             }
             var toolCalls = new JsonArray([.. pending.Select(kv => (JsonNode)new JsonObject
             {

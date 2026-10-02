@@ -188,6 +188,14 @@ public sealed class ChatToolsTests(AppFixture app)
         var tool = chat.GetProperty("messages").EnumerateArray().First(m => m.GetProperty("toolName").GetString() == "delegate");
         Assert.Equal(3, tool.GetProperty("attachments").GetArrayLength());
         Assert.All(tool.GetProperty("details").GetProperty("agents").EnumerateArray(), a => Assert.Equal(1, a.GetProperty("steps")[0].GetProperty("files").GetArrayLength()));
+        // Each one's tokens are kept (two rounds of the fake model's 100 in, 40 cached, 12 out): the answer's cost counts them.
+        Assert.All(tool.GetProperty("details").GetProperty("agents").EnumerateArray(), a =>
+        {
+            Assert.Equal(200, a.GetProperty("usage").GetProperty("prompt").GetInt32());
+            Assert.Equal(80, a.GetProperty("usage").GetProperty("cached").GetInt32());
+            Assert.Equal(24, a.GetProperty("usage").GetProperty("completion").GetInt32());
+            Assert.False(string.IsNullOrEmpty(a.GetProperty("model").GetString()));
+        });
         foreach (var p in pictures)
         {
             await StatusAssert.Is(HttpStatusCode.OK, await b.GetAsync($"/api/chat/attachments/{p.GetProperty("id").GetGuid()}/content"));

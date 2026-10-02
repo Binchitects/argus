@@ -18,7 +18,7 @@ public static class UsageEndpoints
     private const string Cached =
         """coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0)""";
 
-    private const string From = """ from "LiteLLM_SpendLogs" s left join "LiteLLM_VerificationToken" v on v.token = s.api_key """;
+    public const string From = """ from "LiteLLM_SpendLogs" s left join "LiteLLM_VerificationToken" v on v.token = s.api_key """;
 
     public static void MapUsage(this IEndpointRouteBuilder app) =>
         app.MapGet("/api/usage/me", MeAsync).RequireAuthorization();

@@ -125,11 +125,11 @@ public static class AccountEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway)
+    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger)
     {
         var user = (await users.GetUserAsync(p))!;
         var keys = await gateway.KeysAsync(user.Email!);
-        var all = await gateway.UsersAsync();
+        var all = (await ledger.ReadAsync()).People;
         all.TryGetValue(user.Email!, out var standing);
         return Results.Ok(new
         {

@@ -174,7 +174,7 @@ public sealed class ReadOnlyTests(AppFixture app)
         var ex = await Assert.ThrowsAnyAsync<Npgsql.PostgresException>(() =>
             sql!.QueryAsync("""delete from "LiteLLM_SpendLogs" returning 1""", CancellationToken.None));
         Assert.True(ex.SqlState is "25006" or "42501", ex.SqlState); // read-only transaction / permission denied
-        var rows = await sql!.QueryAsync("""select count(*) from "LiteLLM_SpendLogs" """, CancellationToken.None);
+        var rows = await sql!.QueryAsync("""select count(*) from "LiteLLM_SpendLogs" where request_id in ('r1','r2','r3','r4','r5')""", CancellationToken.None);
         Assert.Equal(5.0, rows.Rows[0][0]);
     }
 

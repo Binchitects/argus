@@ -68,14 +68,15 @@ public static class AdminEndpoints
         });
     }
 
-    private static async Task<IResult> ListAsync(AppDbContext db, UserManager<AppUser> users, ILiteLlm gateway)
+    private static async Task<IResult> ListAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger)
     {
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Select(u => u.Id).ToHashSet();
         IReadOnlyDictionary<string, GatewayUser> standing;
         string? warning = null;
         try
         {
-            standing = await gateway.UsersAsync();
+            var spending = await ledger.ReadAsync();
+            (standing, warning) = (spending.People, spending.Problem);
         }
         catch (GatewayException ex)
         {
@@ -121,7 +122,7 @@ public static class AdminEndpoints
         }
     }
 
-    private static Task<IResult> GetAsync(Guid id, PeopleService people, UserManager<AppUser> users, ILiteLlm gateway, Access.AccessService access, AppDbContext db) =>
+    private static Task<IResult> GetAsync(Guid id, PeopleService people, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, Access.AccessService access, AppDbContext db) =>
         WithPerson(id, people, async u =>
         {
             IReadOnlyList<GatewayKey> keys = [];
@@ -130,7 +131,7 @@ public static class AdminEndpoints
             try
             {
                 keys = await gateway.KeysAsync(u.Email!);
-                (await gateway.UsersAsync()).TryGetValue(u.Email!, out standing);
+                (await ledger.ReadAsync()).People.TryGetValue(u.Email!, out standing);
             }
             catch (GatewayException ex)
             {

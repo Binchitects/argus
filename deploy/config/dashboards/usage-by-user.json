@@ -600,7 +600,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select u.user_id as \"Person\", coalesce(u.user_email,'') as \"Email\", round(coalesce(u.spend,0)::numeric,4) as \"Spend\", u.max_budget as \"Budget\", case when u.max_budget is null or u.max_budget = 0 then null else round((100.0*coalesce(u.spend,0)/u.max_budget)::numeric,1) end as \"Used %\" from \"LiteLLM_UserTable\" u where u.user_id not like 'e2e-%' order by 5 desc nulls last"
+          "rawSql": "select u.user_id as \"Person\", coalesce(u.user_email,'') as \"Email\", round(coalesce(l.spend,0)::numeric,4) as \"Spend\", u.max_budget as \"Budget\", case when u.max_budget is null or u.max_budget = 0 then null else round((100.0*coalesce(l.spend,0)/u.max_budget)::numeric,1) end as \"Used %\" from \"LiteLLM_UserTable\" u left join (select lower(coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)')) as person, sum(s.spend) as spend from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key group by 1) l on l.person = lower(u.user_id) where u.user_id not like 'e2e-%' order by 5 desc nulls last"
         }
       ],
       "fieldConfig": {

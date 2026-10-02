@@ -188,21 +188,23 @@ public static class OperationsEndpoints
         }
     }
 
-    private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, ILiteLlm gateway, ArgusAdmin argus,
+    private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
         IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Count(u => !u.IsDisabled);
-        IReadOnlyDictionary<string, GatewayUser> standing = new Dictionary<string, GatewayUser>();
+        var spending = new Spending(new Dictionary<string, GatewayUser>(), 0);
         string? warning = null;
         try
         {
-            standing = await gateway.UsersAsync(ct);
+            spending = await ledger.ReadAsync(ct);
+            warning = spending.Problem;
         }
         catch (GatewayException ex)
         {
             warning = "Spend and credit are missing: " + ex.Message;
         }
+        var standing = spending.People;
         var mine = people.Select(p => (p, g: standing.GetValueOrDefault(p.Email ?? ""))).ToList();
         var over = mine.Where(x => x.g is { Budget: > 0 } g && g.Spend >= g.Budget).Select(x => x.p.UserName).ToList();
 
@@ -231,7 +233,7 @@ public static class OperationsEndpoints
         {
             people = people.Count,
             admins,
-            spend = standing.Values.Sum(g => g.Spend),
+            spend = spending.Total,
             overCredit = over,
             warning,
             services = await probes,
@@ -337,10 +339,10 @@ public static class OperationsEndpoints
         });
     }
 
-    private static async Task<IResult> PeopleCsvAsync(AppDbContext db, UserManager<AppUser> users, ILiteLlm gateway, CancellationToken ct)
+    private static async Task<IResult> PeopleCsvAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, CancellationToken ct)
     {
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Select(u => u.Id).ToHashSet();
-        var standing = await gateway.UsersAsync(ct);
+        var standing = (await ledger.ReadAsync(ct)).People;
         var sb = new StringBuilder("username,display_name,email,role,source,disabled,spend,budget,credit_left\n");
         foreach (var u in await db.Users.AsNoTracking().OrderBy(u => u.UserName).ToListAsync(ct))
         {

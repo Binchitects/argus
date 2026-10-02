@@ -177,7 +177,7 @@ function agentStep(agents: AgentWork[], e: Extract<ChatEvent, { type: 'agent' }>
       a.steps = a.steps.map((s) => (s.id === e.call?.id ? { ...s, result: e.text ?? '', isError: !!e.isError, files: e.files ?? null } : s))
       break
     case 'done':
-      Object.assign(a, { status: e.error ? 'failed' : 'done', error: e.error ?? null, ms: e.ms ?? null })
+      Object.assign(a, { status: e.error ? 'failed' : 'done', error: e.error ?? null, ms: e.ms ?? null, model: e.model ?? null, usage: e.usage ?? null })
       break
   }
   next[e.index] = a

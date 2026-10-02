@@ -15,10 +15,17 @@ public sealed class OperationsTests(AppFixture app)
         var admin = await Admin();
         var name = "ov" + Guid.NewGuid().ToString("N")[..8];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test", budget = 1 }));
+        // Spent in the chat: LiteLLM books it to the end user, not the internal user its keys count for.
+        await app.SpendAsync($"{name}@example.test", 1.5m);
         var o = await admin.JsonAsync(await admin.GetAsync("/api/admin/overview"));
         Assert.True(o.GetProperty("people").GetInt32() >= 2);
         Assert.True(o.GetProperty("admins").GetInt32() >= 1);
-        Assert.Contains(name, o.GetProperty("overCredit").EnumerateArray().Select(x => x.GetString())); // the fake gateway reports 1.50 spent
+        Assert.Contains(name, o.GetProperty("overCredit").EnumerateArray().Select(x => x.GetString()));
+        // Everything in the gateway's log: the seeded requests (1.0012) and this one at least.
+        Assert.True(o.GetProperty("spend").GetDecimal() >= 2.5012m, o.GetProperty("spend").ToString());
+        var people = (await admin.JsonAsync(await admin.GetAsync("/api/admin/people"))).GetProperty("people").EnumerateArray();
+        Assert.Equal(1.5m, people.Single(p => p.GetProperty("userName").GetString() == name).GetProperty("spend").GetDecimal());
+        Assert.Contains($"{name}@example.test", await (await admin.GetAsync("/api/admin/people.csv")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
         Assert.True(o.GetProperty("index").GetProperty("configured").GetBoolean());
         Assert.Equal(1, o.GetProperty("index").GetProperty("summary").GetProperty("repos").GetInt32());
         Assert.Equal("Qwen3.8-Flash-Next", o.GetProperty("model").GetString());

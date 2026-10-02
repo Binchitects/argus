@@ -19,18 +19,42 @@ export function toolTitle(name: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
-/** What an answer cost, from its tokens and its model's prices. */
-export function answerCost(messages: Message[], config: ChatConfig): number | null {
-  let total = 0
-  let known = false
-  for (const m of messages) {
-    const p = config.models.find((x) => x.name === m.model)?.prices
-    if (!p || m.promptTokens === null || p.input === null || p.output === null) continue
-    const cached = m.cachedTokens ?? 0
-    total += ((m.promptTokens - cached) * p.input + cached * (p.cachedInput ?? p.input) + (m.completionTokens ?? 0) * p.output) / 1_000_000
-    known = true
+/** The tokens an answer used, its sub-agents' with them, and what that cost at its models' prices (null: no price known). */
+export interface AnswerUsage {
+  prompt: number
+  cached: number
+  completion: number
+  /** The sub-agents' share of the tokens above. */
+  agents: { prompt: number; cached: number; completion: number }
+  cost: number | null
+}
+
+/**
+ * What an answer used and cost: each model call's tokens at its model's prices, the
+ * answer's own and its sub-agents' (kept with their delegate call). The gateway bills
+ * the same calls at the same prices, so this is what the usage pages show for it.
+ */
+export function answerUsage(messages: Message[], config: ChatConfig): AnswerUsage {
+  const u: AnswerUsage = { prompt: 0, cached: 0, completion: 0, agents: { prompt: 0, cached: 0, completion: 0 }, cost: null }
+  const add = (model: string | null | undefined, prompt: number, cached: number, completion: number) => {
+    u.prompt += prompt
+    u.cached += cached
+    u.completion += completion
+    const p = config.models.find((x) => x.name === model)?.prices
+    if (!p || p.input === null || p.output === null) return
+    u.cost = (u.cost ?? 0) + ((prompt - cached) * p.input + cached * (p.cachedInput ?? p.input) + completion * p.output) / 1_000_000
   }
-  return known ? total : null
+  for (const m of messages) {
+    if (m.role === 'assistant' && m.promptTokens !== null) add(m.model, m.promptTokens, m.cachedTokens ?? 0, m.completionTokens ?? 0)
+    for (const a of m.role === 'tool' ? (m.details?.agents ?? []) : []) {
+      if (!a.usage) continue
+      add(a.model, a.usage.prompt, a.usage.cached, a.usage.completion)
+      u.agents.prompt += a.usage.prompt
+      u.agents.cached += a.usage.cached
+      u.agents.completion += a.usage.completion
+    }
+  }
+  return u
 }
 
 /** Today, Yesterday, Previous 7 days, Previous 30 days, then by month. */

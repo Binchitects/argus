@@ -5,13 +5,13 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Textarea } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
-import { formatValue } from '@/lib/format'
+import { formatValue, money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { attachmentUrl } from './api'
 import { ImageViewer } from './image-viewer'
 import type { Notice, ToolRunning } from './live'
 import { Markdown } from './markdown'
-import { answerCost, seconds } from './format'
+import { answerUsage, seconds } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
 import { QuestionCard } from './questions'
 import type { AgentWork, ChatConfig, Message } from './types'
@@ -203,9 +203,8 @@ export function AnswerTurn({
   const first = assistants[0]
   const last = assistants.at(-1)
   const text = assistants.map((a) => a.content).filter(Boolean).join('\n\n')
-  const tokens = assistants.reduce((a, m) => ({ in: a.in + (m.promptTokens ?? 0), cached: a.cached + (m.cachedTokens ?? 0), out: a.out + (m.completionTokens ?? 0) }), { in: 0, cached: 0, out: 0 })
   const took = assistants.reduce((a, m) => a + (m.durationMs ?? 0), 0) + answer.filter((m) => m.role === 'tool').reduce((a, m) => a + (m.durationMs ?? 0), 0)
-  const cost = answerCost(assistants, config)
+  const usage = answerUsage(answer, config)
   const waiting = live && assistants.every((a) => !a.content && !a.reasoning && !a.toolCalls?.length)
 
   let footer: ReactNode = null
@@ -262,12 +261,16 @@ export function AnswerTurn({
         <span className="ml-1 flex flex-wrap items-center gap-x-2 tabular-nums">
           {last?.model && <span>{last.model}</span>}
           {took > 0 && <span>· {seconds(took)}</span>}
-          {tokens.in + tokens.out > 0 && (
-            <span title={`${tokens.in.toLocaleString()} in (${tokens.cached.toLocaleString()} from cache), ${tokens.out.toLocaleString()} out`}>
-              · {formatValue(tokens.in)} in · {formatValue(tokens.out)} out
+          {usage.prompt + usage.completion > 0 && (
+            <span
+              title={`${usage.prompt.toLocaleString()} in (${usage.cached.toLocaleString()} from cache), ${usage.completion.toLocaleString()} out${
+                usage.agents.prompt + usage.agents.completion > 0 ? `; sub-agents: ${usage.agents.prompt.toLocaleString()} in, ${usage.agents.completion.toLocaleString()} out` : ''
+              }`}
+            >
+              · {formatValue(usage.prompt)} in · {formatValue(usage.completion)} out
             </span>
           )}
-          {cost !== null && <span>· ${cost < 0.01 ? Number(cost.toPrecision(2)) : cost.toFixed(2)}</span>}
+          {usage.cost !== null && <span>· {money(usage.cost)}</span>}
         </span>
       </div>
     )
