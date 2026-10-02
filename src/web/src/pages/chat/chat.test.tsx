@@ -58,6 +58,7 @@ function backend(opts: { events?: object[]; saved?: Message[]; hang?: boolean; s
       answered = true
       return { events: opts.events ?? [], hang: opts.hang }
     },
+    'POST /api/chat/conversations/c1/stop': () => ({ status: 202 }),
     ...opts.extra,
   })
 }
@@ -397,6 +398,8 @@ describe('chat', () => {
     const a = await screen.findByRole('region', { name: 'Answer' })
     expect(await within(a).findByText('Waiting for you')).toBeInTheDocument()
     expect(within(a).getByRole('alert')).toHaveTextContent('Allow Calculate to run with these arguments?')
+    // Open, so the person reads what it would run before allowing it.
+    expect(within(a).getByText('Asked with')).toBeInTheDocument()
     await userEvent.click(within(a).getByRole('button', { name: 'Allow' }))
     await waitFor(() => expect(calls.find((c) => c.path.endsWith('/tool-calls/call_1'))?.body).toEqual({ allow: true }))
     await waitFor(() => expect(within(a).queryByText('Waiting for you')).toBeNull())
@@ -479,6 +482,77 @@ describe('chat', () => {
     expect(await screen.findByText('Stopped.')).toBeInTheDocument()
     expect(screen.getByText('partial answer')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+  })
+
+  it('a chat still answering (its page was closed) is watched again from the start, and Stop asks the server', async () => {
+    const question = msg('q1', null, 'user', { content: 'long one' })
+    const calls = backend({
+      start: conversation({ messages: [question], currentLeafId: 'q1', answering: true }),
+      saved: [question, msg('a1', 'q1', 'assistant', { content: 'written while away', status: 'stopped' })],
+      extra: {
+        'GET /api/chat/conversations/c1/stream': () => ({
+          events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'written while away' }],
+          hang: true,
+        }),
+      },
+    })
+    renderApp('/chat/c1')
+    expect(await screen.findByText('written while away')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    expect(await screen.findByText('Stopped.')).toBeInTheDocument()
+    expect(calls.filter((c) => c.path === '/api/chat/conversations/c1/stream')).toHaveLength(1)
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/stop')).toBe(true)
+  })
+
+  it('/compact summarizes the chat; the page marks where, and shows the summary on demand', async () => {
+    const summary = 'The person said hello; the assistant wrote hello.py.'
+    let compacted = false
+    const calls = backend({
+      extra: {
+        'GET /api/chat/conversations/c1': () => ({
+          json: conversation({ messages: compacted ? [answered[0]!, { ...answered[1]!, summary }] : answered, currentLeafId: 'a1' }),
+        }),
+        'POST /api/chat/conversations/c1/compact': () => {
+          compacted = true
+          return { events: [{ type: 'compacting' }, { type: 'compacted', id: 'a1', summary, auto: false, covered: 2 }, { type: 'done', id: 'a1' }] }
+        },
+      },
+    })
+    renderApp('/chat/c1')
+    await screen.findByText('Hi! Here is code:')
+    await ask('/compact')
+    expect(await screen.findByText('Compacted: 2 messages summarized. The next answers read the summary.')).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true)
+    expect(calls.some((c) => c.path === '/api/chat/conversations/c1/messages')).toBe(false)
+    const mark = await screen.findByRole('note', { name: 'Chat compacted' })
+    await userEvent.click(within(mark).getByRole('button', { name: /Show summary/ }))
+    expect(within(mark).getByText(/the assistant wrote hello\.py/)).toBeInTheDocument()
+  })
+
+  it('a chat half full shows how full, and compacts from there', async () => {
+    const full = [answered[0]!, { ...answered[1]!, promptTokens: 20_000, completionTokens: 200 }]
+    const calls = backend({ start: conversation({ messages: full, currentLeafId: 'a1' }), extra: { 'POST /api/chat/conversations/c1/compact': () => ({ events: [{ type: 'done', id: 'a1' }] }) } })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: '62% of context · Compact' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true))
+  })
+
+  it('a tool call shows its code and its output as code blocks', async () => {
+    const messages = [
+      msg('q1', null, 'user', { content: 'count files' }),
+      msg('a1', 'q1', 'assistant', { toolCalls: [{ id: 'c1', function: { name: 'run_python', arguments: JSON.stringify({ code: 'import os\nprint(len(os.listdir()))' }) } }] }),
+      msg('t1', 'a1', 'tool', { toolCallId: 'c1', toolName: 'run_python', content: '{"exit_code":1,"stdout":"3\\n","stderr":"Traceback: boom","seconds":0.2}', status: 'failed' }),
+      msg('a2', 't1', 'assistant', { content: 'Three files.' }),
+    ]
+    backend({ start: conversation({ messages, currentLeafId: 'a2' }) })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: /Run python/ }))
+    const code = screen.getByRole('figure', { name: 'Code: code · python' })
+    expect(within(code).getByRole('button', { name: 'Copy code' })).toBeInTheDocument()
+    expect(code.textContent).toContain('print(len(os.listdir()))')
+    expect(within(screen.getByRole('figure', { name: 'Code: Output' })).getByText('3')).toBeInTheDocument()
+    expect(screen.getByRole('figure', { name: 'Code: Error' }).textContent).toContain('Traceback: boom')
+    expect(screen.getByText('Exit code 1')).toBeInTheDocument()
   })
 
   it('shows why an answer failed', async () => {

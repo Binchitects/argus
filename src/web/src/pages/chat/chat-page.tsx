@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, streamChat } from './api'
+import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, stopChat, streamChat } from './api'
 import { Composer } from './composer'
 import { collectFiles } from './files'
 import { FilesPanel } from './files-panel'
@@ -21,8 +21,8 @@ import { toolsOn } from './tools'
 import { ToolsPicker } from './tools-picker'
 import { ChatList } from './sidebar'
 import { ChatTree, toTurns } from './tree'
-import { AnswerTurn, QuestionTurn } from './turns'
-import type { ChatConfig, ChatSettings, Conversation, Message } from './types'
+import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
+import type { ChatConfig, ChatEvent, ChatSettings, Conversation, Message } from './types'
 import { useUploads } from './uploads'
 
 export function ChatPage() {
@@ -79,6 +79,9 @@ export function ChatPage() {
     </div>
   )
 }
+
+/** Why a stream was let go: the page left the chat (the answer goes on). */
+const leaving = 'leaving'
 
 const suggestions = [
   { icon: Code2, text: 'Write a Python script that renames photos by the date they were taken.' },
@@ -144,6 +147,11 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const model = chatModel(config, settings.model)
   const toolsOnHere = toolsOn(config.tools, settings.tools)
   const title = live?.title ?? data?.title ?? null
+  /** An answer is being written (not only a compaction the person asked for). */
+  const answering = streaming && view.mode !== 'compact'
+  // How full the context was at the last answer: its prompt and what it wrote.
+  const lastUsage = [...path].reverse().find((m) => m.role === 'assistant' && m.promptTokens != null)
+  const context = model?.context && lastUsage ? { used: (lastUsage.promptTokens ?? 0) + (lastUsage.completionTokens ?? 0), limit: model.context } : undefined
 
   useEffect(() => {
     document.title = title ? `${title} · ${brand ?? 'Chat'}` : `Chat · ${brand ?? ''}`.trim()
@@ -254,12 +262,19 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     await queryClient.invalidateQueries({ queryKey: ['chat'] })
   }
 
-  /** Streams one answer; false when the question never reached the server (it goes back into the box). */
+  /**
+   * Streams one answer; false when the question never reached the server (it goes
+   * back into the box). The answer runs on the server: leaving the page only stops
+   * watching it. No body: watch the answer the chat is writing already.
+   */
   /** Which run is current: a run that ended tidies up only while no newer one has started. */
   const runs = useRef(0)
+  /** An answer was watched here already: the chat's own "answering" is not watched again. */
+  const attached = useRef(false)
   const run = useCallback(
-    async (conversationId: string, endpoint: string, body: object, start: LiveState, localId: string | null): Promise<boolean> => {
+    async (conversationId: string, endpoint: string, body: object | null, start: LiveState, localId: string | null, watch?: (e: ChatEvent) => void): Promise<boolean> => {
       const me = ++runs.current
+      attached.current = true
       setLive(start)
       setStreaming(true)
       streamingIn.current = conversationId
@@ -275,11 +290,14 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
           body,
           (e) => {
             received = true
+            watch?.(e)
             setLive((s) => reduce(s ?? start, e, localId))
           },
           controller.signal,
         )
       } catch (err) {
+        // The page left: the answer goes on without it, and nothing here is shown any more.
+        if (controller.signal.reason === leaving) return true
         wasStopped = err instanceof DOMException && err.name === 'AbortError'
         if (!wasStopped)
           setError(err instanceof ApiError ? err.message : received ? 'The answer was interrupted.' : 'The message did not reach the server. It is back in the box below: send it again.')
@@ -308,6 +326,39 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     [queryClient],
   )
 
+  /** Stop: the server stops the answer and keeps what it has; this page stops watching at once. */
+  const stop = async () => {
+    const chat = streamingIn.current
+    const watching = abort.current
+    // Not answering any more (it ended as Stop was pressed): nothing to say.
+    if (chat) await stopChat(chat).catch((e) => !(e instanceof ApiError && e.http === 409) && toast.error(errorMessage(e, 'The answer could not be stopped. It goes on.')))
+    watching?.abort()
+  }
+
+  // Leaving the chat stops watching its answer, not the answer.
+  useEffect(() => () => abort.current?.abort(leaving), [])
+
+  // A chat answering already (its page was closed, or another tab asked): watch the answer from its start.
+  useEffect(() => {
+    if (!id || !data?.answering || attached.current || abort.current) return
+    attached.current = true
+    void run(id, 'stream', null, { messages: data.messages, leaf: data.currentLeafId, notices: [], title: null, thinkingSince: null }, null)
+  }, [id, data, run])
+
+  /** Compacts the branch on screen: the model summarizes it, and the next answers read the summary instead. */
+  const compact = async () => {
+    if (!id || streaming) return
+    const seen = { done: '', failed: '' }
+    await run(id, 'compact', {}, { ...view, notices: [], mode: 'compact' }, null, (e) => {
+      if (e.type === 'compacted') seen.done = `Compacted: ${e.covered} ${e.covered === 1 ? 'message' : 'messages'} summarized. The next answers read the summary.`
+      if (e.type === 'notice') seen.done = e.text
+      if (e.type === 'error') seen.failed = e.message
+    })
+    if (seen.failed) setError(seen.failed)
+    else if (seen.done) toast.success(seen.done)
+  }
+  const canCompact = !!id && !streaming && path.length > 0 && !path.at(-1)!.id.startsWith('local-') && path.at(-1)!.role !== 'tool' && !path.at(-1)!.toolCalls?.length
+
   /** The chat's id, making the chat first when this is its first message. */
   const ensureChat = async (): Promise<string | null> => {
     if (id) return id
@@ -324,6 +375,15 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   }
 
   const send = async (text: string): Promise<boolean> => {
+    // "/compact": a command, not a question.
+    if (text === '/compact' && uploads.attachments.length === 0) {
+      if (!canCompact) {
+        toast.error(id ? 'Compact when the answer is done.' : 'This chat has nothing to compact yet.')
+        return false
+      }
+      await compact()
+      return true
+    }
     const conversationId = await ensureChat()
     if (!conversationId) return false
     const parent = view.leaf
@@ -420,6 +480,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
           onToggleFiles={() => setFilesOpen(!filesOpen)}
           onOpenList={onOpenList}
           chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt } : undefined}
+          onCompact={canCompact ? () => void compact() : undefined}
         />
         {empty ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
@@ -433,7 +494,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                   {error}
                 </Alert>
               )}
-              <Composer streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} uploads={uploads} model={model} tools={toolsPicker} autoFocus big />
+              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} autoFocus big />
               <div className="stagger mt-4 grid gap-2 sm:grid-cols-3">
                 {(config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions).map((s) => (
                   <button
@@ -472,31 +533,46 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                       </Link>
                     </p>
                   )}
-                  {turns.map((t, i) => (
-                    <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                      {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} />}
-                      {(t.answer.length > 0 || (streaming && i === lastTurn)) && (
-                        <AnswerTurn
-                          answer={t.answer}
-                          siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
-                          live={streaming && i === lastTurn}
-                          thinkingSince={streaming && i === lastTurn ? view.thinkingSince : null}
-                          queued={streaming && i === lastTurn ? view.queued : null}
-                          notices={i === lastTurn ? view.notices : []}
-                          config={config}
-                          question={t.question}
-                          onSwitch={switchTo}
-                          onRegenerate={regenerate}
-                          onOpenFile={openFile}
-                          onPreview={openPreview}
-                          onFork={id ? (messageId) => void forkFrom(messageId) : undefined}
-                          approvals={streaming && i === lastTurn ? view.waiting : undefined}
-                          onDecide={(callId, allow) => void decide(callId, allow)}
-                          busy={streaming}
-                        />
-                      )}
-                    </div>
-                  ))}
+                  {turns.map((t, i) => {
+                    const summary = [t.question, ...t.answer].find((m) => m?.summary)?.summary
+                    return (
+                      <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
+                        {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} />}
+                        {(t.answer.length > 0 || (answering && i === lastTurn)) && (
+                          <AnswerTurn
+                            answer={t.answer}
+                            siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
+                            live={answering && i === lastTurn}
+                            thinkingSince={answering && i === lastTurn ? view.thinkingSince : null}
+                            queued={answering && i === lastTurn ? view.queued : null}
+                            compacting={answering && i === lastTurn && !!view.compacting}
+                            notices={i === lastTurn ? view.notices : []}
+                            config={config}
+                            question={t.question}
+                            onSwitch={switchTo}
+                            onRegenerate={regenerate}
+                            onOpenFile={openFile}
+                            onPreview={openPreview}
+                            onFork={id ? (messageId) => void forkFrom(messageId) : undefined}
+                            approvals={answering && i === lastTurn ? view.waiting : undefined}
+                            onDecide={(callId, allow) => void decide(callId, allow)}
+                            busy={streaming}
+                          />
+                        )}
+                        {summary && <CompactedMark summary={summary} onOpenFile={openFile} />}
+                      </div>
+                    )
+                  })}
+                  {streaming && view.mode === 'compact' && (
+                    <output className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <span className="flex gap-1" aria-hidden="true">
+                        <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+                        <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+                        <span className="size-1.5 animate-bounce rounded-full bg-current" />
+                      </span>
+                      {view.queued != null ? `Waiting for the model to compact the chat (${view.queued} ahead)…` : 'Compacting the chat: summarizing it so the next answers read the summary…'}
+                    </output>
+                  )}
                   {error && <Alert variant="destructive">{error}</Alert>}
                 </div>
               </div>
@@ -517,7 +593,17 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                   <ArrowDown />
                 </Button>
               )}
-              <Composer streaming={streaming} onSend={send} onStop={() => abort.current?.abort()} uploads={uploads} model={model} tools={toolsPicker} autoFocus />
+              <Composer
+                streaming={streaming}
+                onSend={send}
+                onStop={() => void stop()}
+                uploads={uploads}
+                model={model}
+                tools={toolsPicker}
+                context={context}
+                onCompact={canCompact ? () => void compact() : undefined}
+                autoFocus
+              />
             </div>
           </>
         )}

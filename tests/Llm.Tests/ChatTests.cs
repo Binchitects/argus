@@ -189,41 +189,91 @@ public sealed class ChatTests(AppFixture app)
         Assert.Equal("failed", last.GetProperty("status").GetString());
     }
 
+    /// <summary>Starts an answer and reads its stream until <paramref name="until"/> has arrived; the stream stays open.</summary>
+    private static async Task<(HttpResponseMessage Response, string Seen)> StartAsync(TestBrowser b, Guid id, string text, string until, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri($"/api/chat/conversations/{id}/messages", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new { content = text }),
+        };
+        var res = await b.Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        var stream = await res.Content.ReadAsStreamAsync(ct);
+        var buffer = new byte[4096];
+        var seen = new StringBuilder();
+        while (!seen.ToString().Contains(until, StringComparison.Ordinal))
+        {
+            seen.Append(Encoding.UTF8.GetString(buffer, 0, await stream.ReadAsync(buffer, ct)));
+        }
+        return (res, seen.ToString());
+    }
+
+    /// <summary>The last message once it has <paramref name="status"/> (the answer runs on its own).</summary>
+    private async Task<JsonElement> LastOnceAsync(TestBrowser b, Guid id, string status)
+    {
+        JsonElement last = default;
+        for (var i = 0; i < 100; i++)
+        {
+            var conv = await ConversationAsync(b, id);
+            last = conv.GetProperty("messages").EnumerateArray().Last();
+            if (last.GetProperty("status").GetString() == status && !conv.GetProperty("answering").GetBoolean())
+            {
+                break;
+            }
+            await Task.Delay(100);
+        }
+        return last;
+    }
+
     [Fact]
     public async Task Stopping_keeps_what_arrived_and_marks_it_stopped()
     {
         var (b, _) = await PersonAsync();
         var id = await NewChatAsync(b, new { useArgus = false });
-        using var cts = new CancellationTokenSource();
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri($"/api/chat/conversations/{id}/messages", UriKind.Relative))
+        var (res, _) = await StartAsync(b, id, "Write a lot [slow]", "w5 ", CancellationToken.None);
+        using (res)
         {
-            Content = JsonContent.Create(new { content = "Write a lot [slow]" }),
-        };
-        var res = await b.Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-        var stream = await res.Content.ReadAsStreamAsync(cts.Token);
-        var buffer = new byte[4096];
-        var seen = new StringBuilder();
-        while (!seen.ToString().Contains("w5 ", StringComparison.Ordinal))
-        {
-            seen.Append(Encoding.UTF8.GetString(buffer, 0, await stream.ReadAsync(buffer, cts.Token)));
+            Assert.True((await ConversationAsync(b, id)).GetProperty("answering").GetBoolean());
+            await StatusAssert.Is(HttpStatusCode.Accepted, await b.PostAsync($"/api/chat/conversations/{id}/stop", new { }));
+            // The open stream says so, and ends.
+            var rest = Events(await res.Content.ReadAsStringAsync());
+            Assert.Equal("stopped", rest.Last().GetProperty("type").GetString());
         }
-        await cts.CancelAsync();
-        res.Dispose();
 
-        JsonElement last = default;
-        for (var i = 0; i < 50; i++)
-        {
-            await Task.Delay(100);
-            last = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().Last();
-            if (last.GetProperty("status").GetString() == "stopped")
-            {
-                break;
-            }
-        }
+        var last = await LastOnceAsync(b, id, "stopped");
         Assert.Equal("stopped", last.GetProperty("status").GetString());
         var content = last.GetProperty("content").GetString()!;
         Assert.StartsWith("w0 w1 w2 w3 w4 w5 ", content, StringComparison.Ordinal);
         Assert.DoesNotContain("w399", content, StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.Conflict, await b.PostAsync($"/api/chat/conversations/{id}/stop", new { }));
+    }
+
+    [Fact]
+    public async Task Closing_the_page_leaves_the_answer_to_finish_and_it_can_be_watched_again()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        using var cts = new CancellationTokenSource();
+        var (res, _) = await StartAsync(b, id, "Take your time [steady]", "s3 ", cts.Token);
+        // The page goes away mid-answer.
+        await cts.CancelAsync();
+        res.Dispose();
+
+        // Coming back: the answer so far in one go, then the rest live, to the end.
+        var watch = await b.GetAsync($"/api/chat/conversations/{id}/stream");
+        await StatusAssert.Is(HttpStatusCode.OK, watch);
+        var events = Events(await watch.Content.ReadAsStringAsync());
+        Assert.Equal("question", events[0].GetProperty("type").GetString());
+        var text = string.Concat(events.Where(e => e.GetProperty("type").GetString() == "content").Select(e => e.GetProperty("text").GetString()));
+        Assert.Equal(string.Concat(Enumerable.Range(0, 60).Select(i => $"s{i} ")), text);
+        Assert.Equal("done", events.Last().GetProperty("type").GetString());
+
+        var last = await LastOnceAsync(b, id, "complete");
+        Assert.Equal("complete", last.GetProperty("status").GetString());
+        Assert.EndsWith("s59 ", last.GetProperty("content").GetString()!, StringComparison.Ordinal);
+        // Nothing is being written now: nothing to watch.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await b.GetAsync($"/api/chat/conversations/{id}/stream"));
+        var listed = (await b.JsonAsync(await b.GetAsync("/api/chat/conversations"))).EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == id);
+        Assert.False(listed.GetProperty("answering").GetBoolean());
     }
 
     [Fact]
@@ -256,6 +306,7 @@ public sealed class ChatTests(AppFixture app)
         using var running = await b.Http.SendAsync(first, HttpCompletionOption.ResponseHeadersRead);
         var second = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "again" });
         await StatusAssert.Is(HttpStatusCode.Conflict, second);
+        await StatusAssert.Is(HttpStatusCode.Accepted, await b.PostAsync($"/api/chat/conversations/{id}/stop", new { }));
     }
 
     [Fact]
@@ -331,6 +382,112 @@ public sealed class ChatTests(AppFixture app)
         Assert.DoesNotContain("old question 0 ", text, StringComparison.Ordinal);
         Assert.Equal("user", sent[1]!["role"]!.GetValue<string>());
         Assert.True(text.Length < (32768 - 8192) * 4);
+    }
+
+    /// <summary>A branch of old exchanges, each question <paramref name="chars"/> long, on screen: its last answer's id.</summary>
+    private async Task<Guid> OldExchangesAsync(Guid id, int count, int chars)
+    {
+        using var scope = app.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Guid? parent = null;
+        for (var i = 0; i < count; i++)
+        {
+            var q = new Llm.Core.Chat.ChatMessage { ConversationId = id, ParentId = parent, Role = "user", Sequence = 2 * i + 1, Content = $"old question {i} " + new string('x', chars) };
+            var a = new Llm.Core.Chat.ChatMessage { ConversationId = id, ParentId = q.Id, Role = "assistant", Sequence = 2 * i + 2, Content = $"old answer {i}" };
+            db.ChatMessages.AddRange(q, a);
+            parent = a.Id;
+        }
+        var c = await db.Conversations.SingleAsync(x => x.Id == id);
+        c.CurrentLeafId = parent;
+        await db.SaveChangesAsync();
+        return parent!.Value;
+    }
+
+    private IEnumerable<JsonObject> RequestsOf(string email, bool summaries) =>
+        app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email).Select(r => r.Body)
+            .Where(b => b["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You compact", StringComparison.Ordinal) == summaries);
+
+    [Fact]
+    public async Task A_chat_near_the_end_of_the_context_is_compacted_and_goes_on()
+    {
+        var (b, email) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        // 30 exchanges of ~2,600 characters: past 80% of a 32K-token context.
+        await OldExchangesAsync(id, 30, 2_500);
+        var events = await SendAsync(b, id, "the newest question");
+        var types = Types(events).ToList();
+        Assert.True(types.IndexOf("compacting") >= 0 && types.IndexOf("compacted") < types.IndexOf("assistant"), string.Join(",", types));
+        var compacted = events.Single(e => e.GetProperty("type").GetString() == "compacted");
+        Assert.True(compacted.GetProperty("auto").GetBoolean());
+
+        // The summarizer read the oldest messages; the answer read its summary and the newest ones as they are.
+        Assert.Contains("old question 0 ", Assert.Single(RequestsOf(email, summaries: true)).ToJsonString(), StringComparison.Ordinal);
+        var sent = RequestsOf(email, summaries: false).Last()["messages"]!.AsArray();
+        Assert.Contains("<summary>\nSummary of ", sent[0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        var text = sent.ToJsonString();
+        Assert.DoesNotContain("old question 0 ", text, StringComparison.Ordinal);
+        Assert.Contains("old question 29 ", text, StringComparison.Ordinal);
+        Assert.Contains("the newest question", text, StringComparison.Ordinal);
+        Assert.Equal("user", sent[1]!["role"]!.GetValue<string>());
+
+        // The summary is kept on the last message it covers, for the page and the next answers.
+        var messages = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().ToList();
+        var holder = messages.Single(m => m.GetProperty("summary").ValueKind == JsonValueKind.String);
+        Assert.Equal(compacted.GetProperty("id").GetGuid(), holder.GetProperty("id").GetGuid());
+        Assert.Equal("assistant", holder.GetProperty("role").GetString());
+
+        // The next question is not compacted again: it fits.
+        await SendAsync(b, id, "and one more");
+        Assert.Single(RequestsOf(email, summaries: true));
+        Assert.StartsWith("The earlier part", RequestsOf(email, summaries: false).Last()["messages"]![0]!["content"]!.GetValue<string>().Split("\n\n").Last(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Compact_summarizes_the_branch_on_screen_and_the_next_answer_reads_the_summary()
+    {
+        var (b, email) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{id}/compact", new { }));
+        await SendAsync(b, id, "first question");
+        await SendAsync(b, id, "second question");
+
+        var events = await SendAsync(b, id, "", path: "compact");
+        Assert.Equal(["compacting", "compacted", "done"], Types(events));
+        Assert.False(events[1].GetProperty("auto").GetBoolean());
+        Assert.Equal(4, events[1].GetProperty("covered").GetInt32());
+        var conv = await ConversationAsync(b, id);
+        var leaf = conv.GetProperty("currentLeafId").GetGuid();
+        Assert.Equal(leaf, events[1].GetProperty("id").GetGuid());
+        Assert.StartsWith("Summary of ", conv.GetProperty("messages").EnumerateArray().Single(m => m.GetProperty("id").GetGuid() == leaf).GetProperty("summary").GetString(), StringComparison.Ordinal);
+        var asked = RequestsOf(email, summaries: true).Last()["messages"]![1]!["content"]!.GetValue<string>();
+        Assert.Contains("Person: first question", asked, StringComparison.Ordinal);
+        Assert.Contains("Assistant: Answer to: second question", asked, StringComparison.Ordinal);
+
+        // Nothing new since: nothing to do.
+        Assert.Equal(["notice", "done"], Types(await SendAsync(b, id, "", path: "compact")));
+
+        await SendAsync(b, id, "third question");
+        var sent = RequestsOf(email, summaries: false).Last()["messages"]!.AsArray();
+        Assert.Equal(["system", "user"], sent.Select(m => m!["role"]!.GetValue<string>()));
+        Assert.Contains("Summary of ", sent[0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        // A fork keeps the summary.
+        var fork = (await b.JsonAsync(await b.PostAsync($"/api/chat/conversations/{id}/fork", new { }))).GetProperty("id").GetGuid();
+        Assert.Contains((await ConversationAsync(b, fork)).GetProperty("messages").EnumerateArray(), m => m.GetProperty("summary").ValueKind == JsonValueKind.String);
+    }
+
+    [Fact]
+    public async Task A_chat_that_is_answering_cannot_be_compacted()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        await SendAsync(b, id, "first");
+        var (res, _) = await StartAsync(b, id, "long [slow]", "w1 ", CancellationToken.None);
+        using (res)
+        {
+            await StatusAssert.Is(HttpStatusCode.Conflict, await b.PostAsync($"/api/chat/conversations/{id}/compact", new { }));
+            await StatusAssert.Is(HttpStatusCode.Accepted, await b.PostAsync($"/api/chat/conversations/{id}/stop", new { }));
+        }
     }
 
     [Fact]

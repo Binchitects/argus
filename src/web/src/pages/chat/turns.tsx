@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, Copy, FileText, GitFork, Pencil, RefreshCw, Square } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, FileText, FoldVertical, GitFork, Pencil, RefreshCw, Square } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,29 @@ import { Markdown } from './markdown'
 import { answerCost, seconds } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
 import type { ChatConfig, Message } from './types'
+
+/** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
+export function CompactedMark({ summary, onOpenFile }: { summary: string; onOpenFile: (name: string) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="grid gap-2" role="note" aria-label="Chat compacted">
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="h-px flex-1 bg-border" aria-hidden="true" />
+        <FoldVertical className="size-3.5 shrink-0" aria-hidden="true" />
+        <span>Compacted: the model reads a summary of the chat above</span>
+        <Button variant="ghost" size="sm" className="h-6 gap-1 px-1.5 text-xs" onClick={() => setOpen(!open)} aria-expanded={open}>
+          {open ? 'Hide summary' : 'Show summary'} <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} aria-hidden="true" />
+        </Button>
+        <span className="h-px flex-1 bg-border" aria-hidden="true" />
+      </div>
+      {open && (
+        <div className="animate-enter rounded-xl border bg-muted/30 px-4 py-3 text-sm">
+          <Markdown text={summary} onOpenFile={onOpenFile} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 /** "2 / 3" with arrows: the alternatives to a question or an answer. */
 function Branches({ siblings, current, onSwitch, label }: { siblings: Message[]; current: Message; onSwitch: (id: string) => void; label: string }) {
@@ -129,6 +152,7 @@ export function AnswerTurn({
   live,
   thinkingSince,
   queued,
+  compacting,
   notices,
   config,
   question,
@@ -147,6 +171,8 @@ export function AnswerTurn({
   thinkingSince: number | null
   /** In line for a turn: how many go first (null: not waiting). */
   queued?: number | null
+  /** The chat's older messages are being summarized before this answer. */
+  compacting?: boolean
   notices: Notice[]
   config: ChatConfig
   question?: Message
@@ -249,7 +275,9 @@ export function AnswerTurn({
             <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
             <span className="size-1.5 animate-bounce rounded-full bg-current" />
           </span>
-          {queued == null ? 'Waiting for the model…' : queued === 0 ? 'Your turn is next: the model is answering others.' : `Waiting for your turn: ${queued} ${queued === 1 ? 'answer' : 'answers'} ahead of you.`}
+          {compacting
+            ? 'Compacting the chat: summarizing its older messages so the answer fits…'
+            : queued == null ? 'Waiting for the model…' : queued === 0 ? 'Your turn is next: the model is answering others.' : `Waiting for your turn: ${queued} ${queued === 1 ? 'answer' : 'answers'} ahead of you.`}
         </output>
       )}
       {assistants.map((a, i) => {

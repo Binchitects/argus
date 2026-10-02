@@ -18,6 +18,12 @@ export interface LiveState {
   waiting?: string[]
   /** In line for a turn (the model serves few at once): how many go first. */
   queued?: number | null
+  /** The answer being written: text and tool calls go to it. */
+  current?: string | null
+  /** The older messages are being summarized. */
+  compacting?: boolean
+  /** "compact": this stream only compacts the chat (no answer is written). */
+  mode?: 'answer' | 'compact'
 }
 
 export const blank = (id: string, role: Message['role'], parentId: string | null, content = ''): Message => ({
@@ -31,11 +37,24 @@ export function withQuestion(state: LiveState, localId: string, parentId: string
   return { ...state, messages: [...state.messages, { ...blank(localId, 'user', parentId, text), attachments }], leaf: localId, notices: [] }
 }
 
-/** Applies one event from the stream. `localId` is the id the question was shown under. */
+/** Puts a message in its place when the page has it already (an answer watched again from its start), else at the end. */
+function put(messages: Message[], m: Message) {
+  const i = messages.findIndex((x) => x.id === m.id)
+  if (i >= 0) messages[i] = m
+  else messages.push(m)
+}
+
+/**
+ * Applies one event from the stream. `localId` is the id the question was shown
+ * under. Replaying an answer from its start over the saved chat (a page that came
+ * back) rebuilds it: each message the answer made is started again from nothing.
+ */
 export function reduce(state: LiveState, e: ChatEvent, localId: string | null, now = Date.now()): LiveState {
   const messages = [...state.messages]
   const lastAssistant = (): Message | undefined => {
-    for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'assistant') return (messages[i] = { ...messages[i]! })
+    const i = state.current ? messages.findIndex((m) => m.id === state.current) : -1
+    if (i >= 0) return (messages[i] = { ...messages[i]! })
+    for (let j = messages.length - 1; j >= 0; j--) if (messages[j]!.role === 'assistant') return (messages[j] = { ...messages[j]! })
     return undefined
   }
   switch (e.type) {
@@ -43,13 +62,20 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       // The server's id replaces the one the question was shown under.
       const i = messages.findIndex((m) => m.id === localId)
       if (i >= 0) messages[i] = { ...messages[i]!, id: e.id, parentId: e.parentId }
-      return { ...state, messages, leaf: e.id }
+      return { ...state, messages, leaf: e.id, mode: 'answer' }
+    }
+    case 'compacting':
+      return { ...state, compacting: true, mode: state.mode ?? 'compact' }
+    case 'compacted': {
+      const i = messages.findIndex((m) => m.id === e.id)
+      if (i >= 0) messages[i] = { ...messages[i]!, summary: e.summary }
+      return { ...state, messages, compacting: false }
     }
     case 'title':
       return { ...state, title: e.title }
     case 'assistant':
-      messages.push({ ...blank(e.id, 'assistant', e.parentId), model: e.model })
-      return { ...state, messages, leaf: e.id, thinkingSince: null, queued: null }
+      put(messages, { ...blank(e.id, 'assistant', e.parentId), model: e.model })
+      return { ...state, messages, leaf: e.id, current: e.id, thinkingSince: null, queued: null }
     case 'queued':
       return { ...state, queued: e.ahead }
     case 'reasoning': {
@@ -78,10 +104,10 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       return { ...state, messages }
     }
     case 'approval':
-      return { ...state, waiting: [...(state.waiting ?? []), e.id] }
+      return { ...state, waiting: [...(state.waiting ?? []).filter((w) => w !== e.id), e.id] }
     case 'tool_result': {
       const parent = state.leaf
-      messages.push({
+      put(messages, {
         ...blank(e.messageId, 'tool', parent, e.text), toolCallId: e.id, toolName: e.name, noAccess: e.noAccess, durationMs: e.durationMs,
         status: e.declined ? 'declined' : e.isError ? 'failed' : 'complete', attachments: e.attachments ?? [],
       })
@@ -90,10 +116,14 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     case 'notice':
       return { ...state, notices: [...state.notices, { kind: e.kind, text: e.text }] }
     case 'error': {
+      // A compaction the person asked for has no answer to carry it: the page says it.
+      if (state.mode === 'compact') return { ...state, compacting: false }
       const a = lastAssistant()
       if (a) Object.assign(a, { status: 'failed', error: e.message })
       return { ...state, messages, thinkingSince: null }
     }
+    case 'stopped':
+      return stopped({ ...state, messages })
     case 'done':
       return state
   }

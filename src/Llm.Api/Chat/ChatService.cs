@@ -47,13 +47,8 @@ public sealed partial class ChatService(
     public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {
         var email = user.Email!.ToLowerInvariant();
-        // A chat that chose no model takes the first this person may use that is loaded.
-        var requested = overrides.Model ?? conversation.Model;
-        var model = requested is null
-            ? (await policy.ForAsync(user, await models.ListAsync(ct), ct)).Default
-            : await models.ResolveAsync(requested, ct);
-        var modelName = model?.Name ?? "default";
-        if (model is not null && await policy.RefusalAsync(user, model.Name, ct) is { } refusal)
+        var (model, modelName, refusal) = await ModelForAsync(user, conversation, overrides.Model, ct);
+        if (refusal is not null)
         {
             var sequence = (await db.ChatMessages.Where(m => m.ConversationId == conversation.Id).MaxAsync(m => (int?)m.Sequence, ct) ?? 0) + 1;
             var refused = new ChatMessage
@@ -107,7 +102,8 @@ public sealed partial class ChatService(
             }
         }
 
-        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, string.Join("\n\n", instructions), runs.ContainsKey("read_file"), ct);
+        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, modelName, email, string.Join("\n\n", instructions), runs.ContainsKey("read_file"),
+            emit, ct);
         if (imagesDropped)
         {
             await emit(new { type = "notice", kind = "no_vision", text = $"{modelName} cannot see images, so it got their names only. Choose a model that can see to ask about them." });
@@ -206,9 +202,10 @@ public sealed partial class ChatService(
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                // Stop: keep what arrived. The request is gone, so save without its token.
+                // Stop: keep what arrived. The stop cancelled the token, so save without it.
                 Keep(MessageStatus.Stopped);
                 await FinishAsync(conversation, CancellationToken.None);
+                await emit(new { type = "stopped", id = msg.Id });
                 return;
             }
             catch (ChatGatewayException ex)
@@ -229,7 +226,8 @@ public sealed partial class ChatService(
 
             if (calls.Count == 0 || runs.Count == 0)
             {
-                await FinishAsync(conversation, ct);
+                // Written in full: a stop now must not lose it.
+                await FinishAsync(conversation, CancellationToken.None);
                 await emit(new { type = "done", id = msg.Id });
                 return;
             }
@@ -285,6 +283,7 @@ public sealed partial class ChatService(
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     await FinishAsync(conversation, CancellationToken.None);
+                    await emit(new { type = "stopped", id = (Guid?)null });
                     return;
                 }
                 var (text, isError) = (outcome.Text, outcome.IsError);
@@ -307,6 +306,17 @@ public sealed partial class ChatService(
                 });
             }
         }
+    }
+
+    /// <summary>The model an answer uses (a chat that chose none: the first loaded this person may use), and why it may not, if so.</summary>
+    private async Task<(GatewayModel? Model, string Name, string? Refusal)> ModelForAsync(AppUser user, Conversation conversation, string? instead, CancellationToken ct)
+    {
+        var requested = instead ?? conversation.Model;
+        var model = requested is null
+            ? (await policy.ForAsync(user, await models.ListAsync(ct), ct)).Default
+            : await models.ResolveAsync(requested, ct);
+        var refusal = model is null ? null : await policy.RefusalAsync(user, model.Name, ct);
+        return (model, model?.Name ?? "default", refusal);
     }
 
     /// <summary>"Ask before running": the page shows the call, and the answer waits for yes or no (ten minutes at most).</summary>
@@ -358,23 +368,27 @@ public sealed partial class ChatService(
     }
 
     /// <summary>
-    /// The branch as the model reads it, trimmed from the oldest end to fit its context.
-    /// Images go as pictures to a model that can see, and as their names to one that cannot.
+    /// The branch as the model reads it: from its newest summary on (Compaction.cs),
+    /// compacted first when it fills too much of the context, and trimmed from the
+    /// oldest end as a last resort. Images go as pictures to a model that can see,
+    /// and as their names to one that cannot.
     /// </summary>
-    private async Task<(JsonArray Messages, bool ImagesDropped)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string? toolInstructions,
-        bool canReadFiles, CancellationToken ct)
+    private async Task<(JsonArray Messages, bool ImagesDropped)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string modelName,
+        string email, string? toolInstructions, bool canReadFiles, Func<object, Task> emit, CancellationToken ct)
     {
         var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
         all[question.Id] = question;
         var stored = PathTo(all, question.Id);
+        // What a summary covers goes as the summary.
+        var (summary, from) = LastSummary(stored, stored.Count - 1);
         // Only questions' files go to the model; pictures a tool made are for the person.
         var attachmentIds = stored.Where(m => m.Role == "user").SelectMany(m => ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => attachmentIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
         var vision = model?.Vision == true;
         var imagesDropped = false;
 
-        var turns = new List<(JsonObject Turn, long Weight)>();
-        foreach (var m in stored)
+        var turns = new List<(JsonObject Turn, long Weight, ChatMessage Source)>();
+        foreach (var m in stored.Skip(from))
         {
             switch (m.Role)
             {
@@ -410,7 +424,7 @@ public sealed partial class ChatService(
                     }
                     if (images.Count == 0)
                     {
-                        turns.Add((new JsonObject { ["role"] = "user", ["content"] = text.ToString() }, text.Length));
+                        turns.Add((new JsonObject { ["role"] = "user", ["content"] = text.ToString() }, text.Length, m));
                     }
                     else
                     {
@@ -423,18 +437,18 @@ public sealed partial class ChatService(
                                 ["image_url"] = new JsonObject { ["url"] = $"data:{img.ContentType};base64,{Convert.ToBase64String(img.Data!)}" },
                             });
                         }
-                        turns.Add((new JsonObject { ["role"] = "user", ["content"] = parts }, text.Length + (long)images.Count * ImageWeight));
+                        turns.Add((new JsonObject { ["role"] = "user", ["content"] = parts }, text.Length + (long)images.Count * ImageWeight, m));
                     }
                     break;
                 case "assistant" when m.ToolCallsJson is not null:
                     var withCalls = new JsonObject { ["role"] = "assistant", ["content"] = m.Content, ["tool_calls"] = JsonNode.Parse(m.ToolCallsJson) };
-                    turns.Add((withCalls, withCalls.ToJsonString().Length));
+                    turns.Add((withCalls, withCalls.ToJsonString().Length, m));
                     break;
                 case "assistant" when m.Content.Length > 0:
-                    turns.Add((new JsonObject { ["role"] = "assistant", ["content"] = m.Content }, m.Content.Length));
+                    turns.Add((new JsonObject { ["role"] = "assistant", ["content"] = m.Content }, m.Content.Length, m));
                     break;
                 case "tool":
-                    turns.Add((new JsonObject { ["role"] = "tool", ["tool_call_id"] = m.ToolCallId, ["content"] = m.Content }, m.Content.Length));
+                    turns.Add((new JsonObject { ["role"] = "tool", ["tool_call_id"] = m.ToolCallId, ["content"] = m.Content }, m.Content.Length, m));
                     break;
             }
         }
@@ -453,6 +467,16 @@ public sealed partial class ChatService(
         var context = model?.Context ?? 32768;
         var output = conversation.MaxTokens ?? model?.MaxOutput ?? 8192;
         var budgetChars = (long)Math.Max(4096, context - output - 1024) * 7 / 2 - system.Length;
+        if (await AutoCompactAsync(turns, stored, from, summary, budgetChars, model, modelName, email, emit, ct) is { } compacted)
+        {
+            summary = compacted.Summary;
+            turns.RemoveRange(0, compacted.Cut);
+        }
+        if (summary is not null)
+        {
+            system += "\n\nThe earlier part of this conversation was compacted: its messages are not shown, this summary stands for them.\n<summary>\n" + summary + "\n</summary>";
+            budgetChars -= summary.Length + 150;
+        }
         var dropped = 0;
         while (turns.Count > 1 && turns.Sum(t => t.Weight) > budgetChars)
         {
