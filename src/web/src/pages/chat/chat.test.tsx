@@ -529,11 +529,20 @@ describe('chat', () => {
     expect(within(mark).getByText(/the assistant wrote hello\.py/)).toBeInTheDocument()
   })
 
-  it('a chat half full shows how full, and compacts from there', async () => {
-    const full = [answered[0]!, { ...answered[1]!, promptTokens: 20_000, completionTokens: 200 }]
+  it('the context gauge shows how full, what fills it, and compacts from there', async () => {
+    const context = { system: 4000, instructions: 0, tools: 6000, summary: 0, files: 8000, you: 1000, answers: 1000, toolResults: 0 }
+    const full = [answered[0]!, { ...answered[1]!, promptTokens: 20_000, completionTokens: 200, context }]
     const calls = backend({ start: conversation({ messages: full, currentLeafId: 'a1' }), extra: { 'POST /api/chat/conversations/c1/compact': () => ({ events: [{ type: 'done', id: 'a1' }] }) } })
     renderApp('/chat/c1')
-    await userEvent.click(await screen.findByRole('button', { name: '62% of context · Compact' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Context: 62% full. Details and compact' }))
+    const parts = await screen.findByRole('list', { name: 'What fills it' })
+    // 20,000 prompt tokens by the characters of each kind (20,000 in all); the answer's 200 count as answers.
+    expect(within(parts).getByText('Files').parentElement).toHaveTextContent('Files8 K24%')
+    expect(within(parts).getByText('Tool definitions').parentElement).toHaveTextContent('Tool definitions6 K18%')
+    expect(within(parts).getByText('Answers').parentElement).toHaveTextContent('Answers1.2 K4%')
+    // Kept for the answer: the model's longest (8,192); the rest is free.
+    expect(within(parts).getByText('Free').parentElement).toHaveTextContent('Free4.38 K13%')
+    await userEvent.click(screen.getByRole('button', { name: 'Compact now' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true))
   })
 

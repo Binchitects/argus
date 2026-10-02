@@ -109,7 +109,7 @@ public sealed partial class ChatService(
             }
         }
 
-        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, modelName, email, string.Join("\n\n", instructions.Select(i => i.Text)), runs.ContainsKey("read_file"),
+        var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, email, string.Join("\n\n", instructions.Select(i => i.Text)), runs.ContainsKey("read_file"),
             emit, ct);
         if (imagesDropped)
         {
@@ -156,6 +156,9 @@ public sealed partial class ChatService(
                 request["tools"] = tools.DeepClone();
             }
 
+            // What fills this request, for the context gauge (scaled to the prompt tokens the model reports).
+            var filled = ContextParts.Measure(request, systemParts, ImageWeight);
+            msg.ContextJson = filled.ToJsonString();
             var content = new StringBuilder();
             var reasoning = new StringBuilder();
             var calls = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
@@ -228,7 +231,7 @@ public sealed partial class ChatService(
             await emit(new
             {
                 type = "usage", prompt = msg.PromptTokens, cached = msg.CachedTokens, completion = msg.CompletionTokens,
-                thinkingMs = msg.ThinkingMs, durationMs = msg.DurationMs,
+                thinkingMs = msg.ThinkingMs, durationMs = msg.DurationMs, context = filled,
             });
 
             if (calls.Count == 0 || runs.Count == 0)
@@ -627,7 +630,7 @@ public sealed partial class ChatService(
     /// oldest end as a last resort. Images go as pictures to a model that can see,
     /// and as their names to one that cannot.
     /// </summary>
-    private async Task<(JsonArray Messages, bool ImagesDropped)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string modelName,
+    private async Task<(JsonArray Messages, bool ImagesDropped, SystemParts System)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string modelName,
         string email, string? toolInstructions, bool canReadFiles, Func<object, Task> emit, CancellationToken ct)
     {
         var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
@@ -708,14 +711,17 @@ public sealed partial class ChatService(
         }
 
         var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC)." + "\n\n" + PreviewNote;
+        var baseLength = system.Length;
         if (!string.IsNullOrWhiteSpace(toolInstructions))
         {
             system += "\n\n" + toolInstructions;
         }
+        var toolNotes = system.Length - baseLength;
         if (!string.IsNullOrWhiteSpace(conversation.SystemPrompt))
         {
             system += "\n\nThe person's instructions for this conversation:\n" + conversation.SystemPrompt.Trim();
         }
+        var person = system.Length - baseLength - toolNotes;
 
         // Rough, and on the safe side: ~3.5 characters a token for English and code.
         var context = model?.Context ?? 32768;
@@ -726,6 +732,7 @@ public sealed partial class ChatService(
             summary = compacted.Summary;
             turns.RemoveRange(0, compacted.Cut);
         }
+        var beforeSummary = system.Length;
         if (summary is not null)
         {
             system += "\n\nThe earlier part of this conversation was compacted: its messages are not shown, this summary stands for them.\n<summary>\n" + summary + "\n</summary>";
@@ -748,7 +755,8 @@ public sealed partial class ChatService(
             LogTrimmed(logger, conversation.Id, dropped);
         }
 
-        return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped);
+        return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped,
+            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary));
     }
 
     public static IEnumerable<Guid> ParseIds(string? json) =>

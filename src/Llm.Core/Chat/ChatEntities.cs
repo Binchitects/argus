@@ -68,6 +68,8 @@ public sealed class ChatMessage
     public string? AttachmentsJson { get; set; }
     /// <summary>What a tool's call shows the person beyond what the model read (sub-agents' work: their thinking, tool calls and words), as JSON.</summary>
     public string? DetailsJson { get; set; }
+    /// <summary>Assistant: what filled the request it answered, in characters by kind (system, tools, files, your messages...), as JSON; scaled to its prompt tokens for the context gauge.</summary>
+    public string? ContextJson { get; set; }
     public string? Model { get; set; }
     public int? PromptTokens { get; set; }
     public int? CachedTokens { get; set; }

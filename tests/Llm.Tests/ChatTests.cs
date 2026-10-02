@@ -308,6 +308,26 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Each_answer_keeps_what_filled_its_request_for_the_context_gauge()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false, systemPrompt = "Answer in one line." });
+        var file = await UploadAsync(b, "notes.txt", Encoding.UTF8.GetBytes(new string('x', 3000)));
+        var events = await SendAsync(b, id, "What is in the notes?", [file.GetProperty("id").GetGuid()]);
+        var live = events.Single(e => e.GetProperty("type").GetString() == "usage").GetProperty("context");
+
+        var answer = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().Last(m => m.GetProperty("role").GetString() == "assistant");
+        var kept = answer.GetProperty("context");
+        Assert.Equal(live.GetRawText(), kept.GetRawText());
+        Assert.True(kept.GetProperty("system").GetInt32() > 500, kept.GetRawText());
+        Assert.Equal("\n\nThe person's instructions for this conversation:\nAnswer in one line.".Length, kept.GetProperty("instructions").GetInt32());
+        Assert.True(kept.GetProperty("files").GetInt32() > 3000, kept.GetRawText());
+        Assert.Equal("What is in the notes?".Length + 2, kept.GetProperty("you").GetInt32());
+        Assert.True(kept.GetProperty("tools").GetInt32() > 0, kept.GetRawText());
+        Assert.Equal(0, kept.GetProperty("summary").GetInt32());
+    }
+
+    [Fact]
     public async Task Regenerate_adds_an_answer_beside_the_old_one()
     {
         var (b, _) = await PersonAsync();

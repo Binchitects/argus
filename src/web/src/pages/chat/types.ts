@@ -77,6 +77,19 @@ export interface Message {
   summary?: string | null
   /** What a tool call shows beyond what the model read: sub-agents' work ({ agents: [...] }). */
   details?: { agents?: AgentWork[] } | null
+  /** An answer: what filled the request it answered, in characters by kind (the context gauge scales it to its prompt tokens). */
+  context?: ContextFill | null
+}
+
+export interface ContextFill {
+  system: number
+  instructions: number
+  tools: number
+  summary: number
+  files: number
+  you: number
+  answers: number
+  toolResults: number
 }
 
 /** A sub-agent's work, as it happens and as it is kept: its part, thinking, tool calls with their results, and words. */
@@ -149,7 +162,7 @@ export type ChatEvent =
   | { type: 'reasoning'; text: string }
   | { type: 'thought'; ms: number }
   | { type: 'content'; text: string }
-  | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; thinkingMs: number | null; durationMs: number | null }
+  | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; thinkingMs: number | null; durationMs: number | null; context?: ContextFill | null }
   | { type: 'tool_call'; id: string; name: string; arguments: string; tool?: string | null }
   | { type: 'approval'; id: string; name: string; arguments: string; tool: string; title: string }
   /** How far a long tool call is, as its server says (`total` when it knows the end). */

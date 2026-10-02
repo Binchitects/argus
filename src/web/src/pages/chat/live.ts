@@ -107,7 +107,7 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     }
     case 'usage': {
       const a = lastAssistant()
-      if (a) Object.assign(a, { promptTokens: e.prompt, cachedTokens: e.cached, completionTokens: e.completion, thinkingMs: e.thinkingMs ?? a.thinkingMs, durationMs: e.durationMs })
+      if (a) Object.assign(a, { promptTokens: e.prompt, cachedTokens: e.cached, completionTokens: e.completion, thinkingMs: e.thinkingMs ?? a.thinkingMs, durationMs: e.durationMs, context: e.context ?? a.context })
       return { ...state, messages, thinkingSince: null }
     }
     case 'tool_call': {

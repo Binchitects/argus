@@ -126,6 +126,40 @@ test.describe("Argus's answers and images", () => {
   }
 })
 
+// How full the context is, and what fills it: from the last answer's prompt tokens.
+const contextChat = {
+  ...argusChat,
+  id: '00000000-0000-4000-8000-0000000c0e7a', title: 'A long chat', useArgus: false, currentLeafId: 'x2',
+  messages: [
+    { ...blank, id: 'x1', parentId: null, role: 'user', content: 'Summarize the attached report.' },
+    {
+      ...blank, id: 'x2', parentId: 'x1', role: 'assistant', model: 'Test-Model', content: 'The report says sales grew.', promptTokens: 21_000, cachedTokens: 0, completionTokens: 400,
+      context: { system: 3000, instructions: 300, tools: 5000, summary: 0, files: 11000, you: 200, answers: 800, toolResults: 700 },
+    },
+  ],
+}
+
+test.describe('context gauge', () => {
+  test('shows how full the context is and what fills it, and compacts from there', async ({ page }, info) => {
+    await page.route(`**/api/chat/conversations/${contextChat.id}`, (route) => route.fulfill({ json: contextChat }))
+    let compacted = false
+    await page.route(`**/api/chat/conversations/${contextChat.id}/compact`, (route) => {
+      compacted = true
+      return route.fulfill({ body: 'data: {"type":"done","id":"x2"}\n\n', contentType: 'text/event-stream' })
+    })
+    await page.goto(`/chat/${contextChat.id}`)
+    await page.getByRole('button', { name: /^Context: \d+% full/ }).click()
+    const parts = page.getByRole('list', { name: 'What fills it' })
+    await expect(parts).toContainText('Files')
+    await expect(parts).toContainText('Tool definitions')
+    await expect(parts).toContainText('Kept for the answer')
+    await expectAccessible(page, info, 'context-gauge')
+    await screenshot(page, info, 'context-gauge')
+    await page.getByRole('button', { name: 'Compact now' }).click()
+    await expect.poll(() => compacted).toBe(true)
+  })
+})
+
 // Persian beside English: each block reads in its own direction, code stays left to right.
 const rtlChat = {
   ...argusChat,
@@ -634,6 +668,21 @@ test.describe('tools', () => {
     await expect(page.getByRole('button', { name: 'Files (2)' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'Answer' }).last().getByRole('list', { name: 'Pictures' }).last().getByRole('img')).toHaveCount(2)
     expect((await page.request.delete(`/api/chat/conversations/${id}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
+  })
+
+  test('the context gauge splits a real answer by what filled it', async ({ page }) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    test.setTimeout(180_000)
+    await page.goto('/chat')
+    await thinking(page, 'No thinking')
+    await page.getByLabel('Attach files').setInputFiles({ name: 'facts.txt', mimeType: 'text/plain', buffer: Buffer.from('The sky is green on Tuesdays.\n'.repeat(200)) })
+    await ask(page, 'What colour is the sky on Tuesdays, says the file? One word.')
+    await done(page)
+    await page.getByRole('button', { name: /^Context: \d+% full/ }).click()
+    const parts = page.getByRole('list', { name: 'What fills it' })
+    for (const kind of ['System prompt and tool notes', 'Files', 'Your messages', 'Answers']) await expect(parts).toContainText(kind)
+    await page.keyboard.press('Escape')
+    expect((await page.request.delete(`/api/chat/conversations/${page.url().split('/').pop()}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
   })
 
   test('an answer that finishes after the page left is in the bell', async ({ page }) => {

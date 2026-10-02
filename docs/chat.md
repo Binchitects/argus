@@ -25,6 +25,17 @@ setups to paste.
   - **Stop** keeps what was written, marked *Stopped*.
   - **Answer again** writes a new answer beside the old one; both stay. It can
     also use another model or thinking level, for that answer only.
+- **Context.** The gauge beside Send shows how full the model's context is,
+  from the last answer's prompt as the model counted it (and what it
+  answered). Opened, it shows what fills it: the system prompt and the tools'
+  notes, tool definitions, your instructions, a summary of earlier messages,
+  files, your messages, answers, tool calls and results, what is kept for the
+  answer, and what is free. Each request is measured by kind in characters and
+  scaled to its prompt tokens.
+- **Compact.** Near the limit the chat compacts itself: the model summarizes
+  the older messages, and the next answers read the summary instead. **Compact
+  now** in the gauge (or the chat's menu, or sending `/compact`) does it at
+  once. Nothing is deleted: the messages stay on screen above a mark.
 - **Branches.**
   - **Editing** a question sends the new text as a sibling of the old one:
     both questions and their answers are kept.

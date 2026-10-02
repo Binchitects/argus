@@ -12,6 +12,7 @@ import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
 import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, stopChat, streamChat } from './api'
 import { Composer } from './composer'
+import { contextOf } from './context'
 import { collectFiles } from './files'
 import { FilesPanel } from './files-panel'
 import { answerNews } from './format'
@@ -153,7 +154,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const answering = streaming && view.mode !== 'compact'
   // How full the context was at the last answer: its prompt and what it wrote.
   const lastUsage = [...path].reverse().find((m) => m.role === 'assistant' && m.promptTokens != null)
-  const context = model?.context && lastUsage ? { used: (lastUsage.promptTokens ?? 0) + (lastUsage.completionTokens ?? 0), limit: model.context } : undefined
+  const context = contextOf(lastUsage, model?.context, settings.maxTokens ?? model?.maxOutput ?? null)
 
   useEffect(() => {
     document.title = title ? `${title} · ${brand ?? 'Chat'}` : `Chat · ${brand ?? ''}`.trim()

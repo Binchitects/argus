@@ -1,9 +1,11 @@
-import { ArrowUp, EyeOff, FileText, FoldVertical, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, EyeOff, FileText, Paperclip, Square, X } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import type { ContextView } from './context'
+import { ContextGauge } from './context-gauge'
 import type { ChatModel } from './types'
 import type { Uploads } from './uploads'
 
@@ -33,8 +35,8 @@ export function Composer({
   big?: boolean
   /** The chat's tools picker, beside the attach button. */
   tools?: ReactNode
-  /** Tokens the last answer used of the model's context: shown once it is half full. */
-  context?: { used: number; limit: number }
+  /** How full the model's context is, and what fills it (from the last answer). */
+  context?: ContextView
   /** Summarize the chat's older messages (also: send /compact). */
   onCompact?: () => void
 }) {
@@ -142,14 +144,7 @@ export function Composer({
         {tools}
         <span className="hidden text-xs text-muted-foreground lg:inline">Enter to send · Shift+Enter for a new line</span>
         <span className="ml-auto" />
-        {context && context.limit > 0 && context.used / context.limit >= 0.5 && (
-          <Tooltip content="How full the model's context is. Near the limit the chat is compacted on its own: its older messages become a summary. Compact now to start fresh with the summary.">
-            <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-muted-foreground tabular-nums" disabled={streaming || !onCompact} onClick={onCompact}>
-              <FoldVertical className="size-3.5" aria-hidden="true" />
-              {Math.min(100, Math.round((context.used / context.limit) * 100))}% of context · Compact
-            </Button>
-          </Tooltip>
-        )}
+        {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} />}
         {streaming ? (
           <Button type="button" size="icon-sm" variant="secondary" className="animate-pop rounded-full" onClick={onStop} aria-label="Stop">
             <Square className="fill-current" />
