@@ -150,6 +150,46 @@ test.describe('right-to-left text', () => {
   })
 })
 
+// A diagram is drawn in the answer; a broken one shows its code and why.
+const diagramChat = {
+  ...argusChat,
+  id: '00000000-0000-4000-8000-0000000d1a90', title: 'How a frame is decoded', useArgus: false, currentLeafId: 'd2',
+  messages: [
+    { ...blank, id: 'd1', parentId: null, role: 'user', content: 'Draw how a frame flows through the decoder.' },
+    {
+      ...blank, id: 'd2', parentId: 'd1', role: 'assistant', model: 'Test-Model',
+      content: 'The data flow:\n\n```mermaid\nflowchart LR\n  accTitle: Frame data flow\n  A["read(buf)"] --> B{header ok?}\n  B -->|yes| C[DecodeFrame]\n  B -->|no| D[error]\n  C --> E[(frame_t)]\n```\n\nAnd one that does not parse:\n\n```mermaid\nflowchart LR\n  A --> (oops\n```',
+    },
+  ],
+}
+
+test.describe('diagrams', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`a Mermaid diagram is drawn in the answer, its code a click away (${theme})`, async ({ page, isMobile }, info) => {
+      const errors = watchConsole(page)
+      await withTheme(page, theme)
+      await page.route(`**/api/chat/conversations/${diagramChat.id}`, (route) => route.fulfill({ json: diagramChat }))
+      await page.goto(`/chat/${diagramChat.id}`)
+      const answer = page.getByRole('region', { name: 'Answer' })
+      const figure = answer.getByRole('figure', { name: 'Diagram: mermaid' })
+      const drawing = figure.frameLocator('iframe[title="Frame data flow"]')
+      await expect(drawing.getByText('DecodeFrame')).toBeVisible({ timeout: 20_000 })
+      // As tall as the drawing: not the 160px it starts at, not cut.
+      await expect.poll(async () => (await figure.locator('iframe').boundingBox())?.height ?? 0).toBeGreaterThan(60)
+      await expect(answer.getByText('The diagram could not be drawn')).toBeVisible()
+      await expect(answer.getByRole('figure', { name: 'Code: mermaid' })).toContainText('A --> (oops')
+      await expectAccessible(page, info, `diagram-${theme}`)
+      await screenshot(page, info, `chat-diagram-${theme}${isMobile ? '-phone' : ''}`)
+
+      await figure.getByRole('button', { name: 'Code', exact: true }).click()
+      await expect(answer.getByRole('figure', { name: 'Code: mermaid' }).first()).toContainText('accTitle: Frame data flow')
+      await answer.getByRole('button', { name: 'Diagram', exact: true }).click()
+      await expect(figure.frameLocator('iframe').getByText('DecodeFrame')).toBeVisible()
+      expect(errors).toEqual([])
+    })
+  }
+})
+
 test.describe('chat with the model', () => {
   test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
   test.setTimeout(180_000)

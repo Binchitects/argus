@@ -26,17 +26,22 @@ export function previewKindOf(rawLang: string | null | undefined, name: string |
   return null
 }
 
-/** Messages between the chat and the runner. */
-export type ToRunner = { type: 'render'; kind: PreviewKind; code: string; theme: 'light' | 'dark' }
+/**
+ * Messages between the chat and the runner. Drawn inline (a diagram in an answer),
+ * the runner fits its content and reports its height, so the frame grows to fit.
+ */
+export type ToRunner = { type: 'render'; kind: PreviewKind; code: string; theme: 'light' | 'dark'; inline?: boolean }
 export type FromRunner =
   | { type: 'ready' }
   | { type: 'rendered' }
   | { type: 'error'; message: string }
   | { type: 'blocked'; uri: string }
+  | { type: 'size'; height: number }
 
 export function isFromRunner(data: unknown): data is FromRunner {
-  const t = (data as { type?: unknown } | null)?.type
-  return t === 'ready' || t === 'rendered' || t === 'error' || t === 'blocked'
+  const d = data as { type?: unknown; height?: unknown } | null
+  const t = d?.type
+  return t === 'ready' || t === 'rendered' || t === 'error' || t === 'blocked' || (t === 'size' && typeof d?.height === 'number' && Number.isFinite(d.height))
 }
 
 export function isToRunner(data: unknown): data is ToRunner {

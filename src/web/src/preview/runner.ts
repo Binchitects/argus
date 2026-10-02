@@ -16,7 +16,7 @@ let done = false
 window.addEventListener('message', (e) => {
   if (e.source !== parentWindow || done || !isToRunner(e.data)) return
   done = true // One render per load: the chat reloads the frame for a new one.
-  void render(e.data.kind, e.data.code, e.data.theme)
+  void render(e.data.kind, e.data.code, e.data.theme, e.data.inline === true)
 })
 window.addEventListener('error', (e) => send({ type: 'error', message: String(e.message || e) }))
 window.addEventListener('unhandledrejection', (e) => send({ type: 'error', message: String((e.reason as Error)?.message ?? e.reason) }))
@@ -30,7 +30,7 @@ window.addEventListener('securitypolicyviolation', (e) => {
 })
 send({ type: 'ready' })
 
-async function render(kind: PreviewKind, code: string, theme: 'light' | 'dark') {
+async function render(kind: PreviewKind, code: string, theme: 'light' | 'dark', inline: boolean) {
   try {
     if (kind === 'html') {
       // The page replaces this one; its own reporter (injected) keeps talking to the chat.
@@ -42,6 +42,11 @@ async function render(kind: PreviewKind, code: string, theme: 'light' | 'dark') 
     }
     document.documentElement.dataset.theme = theme
     const root = document.getElementById('root')!
+    if (inline) {
+      // The frame takes the content's height: the content must not take the frame's.
+      document.documentElement.dataset.inline = ''
+      new ResizeObserver(() => send({ type: 'size', height: Math.ceil(document.body.getBoundingClientRect().height) })).observe(document.body)
+    }
     if (kind === 'svg') {
       root.className = 'center'
       // Markup, not script: an <svg>'s <script> does not run when set this way.
@@ -49,7 +54,9 @@ async function render(kind: PreviewKind, code: string, theme: 'light' | 'dark') 
     } else if (kind === 'mermaid') {
       await script(mermaidUrl)
       const mermaid = (window as unknown as { mermaid: MermaidApi }).mermaid
-      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: theme === 'dark' ? 'dark' : 'default' })
+      // Dark edge labels sit on grey by default, too faint to read (WCAG AA): a darker ground.
+      const themeVariables = theme === 'dark' ? { edgeLabelBackground: '#26262b' } : {}
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: theme === 'dark' ? 'dark' : 'default', themeVariables })
       const { svg } = await mermaid.render('diagram', code)
       root.className = 'center'
       root.innerHTML = svg

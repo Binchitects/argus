@@ -37,7 +37,10 @@ export async function expectAccessible(page: Page, info: TestInfo, label: string
  * in the middle of a page's requests.
  */
 export async function withTheme(page: Page, theme: 'light' | 'dark') {
-  await page.addInitScript((t) => localStorage.setItem('theme', t), theme)
+  // Init scripts run in every frame: a sandboxed preview has no storage to set.
+  await page.addInitScript((t) => {
+    if (window === window.top) localStorage.setItem('theme', t)
+  }, theme)
 }
 
 export async function expectTheme(page: Page, theme: 'light' | 'dark') {

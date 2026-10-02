@@ -1,15 +1,19 @@
-import { Check, ChevronDown, Copy, Download, PanelRightOpen, Play, WrapText } from 'lucide-react'
+import { Check, ChevronDown, Code2, Copy, Download, PanelRightOpen, Play, Workflow, WrapText } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { previewLabels, type PreviewKind } from '@/preview/kind'
 import { extensionFor, highlight } from './highlight'
+import { InlineDiagram } from './live-preview'
 
 const COLLAPSE_OVER = 40
 const COLLAPSED_LINES = 24
 
-/** A code block: its language or file name, copy, wrap, download, open in the Files panel, a live preview, line numbers; long ones fold. */
+/**
+ * A code block: its language or file name, copy, wrap, download, open in the Files panel, a live preview,
+ * line numbers; long ones fold. A Mermaid diagram is drawn in its place, its code a click away.
+ */
 export function CodeBlock({
   code,
   lang,
@@ -18,6 +22,7 @@ export function CodeBlock({
   preview,
   onPreview,
   label: shownLabel,
+  draw = false,
 }: {
   code: string
   lang: string | null
@@ -28,8 +33,14 @@ export function CodeBlock({
   /** What the code can be previewed as, and how to show it. */
   preview?: PreviewKind | null
   onPreview?: () => void
+  /** Draw a diagram in place of its code (not while it is still being written). */
+  draw?: boolean
 }) {
   const [wrap, setWrap] = useState(false)
+  const [view, setView] = useState<'diagram' | 'code' | null>(null)
+  const [drawError, setDrawError] = useState<string | null>(null)
+  const drawable = draw && preview === 'mermaid' && !drawError
+  const diagram = drawable && (view ?? 'diagram') === 'diagram'
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const text = code.replace(/\n$/, '')
@@ -55,15 +66,22 @@ export function CodeBlock({
   }
 
   return (
-    <figure dir="ltr" className="group/code @container my-3 min-w-0 overflow-hidden rounded-lg border bg-muted/40 not-first:mt-3" aria-label={`Code: ${label}`}>
+    <figure dir="ltr" className="group/code @container my-3 min-w-0 overflow-hidden rounded-lg border bg-muted/40 not-first:mt-3" aria-label={`${diagram ? 'Diagram' : 'Code'}: ${label}`}>
       <figcaption className="flex h-9 items-center gap-1 border-b bg-muted/60 pr-1 pl-3 text-xs">
         <span className={cn('truncate font-mono text-muted-foreground', name && 'text-foreground')}>{label}</span>
         <span className="ml-auto flex items-center">
-          <Tooltip content={wrap ? 'Do not wrap lines' : 'Wrap lines'}>
-            <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setWrap(!wrap)} aria-label="Wrap lines" aria-pressed={wrap}>
-              <WrapText />
+          {drawable && (
+            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setView(diagram ? 'code' : 'diagram')}>
+              {diagram ? <Code2 /> : <Workflow />} {diagram ? 'Code' : 'Diagram'}
             </Button>
-          </Tooltip>
+          )}
+          {!diagram && (
+            <Tooltip content={wrap ? 'Do not wrap lines' : 'Wrap lines'}>
+              <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setWrap(!wrap)} aria-label="Wrap lines" aria-pressed={wrap}>
+                <WrapText />
+              </Button>
+            </Tooltip>
+          )}
           <Tooltip content={`Download ${fileName}`}>
             <Button variant="ghost" size="icon-sm" className="size-7" onClick={download} aria-label={`Download ${fileName}`}>
               <Download />
@@ -88,6 +106,15 @@ export function CodeBlock({
           </Button>
         </span>
       </figcaption>
+      {drawError && (
+        <div className="grid gap-1 border-b px-3 py-2 text-xs">
+          <p className="text-muted-foreground">The diagram could not be drawn:</p>
+          <pre className="max-h-32 overflow-auto font-mono whitespace-pre-wrap text-destructive-ink">{drawError.slice(0, 800)}</pre>
+        </div>
+      )}
+      {diagram ? (
+        <InlineDiagram code={text} title={accTitle(text) ?? `Diagram: ${label}`} onError={setDrawError} />
+      ) : (
       <div className={cn('relative grid', !wrap && 'grid-cols-[auto_minmax(0,1fr)]')}>
         {!wrap && (
           <div aria-hidden="true" className="border-r py-3 pr-2 pl-3 text-right font-mono text-[0.8125rem] leading-6 text-muted-foreground/70 select-none">
@@ -102,7 +129,8 @@ export function CodeBlock({
         </pre>
         {long && !expanded && <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-muted/90 to-transparent" />}
       </div>
-      {long && (
+      )}
+      {long && !diagram && (
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
@@ -114,4 +142,9 @@ export function CodeBlock({
       )}
     </figure>
   )
+}
+
+/** A Mermaid diagram's own title for screen readers (accTitle: ...), if it has one. */
+function accTitle(code: string): string | null {
+  return /^\s*accTitle\s*:\s*(.+)$/m.exec(code)?.[1]?.trim() || null
 }

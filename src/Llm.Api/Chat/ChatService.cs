@@ -42,7 +42,9 @@ public sealed partial class ChatService(
     internal const string PreviewNote =
         "The chat shows a live preview of code blocks fenced as html, svg, mermaid, jsx or tsx. " +
         "Previews have no network: use no CDN or API calls. A page may use Tailwind (its CDN script is served locally). " +
-        "A React component (jsx or tsx) is shown from its default export and may import only react, react-dom and lucide-react; style it with Tailwind classes.";
+        "A React component (jsx or tsx) is shown from its default export and may import only react, react-dom and lucide-react; style it with Tailwind classes. " +
+        "A mermaid block is drawn as a diagram in the answer itself: use one for a workflow, an architecture, a sequence, a data flow or states. " +
+        "In Mermaid, quote any label with punctuation (A[\"parse(input)\"]) and give each diagram an accTitle line.";
 
     public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {

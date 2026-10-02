@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isToRunner, previewKindOf } from './kind'
+import { isFromRunner, isToRunner, previewKindOf } from './kind'
 import { compileComponent, componentOf, importsOf, PreviewError, reporter, rewriteHtml } from './page'
 
 describe('what can be previewed', () => {
@@ -20,6 +20,12 @@ describe('what can be previewed', () => {
     expect(isToRunner({ type: 'render', kind: 'html', code: '<p/>', theme: 'dark' })).toBe(true)
     expect(isToRunner({ type: 'render', kind: 'exe', code: '' })).toBe(false)
     expect(isToRunner({ type: 'render', kind: 'html' })).toBe(false)
+  })
+
+  it('takes a size from the runner only as a number', () => {
+    expect(isFromRunner({ type: 'size', height: 320 })).toBe(true)
+    expect(isFromRunner({ type: 'size', height: '320' })).toBe(false)
+    expect(isFromRunner({ type: 'size', height: Infinity })).toBe(false)
   })
 })
 

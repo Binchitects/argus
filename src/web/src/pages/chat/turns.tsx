@@ -285,7 +285,7 @@ export function AnswerTurn({
         return (
           <div key={a.id}>
             {a.reasoning && <Thinking text={a.reasoning} live={live && isLast && !a.content && !a.toolCalls?.length} ms={a.thinkingMs} since={isLast ? thinkingSince : null} />}
-            {a.content && <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} />}
+            {a.content && <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} live={live && isLast} />}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
             {a.toolCalls?.map((t) => (
               <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} onOpenFile={onOpenFile} />
