@@ -43,7 +43,7 @@ export function Thinking({ text, live, ms, since }: { text: string; live: boolea
         <ChevronRight className="size-3.5 transition-transform duration-200 group-data-[state=open]:rotate-90" aria-hidden="true" />
       </Collapsible.Trigger>
       <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-        <div ref={box} className="mt-1 max-h-72 overflow-y-auto border-l-2 pl-4 text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
+        <div ref={box} dir="auto" className="mt-1 max-h-72 overflow-y-auto border-s-2 ps-4 text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {text}
         </div>
       </Collapsible.Content>

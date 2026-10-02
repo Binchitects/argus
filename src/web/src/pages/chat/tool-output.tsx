@@ -97,7 +97,7 @@ function RowTable({ rows }: { rows: Row[] }) {
   return (
     <ScrollRegion label="Rows" className="rounded-md border">
       <table className="w-full text-xs">
-        <thead className="bg-muted/60 text-left text-muted-foreground">
+        <thead className="bg-muted/60 text-start text-muted-foreground">
           <tr>
             {columns.map((c) => (
               <th key={c} scope="col" className="px-2 py-1.5 font-medium whitespace-nowrap">

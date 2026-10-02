@@ -143,7 +143,7 @@ export function ChatSettingsPopover({ config, settings, onChange }: { config: Ch
         >
           <p className="text-sm font-semibold">This chat</p>
           <Field label="Instructions" hint="Sent with every question: a role, a style, what to assume.">
-            <Textarea value={draft.systemPrompt} onChange={(e) => setDraft({ ...draft, systemPrompt: e.target.value })} placeholder="e.g. Answer briefly, in British English." className="min-h-24" />
+            <Textarea dir="auto" value={draft.systemPrompt} onChange={(e) => setDraft({ ...draft, systemPrompt: e.target.value })} placeholder="e.g. Answer briefly, in British English." className="min-h-24" />
           </Field>
           <div className="grid grid-cols-3 gap-2">
             <Field label="Temperature">

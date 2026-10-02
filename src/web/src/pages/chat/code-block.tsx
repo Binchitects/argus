@@ -55,7 +55,7 @@ export function CodeBlock({
   }
 
   return (
-    <figure className="group/code @container my-3 min-w-0 overflow-hidden rounded-lg border bg-muted/40 not-first:mt-3" aria-label={`Code: ${label}`}>
+    <figure dir="ltr" className="group/code @container my-3 min-w-0 overflow-hidden rounded-lg border bg-muted/40 not-first:mt-3" aria-label={`Code: ${label}`}>
       <figcaption className="flex h-9 items-center gap-1 border-b bg-muted/60 pr-1 pl-3 text-xs">
         <span className={cn('truncate font-mono text-muted-foreground', name && 'text-foreground')}>{label}</span>
         <span className="ml-auto flex items-center">

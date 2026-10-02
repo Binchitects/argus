@@ -23,7 +23,16 @@ const purify = DOMPurify()
 purify.addHook('uponSanitizeAttribute', (node, data) => {
   if (data.attrName === 'style' && !(node as Element).closest?.('.katex')) data.keepAttr = false
 })
+/**
+ * Right-to-left text (Persian, Arabic, Hebrew) reads right to left, each block by its own
+ * first letters, as ChatGPT does: a Persian paragraph beside an English one. A list, a
+ * quote or a table takes the direction of its first words, and what is inside follows
+ * (an inner dir="auto" would hide those words from it). Code stays left to right.
+ */
+const directional = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'UL', 'OL', 'TABLE', 'DL'])
 purify.addHook('afterSanitizeAttributes', (node) => {
+  if (directional.has(node.tagName) && !node.parentElement?.closest('li, td, th, blockquote')) node.setAttribute('dir', 'auto')
+  if (node.tagName === 'PRE' || node.tagName === 'CODE' || node.classList?.contains('katex')) node.setAttribute('dir', 'ltr')
   if (node.tagName === 'A' && /^https?:/i.test(node.getAttribute('href') ?? '')) {
     node.setAttribute('target', '_blank')
     node.setAttribute('rel', 'noopener noreferrer nofollow')
@@ -31,7 +40,7 @@ purify.addHook('afterSanitizeAttributes', (node) => {
 })
 
 export function sanitize(html: string): string {
-  return purify.sanitize(html, { FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed'], ADD_ATTR: ['target'] })
+  return purify.sanitize(html, { FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed'], ADD_ATTR: ['target', 'dir'] })
 }
 
 type Block = { kind: 'html'; html: string } | { kind: 'code'; code: string; lang: string | null; name: string | null; preview: PreviewKind | null }

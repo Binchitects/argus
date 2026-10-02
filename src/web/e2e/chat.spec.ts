@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { expectAccessible, screenshot, watchConsole, withTheme } from './helpers.ts'
 
 // With a real model behind the gateway (the deployed stack): E2E_CHAT=1.
@@ -115,6 +115,39 @@ test.describe("Argus's answers and images", () => {
       expect(errors).toEqual([])
     })
   }
+})
+
+// Persian beside English: each block reads in its own direction, code stays left to right.
+const rtlChat = {
+  ...argusChat,
+  id: '00000000-0000-4000-8000-0000000f0a51', title: 'خلاصه مخزن', useArgus: false, currentLeafId: 'r2',
+  messages: [
+    { ...blank, id: 'r1', parentId: null, role: 'user', content: 'این مخزن چه کاری انجام می‌دهد؟' },
+    {
+      ...blank, id: 'r2', parentId: 'r1', role: 'assistant', model: 'Test-Model',
+      content: '## خلاصه\n\nاین مخزن یک **کتابخانه** برای خواندن فریم‌ها است و تابع `DecodeFrame` را دارد.\n\n- خواندن فریم\n- بررسی طول\n\n> نکته: خطاها منفی هستند.\n\n```c\nint n = DecodeFrame(buf, len, &f);\n```\n\nThe English summary stays left to right.',
+    },
+  ],
+}
+
+test.describe('right-to-left text', () => {
+  test('a Persian question and answer read right to left, code left to right', async ({ page, isMobile }, info) => {
+    await page.route(`**/api/chat/conversations/${rtlChat.id}`, (route) => route.fulfill({ json: rtlChat }))
+    await page.goto(`/chat/${rtlChat.id}`)
+    const direction = (l: Locator) => l.evaluate((e) => getComputedStyle(e).direction)
+    const answer = page.getByRole('region', { name: 'Answer' })
+    await expect(answer.getByRole('heading', { name: 'خلاصه' })).toBeVisible()
+    expect(await direction(page.getByRole('region', { name: 'You' }).getByText('این مخزن چه کاری'))).toBe('rtl')
+    expect(await direction(answer.getByText('این مخزن یک'))).toBe('rtl')
+    expect(await direction(answer.getByRole('list'))).toBe('rtl')
+    expect(await direction(answer.locator('blockquote'))).toBe('rtl')
+    expect(await direction(answer.getByText('The English summary'))).toBe('ltr')
+    expect(await direction(answer.getByRole('figure', { name: /^Code/ }))).toBe('ltr')
+    await page.getByRole('textbox', { name: 'Message' }).fill('سلام')
+    expect(await direction(page.getByRole('textbox', { name: 'Message' }))).toBe('rtl')
+    await expectAccessible(page, info, 'rtl')
+    await screenshot(page, info, `chat-rtl${isMobile ? '-phone' : ''}`)
+  })
 })
 
 test.describe('chat with the model', () => {

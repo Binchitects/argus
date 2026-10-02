@@ -110,7 +110,7 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
       )}
       {images.length > 0 && <ImageViewer images={images} index={viewing} onIndex={setViewing} />}
       {editing === null ? (
-        m.content && <div className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">{m.content}</div>
+        m.content && <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">{m.content}</div>
       ) : (
         <form
           className="grid w-full max-w-[85%] gap-2"
@@ -120,7 +120,7 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
             setEditing(null)
           }}
         >
-          <Textarea value={editing} onChange={(e) => setEditing(e.target.value)} aria-label="Edit your question" autoFocus className="min-h-24" />
+          <Textarea dir="auto" value={editing} onChange={(e) => setEditing(e.target.value)} aria-label="Edit your question" autoFocus className="min-h-24" />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(null)}>
               Cancel

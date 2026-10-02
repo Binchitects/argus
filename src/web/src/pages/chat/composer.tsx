@@ -115,6 +115,7 @@ export function Composer({
       )}
       <textarea
         ref={area}
+        dir="auto"
         rows={big ? 3 : 1}
         value={text}
         onChange={(e) => setText(e.target.value)}
