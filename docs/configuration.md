@@ -587,7 +587,7 @@ place to go for behaviour the `.env` does not expose.
 | `traefik/dynamic/tls.yml` | the certificate store and TLS options: minimum version TLS 1.2, and a restricted cipher list |
 | `litellm/config.yaml` | the model list and its advertised window, router retries and timeout, the default per-person budget, the Redis cache policy (`mode: default_off`), and `user_header_mappings` — the mapping that makes chat spend and API spend one number |
 | `prometheus/prometheus.yml` | the 14 scrape jobs and their intervals |
-| `prometheus/rules/*.yml` | alerting rules: `hardware.yml` (9), `llm.yml` (7), `stack.yml` (5), `argus.yml` (4). `slo.yml` holds two more written out but **commented off** — an SLO alert needs a target somebody agreed to, and shipping guesses produces alarms nobody owns |
+| `prometheus/rules/*.yml` | alerting rules: `hardware.yml` (9), `llm.yml` (7), `stack.yml` (6), `argus.yml` (4). `slo.yml` holds two more written out but **commented off** — an SLO alert needs a target somebody agreed to, and shipping guesses produces alarms nobody owns |
 | `alertmanager/alertmanager.yml` | routing and receivers. **Out of the box everything routes to the `null` receiver**: alerts are visible on the app's Alerts page (and in Prometheus and Alertmanager) and notified nowhere. Slack, SMTP and generic-webhook receivers are present but commented out, and read their secrets from files (`slack_api_url_file`, `auth_password_file`) so a real URL never lands in version control |
 | `loki/loki-config.yml` | storage and retention for log aggregation — retention is **enabled**, at 336 h (14 days), with a 2 h delete delay |
 | `promtail/promtail-config.yml` | which logs to collect; reads the Docker socket and container log files |
@@ -601,7 +601,8 @@ place to go for behaviour the `.env` does not expose.
 
 | file | written by | when |
 |---|---|---|
-| `traefik/certs/tls.crt`, `bundle.crt` | `tls-init` | every `up`. Copies for host-side tools; the private key never leaves the volume |
+| `traefik/certs/ca.crt`, `tls.crt`, `bundle.crt` | `tls-init` | every `up`. `ca.crt` is what to trust (the stack's CA); `tls.crt` the certificate served; `bundle.crt` the public CAs with it. The keys never leave the volume |
+| `traefik/dynamic/certificate.yml` | `tls-init` | every `up`: which certificate Traefik serves. A new certificate has a new file name, so Traefik loads it with no restart |
 | `prometheus/secrets/llamacpp.token` | `prometheus-secrets` | every `up` |
 | `directory/users.yml` | the app | at start and on every change to a person. What Argus mounts (`config/directory` → `/directory`, `ARGUS_USERS_FILE`) to map a GitLab identity to a person: usernames, emails and display names only, never passwords. Kept in the tree with a `.gitkeep`; only its contents are ignored |
 | `app/` | the app | the Settings page's pending `.env` changes |

@@ -54,7 +54,9 @@ IMAGE = env("IMAGEGEN_MODEL_NAME") if "image" in env("COMPOSE_PROFILES").split("
 LOCAL = {}  # models added in Admin -> Models: name -> who may use it
 PORT = env("TRAEFIK_HTTPS_PORT", "443")
 SUFFIX = "" if PORT == "443" else f":{PORT}"
-CTX = ssl.create_default_context(cafile=str(ROOT / (env("LLM_CONFIG_DIR") or "config") / "traefik/certs/tls.crt"))
+CERTS = ROOT / (env("LLM_CONFIG_DIR") or "config") / "traefik/certs"
+# What to trust: the stack's CA, or the certificate itself when an operator brought their own.
+CTX = ssl.create_default_context(cafile=str(CERTS / "ca.crt" if (CERTS / "ca.crt").exists() else CERTS / "tls.crt"))
 RESULTS = []
 
 

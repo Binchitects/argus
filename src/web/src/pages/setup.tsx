@@ -168,14 +168,16 @@ export function ConnectPage() {
         {connect.data?.certificate && (
           <Card>
             <CardHeader>
-              <CardTitle>If your tool rejects the certificate</CardTitle>
-              <CardDescription>A private deployment may use its own certificate. Download it and tell the tool to trust it.</CardDescription>
+              <CardTitle>Trust this deployment's certificate</CardTitle>
+              <CardDescription>
+                It is signed by this deployment's own certificate authority. Trust that once, in your browser and your tools, and every renewal after it is trusted too: no more warnings.
+              </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" asChild>
                   <a href="/api/account/certificate" download="llm-service-ca.crt">
-                    <Download /> The certificate
+                    <Download /> The CA certificate
                   </a>
                 </Button>
                 <Button variant="outline" asChild>
@@ -184,8 +186,21 @@ export function ConnectPage() {
                   </a>
                 </Button>
               </div>
+              <CodeBlock
+                code={`# Windows (Chrome, Edge): as administrator
+certutil -addstore -f Root llm-service-ca.crt
+# macOS (Safari, Chrome)
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain llm-service-ca.crt
+# Linux
+sudo cp llm-service-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`}
+                label="the commands to trust it on this computer"
+              />
               <p className="text-sm text-muted-foreground">
-                Node adds a certificate to the ones it trusts; Python and curl replace them, so they take the bundle (the public CAs as well).
+                Firefox, and Chrome on Linux, keep their own list: import the CA certificate under the browser's certificate settings (Authorities). A browser that remembers an old
+                certificate for this address forgets it once it trusts the CA.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                For your tools: Node adds a certificate to the ones it trusts; Python and curl replace them, so they take the bundle (the public CAs as well).
               </p>
               <CodeBlock
                 code={`# Node tools (Claude Code, Qwen Code, OpenCode, OpenClaw, DeepSeek Harness, editors)

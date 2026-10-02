@@ -56,7 +56,8 @@ docker logs -f model-init
 The first start downloads the model, checks every file against the SHA-256 that
 Hugging Face publishes, then starts the engine. Open `https://llm.localhost`
 and sign in as `admin` with `ADMIN_PASSWORD` from `.env`. The browser warns
-once about the self-signed certificate; accept it.
+once about the certificate until you trust the stack's CA (below); you can
+click through it, since the stack sends no HSTS.
 
 **Adding a setup** for another model or card is one file: copy the closest sample,
 edit its header and its MODEL block, and check it. Step by step, with how to choose
@@ -145,7 +146,7 @@ Each of these used to be a script you had to run in the right order.
 
 | service | does, from `.env` |
 |---|---|
-| `tls-init` | generates the self-signed certificate for `LLM_DOMAIN` and `*.LLM_DOMAIN`, keeps it, regenerates it if the domain changes |
+| `tls-init` | makes the stack's own CA once (kept), and from it a certificate for `LLM_DOMAIN` and `*.LLM_DOMAIN`, valid 397 days; a new one when the domain changes, it expires within 30 days, or another CA signed it. Or serves yours from `config/tls/` |
 | `app-init` | hands the app the folders it writes (`config/directory`, `config/app`, `config/engine`) as `LLM_UID:LLM_GID` |
 | `app` (at start) | creates its database, the first admin from `ADMIN_PASSWORD`, and the OIDC clients from the `*_OIDC_CLIENT_SECRET` values (removing any other) |
 | `model-init` | downloads and verifies the model; fails with the path in the message if a file is missing |
@@ -182,6 +183,38 @@ Replace `llm.localhost` with your `LLM_DOMAIN`. Browsers resolve `*.localhost` b
 themselves; **curl, Python, Node and every SDK on another machine do not** — run
 `sudo ./scripts/setup-hosts.sh` there, or add the names to that machine's hosts file.
 
+### Trusting the certificate
+
+The stack signs its certificate with **its own CA**, made once by `tls-init`
+and kept. Trust that CA once on each machine and browser; the certificates it
+signs after that (renewals every year, a new domain) are trusted with it, so no
+warning comes back. Download it from **Connect your tools**, or take
+`deploy/config/traefik/certs/ca.crt` on the host.
+
+| where | how |
+|---|---|
+| Windows (Chrome, Edge) | double-click `ca.crt` → Install Certificate → Local Machine → **Trusted Root Certification Authorities**; or `certutil -addstore -f Root ca.crt` as administrator |
+| macOS (Safari, Chrome) | `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ca.crt` |
+| Linux (system, Chrome) | `sudo cp ca.crt /usr/local/share/ca-certificates/llm-service.crt && sudo update-ca-certificates`; Chrome on Linux reads its own store: Settings → Privacy and security → Security → Manage certificates → Authorities → Import |
+| Firefox (any system) | Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import, tick "Trust this CA to identify websites" |
+| tools on the command line | see `with-ca.sh` below |
+
+**No HSTS.** The stack sends `Strict-Transport-Security: max-age=0`: a browser
+can always click through the warning while it does not trust the CA yet. A
+browser that kept HSTS from an older version of the stack drops it once it
+trusts the CA; until then, clear it by hand: Chrome and Edge at
+`chrome://net-internals/#hsts` (Delete domain security policies:
+`llm.localhost`, and each `name.llm.localhost` you used), Firefox by
+"Forget About This Site" in the history.
+
+**Your own certificate** (a company CA's, or a public one): put `tls.crt` (with
+its chain) and `tls.key` in `deploy/config/tls/` and run `docker compose up -d`.
+With a publicly trusted certificate you may turn HSTS on in
+`config/traefik/dynamic/middlewares.yml`.
+
+The certificate is renewed on any `docker compose up -d` within 30 days of
+expiry; the **CertificateExpiresSoon** alert says so 21 days ahead.
+
 ### Connecting tools to the API
 
 Each person sets up their own tools from **Connect your tools** (`/setup`, in the
@@ -204,7 +237,9 @@ that changes its format needs that file changed. An admin can also make a key fo
 | model | `MODEL_NAME` from `.env`, e.g. `Qwen3.8-Flash-Next` |
 | certificate | run host tools through `deploy/scripts/with-ca.sh` (below) |
 
-The certificate is self-signed, and **TLS verification happens in the client**:
+The certificate is signed by the stack's own CA, and **TLS verification happens
+in the client**: trust `ca.crt` once (see **Trusting the certificate** below) and
+every renewal after that is trusted too.
 nothing the stack does on its side can make a host tool accept it. So each runtime
 has to be told, and each wants a different variable.
 
@@ -215,9 +250,9 @@ has to be told, and each wants a different variable.
 | curl | `CURL_CA_BUNDLE` | **replaces** the trust store |
 | git | `GIT_SSL_CAINFO` | **replaces** the trust store |
 
-That add/replace split is why `tls.crt` alone is not enough for the bottom three:
+That add/replace split is why `ca.crt` alone is not enough for the bottom three:
 pointing `SSL_CERT_FILE` at it stops the tool trusting the public internet too.
-`deploy/scripts/with-ca.sh` sets every one of them correctly — `tls.crt` where
+`deploy/scripts/with-ca.sh` sets every one of them correctly — `ca.crt` where
 the variable adds, `bundle.crt` (public roots **plus** the stack's) where it
 replaces — and installs nothing anywhere:
 
@@ -247,7 +282,7 @@ setting; its own docs state it neither sets nor validates one. It reads
 nothing — it has to be in the environment that launches it:
 
 ```bash
-NODE_EXTRA_CA_CERTS="/path/to/llm-service/deploy/config/traefik/certs/tls.crt" dsh web
+NODE_EXTRA_CA_CERTS="/path/to/llm-service/deploy/config/traefik/certs/ca.crt" dsh web
 ```
 
 Then add a provider with base URL `https://gateway.llm.localhost/v1` and the
@@ -255,7 +290,7 @@ person's key from **Connect your tools**. (The wrapper form above does the same 
 without exporting anything permanent.)
 
 ```bash
-curl --cacert deploy/config/traefik/certs/tls.crt https://gateway.llm.localhost/v1/chat/completions -H "Authorization: Bearer sk-YOURKEY" -H 'Content-Type: application/json' -d '{"model":"Qwen3.8-Flash-Next","messages":[{"role":"user","content":"hi"}],"max_tokens":300}'
+curl --cacert deploy/config/traefik/certs/ca.crt https://gateway.llm.localhost/v1/chat/completions -H "Authorization: Bearer sk-YOURKEY" -H 'Content-Type: application/json' -d '{"model":"Qwen3.8-Flash-Next","messages":[{"role":"user","content":"hi"}],"max_tokens":300}'
 ```
 
 **Qwen Code** — `~/.qwen/settings.json` (the `mcpServers` part adds Argus, below):
@@ -264,7 +299,7 @@ curl --cacert deploy/config/traefik/certs/tls.crt https://gateway.llm.localhost/
 {
   "env": {
     "LOCAL_LLM_API_KEY": "sk-YOURKEY",
-    "NODE_EXTRA_CA_CERTS": "/path/to/llm-service/deploy/config/traefik/certs/tls.crt"
+    "NODE_EXTRA_CA_CERTS": "/path/to/llm-service/deploy/config/traefik/certs/ca.crt"
   },
   "modelProviders": {
     "openai": [
@@ -289,7 +324,7 @@ curl --cacert deploy/config/traefik/certs/tls.crt https://gateway.llm.localhost/
 Then `qwen -m Qwen3.8-Flash-Next`.
 
 **Hermes** — see [docs/hermes.md](hermes.md); use the model's
-real name and append `tls.crt` to Hermes's own CA bundle.
+real name and append `ca.crt` to Hermes's own CA bundle.
 
 **Claude Code** speaks Anthropic's protocol, which the gateway also serves
 (`/v1/messages`):
@@ -299,7 +334,7 @@ export ANTHROPIC_BASE_URL=https://gateway.llm.localhost
 export ANTHROPIC_AUTH_TOKEN=sk-YOURKEY
 export ANTHROPIC_MODEL=Qwen3.8-Flash-Next
 export ANTHROPIC_DEFAULT_HAIKU_MODEL=Qwen3.8-Flash-Next
-NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/tls.crt claude
+NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/ca.crt claude
 ```
 
 **Anything else** (OpenAI SDK, IDE plugins, other agents) takes the same base URL,

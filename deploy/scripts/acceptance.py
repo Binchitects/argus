@@ -101,7 +101,7 @@ HTTPS_PORT = env("TRAEFIK_HTTPS_PORT", "443")
 HTTP_PORT = env("TRAEFIK_HTTP_PORT", "80")
 PROFILES = env("COMPOSE_PROFILES", "")
 CFG = ROOT / env("LLM_CONFIG_DIR", "config")
-CA = CFG / "traefik/certs/tls.crt"
+CA = CFG / "traefik/certs/ca.crt" if (CFG / "traefik/certs/ca.crt").exists() else CFG / "traefik/certs/tls.crt"
 SUFFIX = "" if HTTPS_PORT == "443" else f":{HTTPS_PORT}"
 
 

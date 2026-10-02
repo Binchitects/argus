@@ -287,7 +287,7 @@ original minimum set, and where each item stands:
 | test | asserts |
 |---|---|
 | C4.1 | `https://<domain>/admin` sends a signed-out browser to sign in and back |
-| C4.2 | the self-signed certificate produces a warning that can be accepted, and the page then loads |
+| C4.2 | before the CA is trusted, the warning can be clicked through (no HSTS); after, no warning |
 | C4.3 | a chat renders a streamed answer incrementally: **done in the app's chat** (`chat.spec.ts`) |
 | C4.4 | Argus is offered to a non-admin: **done in the app's chat**, with the no-access notice for someone without access |
 | C4.5 | every dashboard draws every panel without an error: **done in the app** (`admin.spec.ts`) |
@@ -315,7 +315,7 @@ cat > /tmp/argus-mcp.patch.yml <<'YML'
         Authorization: !!js '`Bearer ${process.env.ARGUS_TOKEN}`'
 YML
 
-ARGUS_TOKEN=<gitlab PAT> NODE_EXTRA_CA_CERTS=config/traefik/certs/tls.crt \
+ARGUS_TOKEN=<gitlab PAT> NODE_EXTRA_CA_CERTS=config/traefik/certs/ca.crt \
   dsh --profile headless --patch /tmp/argus-mcp.patch.yml \
   "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
 # -> root/eal-core, and Argus logs the call: outcome=ok, user=dev_alpha

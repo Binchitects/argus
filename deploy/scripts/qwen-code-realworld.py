@@ -219,7 +219,7 @@ def main():
     p.add_argument("--repo", required=True, help="baseline git checkout; never modified")
     p.add_argument("--qwen-home", required=True, help="Qwen Code install dir (contains bin/qwen and node/)")
     p.add_argument("--base-url", default="https://gateway.llm.localhost/v1")
-    p.add_argument("--ca", required=True, help="the stack's certificate (config/traefik/certs/tls.crt)")
+    p.add_argument("--ca", required=True, help="the stack's CA (config/traefik/certs/ca.crt)")
     p.add_argument("--key-a", required=True)
     p.add_argument("--key-b", required=True, help="second person's key, for the concurrent tasks")
     p.add_argument("--model", required=True, help="MODEL_NAME from .env, e.g. Qwen3.8-Flash-Next")

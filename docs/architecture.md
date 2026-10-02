@@ -315,7 +315,7 @@ the LiteLLM admin UI reads, in Postgres.
 | service | image | what it does |
 |---|---|---|
 | `traefik` | `traefik:v3.6.7` | the only published ports. Terminates TLS, routes by `Host(...)` label, applies middleware chains. Docker provider scoped to this compose project by label, file provider watches `config/traefik/dynamic/` |
-| `tls-init` | `python:3.13-slim` (with `openssl`) | one-shot. Generates the self-signed certificate for `<domain>` and `*.<domain>` into `traefik-certs`, reuses it, and regenerates it when `LLM_DOMAIN` changes. Also builds `/certs/bundle.crt` — the public roots, this certificate, and **every `.crt`/`.pem` dropped in `config/ca/`** — so one company CA can be trusted stack-wide, and copies the public cert and the bundle to `config/traefik/certs/` for host-side tools |
+| `tls-init` | `python:3.13-slim` (with `openssl`) | one-shot. Makes the stack's own CA once, and from it the certificate for `<domain>` and `*.<domain>` (397 days, renewed within 30 days of expiry or on a new domain) into `traefik-certs`, or takes yours from `config/tls/`; names the served one in `dynamic/certificate.yml`, so Traefik loads a new one with no restart. It reuses it, and regenerates it when `LLM_DOMAIN` changes. Also builds `/certs/bundle.crt` — the public roots, this certificate, and **every `.crt`/`.pem` dropped in `config/ca/`** — so one company CA can be trusted stack-wide, and copies the public cert and the bundle to `config/traefik/certs/` for host-side tools |
 
 Traefik's Docker provider is constrained by
 ``Label(`com.docker.compose.project`, ...)``. Without that, router names are a
@@ -454,7 +454,7 @@ rather than designed. This table is the short path from symptom to cause.
 
 | symptom | almost always |
 |---|---|
-| `certificate verify failed` from a host tool (`dsh`, `curl`, an SDK) | the client was not told about the self-signed certificate. `deploy/scripts/with-ca.sh` |
+| `certificate verify failed` from a host tool (`dsh`, `curl`, an SDK) | the client does not trust the stack's CA (`config/traefik/certs/ca.crt`). `deploy/scripts/with-ca.sh` |
 | `certificate verify failed` from **inside** a container | that container is missing the cert mount and its CA variable |
 | `421 Invalid Host Header` from Argus | `--allowed-host` does not match the Host header Traefik forwards |
 | Every hostname 404s, every container healthy | Traefik's `constraints:` no longer matches `COMPOSE_PROJECT_NAME` |

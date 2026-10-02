@@ -38,7 +38,7 @@ CFG="$(grep -E '^LLM_CONFIG_DIR=' .env 2>/dev/null | tail -n1 | cut -d= -f2- | t
 CFG="${CFG:-./config}"
 case "$CFG" in /*) ;; *) CFG="$PWD/${CFG#./}" ;; esac
 CERT_DIR="$CFG/traefik/certs"
-CA="$CERT_DIR/tls.crt"
+CA="$CERT_DIR/ca.crt"; [ -s "$CA" ] || CA="$CERT_DIR/tls.crt"
 BUNDLE="$CERT_DIR/bundle.crt"
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then

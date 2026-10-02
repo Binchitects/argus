@@ -27,6 +27,11 @@ Thumbs.db
 # The exported TLS certificate (tls-init)
 config/traefik/certs/*
 !config/traefik/certs/.gitkeep
+# Written by tls-init: which certificate Traefik serves.
+config/traefik/dynamic/certificate.yml
+# Your own certificate and key, when you bring one (config/tls/README.md).
+config/tls/*
+!config/tls/README.md
 
 # Argus's private CA for a GitLab that is not on a public one. Whatever an
 # operator drops here belongs to their environment, not to this repository --

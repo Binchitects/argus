@@ -94,6 +94,7 @@ public sealed class FoundationTests(AppFixture app)
         using var req = new HttpRequestMessage(HttpMethod.Get, new Uri("/", UriKind.Relative));
         req.Headers.Add("X-Forwarded-Proto", "https");
         var res = await _client.SendAsync(req);
-        Assert.StartsWith("max-age=", res.Headers.GetValues("Strict-Transport-Security").Single(), StringComparison.Ordinal);
+        // No HSTS, and a policy a browser kept from before is cleared.
+        Assert.Equal("max-age=0", res.Headers.GetValues("Strict-Transport-Security").Single());
     }
 }

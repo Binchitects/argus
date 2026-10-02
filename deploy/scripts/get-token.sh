@@ -32,7 +32,7 @@ SECRET="$(get API_OIDC_CLIENT_SECRET)"
 [[ -n "$SECRET" ]] || { echo "API_OIDC_CLIENT_SECRET missing - set it in .env" >&2; exit 1; }
 
 CFG="$(get LLM_CONFIG_DIR)"; CFG="${CFG:-./config}"
-CA="$CFG/traefik/certs/tls.crt"
+CA="$CFG/traefik/certs/ca.crt"; [ -s "$CA" ] || CA="$CFG/traefik/certs/tls.crt"
 
 # --resolve + --ssl-no-revoke are only needed because *.localhost does not
 # resolve in CLI tools and Windows curl cannot check revocation for a self-signed certificate.

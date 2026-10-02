@@ -60,3 +60,16 @@ groups:
           description: >-
             Old blocks are about to be dropped early. Raise
             PROMETHEUS_RETENTION_SIZE or lengthen the scrape interval.
+
+      - alert: CertificateExpiresSoon
+        # The newest certificate for each name: a renewed one replaces the old in what Traefik serves.
+        expr: max by (cn) (traefik_tls_certs_not_after) - time() < 21 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "The certificate for {{ $labels.cn }} expires within 21 days"
+          description: >-
+            tls-init renews it on any `docker compose up -d` (within 30 days of
+            expiry, from the stack's own CA). With your own certificate in
+            config/tls, replace the files there, then run that.

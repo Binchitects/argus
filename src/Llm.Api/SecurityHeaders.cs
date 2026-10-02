@@ -22,7 +22,9 @@ public static class SecurityHeaders
                 h["Cross-Origin-Opener-Policy"] = "same-origin";
                 if (context.Request.IsHttps)
                 {
-                    h.StrictTransportSecurity = "max-age=31536000";
+                    // No HSTS: with the stack's own CA, a browser that has not trusted it yet must still
+                    // be able to click through the warning. max-age=0 clears a policy kept from before.
+                    h.StrictTransportSecurity = "max-age=0";
                 }
                 return Task.CompletedTask;
             });

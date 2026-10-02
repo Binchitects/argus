@@ -252,7 +252,7 @@ the stack's certificate appended, every call fails as a bare **"Connection error
 neither TLS nor the certificate:
 
 ```bash
-cat deploy/config/traefik/certs/tls.crt >> ~/AppData/Local/hermes/ca-bundle.pem
+cat deploy/config/traefik/certs/ca.crt >> ~/AppData/Local/hermes/ca-bundle.pem
 ```
 
 This hides behind the context check, which runs first and needs no network —

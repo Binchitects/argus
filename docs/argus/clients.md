@@ -87,7 +87,7 @@ Executed end to end against a live stack; see
 [`clients/deepseek-harness/`](../../clients/deepseek-harness/).
 
 ```bash
-ARGUS_TOKEN=<pat> NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/tls.crt \
+ARGUS_TOKEN=<pat> NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/ca.crt \
   dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
   "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
 ```

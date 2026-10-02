@@ -37,7 +37,7 @@ describe('connect your tools', () => {
     expect(screen.getByText(/export OPENAI_BASE_URL=/)).toHaveTextContent('OPENAI_MODEL=Big-Model')
     // Argus is not offered to someone who may not use it; the certificate is there to download.
     expect(screen.queryByText('Argus, the code index')).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /The certificate/ })).toHaveAttribute('href', '/api/account/certificate')
+    expect(screen.getByRole('link', { name: /The CA certificate/ })).toHaveAttribute('href', '/api/account/certificate')
     expect(screen.getByRole('link', { name: /With the public CAs/ })).toHaveAttribute('href', '/api/account/certificate?bundle=true')
   })
 
@@ -52,7 +52,7 @@ describe('connect your tools', () => {
     // The chosen tool's steps carry Argus too, with this deployment's address.
     const steps = screen.getByRole('region', { name: 'Setting up Claude Code' })
     expect(within(steps).getByText(/claude mcp add --transport http argus/)).toHaveTextContent(`${window.location.protocol}//argus.${window.location.host}/mcp`)
-    expect(screen.queryByRole('link', { name: /The certificate/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /The CA certificate/ })).not.toBeInTheDocument()
   })
 
   it('each tool has its own steps, filled in with the address, the model and its limits', async () => {

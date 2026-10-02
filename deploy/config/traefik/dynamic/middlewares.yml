@@ -8,8 +8,13 @@ http:
         contentTypeNosniff: true
         browserXssFilter: true
         referrerPolicy: same-origin
-        stsSeconds: 31536000
-        stsIncludeSubdomains: true
+        # No HSTS. With the stack's own CA a browser that has not trusted it yet
+        # must still be able to click through the warning, and HSTS removes that
+        # choice. max-age=0 tells a browser that kept a policy from before to
+        # drop it (once it trusts the certificate). With a public certificate in
+        # config/tls, HSTS can be turned on here: stsSeconds: 31536000.
+        customResponseHeaders:
+          Strict-Transport-Security: "max-age=0"
 
     compress:
       compress:

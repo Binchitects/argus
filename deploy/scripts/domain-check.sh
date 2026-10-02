@@ -22,7 +22,8 @@ get() { grep -E "^$1=" .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r[:s
 DOM="$(get LLM_DOMAIN)"; DOM="${DOM:-llm.localhost}"
 PORT="$(get TRAEFIK_HTTPS_PORT)"; PORT="${PORT:-443}"
 CFG="$(get LLM_CONFIG_DIR)"; CFG="${CFG:-./config}"
-CRT="$CFG/traefik/certs/tls.crt"
+CRT="$CFG/traefik/certs/tls.crt"   # the certificate served
+CA="$CFG/traefik/certs/ca.crt"; [ -s "$CA" ] || CA="$CRT"   # what to trust
 FAILS=0
 
 ok()   { printf '  \033[32mOK\033[0m    %s\n' "$*"; }
@@ -32,7 +33,7 @@ resolve=()
 for h in "" gateway api metrics alerts argus; do
   name="${h:+$h.}$DOM"; resolve+=(--resolve "$name:$PORT:127.0.0.1")
 done
-C=(curl -s --max-time 20 --cacert "$CRT" "${resolve[@]}")
+C=(curl -s --max-time 20 --cacert "$CA" "${resolve[@]}")
 # As a browser navigating: the app sends a browser to sign in (302) and a program a 401.
 B=("${C[@]}" -H 'Accept: text/html')
 u() { local h="${1:+$1.}" p="${2:-/}"; [[ "$PORT" == 443 ]] && echo "https://$h$DOM$p" || echo "https://$h$DOM:$PORT$p"; }
@@ -47,6 +48,13 @@ san="$(echo | openssl s_client -connect "127.0.0.1:$PORT" -servername "$DOM" 2>/
 cmp -s <(openssl x509 -in "$CRT" -noout -fingerprint 2>/dev/null) \
        <(echo | openssl s_client -connect "127.0.0.1:$PORT" -servername "$DOM" 2>/dev/null | openssl x509 -noout -fingerprint 2>/dev/null) \
   && ok "exported $CRT is the certificate being served" || bad "$CRT does not match the served certificate"
+if [[ "$CA" != "$CRT" ]]; then
+  # Signed by the stack's CA, which is what people trust: renewals keep working for them.
+  openssl verify -CAfile "$CA" <(openssl x509 -in "$CRT" 2>/dev/null) >/dev/null 2>&1 \
+    && ok "it is signed by the stack's CA (ca.crt)" || bad "it is not signed by $CA"
+  days=$(( ( $(date -d "$(openssl x509 -in "$CRT" -noout -enddate | cut -d= -f2)" +%s) - $(date +%s) ) / 86400 ))
+  (( days > 21 )) && ok "valid for $days more days" || bad "expires in $days days: docker compose up -d renews it"
+fi
 
 echo "2. routes (verified TLS)"
 expect() {  # host path expected-codes-regex label

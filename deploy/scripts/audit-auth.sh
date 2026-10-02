@@ -19,7 +19,7 @@ export MSYS_NO_PATHCONV=1
 
 get() { grep -E "^$1=" .env | head -n1 | cut -d= -f2- | tr -d '[:space:]'; }
 CFG="$(get LLM_CONFIG_DIR)"; CFG="${CFG:-./config}"
-CA="$CFG/traefik/certs/tls.crt"
+CA="$CFG/traefik/certs/ca.crt"; [ -s "$CA" ] || CA="$CFG/traefik/certs/tls.crt"
 DOM="$(get LLM_DOMAIN)"; DOM="${DOM:-llm.localhost}"
 USER_NAME="admin"
 PASS="$(get ADMIN_PASSWORD)"
@@ -162,9 +162,13 @@ c=$(status "$APP/api/admin/people")
 c=$(status -b "$JAR" -X POST -H 'Content-Type: application/json' -d '{}' "$APP/api/auth/logout")
 [ "$c" = "400" ] && green OK "a state change without X-Requested-With -> 400 (CSRF)" || red FAIL "CSRF guard -> $c"
 hdrs=$(curl -s -D - -o /dev/null "${RES[@]}" "$APP/" | tr -d '\r')
-for h in "content-security-policy: default-src 'self'" "strict-transport-security: max-age" "x-frame-options: DENY" "x-content-type-options: nosniff"; do
+for h in "content-security-policy: default-src 'self'" "x-frame-options: DENY" "x-content-type-options: nosniff"; do
   printf '%s\n' "$hdrs" | grep -qi "^$h" && green OK "${h%%:*}" || red FAIL "missing ${h%%:*}"
 done
+# No HSTS: a browser must be able to click through the warning until it trusts the stack's CA.
+# max-age=0 is there to clear a policy kept from before; anything longer is a regression.
+sts=$(printf '%s\n' "$hdrs" | grep -i '^strict-transport-security:' | sed 's/^[^:]*: *//')
+[[ "$sts" == "max-age=0" ]] && green OK "no HSTS (max-age=0 clears an old one)" || red FAIL "HSTS is '$sts'"
 cookie=$(grep -E 'llm_session' "$JAR" | head -1)
 [[ "$cookie" == "#HttpOnly_"* ]] && green OK "the session cookie is HttpOnly" || red FAIL "session cookie not HttpOnly"
 [[ "$(printf '%s' "$cookie" | awk '{print $4}')" == "TRUE" ]] && green OK "the session cookie is Secure" || red FAIL "session cookie not Secure"

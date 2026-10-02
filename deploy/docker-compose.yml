@@ -165,27 +165,28 @@ services:
     <<: *gpu-reservation
     logging: *default-logging
 
-  # Generates the self-signed TLS certificate Traefik serves, then exits.
+  # Makes the certificate Traefik serves, then exits.
   #
-  # Replaces a host-side certificate script and its private CA. That path needed a script run
-  # before the first `up` and a CA installed into every client's trust store,
-  # and each step was a place a fresh deployment went wrong.
+  # The stack's own CA, made once and kept on the volume, signs a certificate
+  # for <domain> and *.<domain>, valid 397 days. tls-init runs on every `up`
+  # and issues a new one when the domain changes, when it expires within 30
+  # days, or when this CA did not sign it. People trust the CA once
+  # (config/traefik/certs/ca.crt, also under Connect your tools), and the
+  # renewals and domain changes after that never break that trust: no browser
+  # warning to click through, no stale certificate pinned anywhere.
+  #
+  # Or the operator's own: tls.crt (with its chain) and tls.key in config/tls/
+  # are served as they are, for a company CA's or a public certificate.
   #
   # Not Traefik's built-in default certificate, deliberately: Traefik makes that
   # one in memory and makes a NEW one on every restart, so nothing can ever trust
-  # it. This certificate is generated once, kept on a volume, and reused, so
-  # internal clients (Argus, Langfuse's sign-in) verify it properly.
+  # it. OpenSSL from the Python image the stack already runs: no extra image.
   #
-  # Regenerated automatically when LLM_DOMAIN changes. Covers the domain and
-  # *.domain, valid 10 years. OpenSSL from the Python image the stack already
-  # runs: no extra image to pull.
-  #
-  # The public certificate is also copied to config/traefik/certs/tls.crt for
-  # host-side tools. The private key never leaves the volume.
-  #
-  # bundle.crt is what containers that call out trust (Argus): the
-  # public CAs, this certificate, and every .crt/.pem in config/ca/ -- put the
-  # company CA there when GitLab or another internal service uses one.
+  # Exported to config/traefik/certs/ for people and host-side tools: ca.crt,
+  # tls.crt and bundle.crt. The keys never leave the volume. bundle.crt is what
+  # containers that call out trust (Argus, the gateway): the public CAs, this
+  # stack's CA, and every .crt/.pem in config/ca/ -- put the company CA there
+  # when GitLab or another internal service uses one.
   tls-init:
     image: python:3.13-slim
     container_name: tls-init
@@ -202,17 +203,54 @@ services:
       - |
         set -e
         D=/certs
-        if [ ! -s "$$D/tls.crt" ] || [ ! -s "$$D/tls.key" ] || [ "$$(cat "$$D/domain" 2>/dev/null)" != "$$LLM_DOMAIN" ]; then
-          openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
-            -keyout "$$D/tls.key" -out "$$D/tls.crt" -subj "/O=LLMService/CN=$$LLM_DOMAIN" \
-            -addext "subjectAltName=DNS:$$LLM_DOMAIN,DNS:*.$$LLM_DOMAIN" 2>/dev/null
-          echo "$$LLM_DOMAIN" > "$$D/domain"
-          echo "tls-init: generated a self-signed certificate for $$LLM_DOMAIN and *.$$LLM_DOMAIN"
+        own=0
+        if [ -s /own/tls.crt ] && [ -s /own/tls.key ]; then
+          own=1
+          # The operator's own certificate (config/tls): a company CA's, or a public one.
+          if ! cmp -s /own/tls.crt "$$D/tls.crt" || ! cmp -s /own/tls.key "$$D/tls.key"; then
+            cp /own/tls.crt "$$D/tls.crt"; cp /own/tls.key "$$D/tls.key"
+            echo "tls-init: serving the certificate in config/tls"
+          fi
+          # The stack's CA is kept (not offered) for when config/tls is emptied again:
+          # people who trusted it then need not trust a new one.
+          rm -f "$$D/domain"
         else
-          echo "tls-init: certificate for $$LLM_DOMAIN already present"
+          # The stack's own CA, made once and kept: people trust it once, and the
+          # certificates it signs can renew or change domain without breaking that.
+          if [ ! -s "$$D/ca.key" ] || [ ! -s "$$D/ca.crt" ]; then
+            openssl req -x509 -newkey rsa:3072 -sha256 -days 3650 -nodes -keyout "$$D/ca.key" -out "$$D/ca.crt" \
+              -subj "/O=LLMService/CN=LLM Service local CA $$(date -u +%Y%m%d%H%M)" \
+              -addext "basicConstraints=critical,CA:TRUE,pathlen:0" -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+            echo "tls-init: made the local CA (config/traefik/certs/ca.crt): trust it once in each browser and tool"
+          fi
+          # A new server certificate when there is none, the domain changed, it
+          # expires within 30 days, or this CA did not sign it.
+          renew=0
+          [ -s "$$D/tls.crt" ] && [ -s "$$D/tls.key" ] || renew=1
+          [ "$$(cat "$$D/domain" 2>/dev/null)" = "$$LLM_DOMAIN" ] || renew=1
+          openssl x509 -checkend 2592000 -noout -in "$$D/tls.crt" >/dev/null 2>&1 || renew=1
+          openssl verify -CAfile "$$D/ca.crt" "$$D/tls.crt" >/dev/null 2>&1 || renew=1
+          if [ $$renew = 1 ]; then
+            printf 'subjectAltName=DNS:%s,DNS:*.%s\nbasicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' \
+              "$$LLM_DOMAIN" "$$LLM_DOMAIN" > /tmp/ext
+            openssl req -newkey rsa:2048 -sha256 -nodes -keyout /tmp/tls.key -out /tmp/tls.csr -subj "/O=LLMService/CN=$$LLM_DOMAIN" 2>/dev/null
+            # 397 days: within what every browser accepts for a server certificate.
+            openssl x509 -req -in /tmp/tls.csr -CA "$$D/ca.crt" -CAkey "$$D/ca.key" -set_serial "0x$$(openssl rand -hex 16)" \
+              -days 397 -sha256 -extfile /tmp/ext -out /tmp/leaf.crt 2>/dev/null
+            # The chain Traefik serves: the certificate, then the CA.
+            cat /tmp/leaf.crt "$$D/ca.crt" > "$$D/tls.crt"
+            mv /tmp/tls.key "$$D/tls.key"
+            echo "$$LLM_DOMAIN" > "$$D/domain"
+            echo "tls-init: issued a certificate for $$LLM_DOMAIN and *.$$LLM_DOMAIN from the local CA, valid 397 days"
+          else
+            echo "tls-init: certificate for $$LLM_DOMAIN present and valid"
+          fi
+          chmod 600 "$$D/ca.key"
         fi
-        # Public CAs, ours, and any extra CA the operator added (config/ca/).
-        cat /etc/ssl/certs/ca-certificates.crt "$$D/tls.crt" > "$$D/bundle.crt.new"
+        # Public CAs, the one to trust for this stack (its CA, or the certificate
+        # itself), and any extra CA the operator added (config/ca/).
+        trust="$$D/ca.crt"; [ $$own = 0 ] && [ -s "$$trust" ] || trust="$$D/tls.crt"
+        cat /etc/ssl/certs/ca-certificates.crt "$$trust" > "$$D/bundle.crt.new"
         for ca in /extra-ca/*.crt /extra-ca/*.pem; do
           [ -f "$$ca" ] || continue
           grep -q "BEGIN CERTIFICATE" "$$ca" || { echo "tls-init: $$(basename "$$ca") in config/ca is not a PEM certificate"; exit 1; }
@@ -220,17 +258,32 @@ services:
           echo "tls-init: trusting $$(basename "$$ca") from config/ca"
         done
         mv "$$D/bundle.crt.new" "$$D/bundle.crt"
+        # What Traefik serves: a copy under a name of its own, named in a file its
+        # file provider watches. A new certificate is a new name, so Traefik loads
+        # it at once, with no restart; the keys stay on this volume.
+        id=$$(sha256sum "$$D/tls.crt" | cut -c1-12)
+        if [ ! -s "$$D/served-$$id.crt" ]; then
+          cp "$$D/tls.crt" "$$D/served-$$id.crt"; cp "$$D/tls.key" "$$D/served-$$id.key"
+        fi
+        chmod 644 "$$D/served-$$id.crt"; chmod 600 "$$D/served-$$id.key"
+        printf '# Written by tls-init on every up: the certificate Traefik serves.\n# A new certificate has a new name, which is what makes Traefik load it.\ntls:\n  stores:\n    default:\n      defaultCertificate:\n        certFile: /etc/traefik/certs/served-%s.crt\n        keyFile: /etc/traefik/certs/served-%s.key\n' "$$id" "$$id" > /dynamic/certificate.yml.new
+        mv /dynamic/certificate.yml.new /dynamic/certificate.yml
+        chown "$$(stat -c %u:%g /dynamic)" /dynamic/certificate.yml 2>/dev/null || true
+        # The one before stays until the next run, while Traefik switches over.
+        ls -t "$$D"/served-*.crt 2>/dev/null | tail -n +3 | while read -r old; do rm -f "$$old" "$${old%.crt}.key"; done
         chmod 644 "$$D/tls.crt" "$$D/bundle.crt"
+        [ ! -f "$$D/ca.crt" ] || chmod 644 "$$D/ca.crt"
+        [ ! -f "$$D/ca.key" ] || chmod 600 "$$D/ca.key"
         chmod 600 "$$D/tls.key"
-        # Owned by whoever owns the directory, so the operator can delete it.
-        #
-        # BOTH files, because host-side tools differ in whether a CA variable
-        # ADDS to the public roots or REPLACES them. Node's
-        # NODE_EXTRA_CA_CERTS adds, so tls.crt is right there; OpenSSL's
-        # SSL_CERT_FILE, curl's CURL_CA_BUNDLE and git's GIT_SSL_CAINFO all
-        # replace, so those need bundle.crt or they stop trusting the public
-        # internet. scripts/with-ca.sh picks the right one per variable.
-        for f in tls.crt bundle.crt; do
+        # Copies for people and host-side tools, owned by whoever owns the
+        # directory. Never a key. ca.crt is what to trust (a tool that ADDS a CA,
+        # like Node's NODE_EXTRA_CA_CERTS, takes it); bundle.crt is for settings
+        # that REPLACE the trust store (SSL_CERT_FILE, curl, git), and tls.crt is
+        # the certificate served. scripts/with-ca.sh picks the right one.
+        rm -f /export/ca.crt
+        for f in ca.crt tls.crt bundle.crt; do
+          [ -f "$$D/$$f" ] || continue
+          [ $$f != ca.crt ] || [ $$own = 0 ] || continue
           if cp "$$D/$$f" "/export/$$f" 2>/dev/null; then
             chmod 644 "/export/$$f"
             chown "$$(stat -c %u:%g /export)" "/export/$$f" 2>/dev/null || true
@@ -240,6 +293,10 @@ services:
       - traefik-certs:/certs
       - ${LLM_CONFIG_DIR:-./config}/traefik/certs:/export
       - ${LLM_CONFIG_DIR:-./config}/ca:/extra-ca:ro
+      # The operator's own certificate, if any: tls.crt (with its chain) and tls.key.
+      - ${LLM_CONFIG_DIR:-./config}/tls:/own:ro
+      # Where it names the certificate Traefik serves (certificate.yml, generated).
+      - ${LLM_CONFIG_DIR:-./config}/traefik/dynamic:/dynamic
     logging: *default-logging
 
   traefik:
