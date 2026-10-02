@@ -7,7 +7,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- Stamped by the image builds (APP_VERSION); the app shows it at /api/info. -->
+    <!-- One version for every project and image: VERSION at the repository's root,
+         bumped by each release (APP_VERSION overrides it for a one-off build).
+         The app shows it at /api/info and in the sidebar; Argus in its metrics. -->
+    <AppVersion Condition="'$(AppVersion)' == '' and Exists('$(MSBuildThisFileDirectory)VERSION')">$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</AppVersion>
     <Version Condition="'$(AppVersion)' != ''">$(AppVersion)</Version>
   </PropertyGroup>
 </Project>

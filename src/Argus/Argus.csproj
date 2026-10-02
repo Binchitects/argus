@@ -4,7 +4,6 @@
     <AssemblyName>argus</AssemblyName>
     <RootNamespace>Argus</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version Condition="'$(AppVersion)' == ''">3.0.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.12" />

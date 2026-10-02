@@ -5,9 +5,10 @@
 # Built from the repository root: docker build -f src/Llm.Api/Dockerfile .
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api
-ARG APP_VERSION=0.0.0
+# Empty: VERSION at the repository's root (Directory.Build.props).
+ARG APP_VERSION=
 WORKDIR /src
-COPY global.json Directory.Build.props ./
+COPY global.json Directory.Build.props VERSION ./
 COPY src/Llm.Core/Llm.Core.csproj src/Llm.Core/
 COPY src/Llm.Api/Llm.Api.csproj src/Llm.Api/
 RUN dotnet restore src/Llm.Api/Llm.Api.csproj

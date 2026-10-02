@@ -1433,7 +1433,7 @@ services:
       context: ${LLM_SOURCE_DIR:-..}
       dockerfile: src/Llm.Api/Dockerfile
       args:
-        APP_VERSION: ${APP_VERSION:-0.2.0}
+        APP_VERSION: ${APP_VERSION:-}
     container_name: app
     profiles: ["gateway"]
     restart: unless-stopped
@@ -1622,7 +1622,7 @@ services:
     build:
       context: ${LLM_SOURCE_DIR:-..}/src/web
       args:
-        APP_VERSION: ${APP_VERSION:-0.2.0}
+        APP_VERSION: ${APP_VERSION:-}
     container_name: web
     profiles: ["gateway"]
     restart: unless-stopped

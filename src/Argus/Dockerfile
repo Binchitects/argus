@@ -30,7 +30,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && ctags --version | grep -q "Universal Ctags"
 WORKDIR /src
-COPY global.json Directory.Build.props ./
+COPY global.json Directory.Build.props VERSION ./
 COPY src/Argus/Argus.csproj src/Argus/
 COPY tests/Argus.Tests/Argus.Tests.csproj tests/Argus.Tests/
 RUN dotnet restore tests/Argus.Tests/Argus.Tests.csproj
@@ -62,7 +62,8 @@ RUN case "$(dpkg --print-architecture)" in amd64) rid=linux-x64 ;; arm64) rid=li
 # -------------------------------------------------------------- runtime -----
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_TAG} AS runtime
 
-ARG ARGUS_VERSION=3.0.0
+# Empty: the assembly's, from VERSION at the repository's root.
+ARG ARGUS_VERSION=
 ARG ARGUS_REVISION=unknown
 LABEL org.opencontainers.image.title="argus" \
       org.opencontainers.image.description="Chat, code index and documentation for a team, on local models" \
