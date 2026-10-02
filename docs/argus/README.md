@@ -423,19 +423,48 @@ Nothing goes red, so nothing looks wrong.
 
 Two things close that hole, and they only work together.
 
-**The index reindexes itself.** `ARGUS_INDEX_INTERVAL` (default 900 s) makes the
-`argus` serve process run a pass on a timer. It runs *inside* the serve process
-rather than as a second container because both would write the same SQLite
-index, and `store.connect` sets no `busy_timeout`: the two would fail each other
-with `database is locked` and neither failure would say why. Sharing one
-`_index_lock` also means a scheduled pass is visible on the app's Indexing
-page exactly like a manual one — progress, log and exit code — and it clears
-the staleness below the moment it finishes.
+**The index reindexes itself.** In this stack the app asks Argus for a pass on
+the **schedule** set under **Admin → Indexing** (every 15 minutes until
+changed; in words, or cron, in a time zone; empty = only pushes and **Index
+now**). Argus's own timer, `ARGUS_INDEX_INTERVAL`, is for an Argus that runs
+without the app (`0`, off, here). Either way the pass runs *inside* the serve
+process rather than as a second container because both would write the same
+SQLite index: the two would fail each other with `database is locked`. Sharing
+one index lock also means a scheduled pass is visible on the Indexing page
+exactly like a manual one — progress, log and exit code — and it clears the
+staleness below the moment it finishes.
 
-If the index is found stale or empty at startup, the first pass runs after 30
-seconds instead of waiting out a full interval. A fresh drop-in deployment with
-an empty named volume indexes itself rather than sitting empty for fifteen
-minutes while the app insists everything is fine.
+With Argus's own timer, if the index is found stale or empty at startup the
+first pass runs after 30 seconds instead of waiting out a full interval.
+
+### Choosing what is indexed
+
+**Admin → Indexing → Repositories** lists every repository the service account
+can see (each pass refreshes the list; **Refresh from GitLab** does at once):
+
+- **Indexed** on or off per repository, or for several at once. Off takes it out
+  of the index at once, its files, symbols and text search with it (after the
+  pass running, if one is). **New repositories** says whether one GitLab lists for
+  the first time is indexed (by default, yes: as before).
+- **Branches**: the default branch is always indexed; the dialog lists the
+  repository's branches as GitLab has them, each with its latest commit, to tick
+  more, and takes patterns (`release/*`) for branches to come. Each branch is an
+  index of its own. `ARGUS_INDEX_BRANCHES` still adds patterns for every
+  repository, and **Index now** takes extra ones for one run.
+- **Index**: each indexed branch at its commit — hash (linked to GitLab),
+  subject line, when it was committed and last checked, its files and symbols,
+  and whether it is current, out of date or failed.
+- **Update** brings one repository up to date from its latest commits now (only
+  what changed since the commit indexed is read again), or after the pass
+  running, queued like a push.
+- While a pass runs, **Index now** shows how far it is (a percentage over the
+  repositories, and of the one on now its changed files), and each repository's
+  row says **Indexing** with its percentage, or **Queued**. The index process
+  reports this as `@progress` lines on stdout, which the server keeps out of
+  the run log.
+
+The choices live in the index database (`repo_choices`, migration 016), so a
+standalone Argus has them too (`/admin/repos`).
 
 ### Indexing on push
 

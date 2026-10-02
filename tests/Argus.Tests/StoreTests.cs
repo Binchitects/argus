@@ -14,7 +14,7 @@ public class StoreTests
         var version = Convert.ToInt32(Sql.Scalar(ix.Conn, "PRAGMA user_version"));
         Assert.Equal(Db.Migrations[^1].Version, version);
         Assert.Equal(version, Db.Migrate(ix.Conn));
-        Assert.Equal(15, Db.Migrations.Count);
+        Assert.Equal(16, Db.Migrations.Count);
     }
 
     [Fact]
@@ -246,5 +246,83 @@ public class ResolveTests
         IReadOnlySet<string> names = new HashSet<string> { "eal", "zlib" };
         Assert.False(Resolve.IsVendoredCopy("eal/include/eal/eal_thread.h", "eal", names));
         Assert.True(Resolve.IsVendoredCopy("src/zlib/zconf.h", "libpng", names));
+    }
+}
+
+/// <summary>What admins choose for the index: repositories in or out, their branches, and new ones.</summary>
+[Collection("process-state")]
+public class ChoicesTests
+{
+    static Argus.Indexing.Project P(long id, string path) => new(id, path, "main", $"http://x/{path}.git");
+
+    [Fact]
+    public void New_repositories_follow_the_policy_and_known_ones_keep_their_choice()
+    {
+        using var ix = new TestIndex();
+        Choices.Record(ix.Conn, [P(1, "g/a"), P(2, "g/b")], 100);
+        Assert.True(Choices.Find(ix.Conn, 1)!.Included);
+        Assert.True(Choices.Set(ix.Conn, 2, false, ["develop", "release/*"], 110));
+        Choices.SetNewReposIncluded(ix.Conn, false);
+        // GitLab lists them again (one renamed) and a new one.
+        Choices.Record(ix.Conn, [P(1, "g/a-renamed"), P(2, "g/b"), P(3, "g/c")], 200);
+        Assert.Equal("g/a-renamed", Choices.Find(ix.Conn, 1)!.Path);
+        var b = Choices.Find(ix.Conn, 2)!;
+        Assert.False(b.Included);
+        Assert.Equal(["develop", "release/*"], b.Branches);
+        Assert.False(Choices.Find(ix.Conn, 3)!.Included);
+        Assert.False(Choices.Included(ix.Conn, 99));
+        Assert.False(Choices.Set(ix.Conn, 99, true, null, 300));
+    }
+
+    [Fact]
+    public void A_repository_taken_out_leaves_the_index_and_its_text_search_with_it()
+    {
+        using var ix = new TestIndex();
+        var main = ix.Repo(5, "g/gone");
+        var dev = ix.Repo(5, "g/gone", branch: "develop");
+        ix.File(main, "a.c", "int UniqueGoneWord;\n");
+        ix.File(dev, "b.c", "int UniqueGoneWord;\n");
+        var kept = ix.Repo(6, "g/kept");
+        ix.File(kept, "k.c", "int KeptWord;\n");
+        int Matches(string word) => Convert.ToInt32(Sql.Scalar(ix.Conn, "SELECT COUNT(*) FROM files_fts WHERE files_fts MATCH ?", word));
+        Assert.Equal(2, Matches("UniqueGoneWord"));
+
+        Assert.Equal(2, Choices.Drop(ix.Conn, 5));
+        Assert.Equal(0, Matches("UniqueGoneWord"));
+        Assert.Equal(1, Matches("KeptWord"));
+        Assert.Equal(0L, Sql.Scalar(ix.Conn, "SELECT COUNT(*) FROM files WHERE repo_id IN (?, ?)", main, dev));
+    }
+
+    [Fact]
+    public void A_runs_progress_follows_the_steps_the_index_reports()
+    {
+        var p = new System.Text.Json.Nodes.JsonObject { ["outcomes"] = new System.Text.Json.Nodes.JsonObject() };
+        var lines = new List<string>();
+        Argus.Indexing.Progress.Write = lines.Add;
+        try
+        {
+            Argus.Indexing.Progress.Pass(2);
+            Argus.Indexing.Progress.Branch(1, "g/a", "main");
+            Argus.Indexing.Progress.Files("g/a", "main", 40, 160);
+            Argus.Indexing.Progress.BranchDone("g/a", "main", "ok");
+            Argus.Indexing.Progress.Branch(2, "g/b", "main");
+            Argus.Indexing.Progress.Finishing("embeddings");
+        }
+        finally
+        {
+            Argus.Indexing.Progress.Write = line => Console.Out.WriteLine(line);
+        }
+        foreach (var line in lines)
+        {
+            Assert.StartsWith(Argus.Indexing.Progress.Prefix, line);
+            Argus.Server.Jobs.Step(p, (System.Text.Json.Nodes.JsonObject)System.Text.Json.Nodes.JsonNode.Parse(line[Argus.Indexing.Progress.Prefix.Length..])!);
+        }
+        Assert.Equal(2, p["repos"]!.GetValue<int>());
+        Assert.Equal(2, p["position"]!.GetValue<int>());
+        Assert.Equal("g/b", p["repo"]!.GetValue<string>());
+        Assert.Equal(0, p["done"]!.GetValue<int>());
+        Assert.Equal("ok", p["outcomes"]!["g/a@main"]!.GetValue<string>());
+        Assert.Equal("finishing", p["stage"]!.GetValue<string>());
+        Assert.Equal("embeddings", p["what"]!.GetValue<string>());
     }
 }

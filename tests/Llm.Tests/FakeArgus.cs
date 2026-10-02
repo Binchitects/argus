@@ -37,6 +37,17 @@ public sealed class FakeArgus : HttpMessageHandler
                  "index":{"repos":1,"stale":0,"errored":0,"stale_after":86400,"version":"2.9.0","never_run":0,"files":12,"symbols":340,"stale_names":[]},
                  "interval":900,"webhook":false,"pending":[]}
                 """),
+            ("POST", "/admin/index") when body is { } b && b.TryGetProperty("repo", out var repo) => Json(HttpStatusCode.OK, $$"""{"status":"queued","repo":"{{repo.GetString()}}","queued":1}"""),
+            ("GET", "/admin/repos") => Json(HttpStatusCode.OK, """
+                {"new_repos":"include","global_branches":[],"repos":[{"gitlab_id":7,"repo":"group/app","default_branch":"main","included":true,"branches":["develop"],
+                 "seen_at":1790000000,"changed_at":null,"indexed":[{"branch":"main","default":true,"sha":"0123456789abcdef","message":"Fix the decoder","committed_at":1789999000,
+                 "indexed_at":1790000090,"last_run_at":1790000090,"stale":false,"timed_out":false,"symbols_failed":false,"error":null,"files":12,"symbols":340}]}]}
+                """),
+            ("PATCH", "/admin/repos/7") => Json(HttpStatusCode.OK, """{"status":"saved","repo":"group/app","included":false,"removed":1,"deferred":false}"""),
+            ("PATCH", _) => Json(HttpStatusCode.NotFound, """{"error":"no such repository"}"""),
+            ("GET", "/admin/repos/7/branches") => Json(HttpStatusCode.OK, """[{"name":"main","sha":"0123","message":"Fix","committed_at":"2026-09-30T10:00:00Z","default":true,"protected":true}]"""),
+            ("PUT", "/admin/repos/settings") => Json(HttpStatusCode.OK, """{"status":"saved","new_repos":"exclude"}"""),
+            ("POST", "/admin/repos/discover") => Json(HttpStatusCode.OK, """{"new_repos":"include","global_branches":[],"repos":[]}"""),
             ("POST", "/admin/index") when IndexRunning => Json(HttpStatusCode.Conflict, """{"error":"an index run is already in progress","started":1790000000}"""),
             ("POST", "/admin/index") => Json(HttpStatusCode.OK, """{"status":"started","branches":[],"allow_partial":false}"""),
             ("GET", "/admin/packs") => Json(HttpStatusCode.OK, """

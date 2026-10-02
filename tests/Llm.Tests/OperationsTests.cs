@@ -104,6 +104,67 @@ public sealed class OperationsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Repositories_are_chosen_updated_one_by_one_and_audited()
+    {
+        var admin = await Admin();
+        var repos = await admin.JsonAsync(await admin.GetAsync("/api/admin/argus/repos"));
+        var app0 = repos.GetProperty("repos")[0];
+        Assert.Equal("Fix the decoder", app0.GetProperty("indexed")[0].GetProperty("message").GetString());
+
+        var res = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/argus/repos/7", UriKind.Relative), new { included = false, branches = new[] { " develop ", "release/*" } });
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        var call = app.Argus.Calls.Last(c => c.PathAndQuery == "/admin/repos/7");
+        Assert.False(call.Body!.Value.GetProperty("included").GetBoolean());
+        Assert.Equal(["develop", "release/*"], call.Body!.Value.GetProperty("branches").EnumerateArray().Select(b => b.GetString()));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/argus/repos/8", UriKind.Relative), new { included = true }));
+
+        Assert.Equal("main", (await admin.JsonAsync(await admin.GetAsync("/api/admin/argus/repos/7/branches")))[0].GetProperty("name").GetString());
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/argus/repos/settings", UriKind.Relative), new { newRepos = "exclude" }));
+        Assert.Equal("exclude", app.Argus.Calls.Last(c => c.PathAndQuery == "/admin/repos/settings").Body!.Value.GetProperty("new_repos").GetString());
+
+        // Update one repository: only it, now or after the pass running.
+        var one = await admin.PostAsync("/api/admin/argus/index", new { repo = "group/app" });
+        await StatusAssert.Is(HttpStatusCode.OK, one);
+        Assert.Equal("queued", (await admin.JsonAsync(one)).GetProperty("status").GetString());
+        Assert.Equal("group/app", app.Argus.Calls.Last(c => c.PathAndQuery == "/admin/index").Body!.Value.GetProperty("repo").GetString());
+
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=20"))).EnumerateArray().ToList();
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "argus.repo_choice" && e.GetProperty("target").GetString() == "group/app");
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "argus.index_repo" && e.GetProperty("target").GetString() == "group/app");
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "argus.repo_policy");
+    }
+
+    [Fact]
+    public async Task The_index_schedule_is_set_in_words_checked_and_shows_its_next_passes()
+    {
+        var admin = await Admin();
+        var first = await admin.JsonAsync(await admin.GetAsync("/api/admin/argus/schedule"));
+        Assert.Equal("*/15 * * * *", first.GetProperty("schedule").GetString());
+        Assert.Equal(3, first.GetProperty("nextRuns").GetArrayLength());
+
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/argus/schedule", UriKind.Relative), new { schedule = "* * * * *", timeZone = "UTC" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/argus/schedule", UriKind.Relative), new { schedule = "0 2 * *", timeZone = "UTC" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/argus/schedule", UriKind.Relative), new { schedule = "0 2 * * *", timeZone = "Mars/Base" }));
+        try
+        {
+            await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/argus/schedule", UriKind.Relative), new { schedule = "30 2 * * 1-5", timeZone = "Europe/Berlin" }));
+            var set = await admin.JsonAsync(await admin.GetAsync("/api/admin/argus/schedule"));
+            Assert.Equal("30 2 * * 1-5", set.GetProperty("schedule").GetString());
+            Assert.Equal("Europe/Berlin", set.GetProperty("timeZone").GetString());
+            var next = set.GetProperty("nextRuns")[0].GetDateTimeOffset();
+            Assert.Equal(new TimeSpan(2, 30, 0), TimeZoneInfo.ConvertTime(next, TimeZoneInfo.FindSystemTimeZoneById("Europe/Berlin")).TimeOfDay);
+
+            // Off: only pushes and Index now.
+            await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/argus/schedule", UriKind.Relative), new { schedule = "", timeZone = "UTC" }));
+            Assert.Equal(0, (await admin.JsonAsync(await admin.GetAsync("/api/admin/argus/schedule"))).GetProperty("nextRuns").GetArrayLength());
+        }
+        finally
+        {
+            await admin.Http.PutAsJsonAsync(new Uri("/api/admin/argus/schedule", UriKind.Relative), new { schedule = "*/15 * * * *", timeZone = "UTC" });
+        }
+    }
+
+    [Fact]
     public async Task A_run_already_in_progress_is_a_409_with_argus_reason()
     {
         var admin = await Admin();

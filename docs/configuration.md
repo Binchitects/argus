@@ -419,19 +419,17 @@ by name as well as by position, so none of these ship in a bundle.
 | `ARGUS_EMBED_DIM` | `768` | its output dimension. Must match the model, or the pack vectors are unusable |
 | `ARGUS_PACK_LIBRARY_DIR` | the repository's `packs/` | the **pack library**: built knowledge packs (`tools/build-packs.sh` writes them there), mounted read-only; **Admin → Packs** loads them. Loading links a pack, so nothing is copied |
 | `ARGUS_PACK_INDEX_URL` | empty | a published pack index (JSON) for the **Update** button on **Admin → Packs**. Empty = adding and removing still work and Update is absent |
-| `ARGUS_INDEX_INTERVAL` | `900` | seconds between automatic index passes. **`0` turns automatic reindexing off**, and then the index only advances when somebody presses **Index now** under **Admin → Indexing** |
+| `ARGUS_INDEX_INTERVAL` | `0` | Argus's own timer, seconds between automatic index passes; `0` is off. In this stack the app starts the passes on the **schedule** set under **Admin → Indexing** (cron, in a time zone; every 15 minutes until changed; empty = only pushes and **Index now**). Set the timer only for an Argus that runs without the app |
 | `ARGUS_INDEX_STALE_AFTER` | `3600` | seconds without a successful pass before a repository counts as stale. Feeds `argus_index_stale`, the `ArgusIndexStale` alert and the number on **Admin → Overview**. Default is 4 × the interval above |
 | `ARGUS_WEBHOOK_TOKEN` | empty | the GitLab push webhook's secret. **Empty means the webhook route does not exist at all.** Set it here and put the same value in GitLab's webhook configuration; see [ARGUS.md](argus/README.md#indexing-on-push). Deliberately not the admin token — this one is stored in GitLab, so it is the lower-privilege credential |
 
-`ARGUS_INDEX_INTERVAL` is the setting that makes the rest of the freshness
-story work. Before it existed the stack had alert rules, a stale metric and a
-button, and nothing that ran a pass on a timer: `argus_index_stale` was `1` on
-every healthy deployment, and an alert that is always firing is an alert
-nobody reads. The timer runs **inside the `argus` serve process**, not as a
-second container, because two processes writing one SQLite index would fail
-each other with `database is locked`. Raise
-`ARGUS_INDEX_STALE_AFTER` on an estate where a full pass legitimately takes
-longer than the interval.
+The index schedule is what makes the rest of the freshness story work: without
+a pass on a timer, `argus_index_stale` would be `1` on every healthy deployment,
+and an alert that is always firing is an alert nobody reads. The app only asks
+for a pass; it runs **inside the `argus` serve process**, not as a second
+container, because two processes writing one SQLite index would fail each
+other with `database is locked`. Raise `ARGUS_INDEX_STALE_AFTER` on an estate
+where a full pass legitimately takes longer than the schedule's gap.
 
 Both TLS settings apply to the API **and** to every `git clone`, because Argus
 reaches GitLab over two transports that share no TLS configuration. Configuring

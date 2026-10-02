@@ -187,6 +187,10 @@ public static class SettingsCatalog
         new("EMBED_CPUS", Engine, "Embedder CPU limit", "Argus's embedding server (llamacpp-embed), on the CPU.", SettingType.WholeNumber, SettingScope.Stack) { Min = 1, Max = 64 },
         new("POSTGRES_CPUS", Engine, "Database CPU limit", "", SettingType.WholeNumber, SettingScope.Stack) { Min = 1, Max = 64, Impact = "The database restarts: everything pauses for a few seconds." },
 
+        new("ArgusIndex:Schedule", Argus, "Reindex on schedule", "When Argus brings the index up to date by itself, as cron (minute hour day month weekday), e.g. */15 * * * * for every 15 minutes. Empty: only GitLab pushes and Index now. Easier set under Indexing.", SettingType.Text, SettingScope.Live)
+            { Default = "*/15 * * * *" },
+        new("ArgusIndex:TimeZone", Argus, "Time zone of the index schedule", "An IANA name such as Europe/Berlin.", SettingType.Text, SettingScope.Live)
+            { Default = "UTC", Pattern = @"^(UTC|[A-Za-z]+(/[A-Za-z0-9_+\-]+){1,2})$", PatternHelp = "An IANA time zone, e.g. Europe/Berlin, or UTC." },
         new("ARGUS_GITLAB_URL", Argus, "GitLab address", "https://gitlab.example.com", SettingType.Url, SettingScope.Stack)
             { Pattern = @"https?://\S+", PatternHelp = "http(s)://…", Impact = "Argus restarts and reindexes." },
         new("Chat:GitlabLinkUrl", Argus, "GitLab address for links", "Where people's browsers open GitLab, for the files and lines in Argus's answers. Empty: the GitLab address above. Set it when Argus reaches GitLab by an internal name.", SettingType.Url, SettingScope.Live)

@@ -1,6 +1,6 @@
 /** A task's schedule as people choose it (every day at 9, weekdays, …) and as cron, both ways. */
 
-export type Repeat = 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'hours' | 'custom'
+export type Repeat = 'minutes' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'hours' | 'custom'
 
 export interface Schedule {
   repeat: Repeat
@@ -12,18 +12,22 @@ export interface Schedule {
   date: number
   /** Every N hours. */
   hours: number
+  /** Every N minutes (5–30, dividing the hour). */
+  minutes: number
   cron: string
 }
 
 export const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
-export const blankSchedule: Schedule = { repeat: 'weekdays', time: '09:00', day: 1, date: 1, hours: 4, cron: '0 9 * * 1-5' }
+export const blankSchedule: Schedule = { repeat: 'weekdays', time: '09:00', day: 1, date: 1, hours: 4, minutes: 15, cron: '0 9 * * 1-5' }
 
 const two = (n: number) => String(n).padStart(2, '0')
 
 export function cronOf(s: Schedule): string {
   const [h = 0, m = 0] = s.time.split(':').map(Number)
   switch (s.repeat) {
+    case 'minutes':
+      return `*/${s.minutes} * * * *`
     case 'daily':
       return `${m} ${h} * * *`
     case 'weekdays':
@@ -43,6 +47,7 @@ export function cronOf(s: Schedule): string {
 export function scheduleOf(cron: string): Schedule {
   const f = cron.trim().split(/\s+/)
   const base = { ...blankSchedule, cron: cron.trim(), repeat: 'custom' as Repeat }
+  if (f.length === 5 && /^\*\/\d+$/.test(f[0]!) && f.slice(1).every((x) => x === '*')) return { ...base, repeat: 'minutes', minutes: Number(f[0]!.slice(2)) }
   if (f.length !== 5 || !/^\d+$/.test(f[0]!)) return base
   const m = Number(f[0])
   if (/^\*\/\d+$/.test(f[1]!) && f[2] === '*' && f[3] === '*' && f[4] === '*') return { ...base, repeat: 'hours', hours: Number(f[1]!.slice(2)), time: `00:${two(m)}` }
@@ -59,6 +64,8 @@ export function scheduleOf(cron: string): Schedule {
 export function describe(cron: string): string {
   const s = scheduleOf(cron)
   switch (s.repeat) {
+    case 'minutes':
+      return `Every ${s.minutes} minutes`
     case 'daily':
       return `Every day at ${s.time}`
     case 'weekdays':

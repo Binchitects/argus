@@ -14,7 +14,19 @@ namespace Llm.Api.Operations;
 
 public sealed record Probe(string Name, string Purpose, bool Ok, string Detail);
 
-public sealed record IndexRequest(string[]? Branches, bool AllowPartial = false);
+/// <param name="Repo">One repository to bring up to date (its path); null: a whole pass.</param>
+public sealed record IndexRequest(string[]? Branches, bool AllowPartial = false, string? Repo = null);
+
+/// <param name="Included">In the index or out; null: unchanged.</param>
+/// <param name="Branches">Branches indexed besides the default one (names or globs); null: unchanged.</param>
+public sealed record RepoChoiceRequest(bool? Included = null, string[]? Branches = null);
+
+/// <param name="Schedule">Five-field cron; "": Argus does not reindex by itself.</param>
+/// <param name="TimeZone">IANA, e.g. Europe/Berlin.</param>
+public sealed record IndexScheduleRequest(string Schedule, string TimeZone);
+
+/// <param name="NewRepos">include or exclude: whether a repository GitLab lists for the first time is indexed.</param>
+public sealed record RepoPolicyRequest(string NewRepos);
 public sealed record PackRequest(string? Source, string? Sha256, string? Name, string? IndexUrl, string? File = null);
 
 public static class OperationsEndpoints
@@ -33,6 +45,12 @@ public static class OperationsEndpoints
         argus.MapGet("/status", (ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("index/status", ct), a));
         argus.MapPost("/index", (IndexRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
+            if (body.Repo is { Length: > 0 } repo)
+            {
+                var one = await a.PostAsync("index", new JsonObject { ["repo"] = repo.Trim() }, ct);
+                await audit.WriteAsync("argus.index_repo", repo.Trim());
+                return one;
+            }
             var branches = (body.Branches ?? []).Select(b => b.Trim()).Where(b => b.Length > 0).ToArray();
             var res = await a.PostAsync("index", new JsonObject
             {
@@ -42,6 +60,40 @@ public static class OperationsEndpoints
             await audit.WriteAsync("argus.index", string.Join(",", branches), detail: body.AllowPartial ? "partial enumeration allowed" : null);
             return res;
         }, a));
+        // Which repositories and branches are indexed (Argus keeps the choices).
+        argus.MapGet("/repos", (ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("repos", ct), a));
+        argus.MapPost("/repos/discover", (ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        {
+            var res = await a.PostAsync("repos/discover", new JsonObject(), ct);
+            await audit.WriteAsync("argus.repos_discover", null);
+            return res;
+        }, a));
+        argus.MapPatch("/repos/{gitlabId:long}", (long gitlabId, RepoChoiceRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        {
+            var payload = new JsonObject();
+            if (body.Included is { } included)
+            {
+                payload["included"] = included;
+            }
+            if (body.Branches is { } branches)
+            {
+                payload["branches"] = new JsonArray([.. branches.Select(b => JsonValue.Create(b.Trim()))]);
+            }
+            var res = await a.PatchAsync($"repos/{gitlabId}", payload, ct);
+            var repo = res?["repo"]?.GetValue<string>() ?? gitlabId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await audit.WriteAsync("argus.repo_choice", repo,
+                detail: string.Join("; ", new[] { body.Included is { } i ? (i ? "indexed" : "not indexed") : null, body.Branches is { } b ? $"branches: {string.Join(", ", b)}" : null }.OfType<string>()));
+            return res;
+        }, a));
+        argus.MapGet("/repos/{gitlabId:long}/branches", (long gitlabId, ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync($"repos/{gitlabId}/branches", ct), a));
+        argus.MapPut("/repos/settings", (RepoPolicyRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        {
+            var res = await a.PutAsync("repos/settings", new JsonObject { ["new_repos"] = body.NewRepos }, ct);
+            await audit.WriteAsync("argus.repo_policy", body.NewRepos);
+            return res;
+        }, a));
+        argus.MapGet("/schedule", ScheduleAsync);
+        argus.MapPut("/schedule", SetScheduleAsync);
         argus.MapGet("/packs", (ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("packs", ct), a));
         argus.MapPost("/packs/{action}", (string action, PackRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
@@ -75,6 +127,48 @@ public static class OperationsEndpoints
                 return Relay(() => a.GetAsync($"explore/{what}?{query}", ct), a);
             });
         }
+    }
+
+    /// <summary>When Argus reindexes by itself: the schedule, its zone, and the next passes.</summary>
+    private static IResult ScheduleAsync(IOptionsMonitor<ArgusIndexOptions> options, TimeProvider clock)
+    {
+        var o = options.CurrentValue;
+        var (cron, zone, problem) = ArgusIndexSchedule.Read(o);
+        return Results.Ok(new
+        {
+            schedule = o.Schedule ?? "", timeZone = zone.Id, problem,
+            nextRuns = cron?.NextRuns(clock.GetUtcNow(), zone, 3) ?? [],
+        });
+    }
+
+    private static async Task<IResult> SetScheduleAsync(IndexScheduleRequest body, Settings.SettingsService settings, Identity.Audit audit, TimeProvider clock, CancellationToken ct)
+    {
+        var schedule = (body.Schedule ?? "").Trim();
+        var (zone, zoneProblem) = Models.Hours.Zone(body.TimeZone);
+        if (zoneProblem is not null)
+        {
+            return AuthEndpoints.Problem(400, "time_zone", $"\"{body.TimeZone}\" is not a time zone: use an IANA name such as Europe/Berlin.");
+        }
+        if (schedule.Length > 0)
+        {
+            var (cron, problem) = Schedules.Cron.Parse(schedule);
+            if (cron is null)
+            {
+                return AuthEndpoints.Problem(400, "schedule", problem!);
+            }
+            if (cron.Next(clock.GetUtcNow(), zone) is null)
+            {
+                return AuthEndpoints.Problem(400, "schedule", "That schedule never comes round (31 February?).");
+            }
+            if (cron.ShortestGap(clock.GetUtcNow(), zone) is { } gap && gap < ArgusIndexSchedule.MinInterval)
+            {
+                return AuthEndpoints.Problem(400, "schedule", $"At most one pass every {ArgusIndexSchedule.MinInterval.TotalMinutes:0} minutes: a pass reads every repository's changes.");
+            }
+            schedule = cron.Expression;
+        }
+        await settings.SaveAsync([new Settings.SettingChange("ArgusIndex:Schedule", schedule), new Settings.SettingChange("ArgusIndex:TimeZone", zone.Id)], ct);
+        await audit.WriteAsync("argus.index_schedule", schedule.Length > 0 ? schedule : "off", detail: zone.Id);
+        return Results.NoContent();
     }
 
     /// <summary>Argus's answer as it is, or a sentence saying why there is none.</summary>

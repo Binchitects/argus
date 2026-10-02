@@ -6,11 +6,9 @@ import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Stat, StatGrid } from '@/components/app/stat'
 import { Alert } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
-import { DataTable, SortHeader, type ColumnDef } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -18,6 +16,10 @@ import { Label } from '@/components/ui/label'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { agoSeconds, duration, formatValue } from '@/lib/format'
+import { configQuery } from '../chat/api'
+import { passPercent, type IndexProgress } from './argus-progress'
+import { RepositoriesCard } from './argus-repos'
+import { ScheduleCard } from './argus-schedule'
 import { indexExit, type IndexSummary } from './ops-api'
 
 export function NotConfigured() {
@@ -32,40 +34,35 @@ export function NotConfigured() {
 
 interface IndexStatus {
   configured?: boolean
-  job: { state: string; branches: string[]; started: number | null; finished: number | null; returncode: number | null; tail: string[]; trigger: string | null; allow_partial?: boolean; repos_error?: string }
-  repos: { repo: string; branch: string; default_branch: string; last_run_at: number | null; timed_out: boolean; symbols_failed: number | null }[]
+  job: {
+    state: string
+    branches: string[]
+    started: number | null
+    finished: number | null
+    returncode: number | null
+    tail: string[]
+    trigger: string | null
+    allow_partial?: boolean
+    repos_error?: string
+    progress?: IndexProgress | null
+  }
   index: IndexSummary
   interval: number
   webhook: boolean
   pending: string[]
 }
 
-type RepoRow = IndexStatus['repos'][number]
-
-const repoColumns: ColumnDef<RepoRow>[] = [
-  { accessorKey: 'repo', header: ({ column }) => <SortHeader column={column} title="Repository" />, cell: ({ getValue }) => <span className="font-medium">{getValue<string>()}</span> },
-  {
-    accessorKey: 'branch',
-    header: 'Branch',
-    cell: ({ row: { original: r } }) => (
-      <span className="inline-flex items-center gap-1.5">
-        <code className="font-mono text-xs">{r.branch}</code>
-        {r.branch === r.default_branch && <Badge variant="secondary">default</Badge>}
-      </span>
-    ),
-  },
-  { id: 'last', accessorFn: (r) => r.last_run_at ?? 0, header: ({ column }) => <SortHeader column={column} title="Last run" />, cell: ({ row: { original: r } }) => <span className="text-muted-foreground">{agoSeconds(r.last_run_at)}</span> },
-  {
-    id: 'state',
-    header: 'State',
-    accessorFn: (r) => (r.timed_out ? 'timed out' : r.symbols_failed ? 'failed' : 'ok'),
-    cell: ({ row: { original: r } }) =>
-      r.timed_out ? <Badge variant="destructive">Timed out</Badge> : r.symbols_failed ? <Badge variant="warning">{r.symbols_failed} failed</Badge> : <Badge variant="success">OK</Badge>,
-  },
-]
+/** Where a running pass is, in words: the repository on now and its files, or what it does after the last one. */
+function passWords(p: IndexProgress): string {
+  if (p.stage === 'finishing') return p.what === 'embeddings' ? 'Every repository done: embedding new symbols for meaning search.' : 'Every repository done: linking includes across repositories.'
+  if (!p.repo) return 'Asking GitLab for the repositories…'
+  const files = p.total ? `, ${p.done ?? 0} of ${p.total} changed files` : ''
+  return `Repository ${p.position} of ${p.repos}: ${p.repo} (${p.branch})${files}.`
+}
 
 export function IndexingPage() {
   const queryClient = useQueryClient()
+  const gitlabUrl = useQuery(configQuery).data?.gitlabUrl ?? null
   const st = useQuery({
     queryKey: ['admin', 'argus', 'status'],
     queryFn: ({ signal }) => api<IndexStatus>('/api/admin/argus/status', { signal }),
@@ -89,7 +86,7 @@ export function IndexingPage() {
         <NotConfigured />
       </>
     )
-  const { job, index: idx, repos } = st.data
+  const { job, index: idx } = st.data
   const running = job.state === 'running'
   const trigger = { schedule: 'the schedule', webhook: 'a GitLab push', manual: 'an admin' }[job.trigger ?? ''] ?? job.trigger
   return (
@@ -106,7 +103,8 @@ export function IndexingPage() {
           <CardHeader>
             <CardTitle>Index now</CardTitle>
             <CardDescription>
-              {st.data.interval ? `Argus reindexes by itself every ${duration(st.data.interval)}.` : 'Argus does not reindex by itself (no schedule set).'} {st.data.webhook ? 'GitLab pushes also start a run.' : ''}
+              A pass over every chosen repository and branch, now. {st.data.webhook ? 'GitLab pushes also update the repository pushed to.' : ''}
+              {st.data.interval ? ` Argus's own timer also runs one every ${duration(st.data.interval)} (ARGUS_INDEX_INTERVAL).` : ''}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
@@ -117,7 +115,7 @@ export function IndexingPage() {
                 start.mutate()
               }}
             >
-              <Field label="Extra branches" hint="Besides each repository's default branch. Space- or comma-separated; globs work: develop release/*">
+              <Field label="Extra branches, this run only" hint="Besides each repository's own (chosen under Repositories below). Space- or comma-separated; globs work: develop release/*">
                 <Input value={branches} onChange={(e) => setBranches(e.target.value)} placeholder="develop release/*" className="font-mono" />
               </Field>
               <Label className="font-normal">
@@ -130,6 +128,20 @@ export function IndexingPage() {
               </div>
             </form>
             {start.error && <Alert variant="destructive">{errorMessage(start.error)}</Alert>}
+            {running && job.progress && (
+              <div className="grid gap-1.5">
+                <progress
+                  value={passPercent(job.progress)}
+                  max={100}
+                  aria-label="Index pass"
+                  className="h-2 w-full appearance-none overflow-hidden rounded-full bg-muted [&::-moz-progress-bar]:bg-primary [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary"
+                />
+                <p className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{passWords(job.progress)}</span>
+                  <span className="tabular-nums">{passPercent(job.progress)}%</span>
+                </p>
+              </div>
+            )}
             <output className="block text-sm text-muted-foreground">
               {running
                 ? `Running since ${agoSeconds(job.started)}, started by ${trigger}, for ${job.branches.join(', ') || 'default branches'}.`
@@ -142,7 +154,8 @@ export function IndexingPage() {
             {job.tail.length > 0 && <CodeBlock code={job.tail.join('\n')} label="run log" log />}
           </CardContent>
         </Card>
-        <DataTable columns={repoColumns} data={repos} noun="repositories" getRowId={(r) => `${r.repo}@${r.branch}`} initialSorting={[{ id: 'repo', desc: false }]} />
+        <ScheduleCard />
+        <RepositoriesCard running={running} progress={job.progress ?? null} pending={st.data.pending} gitlabUrl={gitlabUrl} />
       </div>
     </>
   )

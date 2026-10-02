@@ -57,6 +57,29 @@ public static class Writes
                 fetched_at    = excluded.fetched_at
             """, tokenHash, userId, username, repoIdsJson, fetchedAt));
 
+    /// <summary>
+    /// Removes index rows (a repository taken out, a branch no longer indexed) with their
+    /// files and symbols. files_fts keeps its own copy of the text (external content):
+    /// it is told first, or it would keep searching what is gone.
+    /// </summary>
+    public static int DeleteRepos(SqliteConnection conn, IReadOnlyList<long> repoIds)
+    {
+        if (repoIds.Count == 0) return 0;
+        var marks = Sql.Marks(repoIds.Count);
+        var ids = repoIds.Cast<object?>().ToArray();
+        var n = 0;
+        Atomic(conn, () =>
+        {
+            Sql.ExecList(conn, $"INSERT INTO files_fts(files_fts, rowid, path, content) SELECT 'delete', id, path, content FROM files WHERE repo_id IN ({marks})", ids);
+            n = Sql.ExecList(conn, $"DELETE FROM repos WHERE id IN ({marks})", ids);
+        });
+        return n;
+    }
+
+    /// <summary>The commit an index row is at, in words: its subject line and when it was committed.</summary>
+    public static void SetCommitInfo(SqliteConnection conn, long repoId, string? message, long? committedAt) =>
+        Sql.Exec(conn, "UPDATE repos SET last_indexed_message = ?, last_indexed_commit_at = ? WHERE id = ?", message, committedAt, repoId);
+
     public static void SetLastIndexed(SqliteConnection conn, long repoId, string sha, long ts) =>
         Atomic(conn, () => Sql.Exec(conn, "UPDATE repos SET last_indexed_sha = ?, last_indexed_at = ? WHERE id = ?", sha, ts, repoId));
 

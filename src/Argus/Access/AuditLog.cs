@@ -81,6 +81,14 @@ public static class AuditLog
         });
     }
 
+    /// <summary>An admin's change to what is indexed (a repository in or out, its branches, the policy for new ones, a refresh).</summary>
+    public static void Event(string name, JsonObject fields)
+    {
+        var line = new JsonObject { ["event"] = name };
+        foreach (var (k, v) in fields) line[k] = v?.DeepClone();
+        Emit(line);
+    }
+
     public static void Denied(string reason, string path, string? detail = null) =>
         Emit(new JsonObject { ["event"] = "denied", ["reason"] = reason, ["path"] = path, ["detail"] = detail });
 

@@ -28,8 +28,9 @@ public static class Worker
     static long RepoIdFor(SqliteConnection conn, long gitlabId) =>
         Sql.One(conn, "SELECT id FROM repos WHERE gitlab_id = ? ORDER BY (branch = default_branch) DESC, id LIMIT 1", gitlabId)!.Long("id");
 
+    /// <param name="progress">Told the files done of those to look at, now and then (and once at the end of the files).</param>
     public static IndexResult IndexRepo(SqliteConnection conn, IndexConfig index, Project project, string mirrorPath, string tree,
-        string newSha, string? oldSha, Func<double>? now = null, long? repoId = null)
+        string newSha, string? oldSha, Func<double>? now = null, long? repoId = null, Action<int, int>? progress = null)
     {
         now ??= () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
         var started = now();
@@ -63,8 +64,15 @@ public static class Worker
         var failedPaths = new List<string>();
         var unreachedRetry = new List<string>();
 
+        var told = now();
         for (int position = 0; position < pending.Count; position++)
         {
+            // About once a second: a large first pass shows how far it is.
+            if (progress is not null && now() - told >= 1)
+            {
+                progress(position, pending.Count);
+                told = now();
+            }
             var change = pending[position];
             if (now() - started > index.RepoTimeBudgetSeconds)
             {
@@ -142,6 +150,7 @@ public static class Worker
             result.Indexed++;
         }
 
+        progress?.Invoke(pending.Count, pending.Count);
         var (uncovered, unattributable) = ApplySymbols(conn, rid, tree, toParse, result, Ts, shas);
         failedPaths.AddRange(uncovered);
 

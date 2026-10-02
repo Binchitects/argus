@@ -293,6 +293,8 @@ public static class IdentityWiring
         services.Configure<Models.EngineOptions>(config.GetSection("Engine"));
         services.Configure<Models.ModelHoursOptions>(config.GetSection("ModelHours"));
         services.Configure<Schedules.ScheduleOptions>(config.GetSection("Schedules"));
+        services.Configure<Operations.ArgusIndexOptions>(config.GetSection("ArgusIndex"));
+        services.AddHostedService<Operations.ArgusIndexSchedule>();
         services.Configure<Schedules.MailOptions>(config.GetSection("Mail"));
         services.AddSingleton<Schedules.Mailer>();
         services.AddSingleton<Schedules.Webhooks>();

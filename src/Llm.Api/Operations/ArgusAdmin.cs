@@ -22,6 +22,10 @@ public sealed class ArgusAdmin(HttpClient http, IOptions<ArgusOptions> options)
 
     public Task<JsonNode?> PostAsync(string path, JsonNode body, CancellationToken ct = default) => SendAsync(HttpMethod.Post, path, body, ct);
 
+    public Task<JsonNode?> PatchAsync(string path, JsonNode body, CancellationToken ct = default) => SendAsync(HttpMethod.Patch, path, body, ct);
+
+    public Task<JsonNode?> PutAsync(string path, JsonNode body, CancellationToken ct = default) => SendAsync(HttpMethod.Put, path, body, ct);
+
     private async Task<JsonNode?> SendAsync(HttpMethod method, string path, JsonNode? body, CancellationToken ct)
     {
         if (!Enabled)

@@ -7,8 +7,9 @@ import { cn } from '@/lib/utils'
  */
 export function ScrollRegion({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
+    // relative: absolutely placed content (a screen-reader-only header) scrolls with the rest instead of widening the page.
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must take focus to be scrollable by keyboard (WCAG 2.1.1)
-    <section aria-label={label} tabIndex={0} className={cn('overflow-auto outline-none focus-visible:ring-[3px] focus-visible:ring-ring', className)}>
+    <section aria-label={label} tabIndex={0} className={cn('relative overflow-auto outline-none focus-visible:ring-[3px] focus-visible:ring-ring', className)}>
       {children}
     </section>
   )

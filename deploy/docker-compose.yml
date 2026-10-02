@@ -1283,9 +1283,10 @@ services:
       # privilege credential. Leaking it lets somebody cause an index pass;
       # leaking the admin token lets them read the estate.
       #
-      # It is the accelerator, not the mechanism. ARGUS_INDEX_INTERVAL is what
-      # guarantees freshness -- a missed delivery, a webhook nobody configured,
-      # and a repository no webhook fires for are all still covered by the poll.
+      # It is the accelerator, not the mechanism. The index schedule (Admin ->
+      # Indexing) is what guarantees freshness -- a missed delivery, a webhook
+      # nobody configured, and a repository no webhook fires for are all still
+      # covered by the scheduled pass.
       ARGUS_WEBHOOK_TOKEN: ${ARGUS_WEBHOOK_TOKEN:-}
       # The chat's credential (the platform's app). With it, Argus answers for
       # the person signed into chat -- their GitLab membership, read with the
@@ -1306,16 +1307,15 @@ services:
       ARGUS_PACK_LIBRARY: /pack-library
       # A published pack index, for Update on Admin -> Packs. Empty = no updates.
       ARGUS_PACK_INDEX_URL: ${ARGUS_PACK_INDEX_URL:-}
-      # How often the server reindexes by itself, in seconds. 0 or unset means
-      # NEVER, which is what this stack shipped with: the index only advanced
-      # when an operator pressed "Index now", so every answer was served from
-      # whatever was indexed the last time somebody remembered. 900 is the
-      # documented cadence.
+      # Argus's own timer, in seconds; 0 = off. In this stack the app starts the
+      # passes instead, on the schedule set under Admin -> Indexing (every 15
+      # minutes until changed), so the timer is off: two would double the work.
+      # Set it only for an Argus that runs without the app.
       #
-      # It runs inside the serve process rather than as a second container on
-      # purpose (src/Argus/Server/Jobs.cs): two writers on one SQLite index
-      # would fail each other with "database is locked".
-      ARGUS_INDEX_INTERVAL: ${ARGUS_INDEX_INTERVAL:-900}
+      # Either way the pass runs inside the serve process rather than as a
+      # second container on purpose (src/Argus/Server/Jobs.cs): two writers on
+      # one SQLite index would fail each other with "database is locked".
+      ARGUS_INDEX_INTERVAL: ${ARGUS_INDEX_INTERVAL:-0}
       # When a repository counts as stale, for the metric and the alert. Four
       # times the interval above, so one slow or skipped pass is not an
       # incident but an hour of silence is. Raise it on an estate where a

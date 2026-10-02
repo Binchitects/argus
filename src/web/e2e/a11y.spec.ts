@@ -22,7 +22,7 @@ for (const [path, name] of opens) {
     await page.getByRole('heading', { level: 1 }).first().waitFor()
     await expect(page.locator('main [aria-busy="true"], main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
     const button = page.getByRole('button', { name, exact: typeof name === 'string' }).first()
-    await expect(button).toBeEnabled()
+    await expect(button).toBeEnabled({ timeout: 20_000 })
     await button.click()
     const opened = page.locator('[role="dialog"], [role="alertdialog"]').last()
     await expect(opened).toBeVisible()

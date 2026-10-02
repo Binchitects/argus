@@ -236,6 +236,9 @@ public sealed class GitLabError(string message) : Exception(message);
 
 public sealed record Project(long GitlabId, string PathWithNamespace, string DefaultBranch, string HttpUrl);
 
+/// <summary>A branch as GitLab lists it, with its latest commit.</summary>
+public sealed record RemoteBranch(string Name, string Sha, string? Title, string? CommittedAt, bool IsDefault, bool IsProtected);
+
 /// <summary>Whether the service token can enumerate every repository.</summary>
 public sealed record EnumerationHealth(bool IsAdmin, int VisibleCount, int MemberCount)
 {
@@ -339,6 +342,40 @@ public static class GitLab
             if (owns) client.Dispose();
         }
         return projects;
+    }
+
+    /// <summary>A project's branches, with each one's latest commit (at most <paramref name="limit"/>, by name).</summary>
+    public static List<RemoteBranch> ListBranches(GitLabConfig cfg, long gitlabId, int limit = 500, HttpClient? client = null)
+    {
+        var owns = client is null;
+        client ??= Tls.ClientFor(cfg, 30.0);
+        var branches = new List<RemoteBranch>();
+        try
+        {
+            for (int page = 1; branches.Count < limit; page++)
+            {
+                var p = page;
+                var response = Credentials.Authorized(cfg, auth =>
+                    Tls.Get(client, $"{cfg.Url}/api/v4/projects/{gitlabId}/repository/branches", auth,
+                        [("per_page", PerPage.ToString()), ("page", p.ToString())]));
+                if (response.Status != 200)
+                    throw new GitLabError($"GET /projects/{gitlabId}/repository/branches returned {response.Status}: {PyStr.Prefix(response.Text, 200)}");
+                if (response.Json() is not JsonArray arr || arr.Count == 0) break;
+                foreach (var item in arr.OfType<JsonObject>())
+                {
+                    var commit = item["commit"] as JsonObject;
+                    branches.Add(new RemoteBranch(item["name"]?.GetValue<string>() ?? "", commit?["id"]?.GetValue<string>() ?? "",
+                        commit?["title"]?.GetValue<string>(), commit?["committed_date"]?.GetValue<string>(),
+                        item["default"]?.GetValue<bool>() ?? false, item["protected"]?.GetValue<bool>() ?? false));
+                }
+                if (arr.Count < PerPage) break;
+            }
+        }
+        finally
+        {
+            if (owns) client.Dispose();
+        }
+        return [.. branches.Take(limit)];
     }
 
     public static EnumerationHealth CheckEnumeration(GitLabConfig cfg, HttpClient? client = null)

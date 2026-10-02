@@ -23,6 +23,7 @@ public sealed class Jobs(ArgusConfig cfg)
     {
         ["state"] = "idle", ["branches"] = new JsonArray(), ["started"] = null, ["finished"] = null,
         ["returncode"] = null, ["tail"] = new JsonArray(), ["trigger"] = null, ["pending"] = new JsonArray(), ["pending_full"] = false,
+        ["progress"] = null,
     };
 
     readonly Lock _packLock = new();
@@ -56,10 +57,54 @@ public sealed class Jobs(ArgusConfig cfg)
         _index["finished"] = null;
         _index["returncode"] = null;
         _index["tail"] = new JsonArray();
+        _index["progress"] = new JsonObject { ["repos"] = 0, ["position"] = 0, ["stage"] = "starting", ["outcomes"] = new JsonObject() };
     }
 
     bool Running => _index["state"]?.ToString() == "running";
 
+    /// <summary>
+    /// A step the index process reported (Indexing.Progress): the pass's size, the branch
+    /// it is on and how many of its files are done, each branch's outcome, the last steps.
+    /// </summary>
+    void OnProgress(string json)
+    {
+        JsonObject? step;
+        try { step = JsonNode.Parse(json) as JsonObject; }
+        catch (System.Text.Json.JsonException) { return; }
+        if (step is not null && _index["progress"] is JsonObject p) Step(p, step);
+    }
+
+    /// <summary>One reported step folded into the run's progress.</summary>
+    public static void Step(JsonObject p, JsonObject step)
+    {
+        var stage = step["stage"]?.ToString();
+        switch (stage)
+        {
+            case "pass":
+                p["repos"] = step["repos"]?.DeepClone();
+                break;
+            case "branch":
+                p["position"] = step["position"]?.DeepClone();
+                p["repo"] = step["repo"]?.DeepClone();
+                p["branch"] = step["branch"]?.DeepClone();
+                p["done"] = 0;
+                p["total"] = null;
+                break;
+            case "files":
+                p["done"] = step["done"]?.DeepClone();
+                p["total"] = step["total"]?.DeepClone();
+                break;
+            case "branch_done":
+                if (p["outcomes"] is JsonObject outcomes) outcomes[$"{step["repo"]}@{step["branch"]}"] = step["outcome"]?.DeepClone();
+                break;
+            case "finishing":
+                p["what"] = step["what"]?.DeepClone();
+                break;
+        }
+        p["stage"] = stage;
+    }
+
+    /// <param name="trigger">manual, schedule (the app's), webhook: shown with the run.</param>
     public bool StartIndex(IReadOnlyList<string> branches, bool allowPartial, string trigger)
     {
         lock (_indexLock)
@@ -128,6 +173,11 @@ public sealed class Jobs(ArgusConfig cfg)
             {
                 if (line is null) return;
                 var clean = PyStr.RStrip(line);
+                if (clean.StartsWith(Indexing.Progress.Prefix, StringComparison.Ordinal))
+                {
+                    lock (_indexLock) OnProgress(clean[Indexing.Progress.Prefix.Length..]);
+                    return;
+                }
                 lock (_indexLock)
                 {
                     tail.Add(clean);
@@ -174,14 +224,17 @@ public sealed class Jobs(ArgusConfig cfg)
             if (!full) { only = pending[0]; pending.RemoveAt(0); }
             if (pending.Count > 0) _index["pending"] = Strings(pending);
             remaining = pending.Count;
-            MarkRunning([], false, "webhook");
+            MarkRunning([], false, _index["pending_trigger"]?.ToString() ?? "webhook");
         }
         AuditLog.IndexWebhook(only ?? "*", queued: remaining);
         new Thread(() => RunIndex([], false, only)) { IsBackground = true, Name = "argus-index" }.Start();
     }
 
     /// <summary>A push arrived: start it, queue it behind the running pass, or collapse an overfull queue.</summary>
-    public JsonObject EnqueueWebhook(string repo)
+    public JsonObject EnqueueWebhook(string repo) => EnqueueRepo(repo, "webhook");
+
+    /// <summary>One repository to bring up to date (a push, or an admin's Update): started now, or queued behind the running pass.</summary>
+    public JsonObject EnqueueRepo(string repo, string trigger)
     {
         lock (_indexLock)
         {
@@ -199,10 +252,11 @@ public sealed class Jobs(ArgusConfig cfg)
                     return new JsonObject { ["status"] = "collapsed_to_full_pass", ["repo"] = repo, ["queued"] = 0 };
                 }
                 _index["pending"] = Strings(pending);
+                _index["pending_trigger"] = trigger;
                 AuditLog.IndexWebhook(repo, queued: pending.Count);
                 return new JsonObject { ["status"] = "queued", ["repo"] = repo, ["queued"] = pending.Count };
             }
-            MarkRunning([], false, "webhook");
+            MarkRunning([], false, trigger);
         }
         AuditLog.IndexWebhook(repo, started: true);
         new Thread(() => RunIndex([], false, repo)) { IsBackground = true, Name = "argus-index" }.Start();

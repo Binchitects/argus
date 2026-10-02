@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
 using Argus.Access;
+using Argus.Indexing;
 using Argus.Server;
 using Argus.Store;
 using Microsoft.AspNetCore.Builder;
@@ -220,6 +221,53 @@ public sealed class ServerTests : IDisposable
         req.Headers.Add("x-argus-admin-token", "admin-secret");
         var resp = await _http.SendAsync(req);
         return (resp.StatusCode, JsonNode.Parse(await resp.Content.ReadAsStringAsync())!);
+    }
+
+    async Task<(HttpStatusCode Status, JsonNode Body)> AdminSend(HttpMethod method, string path, object body)
+    {
+        var req = new HttpRequestMessage(method, path) { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") };
+        req.Headers.Add("x-argus-admin-token", "admin-secret");
+        var resp = await _http.SendAsync(req);
+        return (resp.StatusCode, JsonNode.Parse(await resp.Content.ReadAsStringAsync())!);
+    }
+
+    [Fact]
+    public async Task Repositories_are_listed_with_their_branches_chosen_in_and_out_and_new_ones_follow_the_policy()
+    {
+        Choices.Record(_ix.Conn, [new Project(11, "grp/alpha", "main", "http://x/a.git"), new Project(12, "grp/hidden", "main", "http://x/h.git")], 100);
+        Writes.SetCommitInfo(_ix.Conn, _repo, "Decode frames faster", 1_700_000_000);
+        Assert.Equal(HttpStatusCode.Forbidden, (await _http.GetAsync("/admin/repos")).StatusCode);
+
+        var (status, list) = await AdminGet("/admin/repos");
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("include", list["new_repos"]!.GetValue<string>());
+        var alpha = list["repos"]!.AsArray().Single(r => r!["repo"]!.GetValue<string>() == "grp/alpha")!;
+        Assert.True(alpha["included"]!.GetValue<bool>());
+        var main = alpha["indexed"]![0]!;
+        Assert.Equal("main", main["branch"]!.GetValue<string>());
+        Assert.Equal("Decode frames faster", main["message"]!.GetValue<string>());
+        Assert.Equal(1, main["files"]!.GetValue<int>());
+        Assert.Equal(1, main["symbols"]!.GetValue<int>());
+
+        // Out: it leaves the index at once (no pass is running).
+        var (saved, outcome) = await AdminSend(HttpMethod.Patch, "/admin/repos/12", new { included = false });
+        Assert.Equal(HttpStatusCode.OK, saved);
+        Assert.Equal(1, outcome["removed"]!.GetValue<int>());
+        var hidden = (await AdminGet("/admin/repos")).Body["repos"]!.AsArray().Single(r => r!["gitlab_id"]!.GetValue<long>() == 12)!;
+        Assert.False(hidden["included"]!.GetValue<bool>());
+        Assert.Empty(hidden["indexed"]!.AsArray());
+
+        // Its own branches, besides the default.
+        Assert.Equal(HttpStatusCode.OK, (await AdminSend(HttpMethod.Patch, "/admin/repos/11", new { branches = new[] { "develop", "release/*" } })).Status);
+        alpha = (await AdminGet("/admin/repos")).Body["repos"]!.AsArray().Single(r => r!["gitlab_id"]!.GetValue<long>() == 11)!;
+        Assert.Equal(["develop", "release/*"], alpha["branches"]!.AsArray().Select(b => b!.GetValue<string>()));
+        Assert.Equal(HttpStatusCode.NotFound, (await AdminSend(HttpMethod.Patch, "/admin/repos/999", new { included = true })).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Put, "/admin/repos/settings", new { new_repos = "maybe" })).Status);
+
+        // New repositories left out until chosen.
+        Assert.Equal(HttpStatusCode.OK, (await AdminSend(HttpMethod.Put, "/admin/repos/settings", new { new_repos = "exclude" })).Status);
+        Choices.Record(_ix.Conn, [new Project(13, "grp/new", "main", "http://x/n.git")], 200);
+        Assert.False((await AdminGet("/admin/repos")).Body["repos"]!.AsArray().Single(r => r!["gitlab_id"]!.GetValue<long>() == 13)!["included"]!.GetValue<bool>());
     }
 
     [Fact]

@@ -38,7 +38,7 @@ public sealed class ArgusPrincipal : ClaimsPrincipal
 /// ARGUS_ADMIN_TOKEN for scripts), the GitLab push webhook (gated by
 /// ARGUS_WEBHOOK_TOKEN), and the in-process index scheduler.
 /// </summary>
-public static class ArgusServer
+public static partial class ArgusServer
 {
     public const string HealthzPath = "/healthz";
     public const string AdminPrefix = "/admin/";
@@ -156,6 +156,7 @@ public static class ArgusServer
 
         app.MapGet(HealthzPath, () => Json(new JsonObject { ["status"] = "ok" }));
         MapAdmin(app, cfg, jobs);
+        MapRepoAdmin(app, cfg, jobs);
         if (WebhookEnabled()) MapWebhook(app, jobs);
         if (AppEnabled()) PlatformApi.Map(app, cfg, appDbPath, gateway, chat);
         app.MapMcp("/mcp");
@@ -384,7 +385,10 @@ public static class ArgusServer
             var branches = (body["branches"] as JsonArray ?? []).Select(b => b is JsonValue v && v.TryGetValue<string>(out var s) ? s : null)
                 .Where(s => s is not null && PyStr.Strip(s).Length > 0).Cast<string>().ToList();
             var allowPartial = body["allow_partial"] is JsonValue ap && ap.TryGetValue<bool>(out var b) && b;
-            if (!jobs.StartIndex(branches, allowPartial, "manual"))
+            var trigger = body["trigger"]?.ToString() is "schedule" ? "schedule" : "manual";
+            // One repository: brought up to date now, or queued behind the running pass.
+            if (body["repo"]?.ToString() is { Length: > 0 } repo) return Json(jobs.EnqueueRepo(repo, trigger));
+            if (!jobs.StartIndex(branches, allowPartial, trigger))
                 return Json(new JsonObject { ["error"] = "an index run is already in progress", ["started"] = jobs.IndexStarted() }, 409);
             return Json(new JsonObject
             {

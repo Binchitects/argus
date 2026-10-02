@@ -74,12 +74,25 @@ public static class Commands
             if (sha == old && !Worker.ContractIsStale(conn, repoId))
             {
                 Writes.RecordRunState(conn, repoId, false, false, Now());
+                // Rows indexed before commits were described get their words now.
+                if (Sql.One(conn, "SELECT last_indexed_message FROM repos WHERE id = ?", repoId)!.StrOrNull("last_indexed_message") is null)
+                {
+                    var (subject, at) = Mirror.CommitInfo(mirrorDir, sha);
+                    Writes.SetCommitInfo(conn, repoId, subject, at);
+                }
                 Out.WriteLine($"{label}: up to date");
                 AuditLog.IndexRepo(project.PathWithNamespace, branch, "up_to_date", Ms(started));
+                Progress.BranchDone(project.PathWithNamespace, branch, "up_to_date");
                 return (false, "up_to_date");
             }
             var tree = Mirror.SyncWorktree(cfg.Index, project.GitlabId, mirrorDir, sha, branch);
-            result = Worker.IndexRepo(conn, cfg.Index, project, mirrorDir, tree, sha, old, repoId: repoId);
+            result = Worker.IndexRepo(conn, cfg.Index, project, mirrorDir, tree, sha, old, repoId: repoId,
+                progress: (done, total) => Progress.Files(project.PathWithNamespace, branch, done, total));
+            if (!result.TimedOut && !result.SymbolsFailed)
+            {
+                var (subject, at) = Mirror.CommitInfo(mirrorDir, sha);
+                Writes.SetCommitInfo(conn, repoId, subject, at);
+            }
         }
         catch (GitError exc)
         {
@@ -87,6 +100,7 @@ public static class Commands
             Writes.RecordRunState(conn, repoId, false, false, Now(), exc.Message);
             Err.WriteLine($"{label}: FAILED ({exc.Message})");
             AuditLog.IndexRepo(project.PathWithNamespace, branch, "failed", Ms(started), error: exc.Message);
+            Progress.BranchDone(project.PathWithNamespace, branch, "failed");
             return (true, "failed");
         }
         catch (Exception exc)
@@ -96,6 +110,7 @@ public static class Commands
             Writes.RecordRunState(conn, repoId, false, false, Now(), repr);
             Err.WriteLine($"{label}: FAILED ({repr})");
             AuditLog.IndexRepo(project.PathWithNamespace, branch, "failed", Ms(started), error: repr);
+            Progress.BranchDone(project.PathWithNamespace, branch, "failed");
             return (true, "failed");
         }
         var flags = (result.TimedOut ? " TIMED-OUT" : "") + (result.SymbolsFailed ? " SYMBOLS-FAILED" : "");
@@ -103,14 +118,16 @@ public static class Commands
         var outcome = result.TimedOut ? "timed_out" : result.SymbolsFailed ? "symbols_failed" : "ok";
         AuditLog.IndexRepo(project.PathWithNamespace, branch, outcome, Ms(started), result.Indexed, result.Deleted, result.Skipped,
             result.Errors, result.TimedOut, result.SymbolsFailed);
+        Progress.BranchDone(project.PathWithNamespace, branch, outcome);
         return (result.TimedOut || result.SymbolsFailed, outcome);
     }
 
     static int PruneMissingBranches(SqliteConnection conn, Project project, List<string> keep)
     {
         var marks = keep.Count > 0 ? Sql.Marks(keep.Count) : "NULL";
-        var n = Sql.ExecList(conn, $"DELETE FROM repos WHERE gitlab_id = ? AND branch NOT IN ({marks})",
-            new object?[] { project.GitlabId }.Concat(keep).ToArray());
+        var gone = Sql.QueryList(conn, $"SELECT id FROM repos WHERE gitlab_id = ? AND branch NOT IN ({marks})",
+            new object?[] { project.GitlabId }.Concat(keep).ToArray()).Select(r => r.Long("id")).ToList();
+        var n = Writes.DeleteRepos(conn, gone);
         if (n > 0) Out.WriteLine($"{project.PathWithNamespace}: dropped {n} branch(es) no longer indexed");
         return n;
     }
@@ -146,7 +163,19 @@ public static class Commands
         }
         using var conn = Db.Open(cfg.Index.DbPath);
         var projects = GitLab.ListProjects(cfg.GitLab);
-        if (only is not null) projects = projects.Where(p => p.PathWithNamespace == only).ToList();
+        // What GitLab lists is what admins choose from; what they left out leaves the index.
+        Choices.Record(conn, projects, Now());
+        var excluded = projects.Where(p => !Choices.Included(conn, p.GitlabId)).ToList();
+        foreach (var p in excluded)
+        {
+            if (Choices.Drop(conn, p.GitlabId) > 0) Out.WriteLine($"{p.PathWithNamespace}: not chosen for the index -- removed from it");
+        }
+        projects = projects.Except(excluded).ToList();
+        if (only is not null)
+        {
+            if (excluded.Any(p => p.PathWithNamespace == only)) Out.WriteLine($"repo '{only}' is not chosen for the index");
+            projects = projects.Where(p => p.PathWithNamespace == only).ToList();
+        }
         if (resetRetries)
         {
             if (only is not null)
@@ -170,17 +199,21 @@ public static class Commands
             return GiveUp(0, "no_repos_matched");
         }
         AuditLog.IndexStart(cfg.Index.Branches, allowPartial, projects.Count);
+        Progress.Pass(projects.Count);
         var runStarted = NowF();
         bool anyUnhealthy = false;
-        int failed = 0, upToDate = 0, empty = 0;
+        int failed = 0, upToDate = 0, empty = 0, position = 0;
         foreach (var project in projects)
         {
+            position++;
             string mirrorDir;
             List<string> branches;
             try
             {
                 mirrorDir = Mirror.EnsureMirror(cfg.Index, project, project.HttpUrl, Credentials.GitPassword(cfg.GitLab), cfg.GitLab);
-                branches = Mirror.SelectBranches(Mirror.ListBranches(mirrorDir), cfg.Index.Branches, project.DefaultBranch);
+                // The operator's branch patterns for every repository, and the admin's for this one.
+                IReadOnlyList<string> patterns = [.. cfg.Index.Branches, .. Choices.Find(conn, project.GitlabId)?.Branches ?? []];
+                branches = Mirror.SelectBranches(Mirror.ListBranches(mirrorDir), patterns, project.DefaultBranch);
             }
             catch (GitError exc)
             {
@@ -191,17 +224,20 @@ public static class Commands
                 Err.WriteLine($"{project.PathWithNamespace}: FAILED ({exc.Message})");
                 failed++;
                 AuditLog.IndexRepo(project.PathWithNamespace, project.DefaultBranch, "mirror_failed", error: exc.Message);
+                Progress.BranchDone(project.PathWithNamespace, project.DefaultBranch, "failed");
                 continue;
             }
             if (branches.Count == 0)
             {
                 Out.WriteLine($"{project.PathWithNamespace}: no branches (empty repository) -- nothing to index");
                 AuditLog.IndexRepo(project.PathWithNamespace, project.DefaultBranch, "no_branches");
+                Progress.BranchDone(project.PathWithNamespace, project.DefaultBranch, "empty");
                 empty++;
                 continue;
             }
             foreach (var branch in branches)
             {
+                Progress.Branch(position, project.PathWithNamespace, branch);
                 var (unhealthy, outcome) = IndexBranch(conn, cfg, project, branch, mirrorDir);
                 if (unhealthy) anyUnhealthy = true;
                 if (outcome == "failed") failed++;
@@ -211,6 +247,7 @@ public static class Commands
         }
         Dictionary<string, long> counts;
         int edges;
+        Progress.Finishing("includes");
         try
         {
             counts = Resolve.ResolveIncludes(conn);
@@ -227,6 +264,7 @@ public static class Commands
         Out.WriteLine($"repo graph: {edges} cross-repo edges");
         if (empty > 0)
             Out.WriteLine($"repos: {projects.Count} seen, {empty} empty (nothing to index), {projects.Count - empty} indexed");
+        Progress.Finishing("embeddings");
         var embedded = EmbedAfterIndex(cfg, EmbedPerPass() is var limit && limit > 0 ? limit : null);
         var rc = anyUnhealthy ? 1 : 0;
         AuditLog.IndexEnd(rc, Ms(runStarted), projects.Count, failed, upToDate, empty: empty, embedded: embedded);

@@ -23,30 +23,40 @@ test('a scheduled task is set up in words, runs now, and its answer is a chat an
   await expectAccessible(page, info, 'task-form')
   await dialog.getByRole('button', { name: 'Add task' }).click()
 
-  const card = page.getByRole('region', { name })
-  await expect(card).toContainText('Mondays at 07:30 · Europe/Berlin')
-  await expect(card).toContainText('Next:')
-  await expectAccessible(page, info, 'tasks')
-  await screenshot(page, info, `tasks${isMobile ? '-phone' : ''}`)
+  try {
+    const card = page.getByRole('region', { name })
+    await expect(card).toContainText('Mondays at 07:30 · Europe/Berlin')
+    await expect(card).toContainText('Next:')
+    await expectAccessible(page, info, 'tasks')
+    await screenshot(page, info, `tasks${isMobile ? '-phone' : ''}`)
 
-  if (live) {
-    await card.getByRole('button', { name: 'Run now' }).click()
-    await expect(card.getByText('Done', { exact: true })).toBeVisible({ timeout: 180_000 })
-    await card.getByRole('link', { name: 'Open the chat' }).click()
-    await expect(page.getByRole('region', { name: 'Answer' }).last()).toContainText(/scheduled hello/i)
-    const bell = page.getByRole('button', { name: /^Notifications, \d+ new$/ })
-    await expect(bell).toBeVisible({ timeout: 70_000 })
-    await bell.click()
-    await expect(page.getByRole('dialog', { name: 'Notifications' })).toContainText(name)
-    await page.keyboard.press('Escape')
-    // The run's chat goes, as the test's own.
-    const chat = page.url().split('/').pop()!
-    expect((await page.request.delete(`/api/chat/conversations/${chat}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
-    await page.goto('/tasks')
+    if (live) {
+      await card.getByRole('button', { name: 'Run now' }).click()
+      await expect(card.getByText('Done', { exact: true })).toBeVisible({ timeout: 180_000 })
+      await card.getByRole('link', { name: 'Open the chat' }).click()
+      await expect(page.getByRole('region', { name: 'Answer' }).last()).toContainText(/scheduled hello/i)
+      // The bell reads its list when the page loads (and every minute): this run's is there after a reload.
+      await page.reload()
+      await page.getByRole('button', { name: /^Notifications, \d+ new$/ }).click()
+      await expect(page.getByRole('dialog', { name: 'Notifications' })).toContainText(name)
+      await page.keyboard.press('Escape')
+      expect((await page.request.post('/api/notifications/read', { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
+      // The run's chat goes, as the test's own.
+      const chat = page.url().split('/').pop()!
+      expect((await page.request.delete(`/api/chat/conversations/${chat}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
+      await page.goto('/tasks')
+    }
+    await page.getByRole('region', { name }).getByRole('button', { name: 'Remove' }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Remove' }).click()
+    await expect(page.getByRole('region', { name })).toHaveCount(0)
+  } finally {
+    // Whatever happened, the test's task and its chats go.
+    const headers = { 'X-Requested-With': 'e2e' }
+    for (const t of (await (await page.request.get('/api/tasks')).json()).tasks.filter((t: { name: string }) => t.name === name))
+      await page.request.delete(`/api/tasks/${t.id}`, { headers })
+    const chats = await (await page.request.get('/api/chat/conversations')).json()
+    for (const c of (Array.isArray(chats) ? chats : []).filter((c: { title: string }) => c.title.startsWith(`${name} · `)))
+      await page.request.delete(`/api/chat/conversations/${c.id}`, { headers })
   }
-
-  await page.getByRole('region', { name }).getByRole('button', { name: 'Remove' }).click()
-  await page.getByRole('alertdialog').getByRole('button', { name: 'Remove' }).click()
-  await expect(page.getByRole('region', { name })).toHaveCount(0)
   expect(errors).toEqual([])
 })

@@ -271,6 +271,7 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="minutes">Every few minutes</SelectItem>
                 <SelectItem value="daily">Every day</SelectItem>
                 <SelectItem value="weekdays">Weekdays</SelectItem>
                 <SelectItem value="weekly">Once a week</SelectItem>
@@ -283,6 +284,10 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
           {schedule.repeat === 'custom' ? (
             <Field label="Cron" hint="Minute, hour, day of the month, month, day of the week.">
               <Input required className="font-mono" autoComplete="off" value={schedule.cron} onChange={(e) => set({ cron: e.target.value })} />
+            </Field>
+          ) : schedule.repeat === 'minutes' ? (
+            <Field label="Every (minutes)" hint={`At least ${view.minIntervalMinutes}.`}>
+              <Input type="number" min={Math.max(5, view.minIntervalMinutes)} max={30} required value={schedule.minutes} onChange={(e) => set({ minutes: Number(e.target.value) })} />
             </Field>
           ) : schedule.repeat === 'hours' ? (
             <Field label="Every (hours)">

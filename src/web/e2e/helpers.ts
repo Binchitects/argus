@@ -26,6 +26,13 @@ export function watchConsole(page: Page): string[] {
 
 /** No serious or critical accessibility violations (axe, WCAG 2.2 AA). */
 export async function expectAccessible(page: Page, info: TestInfo, label: string) {
+  // A dialog fading in has text at part opacity: axe reads its contrast once it has arrived.
+  await page.evaluate(() =>
+    Promise.race([
+      Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))),
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]),
+  )
   const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
   const bad = result.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
   if (bad.length) await info.attach(`axe-${label}.json`, { body: JSON.stringify(bad, null, 2), contentType: 'application/json' })

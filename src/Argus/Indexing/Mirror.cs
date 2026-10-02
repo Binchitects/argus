@@ -177,6 +177,15 @@ public static class Mirror
 
     public static string HeadSha(string mirror, string branch) => PyStr.Strip(Git(mirror, ["rev-parse", branch]));
 
+    /// <summary>A commit's subject line and when it was committed (unix seconds); nulls when git cannot say.</summary>
+    public static (string? Subject, long? CommittedAt) CommitInfo(string mirror, string sha)
+    {
+        var r = RunGit(mirror, ["log", "-1", "--format=%ct%x00%s", sha]);
+        if (r.Code != 0) return (null, null);
+        var parts = PyStr.Strip(r.Stdout).Split('\0', 2);
+        return (parts.Length > 1 ? parts[1] : null, long.TryParse(parts[0], out var at) ? at : null);
+    }
+
     public static bool IsAncestor(string mirror, string old, string @new)
     {
         var r = RunGit(mirror, ["merge-base", "--is-ancestor", old, @new]);
