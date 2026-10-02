@@ -287,6 +287,59 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task Working_hours_keep_their_models_and_start_chats_on_their_default_then_give_way()
+    {
+        var (f, _) = NewApp(max: 2);
+        await using var _f = f;
+        var admin = await AdminAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
+        await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("status").GetString() == "unloaded", "the engine lists tiny-b");
+        var everyDay = new[] { 1, 2, 3, 4, 5, 6, 7 };
+
+        // Refused: no day, a time that is none, more models than the engine holds, a model not of the engine.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/model-hours", new { name = "x", days = Array.Empty<int>(), start = "08:00", end = "18:00" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/model-hours", new { name = "x", days = everyDay, start = "25:00", end = "18:00" }));
+        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/model-hours",
+            new { name = "x", days = everyDay, start = "08:00", end = "18:00", keep = new[] { "tiny-b", "Qwen3.8-Flash-Next", "plain" } }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/model-hours", new { name = "x", days = everyDay, start = "08:00", end = "18:00", keep = new[] { "gpt-9" } }));
+
+        // All day, every day: in force now. Its model loads, and new chats start on it.
+        var made = await admin.PostAsync("/api/admin/model-hours", new { name = "Small all day", days = everyDay, start = "00:00", end = "00:00", keep = new[] { "tiny-b" }, defaultModel = "tiny-b" });
+        await StatusAssert.Is(HttpStatusCode.Created, made);
+        var id = (await admin.JsonAsync(made)).GetProperty("id").GetGuid();
+        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("tiny-b") == "loaded"), "the working hours' model loaded");
+        var engine = (await ModelsAsync(admin)).GetProperty("engine");
+        Assert.Equal("Small all day", engine.GetProperty("hours").GetProperty("name").GetString());
+        Assert.Equal(["tiny-b"], Names(engine.GetProperty("kept")));
+        Assert.Equal(["Qwen3.8-Flash-Next"], Names(engine.GetProperty("pinned")));
+        Assert.True(Row(await ModelsAsync(admin), "tiny-b").GetProperty("keptNow").GetBoolean());
+        Assert.False(Row(await ModelsAsync(admin), "tiny-b").GetProperty("kept").GetBoolean());
+        Assert.Equal("tiny-b", (await admin.JsonAsync(await admin.GetAsync("/api/chat/config"))).GetProperty("model").GetString());
+        var listed = await admin.JsonAsync(await admin.GetAsync("/api/admin/model-hours"));
+        Assert.Equal(id, listed.GetProperty("active").GetProperty("id").GetGuid());
+        Assert.Equal("UTC", listed.GetProperty("timeZone").GetString());
+        // What the working hours keep is not unloaded by hand: they would load it again.
+        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/models/tiny-b/unload"));
+
+        // Off: the pinned model is kept again, and the one only the working hours kept makes room.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/model-hours/{id}", UriKind.Relative), new { enabled = false }));
+        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("tiny-b") == "unloaded" && app.Engine.StatusOf("Qwen3.8-Flash-Next") == "loaded"), "back to the pinned model");
+        Assert.Equal(JsonValueKind.Null, (await ModelsAsync(admin)).GetProperty("engine").GetProperty("hours").ValueKind);
+        await EventuallyAsync(async () => (await admin.JsonAsync(await admin.GetAsync("/api/chat/config"))).GetProperty("model").GetString() == "Qwen3.8-Flash-Next",
+            "new chats back on the loaded model");
+
+        // A model removed leaves the working hours that named it.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.DeleteAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative)));
+        var after = (await admin.JsonAsync(await admin.GetAsync("/api/admin/model-hours"))).GetProperty("windows")[0];
+        Assert.Empty(after.GetProperty("keep").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, after.GetProperty("defaultModel").ValueKind);
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/model-hours/{id}", UriKind.Relative)));
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().Select(e => e.GetProperty("action").GetString()).ToList();
+        Assert.Contains("model.hours_add", audit);
+        Assert.Contains("model.hours_remove", audit);
+    }
+
+    [Fact]
     public async Task A_kept_model_that_fails_to_load_is_not_tried_again_and_the_env_model_takes_its_place()
     {
         var (f, _) = NewApp();

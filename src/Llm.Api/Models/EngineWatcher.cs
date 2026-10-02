@@ -42,6 +42,8 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
         var nextSync = DateTimeOffset.MinValue;
         var loaded = "";
         string? reported = null;
+        // The working hours in force last round, and what they kept: at a change, what is no longer kept unloads.
+        (Guid? Window, IReadOnlyList<string> Kept)? before = null;
         while (!stoppingToken.IsCancellationRequested)
         {
             var loading = false;
@@ -49,6 +51,7 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
             {
                 await using var scope = scopes.CreateAsyncScope();
                 var catalog = scope.ServiceProvider.GetRequiredService<ModelCatalog>();
+                var hours = await scope.ServiceProvider.GetRequiredService<ModelHours>().RefreshAsync(stoppingToken);
                 // At start, then every minute: a gateway that was down, or restarted without the app's models, catches up.
                 if (DateTimeOffset.UtcNow >= nextSync)
                 {
@@ -62,6 +65,18 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
                 string? Status(string name) => models.FirstOrDefault(m => m.Name == name)?.Status;
                 // Never more than the engine holds at once: past that, each load would unload another kept model.
                 var kept = catalog.Kept().Where(k => Status(k) is not null).Take(options.Value.ModelsMax).ToList();
+                if (before is { } was && (was.Window != hours.Window?.Id || (hours.Window is not null && !was.Kept.SequenceEqual(kept))))
+                {
+                    // Working hours began, ended or changed: the models only they kept make room (not on the app's
+                    // first round, when nothing is known of what kept them).
+                    foreach (var gone in was.Kept.Where(k => !kept.Contains(k) && Status(k) == "loaded"))
+                    {
+                        LogHoursUnload(logger, gone, hours.Window?.Name ?? "the pinned models");
+                        await engine.UnloadAsync(gone, stoppingToken);
+                    }
+                    chatModels.Forget();
+                }
+                before = (hours.Window?.Id, kept);
                 if (!loading)
                 {
                     // One at a time: a load at the engine's limit first unloads the model used least recently,
@@ -162,6 +177,9 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
             }
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Working hours: {Model} unloads, {Now} take over")]
+    private static partial void LogHoursUnload(ILogger logger, string model, string now);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Engine: loading {Model}, a model kept loaded")]
     private static partial void LogLoading(ILogger logger, string model);

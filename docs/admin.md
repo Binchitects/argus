@@ -62,6 +62,19 @@ loaded, and how full each GPU would be with them.
   When every place is kept, no other model loads on request, and the chat says
   so. A change of the kept list that flips this restarts llama-server (the kept
   models load again, one after another).
+- **Working hours** change the kept models by day and hour: a small fast model
+  in busy hours, the big one at night. Each has days, a time from and until
+  (until before from runs past midnight; the same is all day), the models kept
+  loaded meanwhile (at most `LLAMACPP_MODELS_MAX`, checked against the GPUs and
+  RAM as pinning is), and the model new chats start on. While one is in force,
+  its models are kept instead of the pinned ones: they load, and the models only
+  the previous window kept unload to make room. When it ends, the pinned models
+  are kept again. Where two overlap, the one listed first applies. Times follow
+  **Settings → Model → Time zone of working hours** (an IANA name; default UTC).
+  The engine summary says which are in force and until when; a model they keep
+  reads **Kept by working hours**, and cannot be unloaded by hand meanwhile.
+  Chats that chose a model keep it; only new ones (and chats that chose none)
+  start on the working hours' model.
 - **Load** loads a model now, beside the kept ones (refused when every place is
   kept). **Unload** unloads it, and stops keeping it. Answers wait while a
   model loads: seconds when its weights are in the page cache, minutes from

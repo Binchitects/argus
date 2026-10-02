@@ -290,6 +290,9 @@ public static class IdentityWiring
 
         // The engine's models (llama.cpp's router): Admin -> Models, and who may use which model.
         services.Configure<Models.EngineOptions>(config.GetSection("Engine"));
+        services.Configure<Models.ModelHoursOptions>(config.GetSection("ModelHours"));
+        services.AddSingleton<Models.ModelHoursState>();
+        services.AddScoped<Models.ModelHours>();
         services.PostConfigure<Models.EngineOptions>(o =>
         {
             if (config["Engine:Enabled"] is null)
@@ -442,6 +445,7 @@ public static class IdentityWiring
         Chat.ChatEndpoints.MapChat(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Models.ModelEndpoints.MapModels(app);
+        Models.ModelHoursEndpoints.MapModelHours(app);
         Models.RemoteServerEndpoints.MapRemoteServers(app);
     }
 

@@ -48,7 +48,7 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
-        HardwareProbe hardware, IOptions<EngineOptions> engine, IOptions<StackOptions> stack, CancellationToken ct)
+        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, IOptions<StackOptions> stack, CancellationToken ct)
     {
         var e = engine.Value;
         var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
@@ -61,14 +61,17 @@ public static class ModelEndpoints
             : new { Audience = Audience.Everyone, groups = Enumerable.Empty<object>() };
         GatewayModel? At(string name) => atGateway.FirstOrDefault(m => m.Name == name);
         var now = state.Now;
+        var hoursNow = hours.Now;
+        // Kept now (the working hours' in force, else the pinned), and the pinned ones (each model's switch).
         var kept = e.Enabled ? catalog.Kept() : [];
+        var pinned = e.Enabled ? catalog.Pinned() : [];
         var hw = e.Enabled ? await hardware.GetAsync(ct) : null;
         var rows = new List<object>();
         if (e.Enabled && e.DefaultModel is { Length: > 0 } d)
         {
             rows.Add(new
             {
-                name = d, source = "env", mode = "chat", status = state.StatusOf(d), file = stack.Value.ModelFile, kept = kept.Contains(d),
+                name = d, source = "env", mode = "chat", status = state.StatusOf(d), file = stack.Value.ModelFile, kept = pinned.Contains(d), keptNow = kept.Contains(d),
                 devices = e.DefaultSettings?.Devices,
                 context = int.TryParse(stack.Value.ModelContext, CultureInfo.InvariantCulture, out var c) ? c : (int?)null,
                 vision = At(d)?.Vision ?? false, access = Access(d),
@@ -81,7 +84,7 @@ public static class ModelEndpoints
             {
                 name = m.Name, source = "local", mode = "chat",
                 // Not in the engine's list although it answered: not read yet (it restarts), or its preset refused.
-                status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null), kept = kept.Contains(m.Name), m.Devices,
+                status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null), kept = pinned.Contains(m.Name), keptNow = kept.Contains(m.Name), m.Devices,
                 file = m.File, m.Projector, context = m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
                 m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
                 m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.OutputPerMtok,
@@ -110,7 +113,8 @@ public static class ModelEndpoints
         {
             engine = new
             {
-                enabled = e.Enabled, error = now.Error, checkedAt = now.At, kept, max = e.ModelsMax,
+                enabled = e.Enabled, error = now.Error, checkedAt = now.At, kept, pinned, max = e.ModelsMax,
+                hours = hoursNow.Window is { } window ? new { window.Id, window.Name, until = hoursNow.Until } : null,
                 // A place left besides the kept models: the others load when asked for (the least recently used unloads first).
                 onRequest = e.Enabled && kept.Count < e.ModelsMax,
                 loaded = now.Models.Where(m => m.Status == "loaded").Select(m => m.Name),
@@ -207,10 +211,17 @@ public static class ModelEndpoints
         db.LocalModels.Remove(model);
         await db.ModelAccess.Where(a => a.Model == name).ExecuteDeleteAsync(ct);
         await db.SaveChangesAsync(ct);
-        if (catalog.Kept().Contains(name))
+        if (catalog.Pinned().Contains(name))
         {
-            catalog.SetKept(catalog.Kept().Where(k => k != name));
+            catalog.SetKept(catalog.Pinned().Where(k => k != name));
         }
+        // Working hours that kept it, or started chats on it, do without it.
+        foreach (var w in await db.ModelWindows.Where(w => w.Keep.Contains(name) || w.DefaultModel == name).ToListAsync(ct))
+        {
+            w.Keep = [.. w.Keep.Where(k => k != name)];
+            w.DefaultModel = w.DefaultModel == name ? null : w.DefaultModel;
+        }
+        await db.SaveChangesAsync(ct);
         await audit.WriteAsync("model.remove", name);
         return Results.Ok(await AfterChangeAsync(catalog, watcher, null, ct));
     }
@@ -259,7 +270,7 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> UnloadAsync(string name, EngineClient engine, EngineState state, ModelCatalog catalog, EngineWatcher watcher,
-        ChatModels chatModels, Audit audit, CancellationToken ct)
+        ChatModels chatModels, ModelHoursState hours, Audit audit, CancellationToken ct)
     {
         if (!await KnownAsync(name, engine, state, ct))
         {
@@ -268,9 +279,13 @@ public static class ModelEndpoints
         try
         {
             // Unloaded on purpose: not kept any more, or it would come straight back.
-            if (catalog.Kept().Contains(name))
+            if (hours.Now is { Window: { } window, Until: var until } && window.Keep.Contains(name))
             {
-                catalog.SetKept(catalog.Kept().Where(k => k != name));
+                return AuthEndpoints.Problem(409, "hours", $"The working hours \"{window.Name}\" keep {name} loaded{(until is { } u ? $" until {u:HH:mm}" : "")}. Change them under Models → Working hours.");
+            }
+            if (catalog.Pinned().Contains(name))
+            {
+                catalog.SetKept(catalog.Pinned().Where(k => k != name));
             }
             await engine.UnloadAsync(name, ct);
         }
@@ -297,7 +312,7 @@ public static class ModelEndpoints
             return AuthEndpoints.Problem(404, "unknown", $"The engine has no model named {name}.");
         }
         var e = options.Value;
-        var kept = catalog.Kept().ToList();
+        var kept = catalog.Pinned().ToList();
         string? warning = null;
         if (body.Keep && !kept.Contains(name))
         {
@@ -328,7 +343,7 @@ public static class ModelEndpoints
         $"Every place in the engine ({max}) keeps a model loaded, so no other can load beside them. Stop keeping one, or raise \"Models loaded at once\" (LLAMACPP_MODELS_MAX) under Settings.";
 
     /// <summary>Whether these models, kept loaded together, fit the machine (the .env model's settings come from .env).</summary>
-    private static KeptPlan Plan(IReadOnlyList<string> kept, IReadOnlyList<LocalModel> local, EngineOptions e, ModelLibrary library, Hardware? hw)
+    internal static KeptPlan Plan(IReadOnlyList<string> kept, IReadOnlyList<LocalModel> local, EngineOptions e, ModelLibrary library, Hardware? hw)
     {
         var entries = library.List();
         var models = new List<(LocalModel, LibraryEntry?)>();

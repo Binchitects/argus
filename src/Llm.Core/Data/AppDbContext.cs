@@ -24,6 +24,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<McpServer> McpServers => Set<McpServer>();
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
     public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
+    public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
     public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -137,6 +138,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.BaseUrl).HasMaxLength(1000);
             e.Property(x => x.ApiKeyProtected).HasMaxLength(4000);
             e.OwnsMany(x => x.Models, m => m.ToJson());
+        });
+        builder.Entity<ModelWindow>(e =>
+        {
+            e.ToTable("model_windows");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.HasIndex(x => x.Name).IsUnique();
+            e.Property(x => x.DefaultModel).HasMaxLength(200);
+            e.Property(x => x.Days).HasDefaultValueSql("'{}'::integer[]");
+            e.Property(x => x.Keep).HasDefaultValueSql("'{}'::text[]");
         });
         builder.Entity<ModelAccess>(e =>
         {

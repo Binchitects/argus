@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Boxes, CircleDot, Eye, HelpCircle, Image as ImageIcon, Loader2, Pencil, Pin, Plus, Power, PowerOff, Settings2, Trash2, XCircle } from 'lucide-react'
+import { Boxes, CircleDot, Clock, Eye, HelpCircle, Image as ImageIcon, Loader2, Pencil, Pin, Plus, Power, PowerOff, Settings2, Trash2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -17,6 +17,7 @@ import { api, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { ModelForm, type SavedModel } from './model-form'
+import { WorkingHours } from './model-hours'
 import { bytes, summary, type ModelProfile } from './model-profile'
 import { ServersSection } from './servers'
 
@@ -34,8 +35,10 @@ interface ModelRow extends SavedModel {
   access: AccessRule
   /** What its file is, when it is in the library. */
   profile?: ModelProfile | null
-  /** Kept loaded: loaded at start, and again whenever it is not. */
+  /** Pinned to keep loaded: loaded at start, and again whenever it is not (outside working hours). */
   kept?: boolean
+  /** Kept loaded now: pinned, or by the working hours in force. */
+  keptNow?: boolean
 }
 
 interface Plan {
@@ -48,9 +51,12 @@ interface ModelsView {
     enabled: boolean
     error: string | null
     checkedAt: string | null
-    /** The models kept loaded, and how many the engine holds at once. */
+    /** The models kept loaded now (the working hours', else the pinned), the pinned ones, and how many the engine holds at once. */
     kept: string[]
+    pinned: string[]
     max: number
+    /** Working hours in force now, and until when. */
+    hours: { id: string; name: string; until: string | null } | null
     /** A place is left beside the kept models: the others load when asked for. */
     onRequest: boolean
     loaded: string[]
@@ -100,6 +106,12 @@ export function ModelsPage() {
         </Alert>
       )}
       {engine.enabled && <EngineSummary engine={engine} />}
+      {engine.enabled && (
+        <WorkingHours
+          engineModels={models.data.models.filter((m) => m.source === 'env' || m.source === 'local').map((m) => m.name)}
+          chatModels={[...new Set(models.data.models.filter((m) => (m.mode ?? 'chat') === 'chat').map((m) => m.name))]}
+        />
+      )}
       <ServersSection onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })} />
       <div className="stagger grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
         {models.data.models.map((m) => (
@@ -124,7 +136,8 @@ function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
         <CardTitle className="text-base">The engine</CardTitle>
         <CardDescription>
           Up to {engine.max} model{engine.max === 1 ? '' : 's'} loaded at once
-          {engine.kept.length > 0 ? `, ${engine.kept.length} kept loaded (${engine.kept.join(', ')})` : ', none kept loaded'}.{' '}
+          {engine.kept.length > 0 ? `, ${engine.kept.length} kept loaded (${engine.kept.join(', ')})` : ', none kept loaded'}
+          {engine.hours ? ` by the working hours "${engine.hours.name}"${engine.hours.until ? ` until ${new Date(engine.hours.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}, instead of the pinned ${engine.pinned.length ? engine.pinned.join(', ') : 'none'}` : ''}.{' '}
           {engine.onRequest
             ? 'Any other loads when someone asks for it; at the limit, the one used least recently unloads, and a kept one comes back.'
             : 'Every place is kept, so no other model loads on request. Raise "Models loaded at once" under Settings for more.'}
@@ -223,7 +236,7 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
   const onEngine = m.status !== null && m.status !== 'missing'
   const image = m.mode === 'image_generation'
   // Loading one more needs a place beside the kept models, unless this is one of them.
-  const canLoad = m.kept === true || engine.kept.length < engine.max
+  const canLoad = m.keptNow === true || engine.kept.length < engine.max
   return (
     <Card className={cn(m.status === 'loaded' && 'border-success/40')}>
       <CardHeader className="flex flex-row flex-wrap items-start gap-3">
@@ -240,6 +253,11 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
             {m.kept && (
               <Badge variant="outline">
                 <Pin /> Kept loaded
+              </Badge>
+            )}
+            {m.keptNow && !m.kept && (
+              <Badge variant="outline">
+                <Clock /> Kept by working hours
               </Badge>
             )}
             {m.vision && (

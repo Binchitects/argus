@@ -41,7 +41,7 @@ public sealed class EngineState
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
 public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
-    RemoteServerClient remote, ILogger<ModelCatalog> logger)
+    RemoteServerClient remote, ModelHoursState hours, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
@@ -227,8 +227,14 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         Write(PresetsFile, text);
     }
 
-    /// <summary>The models kept loaded (loaded at start, and again whenever one is not): admins' choice, else the .env model.</summary>
-    public IReadOnlyList<string> Kept() =>
+    /// <summary>
+    /// The models kept loaded now (loaded at start, and again whenever one is not): the
+    /// working-hours window's in force, else the ones admins pinned.
+    /// </summary>
+    public IReadOnlyList<string> Kept() => hours.Now.Window is { } window ? window.Keep : Pinned();
+
+    /// <summary>The models admins pinned to keep loaded, else the .env model: what is kept outside working hours.</summary>
+    public IReadOnlyList<string> Pinned() =>
         Read(KeepFile) is { } text
             ? [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal)]
             : options.Value.DefaultModel is { Length: > 0 } d ? [d] : [];
@@ -373,7 +379,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 }
 
 /// <summary>Who may use which model, and whether it can answer now.</summary>
-public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineState engine, ModelCatalog catalog, IOptions<EngineOptions> options)
+public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineState engine, ModelCatalog catalog, ModelHoursState hours, IOptions<EngineOptions> options)
 {
     /// <summary>The models on the engine: the .env one and the app's. Their answers need them loaded.</summary>
     public async Task<HashSet<string>> OnEngineAsync(CancellationToken ct = default)
@@ -415,13 +421,18 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
     /// <summary>Whether a model can answer: loaded, or loaded on request.</summary>
     public bool Ready(string model, IReadOnlySet<string> onEngine) => Loaded(model, onEngine) || OnRequest(model, onEngine);
 
-    /// <summary>The chat's models this person may use, and the one a chat uses when it chose none: the first loaded, else the first that loads when asked.</summary>
+    /// <summary>
+    /// The chat's models this person may use, and the one a chat uses when it chose none:
+    /// the working hours' default when it can answer, else the first loaded, else the first
+    /// that loads when asked.
+    /// </summary>
     public async Task<(IReadOnlyList<GatewayModel> Models, GatewayModel? Default, HashSet<string> OnEngine)> ForAsync(AppUser user, IReadOnlyList<GatewayModel> chatModels, CancellationToken ct = default)
     {
         var allowed = await AllowedAsync(user, chatModels.Select(m => m.Name), ct);
         var onEngine = await OnEngineAsync(ct);
         var mine = chatModels.Where(m => allowed.Contains(m.Name)).ToList();
-        return (mine, mine.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? mine.FirstOrDefault(), onEngine);
+        var hoursDefault = hours.Now.Window?.DefaultModel is { } preferred ? mine.FirstOrDefault(m => m.Name == preferred && Ready(m.Name, onEngine)) : null;
+        return (mine, hoursDefault ?? mine.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? mine.FirstOrDefault(), onEngine);
     }
 
     /// <summary>Why this person cannot have an answer from this model now, or null.</summary>
