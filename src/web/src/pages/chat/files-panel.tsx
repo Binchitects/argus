@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Download, ExternalLink, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, Maximize2, Minimize2, Play, X } from 'lucide-react'
+import { ArrowLeft, Download, ExternalLink, FileArchive, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, Maximize2, Minimize2, Play, X } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
+import { errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
+import { saveBlob } from '@/lib/zip'
 import { cn } from '@/lib/utils'
 import { previewKindOf, type PreviewKind } from '@/preview/kind'
 import { attachmentUrl, configQuery, downloadUrl } from './api'
@@ -14,6 +17,7 @@ import { gitlabLink } from './argus'
 import { CodeBlock } from './code-block'
 import type { FileItem } from './files'
 import { parseFence } from './files'
+import { zipFiles, zipName } from './files-zip'
 import { ImageViewer } from './image-viewer'
 import { LivePreview } from './live-preview'
 
@@ -31,8 +35,11 @@ export function FilesPanel({
   onView,
   wide,
   onWide,
+  title,
 }: {
   files: FileItem[]
+  /** The chat's title: the zip of all files is named after it. */
+  title?: string | null
   selected: string | null
   onSelect: (key: string | null) => void
   onClose: () => void
@@ -44,6 +51,19 @@ export function FilesPanel({
   const current = files.find((f) => f.key === selected) ?? null
   const kind = current ? previewOf(current) : null
   const previewing = kind !== null && view === 'preview'
+  const [zipping, setZipping] = useState(false)
+  const downloadAll = async () => {
+    setZipping(true)
+    try {
+      const { zip, missing } = await zipFiles(files)
+      saveBlob(zip, zipName(title ?? null))
+      if (missing.length) toast.warning(`Left out: ${missing.join(', ')}`, { description: 'They could not be had (removed, or the connection dropped).' })
+    } catch (e) {
+      toast.error(errorMessage(e, 'The files could not be zipped.'))
+    } finally {
+      setZipping(false)
+    }
+  }
   return (
     <aside aria-label="Files" className="flex h-full min-h-0 flex-col bg-card">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -66,6 +86,13 @@ export function FilesPanel({
                 </TabsTrigger>
               </TabsList>
             </Tabs>
+          )}
+          {!current && files.length > 0 && (
+            <Tooltip content="Download all as a zip">
+              <Button variant="ghost" size="icon-sm" onClick={downloadAll} loading={zipping} aria-label={`Download all ${files.length} files as a zip`}>
+                <FileArchive />
+              </Button>
+            </Tooltip>
           )}
           {wide !== undefined && onWide && (
             <Tooltip content={wide ? 'Narrow the panel' : 'Widen the panel'}>

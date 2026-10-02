@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { promises as fs } from 'node:fs'
 import { expectAccessible, screenshot, watchConsole, withTheme } from './helpers.ts'
 
 // With a real model behind the gateway (the deployed stack): E2E_CHAT=1.
@@ -77,7 +78,7 @@ async function serveArgusChat(page: Page) {
     await route.fulfill({ response: res, json: { ...(await res.json()), argus: true, gitlabUrl: 'https://gitlab.example.com' } })
   })
   await page.route(`**/api/chat/conversations/${argusChat.id}`, (route) => route.fulfill({ json: argusChat }))
-  await page.route('**/api/chat/attachments/*/content', (route) => route.fulfill({ body: png, contentType: 'image/png' }))
+  await page.route('**/api/chat/attachments/*/content*', (route) => route.fulfill({ body: png, contentType: 'image/png' }))
 }
 
 test.describe("Argus's answers and images", () => {
@@ -98,6 +99,14 @@ test.describe("Argus's answers and images", () => {
 
       await page.getByRole('button', { name: /^Files \(\d+\)$/ }).click()
       const panel = page.getByRole('complementary', { name: 'Files' })
+      // All of them in one zip: the pictures, and the file Argus read under its repository.
+      const saving = page.waitForEvent('download')
+      await panel.getByRole('button', { name: /^Download all \d+ files as a zip$/ }).click()
+      const zip = await saving
+      expect(zip.suggestedFilename()).toBe('Where is DecodeFrame files.zip')
+      const bytes = await fs.readFile(await zip.path())
+      expect(bytes.subarray(0, 4).toString('hex')).toBe('504b0304')
+      for (const name of ['before.png', 'after.png', 'platform/codec/include/codec/frame.h']) expect(bytes.includes(Buffer.from(name))).toBe(true)
       await panel.getByRole('button', { name: /frame\.h.*read by Argus/ }).click()
       await expect(panel.getByRole('link', { name: /Open in GitLab/ })).toBeVisible()
       await expect(panel.getByRole('figure', { name: 'Code: include/codec/frame.h' })).toContainText('frame_t')

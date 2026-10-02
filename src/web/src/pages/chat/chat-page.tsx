@@ -437,6 +437,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const panel = (
     <FilesPanel
       files={files}
+      title={title}
       selected={selectedFile}
       onSelect={(key) => {
         setSelectedFile(key)
