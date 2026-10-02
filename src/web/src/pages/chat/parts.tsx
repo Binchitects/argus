@@ -1,4 +1,4 @@
-import { AlertTriangle, Brain, Calculator, Check, ChevronRight, CircleX, Clock, Download, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Brain, Calculator, Check, ChevronRight, CircleX, Clock, Download, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Collapsible } from 'radix-ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
@@ -27,8 +27,11 @@ function useNow(active: boolean) {
   return now
 }
 
-/** The model's thinking: open and ticking while it thinks, folded to "Thought for 12 s" after. */
-export function Thinking({ text, live, ms, since }: { text: string; live: boolean; ms: number | null; since: number | null }) {
+/**
+ * The model's thinking: open and ticking while it thinks, folded to "Thought for 12 s"
+ * after. `onHurry`: "Answer now", to stop the thinking and have the answer at once.
+ */
+export function Thinking({ text, live, ms, since, onHurry, hurried }: { text: string; live: boolean; ms: number | null; since: number | null; onHurry?: () => void; hurried?: boolean }) {
   // Open while it thinks and folded after, unless the person chose otherwise.
   const [chosen, setOpen] = useState<boolean | null>(null)
   const open = chosen ?? live
@@ -37,14 +40,32 @@ export function Thinking({ text, live, ms, since }: { text: string; live: boolea
   useEffect(() => {
     if (live && box.current) box.current.scrollTop = box.current.scrollHeight
   }, [text, live])
-  const label = live ? `Thinking… ${since ? seconds(now - since) : ''}` : ms !== null ? `Thought for ${seconds(ms)}` : 'Thought process'
+  const [asked, setAsked] = useState(false)
+  const label = live ? `Thinking… ${since ? seconds(now - since) : ''}` : ms !== null ? `Thought for ${seconds(ms)}${hurried ? ', cut short' : ''}` : 'Thought process'
   return (
     <Collapsible.Root open={open} onOpenChange={setOpen} className="mb-3">
-      <Collapsible.Trigger className="group flex items-center gap-1.5 rounded-md py-1 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring">
-        <Brain className={cn('size-4', live && 'animate-pulse text-primary')} aria-hidden="true" />
-        <span className={cn(live && 'text-shimmer')}>{label}</span>
-        <ChevronRight className="size-3.5 transition-transform duration-200 group-data-[state=open]:rotate-90" aria-hidden="true" />
-      </Collapsible.Trigger>
+      <div className="flex flex-wrap items-center gap-2">
+        <Collapsible.Trigger className="group flex items-center gap-1.5 rounded-md py-1 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring">
+          <Brain className={cn('size-4', live && 'animate-pulse text-primary')} aria-hidden="true" />
+          <span className={cn(live && 'text-shimmer')}>{label}</span>
+          <ChevronRight className="size-3.5 transition-transform duration-200 group-data-[state=open]:rotate-90" aria-hidden="true" />
+        </Collapsible.Trigger>
+        {live && onHurry && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 rounded-full px-2.5 text-xs"
+            disabled={asked}
+            onClick={() => {
+              setAsked(true)
+              onHurry()
+            }}
+          >
+            <Zap className="size-3.5" aria-hidden="true" /> {asked ? 'Answering now…' : 'Answer now'}
+          </Button>
+        )}
+      </div>
       <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
         <div ref={box} dir="auto" className="mt-1 max-h-72 overflow-y-auto border-s-2 ps-4 text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {text}

@@ -168,6 +168,7 @@ export function AnswerTurn({
   calls,
   agents,
   onAnswer,
+  onHurry,
   busy,
 }: {
   answer: Message[]
@@ -197,6 +198,8 @@ export function AnswerTurn({
   agents?: Record<string, AgentWork[]>
   /** Sends the person's answers to the model's questions (only on the chat's last answer, once it is done). */
   onAnswer?: (text: string) => Promise<boolean>
+  /** "Answer now" while the model thinks: it stops thinking and answers. */
+  onHurry?: () => void
   busy: boolean
 }) {
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
@@ -298,7 +301,16 @@ export function AnswerTurn({
         const isLast = i === assistants.length - 1
         return (
           <div key={a.id}>
-            {a.reasoning && <Thinking text={a.reasoning} live={live && isLast && !a.content && !a.toolCalls?.length} ms={a.thinkingMs} since={isLast ? thinkingSince : null} />}
+            {a.reasoning && (
+              <Thinking
+                text={a.reasoning}
+                live={live && isLast && !a.content && !a.toolCalls?.length}
+                ms={a.thinkingMs}
+                since={isLast ? thinkingSince : null}
+                onHurry={live && isLast ? onHurry : undefined}
+                hurried={a.cutShort}
+              />
+            )}
             {a.content && <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} live={live && isLast} />}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
             {a.toolCalls?.map((t) =>

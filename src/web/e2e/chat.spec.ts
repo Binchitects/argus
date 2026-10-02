@@ -773,6 +773,20 @@ test.describe('tools', () => {
     }
   })
 
+  test('answer now stops a long thought and the model answers', async ({ page }) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    test.setTimeout(240_000)
+    await page.goto('/chat')
+    await thinking(page, 'Deep think')
+    await ask(page, 'Is 1000003 a prime number? Think it through very carefully first. Then reply with only yes or no.')
+    const answer = page.getByRole('region', { name: 'Answer' }).last()
+    await answer.getByRole('button', { name: 'Answer now' }).click({ timeout: 120_000 })
+    await done(page)
+    await expect(answer).toContainText(/Thought for .*, cut short/)
+    await expect(answer.locator('.md')).toContainText(/yes|no|prime/i)
+    expect((await page.request.delete(`/api/chat/conversations/${page.url().split('/').pop()}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
+  })
+
   test('an answer that finishes after the page left is in the bell', async ({ page }) => {
     test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
     test.setTimeout(240_000)

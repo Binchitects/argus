@@ -15,7 +15,23 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Chat;
 
 /// <summary>For one answer only: another model or thinking level than the chat's (retry with…).</summary>
-public sealed record AnswerOverrides(string? Model = null, string? Thinking = null);
+/// <param name="Hurry">"Answer now", when the person asks for it while the model thinks.</param>
+public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null);
+
+/// <summary>
+/// "Answer now" (as in ChatGPT and Gemini): the person asked the answer to stop thinking.
+/// The model's thinking so far is kept; it is asked again without thinking, and the rest
+/// of the answer (its later rounds after tool calls) thinks no more.
+/// </summary>
+public sealed class Hurry
+{
+    private int _asked;
+
+    public bool Asked => Volatile.Read(ref _asked) == 1;
+
+    /// <returns>False when asked already.</returns>
+    public bool Ask() => Interlocked.Exchange(ref _asked, 1) == 0;
+}
 
 /// <summary>
 /// One answer to a question in a conversation. The conversation is a tree: the
@@ -146,7 +162,7 @@ public sealed partial class ChatService(
             {
                 request["max_tokens"] = maxTokens;
             }
-            if (ThinkingPresets.TemplateKwargs(thinking) is { } kwargs)
+            if (ThinkingPresets.TemplateKwargs(overrides.Hurry?.Asked == true ? "off" : thinking) is { } kwargs)
             {
                 request["chat_template_kwargs"] = kwargs;
             }
@@ -181,10 +197,17 @@ public sealed partial class ChatService(
             }
             try
             {
+                for (var pass = 0; ; pass++)
+                {
+                var cut = false;
                 await foreach (var e in gateway.StreamAsync(request, email, ct))
                 {
                     switch (e)
                     {
+                        // Answer now: still thinking (no word, no tool call yet), it stops here.
+                        case ReasoningDelta when pass == 0 && overrides.Hurry?.Asked == true && content.Length == 0 && calls.Count == 0:
+                            cut = true;
+                            break;
                         case ReasoningDelta r:
                             thoughtFrom ??= clock.Elapsed;
                             reasoning.Append(r.Text);
@@ -208,6 +231,20 @@ public sealed partial class ChatService(
                             (msg.PromptTokens, msg.CachedTokens, msg.CompletionTokens) = (u.Prompt, u.Cached, u.Completion);
                             break;
                     }
+                    if (cut)
+                    {
+                        break;
+                    }
+                }
+                if (!cut)
+                {
+                    break;
+                }
+                // The same request again, without thinking: the model answers with what it has.
+                EndThinking();
+                msg.CutShort = true;
+                await emit(new { type = "thought", ms = msg.ThinkingMs, cutShort = true });
+                request["chat_template_kwargs"] = ThinkingPresets.TemplateKwargs("off");
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

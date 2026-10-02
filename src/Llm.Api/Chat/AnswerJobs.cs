@@ -44,6 +44,9 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
 
         internal Task Running { get; set; } = Task.CompletedTask;
 
+        /// <summary>"Answer now": the person asked it to stop thinking.</summary>
+        public Hurry Hurry { get; } = new();
+
         /// <summary>Its end goes to the person's bell when no page watched it (off for a scheduled task's, which says so itself, and a compaction).</summary>
         public bool Notify { get; set; } = true;
 
@@ -224,7 +227,7 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
                 job.Emit(new { type = "error", message = "The question is gone." });
                 return;
             }
-            await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question, overrides, job.EmitAsync, ct);
+            await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question, overrides with { Hurry = job.Hurry }, job.EmitAsync, ct);
         });
 
     /// <summary>Compacts the branch down to <paramref name="leafId"/> in the background (the model writes a summary: it waits its turn as an answer does).</summary>

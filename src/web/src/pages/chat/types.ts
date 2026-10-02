@@ -79,6 +79,8 @@ export interface Message {
   details?: { agents?: AgentWork[] } | null
   /** An answer: what filled the request it answered, in characters by kind (the context gauge scales it to its prompt tokens). */
   context?: ContextFill | null
+  /** An answer whose thinking was cut short ("Answer now"). */
+  cutShort?: boolean
 }
 
 export interface ContextFill {
@@ -160,7 +162,7 @@ export type ChatEvent =
   | { type: 'title'; title: string }
   | { type: 'assistant'; id: string; parentId: string; model: string }
   | { type: 'reasoning'; text: string }
-  | { type: 'thought'; ms: number }
+  | { type: 'thought'; ms: number; cutShort?: boolean }
   | { type: 'content'; text: string }
   | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; thinkingMs: number | null; durationMs: number | null; context?: ContextFill | null }
   | { type: 'tool_call'; id: string; name: string; arguments: string; tool?: string | null }

@@ -18,6 +18,12 @@ setups to paste.
   Afterwards it folds to "Thought for 4.2 s", and can be opened again.
   *No thinking* really turns it off: it sends `enable_thinking: false` to the
   chat template.
+- **Answer now.** While the model thinks, **Answer now** beside its thinking
+  stops it there and has it answer at once, without thinking (as ChatGPT's and
+  Gemini's do): what it thought so far is kept ("Thought for 6 s, cut short"),
+  and the rest of that answer, after tool calls too, thinks no more. For every
+  answer of a chat to be quick, choose a lighter thinking level or *No
+  thinking*.
 - **Instructions and parameters.** Per chat: your own instructions (sent after
   the app's), temperature, top-p, and the longest answer. Empty means the
   model's default.

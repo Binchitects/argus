@@ -328,6 +328,32 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Answer_now_stops_the_thinking_and_the_model_answers_without_it()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false, thinking = "xhigh" });
+        await StatusAssert.Is(HttpStatusCode.Conflict, await b.PostAsync($"/api/chat/conversations/{id}/hurry", new { }));
+        var (res, seen) = await StartAsync(b, id, "Think hard [ponder]", "t5 ", CancellationToken.None);
+        using (res)
+        {
+            await StatusAssert.Is(HttpStatusCode.Accepted, await b.PostAsync($"/api/chat/conversations/{id}/hurry", new { }));
+            var events = Events(seen + await res.Content.ReadAsStringAsync());
+            Assert.Contains(events, e => e.GetProperty("type").GetString() == "thought" && e.TryGetProperty("cutShort", out var cut) && cut.GetBoolean());
+            Assert.Equal("done", events.Last().GetProperty("type").GetString());
+        }
+        var last = await LastOnceAsync(b, id, "complete");
+        Assert.Equal("Quick answer.", last.GetProperty("content").GetString());
+        Assert.True(last.GetProperty("cutShort").GetBoolean());
+        // What it thought before is kept, cut short.
+        var reasoning = last.GetProperty("reasoning").GetString()!;
+        Assert.StartsWith("t0 t1 t2 t3 t4 t5 ", reasoning, StringComparison.Ordinal);
+        Assert.DoesNotContain("t399", reasoning, StringComparison.Ordinal);
+        var asks = app.Model.Requests.Select(r => r.Body).Where(r => r["messages"]!.AsArray().Last()!["content"]?.ToString().Contains("[ponder]", StringComparison.Ordinal) == true).ToList();
+        Assert.Equal("xhigh", asks[^2]["chat_template_kwargs"]!["reasoning_effort"]!.GetValue<string>());
+        Assert.False(asks[^1]["chat_template_kwargs"]!["enable_thinking"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task Regenerate_adds_an_answer_beside_the_old_one()
     {
         var (b, _) = await PersonAsync();

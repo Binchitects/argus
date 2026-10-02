@@ -14,6 +14,7 @@ namespace Llm.Tests;
 ///   [noaccess]  asks for find_symbol on something the person cannot read
 ///   [slow]      streams 400 small pieces, 25 ms apart (for stop)
 ///   [steady]    streams 60 small pieces, 25 ms apart (for leaving the page mid-answer)
+///   [ponder]    thinks in 400 small pieces, 25 ms apart, then answers; with thinking off, answers "Quick answer." at once
 /// Asked to compact a chat (the summarizer's system prompt), it answers
 /// "Summary of N characters." (N: the length of what it was given).
 ///   [budget]    refuses as LiteLLM does when credit is used up
@@ -93,6 +94,14 @@ public sealed class FakeModel : HttpMessageHandler
         else if (toolAnswered)
         {
             chunks = [Delta(new JsonObject { ["content"] = "Found it." }), Finish("stop")];
+        }
+        else if (lastUser.Contains("[ponder]", StringComparison.Ordinal))
+        {
+            var off = body["chat_template_kwargs"]?["enable_thinking"]?.GetValue<bool>() == false;
+            chunks = off
+                ? [Delta(new JsonObject { ["content"] = "Quick answer." }), Finish("stop")]
+                : [.. Enumerable.Range(0, 400).Select(i => Delta(new JsonObject { ["reasoning_content"] = $"t{i} " })), Delta(new JsonObject { ["content"] = "Slow answer." }), Finish("stop")];
+            delay = off ? TimeSpan.Zero : TimeSpan.FromMilliseconds(25);
         }
         else if (lastUser.Contains("[steady]", StringComparison.Ordinal))
         {

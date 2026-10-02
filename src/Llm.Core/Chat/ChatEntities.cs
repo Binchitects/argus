@@ -70,6 +70,8 @@ public sealed class ChatMessage
     public string? DetailsJson { get; set; }
     /// <summary>Assistant: what filled the request it answered, in characters by kind (system, tools, files, your messages...), as JSON; scaled to its prompt tokens for the context gauge.</summary>
     public string? ContextJson { get; set; }
+    /// <summary>Assistant: its thinking was cut short ("Answer now"), and it answered without more.</summary>
+    public bool CutShort { get; set; }
     public string? Model { get; set; }
     public int? PromptTokens { get; set; }
     public int? CachedTokens { get; set; }

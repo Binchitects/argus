@@ -63,6 +63,7 @@ public static class ChatEndpoints
         g.MapPost("/conversations/{id:guid}/regenerate", RegenerateAsync);
         g.MapGet("/conversations/{id:guid}/stream", WatchAsync);
         g.MapPost("/conversations/{id:guid}/stop", StopAsync);
+        g.MapPost("/conversations/{id:guid}/hurry", HurryAsync);
         g.MapPost("/conversations/{id:guid}/compact", CompactAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync);
@@ -254,6 +255,7 @@ public static class ChatEndpoints
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
             details = m.DetailsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.DetailsJson),
             context = m.ContextJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ContextJson),
+            m.CutShort,
             status = m.Status.ToString().ToLowerInvariant(), m.Error, m.Model,
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
@@ -341,7 +343,7 @@ public static class ChatEndpoints
             {
                 ConversationId = fork.Id, ParentId = m.ParentId is { } parent ? copies[parent] : null, Sequence = ++sequence, Role = m.Role,
                 Content = m.Content, Reasoning = m.Reasoning, ToolCallsJson = m.ToolCallsJson, ToolCallId = m.ToolCallId, ToolName = m.ToolName,
-                AttachmentsJson = m.AttachmentsJson, DetailsJson = m.DetailsJson, ContextJson = m.ContextJson, Model = m.Model, PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens,
+                AttachmentsJson = m.AttachmentsJson, DetailsJson = m.DetailsJson, ContextJson = m.ContextJson, CutShort = m.CutShort, Model = m.Model, PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens,
                 CompletionTokens = m.CompletionTokens, ThinkingMs = m.ThinkingMs, DurationMs = m.DurationMs, Status = m.Status, Error = m.Error,
                 Summary = m.Summary, CreatedAt = m.CreatedAt,
             };
@@ -612,6 +614,22 @@ public static class ChatEndpoints
             return Results.NotFound();
         }
         return jobs.Stop(id) ? Results.Accepted() : AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
+    }
+
+    /// <summary>"Answer now": the answer being written stops thinking and answers with what it has.</summary>
+    private static async Task<IResult> HurryAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
+    {
+        var me = await Me(p, users);
+        if (await Owned(db, id, me) is null)
+        {
+            return Results.NotFound();
+        }
+        if (jobs.Find(id) is not { } job)
+        {
+            return AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
+        }
+        job.Hurry.Ask();
+        return Results.Accepted();
     }
 
     /// <summary>Server-sent events: one JSON object per event, flushed as it happens. Leaving stops the watching, not the answer.</summary>

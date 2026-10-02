@@ -665,6 +665,20 @@ describe('chat', () => {
     expect(screen.getByText(/Main-Model cannot see images/)).toBeInTheDocument()
   })
 
+  it('answer now: while the model thinks, a button asks it to stop thinking and answer', async () => {
+    const calls = backend({
+      events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'reasoning', text: 'Let me think this through…' }],
+      hang: true,
+      extra: { 'POST /api/chat/conversations/c1/hurry': () => ({ status: 202 }) },
+    })
+    renderApp('/chat')
+    await ask('a hard one')
+    const a = await screen.findByRole('region', { name: 'Answer' })
+    await userEvent.click(await within(a).findByRole('button', { name: 'Answer now' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/hurry')).toBe(true))
+    expect(within(a).getByRole('button', { name: 'Answering now…' })).toBeDisabled()
+  })
+
   it('a sent file leaves the box as soon as the question is taken, while the answer still streams', async () => {
     const calls = backend({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }], hang: true })
     renderApp('/chat')

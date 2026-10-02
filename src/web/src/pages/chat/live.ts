@@ -97,7 +97,7 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     }
     case 'thought': {
       const a = lastAssistant()
-      if (a) a.thinkingMs = e.ms
+      if (a) Object.assign(a, { thinkingMs: e.ms, cutShort: e.cutShort ?? a.cutShort })
       return { ...state, messages, thinkingSince: null }
     }
     case 'content': {

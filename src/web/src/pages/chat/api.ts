@@ -33,6 +33,9 @@ export const forkChat = (id: string, messageId?: string) =>
 /** Stops the chat's answer on the server; it keeps what it has. */
 export const stopChat = (id: string) => api(`/api/chat/conversations/${id}/stop`, { body: {} })
 
+/** "Answer now": the answer stops thinking and answers with what it has. */
+export const hurryChat = (id: string) => api(`/api/chat/conversations/${id}/hurry`, { body: {} })
+
 export const archiveChat = (id: string, archived: boolean) => api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { archived } })
 
 export const conversationQuery = (id: string) => ({

@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, stopChat, streamChat } from './api'
+import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, hurryChat, stopChat, streamChat } from './api'
 import { Composer } from './composer'
 import { contextOf } from './context'
 import { collectFiles } from './files'
@@ -572,6 +572,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                             calls={answering && i === lastTurn ? view.calls : undefined}
                             agents={i === lastTurn ? view.agents : undefined}
                             onAnswer={!streaming && i === lastTurn ? send : undefined}
+                            onHurry={answering && i === lastTurn && id ? () => void hurryChat(id).catch((e) => toast.error(errorMessage(e))) : undefined}
                             onDecide={(callId, allow) => void decide(callId, allow)}
                             busy={streaming}
                           />
