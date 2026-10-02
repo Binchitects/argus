@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isFromRunner, isToRunner, previewKindOf } from './kind'
-import { compileComponent, componentOf, importsOf, PreviewError, reporter, rewriteHtml } from './page'
+import { compileComponent, componentOf, importsOf, PreviewError, repairMermaid, reporter, rewriteHtml } from './page'
 
 describe('what can be previewed', () => {
   it('goes by the fence, the file name, and for bare xml what it holds', () => {
@@ -80,5 +80,14 @@ describe('a component', () => {
     expect(componentOf({ App: g, helper: f })).toBe(g)
     expect(componentOf({ Only: f })).toBe(f)
     expect(componentOf({ a: f, b: g })).toBeNull()
+  })
+})
+
+describe('a diagram a model got slightly wrong', () => {
+  it('is mended where the slip is known, and left alone otherwise', () => {
+    expect(repairMermaid('pie\n    title Budget\n    donut showData\n    "Rent" : 32')).toBe('pie showData\n    title Budget\n    "Rent" : 32')
+    expect(repairMermaid('stateDiagram-v2\n    RefundDecision <<choice>>\n    state Fork <<fork>>')).toBe('stateDiagram-v2\n    state RefundDecision <<choice>>\n    state Fork <<fork>>')
+    const fine = 'flowchart TD\n  A --> B'
+    expect(repairMermaid(fine)).toBe(fine)
   })
 })

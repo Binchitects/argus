@@ -44,7 +44,8 @@ public sealed partial class ChatService(
         "Previews have no network: use no CDN or API calls. A page may use Tailwind (its CDN script is served locally). " +
         "A React component (jsx or tsx) is shown from its default export and may import only react, react-dom and lucide-react; style it with Tailwind classes. " +
         "A mermaid block is drawn as a diagram in the answer itself: use one for a workflow, an architecture, a sequence, a data flow or states. " +
-        "In Mermaid, quote any label with punctuation (A[\"parse(input)\"]) and give each diagram an accTitle line.";
+        "In Mermaid, quote any label with punctuation (A[\"parse(input)\"]) and give each diagram an accTitle line; " +
+        "a pie shows its values with \"pie showData\" (there is no donut), and a state diagram's choice is \"state Name <<choice>>\".";
 
     public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {

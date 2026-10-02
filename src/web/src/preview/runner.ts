@@ -7,7 +7,7 @@
 import tailwindUrl from '@tailwindcss/browser?url'
 import mermaidUrl from 'mermaid/dist/mermaid.min.js?url'
 import { isToRunner, type FromRunner, type PreviewKind } from './kind'
-import { compileComponent, componentOf, PreviewError, rewriteHtml, type ModuleName } from './page'
+import { compileComponent, componentOf, PreviewError, repairMermaid, rewriteHtml, type ModuleName } from './page'
 
 const parentWindow = window.parent
 const send = (m: FromRunner) => parentWindow.postMessage(m, '*')
@@ -57,9 +57,12 @@ async function render(kind: PreviewKind, code: string, theme: 'light' | 'dark', 
       // Dark edge labels sit on grey by default, too faint to read (WCAG AA): a darker ground.
       const themeVariables = theme === 'dark' ? { edgeLabelBackground: '#26262b' } : {}
       mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: theme === 'dark' ? 'dark' : 'default', themeVariables })
-      const { svg } = await mermaid.render('diagram', code)
+      // Slips models make often (a pie's "donut", a choice without "state") are mended first:
+      // one is refused outright, the other drawn as a stray box.
+      const { svg } = await mermaid.render('diagram', repairMermaid(code))
       root.className = 'center'
       root.innerHTML = svg
+      readable(root.querySelector('svg'))
     } else {
       await component(code, root)
     }
@@ -72,6 +75,20 @@ async function render(kind: PreviewKind, code: string, theme: 'light' | 'dark', 
 }
 
 type MermaidApi = { initialize(o: object): void; render(id: string, code: string): Promise<{ svg: string }> }
+
+/** The smallest a drawing is shrunk to fit: below it, text is too small to read, and the drawing scrolls sideways instead. */
+const MIN_SCALE = 0.6
+
+/** A wide drawing keeps a readable size: shrunk to fit down to MIN_SCALE, wider than that it scrolls. */
+function readable(svg: SVGSVGElement | null) {
+  if (!svg) return
+  const natural = svg.viewBox.baseVal?.width || svg.getBoundingClientRect().width
+  const room = (svg.parentElement?.clientWidth ?? window.innerWidth) - 24
+  if (natural * MIN_SCALE <= room) return
+  svg.style.maxWidth = 'none'
+  svg.style.width = `${Math.round(natural * MIN_SCALE)}px`
+  document.documentElement.dataset.wide = ''
+}
 
 function script(src: string) {
   return new Promise<void>((resolve, reject) => {

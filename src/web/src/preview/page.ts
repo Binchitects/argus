@@ -67,3 +67,25 @@ export function componentOf(exports: Record<string, unknown>): unknown {
   const fns = Object.values(exports).filter((v) => typeof v === 'function')
   return fns.length === 1 ? fns[0] : null
 }
+
+/**
+ * Mends slips models make in Mermaid that its parser refuses, so the diagram is drawn
+ * anyway: a pie's "donut" line (no such thing; "showData" belongs on the pie line), and a
+ * state diagram's choice or fork written without "state" in front. Anything else is left
+ * as it is (the error is shown then, with the code).
+ */
+export function repairMermaid(code: string): string {
+  const lines = code.split('\n')
+  const kind = lines.find((l) => l.trim() && !l.trim().startsWith('%%'))?.trim().split(/\s+/)[0] ?? ''
+  if (kind === 'pie') {
+    const show = lines.some((l) => /^\s*donut\b.*\bshowData\b/.test(l) || /^\s*showData\s*$/.test(l))
+    const kept = lines.filter((l) => !/^\s*(donut\b.*|showData\s*)$/.test(l))
+    const head = kept.findIndex((l) => /^\s*pie\b/.test(l))
+    if (show && head >= 0 && !/\bshowData\b/.test(kept[head]!)) kept[head] = kept[head]!.replace(/\bpie\b/, 'pie showData')
+    return kept.join('\n')
+  }
+  if (kind.startsWith('stateDiagram')) {
+    return lines.map((l) => l.replace(/^(\s*)(?!state\b)([\w-]+)\s+(<<(?:choice|fork|join)>>)\s*$/, '$1state $2 $3')).join('\n')
+  }
+  return code
+}
