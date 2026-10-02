@@ -174,7 +174,7 @@ function agentStep(agents: AgentWork[], e: Extract<ChatEvent, { type: 'agent' }>
       if (e.call) a.steps = [...a.steps, { id: e.call.id, name: e.call.name ?? '', arguments: e.call.arguments ?? '' }]
       break
     case 'tool_result':
-      a.steps = a.steps.map((s) => (s.id === e.call?.id ? { ...s, result: e.text ?? '', isError: !!e.isError } : s))
+      a.steps = a.steps.map((s) => (s.id === e.call?.id ? { ...s, result: e.text ?? '', isError: !!e.isError, files: e.files ?? null } : s))
       break
     case 'done':
       Object.assign(a, { status: e.error ? 'failed' : 'done', error: e.error ?? null, ms: e.ms ?? null })

@@ -33,6 +33,7 @@ public sealed partial class ChatService(
     Models.ModelPolicy policy,
     ChatModels models,
     IOptionsMonitor<ChatOptions> chat,
+    IServiceScopeFactory scopes,
     ILogger<ChatService> logger)
 {
     /// <summary>An image counts as this many characters of the context budget (roughly 1,000 tokens).</summary>
@@ -74,7 +75,7 @@ public sealed partial class ChatService(
         var tools = new JsonArray();
         var instructions = new List<(string Tool, string Text)>();
         // Sub-agents get the answer's model and tools, filled in below before any call.
-        var kit = new AgentKit(modelName, thinking, email, runs, tools, instructions, progress, emit);
+        var kit = new AgentKit(modelName, thinking, email, runs, tools, instructions, progress, emit, user, conversation);
         if (model?.Tools != false)
         {
             var allowed = await registry.ForAsync(await access.MembershipAsync(user, ct), ct);
@@ -328,7 +329,35 @@ public sealed partial class ChatService(
 
     /// <summary>What sub-agents of an answer work with: its model, thinking, person, tools and their instructions, and where events go.</summary>
     private sealed record AgentKit(string Model, string? Thinking, string Email, Dictionary<string, (ToolChoice Choice, IToolRun Run)> Runs, JsonArray Tools,
-        List<(string Tool, string Text)> Instructions, ToolProgress Progress, Func<object, Task> Emit);
+        List<(string Tool, string Text)> Instructions, ToolProgress Progress, Func<object, Task> Emit, AppUser User, Conversation Conversation);
+
+    /// <summary>
+    /// A sub-agent's own tools: the answer's tools made ready again in a scope of the sub-agent's
+    /// own, so sub-agents running side by side never share a database context (a picture or a
+    /// Python run each save their files). By function name; a tool whose server cannot be
+    /// reached now is left out.
+    /// </summary>
+    private static async Task<Dictionary<string, IToolRun>> AgentToolsAsync(IServiceProvider services, AgentKit kit, HashSet<string> toolIds, CancellationToken ct)
+    {
+        var all = await services.GetRequiredService<ToolRegistry>().AllAsync(ct);
+        var runs = new Dictionary<string, IToolRun>(StringComparer.Ordinal);
+        foreach (var tool in all.Where(t => toolIds.Contains(t.Tool.Id)).Select(t => t.Tool))
+        {
+            try
+            {
+                var run = await tool.StartAsync(new ToolContext(kit.User, kit.Email, kit.Conversation, kit.Progress), ct);
+                foreach (var name in run.Functions.OfType<JsonObject>().Select(f => f["function"]?["name"]?.GetValue<string>()).OfType<string>())
+                {
+                    runs.TryAdd(name, run);
+                }
+            }
+            catch (McpException)
+            {
+                // Its server is down for this sub-agent: the others' tools still serve.
+            }
+        }
+        return runs;
+    }
 
     /// <summary>What a sub-agent's result may take of the answer's context.</summary>
     private const int AgentResultChars = 12_000;
@@ -356,9 +385,10 @@ public sealed partial class ChatService(
             .Select(f => (JsonNode)f.DeepClone())
             .ToList();
         var notes = string.Join("\n\n", kit.Instructions.Where(i => i.Tool is not "agents" and not "ask").Select(i => i.Text));
+        var toolIds = usable.Select(f => kit.Runs[f["function"]!["name"]!.GetValue<string>()].Choice.Tool.Id).ToHashSet(StringComparer.Ordinal);
         using var gate = new SemaphoreSlim(Math.Max(1, chat.CurrentValue.AgentsAtOnce));
         var done = 0;
-        async Task<(JsonObject Result, JsonObject Shown)> RunAsync(AgentTask part, int index)
+        async Task<(JsonObject Result, JsonObject Shown, List<ChatAttachment> Files)> RunAsync(AgentTask part, int index)
         {
             Task Say(object e) => callId is null ? Task.CompletedTask : kit.Emit(e);
             await gate.WaitAsync(ct);
@@ -367,9 +397,11 @@ public sealed partial class ChatService(
                 await Say(new { type = "agent", id = callId, index, @event = "start", title = part.Title, instructions = part.Instructions });
                 await kit.Progress.ReportAsync(new McpProgress(done, parts.Count, $"{part.Title}: started"));
                 var took = Stopwatch.StartNew();
-                var run = await AgentAsync(part, kit, new JsonArray([.. usable.Select(u => u.DeepClone())]), notes,
+                await using var scope = scopes.CreateAsyncScope();
+                var own = await AgentToolsAsync(scope.ServiceProvider, kit, toolIds, ct);
+                var run = await AgentAsync(part, kit, own, new JsonArray([.. usable.Select(u => u.DeepClone())]), notes,
                     doing => kit.Progress.ReportAsync(new McpProgress(done, parts.Count, $"{part.Title}: {doing}")),
-                    e => Say(new { type = "agent", id = callId, index, e.Event, e.Text, e.Call, e.IsError }), ct);
+                    e => Say(new { type = "agent", id = callId, index, e.Event, e.Text, e.Call, e.IsError, e.Files }), ct);
                 var finished = Interlocked.Increment(ref done);
                 var ms = (int)took.Elapsed.TotalMilliseconds;
                 await Say(new { type = "agent", id = callId, index, @event = "done", error = run.Error, ms });
@@ -384,7 +416,7 @@ public sealed partial class ChatService(
                     ["title"] = part.Title, ["instructions"] = part.Instructions, ["text"] = run.Text, ["reasoning"] = Cut(run.Reasoning, AgentShownChars * 5),
                     ["steps"] = new JsonArray([.. run.Steps]), ["error"] = run.Error, ["ms"] = ms,
                 };
-                return (result, shown);
+                return (result, shown, run.Files);
             }
             finally
             {
@@ -393,21 +425,23 @@ public sealed partial class ChatService(
         }
         var outcomes = await Task.WhenAll(parts.Select((p, i) => RunAsync(p, i)));
         var failed = outcomes.Count(o => o.Result.ContainsKey("error"));
-        return new ToolResult(new JsonArray([.. outcomes.Select(o => (JsonNode)o.Result)]).ToJsonString(Mcp.Plain), IsError: failed == outcomes.Length)
+        // What the sub-agents made (pictures, a Python run's files) is the call's: in the chat and its Files panel.
+        return new ToolResult(new JsonArray([.. outcomes.Select(o => (JsonNode)o.Result)]).ToJsonString(Mcp.Plain), IsError: failed == outcomes.Length,
+            Files: [.. outcomes.SelectMany(o => o.Files)])
         {
             Details = new JsonObject { ["agents"] = new JsonArray([.. outcomes.Select(o => (JsonNode)o.Shown)]) },
         };
     }
 
     /// <summary>A step of a sub-agent's work, for the page: its thinking or words as they come, a tool call, a tool's result.</summary>
-    private sealed record AgentStep(string Event, string? Text = null, JsonObject? Call = null, bool? IsError = null);
+    private sealed record AgentStep(string Event, string? Text = null, JsonObject? Call = null, bool? IsError = null, JsonArray? Files = null);
 
     /// <summary>What a sub-agent did: its last words, its thinking, its tool calls (each with its result), and why it stopped short, if so.</summary>
-    private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error);
+    private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error, List<ChatAttachment> Files);
 
     /// <summary>One sub-agent: its own little answer loop, kept out of the chat (only its result goes to the model).</summary>
-    private async Task<AgentRun> AgentAsync(AgentTask part, AgentKit kit, JsonArray tools, string notes, Func<string, Task> say, Func<AgentStep, Task> step,
-        CancellationToken ct)
+    private async Task<AgentRun> AgentAsync(AgentTask part, AgentKit kit, Dictionary<string, IToolRun> own, JsonArray tools, string notes, Func<string, Task> say,
+        Func<AgentStep, Task> step, CancellationToken ct)
     {
         var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC).\n\n" +
             "You are a sub-agent: an assistant gave you one part of a larger task, and does the other parts elsewhere. Do only this part, with " +
@@ -417,6 +451,7 @@ public sealed partial class ChatService(
         var messages = new JsonArray(new JsonObject { ["role"] = "system", ["content"] = system }, new JsonObject { ["role"] = "user", ["content"] = part.Instructions });
         var names = tools.OfType<JsonObject>().Select(f => f["function"]?["name"]?.GetValue<string>()).OfType<string>().ToHashSet(StringComparer.Ordinal);
         var steps = new List<JsonNode>();
+        var made = new List<ChatAttachment>();
         var reasoning = new StringBuilder();
         var text = new StringBuilder();
         for (var round = 0; ; round++)
@@ -460,11 +495,11 @@ public sealed partial class ChatService(
             }
             catch (ChatGatewayException ex)
             {
-                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message, made);
             }
             if (pending.Count == 0)
             {
-                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null, made);
             }
             var toolCalls = new JsonArray([.. pending.Select(kv => (JsonNode)new JsonObject
             {
@@ -483,16 +518,26 @@ public sealed partial class ChatService(
                 await say(name.Replace('_', ' '));
                 string result;
                 var isError = false;
+                JsonArray? files = null;
                 try
                 {
-                    if (!names.Contains(name) || !kit.Runs.TryGetValue(name, out var target))
+                    if (!names.Contains(name) || !own.TryGetValue(name, out var target))
                     {
                         (result, isError) = ($"There is no tool named {name}.", true);
                     }
                     else
                     {
-                        var outcome = await target.Run.CallAsync(name, JsonNode.Parse(raw.Length == 0 ? "{}" : raw) as JsonObject ?? [], ct);
+                        var outcome = await target.CallAsync(name, JsonNode.Parse(raw.Length == 0 ? "{}" : raw) as JsonObject ?? [], ct);
                         (result, isError) = (outcome.Text, outcome.IsError);
+                        if (outcome.Files is { Count: > 0 } got)
+                        {
+                            made.AddRange(got);
+                            files = new JsonArray([.. got.Select(f => (JsonNode)new JsonObject
+                            {
+                                ["id"] = f.Id, ["fileName"] = f.FileName, ["size"] = f.Size, ["truncated"] = f.Truncated, ["kind"] = f.Kind,
+                                ["contentType"] = f.ContentType, ["original"] = f.Kind != "image" && f.Data != null,
+                            })]);
+                        }
                     }
                 }
                 catch (JsonException)
@@ -504,8 +549,8 @@ public sealed partial class ChatService(
                     (result, isError) = (ex.Message, true);
                 }
                 var shown = Cut(result, AgentShownChars);
-                await step(new AgentStep("tool_result", shown, new JsonObject { ["id"] = id }, isError));
-                steps.Add(new JsonObject { ["id"] = id, ["name"] = name, ["arguments"] = raw, ["result"] = shown, ["isError"] = isError });
+                await step(new AgentStep("tool_result", shown, new JsonObject { ["id"] = id }, isError, files));
+                steps.Add(new JsonObject { ["id"] = id, ["name"] = name, ["arguments"] = raw, ["result"] = shown, ["isError"] = isError, ["files"] = files?.DeepClone() });
                 messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = Cut(result, 30_000) });
             }
         }

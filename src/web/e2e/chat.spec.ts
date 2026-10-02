@@ -234,7 +234,8 @@ test.describe('questions from the model', () => {
   })
 })
 
-// Sub-agents did two parts side by side; the card shows each part's result.
+// Sub-agents did two parts side by side; the card shows each part's work, the pictures they drew too.
+const drawn = image('33333333-3333-4333-8333-333333333333', 'codec-flow.png')
 const agentsChat = {
   ...argusChat,
   id: '00000000-0000-4000-8000-0000000a9e75', title: 'Two repositories', useArgus: false, currentLeafId: 'g4',
@@ -245,7 +246,7 @@ const agentsChat = {
       toolCalls: [call('c1', 'delegate', { tasks: [{ title: 'codec errors', instructions: 'Find how platform/codec logs errors.' }, { title: 'driver-shim errors', instructions: 'Find how driver-shim logs errors.' }] })],
     },
     {
-      ...blank, id: 'g3', parentId: 'g2', role: 'tool', toolCallId: 'c1', toolName: 'delegate', durationMs: 8400,
+      ...blank, id: 'g3', parentId: 'g2', role: 'tool', toolCallId: 'c1', toolName: 'delegate', durationMs: 8400, attachments: [drawn],
       content: JSON.stringify([
         { title: 'codec errors', result: 'Through `log_error()` in `src/log.c`, with an error code.', tool_calls: 1 },
         { title: 'driver-shim errors', result: 'With `pr_err` in `shim/main.c`.', tool_calls: 0 },
@@ -254,7 +255,11 @@ const agentsChat = {
         agents: [
           {
             title: 'codec errors', instructions: 'Find how platform/codec logs errors.', reasoning: 'Search for the error helper first.', text: 'Through `log_error()` in `src/log.c`, with an error code.',
-            steps: [{ id: 's1', name: 'search_code', arguments: '{"query":"log_error"}', result: '[{"path":"src/log.c","line":12}]', isError: false }], error: null, ms: 5200,
+            steps: [
+              { id: 's1', name: 'search_code', arguments: '{"query":"log_error"}', result: '[{"path":"src/log.c","line":12}]', isError: false },
+              { id: 's2', name: 'generate_image', arguments: '{"prompt":"codec error flow"}', result: 'Made codec-flow.png.', isError: false, files: [drawn] },
+            ],
+            error: null, ms: 5200,
           },
           { title: 'driver-shim errors', instructions: 'Find how driver-shim logs errors.', reasoning: '', text: 'With `pr_err` in `shim/main.c`.', steps: [], error: null, ms: 3100 },
         ],
@@ -265,22 +270,33 @@ const agentsChat = {
 }
 
 test.describe('sub-agents', () => {
-  test("each part's work is shown on the card: thinking, tool calls, words", async ({ page }, info) => {
+  test("each part's work is shown on the card as the chat shows its own: thinking, tool calls, pictures, words", async ({ page }, info) => {
     await page.route(`**/api/chat/conversations/${agentsChat.id}`, (route) => route.fulfill({ json: agentsChat }))
+    await page.route('**/api/chat/attachments/*/content', (route) => route.fulfill({ body: png, contentType: 'image/png' }))
     await page.goto(`/chat/${agentsChat.id}`)
     const answer = page.getByRole('region', { name: 'Answer' })
+    // What the sub-agents drew is the call's: under it, and in the Files panel.
+    await expect(answer.getByRole('list', { name: 'Pictures' }).getByRole('img', { name: 'codec-flow.png' })).toBeVisible()
     await answer.getByRole('button', { name: /Sub-agents/ }).click()
     const agents = answer.getByRole('list', { name: 'Sub-agents' })
+    await expect(answer).toContainText('2 of 2 done')
     const codec = agents.getByRole('listitem', { name: 'codec errors' })
-    await expect(codec).toContainText('1 tool call · 5.2 s')
+    const shim = agents.getByRole('listitem', { name: 'driver-shim errors' })
+    // Done parts are folded, one under the other; all open at once.
+    await expect(codec).toContainText('2 tool calls · 1 file · 5.2 s')
+    await expect(codec).not.toContainText('Find how platform/codec logs errors.')
+    await answer.getByRole('button', { name: 'Expand all' }).click()
     await expect(codec).toContainText('Find how platform/codec logs errors.')
-    await codec.getByRole('button', { name: /Thinking/ }).click()
+    await expect(shim).toContainText('pr_err')
+    await codec.getByRole('button', { name: /Thought process/ }).click()
     await expect(codec).toContainText('Search for the error helper first.')
     await codec.getByRole('button', { name: /Search code/ }).click()
-    await expect(codec).toContainText('"path":"src/log.c"')
-    await expect(agents.getByRole('listitem', { name: 'driver-shim errors' })).toContainText('pr_err')
-    await expectAccessible(page, info, 'sub-agents')
+    await expect(codec).toContainText('src/log.c')
+    await expect(codec.getByRole('list', { name: 'Pictures' }).getByRole('img', { name: 'codec-flow.png' })).toBeVisible()
     await screenshot(page, info, 'sub-agents')
+    await answer.getByRole('button', { name: 'Collapse all' }).click()
+    await expect(shim).not.toContainText('pr_err')
+    await expectAccessible(page, info, 'sub-agents')
   })
 })
 
@@ -573,7 +589,8 @@ test.describe('tools', () => {
     // A chat with only these two tools: the model has nothing else to reach for.
     const made = await page.request.post('/api/chat/conversations', { data: { tools: ['agents', 'calculator'] }, headers: { 'X-Requested-With': 'e2e' } })
     await page.goto(`/chat/${(await made.json()).id}`)
-    await ask(page, 'Use sub-agents for this, one per part: (1) compute 17*23 with the calculator, (2) compute 2^20 with the calculator. Then give me both results.')
+    // Small parts on purpose: the model is told to delegate even so (else it may just calculate).
+    await ask(page, 'Call the delegate tool once with two sub-agents, even though the parts are small (this is a test of sub-agents): (1) compute 17*23 with the calculator, (2) compute 2^20 with the calculator. Then give me both results.')
     const answer = page.getByRole('region', { name: 'Answer' }).last()
     const agents = answer.getByRole('list', { name: 'Sub-agents' })
     await expect(agents.getByRole('listitem')).toHaveCount(2, { timeout: 120_000 })
@@ -587,6 +604,27 @@ test.describe('tools', () => {
     await page.getByRole('region', { name: 'Answer' }).last().getByRole('button', { name: /Sub-agents 2 parts/ }).click()
     await expect(page.getByRole('list', { name: 'Sub-agents' }).getByRole('listitem').first()).toContainText(/tool call/)
     expect((await page.request.delete(`/api/chat/conversations/${page.url().split('/').pop()}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
+  })
+
+  test('sub-agents draw pictures side by side: each is shown and kept in the Files panel', async ({ page, request }) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    test.setTimeout(600_000)
+    const tools = (await (await request.get('/api/chat/config')).json()) as { tools: { id: string }[] }
+    test.skip(!tools.tools.some((t) => t.id === 'image'), 'no image model at the gateway')
+    const made = await page.request.post('/api/chat/conversations', { data: { tools: ['agents', 'image'] }, headers: { 'X-Requested-With': 'e2e' } })
+    const id = (await made.json()).id
+    await page.goto(`/chat/${id}`)
+    await ask(page, 'Call the delegate tool once with two sub-agents (this is a test of sub-agents): one draws a red apple, the other a blue cup, each with the image tool at 512x512.')
+    const answer = page.getByRole('region', { name: 'Answer' }).last()
+    // Each picture is in the Files list as soon as its sub-agent has it, before the answer is over.
+    await expect(page.getByRole('button', { name: /^Files \([12]\)$/ })).toBeVisible({ timeout: 480_000 })
+    await done(page)
+    const pictures = answer.getByRole('list', { name: 'Pictures' }).last()
+    await expect(pictures.getByRole('img')).toHaveCount(2)
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Files (2)' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Answer' }).last().getByRole('list', { name: 'Pictures' }).last().getByRole('img')).toHaveCount(2)
+    expect((await page.request.delete(`/api/chat/conversations/${id}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
   })
 
   test('the model searches the web and reads a page of an allowed site', async ({ page, request }) => {

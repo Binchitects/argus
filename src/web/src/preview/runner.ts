@@ -88,6 +88,8 @@ function readable(svg: SVGSVGElement | null) {
   svg.style.maxWidth = 'none'
   svg.style.width = `${Math.round(natural * MIN_SCALE)}px`
   document.documentElement.dataset.wide = ''
+  // It scrolls sideways: keyboard users scroll it too.
+  document.body.tabIndex = 0
 }
 
 function script(src: string) {

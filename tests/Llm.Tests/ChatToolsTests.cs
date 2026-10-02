@@ -162,6 +162,39 @@ public sealed class ChatToolsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Sub_agents_drawing_side_by_side_each_keep_their_picture_and_the_call_shows_them_all()
+    {
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("FLUX.2-klein-4B", null, null, false, false, false, null, null, null, Mode: "image_generation"));
+        await using var f = NewApp(gateway, new() { ["Chat:AgentsAtOnce"] = "3" });
+        var (b, _, _) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { tools = new[] { "agents", "image" } });
+        var parts = new
+        {
+            tasks = Enumerable.Range(1, 3).Select(i => new { title = $"Picture {i}", instructions = $$"""Draw: [call generate_image {"prompt":"A fox number {{i}}"}]""" }).ToArray(),
+        };
+        var events = await SendAsync(b, id, $"Three at once: [call delegate {JsonSerializer.Serialize(parts)}]");
+
+        // Each picture is saved (three sub-agents at once, each with its own database scope) and is the call's.
+        var result = Event(events, "tool_result");
+        Assert.False(result.GetProperty("isError").GetBoolean());
+        var pictures = result.GetProperty("attachments").EnumerateArray().ToList();
+        Assert.Equal(3, pictures.Count);
+        Assert.All(pictures, p => Assert.Equal("image", p.GetProperty("kind").GetString()));
+        // As each is made, the page hears of it.
+        Assert.Equal(3, events.Count(e => e.GetProperty("type").GetString() == "agent" && e.GetProperty("event").GetString() == "tool_result"
+            && e.GetProperty("files").ValueKind == JsonValueKind.Array && e.GetProperty("files").GetArrayLength() == 1));
+        var chat = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
+        var tool = chat.GetProperty("messages").EnumerateArray().First(m => m.GetProperty("toolName").GetString() == "delegate");
+        Assert.Equal(3, tool.GetProperty("attachments").GetArrayLength());
+        Assert.All(tool.GetProperty("details").GetProperty("agents").EnumerateArray(), a => Assert.Equal(1, a.GetProperty("steps")[0].GetProperty("files").GetArrayLength()));
+        foreach (var p in pictures)
+        {
+            await StatusAssert.Is(HttpStatusCode.OK, await b.GetAsync($"/api/chat/attachments/{p.GetProperty("id").GetGuid()}/content"));
+        }
+    }
+
+    [Fact]
     public async Task A_chat_has_its_own_tools_among_those_the_person_may_use()
     {
         var (b, _, email) = await PersonAsync(app.Factory);

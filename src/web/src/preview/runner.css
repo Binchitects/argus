@@ -8,6 +8,7 @@ html, body { margin: 0; min-height: 100%; }
 .center > svg { max-width: 100%; height: auto; flex-shrink: 0; }
 /* A wide drawing kept at a readable size scrolls sideways. */
 :root[data-wide] body { overflow-x: auto; }
+:root[data-wide] body:focus-visible { outline: 3px solid Highlight; outline-offset: -3px; }
 /* Inline (a diagram in an answer): as tall as the drawing, on the page's own background. */
 :root[data-inline], :root[data-inline] body { min-height: 0; background: transparent; }
 :root[data-inline] .center { min-height: 0; padding: 12px; }

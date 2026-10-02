@@ -656,6 +656,17 @@ describe('chat', () => {
     expect(screen.getByText(/Main-Model cannot see images/)).toBeInTheDocument()
   })
 
+  it('a sent file leaves the box as soon as the question is taken, while the answer still streams', async () => {
+    const calls = backend({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }], hang: true })
+    renderApp('/chat')
+    await userEvent.upload(await screen.findByLabelText('Attach files'), new File(['a,b'], 'data.csv', { type: 'text/csv' }))
+    expect(await screen.findByRole('list', { name: 'Files to send' })).toHaveTextContent('data.csv')
+    await ask('sum it')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toMatchObject({ attachments: ['att-data.csv'] }))
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Files to send' })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+  })
+
   it('instructions and parameters are checked and saved for the chat', async () => {
     const calls = backend({ start: conversation({ messages: answered, currentLeafId: 'a1' }), extra: { 'PATCH /api/chat/conversations/c1': () => ({ status: 204 }) } })
     renderApp('/chat/c1')

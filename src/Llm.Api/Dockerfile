@@ -5,7 +5,8 @@
 # Built from the repository root: docker build -f src/Llm.Api/Dockerfile .
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api
-# Empty: VERSION at the repository's root (Directory.Build.props).
+# Empty: VERSION at the repository's root (Directory.Build.props). Passed on only when
+# set: an empty -p:AppVersion= is a global property and would win over VERSION.
 ARG APP_VERSION=
 WORKDIR /src
 COPY global.json Directory.Build.props VERSION ./
@@ -14,7 +15,7 @@ COPY src/Llm.Api/Llm.Api.csproj src/Llm.Api/
 RUN dotnet restore src/Llm.Api/Llm.Api.csproj
 COPY src/Llm.Core/ src/Llm.Core/
 COPY src/Llm.Api/ src/Llm.Api/
-RUN dotnet publish src/Llm.Api/Llm.Api.csproj -c Release --no-restore -o /out -p:AppVersion=$APP_VERSION \
+RUN dotnet publish src/Llm.Api/Llm.Api.csproj -c Release --no-restore -o /out ${APP_VERSION:+-p:AppVersion=$APP_VERSION} \
  && rm -f /out/*.pdb
 
 # Chiseled: no shell, no package manager, runs as a non-root user.

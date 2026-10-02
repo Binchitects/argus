@@ -23,4 +23,13 @@ describe('files in a chat', () => {
     expect(files.map((f) => f.name)).toEqual(['notes.txt', 'a.ts', 'snippet-1.txt'])
     expect(files.find((f) => f.name === 'a.ts')).toMatchObject({ code: 'const v = 2' })
   })
+  it("lists sub-agents' pictures and code as soon as they are made, once when kept", () => {
+    const picture = { id: 'p1', fileName: 'apple.png', size: 9, truncated: false, kind: 'image' as const, contentType: 'image/png' }
+    const work = [{ title: 'A', instructions: '', reasoning: '', text: '```py title="fit.py"\nfit()\n```', steps: [{ id: 's1', name: 'generate_image', arguments: '{}', result: 'ok', files: [picture] }], status: 'running' as const, error: null, ms: null }]
+    const q = blank('q', 'user', null, 'draw')
+    const a = { ...blank('a', 'assistant', 'q'), toolCalls: [{ id: 'd1', function: { name: 'delegate', arguments: '{}' } }] }
+    expect(collectFiles([q, a], { d1: work }).map((f) => [f.name, f.kind === 'attachment' && f.made])).toEqual([['apple.png', true], ['fit.py', false]])
+    const kept = { ...blank('t', 'tool', 'a', '[]'), toolCallId: 'd1', attachments: [picture], details: { agents: work } }
+    expect(collectFiles([q, a, kept], { d1: work }).map((f) => f.name)).toEqual(['apple.png', 'fit.py'])
+  })
 })

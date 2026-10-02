@@ -144,7 +144,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const tree = useMemo(() => new ChatTree(view.messages), [view.messages])
   const path = useMemo(() => tree.path(view.leaf), [tree, view.leaf])
   const turns = toTurns(path)
-  const files = useMemo(() => collectFiles(path), [path])
+  const files = useMemo(() => collectFiles(path, view.agents), [path, view.agents])
   const model = chatModel(config, settings.model)
   const toolsOnHere = toolsOn(config.tools, settings.tools)
   const title = live?.title ?? data?.title ?? null
@@ -390,9 +390,10 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     const parent = view.leaf
     const localId = `local-${Date.now()}`
     const attachments = uploads.attachments
-    const ok = await run(conversationId, 'messages', { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null }, withQuestion(view, localId, parent, text, attachments), localId)
-    if (ok) uploads.clear()
-    return ok
+    // The files went with the question once the server has it: the box is free for the next one while the answer streams.
+    return run(conversationId, 'messages', { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null }, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
+      if (e.type === 'question') uploads.clear()
+    })
   }
 
   const edit = (m: Message, text: string) => {

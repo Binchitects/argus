@@ -74,7 +74,7 @@ export function Composer({
       }}
     >
       {uploads.uploads.length > 0 && (
-        <ul className="flex flex-wrap gap-2 px-3 pt-3" aria-label="Attachments">
+        <ul className="flex flex-wrap gap-2 px-3 pt-3" aria-label="Files to send">
           {uploads.uploads.map((u) => (
             <li key={u.key} className={cn('relative flex items-center gap-2 overflow-hidden rounded-lg border bg-muted/40 text-sm', u.error && 'border-destructive/50', u.isImage && u.preview ? 'p-0' : 'py-1.5 pr-8 pl-2.5')}>
               {u.isImage && u.preview ? (

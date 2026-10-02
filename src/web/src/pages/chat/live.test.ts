@@ -50,13 +50,13 @@ describe('live answer', () => {
       { type: 'agent', id: 'd1', index: 0, event: 'reasoning', text: 'm.' },
       { type: 'agent', id: 'd1', index: 0, event: 'content', text: 'Let me look.' },
       { type: 'agent', id: 'd1', index: 0, event: 'tool_call', call: { id: 'c1', name: 'calculate', arguments: '{"expression":"2+2"}' } },
-      { type: 'agent', id: 'd1', index: 0, event: 'tool_result', call: { id: 'c1' }, text: '4', isError: false },
+      { type: 'agent', id: 'd1', index: 0, event: 'tool_result', call: { id: 'c1' }, text: '4', isError: false, files: [{ id: 'p1', fileName: 'four.png', size: 9, truncated: false, kind: 'image', contentType: 'image/png' }] },
       { type: 'agent', id: 'd1', index: 0, event: 'content', text: 'It is 4.' },
       { type: 'agent', id: 'd1', index: 0, event: 'done', error: null, ms: 900 },
     ])
     const [a, b] = s.agents!.d1!
     expect(a).toMatchObject({ title: 'A', reasoning: 'Hmm.', text: 'It is 4.', status: 'done', ms: 900 })
-    expect(a!.steps).toEqual([{ id: 'c1', name: 'calculate', arguments: '{"expression":"2+2"}', result: '4', isError: false }])
+    expect(a!.steps).toEqual([{ id: 'c1', name: 'calculate', arguments: '{"expression":"2+2"}', result: '4', isError: false, files: [expect.objectContaining({ id: 'p1' })] }])
     expect(b).toMatchObject({ title: 'B', status: 'running', steps: [] })
   })
 

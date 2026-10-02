@@ -85,7 +85,8 @@ export interface AgentWork {
   instructions: string
   reasoning: string
   text: string
-  steps: { id: string; name: string; arguments: string; result?: string; isError?: boolean }[]
+  /** Its tool calls; `files`: what a call made (pictures, a Python run's files), the chat's files too. */
+  steps: { id: string; name: string; arguments: string; result?: string; isError?: boolean; files?: Attachment[] | null }[]
   /** running while it works; then done, or failed with its error. */
   status?: 'running' | 'done' | 'failed'
   error: string | null
@@ -156,6 +157,8 @@ export type ChatEvent =
       text?: string | null
       call?: { id: string; name?: string; arguments?: string } | null
       isError?: boolean | null
+      /** What a tool call made (with its tool_result). */
+      files?: Attachment[] | null
       error?: string | null
       ms?: number | null
     }

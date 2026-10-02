@@ -2,7 +2,7 @@ import { Marked, type Token, type Tokens } from 'marked'
 import { argsOf, parseResult, toHits } from './argus'
 import { previewKindOf, type PreviewKind } from '@/preview/kind'
 import { extensionFor, languageOf } from './highlight'
-import type { Attachment, Message } from './types'
+import type { AgentWork, Attachment, Message } from './types'
 
 /**
  * A fence's language and file name. Understood: ```ts title="src/a.ts"```,
@@ -53,18 +53,38 @@ function codeTokens(tokens: Token[]): Tokens.Code[] {
   return out
 }
 
-/** Everything in the branch on screen that is a file: attachments, files Argus read, and code the model wrote. */
-export function collectFiles(path: Message[]): FileItem[] {
+/**
+ * Everything in the branch on screen that is a file: attachments, files Argus read,
+ * and code the model wrote. Sub-agents' files and code count as soon as they are made
+ * (`agents`: their work while it runs, by delegate call).
+ */
+export function collectFiles(path: Message[], agents?: Record<string, AgentWork[]>): FileItem[] {
   const items: FileItem[] = []
   const seen = new Set<string>()
   const calls = new Map(path.flatMap((m) => m.toolCalls ?? []).map((c) => [c.id, argsOf(c.function.arguments)]))
   let snippet = 0
+  const attach = (a: Attachment, made: boolean) => {
+    if (seen.has(a.id)) return
+    seen.add(a.id)
+    items.push({ kind: 'attachment', key: `a-${a.id}`, name: a.fileName, attachment: a, made })
+  }
+  const code = (text: string, key: string, messageId: string) =>
+    codeTokens(lexer.lexer(text)).forEach((t, i) => {
+      if (!t.text.trim()) return
+      const { lang, name, preview } = parseFence(t.lang, t.text)
+      items.push({ kind: 'code', key: `c-${key}-${i}`, name: name ?? `snippet-${++snippet}.${snippetExtension(lang, preview)}`, lang, code: t.text, messageId, preview })
+    })
+  const work = (list: AgentWork[], callId: string, messageId: string) =>
+    list.forEach((w, n) => {
+      for (const s of w?.steps ?? []) for (const a of s.files ?? []) attach(a, true)
+      if (w?.text.includes('```')) code(w.text, `${callId}-${n}`, messageId)
+    })
+  // Work kept with its result is read from there; the live copy is for calls still running.
+  const kept = new Set(path.filter((m) => m.role === 'tool' && m.details?.agents).map((m) => m.toolCallId))
   for (const m of path) {
-    for (const a of m.attachments) {
-      if (seen.has(a.id)) continue
-      seen.add(a.id)
-      items.push({ kind: 'attachment', key: `a-${a.id}`, name: a.fileName, attachment: a, made: m.role === 'tool' })
-    }
+    for (const a of m.attachments) attach(a, m.role === 'tool')
+    if (m.role === 'assistant') for (const c of m.toolCalls ?? []) if (agents?.[c.id] && !kept.has(c.id)) work(agents[c.id]!, c.id, m.id)
+    if (m.role === 'tool' && m.details?.agents) work(m.details.agents, m.toolCallId ?? m.id, m.id)
     if (m.role === 'tool' && m.status !== 'failed') {
       const file = toHits(parseResult(m.content))?.find((h) => h.content !== null)
       if (file) {
@@ -76,12 +96,7 @@ export function collectFiles(path: Message[]): FileItem[] {
       }
       continue
     }
-    if (m.role !== 'assistant' || !m.content.includes('```')) continue
-    codeTokens(lexer.lexer(m.content)).forEach((t, i) => {
-      if (!t.text.trim()) return
-      const { lang, name, preview } = parseFence(t.lang, t.text)
-      items.push({ kind: 'code', key: `c-${m.id}-${i}`, name: name ?? `snippet-${++snippet}.${snippetExtension(lang, preview)}`, lang, code: t.text, messageId: m.id, preview })
-    })
+    if (m.role === 'assistant' && m.content.includes('```')) code(m.content, m.id, m.id)
   }
   // A file the model rewrote shows once: its latest version.
   const latest = new Map<string, FileItem>()

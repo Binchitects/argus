@@ -102,6 +102,7 @@ export function ToolCard({
   waiting,
   onDecide,
   onOpenFile,
+  onPreview,
   progress,
   agents,
 }: {
@@ -114,15 +115,19 @@ export function ToolCard({
   agents?: AgentWork[]
   /** Opens a file the tool made in the Files panel. */
   onOpenFile?: (name: string) => void
+  /** Previews code (a sub-agent's words can hold some). */
+  onPreview?: (code: string) => void
   /** The call waits for the person to allow it ("ask before running"). */
   waiting?: boolean
   onDecide?: (allow: boolean) => void
 }) {
   const delegate = call.function.name === 'delegate'
   const work = agents ?? result?.details?.agents
-  // Open while it waits for the person (they read what it would run before they allow it), and while sub-agents work.
+  // Open while it waits for the person (they read what it would run before they allow it), and
+  // while sub-agents work: watched as they worked, it stays open after, unless folded.
   const [chosen, setOpen] = useState<boolean | null>(null)
-  const open = chosen ?? (!!waiting || (delegate && !result && live))
+  const [watched] = useState(() => delegate && !result && live)
+  const open = chosen ?? (!!waiting || (delegate && (watched || (!result && live))))
   const [viewing, setViewing] = useState<number | null>(null)
   const pictures = result?.attachments.filter((a) => a.kind === 'image') ?? []
   const made = result?.attachments.filter((a) => a.kind !== 'image') ?? []
@@ -170,7 +175,7 @@ export function ToolCard({
               </span>
             ) : result ? (
               <>
-                <Check className="size-3.5 text-success" aria-hidden="true" /> {count && <span>{count} ·</span>} {seconds(result.durationMs)}
+                <Check className="size-3.5 text-success" aria-hidden="true" /> {[count, seconds(result.durationMs)].filter(Boolean).join(' · ')}
               </>
             ) : (
               'Not run'
@@ -193,9 +198,9 @@ export function ToolCard({
           </div>
         )}
         <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-          <div className="grid gap-3 border-t px-3 py-3">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 border-t px-3 py-3">
             {delegate && (work?.length || partsOf(call.function.arguments).length) ? (
-              <AgentsView parts={partsOf(call.function.arguments)} agents={work ?? []} live={live && !result} />
+              <AgentsView parts={partsOf(call.function.arguments)} agents={work ?? []} live={live && !result} onOpenFile={onOpenFile} onPreview={onPreview} />
             ) : null}
             {!delegate && args.length > 0 && (
               <div>
