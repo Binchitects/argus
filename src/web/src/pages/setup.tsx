@@ -266,7 +266,7 @@ function StepList({ steps, tool, start }: { steps: Step[]; tool: string; start: 
           {s.code && (
             <div className="col-start-2 grid gap-1">
               {s.file && s.file !== 'shell' && <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">{s.file}</p>}
-              <CodeBlock code={s.code} label={`${tool}: ${s.file === 'shell' || !s.file ? 'the commands' : s.file}`} />
+              <CodeBlock code={s.code} label={`${tool}, step ${start + i}: ${s.file === 'shell' || !s.file ? 'the commands' : s.file}`} />
             </div>
           )}
         </li>

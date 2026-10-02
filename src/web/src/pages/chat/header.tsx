@@ -133,7 +133,7 @@ export function ChatSettingsPopover({ config, settings, onChange }: { config: Ch
           </Button>
         </PopoverTrigger>
       </Tooltip>
-      <PopoverContent align="end" className="w-96">
+      <PopoverContent align="end" className="w-96" aria-label="Chat settings">
         <form
           className="grid gap-3"
           onSubmit={(e) => {

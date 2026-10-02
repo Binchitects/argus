@@ -2,6 +2,7 @@ import { AlertDialog as AD } from 'radix-ui'
 import { createContext, use, useCallback, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { buttonVariants } from './button'
+import { returnFocus } from './return-focus'
 
 interface ConfirmOptions {
   title: string
@@ -22,7 +23,9 @@ export function useConfirm() {
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [options, setOptions] = useState<ConfirmOptions | null>(null)
   const resolver = useRef<((ok: boolean) => void) | null>(null)
+  const opener = useRef<Element | null>(null)
   const ask = useCallback((o: ConfirmOptions) => {
+    opener.current = document.activeElement === document.body ? null : document.activeElement
     setOptions(o)
     return new Promise<boolean>((resolve) => {
       resolver.current = resolve
@@ -39,7 +42,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       <AD.Root open={!!options} onOpenChange={(open) => !open && settle(false)}>
         <AD.Portal>
           <AD.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
-          <AD.Content className="fixed top-1/2 left-1/2 z-50 grid w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border bg-popover p-6 text-popover-foreground shadow-2xl data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
+          <AD.Content
+            className="fixed top-1/2 left-1/2 z-50 grid w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border bg-popover p-6 text-popover-foreground shadow-2xl data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+            onCloseAutoFocus={(e) => returnFocus(e, opener.current)}
+          >
             <AD.Title className="text-base font-semibold">{options?.title}</AD.Title>
             {options?.description ? (
               <AD.Description className="text-sm text-muted-foreground">{options.description}</AD.Description>

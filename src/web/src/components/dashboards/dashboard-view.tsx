@@ -42,7 +42,7 @@ export function DashboardView({ uid }: { uid: string }) {
 
   return (
     <div className="grid gap-6">
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="flex min-w-0 flex-wrap items-end gap-2">
         {live ? (
           <RangeSelect value={current.to === 'now' ? current.from : ''} onChange={(from) => setRange({ from, to: 'now' })} />
         ) : (
@@ -81,7 +81,7 @@ export function DashboardView({ uid }: { uid: string }) {
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-24">
             {s.panels.map((p) => (
               <div key={p.key} className="min-w-0 lg:col-span-(--w)" style={{ '--w': p.gridPos?.w ?? 24 } as CSSProperties}>
-                <PanelView uid={uid} panel={p} range={current} tick={tick} vars={vars} />
+                <PanelView uid={uid} panel={p} range={current} tick={tick} vars={vars} level={s.title ? 3 : 2} />
               </div>
             ))}
           </div>

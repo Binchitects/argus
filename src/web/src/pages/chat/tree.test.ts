@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { seconds } from './format'
+import { answerNews, seconds } from './format'
+import { blank } from './live'
 import { ChatTree, toTurns } from './tree'
 import type { Message } from './types'
 
@@ -54,5 +55,18 @@ describe('durations', () => {
     expect(seconds(42_000)).toBe('42 s')
     expect(seconds(65_000)).toBe('1 min 5 s')
     expect(seconds(4_380_000)).toBe('1 h 13 min')
+  })
+})
+
+describe('what a screen reader is told about the answer', () => {
+  const q = { ...blank('q', 'user', null, 'hi') }
+  const a = { ...blank('a', 'assistant', 'q', ''), toolCalls: [{ id: 'c1', function: { name: 'find_symbol', arguments: '{}' } }] }
+  it('says what is happening, never the text', () => {
+    expect(answerNews(true, [q])).toBe('Writing the answer…')
+    expect(answerNews(true, [q, a])).toBe('Using Find symbol…')
+    expect(answerNews(true, [q, a, { ...blank('t', 'tool', 'a', 'x'), toolCallId: 'c1' }])).toBe('Writing the answer…')
+    expect(answerNews(false, [q, { ...blank('b', 'assistant', 'q', 'Done') }])).toBe('Answer ready.')
+    const asks = { ...blank('a', 'assistant', 'q', ''), toolCalls: [{ id: 'c2', function: { name: 'ask_user', arguments: '{}' } }] }
+    expect(answerNews(false, [q, asks, { ...blank('t', 'tool', 'a', 'shown'), toolCallId: 'c2', toolName: 'ask_user' }])).toBe('The answer asks you some questions.')
   })
 })

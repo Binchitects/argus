@@ -49,7 +49,7 @@ Each of the 33 services against the test entry points, by name:
 | ✅ | node-exporter, nvidia-smi-exporter, cadvisor, redis, postgres, power-limits, clickhouse | acceptance/health only |
 | ✅ | llamacpp, vllm | e2e-check, health, smoke/bench |
 | ✅ | app (sign-in, OIDC, forwardAuth, people, chat, models) | app tests (xUnit, Vitest, Playwright), CI, acceptance, functional-test, health, domain-check, audit-auth, audit-dashboards |
-| ✅ | web | Playwright (every page, desktop and phone, both themes, axe), domain-check |
+| ✅ | web | Playwright (every page, desktop and phone, both themes, axe WCAG 2.2 AA, keyboard focus, 320 px reflow), domain-check |
 | ✅ | sandbox | sandbox-check (17 checks against the real container), app tests (with a fake) |
 | ⚠️ | imagegen | functional-test (access per model) |
 | ⚠️ | model-init, tls-init | one script each |
@@ -416,7 +416,9 @@ make smoke           # API surface
 ./scripts/audit-dashboards.py 6h  # every panel's queries, run in the app
 
 # the web in a real browser (in src/web): desktop and phone, both themes,
-# axe accessibility; E2E_CHAT=1 adds the chat against the real model
+# axe accessibility (WCAG 2.2 AA) on every page and what opens on it, focus
+# back where it was when a dialog closes, the skip link, every page at 320 px
+# (a11y.spec.ts); E2E_CHAT=1 adds the chat against the real model
 E2E_PASSWORD=<admin password> E2E_CHAT=1 npm run e2e
 # ... and Argus's per-person access, with the test GitLab up
 ./tools/test-gitlab/run.sh --keep   # from the repo root

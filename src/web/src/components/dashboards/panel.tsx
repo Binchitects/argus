@@ -19,10 +19,11 @@ import type { Chosen } from './variables'
 import { thresholdColor, tone } from './colors'
 import { Gauge, Sparkline } from './visuals'
 
-export function PanelView({ uid, panel, range, tick, vars = {} }: { uid: string; panel: PanelDef; range: TimeRange; tick: number; vars?: Chosen }) {
+/** level: its title's heading level (3 under a row's heading, 2 when the panel has none above it). */
+export function PanelView({ uid, panel, range, tick, vars = {}, level = 3 }: { uid: string; panel: PanelDef; range: TimeRange; tick: number; vars?: Chosen; level?: 2 | 3 }) {
   if (panel.type === 'text') {
     return (
-      <Frame panel={panel}>
+      <Frame panel={panel} level={level}>
         <div
           className="text-sm break-words text-muted-foreground [&_a]:text-primary-ink [&_a]:underline [&_code]:font-mono [&_code]:break-all [&_p]:mb-2 [&_pre]:whitespace-pre-wrap [&_pre]:break-all [&_strong]:text-foreground [&_ul]:list-disc [&_ul]:pl-5"
           // The dashboard files are ours; sanitised anyway, so a file can never run script here.
@@ -31,15 +32,16 @@ export function PanelView({ uid, panel, range, tick, vars = {} }: { uid: string;
       </Frame>
     )
   }
-  return <QueryPanel uid={uid} panel={panel} range={range} tick={tick} vars={vars} />
+  return <QueryPanel uid={uid} panel={panel} range={range} tick={tick} vars={vars} level={level} />
 }
 
-function Frame({ panel, action, children, className, compact }: { panel: PanelDef; action?: ReactNode; children: ReactNode; className?: string; compact?: boolean }) {
+function Frame({ panel, action, children, className, compact, level = 3 }: { panel: PanelDef; action?: ReactNode; children: ReactNode; className?: string; compact?: boolean; level?: 2 | 3 }) {
+  const Heading = level === 2 ? 'h2' : 'h3'
   return (
     <section data-panel className={cn('flex h-full min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs', className)} aria-label={panel.title}>
       {(panel.title || action) && (
         <header className="flex min-h-7 items-start justify-between gap-2">
-          <h3 className={cn('flex min-w-0 items-start gap-1.5 font-semibold', compact ? 'text-xs text-muted-foreground' : 'text-sm')}>
+          <Heading className={cn('flex min-w-0 items-start gap-1.5 font-semibold', compact ? 'text-xs text-muted-foreground' : 'text-sm')}>
             {/* A stat's title wraps to two lines rather than losing its end in a narrow cell. */}
             <span className={compact ? 'line-clamp-2' : 'truncate'}>{panel.title}</span>
             {panel.description && (
@@ -49,7 +51,7 @@ function Frame({ panel, action, children, className, compact }: { panel: PanelDe
                 </button>
               </Tooltip>
             )}
-          </h3>
+          </Heading>
           {action}
         </header>
       )}
@@ -58,7 +60,7 @@ function Frame({ panel, action, children, className, compact }: { panel: PanelDe
   )
 }
 
-function QueryPanel({ uid, panel, range, tick, vars }: { uid: string; panel: PanelDef; range: TimeRange; tick: number; vars: Chosen }) {
+function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; panel: PanelDef; range: TimeRange; tick: number; vars: Chosen; level: 2 | 3 }) {
   const [asTable, setAsTable] = useState(false)
   const data = useQuery({
     queryKey: ['panel', uid, panel.key, range.from, range.to, tick, JSON.stringify(vars)],
@@ -182,6 +184,7 @@ function QueryPanel({ uid, panel, range, tick, vars }: { uid: string; panel: Pan
   return (
     <Frame
       panel={panel}
+      level={level}
       compact={isStat}
       className={isStat ? 'justify-between' : undefined}
       action={

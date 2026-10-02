@@ -40,3 +40,21 @@ export function bucket(iso: string, now = new Date()): string {
   if (days < 30) return 'Previous 30 days'
   return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 }
+
+/**
+ * What a screen reader is told about the answer, in a status line: that it is being
+ * written, which tool it uses, that it is ready or asks questions. Never the text as it
+ * streams (a live thread would read every word again and again). Derived, so only a
+ * change is announced: a chat opened is not.
+ */
+export function answerNews(answering: boolean, path: Message[]): string {
+  const last = path.at(-1)
+  const calls = path.filter((m) => m.role === 'assistant').flatMap((m) => m.toolCalls ?? [])
+  const answered = new Set(path.filter((m) => m.role === 'tool').map((m) => m.toolCallId))
+  const running = answering ? calls.findLast((c) => !answered.has(c.id)) : undefined
+  if (running) return `Using ${toolTitle(running.function.name)}…`
+  if (answering) return 'Writing the answer…'
+  if (last?.role === 'tool' && last.toolName === 'ask_user' && last.status !== 'failed') return 'The answer asks you some questions.'
+  if (last?.role === 'assistant' && last.status === 'complete') return 'Answer ready.'
+  return ''
+}

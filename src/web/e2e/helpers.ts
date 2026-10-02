@@ -24,9 +24,9 @@ export function watchConsole(page: Page): string[] {
   return errors
 }
 
-/** No serious or critical accessibility violations (axe, WCAG 2.1 AA). */
+/** No serious or critical accessibility violations (axe, WCAG 2.2 AA). */
 export async function expectAccessible(page: Page, info: TestInfo, label: string) {
-  const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
   const bad = result.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
   if (bad.length) await info.attach(`axe-${label}.json`, { body: JSON.stringify(bad, null, 2), contentType: 'application/json' })
   expect(bad.map((v) => `${v.id}: ${v.help} (${v.nodes.map((n) => n.target.join(' ')).slice(0, 3).join(' | ')})`), `accessibility of ${label}`).toEqual([])

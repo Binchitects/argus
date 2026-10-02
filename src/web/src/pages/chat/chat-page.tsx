@@ -14,6 +14,7 @@ import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, stopC
 import { Composer } from './composer'
 import { collectFiles } from './files'
 import { FilesPanel } from './files-panel'
+import { answerNews } from './format'
 import { ChatHeader } from './header'
 import { reduce, stopped, withQuestion, type LiveState } from './live'
 import { QuestionRail } from './question-rail'
@@ -514,7 +515,8 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
         ) : (
           <>
             <div className="relative flex min-h-0 flex-1 flex-col">
-              <div ref={thread} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto" aria-live="polite">
+              <output className="sr-only">{answerNews(answering, path)}</output>
+              <div ref={thread} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto">
                 <div className="mx-auto grid w-full max-w-(--thread-max) gap-6 px-4 py-6 sm:px-6">
                   {data?.archivedAt && (
                     <output className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">

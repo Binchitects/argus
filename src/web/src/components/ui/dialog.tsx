@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import type { ComponentProps } from 'react'
 import { cn } from '@/lib/utils'
+import { useReturnFocus } from './return-focus'
 
 export const Dialog = DialogPrimitive.Root
 export const DialogTrigger = DialogPrimitive.Trigger
@@ -16,7 +17,8 @@ export function DialogOverlay({ className, ...props }: ComponentProps<typeof Dia
   )
 }
 
-export function DialogContent({ className, children, hideClose, ...props }: ComponentProps<typeof DialogPrimitive.Content> & { hideClose?: boolean }) {
+export function DialogContent({ className, children, hideClose, onOpenAutoFocus, onCloseAutoFocus, ...props }: ComponentProps<typeof DialogPrimitive.Content> & { hideClose?: boolean }) {
+  const focus = useReturnFocus(onOpenAutoFocus, onCloseAutoFocus)
   return (
     <DialogPrimitive.Portal>
       <DialogOverlay />
@@ -25,6 +27,8 @@ export function DialogContent({ className, children, hideClose, ...props }: Comp
           'fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-2xl outline-none duration-200 ease-(--ease-out-expo) data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-2',
           className,
         )}
+        onOpenAutoFocus={focus.onOpenAutoFocus}
+        onCloseAutoFocus={focus.onCloseAutoFocus}
         {...props}
       >
         {children}

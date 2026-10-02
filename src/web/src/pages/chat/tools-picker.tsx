@@ -20,7 +20,7 @@ export function ToolsPicker({ tools, value, onChange }: { tools: ChatTool[]; val
           <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-foreground">{count}</span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 p-0">
+      <PopoverContent align="start" className="w-80 p-0" aria-label="Tools in this chat">
         <div className="border-b px-3 py-2">
           <p className="text-sm font-medium">Tools in this chat</p>
           <p className="text-xs text-muted-foreground">The model calls them when a question needs them.</p>

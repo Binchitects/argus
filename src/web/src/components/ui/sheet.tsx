@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import { Dialog as SheetPrimitive } from 'radix-ui'
 import type { ComponentProps } from 'react'
 import { cn } from '@/lib/utils'
+import { useReturnFocus } from './return-focus'
 
 export const Sheet = SheetPrimitive.Root
 export const SheetTrigger = SheetPrimitive.Trigger
@@ -13,7 +14,8 @@ const sides = {
 }
 
 /** A panel that slides in from the side: details, filters, the phone navigation. */
-export function SheetContent({ className, children, side = 'right', ...props }: ComponentProps<typeof SheetPrimitive.Content> & { side?: keyof typeof sides }) {
+export function SheetContent({ className, children, side = 'right', onOpenAutoFocus, onCloseAutoFocus, ...props }: ComponentProps<typeof SheetPrimitive.Content> & { side?: keyof typeof sides }) {
+  const focus = useReturnFocus(onOpenAutoFocus, onCloseAutoFocus)
   return (
     <SheetPrimitive.Portal>
       <SheetPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
@@ -23,6 +25,8 @@ export function SheetContent({ className, children, side = 'right', ...props }: 
           sides[side],
           className,
         )}
+        onOpenAutoFocus={focus.onOpenAutoFocus}
+        onCloseAutoFocus={focus.onCloseAutoFocus}
         {...props}
       >
         {children}
