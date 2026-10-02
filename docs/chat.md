@@ -68,7 +68,7 @@ setups to paste.
     reply, today or days later. Nothing waits on the server meanwhile.
   - **Sub-agents**: for a task whose parts do not need each other (how three
     repositories log errors, two designs side by side), the model splits it
-    into two to six parts, each done by a sub-agent of its own: a clean
+    into two to ten parts, each done by a sub-agent of its own: a clean
     context with only its instructions, and the chat's tools (but not
     delegating again, asking you questions, or tools that ask before each
     call). They run side by side, up to **Sub-agents at once** (Settings →

@@ -10,10 +10,11 @@ import { cn } from '@/lib/utils'
 import { argsOf, parseResult, resultCount } from './argus'
 import { CodeBlock } from './code-block'
 import { seconds, toolTitle } from './format'
-import { argsSummary, splitArgs } from './tool-args'
+import { argsSummary, partsOf, partsSummary, splitArgs } from './tool-args'
 import { ToolOutput } from './tool-output'
+import { AgentsView } from './agents'
 import type { ToolRunning } from './live'
-import type { Message, ToolCall } from './types'
+import type { AgentWork, Message, ToolCall } from './types'
 
 function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now())
@@ -102,26 +103,31 @@ export function ToolCard({
   onDecide,
   onOpenFile,
   progress,
+  agents,
 }: {
   call: ToolCall
   result?: Message
   live: boolean
   /** While it runs: since when, and how far its server says it is. */
   progress?: ToolRunning
+  /** A delegate call's sub-agents, as they work (after: from the result's details). */
+  agents?: AgentWork[]
   /** Opens a file the tool made in the Files panel. */
   onOpenFile?: (name: string) => void
   /** The call waits for the person to allow it ("ask before running"). */
   waiting?: boolean
   onDecide?: (allow: boolean) => void
 }) {
-  // Open while it waits for the person: they read what it would run before they allow it.
+  const delegate = call.function.name === 'delegate'
+  const work = agents ?? result?.details?.agents
+  // Open while it waits for the person (they read what it would run before they allow it), and while sub-agents work.
   const [chosen, setOpen] = useState<boolean | null>(null)
-  const open = chosen ?? !!waiting
+  const open = chosen ?? (!!waiting || (delegate && !result && live))
   const [viewing, setViewing] = useState<number | null>(null)
   const pictures = result?.attachments.filter((a) => a.kind === 'image') ?? []
   const made = result?.attachments.filter((a) => a.kind !== 'image') ?? []
   const Icon = toolIcons.find(([re]) => re.test(call.function.name))?.[1] ?? Wrench
-  const args = argsSummary(call.function.arguments)
+  const args: [string, string][] = call.function.name === 'delegate' ? partsSummary(call.function.arguments) : argsSummary(call.function.arguments)
   const running = !result && live && !waiting
   const now = useNow(running && !!progress)
   const ran = running && progress ? now - progress.since : 0
@@ -188,13 +194,16 @@ export function ToolCard({
         )}
         <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
           <div className="grid gap-3 border-t px-3 py-3">
-            {args.length > 0 && (
+            {delegate && (work?.length || partsOf(call.function.arguments).length) ? (
+              <AgentsView parts={partsOf(call.function.arguments)} agents={work ?? []} live={live && !result} />
+            ) : null}
+            {!delegate && args.length > 0 && (
               <div>
                 <p className="mb-1 text-xs font-medium text-muted-foreground">Asked with</p>
                 <ToolArgsView name={call.function.name} raw={call.function.arguments} />
               </div>
             )}
-            {result && (
+            {result && !(delegate && work?.length) && (
               <div>
                 <p className="mb-1 text-xs font-medium text-muted-foreground">{failed ? 'The tool said' : 'Result'}</p>
                 <div className="max-h-[32rem] overflow-y-auto text-sm [&_.md]:text-sm">

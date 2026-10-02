@@ -250,6 +250,7 @@ public static class ChatEndpoints
             m.Id, m.ParentId, m.Role, m.Content, m.Reasoning, m.ToolName, m.ToolCallId,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
+            details = m.DetailsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.DetailsJson),
             status = m.Status.ToString().ToLowerInvariant(), m.Error, m.Model,
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
@@ -337,7 +338,7 @@ public static class ChatEndpoints
             {
                 ConversationId = fork.Id, ParentId = m.ParentId is { } parent ? copies[parent] : null, Sequence = ++sequence, Role = m.Role,
                 Content = m.Content, Reasoning = m.Reasoning, ToolCallsJson = m.ToolCallsJson, ToolCallId = m.ToolCallId, ToolName = m.ToolName,
-                AttachmentsJson = m.AttachmentsJson, Model = m.Model, PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens,
+                AttachmentsJson = m.AttachmentsJson, DetailsJson = m.DetailsJson, Model = m.Model, PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens,
                 CompletionTokens = m.CompletionTokens, ThinkingMs = m.ThinkingMs, DurationMs = m.DurationMs, Status = m.Status, Error = m.Error,
                 Summary = m.Summary, CreatedAt = m.CreatedAt,
             };

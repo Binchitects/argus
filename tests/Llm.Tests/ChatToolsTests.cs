@@ -127,6 +127,24 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Equal("Answer to: Name a colour.", done[1].GetProperty("result").GetString());
         Assert.Contains(events, e => e.GetProperty("type").GetString() == "tool_progress" && e.GetProperty("total").GetDouble() == 2);
 
+        // Each sub-agent's work streams as it happens: it starts, thinks, calls a tool and reads its result, writes, ends.
+        var callId = Event(events, "tool_call").GetProperty("id").GetString();
+        var sum = events.Where(e => e.GetProperty("type").GetString() == "agent" && e.GetProperty("index").GetInt32() == 0).ToList();
+        Assert.All(sum, e => Assert.Equal(callId, e.GetProperty("id").GetString()));
+        Assert.Equal(["start", "tool_call", "tool_result", "content", "done"],
+            sum.Select(e => e.GetProperty("event").GetString()).Where(k => k != "reasoning").Distinct());
+        Assert.Equal("calculate", sum.First(e => e.GetProperty("event").GetString() == "tool_call").GetProperty("call").GetProperty("name").GetString());
+        Assert.Contains("4", sum.First(e => e.GetProperty("event").GetString() == "tool_result").GetProperty("text").GetString(), StringComparison.Ordinal);
+
+        // And it is kept with the call, for the page: each part's thinking, steps and words (the model read only the results).
+        var chat = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
+        var tool = chat.GetProperty("messages").EnumerateArray().First(m => m.GetProperty("toolName").GetString() == "delegate");
+        var kept = tool.GetProperty("details").GetProperty("agents");
+        Assert.Equal("Sum", kept[0].GetProperty("title").GetString());
+        Assert.Equal("calculate", kept[0].GetProperty("steps")[0].GetProperty("name").GetString());
+        Assert.Equal("Found it.", kept[0].GetProperty("text").GetString());
+        Assert.DoesNotContain("steps", tool.GetProperty("content").GetString(), StringComparison.Ordinal);
+
         // Each sub-agent starts clean, with the chat's tools but not delegating again nor asking the person.
         var agents = app.Model.Requests.Select(r => r.Body)
             .Where(r => r["user"]!.GetValue<string>() == email && r["messages"]![0]!["content"]!.GetValue<string>().Contains("You are a sub-agent", StringComparison.Ordinal))
@@ -140,7 +158,7 @@ public sealed class ChatToolsTests(AppFixture app)
 
         // One part is not a split: the model is told how to call it.
         var wrong = await SendAsync(b, id, """Again: [call delegate {"tasks":[{"title":"Only","instructions":"x"}]}]""");
-        Assert.Contains("2 to 6 tasks", Event(wrong, "tool_result").GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Contains("2 to 10 tasks", Event(wrong, "tool_result").GetProperty("text").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

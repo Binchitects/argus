@@ -44,7 +44,11 @@ public sealed class ToolProgress(Func<object, Task> emit)
 /// the tool made for the person (a picture), which the page shows. EndsAnswer: the
 /// answer stops after this call (questions for the person: their reply comes next).
 /// </summary>
-public sealed record ToolResult(string Text, bool IsError = false, IReadOnlyList<ChatAttachment>? Files = null, bool EndsAnswer = false);
+public sealed record ToolResult(string Text, bool IsError = false, IReadOnlyList<ChatAttachment>? Files = null, bool EndsAnswer = false)
+{
+    /// <summary>What the page shows beyond the text the model reads (sub-agents' work), kept with the call.</summary>
+    public System.Text.Json.Nodes.JsonNode? Details { get; init; }
+}
 
 /// <summary>A tool made ready for one answer: its functions, and how to run them.</summary>
 public interface IToolRun

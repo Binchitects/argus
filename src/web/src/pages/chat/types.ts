@@ -75,6 +75,21 @@ export interface Message {
   noAccess: boolean
   /** The chat was compacted here: the model reads this summary instead of the branch down to this message. */
   summary?: string | null
+  /** What a tool call shows beyond what the model read: sub-agents' work ({ agents: [...] }). */
+  details?: { agents?: AgentWork[] } | null
+}
+
+/** A sub-agent's work, as it happens and as it is kept: its part, thinking, tool calls with their results, and words. */
+export interface AgentWork {
+  title: string
+  instructions: string
+  reasoning: string
+  text: string
+  steps: { id: string; name: string; arguments: string; result?: string; isError?: boolean }[]
+  /** running while it works; then done, or failed with its error. */
+  status?: 'running' | 'done' | 'failed'
+  error: string | null
+  ms: number | null
 }
 
 export interface ConversationSummary {
@@ -129,7 +144,21 @@ export type ChatEvent =
   | { type: 'approval'; id: string; name: string; arguments: string; tool: string; title: string }
   /** How far a long tool call is, as its server says (`total` when it knows the end). */
   | { type: 'tool_progress'; id: string; progress: number; total: number | null; message: string | null }
-  | { type: 'tool_result'; id: string; messageId: string; name: string; text: string; isError: boolean; declined?: boolean; noAccess: boolean; durationMs: number; attachments?: Attachment[] }
+  | { type: 'tool_result'; id: string; messageId: string; name: string; text: string; isError: boolean; declined?: boolean; noAccess: boolean; durationMs: number; attachments?: Attachment[]; details?: Message['details'] }
+  /** A sub-agent's step (the delegate tool's call `id`, the agent's `index`): started, thinking or words as they come, a tool call, its result, done. */
+  | {
+      type: 'agent'
+      id: string
+      index: number
+      event: 'start' | 'reasoning' | 'content' | 'tool_call' | 'tool_result' | 'done'
+      title?: string
+      instructions?: string
+      text?: string | null
+      call?: { id: string; name?: string; arguments?: string } | null
+      isError?: boolean | null
+      error?: string | null
+      ms?: number | null
+    }
   | { type: 'notice'; kind: string; text: string }
   /** Waiting for a turn: the model serves few at once, in turn (fair use). */
   | { type: 'queued'; ahead: number }

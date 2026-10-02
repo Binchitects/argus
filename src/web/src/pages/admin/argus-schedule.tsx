@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { TimeZonePicker } from '@/components/app/time-zone-picker'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -41,7 +42,6 @@ function ScheduleForm({ saved, onSaved }: { saved: IndexSchedule; onSaved: () =>
     },
     onError: (e) => setError(errorMessage(e)),
   })
-  const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []
   const when = (at: string) => new Date(at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', timeZone: saved.timeZone })
   return (
     <Card aria-label="Schedule">
@@ -121,15 +121,8 @@ function ScheduleForm({ saved, onSaved }: { saved: IndexSchedule; onSaved: () =>
                 </Field>
               )}
               <Field label="Time zone">
-                <Input list="index-time-zones" required autoComplete="off" value={timeZone} onChange={(e) => setTimeZone(e.target.value)} />
+                <TimeZonePicker value={timeZone} onChange={setTimeZone} />
               </Field>
-              <datalist id="index-time-zones">
-                {zones.map((z) => (
-                  <option key={z} value={z}>
-                    {z}
-                  </option>
-                ))}
-              </datalist>
             </div>
           )}
           <div className="flex flex-wrap items-center gap-3">

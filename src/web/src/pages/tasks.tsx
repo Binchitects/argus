@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
+import { TimeZonePicker } from '@/components/app/time-zone-picker'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -242,7 +243,6 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
     onError: (e) => setError(errorMessage(e)),
   })
   const set = (patch: Partial<Schedule>) => setSchedule({ ...schedule, ...patch })
-  const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []
   return (
     <>
       <DialogHeader>
@@ -320,15 +320,8 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
             </Field>
           )}
           <Field label="Time zone">
-            <Input list="time-zones" required autoComplete="off" value={form.timeZone} onChange={(e) => setForm({ ...form, timeZone: e.target.value })} />
+            <TimeZonePicker value={form.timeZone} onChange={(timeZone) => setForm({ ...form, timeZone })} />
           </Field>
-          <datalist id="time-zones">
-            {zones.map((z) => (
-              <option key={z} value={z}>
-                {z}
-              </option>
-            ))}
-          </datalist>
           <Field label="Model">
             <Select value={form.model || DEFAULT} onValueChange={(v) => setForm({ ...form, model: v === DEFAULT ? '' : v })}>
               <SelectTrigger className="min-w-0 [&>span]:truncate">

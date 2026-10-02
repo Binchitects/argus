@@ -39,6 +39,27 @@ describe('live answer', () => {
     expect(s.calls?.c1).toEqual({ since: 1000, progress: 2, total: 4, message: 'Cloning' })
   })
 
+  it("sub-agents' work builds up step by step under their delegate call", () => {
+    const s = play([
+      { type: 'question', id: 'q1', parentId: null },
+      { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' },
+      { type: 'tool_call', id: 'd1', name: 'delegate', arguments: '{}' },
+      { type: 'agent', id: 'd1', index: 1, event: 'start', title: 'B', instructions: 'Do B' },
+      { type: 'agent', id: 'd1', index: 0, event: 'start', title: 'A', instructions: 'Do A' },
+      { type: 'agent', id: 'd1', index: 0, event: 'reasoning', text: 'Hm' },
+      { type: 'agent', id: 'd1', index: 0, event: 'reasoning', text: 'm.' },
+      { type: 'agent', id: 'd1', index: 0, event: 'content', text: 'Let me look.' },
+      { type: 'agent', id: 'd1', index: 0, event: 'tool_call', call: { id: 'c1', name: 'calculate', arguments: '{"expression":"2+2"}' } },
+      { type: 'agent', id: 'd1', index: 0, event: 'tool_result', call: { id: 'c1' }, text: '4', isError: false },
+      { type: 'agent', id: 'd1', index: 0, event: 'content', text: 'It is 4.' },
+      { type: 'agent', id: 'd1', index: 0, event: 'done', error: null, ms: 900 },
+    ])
+    const [a, b] = s.agents!.d1!
+    expect(a).toMatchObject({ title: 'A', reasoning: 'Hmm.', text: 'It is 4.', status: 'done', ms: 900 })
+    expect(a!.steps).toEqual([{ id: 'c1', name: 'calculate', arguments: '{"expression":"2+2"}', result: '4', isError: false }])
+    expect(b).toMatchObject({ title: 'B', status: 'running', steps: [] })
+  })
+
   it('tool results hang off the call, and the next answer off the result', () => {
     const s = play([
       { type: 'question', id: 'q1', parentId: null },

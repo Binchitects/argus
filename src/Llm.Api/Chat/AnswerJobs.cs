@@ -59,8 +59,9 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
                 {
                     return;
                 }
-                // Text comes a token at a time; what is kept for a page that comes back joins it up.
-                if (type is "content" or "reasoning" && _events.Count > 0 && _events[^1]["type"]?.GetValue<string>() == type)
+                // Text comes a token at a time; what is kept for a page that comes back joins it up
+                // (a sub-agent's too, while it is the same one's same kind of text).
+                if (_events.Count > 0 && Joins(_events[^1], node, type))
                 {
                     _events[^1]["text"] = _events[^1]["text"]!.GetValue<string>() + node["text"]!.GetValue<string>();
                 }
@@ -80,6 +81,15 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         /// <paramref name="ct"/> fires. An empty string now and then while nothing
         /// happens (a long tool call, a wait in line) keeps proxies from closing the stream.
         /// </summary>
+        private static bool Joins(JsonObject last, JsonObject next, string? type) => type switch
+        {
+            "content" or "reasoning" => last["type"]?.GetValue<string>() == type,
+            "agent" => next["event"]?.GetValue<string>() is "content" or "reasoning" && last["type"]?.GetValue<string>() == "agent"
+                && last["event"]?.GetValue<string>() == next["event"]?.GetValue<string>()
+                && last["id"]?.GetValue<string>() == next["id"]?.GetValue<string>() && last["index"]?.GetValue<int>() == next["index"]?.GetValue<int>(),
+            _ => false,
+        };
+
         public async IAsyncEnumerable<string> WatchAsync(TimeSpan heartbeat, [EnumeratorCancellation] CancellationToken ct)
         {
             var channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });

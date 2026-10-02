@@ -66,6 +66,8 @@ public sealed class ChatMessage
     public string? ToolName { get; set; }
     /// <summary>Attachment ids (JSON array) whose text went with this user turn.</summary>
     public string? AttachmentsJson { get; set; }
+    /// <summary>What a tool's call shows the person beyond what the model read (sub-agents' work: their thinking, tool calls and words), as JSON.</summary>
+    public string? DetailsJson { get; set; }
     public string? Model { get; set; }
     public int? PromptTokens { get; set; }
     public int? CachedTokens { get; set; }

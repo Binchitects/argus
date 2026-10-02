@@ -15,7 +15,7 @@ public sealed record AgentTask(string Title, string Instructions);
 public sealed class AgentsTool : IChatTool
 {
     public const string Function = "delegate";
-    public const int MaxParts = 6;
+    public const int MaxParts = 10;
 
     public string Id => "agents";
     public string Title => "Sub-agents";

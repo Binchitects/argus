@@ -14,7 +14,7 @@ import { Markdown } from './markdown'
 import { answerCost, seconds } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
 import { QuestionCard } from './questions'
-import type { ChatConfig, Message } from './types'
+import type { AgentWork, ChatConfig, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
 export function CompactedMark({ summary, onOpenFile }: { summary: string; onOpenFile: (name: string) => void }) {
@@ -165,6 +165,7 @@ export function AnswerTurn({
   approvals,
   onDecide,
   calls,
+  agents,
   onAnswer,
   busy,
 }: {
@@ -191,6 +192,8 @@ export function AnswerTurn({
   onDecide?: (callId: string, allow: boolean) => void
   /** Tool calls running: since when, and how far. */
   calls?: Record<string, ToolRunning>
+  /** Sub-agents of delegate calls, as they work. */
+  agents?: Record<string, AgentWork[]>
   /** Sends the person's answers to the model's questions (only on the chat's last answer, once it is done). */
   onAnswer?: (text: string) => Promise<boolean>
   busy: boolean
@@ -298,7 +301,7 @@ export function AnswerTurn({
               t.function.name === 'ask_user' && results.get(t.id)?.status !== 'failed' ? (
                 <QuestionCard key={t.id} raw={t.function.arguments} onAnswer={!live && results.has(t.id) ? onAnswer : undefined} />
               ) : (
-                <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} onOpenFile={onOpenFile} progress={calls?.[t.id]} />
+                <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} onOpenFile={onOpenFile} progress={calls?.[t.id]} agents={agents?.[t.id]} />
               ),
             )}
             {a.error && (

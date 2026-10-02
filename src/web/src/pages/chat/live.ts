@@ -1,4 +1,4 @@
-import type { Attachment, ChatEvent, Message } from './types'
+import type { AgentWork, Attachment, ChatEvent, Message } from './types'
 
 /** A tool call while it runs: since when, and the progress its server last reported. */
 export interface ToolRunning {
@@ -26,6 +26,8 @@ export interface LiveState {
   waiting?: string[]
   /** Tool calls running: since when, and how far they are when their server says. */
   calls?: Record<string, ToolRunning>
+  /** Sub-agents of a delegate call (by its id), as they work. */
+  agents?: Record<string, AgentWork[]>
   /** In line for a turn (the model serves few at once): how many go first. */
   queued?: number | null
   /** The answer being written: text and tool calls go to it. */
@@ -113,6 +115,8 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       if (a) a.toolCalls = [...(a.toolCalls ?? []), { id: e.id, function: { name: e.name, arguments: e.arguments } }]
       return { ...state, messages, calls: { ...state.calls, [e.id]: { since: now } } }
     }
+    case 'agent':
+      return { ...state, agents: { ...state.agents, [e.id]: agentStep(state.agents?.[e.id] ?? [], e) } }
     case 'tool_progress': {
       const call = state.calls?.[e.id]
       return { ...state, calls: { ...state.calls, [e.id]: { since: call?.since ?? now, progress: e.progress, total: e.total, message: e.message ?? call?.message } } }
@@ -123,7 +127,7 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       const parent = state.leaf
       put(messages, {
         ...blank(e.messageId, 'tool', parent, e.text), toolCallId: e.id, toolName: e.name, noAccess: e.noAccess, durationMs: e.durationMs,
-        status: e.declined ? 'declined' : e.isError ? 'failed' : 'complete', attachments: e.attachments ?? [],
+        status: e.declined ? 'declined' : e.isError ? 'failed' : 'complete', attachments: e.attachments ?? [], details: e.details ?? null,
       })
       return { ...state, messages, leaf: e.messageId, waiting: (state.waiting ?? []).filter((w) => w !== e.id) }
     }
@@ -147,4 +151,35 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
 export function stopped(state: LiveState): LiveState {
   const messages = state.messages.map((m) => (m.id === state.leaf && m.role === 'assistant' ? { ...m, status: 'stopped' as const } : m))
   return { ...state, messages, thinkingSince: null }
+}
+
+/** One sub-agent step folded into what the page shows of it. */
+function agentStep(agents: AgentWork[], e: Extract<ChatEvent, { type: 'agent' }>): AgentWork[] {
+  const next = [...agents]
+  const blankAgent: AgentWork = { title: '', instructions: '', reasoning: '', text: '', steps: [], status: 'running', error: null, ms: null }
+  const a: AgentWork = { ...(next[e.index] ?? blankAgent) }
+  switch (e.event) {
+    case 'start':
+      Object.assign(a, { title: e.title ?? a.title, instructions: e.instructions ?? a.instructions, status: 'running' })
+      break
+    case 'reasoning':
+      a.reasoning += e.text ?? ''
+      break
+    case 'content':
+      a.text += e.text ?? ''
+      break
+    case 'tool_call':
+      // Words before a tool call were on the way to it: what it says last is its answer.
+      a.text = ''
+      if (e.call) a.steps = [...a.steps, { id: e.call.id, name: e.call.name ?? '', arguments: e.call.arguments ?? '' }]
+      break
+    case 'tool_result':
+      a.steps = a.steps.map((s) => (s.id === e.call?.id ? { ...s, result: e.text ?? '', isError: !!e.isError } : s))
+      break
+    case 'done':
+      Object.assign(a, { status: e.error ? 'failed' : 'done', error: e.error ?? null, ms: e.ms ?? null })
+      break
+  }
+  next[e.index] = a
+  return next
 }

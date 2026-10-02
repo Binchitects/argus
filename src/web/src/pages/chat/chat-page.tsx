@@ -558,6 +558,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
                             onFork={id ? (messageId) => void forkFrom(messageId) : undefined}
                             approvals={answering && i === lastTurn ? view.waiting : undefined}
                             calls={answering && i === lastTurn ? view.calls : undefined}
+                            agents={i === lastTurn ? view.agents : undefined}
                             onAnswer={!streaming && i === lastTurn ? send : undefined}
                             onDecide={(callId, allow) => void decide(callId, allow)}
                             busy={streaming}

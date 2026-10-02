@@ -111,3 +111,21 @@ export function agentResults(value: unknown): AgentResult[] | null {
     error: typeof p.error === 'string' ? p.error : null,
   }))
 }
+
+/** The parts a delegate call gave its sub-agents (titles and instructions), from its arguments. */
+export function partsOf(raw: string): { title: string; instructions: string }[] {
+  try {
+    const tasks = (JSON.parse(raw || '{}') as { tasks?: unknown }).tasks
+    return Array.isArray(tasks)
+      ? tasks.map((t) => ({ title: String((t as { title?: unknown })?.title ?? ''), instructions: String((t as { instructions?: unknown })?.instructions ?? '') }))
+      : []
+  } catch {
+    return []
+  }
+}
+
+/** A delegate call in a line: how many parts, and their titles. */
+export function partsSummary(raw: string): [string, string][] {
+  const parts = partsOf(raw)
+  return parts.length ? [[`${parts.length} parts`, parts.map((p) => p.title).join(', ')]] : []
+}

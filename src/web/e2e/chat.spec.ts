@@ -247,25 +247,40 @@ const agentsChat = {
     {
       ...blank, id: 'g3', parentId: 'g2', role: 'tool', toolCallId: 'c1', toolName: 'delegate', durationMs: 8400,
       content: JSON.stringify([
-        { title: 'codec errors', result: 'Through `log_error()` in `src/log.c`, with an error code.', tool_calls: 3 },
-        { title: 'driver-shim errors', result: 'With `pr_err` in `shim/main.c`.', tool_calls: 2 },
+        { title: 'codec errors', result: 'Through `log_error()` in `src/log.c`, with an error code.', tool_calls: 1 },
+        { title: 'driver-shim errors', result: 'With `pr_err` in `shim/main.c`.', tool_calls: 0 },
       ]),
+      details: {
+        agents: [
+          {
+            title: 'codec errors', instructions: 'Find how platform/codec logs errors.', reasoning: 'Search for the error helper first.', text: 'Through `log_error()` in `src/log.c`, with an error code.',
+            steps: [{ id: 's1', name: 'search_code', arguments: '{"query":"log_error"}', result: '[{"path":"src/log.c","line":12}]', isError: false }], error: null, ms: 5200,
+          },
+          { title: 'driver-shim errors', instructions: 'Find how driver-shim logs errors.', reasoning: '', text: 'With `pr_err` in `shim/main.c`.', steps: [], error: null, ms: 3100 },
+        ],
+      },
     },
     { ...blank, id: 'g4', parentId: 'g3', role: 'assistant', model: 'Test-Model', content: 'codec uses `log_error()`; driver-shim uses `pr_err`.' },
   ],
 }
 
 test.describe('sub-agents', () => {
-  test("each part's result is shown on the card", async ({ page }, info) => {
+  test("each part's work is shown on the card: thinking, tool calls, words", async ({ page }, info) => {
     await page.route(`**/api/chat/conversations/${agentsChat.id}`, (route) => route.fulfill({ json: agentsChat }))
     await page.goto(`/chat/${agentsChat.id}`)
     const answer = page.getByRole('region', { name: 'Answer' })
     await answer.getByRole('button', { name: /Sub-agents/ }).click()
-    const parts = answer.getByRole('list', { name: 'What each sub-agent found' })
-    await expect(parts.getByRole('listitem')).toHaveCount(2)
-    await expect(parts.getByRole('listitem').first()).toContainText('codec errors3 tool calls')
-    await expect(parts.getByRole('listitem').last()).toContainText('pr_err')
+    const agents = answer.getByRole('list', { name: 'Sub-agents' })
+    const codec = agents.getByRole('listitem', { name: 'codec errors' })
+    await expect(codec).toContainText('1 tool call · 5.2 s')
+    await expect(codec).toContainText('Find how platform/codec logs errors.')
+    await codec.getByRole('button', { name: /Thinking/ }).click()
+    await expect(codec).toContainText('Search for the error helper first.')
+    await codec.getByRole('button', { name: /Search code/ }).click()
+    await expect(codec).toContainText('"path":"src/log.c"')
+    await expect(agents.getByRole('listitem', { name: 'driver-shim errors' })).toContainText('pr_err')
     await expectAccessible(page, info, 'sub-agents')
+    await screenshot(page, info, 'sub-agents')
   })
 })
 
@@ -550,6 +565,28 @@ test.describe('tools', () => {
     await done(page)
     await pictures.getByRole('button').first().click()
     await expect(page.getByRole('dialog')).toBeVisible()
+  })
+
+  test("sub-agents work side by side, and each one's work shows as it happens", async ({ page }, info) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    test.setTimeout(300_000)
+    // A chat with only these two tools: the model has nothing else to reach for.
+    const made = await page.request.post('/api/chat/conversations', { data: { tools: ['agents', 'calculator'] }, headers: { 'X-Requested-With': 'e2e' } })
+    await page.goto(`/chat/${(await made.json()).id}`)
+    await ask(page, 'Use sub-agents for this, one per part: (1) compute 17*23 with the calculator, (2) compute 2^20 with the calculator. Then give me both results.')
+    const answer = page.getByRole('region', { name: 'Answer' }).last()
+    const agents = answer.getByRole('list', { name: 'Sub-agents' })
+    await expect(agents.getByRole('listitem')).toHaveCount(2, { timeout: 120_000 })
+    await expect(agents.getByRole('listitem').first()).toContainText(/tool call/, { timeout: 120_000 })
+    await done(page)
+    await expect(answer).toContainText(/391/)
+    await expect(answer).toContainText(/1,?048,?576/)
+    await screenshot(page, info, 'sub-agents-live')
+    // After a reload, their work is still there (kept with the call).
+    await page.reload()
+    await page.getByRole('region', { name: 'Answer' }).last().getByRole('button', { name: /Sub-agents 2 parts/ }).click()
+    await expect(page.getByRole('list', { name: 'Sub-agents' }).getByRole('listitem').first()).toContainText(/tool call/)
+    expect((await page.request.delete(`/api/chat/conversations/${page.url().split('/').pop()}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
   })
 
   test('the model searches the web and reads a page of an allowed site', async ({ page, request }) => {

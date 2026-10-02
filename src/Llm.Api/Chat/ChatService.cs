@@ -73,7 +73,7 @@ public sealed partial class ChatService(
         var tools = new JsonArray();
         var instructions = new List<(string Tool, string Text)>();
         // Sub-agents get the answer's model and tools, filled in below before any call.
-        var kit = new AgentKit(modelName, thinking, email, runs, tools, instructions, progress);
+        var kit = new AgentKit(modelName, thinking, email, runs, tools, instructions, progress, emit);
         if (model?.Tools != false)
         {
             var allowed = await registry.ForAsync(await access.MembershipAsync(user, ct), ct);
@@ -302,6 +302,7 @@ public sealed partial class ChatService(
                     Content = text, Status = declined ? MessageStatus.Declined : isError ? MessageStatus.Failed : MessageStatus.Complete,
                     DurationMs = (int)took.Elapsed.TotalMilliseconds,
                     AttachmentsJson = outcome.Files is { Count: > 0 } made ? JsonSerializer.Serialize(made.Select(f => f.Id)) : null,
+                    DetailsJson = outcome.Details?.ToJsonString(),
                 };
                 db.ChatMessages.Add(result);
                 conversation.CurrentLeafId = result.Id;
@@ -311,6 +312,7 @@ public sealed partial class ChatService(
                 await emit(new
                 {
                     type = "tool_result", id, messageId = result.Id, name, text, isError, declined, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs,
+                    details = outcome.Details,
                     attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType, original = f.Kind != "image" && f.Data != null }),
                 });
             }
@@ -323,22 +325,30 @@ public sealed partial class ChatService(
         }
     }
 
-    /// <summary>What sub-agents of an answer work with: its model, thinking, person, tools and their instructions.</summary>
+    /// <summary>What sub-agents of an answer work with: its model, thinking, person, tools and their instructions, and where events go.</summary>
     private sealed record AgentKit(string Model, string? Thinking, string Email, Dictionary<string, (ToolChoice Choice, IToolRun Run)> Runs, JsonArray Tools,
-        List<(string Tool, string Text)> Instructions, ToolProgress Progress);
+        List<(string Tool, string Text)> Instructions, ToolProgress Progress, Func<object, Task> Emit);
 
     /// <summary>What a sub-agent's result may take of the answer's context.</summary>
     private const int AgentResultChars = 12_000;
+
+    /// <summary>What of a sub-agent's tool results and thinking is kept for the page (the model got them whole).</summary>
+    private const int AgentShownChars = 4_000;
+
+    private static string Cut(string text, int max) => text.Length <= max ? text : text[..max] + "\n[cut to fit]";
 
     /// <summary>
     /// Sub-agents: each part of a task is asked of the answer's model on its own (a clean
     /// context: only its instructions), with the answer's tools except delegating again,
     /// questions for the person and tools that ask before each call (nobody is there to
     /// allow them). Up to Chat:AgentsAtOnce run at once, inside the answer's place in line.
-    /// Their results, in order, are the tool's answer.
+    /// Each one's work streams to the page as it happens ("agent" events: its thinking,
+    /// words, tool calls and their results) and is kept with the call (Details); the model
+    /// reads only their results, in order.
     /// </summary>
     private async Task<ToolResult> AgentsAsync(IReadOnlyList<AgentTask> parts, AgentKit kit, CancellationToken ct)
     {
+        var callId = kit.Progress.CallId;
         var usable = kit.Tools.OfType<JsonObject>()
             .Where(f => f["function"]?["name"]?.GetValue<string>() is { } n && n is not AgentsTool.Function and not AskTool.Function
                 && kit.Runs.TryGetValue(n, out var r) && !r.Choice.Setting.AskFirst)
@@ -347,40 +357,56 @@ public sealed partial class ChatService(
         var notes = string.Join("\n\n", kit.Instructions.Where(i => i.Tool is not "agents" and not "ask").Select(i => i.Text));
         using var gate = new SemaphoreSlim(Math.Max(1, chat.CurrentValue.AgentsAtOnce));
         var done = 0;
-        async Task<JsonObject> RunAsync(AgentTask part)
+        async Task<(JsonObject Result, JsonObject Shown)> RunAsync(AgentTask part, int index)
         {
+            Task Say(object e) => callId is null ? Task.CompletedTask : kit.Emit(e);
             await gate.WaitAsync(ct);
             try
             {
+                await Say(new { type = "agent", id = callId, index, @event = "start", title = part.Title, instructions = part.Instructions });
                 await kit.Progress.ReportAsync(new McpProgress(done, parts.Count, $"{part.Title}: started"));
-                var (text, calls, error) = await AgentAsync(part, kit, new JsonArray([.. usable.Select(u => u.DeepClone())]), notes,
-                    doing => kit.Progress.ReportAsync(new McpProgress(done, parts.Count, $"{part.Title}: {doing}")), ct);
+                var took = Stopwatch.StartNew();
+                var run = await AgentAsync(part, kit, new JsonArray([.. usable.Select(u => u.DeepClone())]), notes,
+                    doing => kit.Progress.ReportAsync(new McpProgress(done, parts.Count, $"{part.Title}: {doing}")),
+                    e => Say(new { type = "agent", id = callId, index, e.Event, e.Text, e.Call, e.IsError }), ct);
                 var finished = Interlocked.Increment(ref done);
-                await kit.Progress.ReportAsync(new McpProgress(finished, parts.Count, $"{part.Title}: {(error is null ? "done" : "failed")}"));
-                var result = new JsonObject
+                var ms = (int)took.Elapsed.TotalMilliseconds;
+                await Say(new { type = "agent", id = callId, index, @event = "done", error = run.Error, ms });
+                await kit.Progress.ReportAsync(new McpProgress(finished, parts.Count, $"{part.Title}: {(run.Error is null ? "done" : "failed")}"));
+                var result = new JsonObject { ["title"] = part.Title, ["result"] = Cut(run.Text, AgentResultChars), ["tool_calls"] = run.Steps.Count };
+                if (run.Error is not null)
                 {
-                    ["title"] = part.Title,
-                    ["result"] = text.Length > AgentResultChars ? text[..AgentResultChars] + "\n[cut to fit]" : text,
-                    ["tool_calls"] = calls,
-                };
-                if (error is not null)
-                {
-                    result["error"] = error;
+                    result["error"] = run.Error;
                 }
-                return result;
+                var shown = new JsonObject
+                {
+                    ["title"] = part.Title, ["instructions"] = part.Instructions, ["text"] = run.Text, ["reasoning"] = Cut(run.Reasoning, AgentShownChars * 5),
+                    ["steps"] = new JsonArray([.. run.Steps]), ["error"] = run.Error, ["ms"] = ms,
+                };
+                return (result, shown);
             }
             finally
             {
                 gate.Release();
             }
         }
-        var results = await Task.WhenAll(parts.Select(RunAsync));
-        var failed = results.Count(r => r.ContainsKey("error"));
-        return new ToolResult(new JsonArray([.. results]).ToJsonString(Mcp.Plain), IsError: failed == results.Length);
+        var outcomes = await Task.WhenAll(parts.Select((p, i) => RunAsync(p, i)));
+        var failed = outcomes.Count(o => o.Result.ContainsKey("error"));
+        return new ToolResult(new JsonArray([.. outcomes.Select(o => (JsonNode)o.Result)]).ToJsonString(Mcp.Plain), IsError: failed == outcomes.Length)
+        {
+            Details = new JsonObject { ["agents"] = new JsonArray([.. outcomes.Select(o => (JsonNode)o.Shown)]) },
+        };
     }
 
-    /// <summary>One sub-agent: its own little answer loop, kept out of the chat (only its result goes back).</summary>
-    private async Task<(string Text, int Calls, string? Error)> AgentAsync(AgentTask part, AgentKit kit, JsonArray tools, string notes, Func<string, Task> say, CancellationToken ct)
+    /// <summary>A step of a sub-agent's work, for the page: its thinking or words as they come, a tool call, a tool's result.</summary>
+    private sealed record AgentStep(string Event, string? Text = null, JsonObject? Call = null, bool? IsError = null);
+
+    /// <summary>What a sub-agent did: its last words, its thinking, its tool calls (each with its result), and why it stopped short, if so.</summary>
+    private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error);
+
+    /// <summary>One sub-agent: its own little answer loop, kept out of the chat (only its result goes to the model).</summary>
+    private async Task<AgentRun> AgentAsync(AgentTask part, AgentKit kit, JsonArray tools, string notes, Func<string, Task> say, Func<AgentStep, Task> step,
+        CancellationToken ct)
     {
         var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC).\n\n" +
             "You are a sub-agent: an assistant gave you one part of a larger task, and does the other parts elsewhere. Do only this part, with " +
@@ -389,7 +415,8 @@ public sealed partial class ChatService(
             (notes.Length > 0 ? "\n\n" + notes : "");
         var messages = new JsonArray(new JsonObject { ["role"] = "system", ["content"] = system }, new JsonObject { ["role"] = "user", ["content"] = part.Instructions });
         var names = tools.OfType<JsonObject>().Select(f => f["function"]?["name"]?.GetValue<string>()).OfType<string>().ToHashSet(StringComparer.Ordinal);
-        var calls = 0;
+        var steps = new List<JsonNode>();
+        var reasoning = new StringBuilder();
         var text = new StringBuilder();
         for (var round = 0; ; round++)
         {
@@ -413,24 +440,30 @@ public sealed partial class ChatService(
             {
                 await foreach (var e in gateway.StreamAsync(request, kit.Email, ct))
                 {
-                    if (e is ContentDelta c)
+                    switch (e)
                     {
-                        text.Append(c.Text);
-                    }
-                    else if (e is ToolCallDelta t)
-                    {
-                        var slot = pending.TryGetValue(t.Index, out var existing) ? existing : (null, null, new StringBuilder());
-                        pending[t.Index] = (t.Id ?? slot.Id, t.Name ?? slot.Name, slot.Args.Append(t.Arguments));
+                        case ReasoningDelta r:
+                            reasoning.Append(r.Text);
+                            await step(new AgentStep("reasoning", r.Text));
+                            break;
+                        case ContentDelta c:
+                            text.Append(c.Text);
+                            await step(new AgentStep("content", c.Text));
+                            break;
+                        case ToolCallDelta t:
+                            var slot = pending.TryGetValue(t.Index, out var existing) ? existing : (null, null, new StringBuilder());
+                            pending[t.Index] = (t.Id ?? slot.Id, t.Name ?? slot.Name, slot.Args.Append(t.Arguments));
+                            break;
                     }
                 }
             }
             catch (ChatGatewayException ex)
             {
-                return (text.ToString().Trim(), calls, ex.Message);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message);
             }
             if (pending.Count == 0)
             {
-                return (text.ToString().Trim(), calls, null);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null);
             }
             var toolCalls = new JsonArray([.. pending.Select(kv => (JsonNode)new JsonObject
             {
@@ -441,26 +474,38 @@ public sealed partial class ChatService(
             messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = text.ToString(), ["tool_calls"] = toolCalls });
             foreach (var call in toolCalls.OfType<JsonObject>())
             {
+                var id = call["id"]!.GetValue<string>();
                 var name = call["function"]!["name"]!.GetValue<string>();
                 var raw = call["function"]!["arguments"]!.GetValue<string>();
-                calls++;
+                var shownCall = new JsonObject { ["id"] = id, ["name"] = name, ["arguments"] = raw };
+                await step(new AgentStep("tool_call", Call: shownCall));
                 await say(name.Replace('_', ' '));
                 string result;
+                var isError = false;
                 try
                 {
-                    result = !names.Contains(name) || !kit.Runs.TryGetValue(name, out var target)
-                        ? $"There is no tool named {name}."
-                        : (await target.Run.CallAsync(name, JsonNode.Parse(raw.Length == 0 ? "{}" : raw) as JsonObject ?? [], ct)).Text;
+                    if (!names.Contains(name) || !kit.Runs.TryGetValue(name, out var target))
+                    {
+                        (result, isError) = ($"There is no tool named {name}.", true);
+                    }
+                    else
+                    {
+                        var outcome = await target.Run.CallAsync(name, JsonNode.Parse(raw.Length == 0 ? "{}" : raw) as JsonObject ?? [], ct);
+                        (result, isError) = (outcome.Text, outcome.IsError);
+                    }
                 }
                 catch (JsonException)
                 {
-                    result = $"The arguments were not valid JSON: {raw}";
+                    (result, isError) = ($"The arguments were not valid JSON: {raw}", true);
                 }
                 catch (McpException ex)
                 {
-                    result = ex.Message;
+                    (result, isError) = (ex.Message, true);
                 }
-                messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = call["id"]!.GetValue<string>(), ["content"] = result.Length > 30_000 ? result[..30_000] + "\n[cut to fit]" : result });
+                var shown = Cut(result, AgentShownChars);
+                await step(new AgentStep("tool_result", shown, new JsonObject { ["id"] = id }, isError));
+                steps.Add(new JsonObject { ["id"] = id, ["name"] = name, ["arguments"] = raw, ["result"] = shown, ["isError"] = isError });
+                messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = Cut(result, 30_000) });
             }
         }
     }
