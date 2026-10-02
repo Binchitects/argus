@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Cpu, Info, Sparkles, XCircle } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -204,7 +204,19 @@ function body(form: FormState) {
  * fit this machine, and estimates the memory as it is filled in. The API runs
  * the same checks on save.
  */
-export function ModelForm({ saved, onClose, gpus = [] }: { saved: SavedModel | null; onClose: () => void; /** The machine's GPUs: a choice is offered with two or more. */ gpus?: { index: number; name: string; total: number }[] }) {
+export function ModelForm({
+  saved,
+  onClose,
+  gpus = [],
+  file: preset,
+}: {
+  saved: SavedModel | null
+  onClose: () => void
+  /** The machine's GPUs: a choice is offered with two or more. */
+  gpus?: { index: number; name: string; total: number }[]
+  /** A library file to start from (one just downloaded). */
+  file?: string
+}) {
   const queryClient = useQueryClient()
   const library = useQuery({ queryKey: ['admin', 'models', 'library'], queryFn: ({ signal }) => api<LibraryFile[]>('/api/admin/models/library', { signal }) })
   const [form, setForm] = useState(() => initial(saved))
@@ -262,6 +274,14 @@ export function ModelForm({ saved, onClose, gpus = [] }: { saved: SavedModel | n
       // The live check below says what is wrong.
     }
   }
+
+  // A file just downloaded: chosen once the library lists it, as if picked by hand.
+  const presetDone = useRef(false)
+  useEffect(() => {
+    if (!preset || saved || presetDone.current || !files.some((f) => f.path === preset)) return
+    presetDone.current = true
+    void chooseFile(preset)
+  })
 
   const save = useMutation({
     mutationFn: () =>

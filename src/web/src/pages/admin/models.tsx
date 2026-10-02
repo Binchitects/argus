@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Boxes, CircleDot, Clock, Eye, HelpCircle, Image as ImageIcon, Loader2, Pencil, Pin, Plus, Power, PowerOff, Settings2, Trash2, XCircle } from 'lucide-react'
+import { Boxes, CircleDot, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Pencil, Pin, Plus, Power, PowerOff, Settings2, Trash2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { ModelForm, type SavedModel } from './model-form'
 import { WorkingHours } from './model-hours'
+import { DownloadsCard, HuggingFaceBrowser } from './huggingface'
 import { bytes, summary, type ModelProfile } from './model-profile'
 import { ServersSection } from './servers'
 
@@ -75,7 +76,8 @@ export function ModelsPage() {
     // Faster while a model loads, so the page shows it the moment it is ready.
     refetchInterval: (q) => (q.state.data?.engine.loading.length ? 3000 : 15000),
   })
-  const [editing, setEditing] = useState<ModelRow | 'new' | null>(null)
+  const [editing, setEditing] = useState<ModelRow | 'new' | { preset: string } | null>(null)
+  const [hf, setHf] = useState(false)
   if (models.isPending) return <PageSkeleton />
   if (models.error) return <QueryError error={models.error} retry={() => models.refetch()} />
   const { engine } = models.data
@@ -92,6 +94,11 @@ export function ModelsPage() {
               </Link>
             </Button>
             {engine.enabled && (
+              <Button variant="outline" onClick={() => setHf(true)}>
+                <Search /> Find on Hugging Face
+              </Button>
+            )}
+            {engine.enabled && (
               <Button onClick={() => setEditing('new')}>
                 <Plus /> Add a model
               </Button>
@@ -105,6 +112,7 @@ export function ModelsPage() {
           {engine.error}
         </Alert>
       )}
+      {engine.enabled && <DownloadsCard onAdd={(preset) => setEditing({ preset })} />}
       {engine.enabled && <EngineSummary engine={engine} />}
       {engine.enabled && (
         <WorkingHours
@@ -120,8 +128,19 @@ export function ModelsPage() {
       </div>
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-3xl">
-          {editing !== null && <ModelForm key={editing === 'new' ? 'new' : editing.name} saved={editing === 'new' ? null : editing} gpus={engine.gpus} onClose={() => setEditing(null)} />}
+          {editing !== null && (
+            <ModelForm
+              key={editing === 'new' ? 'new' : 'preset' in editing ? `preset:${editing.preset}` : editing.name}
+              saved={editing === 'new' || 'preset' in editing ? null : editing}
+              file={editing !== 'new' && 'preset' in editing ? editing.preset : undefined}
+              gpus={engine.gpus}
+              onClose={() => setEditing(null)}
+            />
+          )}
         </DialogContent>
+      </Dialog>
+      <Dialog open={hf} onOpenChange={setHf}>
+        <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">{hf && <HuggingFaceBrowser onClose={() => setHf(false)} />}</DialogContent>
       </Dialog>
     </>
   )

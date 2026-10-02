@@ -75,6 +75,19 @@ loaded, and how full each GPU would be with them.
   reads **Kept by working hours**, and cannot be unloaded by hand meanwhile.
   Chats that chose a model keep it; only new ones (and chats that chose none)
   start on the working hours' model.
+- **Find on Hugging Face** searches GGUF models (most downloaded first), opens
+  one to list its files grouped as models (a split model's parts together, by
+  quantisation, vision projectors apart) with their sizes, whether each fits
+  this machine (the GPUs, GPUs and RAM, or too big) and whether it is in the
+  library already, and downloads the ones ticked into the library
+  (`<library>/<owner>/<repository>/`). **Downloads** shows each one's progress,
+  speed and time left; one runs at a time, a paused or cut off one goes on from
+  where it got to (HTTP range), every file is checked against Hugging Face's
+  SHA-256 and only then renamed into place, so the library never lists half a
+  model. A finished one has **Add as a model**, which opens the form with its
+  file chosen. The app needs the library writable by its user (`LLM_UID`) and,
+  for gated repositories, `HF_TOKEN` of an account that accepted their terms.
+  A download is refused when the disk would keep less than 2 GB free.
 - **Load** loads a model now, beside the kept ones (refused when every place is
   kept). **Unload** unloads it, and stops keeping it. Answers wait while a
   model loads: seconds when its weights are in the page cache, minutes from

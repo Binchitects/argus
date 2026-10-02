@@ -269,3 +269,36 @@ test('working hours are added, shown in words, and removed', async ({ page, isMo
   await expect(row).toHaveCount(0)
   await expect(card.getByRole('button', { name: 'Add working hours' })).toBeVisible()
 })
+
+test('a model is found on Hugging Face, downloaded into the library, and offered as a model', async ({ page, isMobile }, info) => {
+  test.skip(isMobile || process.env.E2E_CHAT !== '1', 'live: downloads from huggingface.co (88 MB, once: it stays in the library)')
+  test.setTimeout(600_000)
+  await page.goto('/admin/models')
+  await page.getByRole('button', { name: 'Find on Hugging Face' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Find a model on Hugging Face' })
+  await dialog.getByRole('searchbox', { name: 'Search Hugging Face' }).fill('smollm2 135m')
+  await dialog.getByRole('button', { name: 'Search' }).click()
+  await dialog.getByRole('button', { name: /^unsloth\/SmolLM2-135M-Instruct-GGUF/ }).click()
+  const repo = page.getByRole('dialog', { name: 'unsloth/SmolLM2-135M-Instruct-GGUF' })
+  const file = repo.getByRole('checkbox', { name: 'SmolLM2-135M-Instruct-Q2_K.gguf' })
+  await expect(file).toBeVisible({ timeout: 30_000 })
+  await expect(repo.getByRole('listitem').filter({ hasText: 'SmolLM2-135M-Instruct-Q2_K.gguf' })).toContainText('Fits the GPUs')
+  await expectAccessible(page, info, 'huggingface-repo')
+  await screenshot(page, info, 'huggingface-repo')
+  if (await file.isDisabled()) {
+    // Downloaded on an earlier run: it is in the library.
+    await expect(repo.getByRole('listitem').filter({ hasText: 'SmolLM2-135M-Instruct-Q2_K.gguf' })).toContainText('In the library')
+    return
+  }
+  await file.check()
+  await repo.getByRole('button', { name: 'Download', exact: true }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Download' }).click()
+  const downloads = page.getByRole('region', { name: 'Downloads' })
+  await expect(downloads).toContainText('unsloth/SmolLM2-135M-Instruct-GGUF')
+  await expect(downloads.getByText('Done', { exact: true })).toBeVisible({ timeout: 300_000 })
+  await screenshot(page, info, 'huggingface-downloaded')
+  await downloads.getByRole('button', { name: 'Add as a model' }).first().click()
+  const form = page.getByRole('dialog', { name: 'Add a model' })
+  await expect(form).toContainText('SmolLM2-135M-Instruct-Q2_K', { timeout: 30_000 })
+  await form.getByRole('button', { name: 'Cancel' }).click()
+})

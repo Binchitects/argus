@@ -238,7 +238,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
         <fieldset className="grid gap-2">
           <legend className="mb-1 text-sm font-medium">Its models ({chosen} chosen)</legend>
           {picks.map((p, i) => (
-            <div key={p.remote} className={cn('grid gap-2 rounded-lg border p-3', !p.on && 'opacity-70')}>
+            <div key={p.remote} className={cn('grid gap-2 rounded-lg border p-3', !p.on && 'border-dashed')}>
               <Label className="flex items-center gap-2 font-normal">
                 <Checkbox checked={p.on} onCheckedChange={(on) => set(i, { on: on === true })} aria-label={`Serve ${p.remote}`} />
                 <span className="font-mono text-sm [overflow-wrap:anywhere]">{p.remote}</span>

@@ -119,7 +119,7 @@ export function AlertsPage() {
             ) : (
               <ul className="grid gap-3">
                 {firing.map((a) => (
-                  <li key={`${a.name}-${JSON.stringify(a.labels)}`} className={cn('rounded-lg border border-l-4 p-4', edge(a.severity), a.state === 'suppressed' && 'opacity-70')}>
+                  <li key={`${a.name}-${JSON.stringify(a.labels)}`} className={cn('rounded-lg border border-l-4 p-4', edge(a.severity), a.state === 'suppressed' && 'border-dashed')}>
                     <div className="flex flex-wrap items-center gap-2">
                       <Severity value={a.severity} />
                       <span className="font-semibold">{a.name}</span>

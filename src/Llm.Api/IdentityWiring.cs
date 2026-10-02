@@ -292,6 +292,12 @@ public static class IdentityWiring
         // The engine's models (llama.cpp's router): Admin -> Models, and who may use which model.
         services.Configure<Models.EngineOptions>(config.GetSection("Engine"));
         services.Configure<Models.ModelHoursOptions>(config.GetSection("ModelHours"));
+        services.Configure<Models.HuggingFaceOptions>(config.GetSection("HuggingFace"));
+        // Downloads are hours long for a large model: the client has no timeout of its own (ModelDownloads cuts off a read that stalls).
+        services.AddHttpClient<Models.HuggingFace>(c => c.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(20), PooledConnectionLifetime = TimeSpan.FromMinutes(10) });
+        services.AddSingleton<Models.ModelDownloads>();
+        services.AddHostedService(sp => sp.GetRequiredService<Models.ModelDownloads>());
         services.Configure<Schedules.ScheduleOptions>(config.GetSection("Schedules"));
         services.Configure<Operations.ArgusIndexOptions>(config.GetSection("ArgusIndex"));
         services.AddHostedService<Operations.ArgusIndexSchedule>();
@@ -458,6 +464,7 @@ public static class IdentityWiring
         Chat.Tools.ToolEndpoints.MapTools(app);
         Models.ModelEndpoints.MapModels(app);
         Models.ModelHoursEndpoints.MapModelHours(app);
+        Models.HuggingFaceEndpoints.MapHuggingFace(app);
         Schedules.TaskEndpoints.MapTasks(app);
         Models.RemoteServerEndpoints.MapRemoteServers(app);
     }

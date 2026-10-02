@@ -25,6 +25,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
     public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
     public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
+    public DbSet<ModelDownload> ModelDownloads => Set<ModelDownload>();
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -172,6 +173,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Link).HasMaxLength(500);
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ModelDownload>(e =>
+        {
+            e.ToTable("model_downloads");
+            e.Property(x => x.Repo).HasMaxLength(200);
+            e.Property(x => x.Revision).HasMaxLength(100);
+            e.Property(x => x.Dir).HasMaxLength(300);
+            e.Property(x => x.State).HasMaxLength(20);
+            e.Property(x => x.Error).HasMaxLength(2000);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.OwnsMany(x => x.Files, f => f.ToJson());
         });
         builder.Entity<ModelWindow>(e =>
         {

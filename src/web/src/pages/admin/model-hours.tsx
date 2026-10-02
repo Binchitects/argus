@@ -97,7 +97,7 @@ export function WorkingHours({ engineModels, chatModels }: { engineModels: strin
             {data.windows.map((w) => {
               const now = data.active?.id === w.id
               return (
-                <li key={w.id} className={cn('flex flex-wrap items-center gap-3 rounded-lg border p-3', now && 'border-primary/50 bg-primary/5', !w.enabled && 'opacity-70')}>
+                <li key={w.id} className={cn('flex flex-wrap items-center gap-3 rounded-lg border p-3', now && 'border-primary/50 bg-primary/5')}>
                   <Clock className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <div className="grid min-w-0 flex-1 gap-0.5">
                     <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
