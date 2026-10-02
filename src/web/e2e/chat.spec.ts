@@ -636,6 +636,26 @@ test.describe('tools', () => {
     expect((await page.request.delete(`/api/chat/conversations/${id}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
   })
 
+  test('an answer that finishes after the page left is in the bell', async ({ page }) => {
+    test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    test.setTimeout(240_000)
+    const headers = { 'X-Requested-With': 'e2e' }
+    const id = (await (await page.request.post('/api/chat/conversations', { data: { tools: [], thinking: 'off' }, headers })).json()).id
+    // The page asks, and is gone two seconds later; the answer goes on without it.
+    await page.request.post(`/api/chat/conversations/${id}/messages`, { data: { content: 'Count from 1 to 40 in words, one per line.', root: true }, headers, timeout: 2_000 }).catch(() => null)
+    await expect
+      .poll(async () => ((await (await page.request.get('/api/notifications')).json()).items as { kind: string; link: string }[]).some((n) => n.kind === 'answer' && n.link === `/chat/${id}`), {
+        timeout: 180_000,
+      })
+      .toBe(true)
+    await page.goto('/chat')
+    await page.getByRole('button', { name: /^Notifications, \d+ new$/ }).click()
+    await page.getByRole('dialog', { name: 'Notifications' }).getByRole('button', { name: /^Answer ready:/ }).first().click()
+    await expect(page).toHaveURL(new RegExp(`/chat/${id}$`))
+    await expect(page.getByRole('region', { name: 'Answer' }).last()).toContainText(/forty/i)
+    expect((await page.request.delete(`/api/chat/conversations/${id}`, { headers })).status()).toBe(204)
+  })
+
   test('the model searches the web and reads a page of an allowed site', async ({ page, request }) => {
     test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
     test.setTimeout(300_000)

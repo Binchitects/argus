@@ -25,6 +25,7 @@ import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
 import type { ChatConfig, ChatEvent, ChatSettings, Conversation, Message } from './types'
 import { useUploads } from './uploads'
+import { tellDesktop } from '@/lib/desktop'
 
 export function ChatPage() {
   const { id } = useParams()
@@ -293,6 +294,14 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
             received = true
             watch?.(e)
             setLive((s) => reduce(s ?? start, e, localId))
+            // Done while the tab is hidden: the desktop says so (when the person turned that on).
+            if (e.type === 'done' && endpoint !== 'compact') {
+              const s = liveRef.current
+              const saved = queryClient.getQueryData<Conversation>(conversationQuery(conversationId).queryKey)
+              tellDesktop(`Answer ready: ${s?.title ?? saved?.title ?? 'Chat'}`, s?.messages.find((m) => m.id === s.current)?.content, `answer-${conversationId}`, () =>
+                navigate(`/chat/${conversationId}`),
+              )
+            }
           },
           controller.signal,
         )
@@ -324,7 +333,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
       }
       return received || wasStopped
     },
-    [queryClient],
+    [queryClient, navigate],
   )
 
   /** Stop: the server stops the answer and keeps what it has; this page stops watching at once. */

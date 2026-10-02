@@ -171,7 +171,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Title).HasMaxLength(300);
             e.Property(x => x.Body).HasMaxLength(2000);
             e.Property(x => x.Link).HasMaxLength(500);
+            e.Property(x => x.Kind).HasMaxLength(20).HasDefaultValue("task");
+            e.Property(x => x.Key).HasMaxLength(300);
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasIndex(x => new { x.UserId, x.Key }).IsUnique().HasFilter("\"Key\" IS NOT NULL");
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<ModelDownload>(e =>

@@ -27,7 +27,10 @@ public sealed class AppFixture : IAsyncLifetime
     /// </summary>
     private static readonly string? External = Environment.GetEnvironmentVariable("LLM_TEST_POSTGRES") is { Length: > 0 } cs ? cs : null;
     private readonly string _run = External is null ? "" : "_" + Guid.NewGuid().ToString("N")[..8];
-    private readonly PostgreSqlContainer? _postgres = External is null ? new PostgreSqlBuilder("pgvector/pgvector:0.8.0-pg16").Build() : null;
+    // Many apps at once, each with its own database and connection pools: more than Postgres's usual 100 connections.
+    private readonly PostgreSqlContainer? _postgres = External is null
+        ? new PostgreSqlBuilder("pgvector/pgvector:0.8.0-pg16").WithCommand("-c", "max_connections=400").Build()
+        : null;
     private string Server => External ?? _postgres!.GetConnectionString();
     private readonly string _webRoot = Directory.CreateTempSubdirectory("llm-webroot-").FullName;
 
@@ -110,6 +113,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Dashboards:Path", DashboardsPath);
             b.UseSetting("Dashboards:SqlDatabase", "litellm_test" + _run);
             b.UseSetting("Dashboards:StatementTimeout", "00:00:03");
+            // Many apps at once here: the bell's watcher would hold their connections (its checks are called directly).
+            b.UseSetting("Notifications:Watch", "false");
             b.UseSetting("Argus:Url", "http://argus:7700");
             b.UseSetting("Argus:AdminToken", FakeArgus.Token);
             b.UseSetting("Stack:EnvSamplesDir", Path.Combine(DashboardsPath, "..", "..", "env-samples"));

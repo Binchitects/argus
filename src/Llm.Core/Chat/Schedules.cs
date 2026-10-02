@@ -57,10 +57,14 @@ public sealed class Notification
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid UserId { get; set; }
+    /// <summary>What it is about: answer (one written while nobody watched), task, usage (credit), alert (the system's, for admins), download.</summary>
+    public string Kind { get; set; } = "task";
     public required string Title { get; set; }
     public string? Body { get; set; }
     /// <summary>Where it leads in the app, e.g. /chat/{id}.</summary>
     public string? Link { get; set; }
+    /// <summary>What it is the news of, once per person (e.g. one alert's firing, a credit threshold): it is not said twice.</summary>
+    public string? Key { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ReadAt { get; set; }
 }

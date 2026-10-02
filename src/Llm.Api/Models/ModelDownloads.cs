@@ -173,6 +173,14 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
                 await db.SaveChangesAsync(CancellationToken.None);
             }
         }
+        // The admin who started it hears how it ended (it can take hours).
+        if (d.State is "done" or "failed" && await scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Llm.Core.Identity.AppUser>>().FindByNameAsync(d.CreatedBy) is { } who)
+        {
+            var files = string.Join(", ", d.Files.Select(f => Path.GetFileName(f.Path)));
+            await scope.ServiceProvider.GetRequiredService<Notifications.Notifier>().SendAsync(who.Id, d.State == "done"
+                ? new Notifications.News("download", $"Downloaded {d.Repo}", $"{files} is in the model library: add it under Models.", "/admin/models", $"download:{d.Id}")
+                : new Notifications.News("download", $"Download of {d.Repo} failed", d.Error, "/admin/models"), CancellationToken.None);
+        }
     }
 
     /// <summary>One file: from where its .part got to, hashed as it comes, checked, then renamed into place.</summary>

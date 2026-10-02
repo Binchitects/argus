@@ -229,6 +229,26 @@ you: a morning digest, a weekly report on a repository with Argus.
   removed task leaves its chats. Each person sees and changes only their own;
   admins set **Tasks per person** (10).
 
+## Notifications
+
+The bell in the header holds news for you, newest first; the page checks it
+every 15 seconds and when the tab comes back, and shows what arrives as a toast:
+
+- **Answer ready** (or failed): an answer that ended while no page of yours
+  watched it (you left the chat or closed the tab). One you watch is not news.
+- **A scheduled task ran**, with its answer (see above).
+- **Credit**: at 80% of your credit, and when it is used up (then the admins
+  hear of it too). Each once per budget: a raised budget says it again when
+  reached.
+- **System alerts** (admins): an alert that starts firing (Alertmanager), once
+  per firing. Silenced ones are not news.
+- **Model downloads** (the admin who started one): done or failed.
+
+**Desktop notifications** (a switch at the bottom of the bell) say the same on
+your desktop while the app's tab is hidden, and an answer that finishes while
+you look elsewhere. The browser asks once; the switch turns them off again.
+Alerts and credit are looked at every minute and every five minutes.
+
 ## Fair use
 
 The model serves few people at once (llama.cpp's `LLAMACPP_PARALLEL` slots).
@@ -279,7 +299,13 @@ So that everyone gets their turn:
 The chat talks to LiteLLM with its own service key (alias `chat`). Each request
 names the person, so spend is theirs (surface **Chat** under Usage & cost), and
 their credit applies. The cost under each answer comes from the model's prices
-at the gateway.
+at the gateway, its sub-agents' calls included.
+
+What a person has spent is what the gateway's request log puts to them, over
+every path (chat, API keys, agents), by the same rule as the usage dashboards;
+the overview, People, the export and Home all read it. LiteLLM's own counters
+split a person in two (the chat is booked to them as an end user, their keys
+as an internal user), and each limits its own path to the budget.
 
 ## Settings
 

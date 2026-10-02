@@ -277,6 +277,37 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
+    public async Task An_answer_that_ends_while_no_page_watches_goes_to_the_bell_and_one_watched_does_not()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        await SendAsync(b, id, "Hello there");
+        Assert.Equal(0, (await b.JsonAsync(await b.GetAsync("/api/notifications"))).GetProperty("unread").GetInt32());
+
+        using var cts = new CancellationTokenSource();
+        var (res, _) = await StartAsync(b, id, "Take your time [steady]", "s3 ", cts.Token);
+        // The page goes away mid-answer; the answer finishes alone.
+        await cts.CancelAsync();
+        res.Dispose();
+        await LastOnceAsync(b, id, "complete");
+        JsonElement notes = default;
+        for (var i = 0; i < 50; i++)
+        {
+            notes = await b.JsonAsync(await b.GetAsync("/api/notifications"));
+            if (notes.GetProperty("unread").GetInt32() > 0)
+            {
+                break;
+            }
+            await Task.Delay(100);
+        }
+        var news = Assert.Single(notes.GetProperty("items").EnumerateArray());
+        Assert.Equal("answer", news.GetProperty("kind").GetString());
+        Assert.StartsWith("Answer ready: ", news.GetProperty("title").GetString(), StringComparison.Ordinal);
+        Assert.EndsWith("s59", news.GetProperty("body").GetString(), StringComparison.Ordinal);
+        Assert.Equal($"/chat/{id}", news.GetProperty("link").GetString());
+    }
+
+    [Fact]
     public async Task Regenerate_adds_an_answer_beside_the_old_one()
     {
         var (b, _) = await PersonAsync();

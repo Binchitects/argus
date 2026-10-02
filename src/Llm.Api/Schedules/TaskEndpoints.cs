@@ -271,7 +271,7 @@ public static class TaskEndpoints
         var me = await Me(p, users);
         var items = await db.Notifications.AsNoTracking().Where(x => x.UserId == me.Id).OrderByDescending(x => x.CreatedAt).Take(30).ToListAsync(ct);
         var unread = await db.Notifications.CountAsync(x => x.UserId == me.Id && x.ReadAt == null, ct);
-        return Results.Ok(new { unread, items = items.Select(x => new { x.Id, x.Title, x.Body, x.Link, x.CreatedAt, read = x.ReadAt != null }) });
+        return Results.Ok(new { unread, items = items.Select(x => new { x.Id, x.Kind, x.Title, x.Body, x.Link, x.CreatedAt, read = x.ReadAt != null }) });
     }
 
     private static async Task<IResult> ReadAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, TimeProvider clock, CancellationToken ct)
@@ -289,8 +289,10 @@ public static class TaskEndpoints
         var me = await Me(p, users);
         var now = clock.GetUtcNow();
         await db.Notifications.Where(x => x.UserId == me.Id && x.ReadAt == null).ExecuteUpdateAsync(s => s.SetProperty(x => x.ReadAt, now), ct);
-        // The last hundred are kept.
-        var old = await db.Notifications.Where(x => x.UserId == me.Id).OrderByDescending(x => x.CreatedAt).Skip(100).Select(x => x.Id).ToListAsync(ct);
+        // The last hundred are kept; news said once (an alert's firing, a credit threshold) a month, so it is not said again meanwhile.
+        var month = now.AddDays(-30);
+        var old = await db.Notifications.Where(x => x.UserId == me.Id).OrderByDescending(x => x.CreatedAt).Skip(100)
+            .Where(x => x.Key == null || x.CreatedAt < month).Select(x => x.Id).ToListAsync(ct);
         if (old.Count > 0)
         {
             await db.Notifications.Where(x => old.Contains(x.Id)).ExecuteDeleteAsync(ct);

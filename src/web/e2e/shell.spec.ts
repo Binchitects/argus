@@ -81,3 +81,42 @@ test('the theme follows the choice, before the first paint', async ({ page }) =>
   await page.getByRole('radio', { name: 'Light' }).click()
   await expect(page.locator('html')).not.toHaveClass(/dark/)
 })
+
+test('the bell lists each kind of news, leads to it, and can say it on the desktop', async ({ page, context }, info) => {
+  const errors = watchConsole(page)
+  await context.grantPermissions(['notifications'])
+  const now = new Date().toISOString()
+  const item = (id: string, kind: string, title: string, body: string, link: string, read = false) => ({ id, kind, title, body, link, createdAt: now, read })
+  let marked = ''
+  await page.route('**/api/notifications/*/read', (route) => {
+    marked = route.request().url()
+    return route.fulfill({ status: 204 })
+  })
+  await page.route('**/api/notifications', (route) =>
+    route.fulfill({
+      json: {
+        unread: 4,
+        items: [
+          item('n1', 'answer', 'Answer ready: Release notes', 'Here are the notes for 3.1.0 …', '/chat'),
+          item('n2', 'usage', '85% of your credit is used', 'You have spent $8.50 of $10.00.', '/'),
+          item('n3', 'alert', 'Critical: Disk almost full', '/library is 97% full.', '/admin/alerts'),
+          item('n4', 'download', 'Downloaded unsloth/Qwen3-4B-GGUF', 'Qwen3-4B-Q4_K_M.gguf is in the model library.', '/admin/models'),
+          item('n5', 'task', 'Morning digest', 'Nothing changed yesterday.', '/chat', true),
+        ],
+      },
+    }),
+  )
+  await page.goto('/tasks')
+  await page.getByRole('button', { name: 'Notifications, 4 new' }).click()
+  const bell = page.getByRole('dialog', { name: 'Notifications' })
+  await expect(bell.getByRole('list', { name: 'News' }).getByRole('listitem')).toHaveCount(5)
+  const desktop = bell.getByRole('switch', { name: /Desktop notifications/ })
+  await desktop.click()
+  await expect(desktop).toBeChecked()
+  await expectAccessible(page, info, 'notifications')
+  await screenshot(page, info, 'notifications')
+  await bell.getByRole('button', { name: /Critical: Disk almost full/ }).click()
+  await expect(page).toHaveURL(/\/admin\/alerts$/)
+  expect(marked).toContain('/api/notifications/n3/read')
+  expect(errors).toEqual([])
+})

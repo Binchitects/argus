@@ -69,6 +69,8 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
             return await EndAsync(run, "skipped", "Its chat was still answering the run before.", ct);
         }
         job.Emit(new { type = "question", id = question.Id, parentId = question.ParentId });
+        // The task's own notification says how it went (and its email, webhook).
+        job.Notify = false;
         jobs.Start(job, question.Id, new AnswerOverrides());
         await job.Running.WaitAsync(ct);
 
@@ -86,7 +88,7 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
         var summary = text ?? error ?? "";
         db.Notifications.Add(new Notification
         {
-            UserId = owner.Id, Title = title, Body = Cut(summary, 400), Link = $"/chat/{c.Id}", CreatedAt = clock.GetUtcNow(),
+            UserId = owner.Id, Kind = "task", Title = title, Body = Cut(summary, 400), Link = $"/chat/{c.Id}", CreatedAt = clock.GetUtcNow(),
         });
         var delivered = new List<string>();
         if (task.Email && owner.Email is { Length: > 0 } email)

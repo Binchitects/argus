@@ -31,6 +31,8 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         private readonly List<JsonObject> _events = [];
         private readonly List<Channel<string>> _watchers = [];
         private bool _ended;
+        private string? _outcome;
+        private string? _error;
 
         internal Job(Guid conversation, Guid person) => (Conversation, Person) = (conversation, person);
 
@@ -41,6 +43,18 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         internal CancellationTokenSource Stopping { get; } = new();
 
         internal Task Running { get; set; } = Task.CompletedTask;
+
+        /// <summary>Its end goes to the person's bell when no page watched it (off for a scheduled task's, which says so itself, and a compaction).</summary>
+        public bool Notify { get; set; } = true;
+
+        /// <summary>How it ended (done, error, stopped), with the error's words; and whether a page was watching then.</summary>
+        internal (string? Outcome, string? Error, bool Watched) Ending()
+        {
+            lock (_lock)
+            {
+                return (_outcome, _error, _watchers.Count > 0);
+            }
+        }
 
         public Task EmitAsync(object e)
         {
@@ -58,6 +72,10 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
                 if (_ended)
                 {
                     return;
+                }
+                if (type is "done" or "error" or "stopped")
+                {
+                    (_outcome, _error) = (type, type == "error" ? node["message"]?.GetValue<string>() : null);
                 }
                 // Text comes a token at a time; what is kept for a page that comes back joins it up
                 // (a sub-agent's too, while it is the same one's same kind of text).
@@ -210,9 +228,12 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         });
 
     /// <summary>Compacts the branch down to <paramref name="leafId"/> in the background (the model writes a summary: it waits its turn as an answer does).</summary>
-    public void StartCompaction(Job job, Guid leafId) =>
+    public void StartCompaction(Job job, Guid leafId)
+    {
+        job.Notify = false;
         Start(job, (services, user, conversation, ct) =>
             services.GetRequiredService<ChatService>().CompactAsync(user, conversation, leafId, job.EmitAsync, ct));
+    }
 
     private void Start(Job job, Func<IServiceProvider, AppUser, Conversation, CancellationToken, Task> work) =>
         job.Running = Task.Run(() => RunAsync(job, work));
@@ -261,7 +282,36 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         }
         finally
         {
+            var (outcome, error, watched) = job.Ending();
             Release(job);
+            if (job.Notify && !watched && outcome is "done" or "error")
+            {
+                await NotifyAsync(job, outcome == "error" ? error ?? "The answer failed." : null);
+            }
+        }
+    }
+
+    /// <summary>An answer that ended while no page watched it (the person left, or closed the tab): the bell says so.</summary>
+    private async Task NotifyAsync(Job job, string? error)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var title = await db.Conversations.AsNoTracking().Where(c => c.Id == job.Conversation).Select(c => c.Title).SingleOrDefaultAsync();
+            if (title is null)
+            {
+                return; // deleted meanwhile
+            }
+            var said = error ?? await db.ChatMessages.AsNoTracking()
+                .Where(m => m.ConversationId == job.Conversation && m.Role == "assistant" && m.Content != "")
+                .OrderByDescending(m => m.Sequence).Select(m => m.Content).FirstOrDefaultAsync();
+            await scope.ServiceProvider.GetRequiredService<Notifications.Notifier>().SendAsync(job.Person,
+                new Notifications.News("answer", error is null ? $"Answer ready: {title}" : $"Answer failed: {title}", said?.Trim(), $"/chat/{job.Conversation}"));
+        }
+        catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
+        {
+            LogNotifyFailed(logger, job.Conversation, ex);
         }
     }
 
@@ -287,4 +337,7 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Conversation {Conversation}: the answer failed")]
     private static partial void LogFailed(ILogger logger, Guid conversation, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Conversation {Conversation}: the bell could not be told the answer ended")]
+    private static partial void LogNotifyFailed(ILogger logger, Guid conversation, Exception ex);
 }
