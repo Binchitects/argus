@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Boxes, Cpu, Database, Home, KeyRound, LayoutDashboard, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, Telescope, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, BarChart3, Boxes, CalendarClock, Cpu, Database, Home, KeyRound, LayoutDashboard, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, Telescope, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -20,6 +20,7 @@ export const navigation: NavSection[] = [
     items: [
       { title: 'Home', path: '/', icon: Home },
       { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'] },
+      { title: 'Scheduled tasks', path: '/tasks', icon: CalendarClock, keywords: ['schedule', 'cron', 'daily', 'weekly', 'report', 'digest', 'webhook', 'email', 'notification'] },
       { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'] },
       { title: 'Connect your tools', path: '/setup', icon: Plug, keywords: ['api key', 'token', 'claude code', 'qwen code', 'opencode', 'continue', 'mcp', 'harness', 'sdk', 'certificate'] },
     ],

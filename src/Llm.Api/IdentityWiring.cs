@@ -291,6 +291,15 @@ public static class IdentityWiring
         // The engine's models (llama.cpp's router): Admin -> Models, and who may use which model.
         services.Configure<Models.EngineOptions>(config.GetSection("Engine"));
         services.Configure<Models.ModelHoursOptions>(config.GetSection("ModelHours"));
+        services.Configure<Schedules.ScheduleOptions>(config.GetSection("Schedules"));
+        services.Configure<Schedules.MailOptions>(config.GetSection("Mail"));
+        services.AddSingleton<Schedules.Mailer>();
+        services.AddSingleton<Schedules.Webhooks>();
+        services.AddHttpClient(Schedules.Webhooks.Client, c => c.Timeout = TimeSpan.FromSeconds(15));
+        services.AddScoped<Schedules.TaskRunner>();
+        services.AddScoped<Schedules.TaskEndpoints.TaskContext>();
+        services.AddSingleton<Schedules.Scheduler>();
+        services.AddHostedService(sp => sp.GetRequiredService<Schedules.Scheduler>());
         services.AddSingleton<Models.ModelHoursState>();
         services.AddScoped<Models.ModelHours>();
         services.PostConfigure<Models.EngineOptions>(o =>
@@ -446,6 +455,7 @@ public static class IdentityWiring
         Chat.Tools.ToolEndpoints.MapTools(app);
         Models.ModelEndpoints.MapModels(app);
         Models.ModelHoursEndpoints.MapModelHours(app);
+        Schedules.TaskEndpoints.MapTasks(app);
         Models.RemoteServerEndpoints.MapRemoteServers(app);
     }
 

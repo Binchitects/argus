@@ -190,6 +190,36 @@ setups to paste.
 A question that never reached the server goes back into the box with its
 attachments, instead of being lost.
 
+## Scheduled tasks
+
+**Scheduled tasks** (in the sidebar, `/tasks`) ask a question on a schedule, as
+you: a morning digest, a weekly report on a repository with Argus.
+
+- **The schedule** is chosen in words (every day, weekdays, once a week or a
+  month, every few hours, at a time) or written as cron (five fields), in a
+  time zone (your browser's by default). The card shows it in words and the
+  next three runs. A task may not run more often than **Most often** (15
+  minutes by default).
+- **Each run** asks the question with the task's model and tools (or the ones
+  a new chat would use), as any answer: in turn with everyone else's, against
+  your credit. It is a new chat, titled with the task and the time, or with
+  **One chat for every run**, the same chat carried on, so each run reads the
+  ones before ("what changed since yesterday").
+- **Delivered** under the bell in the header (a toast too, when the page is
+  open), and if asked by email (to your account's address; an admin sets the
+  mail server under **Settings → Email**) and to a channel: a Slack, Teams,
+  Mattermost or Discord incoming webhook. The post carries `text` (and
+  `content`) with the answer and a link to the chat, and `task`, `status`,
+  `url`, `at` beside them. A webhook URL is a secret: it is stored encrypted
+  (`APP_DATA_KEY`) and never shown again, and only hosts an admin allows
+  (**Webhook hosts**) are posted to, so a task cannot reach into the network.
+- **Run now** runs it at once; the card shows the last run (done, failed or
+  skipped, why, what was delivered) with a link to its chat. A run is skipped
+  while the one before is still answering, or when its owner is disabled.
+- A task that was due while the app was down runs once when it is back. A
+  removed task leaves its chats. Each person sees and changes only their own;
+  admins set **Tasks per person** (10).
+
 ## Fair use
 
 The model serves few people at once (llama.cpp's `LLAMACPP_PARALLEL` slots).

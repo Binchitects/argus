@@ -25,6 +25,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
     public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
     public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
+    public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
+    public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
+    public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -138,6 +141,37 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.BaseUrl).HasMaxLength(1000);
             e.Property(x => x.ApiKeyProtected).HasMaxLength(4000);
             e.OwnsMany(x => x.Models, m => m.ToJson());
+        });
+        builder.Entity<ScheduledTask>(e =>
+        {
+            e.ToTable("scheduled_tasks");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Cron).HasMaxLength(200);
+            e.Property(x => x.TimeZone).HasMaxLength(100);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Thinking).HasMaxLength(50);
+            e.Property(x => x.WebhookEncrypted).HasMaxLength(4000);
+            e.HasIndex(x => x.UserId);
+            e.HasIndex(x => x.NextRunAt);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ScheduledRun>(e =>
+        {
+            e.ToTable("scheduled_runs");
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.Error).HasMaxLength(2000);
+            e.Property(x => x.Delivery).HasMaxLength(1000);
+            e.HasIndex(x => new { x.TaskId, x.StartedAt });
+            e.HasOne<ScheduledTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Notification>(e =>
+        {
+            e.ToTable("notifications");
+            e.Property(x => x.Title).HasMaxLength(300);
+            e.Property(x => x.Body).HasMaxLength(2000);
+            e.Property(x => x.Link).HasMaxLength(500);
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<ModelWindow>(e =>
         {

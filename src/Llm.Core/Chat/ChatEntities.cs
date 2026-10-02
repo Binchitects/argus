@@ -29,6 +29,8 @@ public sealed class Conversation
     public DateTimeOffset? ArchivedAt { get; set; }
     /// <summary>The chat this one was forked from, if any (it may since have been deleted).</summary>
     public Guid? ForkedFromId { get; set; }
+    /// <summary>The scheduled task whose run this chat is, if any.</summary>
+    public Guid? ScheduledTaskId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronsLeft, ChevronsRight, Menu, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useMatch, useMatches, useNavigate, useResolvedPath } from 'react-router'
+import { NotificationBell } from '@/components/app/notifications'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
@@ -117,6 +118,7 @@ function SignedIn({ me }: { me: Me }) {
               <span className="hidden sm:inline">Search…</span>
               <Kbd className="ml-auto hidden sm:inline-flex">Ctrl K</Kbd>
             </Button>
+            <NotificationBell />
             <UserMenu me={me} />
           </div>
         </header>

@@ -20,6 +20,8 @@ public static class SettingsCatalog
     private const string Deployment = "Deployment";
     private const string Monitoring = "Monitoring";
     private const string Backup = "Backup";
+    private const string Schedules = "Scheduled tasks";
+    private const string Mail = "Email";
 
     public static readonly IReadOnlyList<string> Profiles =
         ["gateway", "proxy", "llamacpp", "vllm", "multi-model", "argus", "image", "sandbox", "websearch", "logging", "tracing", "smi", "dcgm", "cadvisor"];
@@ -98,6 +100,23 @@ public static class SettingsCatalog
             { Default = "UTC", Pattern = @"^(UTC|[A-Za-z]+(/[A-Za-z0-9_+\-]+){1,2})$", PatternHelp = "An IANA time zone, e.g. Europe/Berlin, or UTC." },
         new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
+
+        new("Schedules:Enabled", Schedules, "Scheduled tasks", "People may set questions to be asked on a schedule (a daily digest, a weekly report), answered as them, with their model, tools and credit.", SettingType.Boolean, SettingScope.Live)
+            { Default = "true" },
+        new("Schedules:PerPerson", Schedules, "Tasks per person", "How many scheduled tasks one person may have.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "10", Min = 1, Max = 100, Optional = false },
+        new("Schedules:MinInterval", Schedules, "Most often", "A task may not run more often than this, so nobody fills the model's day.", SettingType.Duration, SettingScope.Live)
+            { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 1440, Optional = false },
+        new("Schedules:WebhookHosts", Schedules, "Webhook hosts", "Hosts a task's answer may be posted to, comma separated; *.example.com for a domain and its subdomains. Add your Mattermost or chat server here. Empty: no webhooks.", SettingType.Text, SettingScope.Live)
+            { Default = "hooks.slack.com, *.webhook.office.com, *.logic.azure.com, discord.com" },
+        new("Mail:Host", Mail, "SMTP server", "The mail server the app sends email through (scheduled tasks' answers). Empty: no email.", SettingType.Text, SettingScope.Live),
+        new("Mail:Port", Mail, "SMTP port", "587 for STARTTLS, 25 for plain SMTP inside the network.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "587", Min = 1, Max = 65535, Optional = false },
+        new("Mail:StartTls", Mail, "Use STARTTLS", "Upgrade the connection to TLS before signing in. Off only for a relay inside the network.", SettingType.Boolean, SettingScope.Live)
+            { Default = "true" },
+        new("Mail:User", Mail, "SMTP user", "For servers that need a sign-in; empty for a relay that does not.", SettingType.Text, SettingScope.Live),
+        new("Mail:Password", Mail, "SMTP password", "From your mail team.", SettingType.Secret, SettingScope.Live),
+        new("Mail:From", Mail, "Sender", "The address email comes from, e.g. LLM Service <llm@example.com>.", SettingType.Text, SettingScope.Live),
 
         // --------------------------------------------------------------- stack (.env) --
         new("PRICE_INPUT_PER_MTOK", Credit, "Input, cache miss", "Per million prompt tokens the engine processed, in your credit's currency.", SettingType.Number, SettingScope.Stack)

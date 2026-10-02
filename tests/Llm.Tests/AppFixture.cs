@@ -40,6 +40,7 @@ public sealed class AppFixture : IAsyncLifetime
     public FakeRemote Remote { get; } = new();
     public FakeWeb Web { get; } = new();
     public FakeObserve Observe { get; } = new();
+    public FakeWebhook Webhook { get; } = new();
     public string AppConnectionString { get; private set; } = "";
     /// <summary>The real dashboard files, found by walking up to the repository.</summary>
     public static string DashboardsPath { get; } = FindDashboards();
@@ -125,6 +126,7 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddHttpClient<Llm.Api.Dashboards.PromDatasource>().ConfigurePrimaryHttpMessageHandler(() => Observe);
                 s.AddHttpClient<Llm.Api.Dashboards.LokiDatasource>().ConfigurePrimaryHttpMessageHandler(() => Observe);
                 s.AddHttpClient<Llm.Api.Dashboards.AlertmanagerClient>().ConfigurePrimaryHttpMessageHandler(() => Observe);
+                s.AddHttpClient(Llm.Api.Schedules.Webhooks.Client).ConfigurePrimaryHttpMessageHandler(() => Webhook);
             });
         });
 

@@ -13,7 +13,7 @@ test('home: signed in, the admin sees the system summary, no console errors', as
 })
 
 for (const theme of ['light', 'dark'] as const) {
-  for (const path of ['/', '/account', '/setup', '/design', '/chat', '/no-such-page']) {
+  for (const path of ['/', '/account', '/setup', '/design', '/chat', '/tasks', '/no-such-page']) {
     test(`${path} is accessible in the ${theme} theme`, async ({ page }, info) => {
       const errors = watchConsole(page)
       await withTheme(page, theme)
