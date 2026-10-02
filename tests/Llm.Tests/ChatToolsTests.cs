@@ -236,6 +236,12 @@ public sealed class ChatToolsTests(AppFixture app)
         var listed = JsonDocument.Parse(listedText).RootElement.EnumerateArray().Single(t => t.GetProperty("id").GetString() == toolId);
         Assert.True(listed.GetProperty("server").GetProperty("headerSet").GetBoolean());
         Assert.Equal("weather_desk__", listed.GetProperty("server").GetProperty("prefix").GetString());
+        Assert.Equal(JsonValueKind.Null, listed.GetProperty("server").GetProperty("callTimeoutMinutes").ValueKind);
+        var serverId = Guid.Parse(toolId[4..]);
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/tools/servers/{serverId}", UriKind.Relative), new { callTimeoutMinutes = 2000 }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/tools/servers/{serverId}", UriKind.Relative), new { callTimeoutMinutes = 90 }));
+        var longer = (await admin.JsonAsync(await admin.GetAsync("/api/admin/tools"))).EnumerateArray().Single(t => t.GetProperty("id").GetString() == toolId);
+        Assert.Equal(90, longer.GetProperty("server").GetProperty("callTimeoutMinutes").GetInt32());
 
         var (b, _, email) = await PersonAsync(f);
         var id = await NewChatAsync(b, new { tools = new[] { toolId } });
@@ -244,6 +250,14 @@ public sealed class ChatToolsTests(AppFixture app)
         var call = app.Mcp.Calls.Last(c => c.Method == "tools/call");
         Assert.Equal("echo", call.Params!.Value.GetProperty("name").GetString());
         Assert.Equal(email, call.Headers["X-User-Email"]);
+
+        // A long call says how far it is on the way, and the chat passes it on.
+        var slow = await SendAsync(b, id, """Echo: [call weather_desk__echo {"text":"slow"}]""");
+        var progress = Event(slow, "tool_progress");
+        Assert.Equal("Warming up", progress.GetProperty("message").GetString());
+        Assert.Equal(2, progress.GetProperty("total").GetDouble());
+        Assert.Equal(Event(slow, "tool_call").GetProperty("id").GetString(), progress.GetProperty("id").GetString());
+        Assert.Equal("echo: slow", Event(slow, "tool_result").GetProperty("text").GetString());
 
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/tools/servers/{Guid.Parse(toolId[4..])}", UriKind.Relative)));
         Assert.DoesNotContain(toolId, await ToolsInConfigAsync(b));

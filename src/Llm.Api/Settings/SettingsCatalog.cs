@@ -92,6 +92,8 @@ public static class SettingsCatalog
             { Default = "00:10:00", Unit = "minutes", Min = 1, Max = 120, Optional = false },
         new("Chat:ApiRequestsPerKey", Chat, "API requests at once, per key", "Requests one API key (Qwen Code, an IDE, a script) may have at the gateway at once; more are refused (HTTP 429) until one ends. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "2", Min = 0, Max = 64, Optional = false },
+        new("Chat:ToolCallTimeout", Chat, "Longest tool call", "A call to Argus or an MCP server still running after this long is stopped, and the model told so. An MCP server can have its own limit (Admin → Tools). The chat shows how long a call has run, and the progress the server reports.", SettingType.Duration, SettingScope.Live)
+            { Default = "01:00:00", Unit = "minutes", Min = 1, Max = 1440, Optional = false },
         new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
 

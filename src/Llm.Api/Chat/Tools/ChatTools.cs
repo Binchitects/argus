@@ -7,8 +7,33 @@ using Llm.Core.Identity;
 
 namespace Llm.Api.Chat.Tools;
 
-/// <summary>What a tool knows about the answer it helps with.</summary>
-public sealed record ToolContext(AppUser User, string Email, Conversation Conversation);
+/// <summary>What a tool knows about the answer it helps with, and where a long call reports how far it is.</summary>
+public sealed record ToolContext(AppUser User, string Email, Conversation Conversation, ToolProgress? Progress = null);
+
+/// <summary>
+/// Where a long tool call says how far it is (MCP progress notifications): the chat
+/// shows it beside the call. An answer runs its calls one at a time, so this reports
+/// for the call running now. At most one report a second, unless its words change.
+/// </summary>
+public sealed class ToolProgress(Func<object, Task> emit)
+{
+    private DateTimeOffset _last;
+    private string? _said;
+
+    /// <summary>The call running now (set by the chat before each call).</summary>
+    public string? CallId { get; set; }
+
+    public Task ReportAsync(McpProgress p)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (CallId is not { } id || (now - _last < TimeSpan.FromSeconds(1) && p.Message == _said))
+        {
+            return Task.CompletedTask;
+        }
+        (_last, _said) = (now, p.Message);
+        return emit(new { type = "tool_progress", id, progress = p.Progress, total = p.Total, message = p.Message });
+    }
+}
 
 /// <summary>
 /// A tool call's outcome: the text the model reads, whether it failed, and files
@@ -97,7 +122,7 @@ public sealed class ArgusTool(ArgusMcp argus) : IChatTool
         var functions = Mcp.ToOpenAiTools(await session.ToolsAsync(ct));
         return new LocalRun(functions, session.Instructions, async (name, args, token) =>
         {
-            var (text, isError) = await session.CallAsync(name, args, token);
+            var (text, isError) = await session.CallAsync(name, args, context.Progress is { } p ? p.ReportAsync : null, token);
             return new ToolResult(text, isError);
         });
     }

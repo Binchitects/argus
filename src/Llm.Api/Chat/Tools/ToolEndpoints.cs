@@ -12,7 +12,9 @@ namespace Llm.Api.Chat.Tools;
 public sealed record ToolSettingRequest(bool Enabled, Audience Audience, Guid[]? Groups, bool OnByDefault, bool AskFirst);
 
 /// <summary>An MCP server. HeaderValue: null keeps the stored one, "" removes it.</summary>
-public sealed record McpServerRequest(string? Name = null, string? Description = null, string? Url = null, string? HeaderName = null, string? HeaderValue = null, string? EmailHeader = null);
+/// <param name="CallTimeoutMinutes">Longest one call may take; 0: the chat's limit (Chat:ToolCallTimeout); null: unchanged.</param>
+public sealed record McpServerRequest(string? Name = null, string? Description = null, string? Url = null, string? HeaderName = null, string? HeaderValue = null, string? EmailHeader = null,
+    int? CallTimeoutMinutes = null);
 
 /// <summary>Admin → Tools: which tools exist, for whom, and the MCP servers that add more.</summary>
 public static class ToolEndpoints
@@ -42,7 +44,7 @@ public static class ToolEndpoints
             server = t.Tool is McpServerTool m ? new
             {
                 m.Server.Id, m.Server.Name, m.Server.Description, m.Server.Url, m.Server.HeaderName, headerSet = m.Server.HeaderValueEncrypted is not null,
-                m.Server.EmailHeader, prefix = m.Slug + "__",
+                m.Server.EmailHeader, m.Server.CallTimeoutMinutes, prefix = m.Slug + "__",
             } : null,
         }));
     }
@@ -173,6 +175,10 @@ public static class ToolEndpoints
         {
             return AuthEndpoints.Problem(400, "url", "The address must be an http(s) URL, e.g. https://tools.example.com/mcp.");
         }
+        if (body.CallTimeoutMinutes is < 0 or > 1440)
+        {
+            return AuthEndpoints.Problem(400, "call_timeout", "The longest call is between 1 minute and 24 hours (1440 minutes); 0 for the chat's limit.");
+        }
         if (body.HeaderValue is { Length: > 0 } && string.IsNullOrEmpty(dataKey))
         {
             return AuthEndpoints.Problem(400, "data_key", "APP_DATA_KEY is not set, so a header value cannot be stored encrypted.");
@@ -194,6 +200,10 @@ public static class ToolEndpoints
         if (body.EmailHeader is not null || creating)
         {
             server.EmailHeader = string.IsNullOrWhiteSpace(body.EmailHeader) ? null : body.EmailHeader.Trim();
+        }
+        if (body.CallTimeoutMinutes is { } minutes)
+        {
+            server.CallTimeoutMinutes = minutes == 0 ? null : minutes;
         }
         return null;
     }

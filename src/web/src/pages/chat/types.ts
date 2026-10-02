@@ -127,6 +127,8 @@ export type ChatEvent =
   | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; thinkingMs: number | null; durationMs: number | null }
   | { type: 'tool_call'; id: string; name: string; arguments: string; tool?: string | null }
   | { type: 'approval'; id: string; name: string; arguments: string; tool: string; title: string }
+  /** How far a long tool call is, as its server says (`total` when it knows the end). */
+  | { type: 'tool_progress'; id: string; progress: number; total: number | null; message: string | null }
   | { type: 'tool_result'; id: string; messageId: string; name: string; text: string; isError: boolean; declined?: boolean; noAccess: boolean; durationMs: number; attachments?: Attachment[] }
   | { type: 'notice'; kind: string; text: string }
   /** Waiting for a turn: the model serves few at once, in turn (fair use). */

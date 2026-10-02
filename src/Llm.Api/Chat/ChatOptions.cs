@@ -21,6 +21,9 @@ public sealed class ChatOptions
     public long MaxUploadBytes { get; set; } = 20 * 1024 * 1024;
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromMinutes(15);
 
+    /// <summary>Longest one tool call (Argus, an MCP server) may take; a server can have its own.</summary>
+    public TimeSpan ToolCallTimeout { get; set; } = TimeSpan.FromMinutes(60);
+
     /// <summary>Answers one person may have running at once, across their chats; more wait their turn.</summary>
     public int AnswersPerPerson { get; set; } = 1;
 

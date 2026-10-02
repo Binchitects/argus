@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Chat.Tools;
 
 /// <summary>An MCP server an admin added, as a tool: its functions are named "{server}__{function}".</summary>
-public sealed partial class McpServerTool(McpServer server, HttpClient http, string? dataKey) : IChatTool
+public sealed partial class McpServerTool(McpServer server, HttpClient http, string? dataKey, TimeSpan callTimeout) : IChatTool
 {
     public const string Prefix = "mcp:";
 
@@ -50,14 +50,18 @@ public sealed partial class McpServerTool(McpServer server, HttpClient http, str
     public async Task<System.Text.Json.Nodes.JsonArray> ListAsync(CancellationToken ct) =>
         await (await Mcp.ConnectAsync(http, new Uri(server.Url), Headers(null), server.Name, ct)).ToolsAsync(ct);
 
+    /// <summary>Longest one call may take: the server's own limit, or the chat's.</summary>
+    public TimeSpan CallTimeout => server.CallTimeoutMinutes is { } m ? TimeSpan.FromMinutes(m) : callTimeout;
+
     public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
     {
-        var session = await Mcp.ConnectAsync(http, new Uri(server.Url), Headers(context.Email), server.Name, ct);
+        var session = await Mcp.ConnectAsync(http, new Uri(server.Url), Headers(context.Email), server.Name, ct, CallTimeout);
         var prefix = Slug + "__";
         var functions = Mcp.ToOpenAiTools(await session.ToolsAsync(ct), name => prefix + name);
         return new LocalRun(functions, session.Instructions, async (function, args, token) =>
         {
-            var (text, isError) = await session.CallAsync(function.StartsWith(prefix, StringComparison.Ordinal) ? function[prefix.Length..] : function, args, token);
+            var (text, isError) = await session.CallAsync(function.StartsWith(prefix, StringComparison.Ordinal) ? function[prefix.Length..] : function, args,
+                context.Progress is { } p ? p.ReportAsync : null, token);
             return new ToolResult(text, isError);
         });
     }
@@ -75,7 +79,7 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 /// </summary>
 public sealed class ToolRegistry(
     AppDbContext db, ArgusTool argus, ImageTool image, CalculatorTool calculator, TimeTool time, FilesTool files, PythonTool python, WebTool web,
-    IHttpClientFactory http, IOptions<AuthOptions> auth)
+    IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat)
 {
     public const string McpClient = "mcp";
 
@@ -92,7 +96,7 @@ public sealed class ToolRegistry(
         return all;
     }
 
-    public McpServerTool Server(McpServer server) => new(server, http.CreateClient(McpClient), auth.Value.DataKey);
+    public McpServerTool Server(McpServer server) => new(server, http.CreateClient(McpClient), auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout);
 
     /// <summary>The tools this person may use now: on, allowed to them, and available.</summary>
     public async Task<IReadOnlyList<ToolChoice>> ForAsync(Membership member, CancellationToken ct = default) =>

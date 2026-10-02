@@ -26,7 +26,7 @@ interface ToolRow {
   icon: string
   unavailable: string | null
   setting: { enabled: boolean; audience: Audience; onByDefault: boolean; askFirst: boolean; groups: { id: string; name: string }[] }
-  server: { id: string; name: string; description: string | null; url: string; headerName: string | null; headerSet: boolean; emailHeader: string | null; prefix: string } | null
+  server: { id: string; name: string; description: string | null; url: string; headerName: string | null; headerSet: boolean; emailHeader: string | null; callTimeoutMinutes: number | null; prefix: string } | null
 }
 
 interface Setting {
@@ -117,6 +117,11 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
                 The person's email goes in <span className="font-mono text-foreground">{tool.server.emailHeader}</span>
               </p>
             )}
+            {tool.server.callTimeoutMinutes && (
+              <p className="text-muted-foreground">
+                A call may run for up to <span className="text-foreground">{tool.server.callTimeoutMinutes} minutes</span>
+              </p>
+            )}
             <p className="text-muted-foreground">
               Its functions are named <span className="font-mono text-foreground">{tool.server.prefix}…</span>
             </p>
@@ -180,10 +185,11 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
     headerName: saved?.headerName ?? '',
     headerValue: '',
     emailHeader: saved?.emailHeader ?? '',
+    callTimeoutMinutes: saved?.callTimeoutMinutes ? String(saved.callTimeoutMinutes) : '',
   })
   const [error, setError] = useState<string | null>(null)
   const [test, setTest] = useState<{ ok: boolean; error?: string; tools?: { name: string; description: string | null }[] } | null>(null)
-  const body = { ...form, headerValue: form.headerValue || (saved ? null : '') }
+  const body = { ...form, headerValue: form.headerValue || (saved ? null : ''), callTimeoutMinutes: Number(form.callTimeoutMinutes) || 0 }
   const check = useMutation({
     mutationFn: () => api<NonNullable<typeof test>>(`/api/admin/tools/servers/test${saved ? `?id=${saved.id}` : ''}`, { body }),
     onSuccess: setTest,
@@ -231,9 +237,14 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
             <Input type="password" autoComplete="new-password" {...field('headerValue')} />
           </Field>
         </div>
-        <Field label="Person's email header" hint="Optional, e.g. X-User-Email: for servers that answer as the person asking.">
-          <Input autoComplete="off" {...field('emailHeader')} />
-        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Person's email header" hint="Optional, e.g. X-User-Email: for servers that answer as the person asking.">
+            <Input autoComplete="off" {...field('emailHeader')} />
+          </Field>
+          <Field label="Longest call (minutes)" hint="For tools that run long, up to 1440. Empty: the chat's limit (Settings → Chat).">
+            <Input type="number" min={1} max={1440} inputMode="numeric" autoComplete="off" {...field('callTimeoutMinutes')} />
+          </Field>
+        </div>
         {test &&
           (test.ok ? (
             <Alert variant="success" title={`Connected: ${test.tools?.length ?? 0} tools`}>

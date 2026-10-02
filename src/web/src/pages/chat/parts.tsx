@@ -12,6 +12,7 @@ import { CodeBlock } from './code-block'
 import { seconds, toolTitle } from './format'
 import { argsSummary, splitArgs } from './tool-args'
 import { ToolOutput } from './tool-output'
+import type { ToolRunning } from './live'
 import type { Message, ToolCall } from './types'
 
 function useNow(active: boolean) {
@@ -99,10 +100,13 @@ export function ToolCard({
   waiting,
   onDecide,
   onOpenFile,
+  progress,
 }: {
   call: ToolCall
   result?: Message
   live: boolean
+  /** While it runs: since when, and how far its server says it is. */
+  progress?: ToolRunning
   /** Opens a file the tool made in the Files panel. */
   onOpenFile?: (name: string) => void
   /** The call waits for the person to allow it ("ask before running"). */
@@ -118,6 +122,9 @@ export function ToolCard({
   const Icon = toolIcons.find(([re]) => re.test(call.function.name))?.[1] ?? Wrench
   const args = argsSummary(call.function.arguments)
   const running = !result && live && !waiting
+  const now = useNow(running && !!progress)
+  const ran = running && progress ? now - progress.since : 0
+  const share = progress?.total && progress.progress !== undefined ? Math.min(1, Math.max(0, progress.progress / progress.total)) : null
   const declined = result?.status === 'declined'
   const failed = result?.status === 'failed' || declined
   const value = useMemo(() => (result && !declined ? parseResult(result.content) : undefined), [result, declined])
@@ -144,7 +151,7 @@ export function ToolCard({
               </span>
             ) : running ? (
               <>
-                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> Running
+                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> Running{ran >= 3000 && <span className="tabular-nums"> · {seconds(Math.floor(ran / 1000) * 1000)}</span>}
               </>
             ) : declined ? (
               <span className="flex items-center gap-1">
@@ -164,6 +171,20 @@ export function ToolCard({
             <ChevronRight className="size-3.5 transition-transform duration-200 group-data-[state=open]:rotate-90" aria-hidden="true" />
           </span>
         </Collapsible.Trigger>
+        {running && (share !== null || progress?.message) && (
+          <div className="flex items-center gap-2 border-t px-3 py-1.5 text-xs text-muted-foreground">
+            {share !== null && (
+              <progress
+                value={Math.round(share * 100)}
+                max={100}
+                aria-label={`${toolTitle(call.function.name)} progress`}
+                className="h-1.5 w-24 shrink-0 appearance-none overflow-hidden rounded-full bg-muted [&::-moz-progress-bar]:bg-primary [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-webkit-progress-value]:transition-[width]"
+              />
+            )}
+            {share !== null && <span className="shrink-0 tabular-nums">{Math.round(share * 100)}%</span>}
+            {progress?.message && <span className="min-w-0 truncate">{progress.message}</span>}
+          </div>
+        )}
         <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
           <div className="grid gap-3 border-t px-3 py-3">
             {args.length > 0 && (

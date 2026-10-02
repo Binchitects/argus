@@ -4,7 +4,10 @@ using System.Text.Json;
 
 namespace Llm.Tests;
 
-/// <summary>An MCP server an admin could add: one tool, "echo", behind an API key header.</summary>
+/// <summary>
+/// An MCP server an admin could add: one tool, "echo", behind an API key header. Asked
+/// to echo "slow" with a progress token, it answers as events, saying how far it is first.
+/// </summary>
 public sealed class FakeMcp : HttpMessageHandler
 {
     public const string ApiKey = "mcp-key-for-tests";
@@ -36,6 +39,15 @@ public sealed class FakeMcp : HttpMessageHandler
             return new HttpResponseMessage(HttpStatusCode.Accepted);
         }
         var id = body.GetProperty("id").GetInt32();
+        if (method == "tools/call" && body.GetProperty("params").GetProperty("arguments").GetProperty("text").GetString() == "slow"
+            && body.GetProperty("params").TryGetProperty("_meta", out var meta))
+        {
+            var token = meta.GetProperty("progressToken").GetString();
+            var events = string.Concat(
+                "data: " + JsonSerializer.Serialize(new { jsonrpc = "2.0", method = "notifications/progress", @params = new { progressToken = token, progress = 1, total = 2, message = "Warming up" } }) + "\n\n",
+                "data: " + JsonSerializer.Serialize(new { jsonrpc = "2.0", id, result = new { content = new[] { new { type = "text", text = "echo: slow" } }, isError = false } }) + "\n\n");
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(events, Encoding.UTF8, "text/event-stream") };
+        }
         var result = method switch
         {
             "initialize" => """{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"echo","version":"1"}}""",

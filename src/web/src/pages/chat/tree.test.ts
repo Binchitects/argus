@@ -53,5 +53,6 @@ describe('durations', () => {
     expect(seconds(2300)).toBe('2.3 s')
     expect(seconds(42_000)).toBe('42 s')
     expect(seconds(65_000)).toBe('1 min 5 s')
+    expect(seconds(4_380_000)).toBe('1 h 13 min')
   })
 })

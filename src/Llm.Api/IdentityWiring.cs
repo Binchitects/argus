@@ -254,8 +254,9 @@ public static class IdentityWiring
         });
         services.AddSingleton<Chat.ChatKey>();
         services.AddSingleton<Chat.ChatModels>();
-        services.AddHttpClient<Chat.ArgusMcp>(c => c.Timeout = TimeSpan.FromMinutes(2));
-        services.AddHttpClient(Chat.Tools.ToolRegistry.McpClient, c => c.Timeout = TimeSpan.FromMinutes(2));
+        // A tool call may run for an hour (Chat:ToolCallTimeout): each request sets its own limit.
+        services.AddHttpClient<Chat.ArgusMcp>(c => c.Timeout = Timeout.InfiniteTimeSpan).ConfigurePrimaryHttpMessageHandler(Chat.Mcp.Handler);
+        services.AddHttpClient(Chat.Tools.ToolRegistry.McpClient, c => c.Timeout = Timeout.InfiniteTimeSpan).ConfigurePrimaryHttpMessageHandler(Chat.Mcp.Handler);
         services.AddScoped<Chat.Tools.ArgusTool>();
         services.AddScoped<Chat.Tools.ImageTool>();
         services.AddSingleton<Chat.Tools.CalculatorTool>();

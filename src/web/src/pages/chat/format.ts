@@ -1,10 +1,11 @@
 import type { ChatConfig, Message } from './types'
 
-/** "0.4 s", "12 s", "1 min 5 s". */
+/** "0.4 s", "12 s", "1 min 5 s", "1 h 12 min". */
 export function seconds(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return ''
   if (ms < 10_000) return `${(ms / 1000).toFixed(1)} s`
   const s = Math.round(ms / 1000)
+  if (s >= 3600) return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`
 }
 

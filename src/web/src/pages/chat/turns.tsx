@@ -9,7 +9,7 @@ import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { attachmentUrl } from './api'
 import { ImageViewer } from './image-viewer'
-import type { Notice } from './live'
+import type { Notice, ToolRunning } from './live'
 import { Markdown } from './markdown'
 import { answerCost, seconds } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
@@ -163,6 +163,7 @@ export function AnswerTurn({
   onFork,
   approvals,
   onDecide,
+  calls,
   busy,
 }: {
   answer: Message[]
@@ -186,6 +187,8 @@ export function AnswerTurn({
   /** Tool calls waiting for the person to allow them, and how to answer. */
   approvals?: string[]
   onDecide?: (callId: string, allow: boolean) => void
+  /** Tool calls running: since when, and how far. */
+  calls?: Record<string, ToolRunning>
   busy: boolean
 }) {
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
@@ -288,7 +291,7 @@ export function AnswerTurn({
             {a.content && <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} live={live && isLast} />}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
             {a.toolCalls?.map((t) => (
-              <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} onOpenFile={onOpenFile} />
+              <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} onOpenFile={onOpenFile} progress={calls?.[t.id]} />
             ))}
             {a.error && (
               <Alert variant="destructive" className="my-2">

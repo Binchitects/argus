@@ -75,12 +75,42 @@ setups to paste.
     the JSON, and errors are shown as the tool's own words.
   - When something exists that you can't read, a notice names the repository
     and its maintainers. It stays outside the fold, so it is never missed.
+- **Long tool calls.** A call to Argus or an MCP server may run for an hour
+  (**Settings → Chat → Longest tool call**); an MCP server can have its own
+  limit, up to 24 hours (**Admin → Tools →** the server's **Edit** → **Longest
+  call**).
+  - While it runs, its card shows how long it has run, and the progress the
+    server reports (MCP progress notifications): a bar when it knows the end,
+    and its words.
+  - The client reads the server's events as they come, answers its pings, and
+    keeps the connection alive (TCP keep-alive), so a firewall does not drop
+    a call that is quiet for a while. A stream that breaks is picked up where
+    it broke (`Last-Event-ID`), up to five times, when the server numbers its
+    events.
+  - A call past its limit, or in an answer that is stopped, is cancelled at
+    the server too (`notifications/cancelled`), and the model is told why.
 - **Code.**
   - Every code block shows its language or file name, with **Copy**, wrap,
     **Download** and line numbers.
   - Blocks over 40 lines fold.
   - A block the model names (```` ```ts title="src/a.ts" ````, or a first line
     `// file: src/a.ts`) opens in the Files panel.
+- **Diagrams.** A `mermaid` block is drawn where it is written, as a diagram:
+  ask Argus for a repository's workflow, architecture or data flow and the
+  answer shows it. **Code** shows its source, **Preview** opens it larger in
+  the Files panel.
+  - It is drawn by the preview runner (below), in a frame as tall as the
+    drawing (taller than 1200 px, it scrolls), in the chat's theme.
+  - One that does not parse shows its code, with Mermaid's error.
+  - While the answer is still being written, the block being written is
+    shown as code; it is drawn once it is done.
+  - The model is told to quote labels with punctuation and to give each
+    diagram an `accTitle`, which names it for screen readers.
+- **Right-to-left text.** Persian, Arabic and Hebrew read right to left, as in
+  ChatGPT: each paragraph, heading, list, quote and table of an answer takes
+  the direction of its first words, so Persian and English sit side by side.
+  Questions, the message box, the edit box, thinking and a chat's instructions
+  follow what is typed. Code, code blocks and formulas stay left to right.
 - **Files panel.** Like Claude's: every attachment, every file Argus read (with
   **Open in GitLab**), and every file the model wrote in the branch on screen.
   It keeps the newest version of each and has a viewer.

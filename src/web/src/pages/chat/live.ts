@@ -1,5 +1,13 @@
 import type { Attachment, ChatEvent, Message } from './types'
 
+/** A tool call while it runs: since when, and the progress its server last reported. */
+export interface ToolRunning {
+  since: number
+  progress?: number
+  total?: number | null
+  message?: string | null
+}
+
 /** Notices that came with the answer (Argus unavailable, a model that cannot see...). */
 export interface Notice {
   kind: string
@@ -16,6 +24,8 @@ export interface LiveState {
   thinkingSince: number | null
   /** Tool calls waiting for the person to allow them. */
   waiting?: string[]
+  /** Tool calls running: since when, and how far they are when their server says. */
+  calls?: Record<string, ToolRunning>
   /** In line for a turn (the model serves few at once): how many go first. */
   queued?: number | null
   /** The answer being written: text and tool calls go to it. */
@@ -101,7 +111,11 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     case 'tool_call': {
       const a = lastAssistant()
       if (a) a.toolCalls = [...(a.toolCalls ?? []), { id: e.id, function: { name: e.name, arguments: e.arguments } }]
-      return { ...state, messages }
+      return { ...state, messages, calls: { ...state.calls, [e.id]: { since: now } } }
+    }
+    case 'tool_progress': {
+      const call = state.calls?.[e.id]
+      return { ...state, calls: { ...state.calls, [e.id]: { since: call?.since ?? now, progress: e.progress, total: e.total, message: e.message ?? call?.message } } }
     }
     case 'approval':
       return { ...state, waiting: [...(state.waiting ?? []).filter((w) => w !== e.id), e.id] }

@@ -33,5 +33,7 @@ public sealed class McpServer
     public string? HeaderValueEncrypted { get; set; }
     /// <summary>When set, the person's email goes in this header, for servers that answer per person.</summary>
     public string? EmailHeader { get; set; }
+    /// <summary>Longest one call may take, in minutes; null: Chat:ToolCallTimeout. Some tools run for an hour.</summary>
+    public int? CallTimeoutMinutes { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

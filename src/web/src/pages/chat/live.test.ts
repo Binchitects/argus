@@ -28,6 +28,17 @@ describe('live answer', () => {
     expect(s.leaf).toBe('a1')
   })
 
+  it('a long tool call keeps when it started and the last progress its server reported', () => {
+    const s = play([
+      { type: 'question', id: 'q1', parentId: null },
+      { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' },
+      { type: 'tool_call', id: 'c1', name: 'build', arguments: '{}' },
+      { type: 'tool_progress', id: 'c1', progress: 1, total: 4, message: 'Cloning' },
+      { type: 'tool_progress', id: 'c1', progress: 2, total: 4, message: null },
+    ])
+    expect(s.calls?.c1).toEqual({ since: 1000, progress: 2, total: 4, message: 'Cloning' })
+  })
+
   it('tool results hang off the call, and the next answer off the result', () => {
     const s = play([
       { type: 'question', id: 'q1', parentId: null },

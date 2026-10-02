@@ -69,6 +69,7 @@ public sealed partial class ChatService(
 
         // The chat's tools that this person may use, each made ready for this answer.
         var runs = new Dictionary<string, (ToolChoice Choice, IToolRun Run)>();
+        var progress = new ToolProgress(emit);
         var tools = new JsonArray();
         var instructions = new List<string>();
         if (model?.Tools != false)
@@ -79,7 +80,7 @@ public sealed partial class ChatService(
                 IToolRun run;
                 try
                 {
-                    run = await choice.Tool.StartAsync(new ToolContext(user, email, conversation), ct);
+                    run = await choice.Tool.StartAsync(new ToolContext(user, email, conversation, progress), ct);
                 }
                 catch (McpException ex)
                 {
@@ -271,6 +272,7 @@ public sealed partial class ChatService(
                     else
                     {
                         took.Restart();
+                        progress.CallId = id;
                         outcome = await target.Run.CallAsync(name, args, ct);
                     }
                 }
