@@ -8,7 +8,11 @@ using Llm.Core.Identity;
 namespace Llm.Api.Chat.Tools;
 
 /// <summary>What a tool knows about the answer it helps with, and where a long call reports how far it is.</summary>
-public sealed record ToolContext(AppUser User, string Email, Conversation Conversation, ToolProgress? Progress = null);
+public sealed record ToolContext(AppUser User, string Email, Conversation Conversation, ToolProgress? Progress = null)
+{
+    /// <summary>Runs parts of a task by sub-agents with the answer's model and tools (the Sub-agents tool).</summary>
+    public Func<IReadOnlyList<AgentTask>, CancellationToken, Task<ToolResult>>? Agents { get; init; }
+}
 
 /// <summary>
 /// Where a long tool call says how far it is (MCP progress notifications): the chat

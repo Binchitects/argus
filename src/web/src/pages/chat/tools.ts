@@ -1,4 +1,4 @@
-import { Calculator, Clock, FileText, Globe, Image as ImageIcon, MessageCircleQuestion, Plug, SearchCode, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { Calculator, Clock, FileText, Globe, Image as ImageIcon, MessageCircleQuestion, Network, Plug, SearchCode, SquareTerminal, type LucideIcon } from 'lucide-react'
 import type { ChatTool } from './types'
 
 /** The icon for a tool's icon hint (the API's ChatTool.icon). */
@@ -12,6 +12,7 @@ export const toolIcon: Record<string, LucideIcon> = {
   terminal: SquareTerminal,
   globe: Globe,
   'message-circle-question': MessageCircleQuestion,
+  network: Network,
 }
 
 /** The tools a chat has on: its own choice, or those on in new chats. */

@@ -91,3 +91,23 @@ export function argsSummary(raw: string): [string, string][] {
   }
   return [...a.code.map((c): [string, string] => [c.key, first(c.code)]), ...a.plain, ...Object.entries(a.nested ?? {}).map(([k, v]): [string, string] => [k, JSON.stringify(v)])]
 }
+
+/** What sub-agents brought back (the delegate tool): each part's title, result, tool calls and error. */
+export interface AgentResult {
+  title: string
+  result: string
+  toolCalls: number
+  error: string | null
+}
+
+export function agentResults(value: unknown): AgentResult[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null
+  const parts = value.filter((v): v is Row => isRow(v) && typeof v.title === 'string' && typeof v.result === 'string')
+  if (parts.length !== value.length) return null
+  return parts.map((p) => ({
+    title: p.title as string,
+    result: p.result as string,
+    toolCalls: typeof p.tool_calls === 'number' ? p.tool_calls : 0,
+    error: typeof p.error === 'string' ? p.error : null,
+  }))
+}

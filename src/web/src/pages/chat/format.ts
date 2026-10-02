@@ -9,8 +9,12 @@ export function seconds(ms: number | null | undefined): string {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`
 }
 
-/** "find_symbol" -> "Find symbol". */
+/** Tools whose function name says less than their title. */
+const titles: Record<string, string> = { delegate: 'Sub-agents', ask_user: 'Questions for you' }
+
+/** "find_symbol" -> "Find symbol"; "delegate" -> "Sub-agents". */
 export function toolTitle(name: string): string {
+  if (Object.hasOwn(titles, name)) return titles[name]!
   const words = name.replace(/[_-]+/g, ' ').trim()
   return words.charAt(0).toUpperCase() + words.slice(1)
 }

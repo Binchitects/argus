@@ -234,6 +234,41 @@ test.describe('questions from the model', () => {
   })
 })
 
+// Sub-agents did two parts side by side; the card shows each part's result.
+const agentsChat = {
+  ...argusChat,
+  id: '00000000-0000-4000-8000-0000000a9e75', title: 'Two repositories', useArgus: false, currentLeafId: 'g4',
+  messages: [
+    { ...blank, id: 'g1', parentId: null, role: 'user', content: 'How do codec and driver-shim log errors?' },
+    {
+      ...blank, id: 'g2', parentId: 'g1', role: 'assistant', model: 'Test-Model', content: '',
+      toolCalls: [call('c1', 'delegate', { tasks: [{ title: 'codec errors', instructions: 'Find how platform/codec logs errors.' }, { title: 'driver-shim errors', instructions: 'Find how driver-shim logs errors.' }] })],
+    },
+    {
+      ...blank, id: 'g3', parentId: 'g2', role: 'tool', toolCallId: 'c1', toolName: 'delegate', durationMs: 8400,
+      content: JSON.stringify([
+        { title: 'codec errors', result: 'Through `log_error()` in `src/log.c`, with an error code.', tool_calls: 3 },
+        { title: 'driver-shim errors', result: 'With `pr_err` in `shim/main.c`.', tool_calls: 2 },
+      ]),
+    },
+    { ...blank, id: 'g4', parentId: 'g3', role: 'assistant', model: 'Test-Model', content: 'codec uses `log_error()`; driver-shim uses `pr_err`.' },
+  ],
+}
+
+test.describe('sub-agents', () => {
+  test("each part's result is shown on the card", async ({ page }, info) => {
+    await page.route(`**/api/chat/conversations/${agentsChat.id}`, (route) => route.fulfill({ json: agentsChat }))
+    await page.goto(`/chat/${agentsChat.id}`)
+    const answer = page.getByRole('region', { name: 'Answer' })
+    await answer.getByRole('button', { name: /Sub-agents/ }).click()
+    const parts = answer.getByRole('list', { name: 'What each sub-agent found' })
+    await expect(parts.getByRole('listitem')).toHaveCount(2)
+    await expect(parts.getByRole('listitem').first()).toContainText('codec errors3 tool calls')
+    await expect(parts.getByRole('listitem').last()).toContainText('pr_err')
+    await expectAccessible(page, info, 'sub-agents')
+  })
+})
+
 test.describe('chat with the model', () => {
   test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
   test.setTimeout(180_000)

@@ -66,6 +66,15 @@ setups to paste.
     your own. Its answer ends there. **Send answers** sends your choices as
     your next message (one line per question), so you can also just type a
     reply, today or days later. Nothing waits on the server meanwhile.
+  - **Sub-agents**: for a task whose parts do not need each other (how three
+    repositories log errors, two designs side by side), the model splits it
+    into two to six parts, each done by a sub-agent of its own: a clean
+    context with only its instructions, and the chat's tools (but not
+    delegating again, asking you questions, or tools that ask before each
+    call). They run side by side, up to **Sub-agents at once** (Settings →
+    Chat, 3), inside the answer's place in line; their results, in order,
+    come back to the model, which puts them together. The card shows how many
+    are done and what each is doing, then each part's result.
   - **MCP servers** an admin added: their tools, by name.
   - A tool set to **ask before each call** waits with **Allow** and **Don't
     allow**. A call you do not allow is not run, and the model is told so.

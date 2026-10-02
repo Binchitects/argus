@@ -104,10 +104,50 @@ public sealed class ChatToolsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Sub_agents_do_the_parts_side_by_side_with_the_chats_tools_and_their_results_come_back()
+    {
+        var (b, _, email) = await PersonAsync(app.Factory);
+        var id = await NewChatAsync(b, new { tools = new[] { "agents", "calculator", "ask" } });
+        var parts = new
+        {
+            tasks = new[]
+            {
+                new { title = "Sum", instructions = """Work it out: [call calculate {"expression":"2+2"}]""" },
+                new { title = "Colour", instructions = "Name a colour." },
+            },
+        };
+        var events = await SendAsync(b, id, $"Split it: [call delegate {System.Text.Json.JsonSerializer.Serialize(parts)}]");
+
+        var result = Event(events, "tool_result");
+        Assert.False(result.GetProperty("isError").GetBoolean());
+        var done = JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement.EnumerateArray().ToList();
+        Assert.Equal(["Sum", "Colour"], done.Select(d => d.GetProperty("title").GetString()));
+        Assert.Equal("Found it.", done[0].GetProperty("result").GetString());
+        Assert.Equal(1, done[0].GetProperty("tool_calls").GetInt32());
+        Assert.Equal("Answer to: Name a colour.", done[1].GetProperty("result").GetString());
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "tool_progress" && e.GetProperty("total").GetDouble() == 2);
+
+        // Each sub-agent starts clean, with the chat's tools but not delegating again nor asking the person.
+        var agents = app.Model.Requests.Select(r => r.Body)
+            .Where(r => r["user"]!.GetValue<string>() == email && r["messages"]![0]!["content"]!.GetValue<string>().Contains("You are a sub-agent", StringComparison.Ordinal))
+            .ToList();
+        Assert.True(agents.Count >= 3);
+        Assert.All(agents, r => Assert.Equal(2, r["messages"]!.AsArray().Count(m => m!["role"]!.GetValue<string>() != "tool" && m["role"]!.GetValue<string>() != "assistant")));
+        var offered = agents.SelectMany(r => r["tools"]?.AsArray() ?? []).Select(t => t!["function"]!["name"]!.GetValue<string>()).ToHashSet();
+        Assert.Contains("calculate", offered);
+        Assert.DoesNotContain("delegate", offered);
+        Assert.DoesNotContain("ask_user", offered);
+
+        // One part is not a split: the model is told how to call it.
+        var wrong = await SendAsync(b, id, """Again: [call delegate {"tasks":[{"title":"Only","instructions":"x"}]}]""");
+        Assert.Contains("2 to 6 tasks", Event(wrong, "tool_result").GetProperty("text").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_chat_has_its_own_tools_among_those_the_person_may_use()
     {
         var (b, _, email) = await PersonAsync(app.Factory);
-        Assert.Equal(["argus", "calculator", "time", "files", "ask"], await ToolsInConfigAsync(b));
+        Assert.Equal(["argus", "calculator", "time", "files", "ask", "agents"], await ToolsInConfigAsync(b));
         var id = await NewChatAsync(b, new { tools = new[] { "calculator" } });
         await SendAsync(b, id, "hello");
         Assert.Equal(["calculate"], FunctionsSentFor(email));

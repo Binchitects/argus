@@ -117,7 +117,7 @@ export function CodeBlock({
       ) : (
       <div className={cn('relative grid', !wrap && 'grid-cols-[auto_minmax(0,1fr)]')}>
         {!wrap && (
-          <div aria-hidden="true" className="border-r py-3 pr-2 pl-3 text-right font-mono text-[0.8125rem] leading-6 text-muted-foreground/70 select-none">
+          <div aria-hidden="true" className="border-r py-3 pr-2 pl-3 text-right font-mono text-[0.8125rem] leading-6 text-muted-foreground select-none">
             {(long && !expanded ? lines.slice(0, COLLAPSED_LINES) : lines).map((_, i) => (
               <div key={i}>{i + 1}</div>
             ))}

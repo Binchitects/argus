@@ -1,4 +1,4 @@
-import { AlertTriangle, Brain, Calculator, Check, ChevronRight, CircleX, Clock, Download, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Brain, Calculator, Check, ChevronRight, CircleX, Clock, Download, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, type LucideIcon } from 'lucide-react'
 import { Collapsible } from 'radix-ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
@@ -53,6 +53,7 @@ export function Thinking({ text, live, ms, since }: { text: string; live: boolea
 }
 
 const toolIcons: [RegExp, LucideIcon][] = [
+  [/^delegate$/, Network],
   [/python|run_code/, SquareTerminal],
   [/web|url|fetch/, Globe],
   [/image|picture|draw/, ImageIcon],

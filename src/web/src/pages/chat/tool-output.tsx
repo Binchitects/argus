@@ -11,7 +11,7 @@ import { CodeBlock } from './code-block'
 import { seconds } from './format'
 import { highlight } from './highlight'
 import { Markdown } from './markdown'
-import { runOutput, type RunOutput } from './tool-args'
+import { agentResults, runOutput, type RunOutput } from './tool-args'
 
 const extension = (path: string) => (path.includes('.') ? path.split('.').pop()! : path.split('/').pop()!)
 
@@ -174,6 +174,7 @@ export function ToolOutput({ text, value, args, failed }: { text: string; value:
   const branch = typeof args.branch === 'string' ? args.branch : null
   const query = typeof args.query === 'string' ? args.query : typeof args.name === 'string' ? args.name : null
   const run = runOutput(value)
+  const agents = agentResults(value)
   if (value === undefined || (failed && !run)) {
     return <Markdown text={text || '(nothing)'} />
   }
@@ -185,6 +186,23 @@ export function ToolOutput({ text, value, args, failed }: { text: string; value:
     body = <CodeBlock code={JSON.stringify(value, null, 2)} lang="json" />
   } else if (run) {
     body = <Run run={run} />
+  } else if (agents) {
+    body = (
+      <ol className="grid gap-3" aria-label="What each sub-agent found">
+        {agents.map((a, i) => (
+          <li key={i} className="grid gap-1.5 rounded-lg border p-3">
+            <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+              {a.title}
+              <span className="text-xs font-normal text-muted-foreground">
+                {a.toolCalls === 0 ? 'no tool calls' : `${a.toolCalls} tool call${a.toolCalls === 1 ? '' : 's'}`}
+              </span>
+            </p>
+            {a.error && <p className="text-xs text-destructive-ink">{a.error}</p>}
+            {a.result ? <Markdown text={a.result} /> : <p className="text-xs text-muted-foreground">It brought nothing back.</p>}
+          </li>
+        ))}
+      </ol>
+    )
   } else if (file) {
     body = (
       <div className="grid gap-2">

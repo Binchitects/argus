@@ -71,7 +71,9 @@ public sealed partial class ChatService(
         var runs = new Dictionary<string, (ToolChoice Choice, IToolRun Run)>();
         var progress = new ToolProgress(emit);
         var tools = new JsonArray();
-        var instructions = new List<string>();
+        var instructions = new List<(string Tool, string Text)>();
+        // Sub-agents get the answer's model and tools, filled in below before any call.
+        var kit = new AgentKit(modelName, thinking, email, runs, tools, instructions, progress);
         if (model?.Tools != false)
         {
             var allowed = await registry.ForAsync(await access.MembershipAsync(user, ct), ct);
@@ -80,7 +82,7 @@ public sealed partial class ChatService(
                 IToolRun run;
                 try
                 {
-                    run = await choice.Tool.StartAsync(new ToolContext(user, email, conversation, progress), ct);
+                    run = await choice.Tool.StartAsync(new ToolContext(user, email, conversation, progress) { Agents = (parts, token) => AgentsAsync(parts, kit, token) }, ct);
                 }
                 catch (McpException ex)
                 {
@@ -100,12 +102,12 @@ public sealed partial class ChatService(
                 }
                 if (!string.IsNullOrWhiteSpace(run.Instructions))
                 {
-                    instructions.Add(run.Instructions.Trim());
+                    instructions.Add((choice.Tool.Id, run.Instructions.Trim()));
                 }
             }
         }
 
-        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, modelName, email, string.Join("\n\n", instructions), runs.ContainsKey("read_file"),
+        var (messages, imagesDropped) = await BuildHistoryAsync(conversation, question, model, modelName, email, string.Join("\n\n", instructions.Select(i => i.Text)), runs.ContainsKey("read_file"),
             emit, ct);
         if (imagesDropped)
         {
@@ -317,6 +319,148 @@ public sealed partial class ChatService(
                 await FinishAsync(conversation, CancellationToken.None);
                 await emit(new { type = "done", id = msg.Id });
                 return;
+            }
+        }
+    }
+
+    /// <summary>What sub-agents of an answer work with: its model, thinking, person, tools and their instructions.</summary>
+    private sealed record AgentKit(string Model, string? Thinking, string Email, Dictionary<string, (ToolChoice Choice, IToolRun Run)> Runs, JsonArray Tools,
+        List<(string Tool, string Text)> Instructions, ToolProgress Progress);
+
+    /// <summary>What a sub-agent's result may take of the answer's context.</summary>
+    private const int AgentResultChars = 12_000;
+
+    /// <summary>
+    /// Sub-agents: each part of a task is asked of the answer's model on its own (a clean
+    /// context: only its instructions), with the answer's tools except delegating again,
+    /// questions for the person and tools that ask before each call (nobody is there to
+    /// allow them). Up to Chat:AgentsAtOnce run at once, inside the answer's place in line.
+    /// Their results, in order, are the tool's answer.
+    /// </summary>
+    private async Task<ToolResult> AgentsAsync(IReadOnlyList<AgentTask> parts, AgentKit kit, CancellationToken ct)
+    {
+        var usable = kit.Tools.OfType<JsonObject>()
+            .Where(f => f["function"]?["name"]?.GetValue<string>() is { } n && n is not AgentsTool.Function and not AskTool.Function
+                && kit.Runs.TryGetValue(n, out var r) && !r.Choice.Setting.AskFirst)
+            .Select(f => (JsonNode)f.DeepClone())
+            .ToList();
+        var notes = string.Join("\n\n", kit.Instructions.Where(i => i.Tool is not "agents" and not "ask").Select(i => i.Text));
+        using var gate = new SemaphoreSlim(Math.Max(1, chat.CurrentValue.AgentsAtOnce));
+        var done = 0;
+        async Task<JsonObject> RunAsync(AgentTask part)
+        {
+            await gate.WaitAsync(ct);
+            try
+            {
+                await kit.Progress.ReportAsync(new McpProgress(done, parts.Count, $"{part.Title}: started"));
+                var (text, calls, error) = await AgentAsync(part, kit, new JsonArray([.. usable.Select(u => u.DeepClone())]), notes,
+                    doing => kit.Progress.ReportAsync(new McpProgress(done, parts.Count, $"{part.Title}: {doing}")), ct);
+                var finished = Interlocked.Increment(ref done);
+                await kit.Progress.ReportAsync(new McpProgress(finished, parts.Count, $"{part.Title}: {(error is null ? "done" : "failed")}"));
+                var result = new JsonObject
+                {
+                    ["title"] = part.Title,
+                    ["result"] = text.Length > AgentResultChars ? text[..AgentResultChars] + "\n[cut to fit]" : text,
+                    ["tool_calls"] = calls,
+                };
+                if (error is not null)
+                {
+                    result["error"] = error;
+                }
+                return result;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+        var results = await Task.WhenAll(parts.Select(RunAsync));
+        var failed = results.Count(r => r.ContainsKey("error"));
+        return new ToolResult(new JsonArray([.. results]).ToJsonString(Mcp.Plain), IsError: failed == results.Length);
+    }
+
+    /// <summary>One sub-agent: its own little answer loop, kept out of the chat (only its result goes back).</summary>
+    private async Task<(string Text, int Calls, string? Error)> AgentAsync(AgentTask part, AgentKit kit, JsonArray tools, string notes, Func<string, Task> say, CancellationToken ct)
+    {
+        var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC).\n\n" +
+            "You are a sub-agent: an assistant gave you one part of a larger task, and does the other parts elsewhere. Do only this part, with " +
+            "your tools when they help, and reply with its result: complete but compact, with the facts, names, file paths and links you found, " +
+            "for the assistant to put together with the other parts. Nobody else reads your reply, and you cannot ask questions." +
+            (notes.Length > 0 ? "\n\n" + notes : "");
+        var messages = new JsonArray(new JsonObject { ["role"] = "system", ["content"] = system }, new JsonObject { ["role"] = "user", ["content"] = part.Instructions });
+        var names = tools.OfType<JsonObject>().Select(f => f["function"]?["name"]?.GetValue<string>()).OfType<string>().ToHashSet(StringComparer.Ordinal);
+        var calls = 0;
+        var text = new StringBuilder();
+        for (var round = 0; ; round++)
+        {
+            var request = new JsonObject
+            {
+                ["model"] = kit.Model, ["messages"] = messages.DeepClone(), ["stream"] = true,
+                ["stream_options"] = new JsonObject { ["include_usage"] = true }, ["user"] = kit.Email,
+            };
+            if (ThinkingPresets.TemplateKwargs(kit.Thinking) is { } kwargs)
+            {
+                request["chat_template_kwargs"] = kwargs;
+            }
+            // No tools on the last allowed round: it must answer with what it has.
+            if (tools.Count > 0 && round < chat.CurrentValue.MaxToolRounds)
+            {
+                request["tools"] = tools.DeepClone();
+            }
+            text.Clear();
+            var pending = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
+            try
+            {
+                await foreach (var e in gateway.StreamAsync(request, kit.Email, ct))
+                {
+                    if (e is ContentDelta c)
+                    {
+                        text.Append(c.Text);
+                    }
+                    else if (e is ToolCallDelta t)
+                    {
+                        var slot = pending.TryGetValue(t.Index, out var existing) ? existing : (null, null, new StringBuilder());
+                        pending[t.Index] = (t.Id ?? slot.Id, t.Name ?? slot.Name, slot.Args.Append(t.Arguments));
+                    }
+                }
+            }
+            catch (ChatGatewayException ex)
+            {
+                return (text.ToString().Trim(), calls, ex.Message);
+            }
+            if (pending.Count == 0)
+            {
+                return (text.ToString().Trim(), calls, null);
+            }
+            var toolCalls = new JsonArray([.. pending.Select(kv => (JsonNode)new JsonObject
+            {
+                ["id"] = kv.Value.Id ?? $"agent_{round}_{kv.Key}",
+                ["type"] = "function",
+                ["function"] = new JsonObject { ["name"] = kv.Value.Name ?? "", ["arguments"] = kv.Value.Args.ToString() },
+            })]);
+            messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = text.ToString(), ["tool_calls"] = toolCalls });
+            foreach (var call in toolCalls.OfType<JsonObject>())
+            {
+                var name = call["function"]!["name"]!.GetValue<string>();
+                var raw = call["function"]!["arguments"]!.GetValue<string>();
+                calls++;
+                await say(name.Replace('_', ' '));
+                string result;
+                try
+                {
+                    result = !names.Contains(name) || !kit.Runs.TryGetValue(name, out var target)
+                        ? $"There is no tool named {name}."
+                        : (await target.Run.CallAsync(name, JsonNode.Parse(raw.Length == 0 ? "{}" : raw) as JsonObject ?? [], ct)).Text;
+                }
+                catch (JsonException)
+                {
+                    result = $"The arguments were not valid JSON: {raw}";
+                }
+                catch (McpException ex)
+                {
+                    result = ex.Message;
+                }
+                messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = call["id"]!.GetValue<string>(), ["content"] = result.Length > 30_000 ? result[..30_000] + "\n[cut to fit]" : result });
             }
         }
     }

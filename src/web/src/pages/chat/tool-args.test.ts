@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { argsSummary, runOutput, splitArgs } from './tool-args'
+import { agentResults, argsSummary, runOutput, splitArgs } from './tool-args'
 
 describe('tool arguments', () => {
   it('a program is code in its language; short values stay a list; the rest is JSON', () => {
@@ -32,5 +32,16 @@ describe('tool arguments', () => {
     const r = runOutput({ exit_code: 1, stdout: 'a\n', stderr: 'Traceback…', timed_out: null, problem: null, seconds: 0.4, files_given_to_the_person: ['chart.png'] })
     expect(r).toEqual({ stdout: 'a\n', stderr: 'Traceback…', exitCode: 1, problem: null, seconds: 0.4, rest: { files_given_to_the_person: ['chart.png'] } })
     expect(runOutput({ rows: [] })).toBeNull()
+  })
+})
+
+describe('what sub-agents brought back', () => {
+  it('is read as parts only when every item is one', () => {
+    expect(agentResults([{ title: 'Sum', result: '4', tool_calls: 1 }, { title: 'Colour', result: 'Red', tool_calls: 0, error: 'slow' }])).toEqual([
+      { title: 'Sum', result: '4', toolCalls: 1, error: null },
+      { title: 'Colour', result: 'Red', toolCalls: 0, error: 'slow' },
+    ])
+    expect(agentResults([{ title: 'Sum', result: '4' }, { name: 'x' }])).toBeNull()
+    expect(agentResults([])).toBeNull()
   })
 })
