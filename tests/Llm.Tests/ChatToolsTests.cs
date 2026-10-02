@@ -78,10 +78,36 @@ public sealed class ChatToolsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task The_model_asks_the_person_and_its_answer_ends_there_until_they_reply()
+    {
+        var (b, _, email) = await PersonAsync(app.Factory);
+        var id = await NewChatAsync(b, new { tools = new[] { "ask" } });
+        var asks = app.Model.Requests.Count;
+        var events = await SendAsync(b, id, """Plan it: [call ask_user {"questions":[{"question":"Which database?","options":[{"label":"PostgreSQL"},"SQLite"]}]}]""");
+        Assert.False(Event(events, "tool_result").GetProperty("isError").GetBoolean());
+        Assert.Single(events, e => e.GetProperty("type").GetString() == "assistant");
+        Assert.Single(events, e => e.GetProperty("type").GetString() == "done");
+        // The model was asked once: the answer stopped at the questions instead of going on.
+        Assert.Equal(1, app.Model.Requests.Skip(asks).Count(r => r.Body["user"]!.GetValue<string>() == email));
+        Assert.Contains("ask_user", app.Model.Requests.Last().Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        // The reply is the person's next message, after the questions.
+        var chat = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
+        var asked = chat.GetProperty("currentLeafId").GetGuid();
+        var reply = await SendAsync(b, id, "Which database? PostgreSQL");
+        Assert.Equal(asked, Event(reply, "question").GetProperty("parentId").GetGuid());
+
+        // Questions in the wrong shape are sent back to the model to fix, and the answer goes on.
+        var wrong = await SendAsync(b, id, """Again: [call ask_user {"questions":[{"question":"Which?","options":["only one"]}]}]""");
+        Assert.Contains("2 to 6 options", Event(wrong, "tool_result").GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Equal(2, wrong.Count(e => e.GetProperty("type").GetString() == "assistant"));
+    }
+
+    [Fact]
     public async Task A_chat_has_its_own_tools_among_those_the_person_may_use()
     {
         var (b, _, email) = await PersonAsync(app.Factory);
-        Assert.Equal(["argus", "calculator", "time", "files"], await ToolsInConfigAsync(b));
+        Assert.Equal(["argus", "calculator", "time", "files", "ask"], await ToolsInConfigAsync(b));
         var id = await NewChatAsync(b, new { tools = new[] { "calculator" } });
         await SendAsync(b, id, "hello");
         Assert.Equal(["calculate"], FunctionsSentFor(email));

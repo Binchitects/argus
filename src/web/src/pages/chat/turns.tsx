@@ -13,6 +13,7 @@ import type { Notice, ToolRunning } from './live'
 import { Markdown } from './markdown'
 import { answerCost, seconds } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
+import { QuestionCard } from './questions'
 import type { ChatConfig, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
@@ -164,6 +165,7 @@ export function AnswerTurn({
   approvals,
   onDecide,
   calls,
+  onAnswer,
   busy,
 }: {
   answer: Message[]
@@ -189,6 +191,8 @@ export function AnswerTurn({
   onDecide?: (callId: string, allow: boolean) => void
   /** Tool calls running: since when, and how far. */
   calls?: Record<string, ToolRunning>
+  /** Sends the person's answers to the model's questions (only on the chat's last answer, once it is done). */
+  onAnswer?: (text: string) => Promise<boolean>
   busy: boolean
 }) {
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
@@ -290,9 +294,13 @@ export function AnswerTurn({
             {a.reasoning && <Thinking text={a.reasoning} live={live && isLast && !a.content && !a.toolCalls?.length} ms={a.thinkingMs} since={isLast ? thinkingSince : null} />}
             {a.content && <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} live={live && isLast} />}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
-            {a.toolCalls?.map((t) => (
-              <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} onOpenFile={onOpenFile} progress={calls?.[t.id]} />
-            ))}
+            {a.toolCalls?.map((t) =>
+              t.function.name === 'ask_user' && results.get(t.id)?.status !== 'failed' ? (
+                <QuestionCard key={t.id} raw={t.function.arguments} onAnswer={!live && results.has(t.id) ? onAnswer : undefined} />
+              ) : (
+                <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} onOpenFile={onOpenFile} progress={calls?.[t.id]} />
+              ),
+            )}
             {a.error && (
               <Alert variant="destructive" className="my-2">
                 {a.error}

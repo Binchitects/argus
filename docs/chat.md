@@ -60,6 +60,12 @@ setups to paste.
   - **Web** (off until an admin turns it on): search (the `websearch`
     profile's SearXNG) and reading pages, from the sites an admin allows only.
     Pages are read in parts, as text; PDFs and documents on the web too.
+  - **Questions for you**: when a request leaves a choice open, the model asks
+    instead of guessing, as Claude does: one to four questions, each with a
+    few choices (pick one, or several where it says so), and a box to write
+    your own. Its answer ends there. **Send answers** sends your choices as
+    your next message (one line per question), so you can also just type a
+    reply, today or days later. Nothing waits on the server meanwhile.
   - **MCP servers** an admin added: their tools, by name.
   - A tool set to **ask before each call** waits with **Allow** and **Don't
     allow**. A call you do not allow is not run, and the model is told so.

@@ -261,6 +261,7 @@ public static class IdentityWiring
         services.AddScoped<Chat.Tools.ImageTool>();
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
+        services.AddSingleton<Chat.Tools.AskTool>();
         services.AddScoped<Chat.Tools.FilesTool>();
         services.Configure<Chat.Tools.SandboxOptions>(config.GetSection("Sandbox"));
         services.AddSingleton<Chat.Tools.SandboxClient>();

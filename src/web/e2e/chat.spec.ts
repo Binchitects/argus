@@ -190,6 +190,50 @@ test.describe('diagrams', () => {
   }
 })
 
+// The model asked before going on: the person answers on the card, and that is their next message.
+const askChat = {
+  ...argusChat,
+  id: '00000000-0000-4000-8000-0000000a5c00', title: 'Plan the service', useArgus: false, currentLeafId: 'k3',
+  messages: [
+    { ...blank, id: 'k1', parentId: null, role: 'user', content: 'Plan a small service for me.' },
+    {
+      ...blank, id: 'k2', parentId: 'k1', role: 'assistant', model: 'Test-Model', content: 'Two things first.',
+      toolCalls: [call('c1', 'ask_user', {
+        questions: [
+          { question: 'Which database?', options: [{ label: 'PostgreSQL', description: 'Already in the stack' }, { label: 'SQLite', description: 'One file, no server' }] },
+          { question: 'Which parts?', options: ['Sign-in', 'Search', 'Billing'], multiple: true },
+        ],
+      })],
+    },
+    { ...blank, id: 'k3', parentId: 'k2', role: 'tool', toolCallId: 'c1', toolName: 'ask_user', content: 'The questions are shown to the person.' },
+  ],
+}
+
+test.describe('questions from the model', () => {
+  test('are answered on a card, and the answers are the next message', async ({ page, isMobile }, info) => {
+    const errors = watchConsole(page)
+    let sent: { content: string; parentId?: string } | null = null
+    await page.route(`**/api/chat/conversations/${askChat.id}`, (route) => route.fulfill({ json: askChat }))
+    await page.route(`**/api/chat/conversations/${askChat.id}/messages`, async (route) => {
+      sent = route.request().postDataJSON()
+      await route.fulfill({ status: 409, json: { error: 'not in this test' } })
+    })
+    await page.goto(`/chat/${askChat.id}`)
+    const card = page.getByRole('region', { name: 'Questions for you' })
+    const send = card.getByRole('button', { name: 'Send answers' })
+    await expect(send).toBeDisabled()
+    await card.getByRole('radio', { name: /PostgreSQL/ }).check()
+    await card.getByRole('checkbox', { name: 'Sign-in' }).check()
+    await card.getByRole('checkbox', { name: 'Search' }).check()
+    await card.getByRole('textbox', { name: 'Your own answer: Which parts?' }).fill('Audit log')
+    await expectAccessible(page, info, 'questions')
+    await screenshot(page, info, `chat-questions${isMobile ? '-phone' : ''}`)
+    await send.click()
+    await expect.poll(() => sent).toEqual({ content: 'Which database? PostgreSQL\nWhich parts? Sign-in, Search, Audit log', attachments: [], parentId: 'k3', root: false })
+    expect(errors.filter((e) => !e.includes('409'))).toEqual([])
+  })
+})
+
 test.describe('chat with the model', () => {
   test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
   test.setTimeout(180_000)

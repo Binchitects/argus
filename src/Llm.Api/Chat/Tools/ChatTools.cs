@@ -37,9 +37,10 @@ public sealed class ToolProgress(Func<object, Task> emit)
 
 /// <summary>
 /// A tool call's outcome: the text the model reads, whether it failed, and files
-/// the tool made for the person (a picture), which the page shows.
+/// the tool made for the person (a picture), which the page shows. EndsAnswer: the
+/// answer stops after this call (questions for the person: their reply comes next).
 /// </summary>
-public sealed record ToolResult(string Text, bool IsError = false, IReadOnlyList<ChatAttachment>? Files = null);
+public sealed record ToolResult(string Text, bool IsError = false, IReadOnlyList<ChatAttachment>? Files = null, bool EndsAnswer = false);
 
 /// <summary>A tool made ready for one answer: its functions, and how to run them.</summary>
 public interface IToolRun

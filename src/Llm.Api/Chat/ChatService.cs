@@ -247,6 +247,8 @@ public sealed partial class ChatService(
             messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = msg.Content, ["tool_calls"] = toolCalls.DeepClone() });
             parent = msg.Id;
 
+            // Questions for the person end the answer: their reply comes as their next message.
+            var ends = false;
             foreach (var call in toolCalls.OfType<JsonObject>())
             {
                 var id = call["id"]!.GetValue<string>();
@@ -291,6 +293,7 @@ public sealed partial class ChatService(
                     return;
                 }
                 var (text, isError) = (outcome.Text, outcome.IsError);
+                ends |= outcome.EndsAnswer;
                 var result = new ChatMessage
                 {
                     ConversationId = conversation.Id, ParentId = parent, Role = "tool", Sequence = ++next, ToolCallId = id, ToolName = name,
@@ -308,6 +311,12 @@ public sealed partial class ChatService(
                     type = "tool_result", id, messageId = result.Id, name, text, isError, declined, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs,
                     attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType, original = f.Kind != "image" && f.Data != null }),
                 });
+            }
+            if (ends)
+            {
+                await FinishAsync(conversation, CancellationToken.None);
+                await emit(new { type = "done", id = msg.Id });
+                return;
             }
         }
     }
