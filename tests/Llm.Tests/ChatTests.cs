@@ -354,6 +354,24 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_chat_is_summarized_for_a_reader_to_export_and_nothing_is_kept()
+    {
+        var (b, _) = await PersonAsync();
+        var (other, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, await b.GetAsync($"/api/chat/conversations/{id}/summary"));
+        await SendAsync(b, id, "How do frames decode?");
+        var res = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}/summary"));
+        Assert.False(string.IsNullOrWhiteSpace(res.GetProperty("summary").GetString()));
+        var asked = app.Model.Requests.Last().Body["messages"]!.AsArray();
+        Assert.StartsWith("You summarize a conversation between a person and an AI assistant for a reader", asked[0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains("Person: How do frames decode?", asked[1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        // Nothing kept: the chat is as it was (no summary on any message).
+        Assert.All((await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray(), m => Assert.Equal(JsonValueKind.Null, m.GetProperty("summary").ValueKind));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/chat/conversations/{id}/summary"));
+    }
+
+    [Fact]
     public async Task Regenerate_adds_an_answer_beside_the_old_one()
     {
         var (b, _) = await PersonAsync();

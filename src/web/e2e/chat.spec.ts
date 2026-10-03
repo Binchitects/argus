@@ -222,6 +222,31 @@ test.describe('context gauge', () => {
   })
 })
 
+test.describe('export', () => {
+  test('a chat downloads as Markdown and as data, and its summary comes from the model', async ({ page }) => {
+    await serveArgusChat(page)
+    await page.route(`**/api/chat/conversations/${argusChat.id}/summary`, (route) => route.fulfill({ json: { title: argusChat.title, summary: '# DecodeFrame\n\n- Defined in src/frame/decode.c' } }))
+    await page.goto(`/chat/${argusChat.id}`)
+    const exportAs = async (item: string) => {
+      await page.getByRole('button', { name: 'Chat actions' }).click()
+      await page.getByRole('menuitem', { name: 'Export' }).click()
+      const saving = page.waitForEvent('download')
+      await page.getByRole('menuitem', { name: item }).click()
+      const file = await saving
+      return { name: file.suggestedFilename(), text: (await fs.readFile(await file.path())).toString('utf8') }
+    }
+    const md = await exportAs('Markdown (.md)')
+    expect(md.name).toBe('Where is DecodeFrame.md')
+    expect(md.text).toContain('## You\n\nWhere is DecodeFrame defined')
+    expect(md.text).toContain('*Attached: before.png, after.png*')
+    expect(md.text).toContain('**Find symbol**')
+    const json = JSON.parse((await exportAs('Data (.json)')).text)
+    expect(json.messages).toHaveLength(argusChat.messages.length)
+    const summary = await exportAs('Summary by the model (.md)')
+    expect(summary).toEqual({ name: 'Where is DecodeFrame summary.md', text: '# DecodeFrame\n\n- Defined in src/frame/decode.c' })
+  })
+})
+
 // Persian beside English: each block reads in its own direction, code stays left to right.
 const rtlChat = {
   ...argusChat,

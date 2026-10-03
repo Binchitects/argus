@@ -1,8 +1,18 @@
-import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FileDown, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -185,6 +195,7 @@ export function ChatHeader({
   onOpenList,
   chat,
   onCompact,
+  onExport,
 }: {
   config: ChatConfig
   settings: ChatSettings
@@ -197,6 +208,8 @@ export function ChatHeader({
   chat?: { id: string; title: string; archived: boolean }
   /** Summarize the branch on screen (undefined: nothing to compact now). */
   onCompact?: () => void
+  /** Export the branch on screen, or its summary. */
+  onExport?: (kind: ExportKind) => void
 }) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
@@ -214,13 +227,15 @@ export function ChatHeader({
             <FolderOpen /> <span className="tabular-nums">{filesCount}</span>
           </Button>
         </Tooltip>
-        {chat && <ChatMenu chat={chat} onCompact={onCompact} />}
+        {chat && <ChatMenu chat={chat} onCompact={onCompact} onExport={onExport} />}
       </span>
     </header>
   )
 }
 
-function ChatMenu({ chat, onCompact }: { chat: { id: string; title: string; archived: boolean }; onCompact?: () => void }) {
+export type ExportKind = 'md' | 'html' | 'pdf' | 'json' | 'summary'
+
+function ChatMenu({ chat, onCompact, onExport }: { chat: { id: string; title: string; archived: boolean }; onCompact?: () => void; onExport?: (kind: ExportKind) => void }) {
   const { fork, archive, askDelete } = useChatActions(chat, true)
   return (
     <DropdownMenu>
@@ -238,6 +253,21 @@ function ChatMenu({ chat, onCompact }: { chat: { id: string; title: string; arch
         <DropdownMenuItem disabled={!onCompact} onSelect={() => onCompact?.()}>
           <FoldVertical /> Compact
         </DropdownMenuItem>
+        {onExport && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <FileDown /> Export
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem onSelect={() => onExport('md')}>Markdown (.md)</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onExport('html')}>Web page (.html)</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onExport('pdf')}>PDF (print it)</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onExport('json')}>Data (.json)</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => onExport('summary')}>Summary by the model (.md)</DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
         <DropdownMenuItem onSelect={() => archive.mutate(!chat.archived)}>
           {chat.archived ? <ArchiveRestore /> : <Archive />} {chat.archived ? 'Unarchive' : 'Archive'}
         </DropdownMenuItem>

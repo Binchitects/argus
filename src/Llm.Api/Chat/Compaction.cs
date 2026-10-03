@@ -144,7 +144,8 @@ public sealed partial class ChatService
     /// does not fit the model's context at once is summarized in parts, each folded
     /// into the summary so far.
     /// </summary>
-    private async Task<string> SummarizeAsync(string? earlier, IReadOnlyList<ChatMessage> messages, GatewayModel? model, string modelName, string email, CancellationToken ct)
+    private async Task<string> SummarizeAsync(string? earlier, IReadOnlyList<ChatMessage> messages, GatewayModel? model, string modelName, string email, CancellationToken ct,
+        string prompt = CompactPrompt)
     {
         var output = Math.Min(SummaryTokens, model?.MaxOutput ?? SummaryTokens);
         var room = (long)Math.Max(4096, (model?.Context ?? 32768) - output - 1024) * 7 / 2 - CompactPrompt.Length - 400;
@@ -158,7 +159,7 @@ public sealed partial class ChatService
             var free = Math.Max(2_000, room - (summary?.Length ?? 0));
             if (part.Length > 0 && part.Length + line.Length > free)
             {
-                summary = await SummaryOnceAsync(summary, part.ToString(), model, modelName, email, output, ct);
+                summary = await SummaryOnceAsync(summary, part.ToString(), model, modelName, email, output, ct, prompt);
                 part.Clear();
                 free = Math.Max(2_000, room - summary.Length);
             }
@@ -166,7 +167,7 @@ public sealed partial class ChatService
         }
         if (part.Length > 0)
         {
-            summary = await SummaryOnceAsync(summary, part.ToString(), model, modelName, email, output, ct);
+            summary = await SummaryOnceAsync(summary, part.ToString(), model, modelName, email, output, ct, prompt);
         }
         return summary ?? "";
     }
@@ -209,7 +210,8 @@ public sealed partial class ChatService
         }
     }
 
-    private async Task<string> SummaryOnceAsync(string? earlier, string part, GatewayModel? model, string modelName, string email, int output, CancellationToken ct)
+    private async Task<string> SummaryOnceAsync(string? earlier, string part, GatewayModel? model, string modelName, string email, int output, CancellationToken ct,
+        string prompt = CompactPrompt)
     {
         var ask = new StringBuilder();
         if (earlier is not null)
@@ -226,7 +228,7 @@ public sealed partial class ChatService
         {
             ["model"] = modelName,
             ["messages"] = new JsonArray(
-                new JsonObject { ["role"] = "system", ["content"] = CompactPrompt },
+                new JsonObject { ["role"] = "system", ["content"] = prompt },
                 new JsonObject { ["role"] = "user", ["content"] = ask.ToString() }),
             ["stream"] = true,
             ["stream_options"] = new JsonObject { ["include_usage"] = true },

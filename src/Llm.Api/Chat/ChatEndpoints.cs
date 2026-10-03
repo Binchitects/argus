@@ -64,6 +64,7 @@ public static class ChatEndpoints
         g.MapGet("/conversations/{id:guid}/stream", WatchAsync);
         g.MapPost("/conversations/{id:guid}/stop", StopAsync);
         g.MapPost("/conversations/{id:guid}/hurry", HurryAsync);
+        g.MapGet("/conversations/{id:guid}/summary", SummaryAsync);
         g.MapPost("/conversations/{id:guid}/compact", CompactAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync);
@@ -614,6 +615,24 @@ public static class ChatEndpoints
             return Results.NotFound();
         }
         return jobs.Stop(id) ? Results.Accepted() : AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
+    }
+
+    /// <summary>The branch on screen summarized by the model for a reader (to export): made now, kept nowhere.</summary>
+    private static async Task<IResult> SummaryAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ChatService chat, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (await Owned(db, id, me) is not { } c)
+        {
+            return Results.NotFound();
+        }
+        try
+        {
+            return Results.Ok(new { title = c.Title, summary = await chat.SummaryForReaderAsync(me, c, ct) });
+        }
+        catch (ChatGatewayException ex)
+        {
+            return AuthEndpoints.Problem(503, "summary", $"The chat could not be summarized: {ex.Message}");
+        }
     }
 
     /// <summary>"Answer now": the answer being written stops thinking and answers with what it has.</summary>

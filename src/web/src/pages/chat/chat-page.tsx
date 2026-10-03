@@ -26,6 +26,9 @@ import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
 import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message } from './types'
 import { useUploads } from './uploads'
+import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export'
+import type { ExportKind } from './header'
+import { saveBlob } from '@/lib/zip'
 import type { Queued } from './composer'
 import { tellDesktop } from '@/lib/desktop'
 
@@ -410,6 +413,34 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     })
   }
 
+  /** The branch on screen as a file (made here, from what the page has), or its summary by the model. */
+  const exportChat = (kind: ExportKind) => {
+    const name = title ?? data?.title ?? 'Chat'
+    const save = (text: string, type: string, file: string) => saveBlob(new Blob([text], { type }), file)
+    if (kind === 'summary') {
+      if (!id) return
+      toast.promise(
+        api<{ summary: string }>(`/api/chat/conversations/${id}/summary`).then((r) => save(r.summary, 'text/markdown', exportName(name, 'summary', 'md'))),
+        { loading: 'Summarizing the chat…', success: 'Summary saved', error: (e) => errorMessage(e) },
+      )
+      return
+    }
+    if (kind === 'json') return save(chatToJson({ id: id ?? '', title: name }, path), 'application/json', exportName(name, '', 'json'))
+    const md = chatToMarkdown(name, path)
+    if (kind === 'md') return save(md, 'text/markdown', exportName(name, '', 'md'))
+    const html = markdownToHtml(name, md)
+    if (kind === 'html') return save(html, 'text/html', exportName(name, '', 'html'))
+    // PDF: the page opens on its own, and the browser's print saves it as PDF.
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+    const page = window.open(url, '_blank')
+    if (!page) {
+      toast.error('The browser blocked the new tab: allow pop-ups for this site, or export the web page and print it.')
+      return
+    }
+    page.addEventListener('load', () => page.print(), { once: true })
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
   // Written while an answer runs: each waits its turn, sent once the answer before is over
   // (saved too: a page with nothing live), or at once with Send now (which stops the answer).
   const [queue, setQueue] = useState<Queued[]>([])
@@ -516,6 +547,7 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
           onToggleFiles={() => setFilesOpen(!filesOpen)}
           onOpenList={onOpenList}
           chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt } : undefined}
+          onExport={id && path.length ? exportChat : undefined}
           onCompact={canCompact ? () => void compact() : undefined}
         />
         {empty ? (
