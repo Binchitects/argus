@@ -28,7 +28,7 @@ public sealed class MailOptions
     public bool StartTls { get; set; } = true;
     public string? User { get; set; }
     public string? Password { get; set; }
-    /// <summary>The sender, e.g. "LLM Service &lt;llm@example.com&gt;".</summary>
+    /// <summary>The sender, e.g. "Argus Arena &lt;llm@example.com&gt;".</summary>
     public string? From { get; set; }
 }
 

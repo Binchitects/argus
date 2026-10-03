@@ -264,6 +264,18 @@ public sealed class ServerTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, (await AdminSend(HttpMethod.Patch, "/admin/repos/999", new { included = true })).Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Put, "/admin/repos/settings", new { new_repos = "maybe" })).Status);
 
+        // Its index removed and kept in (built anew next time), or removed and left out.
+        Assert.Equal(HttpStatusCode.Forbidden, (await _http.PostAsync("/admin/repos/11/index/remove", new StringContent("{}"))).StatusCode);
+        var (gone, dropped) = await AdminSend(HttpMethod.Post, "/admin/repos/11/index/remove", new { leave_out = false });
+        Assert.Equal(HttpStatusCode.OK, gone);
+        Assert.True(dropped["removed"]!.GetValue<int>() >= 1);
+        alpha = (await AdminGet("/admin/repos")).Body["repos"]!.AsArray().Single(r => r!["gitlab_id"]!.GetValue<long>() == 11)!;
+        Assert.True(alpha["included"]!.GetValue<bool>());
+        Assert.Empty(alpha["indexed"]!.AsArray());
+        Assert.Equal(HttpStatusCode.OK, (await AdminSend(HttpMethod.Post, "/admin/repos/11/index/remove", new { leave_out = true })).Status);
+        Assert.False((await AdminGet("/admin/repos")).Body["repos"]!.AsArray().Single(r => r!["gitlab_id"]!.GetValue<long>() == 11)!["included"]!.GetValue<bool>());
+        Assert.Equal(HttpStatusCode.NotFound, (await AdminSend(HttpMethod.Post, "/admin/repos/999/index/remove", new { })).Status);
+
         // New repositories left out until chosen.
         Assert.Equal(HttpStatusCode.OK, (await AdminSend(HttpMethod.Put, "/admin/repos/settings", new { new_repos = "exclude" })).Status);
         Choices.Record(_ix.Conn, [new Project(13, "grp/new", "main", "http://x/n.git")], 200);

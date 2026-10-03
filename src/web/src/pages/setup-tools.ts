@@ -75,7 +75,7 @@ claude`,
 model_provider = "llm-service"
 
 [model_providers.llm-service]
-name = "LLM Service"
+name = "Argus Arena"
 base_url = "${c.base}"
 env_key = "${KEY}"
 wire_api = "responses"`,
@@ -125,7 +125,7 @@ qwen`,
           provider: {
             'llm-service': {
               npm: '@ai-sdk/openai-compatible',
-              name: 'LLM Service',
+              name: 'Argus Arena',
               options: { baseURL: c.base, apiKey: `{env:${KEY}}` },
               models: { [c.model]: { name: c.model, limit: { context: c.context, output: c.maxOutput } } },
             },
@@ -278,7 +278,7 @@ aider --model openai/${c.model}`,
       {
         text: 'Add the model, with your key in place of the placeholder:',
         file: '~/.continue/config.yaml',
-        code: `name: LLM Service
+        code: `name: Argus Arena
 version: 0.0.1
 schema: v1
 

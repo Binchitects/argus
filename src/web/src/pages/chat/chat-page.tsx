@@ -154,7 +154,10 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const answering = streaming && view.mode !== 'compact'
   // How full the context was at the last answer: its prompt and what it wrote.
   const lastUsage = [...path].reverse().find((m) => m.role === 'assistant' && m.promptTokens != null)
-  const context = contextOf(lastUsage, model?.context, settings.maxTokens ?? model?.maxOutput ?? null)
+  // A compaction since the last answer: the gauge works out what the next request carries.
+  const compactedAt = path.findLastIndex((m) => m.summary)
+  const compacted = compactedAt >= 0 && (!lastUsage || compactedAt >= path.indexOf(lastUsage)) ? path[compactedAt]!.summary : null
+  const context = contextOf(lastUsage, model?.context, settings.maxTokens ?? model?.maxOutput ?? null, compacted)
 
   useEffect(() => {
     document.title = title ? `${title} · ${brand ?? 'Chat'}` : `Chat · ${brand ?? ''}`.trim()
@@ -258,12 +261,6 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   }
 
   const toolsPicker = model?.tools === false ? null : <ToolsPicker tools={config.tools} value={toolsOnHere} onChange={(tools) => void change({ tools })} />
-
-  const rename = async (t: string) => {
-    if (!id) return
-    await api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { title: t } }).catch((e) => toast.error(errorMessage(e)))
-    await queryClient.invalidateQueries({ queryKey: ['chat'] })
-  }
 
   /**
    * Streams one answer; false when the question never reached the server (it goes
@@ -485,8 +482,6 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
         <ChatHeader
           config={config}
           settings={settings}
-          title={id ? title : null}
-          onRename={rename}
           onChange={change}
           filesCount={files.length}
           filesOpen={filesOpen}

@@ -186,7 +186,7 @@ test('a live setting applies at once and is audited; a stack setting waits and c
   // The name (from /api/info) is in use without a reload: the tab title and the sidebar.
   await expect(page).toHaveTitle(`Settings · ${brand}`)
   await page.getByRole('button', { name: /Back to the default/ }).first().click()
-  await expect(page.getByLabel('Product name')).toHaveValue('LLM Service')
+  await expect(page.getByLabel('Product name')).toHaveValue('Argus Arena')
 
   if (await page.getByText('Stack settings cannot be saved yet').isVisible()) return
   await page.goto('/admin/settings#backup')

@@ -34,7 +34,7 @@ public static class SettingsCatalog
     [
         // ---------------------------------------------------------------- app, live --
         new("Branding:ProductName", Branding, "Product name", "Shown in the sidebar, on the sign-in page and in the browser tab.", SettingType.Text, SettingScope.Live)
-            { Default = "LLM Service", Optional = false, Max = 60 },
+            { Default = "Argus Arena", Optional = false, Max = 60 },
         new("Branding:SignInHeadline", Branding, "Sign-in headline", "The sentence beside the sign-in form.", SettingType.Text, SettingScope.Live)
             { Default = "Your organisation's model, code search and usage, in one place.", Max = 160 },
         new("Branding:SupportContact", Branding, "Where to get help", "An email address or a link, shown on the sign-in page and in the account menu. Empty hides it.", SettingType.Text, SettingScope.Live)
@@ -118,7 +118,7 @@ public static class SettingsCatalog
             { Default = "true" },
         new("Mail:User", Mail, "SMTP user", "For servers that need a sign-in; empty for a relay that does not.", SettingType.Text, SettingScope.Live),
         new("Mail:Password", Mail, "SMTP password", "From your mail team.", SettingType.Secret, SettingScope.Live),
-        new("Mail:From", Mail, "Sender", "The address email comes from, e.g. LLM Service <llm@example.com>.", SettingType.Text, SettingScope.Live),
+        new("Mail:From", Mail, "Sender", "The address email comes from, e.g. Argus Arena <llm@example.com>.", SettingType.Text, SettingScope.Live),
 
         // --------------------------------------------------------------- stack (.env) --
         new("PRICE_INPUT_PER_MTOK", Credit, "Input, cache miss", "Per million prompt tokens the engine processed, in your credit's currency.", SettingType.Number, SettingScope.Stack)

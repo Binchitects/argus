@@ -53,7 +53,7 @@ public sealed class FoundationTests(AppFixture app)
     {
         var info = await _client.GetFromJsonAsync<Dictionary<string, string>>(new Uri("/api/info", UriKind.Relative));
         Assert.NotNull(info);
-        Assert.Equal("LLM Service", info["name"]);
+        Assert.Equal("Argus Arena", info["name"]);
         Assert.Matches(@"^\d+\.\d+\.\d+", info["version"]);
     }
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { GitBranch, Loader2, RefreshCw, RotateCw } from 'lucide-react'
+import { Eraser, GitBranch, Loader2, MoreHorizontal, RefreshCw, RotateCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useConfirm } from '@/components/ui/confirm'
 import { DataTable, selectColumn, SortHeader, type ColumnDef } from '@/components/ui/data-table'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -112,6 +113,31 @@ export function RepositoriesCard({ running, progress, pending, gitlabUrl }: { ru
     onSuccess: changed,
     onError: (e) => toast.error(errorMessage(e)),
   })
+  // Its index removed now: kept in (built anew, at once) or left out.
+  const removeIndex = useMutation({
+    mutationFn: async ({ r, leaveOut }: { r: RepoRow; leaveOut: boolean }) => {
+      const res = await api<{ removed: number }>(`/api/admin/argus/repos/${r.gitlab_id}/index/remove`, { body: { leaveOut } })
+      if (!leaveOut) await api('/api/admin/argus/index', { body: { repo: r.repo } })
+      return res
+    },
+    onSuccess: async (_, { r, leaveOut }) => {
+      await changed()
+      toast.success(leaveOut ? `${r.repo}: index removed` : `${r.repo}: rebuilding its index`, {
+        description: leaveOut ? 'Left out of the index; answers no longer cover it. Turn it on again to index it anew.' : 'Its old index is gone; it is read again from its latest commits.',
+      })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const askRemoveIndex = async (r: RepoRow, leaveOut: boolean) => {
+    if (
+      await confirm(
+        leaveOut
+          ? { title: `Remove the index of ${r.repo}?`, description: 'Every branch\'s files and symbols are removed, and it is left out of the index. Turn it on again to index it anew.', confirm: 'Remove index', destructive: true }
+          : { title: `Rebuild the index of ${r.repo}?`, description: 'Its index is removed and read again from its latest commits; until then, answers do not cover it.', confirm: 'Rebuild' },
+      )
+    )
+      removeIndex.mutate({ r, leaveOut })
+  }
   const leaveOut = async (rows: RepoRow[]) => {
     const what = rows.length === 1 ? rows[0]!.repo : `${rows.length} repositories`
     if (await confirm({ title: `Leave ${what} out of the index?`, description: 'Their files and symbols are removed, and answers no longer cover them. Choose them again to index them anew.', confirm: 'Leave out', destructive: true }))
@@ -161,9 +187,26 @@ export function RepositoriesCard({ running, progress, pending, gitlabUrl }: { ru
       enableSorting: false,
       header: () => <span className="sr-only">Actions</span>,
       cell: ({ row: { original: r } }) => (
-        <Button variant="outline" size="sm" disabled={!r.included || update.isPending} onClick={() => update.mutate(r)} aria-label={`Update the index of ${r.repo}`}>
-          <RotateCw /> Update
-        </Button>
+        <span className="flex items-center justify-end gap-1">
+          <Button variant="outline" size="sm" disabled={!r.included || update.isPending} onClick={() => update.mutate(r)} aria-label={`Update the index of ${r.repo}`}>
+            <RotateCw /> Update
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" disabled={running || removeIndex.isPending} aria-label={`More for ${r.repo}`}>
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={!r.included || r.indexed.length === 0} onSelect={() => void askRemoveIndex(r, false)}>
+                <Eraser /> Rebuild index
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" disabled={r.indexed.length === 0 && !r.included} onSelect={() => void askRemoveIndex(r, true)}>
+                <Trash2 /> Remove index
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
       ),
     },
   ]

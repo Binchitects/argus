@@ -76,3 +76,23 @@ test('the index schedule is set in words and shows the next passes', async ({ pa
     expect((await page.request.put('/api/admin/argus/schedule', { data: { schedule: '*/15 * * * *', timeZone: 'UTC' }, headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
   }
 })
+
+test("a repository's index is removed and built anew", async ({ page, isMobile }) => {
+  test.skip(isMobile, 'one browser changes the index at a time')
+  test.setTimeout(300_000)
+  test.skip(!(await argusUp(page)), 'needs the deployed Argus with the test GitLab')
+  await waitIdle(page)
+  await page.goto('/admin/indexing')
+  const repos = page.getByRole('region', { name: 'Repositories' })
+  await repos.getByRole('searchbox').fill('eal-core')
+  const row = repos.getByRole('row').filter({ hasText: 'root/eal-core' })
+  await expect(row).toContainText('add src/decoder.c')
+  await row.getByRole('button', { name: 'More for root/eal-core' }).click()
+  await page.getByRole('menuitem', { name: 'Rebuild index' }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Rebuild' }).click()
+  await expect(page.getByText('root/eal-core: rebuilding its index')).toBeVisible()
+  await waitIdle(page)
+  await page.reload()
+  await repos.getByRole('searchbox').fill('eal-core')
+  await expect(row).toContainText('add src/decoder.c', { timeout: 30_000 })
+})

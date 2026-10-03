@@ -42,7 +42,7 @@ function SignedIn({ me }: { me: Me }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const sections = visibleNavigation(me.isAdmin)
-  const name = info.data?.name ?? 'LLM Service'
+  const name = info.data?.name ?? 'Argus Arena'
 
   const location = useLocation()
   const fullBleed = useMatches().some((m) => (m.handle as { fullBleed?: boolean } | undefined)?.fullBleed)

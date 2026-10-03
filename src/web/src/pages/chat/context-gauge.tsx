@@ -42,7 +42,9 @@ export function ContextGauge({ context, onCompact, busy }: { context: ContextVie
           <div>
             <p className="text-sm font-medium">Context</p>
             <p className="text-xs text-muted-foreground tabular-nums">
+              {context.estimated ? 'About ' : ''}
               {formatValue(context.used)} of {formatValue(context.limit)} tokens ({percent}%)
+              {context.estimated ? ' since compacting; the next answer counts it' : ''}
             </p>
           </div>
           <div className="flex h-2.5 w-full gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">

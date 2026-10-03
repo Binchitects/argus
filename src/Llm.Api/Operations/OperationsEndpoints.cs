@@ -21,6 +21,9 @@ public sealed record IndexRequest(string[]? Branches, bool AllowPartial = false,
 /// <param name="Branches">Branches indexed besides the default one (names or globs); null: unchanged.</param>
 public sealed record RepoChoiceRequest(bool? Included = null, string[]? Branches = null);
 
+/// <param name="LeaveOut">Leave the repository out of the index too; else it is built anew by the next pass or an update.</param>
+public sealed record RemoveIndexRequest(bool LeaveOut = false);
+
 /// <param name="Schedule">Five-field cron; "": Argus does not reindex by itself.</param>
 /// <param name="TimeZone">IANA, e.g. Europe/Berlin.</param>
 public sealed record IndexScheduleRequest(string Schedule, string TimeZone);
@@ -86,6 +89,14 @@ public static class OperationsEndpoints
             return res;
         }, a));
         argus.MapGet("/repos/{gitlabId:long}/branches", (long gitlabId, ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync($"repos/{gitlabId}/branches", ct), a));
+        // Its index removed now; left out too, or kept in to be built anew.
+        argus.MapPost("/repos/{gitlabId:long}/index/remove", (long gitlabId, RemoveIndexRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        {
+            var res = await a.PostAsync($"repos/{gitlabId}/index/remove", new JsonObject { ["leave_out"] = body.LeaveOut }, ct);
+            await audit.WriteAsync("argus.index_remove", res?["repo"]?.GetValue<string>() ?? gitlabId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                detail: body.LeaveOut ? "left out" : "kept in, built anew");
+            return res;
+        }, a));
         argus.MapPut("/repos/settings", (RepoPolicyRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             var res = await a.PutAsync("repos/settings", new JsonObject { ["new_repos"] = body.NewRepos }, ct);

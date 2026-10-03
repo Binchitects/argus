@@ -65,6 +65,8 @@ public sealed class Notification
     public string? Link { get; set; }
     /// <summary>What it is the news of, once per person (e.g. one alert's firing, a credit threshold): it is not said twice.</summary>
     public string? Key { get; set; }
+    /// <summary>Cleared by the person: news said once (with a key) stays as a record, hidden, so it is not said again.</summary>
+    public bool Cleared { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ReadAt { get; set; }
 }

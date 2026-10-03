@@ -202,6 +202,43 @@
   .stagger > :nth-child(n + 9) { animation-delay: 210ms; }
 }
 
+/* Work in progress with no end known (a tool call, a picture being drawn): a bar
+   that runs along, and a light that passes over a placeholder. With motion off,
+   a still bar and a still placeholder: the timer beside them still counts. */
+.progress-run {
+  position: relative;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--muted);
+}
+.progress-run::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: inherit;
+  background: var(--primary);
+}
+.drawing {
+  background: linear-gradient(110deg, var(--muted) 30%, color-mix(in oklab, var(--primary) 18%, var(--muted)) 50%, var(--muted) 70%) 0 0 / 250% 100%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .progress-run::after {
+    animation: progress-run 1.4s ease-in-out infinite;
+  }
+  .drawing {
+    animation: drawing 2.2s linear infinite;
+  }
+  @keyframes progress-run {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(290%); }
+  }
+  @keyframes drawing {
+    from { background-position: 100% 0; }
+    to { background-position: -150% 0; }
+  }
+}
+
 /* Work in progress ("Thinking…"): a light passes along the words. Only with
    motion on; without it the text is plain. */
 @media (prefers-reduced-motion: no-preference) {

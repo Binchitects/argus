@@ -29,7 +29,7 @@ export function LoginPage() {
   const info = useQuery(infoQuery)
   const [step, setStep] = useState<'password' | '2fa'>('password')
   const [remember, setRemember] = useState(false)
-  const name = info.data?.name ?? 'LLM Service'
+  const name = info.data?.name ?? 'Argus Arena'
   useEffect(() => {
     document.title = `Sign in · ${name}`
   }, [name])

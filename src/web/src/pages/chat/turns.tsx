@@ -14,6 +14,7 @@ import type { Notice, ToolRunning } from './live'
 import { Markdown } from './markdown'
 import { answerUsage, seconds } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
+import { useNow } from './use-now'
 import { QuestionCard } from './questions'
 import type { AgentWork, ChatConfig, Message } from './types'
 
@@ -295,6 +296,7 @@ export function AnswerTurn({
           {compacting
             ? 'Compacting the chat: summarizing its older messages so the answer fits…'
             : queued == null ? 'Waiting for the model…' : queued === 0 ? 'Your turn is next: the model is answering others.' : `Waiting for your turn: ${queued} ${queued === 1 ? 'answer' : 'answers'} ahead of you.`}
+          <Waited since={question?.createdAt} />
         </output>
       )}
       {assistants.map((a, i) => {
@@ -335,5 +337,18 @@ export function AnswerTurn({
       })}
       {footer}
     </section>
+  )
+}
+
+/** How long an answer has been waited for, once it is a few seconds; past 20 seconds, why it may take a while. */
+function Waited({ since }: { since?: string }) {
+  const now = useNow(!!since)
+  const ms = since ? now - new Date(since).getTime() : 0
+  if (ms < 3000) return null
+  return (
+    <span className="tabular-nums">
+      {seconds(Math.floor(ms / 1000) * 1000)}
+      {ms >= 20_000 && ' · a model that was not loaded loads first, and a long chat takes a while to read'}
+    </span>
   )
 }

@@ -40,6 +40,8 @@ public static class TaskEndpoints
         n.MapGet("", NotificationsAsync);
         n.MapPost("/{id:guid}/read", ReadAsync);
         n.MapPost("/read", ReadAllAsync);
+        n.MapDelete("/{id:guid}", ClearAsync);
+        n.MapDelete("", ClearAllAsync);
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
@@ -269,8 +271,8 @@ public static class TaskEndpoints
     private static async Task<IResult> NotificationsAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
     {
         var me = await Me(p, users);
-        var items = await db.Notifications.AsNoTracking().Where(x => x.UserId == me.Id).OrderByDescending(x => x.CreatedAt).Take(30).ToListAsync(ct);
-        var unread = await db.Notifications.CountAsync(x => x.UserId == me.Id && x.ReadAt == null, ct);
+        var items = await db.Notifications.AsNoTracking().Where(x => x.UserId == me.Id && !x.Cleared).OrderByDescending(x => x.CreatedAt).Take(30).ToListAsync(ct);
+        var unread = await db.Notifications.CountAsync(x => x.UserId == me.Id && x.ReadAt == null && !x.Cleared, ct);
         return Results.Ok(new { unread, items = items.Select(x => new { x.Id, x.Kind, x.Title, x.Body, x.Link, x.CreatedAt, read = x.ReadAt != null }) });
     }
 
@@ -298,5 +300,31 @@ public static class TaskEndpoints
             await db.Notifications.Where(x => old.Contains(x.Id)).ExecuteDeleteAsync(ct);
         }
         return Results.NoContent();
+    }
+
+    /// <summary>Clears one: gone, or (news said once) hidden, so it is not said again.</summary>
+    private static async Task<IResult> ClearAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var mine = db.Notifications.Where(x => x.Id == id && x.UserId == me.Id);
+        if (!await mine.AnyAsync(ct))
+        {
+            return Results.NotFound();
+        }
+        await ClearWhereAsync(mine, clock.GetUtcNow(), ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ClearAllAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        await ClearWhereAsync(db.Notifications.Where(x => x.UserId == me.Id), clock.GetUtcNow(), ct);
+        return Results.NoContent();
+    }
+
+    private static async Task ClearWhereAsync(IQueryable<Notification> which, DateTimeOffset now, CancellationToken ct)
+    {
+        await which.Where(x => x.Key == null).ExecuteDeleteAsync(ct);
+        await which.Where(x => x.Key != null).ExecuteUpdateAsync(s => s.SetProperty(x => x.Cleared, true).SetProperty(x => x.ReadAt, x => x.ReadAt ?? now), ct);
     }
 }

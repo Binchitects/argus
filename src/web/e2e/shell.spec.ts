@@ -101,21 +101,28 @@ test('the bell lists each kind of news, leads to it, and can say it on the deskt
           item('n2', 'usage', '85% of your credit is used', 'You have spent $8.50 of $10.00.', '/'),
           item('n3', 'alert', 'Critical: Disk almost full', '/library is 97% full.', '/admin/alerts'),
           item('n4', 'download', 'Downloaded unsloth/Qwen3-4B-GGUF', 'Qwen3-4B-Q4_K_M.gguf is in the model library.', '/admin/models'),
-          item('n5', 'task', 'Morning digest', 'Nothing changed yesterday.', '/chat', true),
+          item('n5', 'task', 'Morning digest', 'See https://intranet.example.test/reports/2026/10/02/very-long-path-without-any-spaces-at-all-to-break-on-ever', '/chat', true),
         ],
       },
     }),
   )
+  const cleared: string[] = []
+  await page.route('**/api/notifications/n*', (route) => (route.request().method() === 'DELETE' ? (cleared.push(route.request().url()), route.fulfill({ status: 204 })) : route.fallback()))
   await page.goto('/tasks')
   await page.getByRole('button', { name: 'Notifications, 4 new' }).click()
   const bell = page.getByRole('dialog', { name: 'Notifications' })
-  await expect(bell.getByRole('list', { name: 'News' }).getByRole('listitem')).toHaveCount(5)
+  const news = bell.getByRole('list', { name: 'News' })
+  await expect(news.getByRole('listitem')).toHaveCount(5)
+  // A long word in a body wraps: the list never scrolls sideways.
+  expect(await news.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  await bell.getByRole('button', { name: 'Clear: Morning digest' }).click()
+  await expect.poll(() => cleared.some((u) => u.endsWith('/api/notifications/n5'))).toBe(true)
   const desktop = bell.getByRole('switch', { name: /Desktop notifications/ })
   await desktop.click()
   await expect(desktop).toBeChecked()
   await expectAccessible(page, info, 'notifications')
   await screenshot(page, info, 'notifications')
-  await bell.getByRole('button', { name: /Critical: Disk almost full/ }).click()
+  await bell.getByRole('button', { name: /^Critical: Disk almost full/ }).click()
   await expect(page).toHaveURL(/\/admin\/alerts$/)
   expect(marked).toContain('/api/notifications/n3/read')
   expect(errors).toEqual([])

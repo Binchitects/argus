@@ -546,6 +546,19 @@ describe('chat', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true))
   })
 
+  it('after compacting, the context gauge shows what the next request carries, worked out', async () => {
+    const context = { system: 4000, instructions: 0, tools: 6000, summary: 0, files: 8000, you: 1000, answers: 1000, toolResults: 0 }
+    const full = [answered[0]!, { ...answered[1]!, promptTokens: 20_000, completionTokens: 200, context, summary: 'x'.repeat(1850) }]
+    backend({ start: conversation({ messages: full, currentLeafId: 'a1' }) })
+    renderApp('/chat/c1')
+    // 4,000 + 6,000 + 2,000 (the summary and its frame) characters, at one token each: 12,000 of 32,768.
+    await userEvent.click(await screen.findByRole('button', { name: 'Context: 37% full. Details and compact' }))
+    expect(await screen.findByText(/About 12 K of 32.77 K tokens \(37%\) since compacting/)).toBeInTheDocument()
+    const parts = screen.getByRole('list', { name: 'What fills it' })
+    expect(within(parts).queryByText('Files')).not.toBeInTheDocument()
+    expect(within(parts).getByText('Summary of earlier messages')).toBeInTheDocument()
+  })
+
   it('a tool call shows its code and its output as code blocks', async () => {
     const messages = [
       msg('q1', null, 'user', { content: 'count files' }),

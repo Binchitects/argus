@@ -118,6 +118,25 @@ public static partial class ArgusServer
             });
         });
 
+        // Its index removed now (every branch's files, symbols and chunks): left out of the
+        // index too, or kept in, to be built anew by the next pass or an update.
+        app.MapPost(AdminPrefix + "repos/{gitlabId:long}/index/remove", async (long gitlabId, HttpRequest request) =>
+        {
+            if (!Authorised(request)) return Forbidden();
+            var body = await BodyOrEmpty(request);
+            var leaveOut = body["leave_out"] is JsonValue v && v.TryGetValue<bool>(out var l) && l;
+            if (jobs.IndexJobSnapshot()["state"]?.ToString() == "running")
+            {
+                return Json(new JsonObject { ["error"] = "an index pass is running: remove the index when it ends" }, 409);
+            }
+            using var conn = Db.Open(cfg.Index.DbPath);
+            if (Choices.Find(conn, gitlabId) is not { } choice) return Json(new JsonObject { ["error"] = "no such repository" }, 404);
+            if (leaveOut) Choices.Set(conn, gitlabId, false, null, NowSeconds());
+            var removed = Choices.Drop(conn, gitlabId);
+            AuditLog.Event("repo_index_removed", new JsonObject { ["repo"] = choice.Path, ["left_out"] = leaveOut, ["rows"] = removed });
+            return Json(new JsonObject { ["status"] = "removed", ["repo"] = choice.Path, ["removed"] = removed, ["included"] = !leaveOut && choice.Included });
+        });
+
         // A repository's branches as GitLab has them now, with each one's latest commit.
         app.MapGet(AdminPrefix + "repos/{gitlabId:long}/branches", (long gitlabId, HttpRequest request) =>
         {

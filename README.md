@@ -1,4 +1,4 @@
-# LLM Service, with Argus
+# Argus Arena
 
 **A private LLM platform for a team, on your own hardware: a chat with tools,
 an API with a key and a budget per person, and Argus, a code index that gives

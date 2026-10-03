@@ -1,6 +1,7 @@
 import { AlertTriangle, Brain, Calculator, Check, ChevronRight, CircleX, Clock, Download, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Collapsible } from 'radix-ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNow } from './use-now'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { formatValue } from '@/lib/format'
@@ -17,15 +18,6 @@ import { AgentsView } from './agents'
 import type { ToolRunning } from './live'
 import type { AgentWork, Message, ToolCall } from './types'
 
-function useNow(active: boolean) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!active) return
-    const t = setInterval(() => setNow(Date.now()), 250)
-    return () => clearInterval(t)
-  }, [active])
-  return now
-}
 
 /**
  * The model's thinking: open and ticking while it thinks, folded to "Thought for 12 s"
@@ -156,6 +148,7 @@ export function ToolCard({
   const Icon = toolIcons.find(([re]) => re.test(call.function.name))?.[1] ?? Wrench
   const args: [string, string][] = call.function.name === 'delegate' ? partsSummary(call.function.arguments) : argsSummary(call.function.arguments)
   const running = !result && live && !waiting
+  const drawing = running && /image|picture|draw/.test(call.function.name)
   const now = useNow(running && !!progress)
   const ran = running && progress ? now - progress.since : 0
   const share = progress?.total && progress.progress !== undefined ? Math.min(1, Math.max(0, progress.progress / progress.total)) : null
@@ -185,7 +178,8 @@ export function ToolCard({
               </span>
             ) : running ? (
               <>
-                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> Running{ran >= 3000 && <span className="tabular-nums"> · {seconds(Math.floor(ran / 1000) * 1000)}</span>}
+                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> {drawing ? 'Drawing' : 'Running'}
+                {ran >= 1000 && <span className="tabular-nums"> · {seconds(Math.floor(ran / 1000) * 1000)}</span>}
               </>
             ) : declined ? (
               <span className="flex items-center gap-1">
@@ -205,8 +199,10 @@ export function ToolCard({
             <ChevronRight className="size-3.5 transition-transform duration-200 group-data-[state=open]:rotate-90" aria-hidden="true" />
           </span>
         </Collapsible.Trigger>
-        {running && (share !== null || progress?.message) && (
+        {running && (share !== null || progress?.message || ran >= 1500) && (
           <div className="flex items-center gap-2 border-t px-3 py-1.5 text-xs text-muted-foreground">
+            {/* No end known: a bar that runs along, so a long call is seen to work. */}
+            {share === null && <span className="progress-run h-1.5 w-24 shrink-0" aria-hidden="true" />}
             {share !== null && (
               <progress
                 value={Math.round(share * 100)}
@@ -254,6 +250,12 @@ export function ToolCard({
             Allow
           </Button>
         </div>
+      )}
+      {drawing && (
+        <output className="drawing mt-2 flex aspect-square w-64 max-w-full flex-col items-center justify-center gap-2 rounded-xl border text-sm text-muted-foreground">
+          <ImageIcon className="size-6" aria-hidden="true" />
+          <span>Drawing the picture…{ran >= 1000 && <span className="tabular-nums"> {seconds(Math.floor(ran / 1000) * 1000)}</span>}</span>
+        </output>
       )}
       {pictures.length > 0 && (
         <ul className="mt-2 flex flex-wrap gap-2" aria-label="Pictures">

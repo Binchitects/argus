@@ -38,6 +38,15 @@ public sealed class NotificationsTests(AppFixture app)
         Assert.Equal(2, all.Count);
         Assert.Equal("Your credit is used up", all[0].GetProperty("title").GetString());
         Assert.Single(await NewsAsync(admin), n => n.GetProperty("title").GetString() == $"{name} has used up their credit");
+
+        // Cleared: gone from the bell, one or all, and news said once is not said again.
+        await StatusAssert.Is(System.Net.HttpStatusCode.NoContent, await person.Http.DeleteAsync(new Uri($"/api/notifications/{all[1].GetProperty("id").GetString()}", UriKind.Relative)));
+        Assert.Single(await NewsAsync(person));
+        await StatusAssert.Is(System.Net.HttpStatusCode.NoContent, await person.Http.DeleteAsync(new Uri("/api/notifications", UriKind.Relative)));
+        await watch.CheckCreditAsync(CancellationToken.None);
+        Assert.Empty(await NewsAsync(person));
+        Assert.Equal(0, (await person.JsonAsync(await person.GetAsync("/api/notifications"))).GetProperty("unread").GetInt32());
+        await StatusAssert.Is(System.Net.HttpStatusCode.NotFound, await admin.Http.DeleteAsync(new Uri($"/api/notifications/{all[0].GetProperty("id").GetString()}", UriKind.Relative)));
     }
 
     [Fact]

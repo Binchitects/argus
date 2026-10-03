@@ -178,8 +178,6 @@ export function ChatSettingsPopover({ config, settings, onChange }: { config: Ch
 export function ChatHeader({
   config,
   settings,
-  title,
-  onRename,
   onChange,
   filesCount,
   filesOpen,
@@ -190,8 +188,6 @@ export function ChatHeader({
 }: {
   config: ChatConfig
   settings: ChatSettings
-  title: string | null
-  onRename?: (title: string) => void
   onChange: (change: ChatSettings) => void
   filesCount: number
   filesOpen: boolean
@@ -202,7 +198,6 @@ export function ChatHeader({
   /** Summarize the branch on screen (undefined: nothing to compact now). */
   onCompact?: () => void
 }) {
-  const [name, setName] = useState<string | null>(null)
   return (
     <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
       <Button variant="ghost" size="icon-sm" className="shrink-0 lg:hidden" onClick={onOpenList} aria-label="Chats">
@@ -212,24 +207,7 @@ export function ChatHeader({
         <ModelPicker config={config} value={settings.model ?? null} onChange={(model) => onChange({ model: model ?? '' })} />
         <ThinkingPicker config={config} value={settings.thinking ?? null} onChange={(thinking) => onChange({ thinking: thinking ?? '' })} />
       </div>
-      <div className="mx-2 hidden min-w-0 flex-1 justify-center md:flex">
-        {title !== null && onRename && (name === null ? (
-          <button type="button" className="max-w-md truncate rounded-md px-2 py-1 text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring" onClick={() => setName(title)} aria-label={`Chat title: ${title}. Rename`}>
-            {title}
-          </button>
-        ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (name.trim()) onRename(name.trim())
-              setName(null)
-            }}
-          >
-            <Input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => setName(null)} aria-label="Chat title" autoFocus className="h-8 w-72" />
-          </form>
-        ))}
-      </div>
-      <span className="ml-auto flex shrink-0 items-center gap-1 md:ml-0">
+      <span className="ml-auto flex shrink-0 items-center gap-1">
         <ChatSettingsPopover config={config} settings={settings} onChange={onChange} />
         <Tooltip content={filesOpen ? 'Hide files' : 'Files in this chat'}>
           <Button variant={filesOpen ? 'secondary' : 'ghost'} size="sm" className="h-8 gap-1.5" onClick={onToggleFiles} aria-pressed={filesOpen} aria-label={`Files (${filesCount})`}>

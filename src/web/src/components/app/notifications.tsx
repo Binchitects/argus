@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Bell, CalendarClock, Coins, Download, MessageSquareText, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Bell, CalendarClock, Coins, Download, MessageSquareText, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -62,6 +62,10 @@ export function NotificationBell() {
     mutationFn: (id?: string) => api(id ? `/api/notifications/${id}/read` : '/api/notifications/read', { method: 'POST' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
   })
+  const clear = useMutation({
+    mutationFn: (id?: string) => api(id ? `/api/notifications/${id}` : '/api/notifications', { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  })
   const unread = data.data?.unread ?? 0
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -76,23 +80,28 @@ export function NotificationBell() {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[22rem] max-w-[calc(100vw-1rem)] p-0" aria-label="Notifications">
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <p className="text-sm font-medium">Notifications</p>
+        <div className="flex items-center gap-1 border-b px-3 py-2">
+          <p className="me-auto text-sm font-medium">Notifications</p>
           {unread > 0 && (
             <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => read.mutate(undefined)}>
               Mark all read
             </Button>
           )}
+          {!!data.data?.items.length && (
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={clear.isPending} onClick={() => clear.mutate(undefined)}>
+              Clear all
+            </Button>
+          )}
         </div>
         {data.data?.items.length ? (
-          <ul className="max-h-96 overflow-y-auto" aria-label="News">
+          <ul className="max-h-96 overflow-x-hidden overflow-y-auto" aria-label="News">
             {data.data.items.map((n) => {
               const Icon = icons[n.kind] ?? Bell
               return (
-                <li key={n.id}>
+                <li key={n.id} className="group relative border-b last:border-b-0">
                   <button
                     type="button"
-                    className={cn('flex w-full gap-2.5 border-b px-3 py-2 text-left outline-none last:border-b-0 hover:bg-accent focus-visible:bg-accent', !n.read && 'bg-primary/5')}
+                    className={cn('flex w-full min-w-0 gap-2.5 py-2 ps-3 pe-9 text-left outline-none hover:bg-accent focus-visible:bg-accent', !n.read && 'bg-primary/5')}
                     onClick={() => {
                       if (!n.read) read.mutate(n.id)
                       setOpen(false)
@@ -105,16 +114,25 @@ export function NotificationBell() {
                         <span dir="auto" className="truncate">
                           {n.title}
                         </span>
-                        {!n.read && <span className="ml-auto size-1.5 shrink-0 rounded-full bg-primary" aria-label="New" />}
+                        {!n.read && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="New" />}
                       </span>
                       {n.body && (
-                        <span dir="auto" className="line-clamp-2 text-xs text-muted-foreground">
+                        <span dir="auto" className="line-clamp-2 text-xs [overflow-wrap:anywhere] text-muted-foreground">
                           {n.body}
                         </span>
                       )}
                       <span className="text-[0.6875rem] text-muted-foreground">{new Date(n.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
                     </span>
                   </button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute end-1.5 top-1.5 size-7 opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
+                    onClick={() => clear.mutate(n.id)}
+                    aria-label={`Clear: ${n.title}`}
+                  >
+                    <X />
+                  </Button>
                 </li>
               )
             })}
