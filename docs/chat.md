@@ -1,6 +1,6 @@
 # Chat
 
-The chat is at `https://<LLM_DOMAIN>/chat`, for everyone who can sign in. To use
+The chat is at `https://DOMAIN/chat`, for everyone who can sign in. To use
 the models from your own tools (Claude Code, Qwen Code, an editor, a script),
 see **Connect your tools** (`/setup`): your API key, the gateway's address and
 setups to paste.
@@ -52,13 +52,18 @@ setups to paste.
   which of them this chat has on; a new chat starts with those an admin put
   on in new chats. The model calls a tool when a question needs it.
   - **Argus**: the code you can read in GitLab (below).
-  - **Image generation**: a picture from a description, made by the image
-    model at the gateway (the `image` profile). It shows in the answer, opens
-    full size, and is a file of the chat.
+  - **Image generation**: a picture from a description, made by the picture
+    model (FLUX.2 klein). It shows in the answer, opens full size, and is a
+    file of the chat.
+  - **Video generation**: a clip of 1 to 5 seconds from a description, made by
+    the video model (Wan2.2 TI2V 5B). It takes minutes (more while the chat
+    model fills the GPU); it plays in the answer and is a file of the chat.
+  - **Speech**: a text read aloud into an MP3 (a voice-over, a pronunciation),
+    in English or Persian.
   - **Calculator**: exact arithmetic to 28 digits, so the model does not
     guess. Functions like sqrt and sin are good to 15 digits.
   - **Date and time**: the time in any time zone, and the days between dates.
-  - **Python**: code run in the sandbox (the `sandbox` profile). It has data
+  - **Python**: code run in the sandbox. It has data
     libraries (numpy, pandas, polars, pyarrow, duckdb, scipy, statsmodels,
     scikit-learn, xgboost, lightgbm, numba, sympy, networkx), charts
     (matplotlib, seaborn, plotly), images (pillow with HEIC, OpenCV,
@@ -76,8 +81,8 @@ setups to paste.
     budget (30,000 characters), with a note saying how long it really is; the
     model reads on by lines, or searches it, when it needs more. Files a tool
     made are read the same way.
-  - **Web** (off until an admin turns it on): search (the `websearch`
-    profile's SearXNG) and reading pages, from the sites an admin allows only.
+  - **Web** (off until an admin turns it on): search (the stack's SearXNG)
+    and reading pages, from the sites an admin allows only.
     Pages are read in parts, as text; PDFs and documents on the web too.
   - **Questions for you**: when a request leaves a choice open, the model asks
     instead of guessing, as Claude does: one to four questions, each with a
@@ -226,6 +231,23 @@ setups to paste.
 A question that never reached the server goes back into the box with its
 attachments, instead of being lost.
 
+## Sound and video
+
+- **Voice messages**: the microphone beside the paperclip records one; the
+  answer to a voice message is read aloud.
+- **Sound and video files** attach like any file (MP3, WAV, OGG, M4A, WebM,
+  MP4, MOV, MKV) and play in place. On upload the sandbox's ffmpeg makes what
+  the models take: a sound as an MP3, a video as up to eight frames and its
+  sound track.
+- **What the model gets**: a model that hears (Qwen3-Omni: its projector reads
+  sound) gets the sound itself; one that does not gets a transcript (Whisper,
+  made once and kept). A video's frames go as pictures to a model that sees,
+  with the second each was taken at.
+- **Read aloud**: under every answer, the speaker reads its prose (no code, no
+  links' addresses): Kokoro's voice, or a Persian voice for Persian.
+- The speech models are at the gateway too: `/v1/audio/transcriptions` and
+  `/v1/audio/speech` with a person's key.
+
 ## Scheduled tasks
 
 **Scheduled tasks** (in the sidebar, `/tasks`) ask a question on a schedule, as
@@ -247,7 +269,7 @@ you: a morning digest, a weekly report on a repository with Argus.
   Mattermost or Discord incoming webhook. The post carries `text` (and
   `content`) with the answer and a link to the chat, and `task`, `status`,
   `url`, `at` beside them. A webhook URL is a secret: it is stored encrypted
-  (`APP_DATA_KEY`) and never shown again, and only hosts an admin allows
+  (`APP_KEY`) and never shown again, and only hosts an admin allows
   (**Webhook hosts**) are posted to, so a task cannot reach into the network.
 - **Run now** runs it at once; the card shows the last run (done, failed or
   skipped, why, what was delivered) with a link to its chat. A run is skipped
@@ -346,7 +368,7 @@ So that everyone gets their turn:
   redirect points to: every connection is checked as it is made. Pages are
   data to the model, not instructions.
 - **MCP servers** get the person's email only if the admin set a header for
-  it. A server's key is stored encrypted under `APP_DATA_KEY` and never shown.
+  it. A server's key is stored encrypted under `APP_KEY` and never shown.
 
 ## Cost and credit
 
@@ -406,8 +428,8 @@ branch.
 | An API call answers **429** | the key already has as many requests running as it may | wait for one to finish, or retry; an admin sets the limit (API requests at once, per key) |
 | "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](argus/README.md) |
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
-| No **Image generation** in the Tools menu | no image model at the gateway | turn on the `image` profile (Settings → Deployment) and apply it |
-| No **Python** in the Tools menu | the sandbox is not running | turn on the `sandbox` profile and apply it; `scripts/sandbox-check.py` says whether it is sound |
+| No **Image generation** or **Video generation** in the Tools menu | the model is off, or its server does not run | Admin → Models: turn it on; a module left out in `docker-compose.override.yml` stays out |
+| No **Python** in the Tools menu | the sandbox is not running | `docker compose ps sandbox`; `scripts/sandbox-check.py` says whether it is sound |
 | No **Web** in the Tools menu | it is off (the default), or no site is allowed | Admin → Tools → Web on, and Settings → Python and web → Sites the chat may open |
 | "… is not one of the sites the chat may open" | the page's site is not allowed | allow it in Settings → Python and web, or `*` for any public site |
 

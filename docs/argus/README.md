@@ -7,7 +7,7 @@ both through the Model Context Protocol (MCP) so an agent can call them as
 tools rather than guessing from memory.
 
 It runs under the `argus` profile and is reachable at
-`https://argus.<LLM_DOMAIN>/mcp`.
+`https://argus.DOMAIN/mcp`.
 
 ---
 
@@ -255,13 +255,13 @@ every request arriving through Traefik would be rejected before reaching a
 handler. The compose `command:` therefore passes the proxy hostname explicitly:
 
 ```yaml
-- --allowed-host=argus.${LLM_DOMAIN:-llm.localhost}
-- --allowed-host=argus.${LLM_DOMAIN:-llm.localhost}:*
+- --allowed-host=argus.${DOMAIN:-llm.localhost}
+- --allowed-host=argus.${DOMAIN:-llm.localhost}:*
 - --allowed-host=argus
 - --allowed-host=argus:*
 ```
 
-If you change `LLM_DOMAIN`, these follow automatically. If you put Argus behind
+If you change `DOMAIN`, these follow automatically. If you put Argus behind
 a different name, add it here or every request returns a Host-validation error.
 
 ---
@@ -321,8 +321,7 @@ Argus's sidecar database, and **also printed as one JSON line on stdout**
 matched; Argus named the maintainers instead) or `error`. `denied` means no
 bearer token, or a GitLab token GitLab rejected; no tool ran.
 
-Promtail ships these lines to Loki — `logging` is in the default
-`COMPOSE_PROFILES`, so this works on a fresh deployment — with `event`,
+Promtail ships these lines to Loki — on every deployment — with `event`,
 `outcome` and `tool` as labels. The app's **Argus** dashboard (Observe → Dashboards) shows calls
 by tool and by person, no-access answers, errors, refusals, p95 latency, and a
 searchable audit trail with each call's arguments. Calls from Qwen Code, Claude
@@ -483,7 +482,7 @@ Trigger:      Push events
 GitLab sends the secret back in `X-Gitlab-Token`; Argus compares it in constant
 time and answers `202`. With `ARGUS_WEBHOOK_TOKEN` unset the route **does not
 exist at all**, so an unconfigured deployment has no unauthenticated way to make
-the indexer run. It is a separate secret from `ARGUS_ADMIN_TOKEN` on purpose:
+the indexer run. It is a separate secret from `ARGUS_KEY` on purpose:
 this one is stored in GitLab's own configuration, so it is the lower-privilege
 credential. Leaking it lets somebody cause an index pass; leaking the admin
 token lets them read the estate.
@@ -521,7 +520,7 @@ exports, per repository and branch:
 The endpoint is under `/admin/`, so it carries a credential — it names every
 repository in the estate, and an open endpoint for that is a map of the
 organisation handed to anything that can reach the port. The stack sends the
-same `ARGUS_ADMIN_TOKEN` the app uses, as a bearer token, because
+same `ARGUS_KEY` the app uses, as a bearer token, because
 Prometheus can only read a credential from a file
 (`authorization.credentials_file`). `prometheus-secrets` writes it out of
 `.env` on every `up`, so there is one secret to rotate rather than two.

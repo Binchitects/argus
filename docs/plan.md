@@ -545,7 +545,25 @@ giving any web container the Docker socket.
   tools** (`/setup`). The `.env` samples, the docs and the scripts describe only
   this stack.
 
-## Next (after v3.2.0)
+## v4.0.0 — Simple to deploy; sound and video in and out (2026-10-03)
+
+- **Deployment**: one 300-line compose file and a short `.env` (the domain, the
+  models folder, the first model, six secrets). Every module runs; one is left
+  out in `docker-compose.override.yml`. No setup containers: each running image
+  prepares itself, and the app fetches the models the others read. Traefik does
+  TLS alone (its own certificate, Let's Encrypt, or yours). Rootless Podman with
+  `podman.yml`. The app's settings live in its database only.
+- **Models**: every chat model is an Admin → Models model (no ".env model");
+  the picture, video and speech models have the same controls (on or off, keep
+  loaded, load, unload, who may use them).
+- **Sound and video**: voice messages and sound or video files go to a model that
+  hears and sees (Qwen3-Omni) or as a transcript and frames to one that does not;
+  answers are read aloud (Kokoro, a Persian voice); tools make videos (Wan2.2)
+  and speech.
+- Removed: Langfuse, vLLM, cAdvisor, DCGM, the stack CA, apply-settings, the
+  env samples, the air-gap bundle and the checks written for the old layout.
+
+## Next (after v4.0.0)
 
 What is known to be left, by size and by what it unblocks. Each comes with the
 test that says it is done.
@@ -592,12 +610,23 @@ Projects are one person's.
 - A rollback test (`upgrade-test.py --back`): the older images over newer
   migrations must refuse to start rather than corrupt.
 - A restore round trip (backup, wipe, restore, every key and spend still there).
-- The air-gapped bundle round trip (build, extract, load, up with no network).
+- An air-gapped bundle for v4 (the images, the models folder, the speech
+  models' volume) and its round trip: build, extract, load, up with no network.
 - **Done when:** each is a script in `deploy/scripts` and passes.
 
-### N7 — Smaller things
+### N7 — Video faster on a shared GPU  *(S)*
+A 2-second clip takes 14 minutes on the 24 GB card beside the chat model: the
+sampling about 1.5 minutes, the rest the decode on the CPU (on the GPU it ran out
+of memory).
+- Decode on the GPU when it has room (unload the chat model for the decode, or
+  a tiled decode that fits), and say the expected time on the tool's card.
+- **Done when:** a 2-second clip takes under 4 minutes with the chat model loaded.
+
+### N8 — Smaller things
 - Queued messages live in the page: a closed tab drops them (keep them on the server).
 - Document previews draw the first 20 pages (page on through the rest).
 - Notifications for credit and alerts by email and webhook too, per person's choice.
 - The seven unpublished Argus packs published to the bucket.
 - The live e2e suite run one model-test at a time in CI (they time out in parallel on one GPU).
+- Podman in CI (a GPU runner), and the sound and video paths in the browser suite.
+- A Persian speech round trip (the Persian voice into Whisper) misheard a word; try a larger Persian voice.

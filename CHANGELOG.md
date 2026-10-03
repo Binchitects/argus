@@ -12,6 +12,66 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v4.0.0 (2026-10-03)
+
+### :rocket: Epics and highlights
+
+- **Simple to deploy**: one compose file of 300 lines (from 2,100) and a short
+  `.env`: the domain, the models folder, the first model and six secrets.
+  Every module runs; one is left out with a line in
+  `docker-compose.override.yml`. No setup containers: each running image
+  prepares itself, and the app fetches the models (the first chat model, the
+  picture, video and embedding files) and tells the speech server to fetch its
+  own
+- **Sound and video in and out**: voice messages from the composer, sound and
+  video files; a model that hears and sees (Qwen3-Omni) gets the sound and the
+  frames, others a transcript (Whisper, made once) and the frames; answers read
+  aloud (Kokoro, a Persian voice); tools that make videos (Wan2.2 TI2V 5B) and
+  speech
+- **Picture, video and speech models managed like the chat models** in Admin →
+  Models: on or off, keep loaded, load, unload, who may use them
+- **Podman**: the same files with `podman.yml`, rootless
+
+### :sparkles: New features & Enhancements
+
+- TLS is Traefik's alone: its own certificate, Let's Encrypt (`ACME_EMAIL`), or
+  a certificate of your own; Traefik's routes are one file and it no longer
+  mounts the Docker socket
+- The speech models are at the gateway for API keys (`/v1/audio/transcriptions`,
+  `/v1/audio/speech`); the chat's `/api/chat/speech` reads an answer aloud
+- Sound and video play in place in the chat and the Files panel
+- Admin → Services probes every module (engine, pictures, video, speech, web search)
+- The default chat model, the thinking levels and how many models the engine
+  holds at once are settings in the app
+- A failed model download is provisioned again; downloads land under a name of
+  their own (the server's files)
+
+### :bug: Bugs fixed
+
+- A model that does not think got thinking switches its template does not know
+  (Qwen3-Omni answered nothing)
+- The video server could be unloaded as idle in the middle of a long job
+
+### :boom: Breaking changes & Deprecations
+
+- A new layout: the compose project is `arena` (volumes `arena_*`), `.env` has
+  new names (`DOMAIN`, `MODELS_DIR`, `MODEL`, `DB_PASSWORD`, `APP_KEY`,
+  `ENGINE_KEY`, `ARGUS_KEY`, `GATEWAY_KEY`, `GITLAB_URL`, `GITLAB_TOKEN`), and
+  the app's image runs as uid 1000. `docs/deployment.md` has the move from v3
+- No `.env` model: it is added under Admin → Models like any other
+- The Settings page no longer edits `.env`: `apply-settings.sh`, the pending
+  changes and the env samples are gone
+- The stack CA, its bundle and the certificate download are gone
+- Removed: Langfuse, vLLM, cAdvisor, DCGM, Redis, the preflight, the air-gap
+  bundle, the Windows scripts, the Makefile, and the checks written for the
+  old layout (acceptance, e2e-check, health, smoke-test, audit-auth, domain-check)
+
+### :arrow_up: Deps updates
+
+- ghcr.io/speaches-ai/speaches 0.9.0-rc.3 (CPU) for speech; models
+  faster-whisper-large-v3-turbo, Kokoro-82M, Piper fa_IR amir; Wan2.2 TI2V 5B
+  for video; Qwen3-Omni-30B-A3B as a model to add
+
 ## v3.2.0 (2026-10-03)
 
 ### :rocket: Epics and highlights

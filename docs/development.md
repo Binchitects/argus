@@ -19,8 +19,7 @@ tests/
   Llm.Tests/            xUnit; real Postgres, OpenLDAP and LiteLLM's schema via Testcontainers
   Argus.Tests/          xUnit
   fixtures/argus/       a ctags corpus and documentation fixtures for Argus's tests
-  deploy/               pytest, for the deployment's tooling (preflight, presets, acceptance)
-deploy/                 the platform: docker-compose, config, env samples, scripts
+deploy/                 the platform: docker-compose (and podman.yml), .env.example, config, scripts
   services/             what compose builds or mounts: sandbox, identity proxy, engine router...
   argus-standalone/     Argus alone: its own compose, config and scripts
 tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, the test GitLab, Hermes add-ons
@@ -62,7 +61,7 @@ Argus against a local config:
 
 ```bash
 ARGUS_ADMIN_EMAIL=you@example.com ARGUS_ADMIN_PASSWORD=a-long-password \
-ARGUS_GATEWAY_URL=http://localhost:4000 LITELLM_MASTER_KEY=sk-... \
+ARGUS_GATEWAY_URL=http://localhost:4000 GATEWAY_KEY=sk-... \
 ARGUS_EMBED_URL=http://localhost:8081 \
   dotnet run --project src/Argus -c Release -- serve --config config.yaml --port 7700
 ```
@@ -119,15 +118,13 @@ Against the running platform, from `deploy/` (each described in
 [testing.md](testing.md)):
 
 ```bash
+python3 scripts/upgrade-test.py --zero --stop-live   # this checkout from zero
 python3 scripts/functional-test.py      # what a person does, as two people
-python3 scripts/acceptance.py           # the wiring
-./scripts/audit-auth.sh                 # every OIDC client, for real
-./scripts/domain-check.sh               # routes and certificates
+python3 scripts/clients-check.py        # the API, Argus over MCP, Qwen Code, DeepSeek Harness
+python3 scripts/scale-test.py           # many people at once
 python3 scripts/sandbox-check.py        # the sandbox's isolation
 python3 scripts/audit-dashboards.py 6h  # every dashboard panel's queries
 ```
-
-`pytest tests/deploy` checks the tooling itself.
 
 ## Images
 
@@ -154,10 +151,10 @@ on a `v*` tag.
 ## Conventions
 
 - **Commits** say what changed and why, in plain words; one concern per commit.
-- **Secrets never enter the repository.** `.env` holds them, and the env samples
-  only say how to make each one (`openssl rand -hex 32`). Nothing prints them.
-- **No Docker socket in a web container.** Changes that recreate containers stay
-  one host command (`deploy/scripts/apply-settings.sh`).
+- **Secrets never enter the repository.** `.env` holds them, and `.env.example`
+  only says how to make each one (`openssl rand -hex 32`). Nothing prints them.
+- **No Docker socket in a web container.** The app changes what runs through
+  the engines' own APIs and control files the servers read, never Docker.
 - **Argus's tool names, descriptions and schemas** (`src/Argus/Server/ToolCatalog.cs`)
   are text a model reads on every request; change them deliberately.
 - **Argus's tool results** are written byte for byte in a fixed shape

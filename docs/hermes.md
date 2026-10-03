@@ -22,7 +22,7 @@ model:
   context_length: 131072          # see "How much context you can have" below
 ```
 
-**Use your own key, not `LITELLM_MASTER_KEY`.** The master key is a superuser
+**Use your own key, not `GATEWAY_KEY`.** The master key is a superuser
 credential with no budget: usage through it is attributed to nobody and
 bounded by nothing, which quietly defeats the per-person accounting the whole
 gateway exists for. Mint yours with:
@@ -247,12 +247,13 @@ before believing the numbers.
 
 **Hermes needs the stack's certificate in its own bundle.** `SSL_CERT_FILE` and
 `REQUESTS_CA_BUNDLE` point at `~/AppData/Local/hermes/ca-bundle.pem`, which
-ships ~120 public roots and knows nothing about a self-signed certificate. Without
-the stack's certificate appended, every call fails as a bare **"Connection error"** that names
-neither TLS nor the certificate:
+ships ~120 public roots and knows nothing about a self-signed certificate. On a
+deployment with Traefik's own certificate every call fails as a bare **"Connection error"** that names
+neither TLS nor the certificate: give the deployment a real certificate (`ACME_EMAIL`,
+or your own: docs/deployment.md), or append your CA to Hermes's bundle:
 
 ```bash
-cat deploy/config/traefik/certs/ca.crt >> ~/AppData/Local/hermes/ca-bundle.pem
+cat your-ca.crt >> ~/AppData/Local/hermes/ca-bundle.pem
 ```
 
 This hides behind the context check, which runs first and needs no network —
@@ -281,7 +282,7 @@ Then confirm the call landed on **you** — the app's **Usage & cost** page (Eve
 
 ```bash
 curl "https://gateway.llm.localhost/user/info?user_id=you@example.com" \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+  -H "Authorization: Bearer $GATEWAY_KEY"
 ```
 
 If spend did not move, the request was attributed to nobody — almost always

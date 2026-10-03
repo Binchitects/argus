@@ -1,7 +1,7 @@
 # Authentication
 
 Everything reachable from outside authenticates against one identity provider:
-**the app** at `https://<LLM_DOMAIN>`. There is one list of people, one sign-in,
+**the app** at `https://DOMAIN`. There is one list of people, one sign-in,
 one place to revoke access. People are local accounts, or come from the company
 directory (LDAP / Active Directory), or both.
 
@@ -17,13 +17,11 @@ So browsers and programs get different credentials from the same issuer:
 
 | Caller | Mechanism | Credential |
 |---|---|---|
-| A person, in a browser | the app's session (and OIDC for Langfuse) | session cookie: 1 h idle, 12 h at most |
+| A person, in a browser | the app's session | session cookie: 1 h idle, 12 h at most |
 | A person's tools (Claude Code, Qwen Code, editors, scripts) | their API key at the gateway, from **Connect your tools** | `sk-...` key, spend tracked per person |
-| A machine client of the engine API | OAuth2 client credentials | access token, 1 h |
 
-The static keys (`LLAMACPP_API_KEY`, `LITELLM_MASTER_KEY`) still exist, but only
-as internal details: the proxy injects them after authentication and they never
-leave the Docker network.
+The static keys (`ENGINE_KEY`, `GATEWAY_KEY`) are internal details: the app
+and the gateway use them inside the stack's network, and they never leave it.
 
 ---
 
@@ -31,40 +29,31 @@ leave the Docker network.
 
 ### 1. The app's own sign-in
 
-`https://<LLM_DOMAIN>/login`. Username (or email) and password, then a 6-digit
+`https://DOMAIN/login`. Username (or email) and password, then a 6-digit
 code for people who turned on two-factor sign-in. The session cookie is scoped
-to the domain, so it covers every `*.<LLM_DOMAIN>` service at once.
+to the domain, so it covers every `*.DOMAIN` service at once.
 
 ### 2. OIDC: apps with their own sign-in screen
 
-Langfuse (the `tracing` profile) sends people to the app and gets back an
+An app with its own sign-in screen sends people to the app and gets back an
 identity: username, name, email, and groups (`admins` for admins; everyone is
 in `users`). Roles are rebuilt at every token refresh, so a demotion reaches
 the apps without anyone signing out. The registered clients are exactly the
 configured ones: the app deletes any other client at start.
 
-Issuer: `https://<LLM_DOMAIN>/`; discovery at
+Issuer: `https://DOMAIN/`; discovery at
 `/.well-known/openid-configuration`.
 
 ### 3. forwardAuth: services with no sign-in of their own
 
-Traefik asks the app (`/api/authz/forward-auth`) before every request to:
-
-| Host | Who gets in |
-|---|---|
-| `metrics.`, `alerts.`, `logs.`, `cadvisor.`, `node.`, `gpu.`, `s3.`, and the engines' `/metrics` | admins only |
-| `api.` (the engine) | a machine token with the `api` scope, or anyone signed in (for `/docs`) |
-| any other host | nobody |
-
-A browser without a session is sent to sign in and comes back afterwards
-(`302`); a program gets `401`; someone signed in without the right role gets
-`403`. On success the app adds `Remote-User`, `Remote-Groups`, `Remote-Email`
-and `Remote-Name`; Traefik overwrites any that a browser sent, so they cannot
-be forged.
+Nothing without a sign-in of its own is published. Prometheus, Alertmanager,
+Loki, the exporters and the engines are reached only inside the stack's
+network; the app shows their data, to admins. Traefik routes three names:
+`DOMAIN` (the app), `gateway.DOMAIN` and `argus.DOMAIN`.
 
 ### 4. The gateway authenticates itself
 
-`gateway.<LLM_DOMAIN>` (LiteLLM) is deliberately **not** behind forwardAuth and
+`gateway.DOMAIN` (LiteLLM) is deliberately **not** behind forwardAuth and
 gets no credential injection. LiteLLM checks each person's own key, which is
 what ties spend to the person; injecting the master key would put every
 request under one identity. It is still reachable only through Traefik over TLS.
@@ -75,7 +64,7 @@ request under one identity. It is still reachable only through Traefik over TLS.
 
 ### As a person
 
-Open `https://<LLM_DOMAIN>`. The first admin is `admin`, with the password in
+Open `https://DOMAIN`. The first admin is `admin`, with the password in
 `ADMIN_PASSWORD` (used once, on the very first start; change it under **Your
 account** afterwards).
 
@@ -171,9 +160,9 @@ as a way in if the directory is down.
 | Sessions | 1 hour idle, 12 hours absolute (no action extends that), 30 days with "keep me signed in"; re-checked against the account every minute |
 | Cross-site requests | every state change needs an `X-Requested-With` header, which another site cannot send |
 | Answers | a wrong password and an unknown name get the same answer |
-| Keys at rest | the session and OIDC signing keys are stored in the database, encrypted with `APP_DATA_KEY` |
+| Keys at rest | the session and OIDC signing keys are stored in the database, encrypted with `APP_KEY` |
 
-**`APP_DATA_KEY` never changes after the first start.** If it is lost or
+**`APP_KEY` never changes after the first start.** If it is lost or
 changed, the app refuses to start and says so, rather than quietly making new
 keys (which would sign everyone out and break single sign-on). Keep it with your
 other secrets.
@@ -230,7 +219,7 @@ value. `audit-auth.sh` step 0 compares each container with `.env`; if it reports
 STALE, `docker compose up -d` recreates it.
 
 **The app will not start: "The stored sign-in keys cannot be decrypted".**
-`APP_DATA_KEY` differs from the value of the first start. Put the old value
+`APP_KEY` differs from the value of the first start. Put the old value
 back. (Only if it is truly lost: stop the app, delete the rows of the
 `DataProtectionKeys` table and the `oidc.%` rows of `settings` in the `llmapp`
 database, and start it. Everyone signs in again.)
@@ -258,10 +247,10 @@ callback from its own base-URL setting, which must be the proxy hostname:
 
 | App | Setting | Must be |
 |---|---|---|
-| Langfuse | `NEXTAUTH_URL` | `https://traces.<LLM_DOMAIN>` |
+| an OIDC client | its redirect URI | `https://<its host>/...` as registered in the app |
 
-**Browser certificate warnings.** Expected once per browser: the certificate is
-signed by the stack's own CA (made by `tls-init`). Trust `ca.crt` once; renewals keep working.
+**Browser certificate warnings.** Traefik's own certificate: set `ACME_EMAIL`
+for Let's Encrypt, or bring your own (docs/deployment.md, Certificates).
 
 **`curl` fails with a TLS error on Windows.** Windows `curl` cannot check
 revocation for a private CA. Add

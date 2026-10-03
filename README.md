@@ -10,8 +10,10 @@ permissions. Nothing leaves your network.**
 - **A chat** for everyone: the models you run, thinking levels, branches and
   edits, files and Office documents, and tools that run on the server: Argus
   (your code and documentation), Python in a sandbox with no network (data,
-  image, map and chart libraries), the web (sites you allow), image generation,
-  a calculator and dates. Tools ask before they run when you want them to.
+  image, map and chart libraries), the web (sites you allow), pictures, video,
+  speech, a calculator and dates. **Sound and video in and out**: voice messages
+  and attached sound or video go to a model that hears and sees (Qwen3-Omni) or
+  as a transcript and frames to one that does not; answers are read aloud. Tools ask before they run when you want them to.
   Pages, pictures, diagrams and React components the model writes run live in
   a sandboxed preview.
 - **An API** for editors, agents and scripts: OpenAI-compatible (and Anthropic's
@@ -24,7 +26,8 @@ permissions. Nothing leaves your network.**
   who may use which model and tool.
 - **Administration**: people and groups; models read for what they are, several
   loaded at once (kept loaded, or loaded on request), each on the GPUs chosen
-  for it, and models on other GPU servers behind the same gateway; every
+  for it, and models on other GPU servers behind the same gateway; picture,
+  video and speech models with the same controls; every
   setting in one place, the audit log, the code index and knowledge packs.
 - **Observability** in the app: ten dashboards, every service's logs, and the
   alerts, what fires now and what fired before.
@@ -54,7 +57,7 @@ really declared in). Scale did not fix it; retrieval did, and answers got faster
 
 ```mermaid
 flowchart LR
-  person([People and tools]) --> traefik[Traefik<br/>TLS, routing, sign-in checks]
+  person([People and tools]) --> traefik[Traefik<br/>TLS, routing]
   traefik --> web[Web<br/>src/web]
   traefik --> api[API<br/>src/Llm.Api]
   traefik --> gateway[LiteLLM<br/>keys, budgets]
@@ -62,6 +65,7 @@ flowchart LR
   gateway --> remote[(Other GPU servers)]
   api --> argus[Argus<br/>src/Argus]
   api --> sandbox[Python sandbox<br/>no network]
+  gateway --> media[Pictures, video,<br/>speech servers]
   api --> obs[Prometheus, Loki,<br/>Alertmanager]
   argus --> gitlab[(Your GitLab)]
   api --> pg[(Postgres)]
@@ -72,18 +76,18 @@ Every service, network and failure mode is in
 
 ## Quick start
 
-On a Linux host with Docker and an NVIDIA GPU:
+On a Linux host with Docker (or rootless Podman) and an NVIDIA GPU:
 
 ```bash
 git clone https://github.com/Binchitects/argus && cd argus/deploy
-cp env-samples/qwen3.8-flash-next.rtx5090.env .env   # the sample for your model and card
-# fill the secrets it lists (each says how: openssl rand -hex 32), then:
-make up                                              # preflight, then docker compose up -d
+cp .env.example .env      # the domain, the models folder, the first model, six secrets
+docker compose up -d
 ```
 
 Open `https://llm.localhost` and sign in as `admin` with the password from
-`.env`. The full walkthrough, including a host with no network, is
-[docs/deployment.md](docs/deployment.md).
+`.env`. The app fetches the first model and the picture, video and speech
+models by itself. Every module runs; one is left out in a line. The full
+walkthrough, Podman and upgrading from v3 are in [docs/deployment.md](docs/deployment.md).
 
 **Argus alone**, without the platform (its own small app, no sign-in service or
 observability): [deploy/argus-standalone/](deploy/argus-standalone/README.md).
@@ -94,7 +98,7 @@ observability): [deploy/argus-standalone/](deploy/argus-standalone/README.md).
 |---|---|
 | [`src/`](src/) | `Llm.Api` and `Llm.Core` (the platform's .NET API), `Argus` (the code index service), `web` (the platform's React app), `argus-web` (Argus's own app) |
 | [`tests/`](tests/) | `Llm.Tests` and `Argus.Tests` (xUnit), `deploy` (the deployment tooling) |
-| [`deploy/`](deploy/) | the platform's deployment: compose, config, env samples, scripts; `argus-standalone/` |
+| [`deploy/`](deploy/) | the platform's deployment: compose (and Podman's override), config, scripts; `argus-standalone/` |
 | [`tools/`](tools/) | development and operations tools: `dn`, the test GitLab, pack builds |
 | [`clients/`](clients/) | MCP configurations for Claude Code, Qwen Code, Continue, DeepSeek Harness and others (the app's **Connect your tools** page has each tool's full setup) |
 | [`docs/`](docs/README.md) | the documentation |

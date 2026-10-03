@@ -1,14 +1,6 @@
 # Testing: what is verified, what is not, and what to add
 
-Short answer to "is every part of the stack tested": **no.** Roughly two thirds
-of the services are referenced by a test; a third are not, and "referenced" is
-not the same as "verified" — being named in a health check means a container
-answered, not that its behaviour is correct.
-
-This document says exactly what runs today, what it leaves out, and defines the
-server-side and client-side tests that would close the gap.
-
-Every number here was measured against the tree, not estimated.
+What runs today, what it leaves out, and the tests that would close the gap.
 
 ---
 
@@ -16,117 +8,33 @@ Every number here was measured against the tree, not estimated.
 
 | layer | entry point | asserts | needs |
 |---|---|---|---|
-| **Argus** | `./tools/dn test tests/Argus.Tests` — **138 tests**; also the image's `test` stage and CI | config and credentials, the parser against Universal Ctags, the index store (FTS, the allowlist on every scoped query, references, impact), indexing against a git fixture, packs (build, install, verify, load from the library), the server (MCP, the admin surface, the chat-client token) and the standalone app | nothing running |
-| **Deploy helpers** | `python3 -m pytest tests/deploy` | `check_mounts.py` (the preflight guard) and acceptance's helpers | Python with pytest |
-| **App** | `./tools/dn test tests/Llm.Tests` (xUnit, **302 tests**), `npm test` (Vitest, **145**) and `npm run e2e` (Playwright) in `src/web`, and CI on every push | sign-in, OIDC, forwardAuth, LDAP against a real OpenLDAP, people and keys, the dashboard engine running every SQL panel against LiteLLM's real schema and every Prometheus and Loki panel against a fake of both (every query fully expanded), the Logs and Alerts APIs, the admin pages including Indexing's exit-code meanings and the partial-enumeration opt-in, models kept loaded and loaded on request against a fake router with a limit and least-recently-used eviction, per-GPU memory, other GPU servers against a fake OpenAI-compatible server, the chat's preview runner in a real browser (sandbox, no network, no app cookies), and every page in a real browser on desktop and phone | Docker (Testcontainers) |
-| **Dashboard audit** | `scripts/audit-dashboards.py` | every panel's queries run in the app: no errors; empty panels, null values and percentages out of range are reported. | a running stack |
-| **Acceptance** | `scripts/acceptance.py` | 7 groups — `config`, `routes`, `identity`, `infra`, `obs`, `ops`, `e2e`. Routes answer, OIDC discovery documents exist, scraping works, alert rules load, Alertmanager and Loki answer | a running stack |
-| **E2E** | `scripts/e2e-check.py` | from **inside** the network: the engine serves the model the gateway advertises, an API call is attributed to the key that made it, a chat is attributed to the same person, an over-budget person is refused | a running stack |
-| **Functional** | `scripts/functional-test.py` | the checks of what a *person* does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, self-signup refusal, per-person billing on both surfaces, access per model, fair use (a key's third request at once is refused), and the dashboards, logs and alerts answering the admin and nobody else | `gateway` profile |
-| **Sandbox** | `scripts/sandbox-check.py` | 17 checks against the running sandbox, sending jobs as the app does: code runs with its files and they come back; no network; no reading the jobs, other runs or the runner, no writing the image; time, memory, file size and process limits bind; nothing a run starts outlives it, not even as a zombie; a stop stops it | `sandbox` profile |
-| **Auth audit** | `scripts/audit-auth.sh` | a **real** OAuth2 authorization-code exchange per OIDC client, then the claims actually delivered | `gateway` profile |
-| **Domain** | `scripts/domain-check.sh` | every hostname routes, TLS serves the right certificate, and (with `--old`) a previous domain is gone | `proxy` |
-| **Smoke** | `scripts/smoke-test.sh` | model listing, auth enforcement, a completion, a streaming completion, Prometheus saw the traffic | `gateway` |
-| **Health** | `scripts/health.sh` | Docker healthchecks plus an in-network probe, per enabled service | any |
-| **Benchmarks** | `benchmark.py`, `multiuser-bench.py` | throughput and latency under concurrency — **measurement, not assertion** | `vllm`/`llamacpp` |
+| **Argus** | `./tools/dn test tests/Argus.Tests`; also the image's `test` stage and CI | config and credentials, the parser, the index store (FTS, the allowlist on every scoped query, references, impact), indexing against a git fixture, packs, the server (MCP, the admin surface, the chat-client token) and the standalone app | nothing running |
+| **App** | `./tools/dn test tests/Llm.Tests` (xUnit, **344 tests**), `npm test` (Vitest, **186**) and `npm run e2e` (Playwright) in `src/web`, and CI on every push | sign-in, OIDC, LDAP against a real OpenLDAP, people and keys, the dashboards against LiteLLM's real schema and fakes of Prometheus and Loki, the admin pages, models kept loaded and loaded on request against a fake router, the picture, video and speech models' controls, sound and video attachments (what each kind of model gets, transcripts made once), read aloud, other GPU servers, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
+| **Deployment** | `scripts/upgrade-test.py --zero --stop-live` (and `--from TAG`) | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file; an upgrade keeps people, groups, chats and files, and survives `up` and `down`/`up` | a GPU host |
+| **Clients** | `scripts/clients-check.py` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
+| **Scale** | `scripts/scale-test.py` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
+| **Functional** | `scripts/functional-test.py` | what a person does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, per-person billing, access per model, fair use, dashboards and logs for admins only | a running stack |
+| **Sandbox** | `scripts/sandbox-check.py` | the running sandbox's isolation: no network, no reading others' runs, limits bind, nothing outlives a run | a running stack |
+| **Dashboard audit** | `scripts/audit-dashboards.py` | every panel's queries in the app: no errors, no values out of range | a running stack |
 
-That is a genuinely good layer for the paths a person takes. It is not
-uniform coverage of the stack.
+**Podman** was checked by hand (2026-10-03, Podman 5.7, rootless): every service
+up with `podman.yml`, GPUs through CDI, a chat answer, a Python run, a voice
+message through the transcript, a picture model loaded on the GPU.
 
----
+## 2. What is not tested
 
-## 2. Coverage per service, measured
-
-Each of the 33 services against the test entry points, by name:
-
-| covered | service | by |
-|---|---|---|
-| ✅ | argus | Argus tests, acceptance, e2e-check, health, domain-check, `tools/test-gitlab/run.sh` |
-| ✅ | litellm | acceptance, e2e-check, functional-test, health |
-| ✅ | traefik | acceptance, functional-test, health, domain-check, audit-auth |
-| ✅ | langfuse | acceptance, health, audit-auth |
-| ✅ | prometheus, alertmanager, loki | acceptance, health, functional-test and audit-dashboards (through the app's dashboards, Logs and Alerts) |
-| ✅ | node-exporter, nvidia-smi-exporter, cadvisor, redis, postgres, power-limits, clickhouse | acceptance/health only |
-| ✅ | llamacpp, vllm | e2e-check, health, smoke/bench |
-| ✅ | app (sign-in, OIDC, forwardAuth, people, chat, models) | app tests (xUnit, Vitest, Playwright), CI, acceptance, functional-test, health, domain-check, audit-auth, audit-dashboards |
-| ✅ | web | Playwright (every page, desktop and phone, both themes, axe WCAG 2.2 AA, keyboard focus, 320 px reflow), domain-check |
-| ✅ | sandbox | sandbox-check (17 checks against the real container), app tests (with a fake) |
-| ⚠️ | imagegen | functional-test (access per model) |
-| ⚠️ | model-init, tls-init | one script each |
-| ❌ | **app-init** | nothing |
-| ❌ | **prometheus-secrets** | nothing |
-| ⚠️ | llamacpp-embed, embed-init | acceptance (the embedder answers with `ARGUS_EMBED_DIM` dimensions) |
-| ❌ | **cpu-temp-exporter** | nothing |
-| ❌ | **dcgm-exporter** | nothing |
-| ❌ | **langfuse-worker** | nothing |
-| ❌ | **minio** | nothing |
-| ❌ | **promtail** | nothing |
-| ❌ | **vllm-secondary** | nothing |
-| ❌ | **searxng** | nothing against the real one (the app's web tool is tested with a fake) |
-
-Nine services are named by no test at all.
-
-### The bigger caveat: skipped is not passed
-
-`acceptance.py` is deliberately profile-aware — it emits `SKIP` rather than
-`FAIL` for a service whose profile is off, and the exit code stays 0. On the
-samples' profiles (`gateway,proxy,smi,llamacpp,logging`) that means `argus`,
-the whole of `tracing` (langfuse, langfuse-worker, clickhouse, minio),
-`cadvisor`, `dcgm`, `vllm` and `vllm-secondary` are **reported green without
-being exercised**. A green run says "nothing
-failed", not "everything passed".
-
----
-
-## 3. What is not tested, categorised
-
-| # | gap | why it matters |
-|---|---|---|
-| G1 | **Some services have no test** | app-init and prometheus-secrets prepare files other services depend on; if they regress, everything downstream fails confusingly |
-| G2 | **Profile-gated stacks are skipped by default** | tracing, logging, cadvisor, dcgm, multi-model are shipped and claimed, never run |
-| G3 | **Restore has no test** | `backup.sh --restore` is the highest-risk operation in the repository and the only one that can destroy data. `--verify` runs its checksums, but nothing restores and compares |
-| G4 | **The airgap round trip is manual** | bundle → transfer → `load.sh` was verified by hand once. Nothing keeps it working |
-| G5 | **`preflight.sh` / `check_mounts.py` are manual** | only synthetic payloads I ran by hand; no test in the suite |
-| G6 | **`with-ca.sh` is manual** | the host-trust path for `dsh`, curl, python and git |
-| G7 | **Built images other than Argus and the app** | the sandbox and cpu-temp-exporter images have no build-time test |
-| G8 | ~~No browser tests for chat~~ **closed** | the app's chat runs in a real browser against the real model, desktop and phone: streaming, thinking, stop and regenerate, attachments, code copy, history, and Argus's no-access notice for a person without access (`src/web/e2e/chat.spec.ts`, [chat.md](chat.md)) |
-| G9 | **Two clients executed, three transcribed** | DSH and Qwen Code now run end to end and their configs are in `clients/`, marked as executed. Claude Code and Continue are written from their own documentation and marked as such; Hermes is unexercised; the OpenAI SDK has no test at all. The distinction is recorded per file in `clients/README.md` so a transcribed config is never mistaken for a verified one |
-| G10 | ~~No upgrade test~~ **Closed** by `scripts/upgrade-test.py`: an old release from zero with fresh volumes, data put in, this checkout over it, `up` again and `down`/`up`; and this checkout from zero. v3.2.0: from zero 13/13; from v3.0.0 30/32, the two misses being v3.0.0's own first chat on a new deployment (fixed in v3.2.0). Rollback is still untested | going back to an older image over newer migrations |
-| G11 | **Disaster recovery is untested** | restore onto a *clean host*, which is the actual scenario |
-| G12 | **Windows / WSL** | every `.ps1` is unexercised here |
-
----
+| gap | what it would catch |
+|---|---|
+| A rollback test (older images over newer data) | a migration that cannot be undone |
+| A restore from `backup.sh` into an empty host | a backup that cannot be restored |
+| An offline (air-gapped) deployment | a first start that needs the internet |
+| `podman.yml` in CI (needs a GPU runner) | a Podman regression |
+| Video generation in CI (minutes on a GPU) | a change in stable-diffusion.cpp's job API |
 
 ## 4. Server-side tests
 
 "Server side" = runs on the host or inside `llm-net`, asserting the stack's own
 contract. None of these need a browser.
-
-### S1 — Configuration and compose integrity *(partial: `preflight.sh`)*
-
-| test | asserts | status |
-|---|---|---|
-| S1.1 | `docker compose config` resolves with only `.env` edited | exists in preflight |
-| S1.2 | every bind mount resolves to real content, live **and** on a fresh clone | exists (`check_mounts.py planned`/`containers`) |
-| S1.3 | a missing required variable names the variable | manual only |
-| S1.4 | every profile combination renders | **missing** |
-| S1.5 | `env-samples/*.env` each render against the current compose | exists — `acceptance.py` ("every env-sample is a complete deployment") |
-
-`check_mounts.py` has its own unit tests in `tests/deploy/test_check_mounts.py`
-(`python3 -m pytest tests/deploy`).
-
-They exist because enabling `logging` by default turned `preflight.sh` red on a
-perfectly healthy host. `/var/lib/docker` is mode 0710 root:root, so an ordinary
-user cannot stat anything inside it and `os.path.exists` returned **False for
-`/var/lib/docker/containers`** — a directory that is plainly there and that the
-daemon binds successfully, because the daemon is root. Preflight called it
-missing and told the operator their checkout had moved, with instructions to
-tear the stack down and delete directories that did not need deleting.
-
-The rule is now explicit: absence is only concluded when every directory above
-the path is searchable. "Cannot see it" is not "it is not there". The tests
-stub the filesystem rather than chmod-ing, because the suite runs as root and
-root is not subject to the bits this is about.
 
 ### S2 — Service contract, per service
 
@@ -153,7 +61,7 @@ emitted), `dcgm-exporter`, `promtail` (a log line reaches Loki), `langfuse-worke
 | S3.2 | forwardAuth allows/bypasses/denies per hostname per the access rules | exists — `ForwardAuthTests` (every host, member vs admin, machine token, unknown and look-alike hosts) and `audit-auth.sh` steps 3-5 |
 | S3.3 | the registered OIDC clients are exactly the configured ones | exists — `OidcTests.A_client_the_configuration_does_not_name_is_removed_at_start` |
 | S3.4 | `config/directory/users.yml` is hash-free and Argus can read it | exists — `IdentityTests.The_directory_for_argus_lists_people_without_passwords` |
-| S3.5 | a changed `APP_DATA_KEY` makes the app refuse to start instead of resetting its keys | exists — `KeyRingTests` |
+| S3.5 | a changed `APP_KEY` makes the app refuse to start instead of resetting its keys | exists — `KeyRingTests` |
 
 ### S4 — Gateway *(good)*
 
@@ -271,19 +179,6 @@ because it does not trust the certificate.
 | C1.4 | no key → 401; bad key → 401; over-budget → 429 with a usable message |
 | C1.5 | without the CA → a certificate error, i.e. the stack is **not** accidentally plaintext |
 
-### C2 — TLS trust per runtime *(G6)*
-
-`with-ca.sh` must be proven for each runtime, because each reads a different
-variable:
-
-| test | runtime | variable |
-|---|---|---|
-| C2.1 | Node | `NODE_EXTRA_CA_CERTS` (adds) |
-| C2.2 | Python `requests`/`httpx`/`urllib` | `SSL_CERT_FILE` (replaces) |
-| C2.3 | curl | `CURL_CA_BUNDLE` (replaces) |
-| C2.4 | git | `GIT_SSL_CAINFO` (replaces) |
-| C2.5 | and that C2.2–C2.4 still verify a **public** host, proving the combined bundle is correct |
-
 ### C3 — Agent integrations
 
 | test | asserts |
@@ -399,7 +294,6 @@ Ordered by (risk × likelihood), not by effort:
 | # | test | why first |
 |---|---|---|
 | 1 | **S6.2 restore round trip** | the only operation that can destroy data, and untested |
-| ~~2~~ | ~~**S1.5 env-samples render**~~ — **done** in `acceptance.py` | |
 | 3 | **S2 for the ten unreferenced services** | closes the largest named hole |
 | 4 | **C2 TLS trust per runtime** | this is the failure users actually hit; four small tests |
 | 5 | **S9.3 genuinely offline start** | the offline commits claim it; nothing checks it |
@@ -462,9 +356,8 @@ For the Argus case the stack's Argus must index the test GitLab, and the
 fixture's `dev_beta` must be a person in the app. Keep a copy of `.env` first,
 because all of this is temporary:
 
-1. In `.env`, add `argus` to `COMPOSE_PROFILES`, and set
-   `ARGUS_GITLAB_URL=http://host.docker.internal:8929`,
-   `ARGUS_GITLAB_AUTH=token` and `ARGUS_GITLAB_TOKEN` to the fixture's token
+1. In `.env`, set `GITLAB_URL=http://host.docker.internal:8929` and
+   `GITLAB_TOKEN` to the fixture's token
    from `tools/test-gitlab/seeded.json` (not in git; it is a throwaway
    instance). Then run `docker compose up -d` and wait for the first index.
 2. In the app, go to Admin → People and add `dev_beta` with the email

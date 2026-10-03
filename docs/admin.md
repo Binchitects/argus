@@ -1,6 +1,6 @@
 # Admin, usage and cost
 
-Everything an operator does happens in the app at `https://<LLM_DOMAIN>`. The
+Everything an operator does happens in the app at `https://DOMAIN`. The
 **Admin** area needs the admin role; **Usage & cost** and **Your account** are
 for everyone, as is **Connect your tools** (each person's API key and the
 setups for their tools).
@@ -36,7 +36,7 @@ page covers the rest.
 | **Sign-in** | Local accounts and the company directory; "Check the directory now". |
 
 Indexing, Packs and Explore talk to Argus through the app's server with
-`ARGUS_ADMIN_TOKEN`, which never reaches a browser. Without the `argus` profile
+`ARGUS_KEY`, which never reaches a browser. Without the `argus` profile
 they say that Argus is not set up, and how to turn it on.
 
 ### Models
@@ -110,7 +110,7 @@ loaded, and how full each GPU would be with them.
   - A name the gateway has already (a model here, or on another server) makes
     it **a second copy** of that model: LiteLLM spreads requests between them,
     and the chat can use the model while this machine's copy is not loaded.
-  - The key is kept encrypted with the app's key ring (`APP_DATA_KEY`) and never
+  - The key is kept encrypted with the app's key ring (`APP_KEY`) and never
     shown again; leave it empty when editing to keep it.
   - **Health.** Each server's card says whether it answers (checked every 30
     seconds when the page asks), why not, and which chosen models it no longer
@@ -191,18 +191,19 @@ Prometheus read them; nothing else does.
 
 ### What the admin area deliberately does not do
 
-**It does not recreate containers.** Admin → Models switches between models
-through the engine's own API (llama.cpp's router), which needs no Docker
-socket. Changing the `.env` model, or anything else in `.env`, recreates
-containers, and that stays a host command (`./scripts/apply-settings.sh`): a
-Docker socket in a web app is root on the host for anyone who reaches it.
+**It does not recreate containers.** Admin → Models loads and unloads models
+through the engines' own APIs (llama.cpp's router, the speech server's) and the
+control files the picture and video servers read, which need no Docker socket.
+`.env` holds only what the stack needs to start; a change there is
+`docker compose up -d` on the host. A Docker socket in a web app is root on
+the host for anyone who reaches it.
 
 **It shows no secrets**, not even masked: a masked value still leaks its length
 and first characters into every screenshot. A secret can be replaced, never
 read back.
 
-**Prices and credit defaults are `.env` values**: change them under Settings →
-Credit and prices, then run `./scripts/apply-settings.sh` on the host.
+**Prices are each model's** (Admin → Models); a new person's credit is in
+`config/litellm.yaml`, and each person's own under People.
 
 ## Usage & cost
 
