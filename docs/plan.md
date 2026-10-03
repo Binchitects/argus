@@ -544,3 +544,57 @@ giving any web container the Docker socket.
   `X-LLM-User-Email` and `user`. People connect their tools from **Connect your
   tools** (`/setup`). The `.env` samples, the docs and the scripts describe only
   this stack.
+
+## Next (after v3.2.0)
+
+What is known to be left, by size and by what it unblocks. Each comes with the
+test that says it is done.
+
+### N1 — One credit across chat and API keys  *(M)*
+LiteLLM counts a person twice — the chat as an end user, the keys as an internal
+user — and each path is limited to the whole budget, so together they can spend
+twice it. The ledger (the request log) already counts them as one.
+- The chat refuses a new answer once the ledger says the credit is used; a
+  watcher blocks a person's keys at the same point and unblocks them when the
+  budget is raised (keys an admin blocked by hand stay blocked).
+- **Done when:** a test spends through both paths and is stopped at the budget,
+  not twice it.
+
+### N2 — Spend and search at scale  *(S)*
+The ledger sums the whole request log on each read, and chat search scans with
+`ILIKE`. Fine for a team; slow for an enterprise's year of logs.
+- A daily per-person roll-up table (the ledger reads it plus today's rows); a
+  `pg_trgm` index for search.
+- **Done when:** both answer in under 200 ms over a seeded million rows.
+
+### N3 — Safeguards on the API path  *(M)*
+The safeguards apply to the chat; API keys go straight to LiteLLM.
+- LiteLLM's guardrail hook calling the app's check (blocked patterns, the
+  model's check, masking), and the same limits per key.
+- **Done when:** the clients check sees a blocked word refused through the API.
+
+### N4 — Deep research, faster  *(M)*
+Four sub-agents reading whole pages take eight minutes or more on one GPU.
+- Pages condensed before they reach the sub-agent's context, fetches cached,
+  sub-agents capped in rounds, and the report written while the last ones finish.
+- **Done when:** the live deep-research test finishes in under four minutes.
+
+### N5 — Projects for teams  *(M)*
+Projects are one person's.
+- Shared with groups (read or write), a model, thinking and tools per project,
+  and project knowledge searched (embedded) instead of only inlined.
+- **Done when:** access tests cover owner, group reader and writer, and others.
+
+### N6 — Rollback, restore and offline  *(M)*
+- A rollback test (`upgrade-test.py --back`): the older images over newer
+  migrations must refuse to start rather than corrupt.
+- A restore round trip (backup, wipe, restore, every key and spend still there).
+- The air-gapped bundle round trip (build, extract, load, up with no network).
+- **Done when:** each is a script in `deploy/scripts` and passes.
+
+### N7 — Smaller things
+- Queued messages live in the page: a closed tab drops them (keep them on the server).
+- Document previews draw the first 20 pages (page on through the rest).
+- Notifications for credit and alerts by email and webhook too, per person's choice.
+- The seven unpublished Argus packs published to the bucket.
+- The live e2e suite run one model-test at a time in CI (they time out in parallel on one GPU).
