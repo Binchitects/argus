@@ -26,6 +26,7 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
 
     public async IAsyncEnumerable<StreamEvent> StreamAsync(JsonObject request, string personEmail, [EnumeratorCancellation] CancellationToken ct)
     {
+        var registered = false;
         for (var attempt = 1; ; attempt++)
         {
             HttpResponseMessage? res;
@@ -39,9 +40,16 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
                 await key.ForgetAsync(ct);
                 continue;
             }
-            catch (ChatGatewayException ex) when (ex.Status == 400 && attempt == 1 && ex.Message.Contains("Invalid model name", StringComparison.OrdinalIgnoreCase))
+            catch (ChatGatewayException ex) when (ex.Message.Contains("Loading model", StringComparison.OrdinalIgnoreCase) && attempt <= 24)
+            {
+                // The engine is still loading the model (it says 503 meanwhile): wait for it, two minutes at most.
+                await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                continue;
+            }
+            catch (ChatGatewayException ex) when (ex.Status == 400 && !registered && ex.Message.Contains("Invalid model name", StringComparison.OrdinalIgnoreCase))
             {
                 // A model the app has not registered yet (a first start, the gateway just up): register now, ask again.
+                registered = true;
                 await using var scope = scopes.CreateAsyncScope();
                 await scope.ServiceProvider.GetRequiredService<Models.ModelCatalog>().SyncGatewayAsync(ct);
                 continue;

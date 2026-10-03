@@ -35,6 +35,9 @@ public sealed class FakeModel : HttpMessageHandler
     /// <summary>Models the gateway does not know yet, once each: the first request for one is refused as LiteLLM does.</summary>
     public ConcurrentDictionary<string, bool> UnknownOnce { get; } = new();
 
+    /// <summary>Models still loading, once each: the first request gets llama.cpp's 503 "Loading model" through LiteLLM.</summary>
+    public ConcurrentDictionary<string, bool> LoadingOnce { get; } = new();
+
     /// <summary>What speech to text was sent (the form, as text), and what text to speech was asked.</summary>
     public ConcurrentQueue<string> Transcriptions { get; } = new();
     public ConcurrentQueue<JsonObject> SpeechRequests { get; } = new();
@@ -67,6 +70,13 @@ public sealed class FakeModel : HttpMessageHandler
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(new JsonObject { ["created"] = 1, ["data"] = new JsonArray(new JsonObject { ["b64_json"] = Convert.ToBase64String(Png) }) }.ToJsonString(), Encoding.UTF8, "application/json"),
+            };
+        }
+        if (body["model"]?.GetValue<string>() is { } loading && LoadingOnce.TryRemove(loading, out _))
+        {
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = new StringContent("""{"error":{"message":"litellm.ServiceUnavailableError: OpenAIException - Loading model. Received Model Group=x","code":"503"}}""", Encoding.UTF8, "application/json"),
             };
         }
         if (body["model"]?.GetValue<string>() is { } asked && UnknownOnce.TryRemove(asked, out _))

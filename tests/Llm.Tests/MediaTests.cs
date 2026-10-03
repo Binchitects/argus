@@ -166,12 +166,13 @@ public sealed class MediaTests(AppFixture app)
     }
 
     [Fact]
-    public async Task A_model_the_gateway_does_not_know_yet_is_registered_and_asked_again()
+    public async Task A_model_the_gateway_does_not_know_yet_or_still_loading_is_waited_for()
     {
         var (f, b, sandbox) = await NewAppAsync();
         await using var _f = f;
         await using var _s = sandbox;
         app.Model.UnknownOnce["Omni"] = true;
+        app.Model.LoadingOnce["Omni"] = true;
         var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { model = "Omni", useArgus = false }))).GetProperty("id").GetGuid();
         var answer = await (await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello after a first start" })).Content.ReadAsStringAsync();
         Assert.DoesNotContain("Invalid model name", answer, StringComparison.Ordinal);
