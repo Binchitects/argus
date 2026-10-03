@@ -466,6 +466,7 @@ public static class IdentityWiring
         Operations.OperationsEndpoints.MapOperations(app);
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
+        Chat.ProjectEndpoints.MapProjects(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Models.ModelEndpoints.MapModels(app);
         Models.ModelHoursEndpoints.MapModelHours(app);

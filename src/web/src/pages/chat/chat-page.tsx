@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, hurryChat, stopChat, streamChat } from './api'
+import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, hurryChat, projectsQuery, stopChat, streamChat } from './api'
 import { Composer } from './composer'
 import { contextOf } from './context'
 import { collectFiles } from './files'
@@ -26,6 +26,7 @@ import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
 import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message } from './types'
 import { useUploads } from './uploads'
+import { ProjectView } from './project-view'
 import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export'
 import type { ExportKind } from './header'
 import { saveBlob } from '@/lib/zip'
@@ -33,7 +34,7 @@ import type { Queued } from './composer'
 import { tellDesktop } from '@/lib/desktop'
 
 export function ChatPage() {
-  const { id } = useParams()
+  const { id, projectId } = useParams()
   const navigate = useNavigate()
   const config = useQuery(configQuery)
   const [listOpen, setListOpen] = useState(false)
@@ -41,10 +42,13 @@ export function ChatPage() {
   // navigation (it is mid-answer), so it is keyed by "which new chat" until then.
   const [fresh, setFresh] = useState(0)
   const [adopted, setAdopted] = useState<string | null>(null)
+  // A new chat may start in a project (from the project's page).
+  const [startIn, setStartIn] = useState<string | null>(null)
   const threadKey = !id || id === adopted ? `new-${fresh}` : id
-  const startNew = () => {
+  const startNew = (project?: string) => {
     setFresh((n) => n + 1)
     setAdopted(null)
+    setStartIn(project ?? null)
     setListOpen(false)
     navigate('/chat')
   }
@@ -63,21 +67,23 @@ export function ChatPage() {
   return (
     <div className="grid h-[calc(100dvh-3.5rem)] min-h-0 lg:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[19rem_minmax(0,1fr)]">
       <div className="hidden min-h-0 border-r bg-sidebar lg:block">
-        <ChatList activeId={id} onNew={startNew} />
+        <ChatList activeId={id} activeProject={projectId} onNew={() => startNew()} />
       </div>
       <Sheet open={listOpen} onOpenChange={setListOpen}>
         <SheetContent side="left" className="w-80 gap-0 bg-sidebar p-0">
           <SheetTitle className="sr-only">Chats</SheetTitle>
           <SheetDescription className="sr-only">Your chats</SheetDescription>
-          <ChatList activeId={id} onNew={startNew} onNavigate={() => setListOpen(false)} />
+          <ChatList activeId={id} activeProject={projectId} onNew={() => startNew()} onNavigate={() => setListOpen(false)} />
         </SheetContent>
       </Sheet>
       {config.error ? (
         <div className="p-6">
           <QueryError error={config.error} retry={() => config.refetch()} />
         </div>
+      ) : projectId ? (
+        <ProjectView key={projectId} projectId={projectId} onOpenList={() => setListOpen(true)} onNewChat={() => startNew(projectId)} />
       ) : config.data ? (
-        <Thread key={threadKey} id={id} config={config.data} onAdopt={setAdopted} onOpenList={() => setListOpen(true)} />
+        <Thread key={threadKey} id={id} config={config.data} onAdopt={setAdopted} onOpenList={() => setListOpen(true)} startIn={id ? null : startIn} />
       ) : (
         <div className="p-6">
           <PageSkeleton />
@@ -96,12 +102,13 @@ const suggestions = [
   { icon: Sparkles, text: 'Review this approach: caching API responses in Redis for five minutes.' },
 ]
 
-function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: ChatConfig; onAdopt: (id: string) => void; onOpenList: () => void }) {
+function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; config: ChatConfig; onAdopt: (id: string) => void; onOpenList: () => void; startIn?: string | null }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const loaded = useQuery({ ...conversationQuery(id ?? ''), enabled: !!id })
   const brand = useQuery(infoQuery).data?.name
-  const [draft, setDraft] = useState<ChatSettings>({})
+  // A new chat started from a project's page is made in it.
+  const [draft, setDraft] = useState<ChatSettings>(() => (startIn ? { projectId: startIn } : {}))
   const [live, setLive] = useState<LiveState | null>(null)
   const liveRef = useRef<LiveState | null>(null)
   /** What to do once a run is over and saved: send the next queued message. */
@@ -413,6 +420,17 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     })
   }
 
+  // A new chat made in a project: its name for the header.
+  const projects = useQuery({ ...projectsQuery, enabled: !!draft.projectId && !id })
+  const projectName = draft.projectId ? { id: draft.projectId, name: projects.data?.find((p) => p.id === draft.projectId)?.name ?? 'Project' } : null
+  const move = async (projectId: string | null) => {
+    if (!id) return
+    await api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { projectId: projectId ?? '00000000-0000-0000-0000-000000000000' } })
+      .then(() => toast.success(projectId ? 'Moved to the project' : 'Taken out of the project', { description: 'The next answers read its instructions and files accordingly.' }))
+      .catch((e) => toast.error(errorMessage(e)))
+    await Promise.all([queryClient.invalidateQueries({ queryKey: ['chat'] }), queryClient.invalidateQueries({ queryKey: ['projects'] })])
+  }
+
   /** The branch on screen as a file (made here, from what the page has), or its summary by the model. */
   const exportChat = (kind: ExportKind) => {
     const name = title ?? data?.title ?? 'Chat'
@@ -579,6 +597,8 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
           onOpenList={onOpenList}
           chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt } : undefined}
           onExport={id && path.length ? exportChat : undefined}
+          project={data?.project ?? (draft.projectId ? projectName : null)}
+          onMove={id ? (projectId) => void move(projectId) : undefined}
           onCompact={canCompact ? () => void compact() : undefined}
         />
         {empty ? (

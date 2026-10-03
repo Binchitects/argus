@@ -16,11 +16,13 @@ namespace Llm.Api.Chat;
 
 /// <summary>A new chat. Tools: the tool ids it may call (default: those on in new chats); UseArgus: Argus on or off in that list.</summary>
 public sealed record NewConversation(string? Thinking = null, bool? UseArgus = null, string? Model = null, string? SystemPrompt = null,
-    double? Temperature = null, double? TopP = null, int? MaxTokens = null, string[]? Tools = null);
+    double? Temperature = null, double? TopP = null, int? MaxTokens = null, string[]? Tools = null, Guid? ProjectId = null);
 
 /// <summary>Only what is sent changes. For the numbers, a negative value clears them (back to the model's default).</summary>
+/// <param name="ProjectId">Into this project; Guid.Empty takes it out of its project.</param>
 public sealed record ConversationChange(string? Title = null, string? Thinking = null, bool? UseArgus = null, string? Model = null,
-    string? SystemPrompt = null, double? Temperature = null, double? TopP = null, int? MaxTokens = null, bool? Archived = null, string[]? Tools = null);
+    string? SystemPrompt = null, double? Temperature = null, double? TopP = null, int? MaxTokens = null, bool? Archived = null, string[]? Tools = null,
+    Guid? ProjectId = null);
 
 /// <summary>The person's answer to a call waiting for them ("ask before running").</summary>
 public sealed record ToolDecision(bool Allow);
@@ -113,16 +115,21 @@ public static partial class ChatEndpoints
         db.Conversations.SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id);
 
     /// <summary>The person's chats, newest first; archived ones only when asked for.</summary>
-    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, string? q = null, bool archived = false)
+    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, string? q = null, bool archived = false,
+        Guid? project = null)
     {
         var me = await Me(p, users);
         var query = db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id && (archived ? c.ArchivedAt != null : c.ArchivedAt == null));
+        if (project is { } pid)
+        {
+            query = query.Where(c => c.ProjectId == pid);
+        }
         if (!string.IsNullOrWhiteSpace(q))
         {
             query = query.Where(c => EF.Functions.ILike(c.Title, "%" + q.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
         }
-        var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300).Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt }).ToListAsync();
-        return Results.Ok(list.Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, answering = jobs.IsAnswering(c.Id) }));
+        var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300).Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.ProjectId }).ToListAsync();
+        return Results.Ok(list.Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.ProjectId, answering = jobs.IsAnswering(c.Id) }));
     }
 
     private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
@@ -139,9 +146,18 @@ public static partial class ChatEndpoints
         {
             return refused;
         }
+        object? project = null;
+        if (body.ProjectId is { } pid)
+        {
+            if (await db.Projects.AsNoTracking().Where(x => x.Id == pid && x.UserId == me.Id).Select(x => new { x.Id, x.Name }).SingleOrDefaultAsync(ct) is not { } owned)
+            {
+                return AuthEndpoints.Problem(400, "project", "There is no such project of yours.");
+            }
+            (c.ProjectId, project) = (pid, owned);
+        }
         db.Conversations.Add(c);
         await db.SaveChangesAsync(ct);
-        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, OnFor(c, allowed), null, [], false));
+        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, OnFor(c, allowed), null, [], false, project));
     }
 
     /// <summary>The ids of the tools a chat has on, of those the person may use.</summary>
@@ -249,6 +265,9 @@ public static partial class ChatEndpoints
         var forkedFrom = c.ForkedFromId is { } from
             ? await db.Conversations.AsNoTracking().Where(x => x.Id == from && x.UserId == me.Id).Select(x => new { x.Id, x.Title }).SingleOrDefaultAsync(ct)
             : null;
+        var project = c.ProjectId is { } pid
+            ? await db.Projects.AsNoTracking().Where(x => x.Id == pid).Select(x => new { x.Id, x.Name }).SingleOrDefaultAsync(ct)
+            : null;
         var tools = OnFor(c, await registry.ForAsync(await access.MembershipAsync(me, ct), ct));
         return Results.Ok(Shape(c, tools, forkedFrom, messages.Select(m => (object)new
         {
@@ -261,15 +280,15 @@ public static partial class ChatEndpoints
             status = m.Status.ToString().ToLowerInvariant(), m.Error, m.Model,
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
-        }), jobs.IsAnswering(id)));
+        }), jobs.IsAnswering(id), project));
     }
 
     /// <param name="answering">An answer is being written: the page watches it (GET …/stream).</param>
-    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering) =>
+    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? project = null) =>
         new
         {
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
-            c.CurrentLeafId, c.ArchivedAt, forkedFrom, c.CreatedAt, c.UpdatedAt, answering, messages,
+            c.CurrentLeafId, c.ArchivedAt, forkedFrom, project, c.CreatedAt, c.UpdatedAt, answering, messages,
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
@@ -299,6 +318,14 @@ public static partial class ChatEndpoints
         if (body.Archived is { } archive)
         {
             c.ArchivedAt = archive ? c.ArchivedAt ?? DateTimeOffset.UtcNow : null;
+        }
+        if (body.ProjectId is { } pid)
+        {
+            if (pid != Guid.Empty && !await db.Projects.AnyAsync(x => x.Id == pid && x.UserId == me.Id, ct))
+            {
+                return AuthEndpoints.Problem(400, "project", "There is no such project of yours.");
+            }
+            c.ProjectId = pid == Guid.Empty ? null : pid;
         }
         await db.SaveChangesAsync(ct);
         return Results.NoContent();

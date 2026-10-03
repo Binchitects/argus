@@ -225,6 +225,48 @@ test.describe('context gauge', () => {
   })
 })
 
+test.describe('projects', () => {
+  test('a project is made with instructions and a file, a chat starts in it, and another moves in', async ({ page, isMobile }, info) => {
+    const headers = { 'X-Requested-With': 'e2e' }
+    const name = `Codec ${Date.now()}`
+    const loose = (await (await page.request.post('/api/chat/conversations', { data: {}, headers })).json()).id
+    try {
+      await page.goto('/chat')
+      const list = await chatList(page, isMobile)
+      await list.getByRole('button', { name: 'New project' }).click()
+      const dialog = page.getByRole('dialog', { name: 'New project' })
+      await dialog.getByLabel('Name').fill(name)
+      await dialog.getByRole('button', { name: 'Create' }).click()
+      await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
+      await page.getByLabel('Project instructions').fill('Answer as a codec engineer.')
+      await page.getByRole('region', { name: 'Instructions' }).getByRole('button', { name: 'Save' }).click()
+      await expect(page.getByText('Instructions saved')).toBeVisible()
+      await page.getByLabel('Add files to the project').setInputFiles({ name: 'facts.txt', mimeType: 'text/plain', buffer: Buffer.from('The frame header is 12 bytes.\n') })
+      await expect(page.getByRole('list', { name: 'Files' })).toContainText('facts.txt')
+      await expectAccessible(page, info, 'project')
+      await screenshot(page, info, `project${isMobile ? '-phone' : ''}`)
+
+      // A new chat from the project's page is in it.
+      await page.getByRole('button', { name: 'New chat in this project' }).click()
+      await expect(page).toHaveURL(/\/chat$/)
+      if (!isMobile) await expect(page.getByRole('link', { name: `Project: ${name}` })).toBeVisible()
+
+      // Another chat moves in from its menu.
+      await page.goto(`/chat/${loose}`)
+      await page.getByRole('button', { name: 'Chat actions' }).click()
+      await page.getByRole('menuitem', { name: 'Move to project' }).click()
+      await page.getByRole('menuitem', { name }).click()
+      await expect(page.getByText('Moved to the project')).toBeVisible()
+      const moved = await (await page.request.get(`/api/chat/conversations/${loose}`)).json()
+      expect(moved.project.name).toBe(name)
+    } finally {
+      const projects = (await (await page.request.get('/api/projects')).json()) as { id: string; name: string }[]
+      for (const p of projects.filter((p) => p.name === name)) await page.request.delete(`/api/projects/${p.id}`, { headers })
+      await page.request.delete(`/api/chat/conversations/${loose}`, { headers })
+    }
+  })
+})
+
 test.describe('search', () => {
   test('words found in an answer open the chat at that answer', async ({ page, isMobile }, info) => {
     await serveArgusChat(page)

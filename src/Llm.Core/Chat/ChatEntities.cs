@@ -31,6 +31,8 @@ public sealed class Conversation
     public Guid? ForkedFromId { get; set; }
     /// <summary>The scheduled task whose run this chat is, if any.</summary>
     public Guid? ScheduledTaskId { get; set; }
+    /// <summary>The project this chat belongs to, if any: its instructions and files go with every answer.</summary>
+    public Guid? ProjectId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];
@@ -121,4 +123,28 @@ public sealed class AttachmentPage
     public int Total { get; set; }
 
     public required byte[] Data { get; set; }
+}
+
+/// <summary>
+/// A project (as in ChatGPT and Claude): chats kept together, with instructions and
+/// files that every answer in them reads. Its owner's only.
+/// </summary>
+public sealed class Project
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserId { get; set; }
+    public required string Name { get; set; }
+    public string? Description { get; set; }
+    /// <summary>Sent with every answer of its chats, after the app's system prompt and before a chat's own.</summary>
+    public string? Instructions { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A file of a project (an uploaded attachment): every chat of the project has it.</summary>
+public sealed class ProjectFile
+{
+    public Guid ProjectId { get; set; }
+    public Guid AttachmentId { get; set; }
+    public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
 }

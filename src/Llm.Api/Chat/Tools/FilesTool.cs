@@ -74,10 +74,7 @@ public sealed class FilesTool(AppDbContext db) : IChatTool
     /// <summary>The conversation's readable files, oldest first; a repeated name gets " (2)".</summary>
     public async Task<IReadOnlyList<ChatFile>> FilesAsync(Guid conversationId, CancellationToken ct)
     {
-        var lists = await db.ChatMessages.AsNoTracking()
-            .Where(m => m.ConversationId == conversationId && m.AttachmentsJson != null)
-            .OrderBy(m => m.Sequence).Select(m => m.AttachmentsJson).ToListAsync(ct);
-        var ids = lists.SelectMany(ChatService.ParseIds).Distinct().ToList();
+        var ids = await ChatService.FileIdsAsync(db, conversationId, ct);
         var found = await db.ChatAttachments.AsNoTracking()
             .Where(a => ids.Contains(a.Id) && a.Kind != "image" && a.Text != "")
             .Select(a => new { a.Id, a.FileName, a.Text, a.Truncated }).ToDictionaryAsync(a => a.Id, ct);

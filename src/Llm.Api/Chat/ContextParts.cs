@@ -4,7 +4,8 @@ using System.Text.RegularExpressions;
 namespace Llm.Api.Chat;
 
 /// <summary>The system message's parts, by length: the app's own words, the tools' instructions, the person's, a compaction's summary.</summary>
-public sealed record SystemParts(int Base, int ToolNotes, int Person, int Summary);
+/// <param name="Files">A project's files in the system message.</param>
+public sealed record SystemParts(int Base, int ToolNotes, int Person, int Summary, int Files = 0);
 
 /// <summary>
 /// What filled a request to the model, in characters by kind, for the context gauge:
@@ -17,7 +18,7 @@ public static partial class ContextParts
 {
     public static JsonObject Measure(JsonObject request, SystemParts system, int imageWeight)
     {
-        long you = 0, files = 0, answers = 0, toolResults = 0;
+        long you = 0, files = system.Files, answers = 0, toolResults = 0;
         foreach (var m in (request["messages"] as JsonArray ?? []).OfType<JsonObject>())
         {
             switch (m["role"]?.GetValue<string>())

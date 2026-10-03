@@ -1,5 +1,5 @@
 import { api, ApiError } from '@/lib/api'
-import type { Attachment, ChatConfig, ChatEvent, Conversation, ConversationSummary } from './types'
+import type { Attachment, ChatConfig, ChatEvent, Conversation, ConversationSummary, Project, ProjectSummary } from './types'
 
 export const configQuery = {
   queryKey: ['chat', 'config'] as const,
@@ -105,3 +105,13 @@ export function uploadFile(file: File, onProgress: (share: number) => void, sign
 export const attachmentUrl = (id: string) => `/api/chat/attachments/${id}/content`
 /** The file itself, to save (never shown in the page). */
 export const downloadUrl = (id: string) => `${attachmentUrl(id)}?download=1`
+
+export const projectsQuery = {
+  queryKey: ['projects'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<ProjectSummary[]>('/api/projects', { signal }),
+}
+
+export const projectQuery = (id: string) => ({
+  queryKey: ['projects', id] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<Project>(`/api/projects/${id}`, { signal }),
+})

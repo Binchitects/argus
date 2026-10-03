@@ -19,6 +19,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<AttachmentPage> AttachmentPages => Set<AttachmentPage>();
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
@@ -64,6 +66,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(c => new { c.UserId, c.UpdatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(c => c.Messages).WithOne().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(c => c.ProjectId);
+            e.HasOne<Project>().WithMany().HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<ChatMessage>(e =>
         {
@@ -83,6 +87,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(a => a.Kind).HasMaxLength(20);
             e.HasIndex(a => a.UserId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Project>(e =>
+        {
+            e.ToTable("projects");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Instructions).HasMaxLength(20_000);
+            e.HasIndex(x => new { x.UserId, x.UpdatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ProjectFile>(e =>
+        {
+            e.ToTable("project_files");
+            e.HasKey(x => new { x.ProjectId, x.AttachmentId });
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<ChatAttachment>().WithMany().HasForeignKey(x => x.AttachmentId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<AttachmentPage>(e =>
         {

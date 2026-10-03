@@ -124,6 +124,28 @@ export interface ConversationSummary {
   archivedAt?: string | null
   /** An answer is being written (it goes on when the page closes): the page watches it again. */
   answering?: boolean
+  projectId?: string | null
+}
+
+/** A project: chats together, with instructions and files every answer in them reads. */
+export interface ProjectSummary {
+  id: string
+  name: string
+  description: string | null
+  updatedAt: string
+  chats: number
+  files: number
+}
+
+export interface Project {
+  id: string
+  name: string
+  description: string | null
+  instructions: string | null
+  createdAt: string
+  updatedAt: string
+  files: (Attachment & { addedAt: string })[]
+  chats: ConversationSummary[]
 }
 
 export interface Conversation extends ConversationSummary {
@@ -140,6 +162,8 @@ export interface Conversation extends ConversationSummary {
   archivedAt: string | null
   /** The chat this one was forked from, while it still exists. */
   forkedFrom: { id: string; title: string } | null
+  /** The project the chat is in, if any. */
+  project?: { id: string; name: string } | null
   createdAt: string
   messages: Message[]
 }
@@ -155,6 +179,8 @@ export interface ChatSettings {
   temperature?: number | null
   topP?: number | null
   maxTokens?: number | null
+  /** A new chat made in this project. */
+  projectId?: string | null
 }
 
 export type ChatEvent =

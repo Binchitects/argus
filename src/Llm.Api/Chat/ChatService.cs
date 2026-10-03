@@ -754,11 +754,23 @@ public sealed partial class ChatService(
             system += "\n\n" + toolInstructions;
         }
         var toolNotes = system.Length - baseLength;
+        // A project's instructions, then the chat's own; then the project's files.
+        var project = conversation.ProjectId is { } pid ? await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == pid, ct) : null;
+        if (!string.IsNullOrWhiteSpace(project?.Instructions))
+        {
+            system += $"\n\nThis conversation is in the person's project \"{project.Name}\". The project's instructions:\n" + project.Instructions.Trim();
+        }
         if (!string.IsNullOrWhiteSpace(conversation.SystemPrompt))
         {
             system += "\n\nThe person's instructions for this conversation:\n" + conversation.SystemPrompt.Trim();
         }
         var person = system.Length - baseLength - toolNotes;
+        var beforeFiles = system.Length;
+        if (project is not null)
+        {
+            system += await ProjectFilesAsync(project, canReadFiles, ct);
+        }
+        var projectFiles = system.Length - beforeFiles;
 
         // Rough, and on the safe side: ~3.5 characters a token for English and code.
         var context = model?.Context ?? 32768;
@@ -793,7 +805,7 @@ public sealed partial class ChatService(
         }
 
         return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped,
-            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary));
+            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, projectFiles));
     }
 
     public static IEnumerable<Guid> ParseIds(string? json) =>

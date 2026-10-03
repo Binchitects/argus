@@ -1,5 +1,7 @@
-import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FileDown, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FileDown, FoldVertical, FolderInput, FolderKanban, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,7 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
-import { chatModel } from './api'
+import { chatModel, projectsQuery } from './api'
 import type { ChatConfig, ChatSettings } from './types'
 import { useChatActions } from './chat-actions'
 
@@ -196,6 +198,8 @@ export function ChatHeader({
   chat,
   onCompact,
   onExport,
+  project,
+  onMove,
 }: {
   config: ChatConfig
   settings: ChatSettings
@@ -210,6 +214,9 @@ export function ChatHeader({
   onCompact?: () => void
   /** Export the branch on screen, or its summary. */
   onExport?: (kind: ExportKind) => void
+  /** The project the chat is in (or a new chat will be in), and moving it to another. */
+  project?: { id: string; name: string } | null
+  onMove?: (projectId: string | null) => void
 }) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
@@ -220,6 +227,16 @@ export function ChatHeader({
         <ModelPicker config={config} value={settings.model ?? null} onChange={(model) => onChange({ model: model ?? '' })} />
         <ThinkingPicker config={config} value={settings.thinking ?? null} onChange={(thinking) => onChange({ thinking: thinking ?? '' })} />
       </div>
+      {project && (
+        <Link
+          to={`/chat/projects/${project.id}`}
+          className="ms-2 hidden min-w-0 max-w-56 items-center gap-1.5 truncate rounded-md px-2 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring sm:flex"
+          aria-label={`Project: ${project.name}`}
+        >
+          <FolderKanban className="size-3.5 shrink-0" aria-hidden="true" />
+          <bdi className="truncate">{project.name}</bdi>
+        </Link>
+      )}
       <span className="ml-auto flex shrink-0 items-center gap-1">
         <ChatSettingsPopover config={config} settings={settings} onChange={onChange} />
         <Tooltip content={filesOpen ? 'Hide files' : 'Files in this chat'}>
@@ -227,7 +244,7 @@ export function ChatHeader({
             <FolderOpen /> <span className="tabular-nums">{filesCount}</span>
           </Button>
         </Tooltip>
-        {chat && <ChatMenu chat={chat} onCompact={onCompact} onExport={onExport} />}
+        {chat && <ChatMenu chat={chat} onCompact={onCompact} onExport={onExport} project={project} onMove={onMove} />}
       </span>
     </header>
   )
@@ -235,8 +252,21 @@ export function ChatHeader({
 
 export type ExportKind = 'md' | 'html' | 'pdf' | 'json' | 'summary'
 
-function ChatMenu({ chat, onCompact, onExport }: { chat: { id: string; title: string; archived: boolean }; onCompact?: () => void; onExport?: (kind: ExportKind) => void }) {
+function ChatMenu({
+  chat,
+  onCompact,
+  onExport,
+  project,
+  onMove,
+}: {
+  chat: { id: string; title: string; archived: boolean }
+  onCompact?: () => void
+  onExport?: (kind: ExportKind) => void
+  project?: { id: string; name: string } | null
+  onMove?: (projectId: string | null) => void
+}) {
   const { fork, archive, askDelete } = useChatActions(chat, true)
+  const projects = useQuery({ ...projectsQuery, enabled: !!onMove })
   return (
     <DropdownMenu>
       <Tooltip content="More">
@@ -253,6 +283,27 @@ function ChatMenu({ chat, onCompact, onExport }: { chat: { id: string; title: st
         <DropdownMenuItem disabled={!onCompact} onSelect={() => onCompact?.()}>
           <FoldVertical /> Compact
         </DropdownMenuItem>
+        {onMove && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <FolderInput /> Move to project
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
+              {projects.data?.map((p) => (
+                <DropdownMenuItem key={p.id} disabled={p.id === project?.id} onSelect={() => onMove(p.id)}>
+                  <FolderKanban /> <bdi className="max-w-56 truncate">{p.name}</bdi>
+                </DropdownMenuItem>
+              ))}
+              {projects.data?.length === 0 && <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>}
+              {project && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => onMove(null)}>Out of {project.name}</DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
         {onExport && (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>

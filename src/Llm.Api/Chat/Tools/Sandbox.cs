@@ -231,10 +231,7 @@ public sealed class PythonTool(SandboxClient sandbox, AppDbContext db, IOptionsM
     /// <summary>The chat's files, as bytes: the original of a document, the text of a text file, the picture itself.</summary>
     public async Task<IReadOnlyList<SandboxFile>> InputsAsync(Guid conversationId, CancellationToken ct)
     {
-        var lists = await db.ChatMessages.AsNoTracking()
-            .Where(m => m.ConversationId == conversationId && m.AttachmentsJson != null)
-            .OrderBy(m => m.Sequence).Select(m => m.AttachmentsJson).ToListAsync(ct);
-        var ids = lists.SelectMany(ChatService.ParseIds).Distinct().ToList();
+        var ids = await ChatService.FileIdsAsync(db, conversationId, ct);
         var found = await db.ChatAttachments.AsNoTracking().Where(a => ids.Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
         var byName = new Dictionary<string, SandboxFile>(StringComparer.OrdinalIgnoreCase);
         long total = 0;
