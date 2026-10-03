@@ -503,6 +503,29 @@ public sealed class ChatToolsTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.GetAsync($"/api/chat/attachments/{text}/pages"));
     }
 
+    [Fact]
+    public async Task Deep_research_turns_on_sub_agents_for_the_answer_and_asks_for_a_plan_and_a_sourced_report()
+    {
+        var (b, _, email) = await PersonAsync(app.Factory);
+        var id = await NewChatAsync(b, new { tools = new[] { "calculator" } });
+        var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "Compare the codecs", research = true });
+        var events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+        // Sub-agents for this answer, though the chat has only the calculator; the web is not allowed here, and it says so.
+        Assert.Contains("delegate", FunctionsSentFor(email));
+        Assert.Contains("calculate", FunctionsSentFor(email));
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "notice" && e.GetProperty("kind").GetString() == "research_no_web");
+        var system = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
+        Assert.Contains("Deep research: the person asked for a thorough, sourced report", system, StringComparison.Ordinal);
+        var sent = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        Assert.StartsWith("Compare the codecs\n\n(Deep research: plan the research questions", sent, StringComparison.Ordinal);
+        var kept = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages")[0].GetProperty("content").GetString();
+        Assert.Equal("Compare the codecs", kept);
+        // The chat keeps its own tools; the next answer, without research, has no sub-agents.
+        await SendAsync(b, id, "Thanks");
+        Assert.DoesNotContain("delegate", FunctionsSentFor(email));
+    }
+
     private static async Task<Guid> UploadAsync(TestBrowser b, string name, string text)
     {
         using var form = new MultipartFormDataContent();

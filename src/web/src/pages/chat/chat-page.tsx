@@ -33,6 +33,10 @@ import { saveBlob } from '@/lib/zip'
 import type { Queued } from './composer'
 import { tellDesktop } from '@/lib/desktop'
 
+/** The id a question is shown under until the server gives it its own. */
+let localCount = 0
+const newLocalId = () => `local-${Date.now()}-${++localCount}`
+
 export function ChatPage() {
   const { id, projectId } = useParams()
   const navigate = useNavigate()
@@ -400,6 +404,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
 
   const send = async (text: string, files?: Attachment[]): Promise<boolean> => {
     const fromBox = files === undefined
+    // Deep research is for the message written with it on: off again once sent.
+    const deep = fromBox && research
+    if (deep) setResearch(false)
     // "/compact": a command, not a question.
     if (text === '/compact' && (files ?? uploads.attachments).length === 0) {
       if (!canCompact) {
@@ -412,10 +419,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     const conversationId = await ensureChat()
     if (!conversationId) return false
     const parent = view.leaf
-    const localId = `local-${Date.now()}`
+    const localId = newLocalId()
     const attachments = files ?? uploads.attachments
     // The files went with the question once the server has it: the box is free for the next one while the answer streams.
-    return run(conversationId, 'messages', { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null }, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
+    return run(conversationId, 'messages', { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null, ...(deep ? { research: true } : {}) }, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
       if (e.type === 'question' && fromBox) uploads.clear()
     })
   }
@@ -459,6 +466,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
 
+  const [research, setResearch] = useState(false)
+
   // Written while an answer runs: each waits its turn, sent once the answer before is over
   // (saved too: a page with nothing live), or at once with Send now (which stops the answer).
   const [queue, setQueue] = useState<Queued[]>([])
@@ -482,7 +491,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
 
   const edit = (m: Message, text: string) => {
     if (!id) return
-    const localId = `local-${Date.now()}`
+    const localId = newLocalId()
     void run(id, 'messages', { content: text, attachments: m.attachments.map((a) => a.id), parentId: m.parentId ?? undefined, root: m.parentId === null }, withQuestion(view, localId, m.parentId, text, m.attachments), localId)
   }
 
@@ -613,7 +622,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   {error}
                 </Alert>
               )}
-              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} autoFocus big />
+              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} autoFocus big />
               <div className="stagger mt-4 grid gap-2 sm:grid-cols-3">
                 {(config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions).map((s) => (
                   <button
@@ -724,6 +733,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 onQueue={enqueue}
                 onSendNow={sendNow}
                 onUnqueue={(key) => setQueue((q) => q.filter((x) => x.key !== key))}
+                research={research}
+                onResearch={setResearch}
                 onStop={() => void stop()}
                 uploads={uploads}
                 model={model}

@@ -711,6 +711,18 @@ describe('chat', () => {
     expect(screen.queryByRole('list', { name: 'Queued messages' })).not.toBeInTheDocument()
   })
 
+  it('deep research goes with the message written with it on, then turns off', async () => {
+    const calls = backend({ events: answer, saved: answered })
+    renderApp('/chat')
+    const toggle = await screen.findByRole('button', { name: 'Deep research' })
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute('placeholder', 'What should be researched?')
+    await ask('Compare the codecs')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toMatchObject({ content: 'Compare the codecs', research: true }))
+    expect(await screen.findByRole('button', { name: 'Deep research' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('a sent file leaves the box as soon as the question is taken, while the answer still streams', async () => {
     const calls = backend({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }], hang: true })
     renderApp('/chat')

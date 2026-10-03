@@ -1,4 +1,4 @@
-import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, Telescope, X } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -36,6 +36,8 @@ export function Composer({
   onQueue,
   onSendNow,
   onUnqueue,
+  research,
+  onResearch,
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
@@ -55,6 +57,9 @@ export function Composer({
   onQueue?: (text: string) => void
   onSendNow?: (key: string) => void
   onUnqueue?: (key: string) => void
+  /** Deep research for the next message: sub-agents search the web, and the answer is a sourced report. */
+  research?: boolean
+  onResearch?: (on: boolean) => void
 }) {
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
@@ -169,7 +174,7 @@ export function Composer({
             uploads.add(e.clipboardData.files)
           }
         }}
-        placeholder={streaming && onQueue ? 'Queue a message…' : 'Message'}
+        placeholder={streaming && onQueue ? 'Queue a message…' : research ? 'What should be researched?' : 'Message'}
         aria-label="Message"
         // oxlint-disable-next-line jsx-a11y/no-autofocus -- the chat's whole purpose is this box
         autoFocus={autoFocus}
@@ -183,7 +188,21 @@ export function Composer({
           </Button>
         </Tooltip>
         {tools}
-        <span className="hidden text-xs text-muted-foreground lg:inline">Enter to send · Shift+Enter for a new line</span>
+        {onResearch && (
+          <Tooltip content="Deep research: a plan, sub-agents that search the web, and a report with its sources. It takes minutes.">
+            <Button
+              type="button"
+              variant={research ? 'secondary' : 'ghost'}
+              size="sm"
+              className={cn('h-8 gap-1.5 rounded-full px-2.5', research && 'text-primary-ink')}
+              aria-pressed={!!research}
+              onClick={() => onResearch(!research)}
+            >
+              <Telescope /> <span className="hidden sm:inline">Deep research</span>
+            </Button>
+          </Tooltip>
+        )}
+        <span className="hidden text-xs text-muted-foreground xl:inline">Enter to send · Shift+Enter for a new line</span>
         <span className="ml-auto" />
         {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} />}
         {streaming && onQueue && hasContent && (

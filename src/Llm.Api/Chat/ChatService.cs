@@ -16,7 +16,8 @@ namespace Llm.Api.Chat;
 
 /// <summary>For one answer only: another model or thinking level than the chat's (retry with…).</summary>
 /// <param name="Hurry">"Answer now", when the person asks for it while the model thinks.</param>
-public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null);
+/// <param name="Research">Deep research: the web and sub-agents on for this answer, a plan, and a sourced report.</param>
+public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false);
 
 /// <summary>
 /// "Answer now" (as in ChatGPT and Gemini): the person asked the answer to stop thinking.
@@ -52,6 +53,21 @@ public sealed partial class ChatService(
     IServiceScopeFactory scopes,
     ILogger<ChatService> logger)
 {
+    /// <summary>Deep research: rounds of tool calls an answer may take (plan, sub-agents, gaps, report).</summary>
+    private const int ResearchRounds = 16;
+
+    internal const string ResearchNote =
+        "Deep research: the person asked for a thorough, sourced report, and waits for it. Work in steps.\n" +
+        "1. Plan: break the question into 3 to 6 research questions that cover its angles (facts, recent changes, numbers, " +
+        "opposing views). Say the plan in one short line.\n" +
+        "2. Research: call delegate once, one part per question: the parts run side by side, each with its own tools. Tell each " +
+        "part to search the web (web_search), open the best sources (fetch_url), and bring back findings with each source's title " +
+        "and URL. Only without delegate, research with the tools you have.\n" +
+        "3. Fill gaps: if something important is missing or sources disagree, research that too.\n" +
+        "4. Report: a title; a short summary of the answer; sections by theme; a table when it compares things; what is uncertain " +
+        "or disputed; and numbered citations [1] in the text, listed under a Sources heading at the end with their URLs (always). Prefer primary, " +
+        "recent sources. Cite only what you opened; never make up a source or a URL.";
+
     /// <summary>An image counts as this many characters of the context budget (roughly 1,000 tokens).</summary>
     private const int ImageWeight = 3_500;
 
@@ -95,7 +111,17 @@ public sealed partial class ChatService(
         if (model?.Tools != false)
         {
             var allowed = await registry.ForAsync(await access.MembershipAsync(user, ct), ct);
-            foreach (var choice in ToolRegistry.Chosen(conversation.Tools, allowed))
+            var chosen = ToolRegistry.Chosen(conversation.Tools, allowed).ToList();
+            if (overrides.Research)
+            {
+                // Deep research needs the web and sub-agents, for this answer, when the person may use them.
+                chosen.AddRange(allowed.Where(t => t.Tool.Id is "web" or "agents" && chosen.All(c => c.Tool.Id != t.Tool.Id)));
+                if (chosen.All(c => c.Tool.Id != "web"))
+                {
+                    await emit(new { type = "notice", kind = "research_no_web", text = "Deep research works best with the web tool, which is not available to you: this answer uses what is." });
+                }
+            }
+            foreach (var choice in chosen)
             {
                 IToolRun run;
                 try
@@ -125,8 +151,26 @@ public sealed partial class ChatService(
             }
         }
 
+        if (overrides.Research)
+        {
+            instructions.Add(("research", ResearchNote));
+        }
         var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, email, string.Join("\n\n", instructions.Select(i => i.Text)), runs.ContainsKey("read_file"),
             emit, ct);
+        if (overrides.Research && messages.OfType<JsonObject>().LastOrDefault(m => m["role"]?.GetValue<string>() == "user") is { } asked)
+        {
+            // Said again on the person's turn (models follow it more closely there); the question kept stays as written.
+            const string reminder = "\n\n(Deep research: plan the research questions, call delegate once with one part per question, " +
+                "then write the report with numbered citations and a Sources list of the pages opened.)";
+            if (asked["content"] is JsonArray parts && parts.OfType<JsonObject>().FirstOrDefault(x => x["type"]?.GetValue<string>() == "text") is { } textPart)
+            {
+                textPart["text"] = textPart["text"]!.GetValue<string>() + reminder;
+            }
+            else if (asked["content"] is JsonValue)
+            {
+                asked["content"] = asked["content"]!.GetValue<string>() + reminder;
+            }
+        }
         if (imagesDropped)
         {
             await emit(new { type = "notice", kind = "no_vision", text = $"{modelName} cannot see images, so it got their names only. Choose a model that can see to ask about them." });
@@ -167,7 +211,7 @@ public sealed partial class ChatService(
                 request["chat_template_kwargs"] = kwargs;
             }
             // No tools on the last allowed round: the model must answer with what it has.
-            if (tools.Count > 0 && round < chat.CurrentValue.MaxToolRounds)
+            if (tools.Count > 0 && round < (overrides.Research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds))
             {
                 request["tools"] = tools.DeepClone();
             }

@@ -35,7 +35,8 @@ public sealed record ForkRequest(Guid? MessageId = null);
 /// screen); <see cref="Root"/> starts a new first question. Editing a question is
 /// sending its new text with the old one's parent: a sibling, so both stay.
 /// </summary>
-public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false);
+/// <param name="Research">Deep research: the answer plans, has sub-agents search the web, and writes a sourced report.</param>
+public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false, bool Research = false);
 
 /// <summary>Compact the branch down to this message (default: the end of the branch on screen).</summary>
 public sealed record CompactRequest(Guid? MessageId = null);
@@ -470,7 +471,7 @@ public static partial class ChatEndpoints
             await Problem(http, 400, "parent", "That message is not in this chat.");
             return;
         }
-        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(), async () =>
+        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Research: body.Research), async () =>
         {
             var next = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
             var first = next == 0;
