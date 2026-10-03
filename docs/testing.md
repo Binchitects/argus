@@ -91,7 +91,7 @@ failed", not "everything passed".
 | G7 | **Built images other than Argus and the app** | the sandbox and cpu-temp-exporter images have no build-time test |
 | G8 | ~~No browser tests for chat~~ **closed** | the app's chat runs in a real browser against the real model, desktop and phone: streaming, thinking, stop and regenerate, attachments, code copy, history, and Argus's no-access notice for a person without access (`src/web/e2e/chat.spec.ts`, [chat.md](chat.md)) |
 | G9 | **Two clients executed, three transcribed** | DSH and Qwen Code now run end to end and their configs are in `clients/`, marked as executed. Claude Code and Continue are written from their own documentation and marked as such; Hermes is unexercised; the OpenAI SDK has no test at all. The distinction is recorded per file in `clients/README.md` so a transcribed config is never mistaken for a verified one |
-| G10 | **No upgrade or rollback test** | changing `ARGUS_VERSION` or an image tag and rolling back is untested |
+| G10 | ~~No upgrade test~~ **Closed** by `scripts/upgrade-test.py`: an old release from zero with fresh volumes, data put in, this checkout over it, `up` again and `down`/`up`; and this checkout from zero. Rollback is still untested | going back to an older image over newer migrations |
 | G11 | **Disaster recovery is untested** | restore onto a *clean host*, which is the actual scenario |
 | G12 | **Windows / WSL** | every `.ps1` is unexercised here |
 
@@ -423,6 +423,20 @@ E2E_PASSWORD=<admin password> E2E_CHAT=1 npm run e2e
 # ... and Argus's per-person access, with the test GitLab up
 ./tools/test-gitlab/run.sh --keep   # from the repo root
 E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 npm run e2e
+
+# clients as developers point them: the API (OpenAI and Anthropic), streaming,
+# tool calls, spend attribution; Argus over MCP; Qwen Code and DeepSeek Harness
+# through the API and calling Argus (each with a throwaway home; the test GitLab up)
+./scripts/clients-check.py --dsh /path/to/node_modules/.bin/dsh
+
+# many people at once: the chat's fair-use queue (and no answer carrying another
+# person's secret), every person's API key at once, a burst of sandbox jobs
+./scripts/scale-test.py --users 12 --sandbox-jobs 24
+
+# upgrade: an old release from zero (fresh volumes), data in, this checkout over
+# it; and this checkout from zero. The live stack goes down meanwhile (volumes kept)
+./scripts/upgrade-test.py --from v3.0.0 --stop-live
+./scripts/upgrade-test.py --zero --stop-live
 
 # from inside the network
 docker run --rm --network llm-net -e MK=<master-key> \
