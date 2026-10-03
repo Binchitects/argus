@@ -22,12 +22,12 @@
 #   volumes/<name>.tar.gz  every other named volume. SQLite databases inside them (chats,
 #                          the Argus index and audit) are copied
 #                          with SQLite's online backup, so a write in progress cannot tear them.
-#   config/                .env, every compose file named in COMPOSE_FILE, and config/ with
-#                          links FOLLOWED: the directory, the OIDC key, the TLS certificate.
+#   config/                .env, every compose file named in COMPOSE_FILE, and config/
+#                          (Traefik's routes, Prometheus's rules, the other files compose mounts).
 #   MANIFEST, SHA256SUMS   what was taken, from which commit; a checksum for every file.
 #
 # The backup directory holds every secret of the stack: it is created 0700 and
-# its files 0600. Models are not backed up (LLAMACPP_MODEL_DIR, re-downloadable).
+# its files 0600. Models are not backed up (MODELS_DIR, re-downloadable).
 # A copy is a backup like any other: --verify DIR and --restore --from DIR take it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,14 +37,14 @@ umask 077
 env_get() { grep -E "^$1=" .env 2>/dev/null | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
 say() { printf '%s\n' "$*"; }
 die() { printf 'backup: ERROR: %s\n' "$*" >&2; exit 1; }
-CFG="$(env_get LLM_CONFIG_DIR)"; CFG="${CFG:-./config}"   # where config/ lives (relative to deploy/)
+CFG=./config
 
-PROJECT="$(env_get COMPOSE_PROJECT_NAME)"; PROJECT="${PROJECT:-llmservice}"
+PROJECT="${COMPOSE_PROJECT_NAME:-arena}"
 BACKUP_DIR="$(env_get BACKUP_DIR)"; BACKUP_DIR="${BACKUP_DIR:-./backups}"
 KEEP="$(env_get BACKUP_KEEP)"; KEEP="${KEEP:-14}"
 INCLUDE_LOGS="$(env_get BACKUP_INCLUDE_LOGS)"; INCLUDE_LOGS="${INCLUDE_LOGS:-1}"
 BACKUP_TIME="$(env_get BACKUP_TIME)"; BACKUP_TIME="${BACKUP_TIME:-03:30}"
-PG_USER="$(env_get LLM_PG_USER)"; PG_USER="${PG_USER:-llmservice}"
+PG_USER=arena
 # The image cpu-temp-exporter already runs: on an air-gapped host a backup must
 # not need an image that was never pulled (or was pruned as unused).
 HELPER=python:3.13-slim
@@ -53,8 +53,8 @@ COPY_DIR="$(env_get BACKUP_COPY_DIR)"
 case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
 
 # Named volumes that are caches or models, not state.
-SKIP_VOLUMES=" hf-cache vllm-cache llamacpp-engine postgres-data "
-LOG_VOLUMES=" loki-data prometheus-data alertmanager-data clickhouse-logs "
+SKIP_VOLUMES=" audio acme sandbox postgres "
+LOG_VOLUMES=" loki prometheus alertmanager "
 
 ACTION=backup; FROM=""; WITH_CONFIG=0; VERIFY_DIR=""
 while [[ $# -gt 0 ]]; do
@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
     --from) FROM="$2"; shift 2 ;;
     --with-config) WITH_CONFIG=1; shift ;;
     --out) BACKUP_DIR="$2"; shift 2 ;;   # kept for compatibility
-    --include-model-cache) SKIP_VOLUMES="${SKIP_VOLUMES/ hf-cache / }"; shift ;;
+    --include-model-cache) SKIP_VOLUMES="${SKIP_VOLUMES/ audio / }"; shift ;;
     -h|--help) sed -n '2,31p' "$0" | grep '^#'; exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
   esac
@@ -185,7 +185,7 @@ if [[ $ACTION == restore ]]; then
 
   if [[ -f "$FROM/postgres.sql.gz" ]]; then
     say "==> gateway database"
-    docker run --rm --network none -v "${PROJECT}_postgres-data:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
+    docker run --rm --network none -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
     docker compose up -d postgres >/dev/null 2>&1 || die "postgres did not start"
     for _ in $(seq 1 60); do docker exec postgres pg_isready -U "$PG_USER" >/dev/null 2>&1 && break; sleep 2; done
     sleep 3
@@ -241,7 +241,7 @@ if docker exec postgres pg_isready -U "$PG_USER" >/dev/null 2>&1; then
     fail "pg_dumpall"
   fi
 else
-  SKIP_VOLUMES="${SKIP_VOLUMES/ postgres-data / }"
+  SKIP_VOLUMES="${SKIP_VOLUMES/ postgres / }"
   say "  postgres is not running: its volume is archived instead (the stack is presumably stopped, so the files are consistent)"
 fi
 
@@ -299,7 +299,7 @@ done
 {
   echo "backup: $STAMP"
   echo "host: $(hostname)"
-  echo "project: $PROJECT   domain: $(env_get LLM_DOMAIN)   model: $(env_get MODEL_NAME)"
+  echo "project: $PROJECT   domain: $(env_get DOMAIN)"
   echo "commit: $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)"
   echo "services running: $(docker compose ps --services 2>/dev/null | tr '\n' ' ')"
   echo "include logs: $INCLUDE_LOGS"

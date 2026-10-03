@@ -5,17 +5,23 @@
 #   podman compose -f docker-compose.yml -f podman.yml up -d
 #
 # GPUs come through CDI (sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml).
-services:
-  # Your uid inside, so what they write stays yours: the app's downloads into
-  # MODELS_DIR, and the Python runs' results the app reads.
-  app:
-    userns_mode: keep-id
-  sandbox:
-    userns_mode: keep-id
+x-gpu: &gpu
+  devices: [nvidia.com/gpu=all]
 
-  # A user cannot lift the locked-memory limit.
+services:
+  # The container's root is you here: the app's downloads into MODELS_DIR stay
+  # yours, and it reads what the Python runs write (their own uids).
+  app:
+    user: "0:0"
+    cap_add: [DAC_OVERRIDE, FOWNER]
+
   llamacpp:
+    <<: *gpu
+    # A user cannot lift the locked-memory limit.
     ulimits: !reset {}
+  imagegen: *gpu
+  videogen: *gpu
+  gpu-exporter: *gpu
 
   # Podman's API in place of Docker's.
   promtail:

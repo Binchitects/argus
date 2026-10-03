@@ -2,12 +2,12 @@
 """
 Upgrade and from-zero deployment test, with fresh volumes beside the live ones.
 
-    python3 scripts/upgrade-test.py --from v3.0.0 --stop-live     # old release from zero, data in, this checkout over it
+    python3 scripts/upgrade-test.py --from v4.0.0 --stop-live     # old release from zero, data in, this checkout over it
     python3 scripts/upgrade-test.py --zero --stop-live            # this checkout from zero
 
-The test stack is its own compose project (its own volumes, its own copy of the
-clean config and CA), with this deployment's .env otherwise: the same domain,
-secrets and profiles. Container names are fixed, so the live stack must be down
+The test stack is its own compose project (its own volumes), with this
+deployment's .env otherwise: the same domain, secrets and models folder, and
+MODEL set to a model in that folder (--model). Container names are fixed, so the live stack must be down
 meanwhile: --stop-live takes it down (`docker compose down`, volumes kept) and
 brings it back at the end. The test project and its volumes are removed at the
 end unless --keep.
@@ -61,9 +61,10 @@ def sh(args: list[str], cwd: Path, timeout: int = 3600, quiet: bool = True) -> i
 
 
 class Client:
-    def __init__(self, domain: str, ca: Path):
+    def __init__(self, domain: str):
         self.app = f"https://{domain}"
-        self.tls = ssl.create_default_context(cafile=str(ca)) if ca.exists() else ssl._create_unverified_context()  # noqa: S323 (a fresh test CA)
+        # Traefik's own certificate on a fresh stack, unless ACME_EMAIL gives a real one.
+        self.tls = ssl.create_default_context() if env_value("ACME_EMAIL") else ssl._create_unverified_context()
         self.jar = http.cookiejar.CookieJar()
         self.open = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar), urllib.request.HTTPSHandler(context=self.tls))
 
@@ -137,12 +138,12 @@ def main() -> int:
     g.add_argument("--zero", action="store_true", help="this checkout from zero")
     ap.add_argument("--stop-live", action="store_true")
     ap.add_argument("--keep", action="store_true")
-    ap.add_argument("--profiles", default=env_value("COMPOSE_PROFILES"))
+    ap.add_argument("--model", default="Qwen3.8-27B-UD-Q4_K_XL/Qwen3.8-27B-UD-Q4_K_XL.gguf", help="MODEL for the test stack: a file in MODELS_DIR, or repo:quant")
     args = ap.parse_args()
 
-    live_project = env_value("COMPOSE_PROJECT_NAME", "llmservice")
-    project = "llm-upgrade-test" if args.old else "llm-zero-test"
-    domain = env_value("LLM_DOMAIN", "llm.localhost") or "llm.localhost"
+    live_project = "arena"
+    project = "arena-upgrade-test" if args.old else "arena-zero-test"
+    domain = env_value("DOMAIN", "llm.localhost") or "llm.localhost"
     version = (REPO / "VERSION").read_text().strip()
     running = subprocess.run(["docker", "compose", "-p", live_project, "ps", "-q"], cwd=ROOT, capture_output=True, text=True).stdout.split()
     if running and not args.stop_live:
@@ -150,7 +151,6 @@ def main() -> int:
         return 2
 
     work = Path(tempfile.mkdtemp(prefix=f"{project}-"))
-    config = work / "config"
     old_tree = work / "from"
     try:
         if running:
@@ -159,25 +159,22 @@ def main() -> int:
         source = old_tree if args.old else REPO
         if args.old:
             sh(["git", "worktree", "add", "--detach", str(old_tree), args.old], REPO)
-        # The clean config of the version that starts first; the stack writes its CA and its catalogue into it.
-        subprocess.run(["git", "archive", args.old or "HEAD", "deploy/config"], cwd=REPO, stdout=open(work / "config.tar", "wb"), check=True)
-        subprocess.run(["tar", "-xf", str(work / "config.tar"), "-C", str(work)], check=True)
-        shutil.move(str(work / "deploy" / "config"), str(config))
         env_file = work / "test.env"
         # The models where the live stack has them (absolute): a fresh project must not download them again.
-        models = Path(env_value("LLM_MODELS_DIR", "./models"))
+        models = Path(env_value("MODELS_DIR", "./models"))
         models = models if models.is_absolute() else (ROOT / models).resolve()
-        lines = [l for l in (ROOT / ".env").read_text().splitlines()
-                 if not l.startswith(("COMPOSE_PROJECT_NAME=", "LLM_CONFIG_DIR=", "COMPOSE_PROFILES=", "LLM_MODELS_DIR=", "EMBED_MODEL_DIR="))]
-        env_file.write_text("\n".join(lines + [f"COMPOSE_PROJECT_NAME={project}", f"LLM_CONFIG_DIR={config}", f"COMPOSE_PROFILES={args.profiles}",
-                                               f"LLM_MODELS_DIR={models}", f"EMBED_MODEL_DIR={env_value('EMBED_MODEL_DIR') or models}"]) + "\n")
-        ca = config / "traefik" / "certs" / "ca.crt"
+        lines = [l for l in (ROOT / ".env").read_text().splitlines() if not l.startswith(("MODELS_DIR=", "MODEL="))]
+        env_file.write_text("\n".join(lines + [f"MODELS_DIR={models}", f"MODEL={args.model}"]) + "\n")
+        # The speech models the live stack fetched, so a fresh project does not fetch them again.
+        if subprocess.run(["docker", "volume", "inspect", f"{live_project}_audio"], capture_output=True).returncode == 0:
+            sh(["docker", "volume", "create", f"{project}_audio"], ROOT)
+            sh(["docker", "run", "--rm", "-v", f"{live_project}_audio:/from:ro", "-v", f"{project}_audio:/to", "alpine:3", "cp", "-a", "/from/.", "/to/"], ROOT)
 
         first = source / "deploy" / "docker-compose.yml"
         print(f"{'Upgrade from ' + args.old if args.old else 'From zero'}: building and starting {project}")
         check("the first version builds", sh(compose(first, env_file, project, "build"), source / "deploy") == 0)
         check("and starts from zero", sh(compose(first, env_file, project, "up", "-d"), source / "deploy") == 0)
-        c = Client(domain, ca)
+        c = Client(domain)
         info = wait_up(c)
         check("it answers", info is not None, json.dumps(info))
         status, _ = c.call("/api/auth/login", {"userName": "admin", "password": env_value("ADMIN_PASSWORD")})
@@ -203,7 +200,7 @@ def main() -> int:
             new = REPO / "deploy" / "docker-compose.yml"
             check("this version builds", sh(compose(new, env_file, project, "build"), REPO / "deploy") == 0)
             check("and starts over the old volumes", sh(compose(new, env_file, project, "up", "-d", "--remove-orphans"), REPO / "deploy") == 0)
-            c = Client(domain, ca)
+            c = Client(domain)
             end = time.time() + 900
             info = None
             while time.time() < end:
@@ -226,7 +223,7 @@ def main() -> int:
                 check(f"{when}: the chat and its answer are there", status == 200 and any("MAPLE-17" in (m.get("content") or "").upper() for m in msgs), f"{len(msgs)} messages")
                 status, text = c.call(f"/api/chat/attachments/{file_id}/content")
                 check(f"{when}: its file is there", status == 200 and "MAPLE-17" in str(text))
-                person = Client(domain, ca)
+                person = Client(domain)
                 status, _ = person.call("/api/auth/login", {"userName": name, "password": person_password})
                 check(f"{when}: the person signs in with their password", status == 200, str(status))
 
@@ -244,7 +241,7 @@ def main() -> int:
             check("up again changes nothing", sh(compose(new, env_file, project, "up", "-d"), REPO / "deploy") == 0 and wait_up(c, 5) is not None)
             check("down (volumes kept)", sh(compose(new, env_file, project, "down"), REPO / "deploy") == 0)
             check("up again", sh(compose(new, env_file, project, "up", "-d"), REPO / "deploy") == 0)
-            c = Client(domain, ca)
+            c = Client(domain)
             check("it answers", wait_up(c) is not None)
             status, _ = c.call("/api/auth/login", {"userName": "admin", "password": env_value("ADMIN_PASSWORD")})
             verify("after down and up")

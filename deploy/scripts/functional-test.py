@@ -47,16 +47,16 @@ def env(key, default=""):
     return default
 
 
-DOM = env("LLM_DOMAIN", "llm.localhost")
+DOM = env("DOMAIN", "llm.localhost")
 MODEL = env("MODEL_NAME")
 # The picture model, when the image profile is on (Admin -> Tools, image generation).
-IMAGE = env("IMAGEGEN_MODEL_NAME") if "image" in env("COMPOSE_PROFILES").split(",") else ""
+IMAGE = "FLUX.2-klein-4B"
 LOCAL = {}  # models added in Admin -> Models: name -> who may use it
 PORT = env("TRAEFIK_HTTPS_PORT", "443")
 SUFFIX = "" if PORT == "443" else f":{PORT}"
-CERTS = ROOT / (env("LLM_CONFIG_DIR") or "config") / "traefik/certs"
 # What to trust: the stack's CA, or the certificate itself when an operator brought their own.
-CTX = ssl.create_default_context(cafile=str(CERTS / "ca.crt" if (CERTS / "ca.crt").exists() else CERTS / "tls.crt"))
+# Traefik's own certificate unless ACME_EMAIL gives a real one: then it is checked.
+CTX = ssl.create_default_context() if env("ACME_EMAIL") else ssl._create_unverified_context()
 RESULTS = []
 
 
@@ -165,7 +165,7 @@ def app_chat(browser, text="Reply with the single word: pong"):
 def litellm(path, payload=None, method=None):
     b = Browser()
     code, body, _, _ = b.req(u("gateway", path), payload, method=method,
-                             headers={"Authorization": "Bearer " + env("LITELLM_MASTER_KEY")})
+                             headers={"Authorization": "Bearer " + env("GATEWAY_KEY")})
     try:
         return code, json.loads(body)
     except json.JSONDecodeError:

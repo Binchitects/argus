@@ -124,7 +124,7 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
         var frames = seconds * Fps / 4 * 4 + 1;
         var body = new JsonObject
         {
-            ["prompt"] = prompt, ["negative_prompt"] = "blurry, distorted, low quality, watermark, text", ["width"] = 832, ["height"] = 480, ["seed"] = -1,
+            ["prompt"] = prompt, ["negative_prompt"] = "blurry, distorted, low quality, watermark, text", ["width"] = 640, ["height"] = 352, ["seed"] = -1,
             ["video_frames"] = frames, ["fps"] = Fps, ["output_format"] = "webm",
             ["sample_params"] = new JsonObject
             {
@@ -142,6 +142,8 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             while (true)
             {
                 await Task.Delay(TimeSpan.FromSeconds(3), ct);
+                // In use while it works: not unloaded as idle under a long job.
+                media.Touch(MediaModels.VideoModel);
                 var now = await client.GetFromJsonAsync<JsonObject>(MediaModels.VideoUrl + poll, ct);
                 switch (now?["status"]?.GetValue<string>())
                 {

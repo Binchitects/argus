@@ -29,8 +29,8 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CA = ROOT / "config" / "traefik" / "certs" / "ca.crt"
-TLS = ssl.create_default_context(cafile=str(CA)) if CA.exists() else ssl.create_default_context()
+# Traefik's own certificate unless ACME_EMAIL gives a real one: then it is checked.
+TLS = None  # set in main, once .env is read
 
 
 def env(key: str, default: str = "") -> str:
@@ -185,8 +185,12 @@ def main() -> int:
     ap.add_argument("--sandbox-jobs", type=int, default=24)
     ap.add_argument("--json")
     args = ap.parse_args()
-    domain = env("LLM_DOMAIN", "llm.localhost") or "llm.localhost"
-    app, base = f"https://{domain}", f"https://gateway.{domain}/v1"
+    global TLS
+    TLS = ssl.create_default_context() if env("ACME_EMAIL") else ssl._create_unverified_context()
+    domain = env("DOMAIN", "llm.localhost") or "llm.localhost"
+    port = env("HTTPS_PORT", "443") or "443"
+    host = domain if port == "443" else f"{domain}:{port}"
+    app, base = f"https://{host}", f"https://gateway.{host}/v1"
     admin = Session(app)
     status, _ = admin.call("/api/auth/login", {"userName": "admin", "password": env("ADMIN_PASSWORD")})
     if status != 200:

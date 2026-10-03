@@ -242,14 +242,14 @@ else
 
   # node-exporter measures the real machine here, so DCGM is worth having and
   # windows_exporter is meaningless.
-  if grep -qE '^COMPOSE_PROFILES=.*\bsmi\b' .env && command -v nvidia-smi >/dev/null 2>&1; then
+  if command -v nvidia-smi >/dev/null 2>&1; then
     ok "keeping the 'smi' GPU exporter (works everywhere)"
     warn "on bare metal you can additionally enable 'dcgm' for SM/PCIe/NVLink detail"
   fi
 
   if [[ -n "$DOMAIN" ]]; then
-    set_env LLM_DOMAIN "$DOMAIN"
-    ok "LLM_DOMAIN=$DOMAIN"
+    set_env DOMAIN "$DOMAIN"
+    ok "DOMAIN=$DOMAIN"
     warn "the certificate follows the domain automatically; a public domain wants"
     warn "a real CA - see the certificatesResolvers block in config/traefik/traefik.yml"
   fi

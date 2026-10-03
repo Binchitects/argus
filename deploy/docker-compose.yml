@@ -212,7 +212,7 @@ services:
     command: >
       --listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model Wan2.2-TI2V-5B-Q4_K_M.gguf
       --t5xxl umt5-xxl-encoder-Q4_K_M.gguf --vae wan2.2_vae.safetensors --max-vram 3 --diffusion-fa
-      --vae-tiling --cfg-scale 5.0 --flow-shift 5.0 --sampling-method euler
+      --vae-tiling --vae-on-cpu --cfg-scale 5.0 --flow-shift 5.0 --sampling-method euler
 
   # Speech to text and text to speech. It fetches its models itself.
   audio:
@@ -249,7 +249,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    tmpfs: ["/var/cache/searxng:uid=977,gid=977,mode=0700", /tmp]
+    tmpfs: ["/var/cache/searxng:mode=1777", /tmp]
     volumes: [./config/searxng.yml:/etc/searxng/settings.yml:ro]
     # A new secret each start: it signs nothing that outlives the process.
     entrypoint: [/bin/sh, -c, 'export SEARXNG_SECRET=$$(od -An -N32 -tx1 /dev/urandom | tr -d " \n"); exec /usr/local/searxng/entrypoint.sh']

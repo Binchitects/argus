@@ -11,7 +11,7 @@ nothing about capacity. Throughput climbs with concurrency until the GPU
 saturates, after which added concurrency only inflates queue time. The knee in
 that curve is your real capacity number.
 
-    python benchmark.py --base-url http://vllm:8000 --api-key sk-... \
+    python benchmark.py --base-url https://gateway.llm.localhost --api-key sk-... \
         --concurrency 1,4,8,16 --requests 16
 """
 
@@ -136,7 +136,7 @@ def run_level(concurrency, total_requests, **kw):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--base-url", default="http://vllm:8000")
+    p.add_argument("--base-url", default="https://gateway.llm.localhost")
     p.add_argument("--api-key", required=True)
     p.add_argument("--model", default="default")
     p.add_argument("--concurrency", default="1,4,8,16",

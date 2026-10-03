@@ -21,7 +21,7 @@ HOSTS=/etc/hosts
 MARKER='# --- LLMService ---'
 END_MARKER='# --- end LLMService ---'
 
-DOMAIN="$(grep -E '^LLM_DOMAIN=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '[:space:]')"
+DOMAIN="$(grep -E '^DOMAIN=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '[:space:]')"
 DOMAIN="${DOMAIN:-llm.localhost}"
 
 SUDO=""

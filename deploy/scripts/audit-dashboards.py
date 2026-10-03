@@ -36,12 +36,12 @@ def env(key, default=""):
     return default
 
 
-DOM = env("LLM_DOMAIN", "llm.localhost")
+DOM = env("DOMAIN", "llm.localhost")
 PORT = env("TRAEFIK_HTTPS_PORT", "443")
 BASE = f"https://{DOM}" + ("" if PORT == "443" else f":{PORT}")
-CERTS = ROOT / (env("LLM_CONFIG_DIR") or "config") / "traefik/certs"
 # What to trust: the stack's CA, or the certificate itself when an operator brought their own.
-CTX = ssl.create_default_context(cafile=str(CERTS / "ca.crt" if (CERTS / "ca.crt").exists() else CERTS / "tls.crt"))
+# Traefik's own certificate unless ACME_EMAIL gives a real one: then it is checked.
+CTX = ssl.create_default_context() if env("ACME_EMAIL") else ssl._create_unverified_context()
 OPENER = urllib.request.build_opener(urllib.request.HTTPSHandler(context=CTX),
                                      urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 

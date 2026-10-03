@@ -32,7 +32,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO = ROOT.parent
-CA = ROOT / "config" / "traefik" / "certs" / "ca.crt"
 GREEN, RED, YELLOW, DIM, OFF = "\033[32m", "\033[31m", "\033[33m", "\033[90m", "\033[0m"
 results: list[tuple[str, str]] = []
 
@@ -55,7 +54,8 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
     return record(name, "PASS" if ok else "FAIL", detail)
 
 
-TLS = ssl.create_default_context(cafile=str(CA)) if CA.exists() else ssl.create_default_context()
+# Traefik's own certificate unless ACME_EMAIL gives a real one: then it is checked.
+TLS = ssl.create_default_context() if env("ACME_EMAIL") else ssl._create_unverified_context()
 jar = http.cookiejar.CookieJar()
 session = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), urllib.request.HTTPSHandler(context=TLS))
 
@@ -109,7 +109,7 @@ def mcp_session(url: str, token: str):
 def run_client(argv: list[str], env_add: dict, cwd: Path, timeout: int = 420) -> tuple[int, str]:
     home = cwd / ".home"
     home.mkdir(exist_ok=True)
-    e = {"PATH": os.environ.get("PATH", ""), "HOME": str(home), "NODE_EXTRA_CA_CERTS": str(CA), "LANG": "C.UTF-8", **env_add}
+    e = {"PATH": os.environ.get("PATH", ""), "HOME": str(home), **({} if env("ACME_EMAIL") else {"NODE_TLS_REJECT_UNAUTHORIZED": "0"}), "LANG": "C.UTF-8", **env_add}
     try:
         p = subprocess.run(argv, cwd=cwd, env=e, capture_output=True, text=True, timeout=timeout)
         return p.returncode, p.stdout + "\n" + p.stderr
@@ -124,7 +124,7 @@ def main() -> int:
     ap.add_argument("--keep-person", action="store_true")
     args = ap.parse_args()
 
-    domain = env("LLM_DOMAIN", "llm.localhost") or "llm.localhost"
+    domain = env("DOMAIN", "llm.localhost") or "llm.localhost"
     app, base, argus = f"https://{domain}", f"https://gateway.{domain}/v1", f"https://argus.{domain}/mcp"
     xhr = {"X-Requested-With": "fetch"}
     print(f"Clients against {domain} (TLS with {CA.relative_to(REPO) if CA.exists() else 'system roots'})")

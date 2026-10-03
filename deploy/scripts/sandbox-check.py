@@ -30,7 +30,7 @@ def env(key, default=""):
     return default
 
 
-PROJECT = env("COMPOSE_PROJECT_NAME", "llmservice")
+PROJECT = os.environ.get("COMPOSE_PROJECT_NAME", "arena")
 UID, GID = env("LLM_UID", "1000"), env("LLM_GID", "1000")
 VOLUME = f"{PROJECT}_sandbox-jobs"
 RESULTS = []
@@ -69,7 +69,7 @@ def run(code, timeout=20, inputs=None, cancel_after=False):
     job = {"id": uuid.uuid4().hex, "code": textwrap.dedent(code), "timeout": timeout, "inputs": inputs or {}, "cancel_after": cancel_after}
     # The sandbox's own image, with python itself as the entrypoint: the client, not the runner.
     p = subprocess.run(["docker", "run", "--rm", "-i", "--network", "none", "--user", f"{UID}:{GID}", "-v", f"{VOLUME}:/sandbox",
-                        "--entrypoint", "python", "llmservice-sandbox:latest", "-c", CLIENT], input=json.dumps(job), capture_output=True, text=True,
+                        "--entrypoint", "python", "arena-sandbox:latest", "-c", CLIENT], input=json.dumps(job), capture_output=True, text=True,
                        timeout=600, check=False)
     try:
         result = json.loads(p.stdout.strip().splitlines()[-1])

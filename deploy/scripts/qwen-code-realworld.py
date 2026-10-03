@@ -181,8 +181,8 @@ def run_task(task, args, key, label, results):
     host = re.sub(r"^https?://([^/:]+).*", r"\1", args.base_url)
     cmd = ["docker", "run", "--rm", "--label", "qwen-realworld=1", "--network", "host", "--user", uid,
            "--add-host", f"{host}:127.0.0.1",
-           "-e", "HOME=/qwenhome", "-e", "NODE_EXTRA_CA_CERTS=/certs/tls.crt",
-           "-v", f"{home}:/qwenhome", "-v", f"{args.ca}:/certs/tls.crt:ro",
+           "-e", "HOME=/qwenhome", *(["-e", "NODE_EXTRA_CA_CERTS=/certs/tls.crt", "-v", f"{args.ca}:/certs/tls.crt:ro"] if args.ca else ["-e", "NODE_TLS_REJECT_UNAUTHORIZED=0"]),
+           "-v", f"{home}:/qwenhome",
            "-v", f"{args.qwen_home}:/opt/qwen-code:ro", "-v", f"{run_dir}:/work", "-w", "/work",
            "--entrypoint", "/opt/qwen-code/bin/qwen", args.image,
            "-m", args.model, "--auth-type", "openai", "--yolo", "-o", "json",
@@ -219,7 +219,7 @@ def main():
     p.add_argument("--repo", required=True, help="baseline git checkout; never modified")
     p.add_argument("--qwen-home", required=True, help="Qwen Code install dir (contains bin/qwen and node/)")
     p.add_argument("--base-url", default="https://gateway.llm.localhost/v1")
-    p.add_argument("--ca", required=True, help="the stack's CA (config/traefik/certs/ca.crt)")
+    p.add_argument("--ca", help="a CA to trust for a certificate of your own; none: Traefik's own, unchecked")
     p.add_argument("--key-a", required=True)
     p.add_argument("--key-b", required=True, help="second person's key, for the concurrent tasks")
     p.add_argument("--model", required=True, help="MODEL_NAME from .env, e.g. Qwen3.8-Flash-Next")

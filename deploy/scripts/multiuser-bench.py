@@ -23,7 +23,7 @@ Per request it records time to first token, decode speed (tokens after the
 first, over the time they took), and wall time. Standard library only.
 
     python3 scripts/multiuser-bench.py --base-url https://gateway.llm.localhost \\
-        --ca config/traefik/certs/ca.crt --key-a sk-... --key-b sk-... \\
+        --key-a sk-... --key-b sk-... \\
         --model qwen3.8-flash-next --json results.json
 """
 
@@ -179,7 +179,7 @@ def main():
     p.add_argument("--json", default="")
     args = p.parse_args()
 
-    ctx = ssl.create_default_context(cafile=args.ca) if args.ca else None
+    ctx = ssl.create_default_context(cafile=args.ca) if args.ca else ssl._create_unverified_context()
     wanted = args.scenarios.split(",")
     results = {}
 

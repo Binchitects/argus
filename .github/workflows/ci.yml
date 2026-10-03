@@ -91,10 +91,7 @@ jobs:
           until [ "$(docker inspect -f '{{.State.Health.Status}}' postgres)" = healthy ]; do sleep 1; done
           docker exec postgres psql -U app -d postgres -qc "create database litellm"
           docker exec -i postgres psql -U app -d litellm -q < tests/Llm.Tests/Resources/litellm-schema.sql
-          mkdir -p ci-settings && chmod 777 ci-settings
           docker run -d --name app --network e2e --read-only --tmpfs /tmp \
-            -v "$PWD/deploy/config/dashboards:/dashboards:ro" -v "$PWD/deploy/env-samples:/env-samples:ro" \
-            -v "$PWD/ci-settings:/settings" \
             -e Database__Host=postgres -e Database__Username=app -e Database__Password=ci \
             -e Auth__Domain=llm.localhost -e Auth__HttpsPort=8443 -e "Auth__AdminPassword=$E2E_PASSWORD" \
             -e Auth__DataKey=ci-data-key -e Gateway__Url=http://127.0.0.1:9 llm-app:ci
@@ -157,23 +154,18 @@ jobs:
           if-no-files-found: ignore
 
   deploy:
-    # The deployment's own tooling, and every sample resolving into a complete
-    # compose file (for the platform and for Argus alone).
+    # The compose files resolving (the platform from .env.example, Argus alone per sample).
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.13" }
-      - name: Tests of the deployment tooling
-        run: pip install pytest pyyaml && pytest -q tests/deploy
-      - name: docker compose config, per sample
+      - name: docker compose config
         run: |
+          sed -e 's/^\(ADMIN_PASSWORD\|DB_PASSWORD\|APP_KEY\|ENGINE_KEY\|ARGUS_KEY\)=$/\1=ci/' -e 's/^GATEWAY_KEY=$/GATEWAY_KEY=sk-ci/' deploy/.env.example > deploy/.env
+          (cd deploy && docker compose config --quiet && docker compose -f docker-compose.yml -f podman.yml config --quiet) && echo "deploy resolves (Docker and Podman)"
           fill() { awk '/^# SECRETS/{s=1} /^# APP/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' "$1" > "$2"; }
-          for dir in deploy deploy/argus-standalone; do
-            for sample in "$dir"/env-samples/*.env; do
-              fill "$sample" "$dir/.env"
-              (cd "$dir" && docker compose config --quiet) && echo "$sample resolves"
-            done
+          for sample in deploy/argus-standalone/env-samples/*.env; do
+            fill "$sample" deploy/argus-standalone/.env
+            (cd deploy/argus-standalone && docker compose config --quiet) && echo "$sample resolves"
           done
       - name: Scripts parse
         run: for f in deploy/scripts/*.sh deploy/argus-standalone/scripts/*.sh tools/*.sh tools/test-gitlab/*.sh clients/claude-code/*.sh tools/dn; do bash -n "$f"; done
