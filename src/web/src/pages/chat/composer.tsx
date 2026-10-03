@@ -1,4 +1,4 @@
-import { ArrowUp, EyeOff, FileText, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, X } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -6,7 +6,14 @@ import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import type { ContextView } from './context'
 import { ContextGauge } from './context-gauge'
-import type { ChatModel } from './types'
+import type { Attachment, ChatModel } from './types'
+
+/** A message written while an answer runs: sent when it ends, or at once with Send now. */
+export interface Queued {
+  key: string
+  text: string
+  attachments: Attachment[]
+}
 import type { Uploads } from './uploads'
 
 /**
@@ -25,6 +32,10 @@ export function Composer({
   tools,
   context,
   onCompact,
+  queued,
+  onQueue,
+  onSendNow,
+  onUnqueue,
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
@@ -39,6 +50,11 @@ export function Composer({
   context?: ContextView
   /** Summarize the chat's older messages (also: send /compact). */
   onCompact?: () => void
+  /** While an answer runs: messages waiting to be sent, and how to add, hurry or drop one. */
+  queued?: Queued[]
+  onQueue?: (text: string) => void
+  onSendNow?: (key: string) => void
+  onUnqueue?: (key: string) => void
 }) {
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
@@ -51,12 +67,15 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 280)}px`
   }, [text])
 
-  const canSend = !streaming && !uploads.busy && (text.trim().length > 0 || uploads.attachments.length > 0)
+  const hasContent = text.trim().length > 0 || uploads.attachments.length > 0
+  const canSend = (!streaming || !!onQueue) && !uploads.busy && hasContent
   const submit = async () => {
     if (!canSend) return
     const t = text.trim()
     setText('')
-    if (!(await onSend(t))) setText((now) => now || t)
+    // An answer is running: this one waits its turn (or goes at once with Send now).
+    if (streaming && onQueue) onQueue(t)
+    else if (!(await onSend(t))) setText((now) => now || t)
     area.current?.focus()
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -75,6 +94,28 @@ export function Composer({
         void submit()
       }}
     >
+      {queued && queued.length > 0 && (
+        <div className="grid gap-1 px-3 pt-3">
+          <ul className="grid gap-1" aria-label="Queued messages">
+            {queued.map((q) => (
+              <li key={q.key} className="flex min-w-0 items-center gap-2 rounded-lg border border-dashed bg-muted/40 py-1 ps-2.5 pe-1 text-sm">
+                <Clock3 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span dir="auto" className="min-w-0 flex-1 truncate">
+                  {q.text || `${q.attachments.length} file${q.attachments.length === 1 ? '' : 's'}`}
+                  {q.text && q.attachments.length > 0 && <span className="text-muted-foreground"> · {q.attachments.length} file{q.attachments.length === 1 ? '' : 's'}</span>}
+                </span>
+                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSendNow?.(q.key)}>
+                  Send now
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" className="size-7" onClick={() => onUnqueue?.(q.key)} aria-label={`Remove queued message: ${q.text || 'files'}`}>
+                  <X />
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">Sent in turn when the answer ends; Send now stops the answer and sends it at once.</p>
+        </div>
+      )}
       {uploads.uploads.length > 0 && (
         <ul className="flex flex-wrap gap-2 px-3 pt-3" aria-label="Files to send">
           {uploads.uploads.map((u) => (
@@ -128,7 +169,7 @@ export function Composer({
             uploads.add(e.clipboardData.files)
           }
         }}
-        placeholder="Message"
+        placeholder={streaming && onQueue ? 'Queue a message…' : 'Message'}
         aria-label="Message"
         // oxlint-disable-next-line jsx-a11y/no-autofocus -- the chat's whole purpose is this box
         autoFocus={autoFocus}
@@ -145,6 +186,13 @@ export function Composer({
         <span className="hidden text-xs text-muted-foreground lg:inline">Enter to send · Shift+Enter for a new line</span>
         <span className="ml-auto" />
         {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} />}
+        {streaming && onQueue && hasContent && (
+          <Tooltip content="Queue: sent when the answer ends (Enter)">
+            <Button type="submit" size="icon-sm" variant="outline" className="animate-pop rounded-full" disabled={!canSend} aria-label="Queue">
+              <ListEnd />
+            </Button>
+          </Tooltip>
+        )}
         {streaming ? (
           <Button type="button" size="icon-sm" variant="secondary" className="animate-pop rounded-full" onClick={onStop} aria-label="Stop">
             <Square className="fill-current" />

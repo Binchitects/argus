@@ -692,6 +692,25 @@ describe('chat', () => {
     expect(within(a).getByRole('button', { name: 'Answering now…' })).toBeDisabled()
   })
 
+  it('a message written while the answer runs is queued, and Send now stops the answer and sends it', async () => {
+    const calls = backend({
+      events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'Working on it' }],
+      hang: true,
+      saved: [msg('q1', null, 'user', { content: 'first' }), msg('a1', 'q1', 'assistant', { content: 'Working on it', status: 'stopped' })],
+    })
+    renderApp('/chat')
+    await ask('first')
+    await screen.findByRole('button', { name: 'Stop' })
+    await ask('second')
+    const queued = await screen.findByRole('list', { name: 'Queued messages' })
+    expect(queued).toHaveTextContent('second')
+    expect(calls.filter((c) => c.path === '/api/chat/conversations/c1/messages')).toHaveLength(1)
+    await userEvent.click(within(queued).getByRole('button', { name: 'Send now' }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/chat/conversations/c1/stop')).toBe(true))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/chat/conversations/c1/messages').map((c) => (c.body as { content: string }).content)).toEqual(['first', 'second']), { timeout: 4000 })
+    expect(screen.queryByRole('list', { name: 'Queued messages' })).not.toBeInTheDocument()
+  })
+
   it('a sent file leaves the box as soon as the question is taken, while the answer still streams', async () => {
     const calls = backend({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }], hang: true })
     renderApp('/chat')

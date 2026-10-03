@@ -24,8 +24,9 @@ import { ToolsPicker } from './tools-picker'
 import { ChatList } from './sidebar'
 import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
-import type { ChatConfig, ChatEvent, ChatSettings, Conversation, Message } from './types'
+import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message } from './types'
 import { useUploads } from './uploads'
+import type { Queued } from './composer'
 import { tellDesktop } from '@/lib/desktop'
 
 export function ChatPage() {
@@ -100,6 +101,8 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
   const [draft, setDraft] = useState<ChatSettings>({})
   const [live, setLive] = useState<LiveState | null>(null)
   const liveRef = useRef<LiveState | null>(null)
+  /** What to do once a run is over and saved: send the next queued message. */
+  const afterRun = useRef<() => void>(() => {})
   useEffect(() => {
     liveRef.current = live
   }, [live])
@@ -327,7 +330,10 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
         }
         // "Answer again" right after a stop starts a new run while this one waits:
         // clearing now would wipe the new answer off the screen as it streams.
-        if (runs.current === me) setLive(null)
+        if (runs.current === me) {
+          setLive(null)
+          afterRun.current()
+        }
       }
       return received || wasStopped
     },
@@ -382,9 +388,10 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     }
   }
 
-  const send = async (text: string): Promise<boolean> => {
+  const send = async (text: string, files?: Attachment[]): Promise<boolean> => {
+    const fromBox = files === undefined
     // "/compact": a command, not a question.
-    if (text === '/compact' && uploads.attachments.length === 0) {
+    if (text === '/compact' && (files ?? uploads.attachments).length === 0) {
       if (!canCompact) {
         toast.error(id ? 'Compact when the answer is done.' : 'This chat has nothing to compact yet.')
         return false
@@ -396,12 +403,33 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     if (!conversationId) return false
     const parent = view.leaf
     const localId = `local-${Date.now()}`
-    const attachments = uploads.attachments
+    const attachments = files ?? uploads.attachments
     // The files went with the question once the server has it: the box is free for the next one while the answer streams.
     return run(conversationId, 'messages', { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null }, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
-      if (e.type === 'question') uploads.clear()
+      if (e.type === 'question' && fromBox) uploads.clear()
     })
   }
+
+  // Written while an answer runs: each waits its turn, sent once the answer before is over
+  // (saved too: a page with nothing live), or at once with Send now (which stops the answer).
+  const [queue, setQueue] = useState<Queued[]>([])
+  const enqueue = (text: string) => {
+    setQueue((q) => [...q, { key: `q${Date.now()}${q.length}`, text, attachments: uploads.attachments }])
+    uploads.clear()
+  }
+  const sendNow = (key: string) => {
+    setQueue((q) => [...q.filter((x) => x.key === key), ...q.filter((x) => x.key !== key)])
+    void stop()
+  }
+  // Called by an answer's run once it is over and saved.
+  useEffect(() => {
+    afterRun.current = () => {
+      const [next, ...rest] = queue
+      if (!next) return
+      setQueue(rest)
+      void send(next.text, next.attachments)
+    }
+  })
 
   const edit = (m: Message, text: string) => {
     if (!id) return
@@ -609,6 +637,10 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
               <Composer
                 streaming={streaming}
                 onSend={send}
+                queued={queue}
+                onQueue={enqueue}
+                onSendNow={sendNow}
+                onUnqueue={(key) => setQueue((q) => q.filter((x) => x.key !== key))}
                 onStop={() => void stop()}
                 uploads={uploads}
                 model={model}
