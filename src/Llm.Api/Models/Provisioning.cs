@@ -20,6 +20,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
 {
     public const string Client = "provisioning";
     private const string By = "setup";
+    private bool _speechAsked;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -77,7 +78,8 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
         var missing = files.Where(f => !File.Exists(Path.Combine(downloads.Root, f.Dir, f.Name))).ToList();
         foreach (var repo in missing.GroupBy(f => (f.Repo, f.Dir)))
         {
-            if (await db.ModelDownloads.AnyAsync(d => d.Repo == repo.Key.Repo && d.Dir == repo.Key.Dir && d.State != "done", ct))
+            // One going (or paused by an admin) is left be; a failed one is tried again.
+            if (await db.ModelDownloads.AnyAsync(d => d.Repo == repo.Key.Repo && d.Dir == repo.Key.Dir && (d.State == "queued" || d.State == "running" || d.State == "paused"), ct))
             {
                 continue;
             }
@@ -95,7 +97,11 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>Asks the speech server for the models it does not have; it fetches them from Hugging Face itself.</summary>
+    /// <summary>
+    /// Asks the speech server for its models; it fetches them from Hugging Face itself. Once a start for
+    /// every one (a download cut short is listed as there: asking again finishes it, and a whole one
+    /// answers at once), then only for those it does not list.
+    /// </summary>
     private async Task SpeechAsync(CancellationToken ct)
     {
         var client = http.CreateClient(Client);
@@ -108,7 +114,8 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
                 have.Add(id);
             }
         }
-        foreach (var (name, id, _) in MediaModels.Speech.Where(s => !have.Contains(s.Id)))
+        var all = !_speechAsked;
+        foreach (var (name, id, _) in MediaModels.Speech.Where(s => all || !have.Contains(s.Id)))
         {
             LogSpeech(logger, name, id);
             using var res = await client.PostAsync($"{MediaModels.AudioUrl}/v1/models/{id}", null, ct);
@@ -117,6 +124,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
                 LogSpeechFailed(logger, id, (int)res.StatusCode);
             }
         }
+        _speechAsked = true;
     }
 
     /// <summary>
@@ -149,7 +157,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
             var wanted = model.Files.Concat(mmproj?.Files ?? []).ToList();
             if (wanted.Any(f => !File.Exists(Path.Combine(downloads.Root, repo.Id, f.Path))))
             {
-                if (!await db.ModelDownloads.AnyAsync(d => d.Repo == repo.Id && d.State != "done", ct))
+                if (!await db.ModelDownloads.AnyAsync(d => d.Repo == repo.Id && (d.State == "queued" || d.State == "running" || d.State == "paused"), ct))
                 {
                     Start(db, repo.Id, repo.Sha, repo.Id, wanted.Select(f => new DownloadFile { Path = f.Path, Size = f.Size, Sha256 = f.Sha256 }));
                     await db.SaveChangesAsync(ct);

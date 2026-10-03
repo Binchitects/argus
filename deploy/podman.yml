@@ -1,0 +1,28 @@
+# Rootless Podman: the same stack, with what a user's own containers need.
+#
+#   systemctl --user enable --now podman.socket
+#   echo 'HTTP_PORT=8080' >> .env; echo 'HTTPS_PORT=8443' >> .env   # below 1024 needs root
+#   podman compose -f docker-compose.yml -f podman.yml up -d
+#
+# GPUs come through CDI (sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml).
+services:
+  # Your uid inside, so what they write stays yours: the app's downloads into
+  # MODELS_DIR, and the Python runs' results the app reads.
+  app:
+    userns_mode: keep-id
+  sandbox:
+    userns_mode: keep-id
+
+  # A user cannot lift the locked-memory limit.
+  llamacpp:
+    ulimits: !reset {}
+
+  # Podman's API in place of Docker's.
+  promtail:
+    volumes: !override
+      - ./config/promtail.yml:/etc/promtail/promtail.yml:ro
+      - ${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock:ro
+
+  # Power caps write /sys, which needs the host's root.
+  power-limits:
+    profiles: [off]

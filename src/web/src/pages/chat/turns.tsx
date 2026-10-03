@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Textarea } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
+import { MediaPlayer, ReadAloud } from './media'
+import { isMedia } from './sound'
 import { formatValue, money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { attachmentUrl } from './api'
@@ -90,7 +92,11 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
       {m.attachments.length > 0 && (
         <ul className="flex max-w-[85%] flex-wrap justify-end gap-2" aria-label="Attachments">
           {m.attachments.map((a) =>
-            a.kind === 'image' ? (
+            isMedia(a) ? (
+              <li key={a.id}>
+                <MediaPlayer a={a} />
+              </li>
+            ) : a.kind === 'image' ? (
               <li key={a.id}>
                 <button
                   type="button"
@@ -218,6 +224,7 @@ export function AnswerTurn({
       <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
         <Branches siblings={siblings} current={first} onSwitch={onSwitch} label="Answer" />
         <CopyButton text={text} label="Copy answer" />
+        {text && <ReadAloud text={text} />}
         {onRegenerate && question && (
           <DropdownMenu>
             <Tooltip content="Answer again">

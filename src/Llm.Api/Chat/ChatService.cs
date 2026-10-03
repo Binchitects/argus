@@ -50,6 +50,7 @@ public sealed partial class ChatService(
     AccessService access,
     Models.ModelPolicy policy,
     ChatModels models,
+    Media media,
     IOptionsMonitor<ChatOptions> chat,
     IServiceScopeFactory scopes,
     ILogger<ChatService> logger)
@@ -108,7 +109,7 @@ public sealed partial class ChatService(
         var tools = new JsonArray();
         var instructions = new List<(string Tool, string Text)>();
         // Sub-agents get the answer's model and tools, filled in below before any call.
-        var kit = new AgentKit(modelName, thinking, email, runs, tools, instructions, progress, emit, user, conversation);
+        var kit = new AgentKit(modelName, model?.Thinking == false ? null : thinking, email, runs, tools, instructions, progress, emit, user, conversation);
         if (model?.Tools != false)
         {
             var allowed = await registry.ForAsync(await access.MembershipAsync(user, ct), ct);
@@ -207,7 +208,8 @@ public sealed partial class ChatService(
             {
                 request["max_tokens"] = maxTokens;
             }
-            if (ThinkingPresets.TemplateKwargs(overrides.Hurry?.Asked == true ? "off" : thinking) is { } kwargs)
+            // A model that does not think gets no thinking switches: its template may not know them (Qwen3-Omni's answers nothing).
+            if (model?.Thinking != false && ThinkingPresets.TemplateKwargs(overrides.Hurry?.Asked == true ? "off" : thinking) is { } kwargs)
             {
                 request["chat_template_kwargs"] = kwargs;
             }
@@ -693,6 +695,63 @@ public sealed partial class ChatService(
     }
 
     /// <summary>
+    /// A sound or video in the question. A model that hears gets the sound itself (an input_audio part); one
+    /// that does not, its transcript. A video's frames go as pictures to a model that can see. Returns what the
+    /// parts weigh against the context budget.
+    /// </summary>
+    private async Task<long> MediaAsync(ChatAttachment f, StringBuilder text, List<JsonObject> parts, bool vision, bool hears, string email, CancellationToken ct)
+    {
+        var name = f.FileName.Replace("\"", "'", StringComparison.Ordinal);
+        var length = f.Seconds is { } sec ? string.Create(CultureInfo.InvariantCulture, $" ({sec:0} s)") : "";
+        var weight = 0L;
+        if (f.Kind == "video")
+        {
+            text.Append("\n\n[video attached: ").Append(name).Append(length);
+            if (vision)
+            {
+                var frames = await media.FramesAsync(f, ct);
+                text.Append(": ").Append(frames.Count).Append(" frames below, taken at ").Append(string.Join(", ", frames.Select(x => string.Create(CultureInfo.InvariantCulture, $"{x.At:0.#} s"))));
+                foreach (var (_, jpeg) in frames)
+                {
+                    parts.Add(new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:image/jpeg;base64," + Convert.ToBase64String(jpeg) } });
+                    weight += ImageWeight;
+                }
+            }
+            else
+            {
+                text.Append(" (this model cannot see its pictures)");
+            }
+            text.Append(']');
+        }
+        var sound = f.Kind == "audio" ? f.Data : f.Sound;
+        if (sound is null)
+        {
+            text.Append(f.Kind == "audio" ? $"\n\n[sound attached: {name} (empty)]" : "");
+            return weight;
+        }
+        if (hears)
+        {
+            text.Append(CultureInfo.InvariantCulture, $"\n\n[{(f.Kind == "audio" ? "sound attached" : "its sound")}: {name}{length}, below]");
+            parts.Add(new JsonObject { ["type"] = "input_audio", ["input_audio"] = new JsonObject { ["data"] = Convert.ToBase64String(sound), ["format"] = "mp3" } });
+            // Roughly 25 tokens a second of sound.
+            return weight + (long)((f.Seconds ?? 30) * 90);
+        }
+        string said;
+        try
+        {
+            said = await media.TranscriptAsync(f, email, ct);
+        }
+        catch (Exception ex) when (ex is MediaException or ChatGatewayException)
+        {
+            text.Append(CultureInfo.InvariantCulture, $"\n\n[{(f.Kind == "audio" ? "sound" : "its sound")}: {name}{length} could not be written down: {ex.Message}]");
+            return weight;
+        }
+        text.Append(CultureInfo.InvariantCulture, $"\n\n<transcript of=\"{name}\"{(f.Seconds is { } s ? string.Create(CultureInfo.InvariantCulture, $" seconds=\"{s:0}\"") : "")}>\n")
+            .Append(said.Length == 0 ? "(no speech)" : safeguards.Mask(said)).Append("\n</transcript>");
+        return weight;
+    }
+
+    /// <summary>
     /// An attachment as it goes into the question: whole when it is short; otherwise
     /// its start, cut at a line, and a note saying how long it is and how to read on.
     /// </summary>
@@ -731,6 +790,7 @@ public sealed partial class ChatService(
         var attachmentIds = stored.Where(m => m.Role == "user").SelectMany(m => ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => attachmentIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
         var vision = model?.Vision == true;
+        var hears = model?.Audio == true;
         var imagesDropped = false;
 
         var turns = new List<(JsonObject Turn, long Weight, ChatMessage Source)>();
@@ -741,10 +801,18 @@ public sealed partial class ChatService(
                 case "user":
                     var text = new StringBuilder(safeguards.Mask(m.Content));
                     var images = new List<ChatAttachment>();
+                    var heard = new List<JsonObject>();
+                    var mediaWeight = 0L;
                     foreach (var id in ParseIds(m.AttachmentsJson))
                     {
                         if (!files.TryGetValue(id, out var f))
                         {
+                            continue;
+                        }
+                        if (f.Kind is "audio" or "video")
+                        {
+                            mediaWeight += await MediaAsync(f, text, heard, vision, hears, email, ct);
+                            imagesDropped |= f.Kind == "video" && !vision && m.Id == question.Id;
                             continue;
                         }
                         if (f.Kind == "image")
@@ -768,7 +836,7 @@ public sealed partial class ChatService(
                         text.Append("\n\n<attachment name=\"").Append(f.FileName.Replace("\"", "'", StringComparison.Ordinal)).Append("\">\n")
                             .Append(Inline(f, chat.CurrentValue.InlineAttachmentChars, canReadFiles)).Append("\n</attachment>");
                     }
-                    if (images.Count == 0)
+                    if (images.Count == 0 && heard.Count == 0)
                     {
                         turns.Add((new JsonObject { ["role"] = "user", ["content"] = text.ToString() }, text.Length, m));
                     }
@@ -783,7 +851,11 @@ public sealed partial class ChatService(
                                 ["image_url"] = new JsonObject { ["url"] = $"data:{img.ContentType};base64,{Convert.ToBase64String(img.Data!)}" },
                             });
                         }
-                        turns.Add((new JsonObject { ["role"] = "user", ["content"] = parts }, text.Length + (long)images.Count * ImageWeight, m));
+                        foreach (var part in heard)
+                        {
+                            parts.Add(part);
+                        }
+                        turns.Add((new JsonObject { ["role"] = "user", ["content"] = parts }, text.Length + (long)images.Count * ImageWeight + mediaWeight, m));
                     }
                     break;
                 case "assistant" when m.ToolCallsJson is not null:

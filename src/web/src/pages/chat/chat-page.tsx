@@ -31,6 +31,7 @@ import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export
 import type { ExportKind } from './header'
 import { saveBlob } from '@/lib/zip'
 import type { Queued } from './composer'
+import { speak, voicePrefix } from './sound'
 import { tellDesktop } from '@/lib/desktop'
 
 /** The id a question is shown under until the server gives it its own. */
@@ -421,9 +422,16 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     const parent = view.leaf
     const localId = newLocalId()
     const attachments = files ?? uploads.attachments
+    // Asked by voice: answered aloud.
+    const aloud = attachments.some((a) => a.fileName.startsWith(voicePrefix))
     // The files went with the question once the server has it: the box is free for the next one while the answer streams.
     return run(conversationId, 'messages', { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null, ...(deep ? { research: true } : {}) }, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
       if (e.type === 'question' && fromBox) uploads.clear()
+      if (e.type === 'done' && aloud) {
+        const s = liveRef.current
+        const said = s?.messages.find((m) => m.id === s.current)?.content
+        if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
+      }
     })
   }
 

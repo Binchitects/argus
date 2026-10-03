@@ -6,6 +6,7 @@ import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import type { ContextView } from './context'
 import { ContextGauge } from './context-gauge'
+import { VoiceButton } from './media'
 import type { Attachment, ChatModel } from './types'
 
 /** A message written while an answer runs: sent when it ends, or at once with Send now. */
@@ -182,11 +183,12 @@ export function Composer({
       />
       <div className="flex items-center gap-2 px-2 pt-1 pb-2">
         <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) uploads.add(e.target.files); e.target.value = '' }} aria-label="Attach files" />
-        <Tooltip content="Attach files: Word, Excel, PowerPoint, PDF, text, code, images">
+        <Tooltip content="Attach files: Word, Excel, PowerPoint, PDF, text, code, images, sound, video">
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => picker.current?.click()} aria-label="Attach">
             <Paperclip />
           </Button>
         </Tooltip>
+        <VoiceButton onRecorded={(f) => uploads.add([f])} />
         {tools}
         {onResearch && (
           <Tooltip content="Deep research: a plan, sub-agents that search the web, and a report with its sources. It takes minutes.">

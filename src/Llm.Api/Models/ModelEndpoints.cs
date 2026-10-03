@@ -25,6 +25,9 @@ public sealed record ModelAccessRequest(Audience Audience, Guid[]? Groups);
 
 public sealed record KeepRequest(bool Keep);
 
+/// <summary>A picture, video or speech model on (at the gateway, in the chat's tools) or off.</summary>
+public sealed record EnabledRequest(bool Enabled);
+
 /// <summary>
 /// Admin → Models: every model at the gateway; for the engine's, which to keep
 /// loaded, loading and unloading them (live: llama.cpp's router), the GPUs each
@@ -44,11 +47,12 @@ public static class ModelEndpoints
         g.MapPost("/{name}/load", LoadAsync);
         g.MapPost("/{name}/unload", UnloadAsync);
         g.MapPut("/{name}/keep", KeepAsync);
+        g.MapPut("/{name}/enabled", EnabledAsync);
         g.MapPut("/{name}/access", AccessAsync);
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
-        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, CancellationToken ct)
+        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, CancellationToken ct)
     {
         var e = engine.Value;
         var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
@@ -93,8 +97,17 @@ public static class ModelEndpoints
                 });
             }
         }
+        // The picture, video and speech models, each on its own server.
+        foreach (var x in await media.ListAsync(ct))
+        {
+            rows.Add(new
+            {
+                name = x.Model.Name, source = "media", mode = x.Model.Mode, server = x.Model.Server, status = x.Now, enabled = x.State.Enabled, kept = x.State.Kept,
+                keptNow = x.State.Kept, vision = false, atGateway = At(x.Model.Name) is not null, access = Access(x.Model.Name),
+            });
+        }
         var onServers = servers.SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var m in atGateway.Where(m => local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name)))
+        foreach (var m in atGateway.Where(m => local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name) && MediaControl.Find(m.Name) is null))
         {
             rows.Add(new { name = m.Name, source = "gateway", mode = m.Mode, status = (string?)null, context = m.Context, vision = m.Vision, access = Access(m.Name) });
         }
@@ -232,8 +245,18 @@ public static class ModelEndpoints
 
     /// <summary>Loads a model now, beside the kept ones: at the engine's limit, the one used least recently unloads (a kept one comes back).</summary>
     private static async Task<IResult> LoadAsync(string name, EngineClient engine, EngineState state, ModelCatalog catalog, EngineWatcher watcher,
-        ChatModels chatModels, IOptions<EngineOptions> options, Audit audit, CancellationToken ct)
+        ChatModels chatModels, IOptions<EngineOptions> options, MediaControl media, Audit audit, CancellationToken ct)
     {
+        if (MediaControl.Find(name) is not null)
+        {
+            if (!(await media.StateAsync(name, ct)).Enabled)
+            {
+                return AuthEndpoints.Problem(409, "off", $"{name} is turned off: turn it on first.");
+            }
+            media.Load(name);
+            await audit.WriteAsync("model.load", name);
+            return Results.Accepted();
+        }
         if (!await KnownAsync(name, engine, state, ct))
         {
             return AuthEndpoints.Problem(404, "unknown", $"The engine has no model named {name} (yet: a model just added is there once the engine has restarted).");
@@ -258,8 +281,14 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> UnloadAsync(string name, EngineClient engine, EngineState state, ModelCatalog catalog, EngineWatcher watcher,
-        ChatModels chatModels, ModelHoursState hours, Audit audit, CancellationToken ct)
+        ChatModels chatModels, ModelHoursState hours, MediaControl media, Audit audit, CancellationToken ct)
     {
+        if (MediaControl.Find(name) is not null)
+        {
+            await media.UnloadAsync(name, ct);
+            await audit.WriteAsync("model.unload", name);
+            return Results.Accepted();
+        }
         if (!await KnownAsync(name, engine, state, ct))
         {
             return Results.NotFound();
@@ -293,8 +322,15 @@ public static class ModelEndpoints
     /// kept already, or when the kept models would not fit the GPUs and RAM together.
     /// </summary>
     private static async Task<IResult> KeepAsync(string name, KeepRequest body, AppDbContext db, EngineClient engine, EngineState state, ModelCatalog catalog,
-        ModelLibrary library, HardwareProbe hardware, EngineWatcher watcher, ChatModels chatModels, IOptions<EngineOptions> options, Audit audit, CancellationToken ct)
+        ModelLibrary library, HardwareProbe hardware, EngineWatcher watcher, ChatModels chatModels, IOptions<EngineOptions> options, MediaControl media, Audit audit,
+        CancellationToken ct)
     {
+        if (MediaControl.Find(name) is not null)
+        {
+            await media.SetAsync(name, kept: body.Keep, ct: ct);
+            await audit.WriteAsync(body.Keep ? "model.keep" : "model.unkeep", name);
+            return Results.Ok(new { kept = body.Keep, warning = (string?)null });
+        }
         if (!await KnownAsync(name, engine, state, ct))
         {
             return AuthEndpoints.Problem(404, "unknown", $"The engine has no model named {name}.");
@@ -345,6 +381,30 @@ public static class ModelEndpoints
         return ModelAdvisor.PlanKept(models, entries, hw);
     }
 
+    /// <summary>A picture, video or speech model on or off: off, it leaves the gateway and the chat's tools, and unloads.</summary>
+    private static async Task<IResult> EnabledAsync(string name, EnabledRequest body, MediaControl media, ModelCatalog catalog, Audit audit, CancellationToken ct)
+    {
+        if (MediaControl.Find(name) is null)
+        {
+            return AuthEndpoints.Problem(404, "unknown", $"{name} is not a picture, video or speech model.");
+        }
+        await media.SetAsync(name, enabled: body.Enabled, ct: ct);
+        if (!body.Enabled)
+        {
+            await media.UnloadAsync(name, ct);
+        }
+        try
+        {
+            await catalog.SyncGatewayAsync(ct);
+        }
+        catch (GatewayException)
+        {
+            // In step within a minute (the engine watcher).
+        }
+        await audit.WriteAsync(body.Enabled ? "model.enable" : "model.disable", name);
+        return Results.NoContent();
+    }
+
     /// <summary>Whether the engine has the model: its last answer, or a fresh one when that did not know it.</summary>
     private static async Task<bool> KnownAsync(string name, EngineClient engine, EngineState state, CancellationToken ct)
     {
@@ -366,7 +426,7 @@ public static class ModelEndpoints
     private static async Task<IResult> AccessAsync(string name, ModelAccessRequest body, AppDbContext db, ChatModels gatewayModels, IOptions<EngineOptions> engine,
         KeyAccessWatcher keys, Audit audit, CancellationToken ct)
     {
-        var known = (await gatewayModels.AllAsync(ct)).Any(m => m.Name == name) || await db.LocalModels.AnyAsync(m => m.Name == name, ct);
+        var known = (await gatewayModels.AllAsync(ct)).Any(m => m.Name == name) || MediaControl.Find(name) is not null || await db.LocalModels.AnyAsync(m => m.Name == name, ct);
         if (!known)
         {
             return Results.NotFound();

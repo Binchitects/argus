@@ -30,6 +30,9 @@ public sealed record ToolDecision(bool Allow);
 /// <summary>Fork up to this message (default: the end of the branch on screen).</summary>
 public sealed record ForkRequest(Guid? MessageId = null);
 
+/// <summary>A text to read aloud (an answer, as it is shown: Markdown and code are left out).</summary>
+public sealed record SpeechRequest(string? Text);
+
 /// <summary>
 /// A question. It follows <see cref="ParentId"/> (default: the end of the branch on
 /// screen); <see cref="Root"/> starts a new first question. Editing a question is
@@ -73,6 +76,7 @@ public static partial class ChatEndpoints
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync);
         g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
         g.MapPost("/attachments", UploadAsync).DisableAntiforgery();
+        g.MapPost("/speech", SpeechAsync);
         g.MapGet("/attachments/{id:guid}/content", ContentAsync);
         g.MapGet("/attachments/{id:guid}/pages", PagesAsync);
         g.MapGet("/search", SearchAsync);
@@ -722,7 +726,32 @@ public static partial class ChatEndpoints
         await http.Response.WriteAsJsonAsync(new { status = code, error = message });
     }
 
-    private static async Task<IResult> UploadAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> monitor)
+    /// <summary>A text read aloud: an MP3 from the gateway's text to speech, in the person's name (Persian in a Persian voice).</summary>
+    private static async Task<IResult> SpeechAsync(SpeechRequest body, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, ChatModels models, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var text = Tools.Voices.Plain(body.Text ?? "");
+        if (text.Length == 0)
+        {
+            return AuthEndpoints.Problem(400, "text", "Nothing to read aloud.");
+        }
+        if (await models.OfModeAsync("audio_speech", null, ct) is null)
+        {
+            return AuthEndpoints.Problem(503, "no_speech", "The gateway has no text to speech model (the audio module).");
+        }
+        var (model, voice) = Tools.Voices.For(text);
+        try
+        {
+            return Results.File(await gateway.SpeakAsync(model, text, voice, me.Email!, ct), "audio/mpeg");
+        }
+        catch (ChatGatewayException ex)
+        {
+            return AuthEndpoints.Problem(502, "gateway", ex.Message);
+        }
+    }
+
+    private static async Task<IResult> UploadAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> monitor,
+        Media media)
     {
         var options = monitor.CurrentValue;
         var me = await Me(p, users);
@@ -752,6 +781,25 @@ public static partial class ChatEndpoints
             db.ChatAttachments.Add(image);
             await db.SaveChangesAsync();
             return Results.Ok(new { image.Id, image.FileName, image.Size, image.Kind, image.ContentType, chars = 0, image.Truncated });
+        }
+        // A sound or a video: what the models take is made once, now, in the sandbox.
+        if (Media.Detect(file.FileName, file.ContentType, ms.ToArray()) is { } kind)
+        {
+            var m = new ChatAttachment
+            {
+                UserId = me.Id, FileName = Path.GetFileName(file.FileName), ContentType = kind.ContentType, Size = file.Length, Text = "", Kind = kind.Kind, Data = ms.ToArray(),
+            };
+            db.ChatAttachments.Add(m);
+            try
+            {
+                await media.PrepareAsync(m, request.HttpContext.RequestAborted);
+            }
+            catch (MediaException ex)
+            {
+                return AuthEndpoints.Problem(400, "unreadable", ex.Message);
+            }
+            await db.SaveChangesAsync();
+            return Results.Ok(new { m.Id, m.FileName, m.Size, m.Kind, m.ContentType, chars = 0, m.Truncated, m.Seconds });
         }
         try
         {
@@ -793,6 +841,12 @@ public static partial class ChatEndpoints
             return a.Data is not null
                 ? Results.File(a.Data, "application/octet-stream", a.FileName)
                 : Results.File(System.Text.Encoding.UTF8.GetBytes(a.Text), "text/plain; charset=utf-8", a.FileName);
+        }
+        if (a.Kind is "audio" or "video" && a.Data is not null)
+        {
+            // Sound and video players seek: ranges.
+            http.Response.Headers.XContentTypeOptions = "nosniff";
+            return Results.File(a.Data, a.ContentType, enableRangeProcessing: true);
         }
         return a.Kind == "image" && a.Data is not null
             ? Results.File(a.Data, a.ContentType)

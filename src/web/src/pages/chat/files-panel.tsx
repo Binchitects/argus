@@ -22,6 +22,8 @@ import { zipFiles, zipName } from './files-zip'
 import { ImageViewer } from './image-viewer'
 import { asViewerImages } from './viewer-images'
 import { LivePreview } from './live-preview'
+import { MediaPlayer } from './media'
+import { isMedia } from './sound'
 
 /**
  * Like Claude's: every file in the branch on screen, and a viewer for the one
@@ -189,6 +191,7 @@ function Viewer({ file }: { file: FileItem }) {
   if (file.kind === 'code') return <CodeBlock code={file.code} lang={file.lang} name={file.name} />
   if (file.kind === 'repo') return <RepoViewer file={file} />
   if (file.attachment.kind === 'image') return <ImageFile attachment={file.attachment} />
+  if (isMedia(file.attachment)) return <MediaPlayer a={file.attachment} className={file.attachment.kind === 'video' ? 'max-h-[70vh] w-full rounded-lg border bg-black' : undefined} />
   if (hasPages(file.attachment)) {
     if (file.attachment.kind !== 'text') return <DocumentPages attachment={file.attachment} />
     // Its pages as they look, or the text the model read.

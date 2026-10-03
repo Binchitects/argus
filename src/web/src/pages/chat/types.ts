@@ -40,11 +40,13 @@ export interface Attachment {
   fileName: string
   size: number
   truncated: boolean
-  /** text: read by the model; image: a picture; file: neither (a file Python made), to download. */
-  kind: 'text' | 'image' | 'file'
+  /** text: read by the model; image: a picture; audio, video: played in place; file: neither (a file Python made), to download. */
+  kind: 'text' | 'image' | 'audio' | 'video' | 'file'
   contentType: string
   /** The file's own bytes are kept (a document's original, a file a tool made): it can be downloaded. */
   original?: boolean
+  /** A sound's or video's length. */
+  seconds?: number | null
 }
 
 export interface ToolCall {

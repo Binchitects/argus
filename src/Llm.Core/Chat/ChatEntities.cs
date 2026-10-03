@@ -105,9 +105,16 @@ public sealed class ChatAttachment
     public long Size { get; set; }
     public required string Text { get; set; }
     public bool Truncated { get; set; }
-    /// <summary>"text" (Text holds it) or "image" (Data holds it).</summary>
+    /// <summary>
+    /// "text" (Text holds it), "image" (Data holds it), "audio" (Data is its MP3; Text, once made, its transcript)
+    /// or "video" (Data is the video; Sound its sound track, its frames are pages; Text, once made, the transcript).
+    /// </summary>
     public string Kind { get; set; } = "text";
     public byte[]? Data { get; set; }
+    /// <summary>A video's sound track, as an MP3 (mono, 16 kHz).</summary>
+    public byte[]? Sound { get; set; }
+    /// <summary>A sound's or video's length.</summary>
+    public double? Seconds { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

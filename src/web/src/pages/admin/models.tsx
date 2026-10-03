@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Boxes, CircleDot, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Pencil, Pin, Plus, Power, PowerOff, Trash2, XCircle } from 'lucide-react'
+import { AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Pencil, Pin, Plus, Power, PowerOff, Trash2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -23,14 +23,17 @@ import { bytes, summary, type ModelProfile } from './model-profile'
 import { ServersSection } from './servers'
 
 interface ModelRow extends SavedModel {
-  /** env: the .env model; local: added here; remote: on another GPU server; gateway: served by the gateway otherwise (cloud, pictures). */
-  source: 'local' | 'remote' | 'gateway'
+  /** local: added here; remote: on another GPU server; media: a picture, video or speech model of this stack; gateway: served by the gateway otherwise. */
+  source: 'local' | 'remote' | 'media' | 'gateway'
   /** For a remote model: its server, and its id there. */
   server?: string
   remote?: string
   mode: string
-  /** failed: its last load exited with an error (the engine's log says why); missing: the engine does not list it (yet). */
-  status: 'loaded' | 'loading' | 'unloaded' | 'failed' | 'missing' | null
+  /** failed: its last load exited with an error (the engine's log says why); missing: the engine does not list it (yet);
+   * waiting: a media model whose files are being fetched; off: its server does not run. */
+  status: 'loaded' | 'loading' | 'unloaded' | 'failed' | 'missing' | 'waiting' | 'off' | null
+  /** A media model: on (at the gateway, in the chat's tools) or off. */
+  enabled?: boolean
   vision: boolean
   atGateway?: boolean
   access: AccessRule
@@ -206,6 +209,13 @@ function Status({ status }: { status: ModelRow['status'] }) {
       </span>
     )
   if (status === 'unloaded') return <span className="text-sm text-muted-foreground">Not loaded</span>
+  if (status === 'waiting')
+    return (
+      <span className="flex items-center gap-1.5 text-sm text-warning-ink">
+        <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Fetching its files…
+      </span>
+    )
+  if (status === 'off') return <span className="text-sm text-muted-foreground">Its server does not run</span>
   if (status === 'missing')
     return (
       <span className="flex items-center gap-1.5 text-sm text-warning-ink">
@@ -247,23 +257,35 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
     onSettled: onChanged,
     onError: (e) => toast.error(errorMessage(e)),
   })
-  const onEngine = m.status !== null && m.status !== 'missing'
+  const media = m.source === 'media'
+  const onEngine = media ? m.status !== 'off' : m.status !== null && m.status !== 'missing'
   const image = m.mode === 'image_generation'
-  // Loading one more needs a place beside the kept models, unless this is one of them.
-  const canLoad = m.keptNow === true || engine.kept.length < engine.max
+  const kind = mediaKinds[m.mode]
+  const Icon = kind?.icon ?? Boxes
+  // Loading one more needs a place beside the kept models, unless this is one of them. A media model has its own server.
+  const canLoad = media ? m.enabled !== false && m.status !== 'waiting' : m.keptNow === true || engine.kept.length < engine.max
+  const enable = useMutation({
+    mutationFn: (on: boolean) => api(`/api/admin/models/${encodeURIComponent(m.name)}/enabled`, { method: 'PUT', body: { enabled: on } }),
+    onSuccess: (_, on) => {
+      toast.success(on ? `${m.name} is on` : `${m.name} is off`, { description: on ? 'At the gateway and in the chat’s tools.' : 'Unloaded, and gone from the gateway and the chat’s tools.' })
+      onChanged()
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
   return (
     <Card className={cn(m.status === 'loaded' && 'border-success/40')}>
       <CardHeader className="flex flex-row flex-wrap items-start gap-3">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary-ink">
-          {image ? <ImageIcon className="size-4.5" aria-hidden="true" /> : <Boxes className="size-4.5" aria-hidden="true" />}
+          <Icon className="size-4.5" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
           <CardTitle className="flex flex-wrap items-center gap-2 [overflow-wrap:anywhere]">
             {m.name}
             <Badge variant={m.source === 'local' ? 'default' : 'secondary'}>
-              {m.source === 'local' ? 'Added here' : m.source === 'remote' ? `On ${m.server}` : 'Gateway'}
+              {m.source === 'local' ? 'Added here' : m.source === 'remote' ? `On ${m.server}` : media ? 'This stack' : 'Gateway'}
             </Badge>
-            {image && <Badge variant="outline">Pictures</Badge>}
+            {kind && <Badge variant="outline">{kind.label}</Badge>}
+            {media && m.enabled === false && <Badge variant="secondary">Off</Badge>}
             {m.kept && (
               <Badge variant="outline">
                 <Pin /> Kept loaded
@@ -281,8 +303,10 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
             )}
           </CardTitle>
           <CardDescription className="[overflow-wrap:anywhere]">
-            {[m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? `${m.context.toLocaleString('en-US')} tokens of context` : null].filter(Boolean).join(' · ') ||
-              (image ? 'An image model' : 'Served by the gateway')}
+            {media
+              ? `On the ${m.server} server`
+              : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? `${m.context.toLocaleString('en-US')} tokens of context` : null].filter(Boolean).join(' · ') ||
+                (image ? 'An image model' : 'Served by the gateway')}
           </CardDescription>
           {m.profile && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary(m.profile)}</p>}
         </div>
@@ -309,13 +333,30 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
             little GPU memory are the usual causes. It is not tried again until you load it.
           </Alert>
         )}
-        {onEngine && (
+        {media && (
+          <Label className="flex items-start gap-3 font-normal">
+            <Switch checked={m.enabled !== false} disabled={enable.isPending} onCheckedChange={(on) => enable.mutate(on)} aria-describedby={`on-${m.name}`} />
+            <span className="grid gap-0.5">
+              <span className="font-medium">On</span>
+              <span id={`on-${m.name}`} className="text-xs text-muted-foreground">
+                {m.enabled !== false ? 'At the gateway for API keys, and in the chat’s tools.' : 'Off: not at the gateway, not in the chat.'}
+              </span>
+            </span>
+          </Label>
+        )}
+        {onEngine && (!media || m.enabled !== false) && (
           <Label className="flex items-start gap-3 font-normal">
             <Switch checked={m.kept === true} disabled={keep.isPending} onCheckedChange={(on) => keep.mutate(on)} aria-describedby={`keep-${m.name}`} />
             <span className="grid gap-0.5">
               <span className="font-medium">Keep loaded</span>
               <span id={`keep-${m.name}`} className="text-xs text-muted-foreground">
-                {m.kept ? 'Loaded at start, and again whenever it is not.' : engine.onRequest ? 'Otherwise it loads when someone asks for it.' : 'Otherwise it loads only when an admin loads it.'}
+                {m.kept
+                  ? 'Loaded at start, and again whenever it is not.'
+                  : media
+                    ? 'Otherwise it loads when someone asks for it, and unloads after ten minutes unused.'
+                    : engine.onRequest
+                      ? 'Otherwise it loads when someone asks for it.'
+                      : 'Otherwise it loads only when an admin loads it.'}
               </span>
             </span>
           </Label>
@@ -329,11 +370,13 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
               disabled={m.status === 'loading' || !canLoad}
               title={canLoad ? undefined : 'Every place in the engine keeps a model loaded'}
               onClick={async () => {
-                const full = engine.loaded.length + engine.loading.length >= engine.max
+                const full = !media && engine.loaded.length + engine.loading.length >= engine.max
                 if (
                   await confirm({
                     title: `Load ${m.name}?`,
-                    description: full
+                    description: media
+                      ? 'It loads on its own server, beside the chat models. A model not kept loaded unloads again after ten minutes unused.'
+                      : full
                       ? 'The engine is full: the model used least recently unloads to make room (a kept one comes back after). Answers wait until this one is loaded: seconds for a small model, minutes for a large one.'
                       : 'It loads beside the models loaded now. Answers wait until it is loaded: seconds for a small model, minutes for a large one.',
                     confirm: 'Load',
@@ -385,4 +428,12 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
       </CardContent>
     </Card>
   )
+}
+
+/** What a media model does, as a badge and an icon. */
+const mediaKinds: Record<string, { label: string; icon: typeof Boxes }> = {
+  image_generation: { label: 'Pictures', icon: ImageIcon },
+  video_generation: { label: 'Video', icon: Clapperboard },
+  audio_transcription: { label: 'Speech to text', icon: Mic },
+  audio_speech: { label: 'Text to speech', icon: AudioLines },
 }

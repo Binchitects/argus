@@ -253,6 +253,10 @@ public static class IdentityWiring
         services.AddHttpClient(Chat.Tools.ToolRegistry.McpClient, c => c.Timeout = Timeout.InfiniteTimeSpan).ConfigurePrimaryHttpMessageHandler(Chat.Mcp.Handler);
         services.AddScoped<Chat.Tools.ArgusTool>();
         services.AddScoped<Chat.Tools.ImageTool>();
+        services.AddScoped<Chat.Tools.VideoTool>();
+        services.AddScoped<Chat.Tools.SpeechTool>();
+        services.AddScoped<Chat.Media>();
+        services.AddHttpClient(Chat.Tools.VideoTool.Client, c => c.Timeout = TimeSpan.FromMinutes(2));
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
         services.AddSingleton<Chat.Tools.AskTool>();
@@ -286,6 +290,9 @@ public static class IdentityWiring
         // A new deployment's models, fetched by the app itself (MODEL in .env, and the picture, video and speech servers').
         services.AddHttpClient(Models.Provisioning.Client, c => c.Timeout = TimeSpan.FromMinutes(30));
         services.AddHostedService<Models.Provisioning>();
+        services.AddHttpClient(Models.MediaControl.Client, c => c.Timeout = TimeSpan.FromSeconds(60));
+        services.AddSingleton<Models.MediaControl>();
+        services.AddHostedService(sp => sp.GetRequiredService<Models.MediaControl>());
         services.Configure<Schedules.ScheduleOptions>(config.GetSection("Schedules"));
         services.Configure<Operations.ArgusIndexOptions>(config.GetSection("ArgusIndex"));
         services.AddHostedService<Operations.ArgusIndexSchedule>();

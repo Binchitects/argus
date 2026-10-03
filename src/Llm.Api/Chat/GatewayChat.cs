@@ -71,10 +71,47 @@ public sealed class GatewayChat(HttpClient http, ChatKey key)
         }
     }
 
+    /// <summary>What was said in a sound, from the speech to text model at the gateway. The spend is the person's.</summary>
+    public async Task<string> TranscribeAsync(string model, byte[] sound, string fileName, string personEmail, CancellationToken ct)
+    {
+        using var res = await WithKeyAsync(() => PostAsync("/v1/audio/transcriptions", () => new MultipartFormDataContent
+        {
+            { new ByteArrayContent(sound) { Headers = { ContentType = new MediaTypeHeaderValue("audio/mpeg") } }, "file", fileName },
+            { new StringContent(model), "model" },
+            { new StringContent(personEmail), "user" },
+        }, personEmail, "application/json", ct), ct);
+        return JsonNode.Parse(await res.Content.ReadAsStringAsync(ct))?["text"]?.GetValue<string>() ?? "";
+    }
+
+    /// <summary>A text spoken by a text to speech model at the gateway, as MP3 bytes. The spend is the person's.</summary>
+    public async Task<byte[]> SpeakAsync(string model, string text, string voice, string personEmail, CancellationToken ct)
+    {
+        var body = new JsonObject { ["model"] = model, ["input"] = text, ["voice"] = voice, ["response_format"] = "mp3", ["user"] = personEmail };
+        using var res = await WithKeyAsync(() => PostAsync("/v1/audio/speech", body, personEmail, "audio/mpeg", ct), ct);
+        return await res.Content.ReadAsByteArrayAsync(ct);
+    }
+
+    /// <summary>The chat key removed at the gateway: a new one is made and the request tried once more.</summary>
+    private async Task<HttpResponseMessage> WithKeyAsync(Func<Task<HttpResponseMessage>> send, CancellationToken ct)
+    {
+        try
+        {
+            return await send();
+        }
+        catch (ChatGatewayException ex) when (ex.Status == 401)
+        {
+            await key.ForgetAsync(ct);
+            return await send();
+        }
+    }
+
     private Task<HttpResponseMessage> OpenAsync(JsonObject request, string personEmail, CancellationToken ct) =>
         PostAsync("/v1/chat/completions", request, personEmail, "text/event-stream", ct);
 
-    private async Task<HttpResponseMessage> PostAsync(string path, JsonObject request, string personEmail, string accept, CancellationToken ct)
+    private Task<HttpResponseMessage> PostAsync(string path, JsonObject request, string personEmail, string accept, CancellationToken ct) =>
+        PostAsync(path, () => new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json"), personEmail, accept, ct);
+
+    private async Task<HttpResponseMessage> PostAsync(string path, Func<HttpContent> content, string personEmail, string accept, CancellationToken ct)
     {
         string bearer;
         try
@@ -90,10 +127,7 @@ public sealed class GatewayChat(HttpClient http, ChatKey key)
         // A dropped connection (the gateway restarting, a new deployment settling) is tried again, twice, a little apart.
         for (var attempt = 1; ; attempt++)
         {
-            using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative))
-            {
-                Content = new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json"),
-            };
+            using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = content() };
             // Attribution (LiteLLM's user_header_mappings); enforcement is the body's
             // `user` field, set by the caller.
             req.Headers.Add(UserEmailHeader, personEmail);

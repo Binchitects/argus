@@ -41,7 +41,7 @@ public sealed class EngineState
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
 public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
-    RemoteServerClient remote, ModelHoursState hours, Modules modules, ILogger<ModelCatalog> logger)
+    RemoteServerClient remote, ModelHoursState hours, Modules modules, MediaControl media, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
@@ -266,10 +266,12 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
         foreach (var m in await db.LocalModels.AsNoTracking().ToListAsync(ct))
         {
-            var info = Info(m.Context, m.MaxOutput ?? DefaultMaxOutput(m.Context), m.Projector is { Length: > 0 }, m.Tools, m.Thinking);
+            // What its projector reads: pictures, sound (an omni model's), or both.
+            var projector = m.Projector is { Length: > 0 } p ? library.Find(p)?.Profile.Projector ?? new ProjectorInfo(true, false, null, null) : null;
+            var info = Info(m.Context, m.MaxOutput ?? DefaultMaxOutput(m.Context), projector?.Vision == true, m.Tools, m.Thinking, projector?.Audio == true);
             var litellm = new JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
             Prices(litellm, m.InputPerMtok, m.OutputPerMtok);
-            wanted[Fingerprint("local", m.Name, m.File, m.Context, m.MaxOutput, m.Projector, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok)] = (m.Name, litellm, info);
+            wanted[Fingerprint("local", m.Name, m.File, m.Context, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok)] = (m.Name, litellm, info);
         }
         foreach (var server in await db.RemoteServers.AsNoTracking().ToListAsync(ct))
         {
@@ -305,7 +307,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         chatModels.Forget();
     }
 
-    /// <summary>The picture and speech servers' models, while those servers run: people's keys reach them too.</summary>
+    /// <summary>The picture and speech models turned on, while their servers run: people's keys reach them too.</summary>
     private async Task MediaAsync(Dictionary<string, (string Name, JsonObject Params, JsonObject Info)> wanted, CancellationToken ct)
     {
         void Add(string name, string model, string url, JsonObject info)
@@ -313,22 +315,26 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             var litellm = new JsonObject { ["model"] = model, ["api_base"] = url + "/v1", ["api_key"] = "none" };
             wanted[Fingerprint("media", name, model, url, info.ToJsonString())] = (name, litellm, info);
         }
-        if (await modules.HasAsync("imagegen", ct))
+        var on = (await media.ListAsync(ct)).Where(x => x.State.Enabled).Select(x => x.Model.Name).ToHashSet(StringComparer.Ordinal);
+        if (on.Contains(MediaModels.ImageModel) && await modules.HasAsync("imagegen", ct))
         {
             Add(MediaModels.ImageModel, "openai/sd-cpp-local", MediaModels.ImageUrl, new JsonObject { ["mode"] = "image_generation" });
         }
         if (await modules.HasAsync("audio", ct))
         {
-            foreach (var (name, id, mode) in MediaModels.Speech)
+            foreach (var (name, id, mode) in MediaModels.Speech.Where(s => on.Contains(s.Name)))
             {
                 Add(name, "openai/" + id, MediaModels.AudioUrl, new JsonObject { ["mode"] = mode });
             }
         }
     }
 
-    private static JsonObject Info(int? context, int? maxOutput, bool vision, bool tools, bool thinking)
+    private static JsonObject Info(int? context, int? maxOutput, bool vision, bool tools, bool thinking, bool audio = false)
     {
-        var info = new JsonObject { ["mode"] = "chat", ["supports_vision"] = vision, ["supports_function_calling"] = tools, ["supports_reasoning"] = thinking };
+        var info = new JsonObject
+        {
+            ["mode"] = "chat", ["supports_vision"] = vision, ["supports_function_calling"] = tools, ["supports_reasoning"] = thinking, ["supports_audio_input"] = audio,
+        };
         if (context is { } c)
         {
             info["max_input_tokens"] = c;

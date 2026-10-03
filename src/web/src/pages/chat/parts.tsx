@@ -1,4 +1,4 @@
-import { AlertTriangle, Brain, Calculator, Check, ChevronRight, CircleX, Clock, Download, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Collapsible } from 'radix-ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNow } from './use-now'
@@ -17,6 +17,8 @@ import { ToolOutput } from './tool-output'
 import { AgentsView } from './agents'
 import type { ToolRunning } from './live'
 import type { AgentWork, Message, ToolCall } from './types'
+import { MediaPlayer } from './media'
+import { isMedia } from './sound'
 
 
 /**
@@ -72,6 +74,8 @@ const toolIcons: [RegExp, LucideIcon][] = [
   [/python|run_code/, SquareTerminal],
   [/web|url|fetch/, Globe],
   [/image|picture|draw/, ImageIcon],
+  [/video/, Clapperboard],
+  [/speak/, AudioLines],
   [/calculat/, Calculator],
   [/time|date|days_between/, Clock],
   [/symbol|definition|reference/, Search],
@@ -144,11 +148,13 @@ export function ToolCard({
   const open = chosen ?? (!!waiting || (delegate && (watched || (!result && live))))
   const [viewing, setViewing] = useState<number | null>(null)
   const pictures = result?.attachments.filter((a) => a.kind === 'image') ?? []
-  const made = result?.attachments.filter((a) => a.kind !== 'image') ?? []
+  const media = result?.attachments.filter(isMedia) ?? []
+  const made = result?.attachments.filter((a) => a.kind !== 'image' && !isMedia(a)) ?? []
   const Icon = toolIcons.find(([re]) => re.test(call.function.name))?.[1] ?? Wrench
   const args: [string, string][] = call.function.name === 'delegate' ? partsSummary(call.function.arguments) : argsSummary(call.function.arguments)
   const running = !result && live && !waiting
   const drawing = running && /image|picture|draw/.test(call.function.name)
+  const filming = running && /video/.test(call.function.name)
   const now = useNow(running && !!progress)
   const ran = running && progress ? now - progress.since : 0
   const share = progress?.total && progress.progress !== undefined ? Math.min(1, Math.max(0, progress.progress / progress.total)) : null
@@ -178,7 +184,7 @@ export function ToolCard({
               </span>
             ) : running ? (
               <>
-                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> {drawing ? 'Drawing' : 'Running'}
+                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> {drawing ? 'Drawing' : filming ? 'Filming' : 'Running'}
                 {ran >= 1000 && <span className="tabular-nums"> · {seconds(Math.floor(ran / 1000) * 1000)}</span>}
               </>
             ) : declined ? (
@@ -272,6 +278,26 @@ export function ToolCard({
             </li>
           ))}
           <ImageViewer images={asViewerImages(pictures)} index={viewing} onIndex={setViewing} />
+        </ul>
+      )}
+      {filming && (
+        <output className="drawing mt-2 flex aspect-video w-96 max-w-full flex-col items-center justify-center gap-2 rounded-xl border text-sm text-muted-foreground">
+          <Clapperboard className="size-6" aria-hidden="true" />
+          <span>Making the video, a few minutes…{ran >= 1000 && <span className="tabular-nums"> {seconds(Math.floor(ran / 1000) * 1000)}</span>}</span>
+        </output>
+      )}
+      {media.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-2" aria-label="Sound and video">
+          {media.map((f) => (
+            <li key={f.id} className="flex items-end gap-1">
+              <MediaPlayer a={f} />
+              <Button asChild variant="ghost" size="icon-sm" className="size-7">
+                <a href={downloadUrl(f.id)} download={f.fileName} aria-label={`Download ${f.fileName}`}>
+                  <Download />
+                </a>
+              </Button>
+            </li>
+          ))}
         </ul>
       )}
       {made.length > 0 && (

@@ -237,7 +237,7 @@ public sealed class TimeTool(TimeProvider clock) : IChatTool
 }
 
 /// <summary>Pictures from the gateway's image model, kept as the person's files.</summary>
-public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, AppDbContext db, Safeguards.Safeguards safeguards) : IChatTool
+public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, AppDbContext db, Safeguards.Safeguards safeguards, Models.MediaControl media) : IChatTool
 {
     public static readonly string[] Sizes = ["1024x1024", "1024x768", "768x1024", "768x768", "512x512"];
 
@@ -247,7 +247,7 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
     public string Icon => "image";
 
     public async Task<string?> UnavailableAsync(CancellationToken ct) =>
-        await models.ImageModelAsync(ct) is null ? "The gateway serves no image model. Turn on the image profile (IMAGEGEN_* in .env)." : null;
+        await models.ImageModelAsync(ct) is null ? "The gateway serves no picture model: turn it on under Admin -> Models (the imagegen module runs it)." : null;
 
     public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
     {
@@ -274,10 +274,16 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
                 {
                     return new ToolResult(limit, IsError: true);
                 }
+                // Loaded when it is not (a model not kept loaded unloads when unused).
+                if (Models.MediaControl.Find(model.Name) is not null && await media.ReadyAsync(model.Name, token) is { } notReady)
+                {
+                    return new ToolResult(notReady, IsError: true);
+                }
                 byte[] png;
                 try
                 {
                     png = await gateway.GenerateImageAsync(model.Name, prompt, size, context.Email, token);
+                    media.Touch(model.Name);
                 }
                 catch (ChatGatewayException ex)
                 {
