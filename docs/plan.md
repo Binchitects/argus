@@ -563,70 +563,265 @@ giving any web container the Docker socket.
 - Removed: Langfuse, vLLM, cAdvisor, DCGM, the stack CA, apply-settings, the
   env samples, the air-gap bundle and the checks written for the old layout.
 
-## Next (after v4.0.0)
+## Next (after v4.0.0): the roadmap to the one enterprise AI chat
 
-What is known to be left, by size and by what it unblocks. Each comes with the
-test that says it is done.
+### Where it stands against the others
 
-### N1 — One credit across chat and API keys  *(M)*
-LiteLLM counts a person twice — the chat as an end user, the keys as an internal
-user — and each path is limited to the whole budget, so together they can spend
-twice it. The ledger (the request log) already counts them as one.
-- The chat refuses a new answer once the ledger says the credit is used; a
-  watcher blocks a person's keys at the same point and unblocks them when the
-  budget is raised (keys an admin blocked by hand stay blocked).
-- **Done when:** a test spends through both paths and is stopped at the budget,
-  not twice it.
+What ChatGPT Enterprise, Claude for Work, Microsoft Copilot, Gemini for
+Workspace, Glean and the self-hosted chats (Open WebUI, LibreChat) have, against
+Argus Arena 4.0.0:
 
-### N2 — Spend and search at scale  *(S)*
-The ledger sums the whole request log on each read, and chat search scans with
-`ILIKE`. Fine for a team; slow for an enterprise's year of logs.
-- A daily per-person roll-up table (the ledger reads it plus today's rows); a
-  `pg_trgm` index for search.
-- **Done when:** both answer in under 200 ms over a seeded million rows.
+| capability | others | Argus Arena 4.0.0 |
+|---|---|---|
+| Chat, files, tools, sub-agents, deep research, projects | all | **yes** |
+| Code that knows your codebase, within each person's GitLab rights | Copilot (GitHub only) | **yes, and stronger** (Argus) |
+| Runs on your own hardware, no data leaves | Open WebUI, LibreChat | **yes**, with keys, credit, dashboards and audit they lack |
+| Sound and video in and out, omni models | ChatGPT, Gemini | **yes** (voice messages, read aloud; no live voice yet) |
+| Memory across chats | ChatGPT, Claude, Gemini | no |
+| Shared assistants (custom GPTs, Gems, Claude projects for a team) | all four | no (projects are one person's) |
+| Company knowledge: Confluence, SharePoint, Drive, Jira, wikis, with each person's rights | Glean, Copilot, Gemini, ChatGPT connectors | no (code and packs only) |
+| Canvas: a document or code edited beside the chat | ChatGPT, Claude, Gemini | no (live previews only) |
+| Shared chats, links within the company | all | no |
+| Prompt library, slash commands | Copilot, Open WebUI, LibreChat | no |
+| Feedback on answers, model comparison | all (internally) | no |
+| Live voice conversation | ChatGPT, Gemini | no |
+| Actions on other systems (create an issue, post to a channel), with approval | ChatGPT actions, Copilot | partly (MCP servers an admin adds) |
+| A plugin catalog | ChatGPT GPT store, Copilot agents | no (MCP servers by hand) |
+| CI and event triggers (a merge re-indexes, a failing pipeline is explained) | Copilot for GitHub | partly (Argus has a GitLab push webhook; v4 leaves it off) |
+| Chat in Teams, Slack, Mattermost, email, the browser, the phone | Copilot, ChatGPT | no |
+| Company sign-in (Entra ID, Okta, Keycloak) and SCIM | all | no (own accounts, LDAP) |
+| Retention, legal hold, eDiscovery | ChatGPT Enterprise, Copilot | no |
+| Budgets per team, chargeback | ChatGPT Enterprise | per person only |
 
-### N3 — Safeguards on the API path  *(M)*
-The safeguards apply to the chat; API keys go straight to LiteLLM.
-- LiteLLM's guardrail hook calling the app's check (blocked patterns, the
-  model's check, masking), and the same limits per key.
-- **Done when:** the clients check sees a blocked word refused through the API.
+What none of them has, and this platform can: **arena mode** (models answered
+side by side and blind, voted on, a leaderboard of the company's own models
+on the company's own questions), and **the whole stack on one GPU host,
+offline**.
 
-### N4 — Deep research, faster  *(M)*
-Measured on 2026-10-03 on the one 24 GB GPU (Qwen3.8-Flash-Next): four
-sub-agents took 8 to 22 minutes each (75,000 to 137,000 prompt tokens over
-their rounds, three at once), so a whole report takes over 25 minutes, even
-with six rounds a sub-agent and 12,000 characters per tool result.
-- Pages condensed before they reach the sub-agent's context, fetches cached,
-  sub-agents capped in rounds, and the report written while the last ones finish.
-- **Done when:** the live deep-research test finishes in under four minutes.
+### The releases
 
-### N5 — Projects for teams  *(M)*
-Projects are one person's.
-- Shared with groups (read or write), a model, thinking and tools per project,
-  and project knowledge searched (embedded) instead of only inlined.
-- **Done when:** access tests cover owner, group reader and writer, and others.
+Each item has its size (S days, M a week or two, L more) and the test that
+says it is done. The releases are ordered by value per effort: speed and
+tokens first (every person feels it daily), then automation and plugins (what
+makes it a platform), then parity, then governance.
 
-### N6 — Rollback, restore and offline  *(M)*
-- A rollback test (`upgrade-test.py --back`): the older images over newer
-  migrations must refuse to start rather than corrupt.
-- A restore round trip (backup, wipe, restore, every key and spend still there).
-- An air-gapped bundle for v4 (the images, the models folder, the speech
-  models' volume) and its round trip: build, extract, load, up with no network.
-- **Done when:** each is a script in `deploy/scripts` and passes.
+### v4.1 — Faster answers, fewer tokens
 
-### N7 — Video faster on a shared GPU  *(S)*
-A 2-second clip takes 14 minutes on the 24 GB card beside the chat model: the
-sampling about 1.5 minutes, the rest the decode on the CPU (on the GPU it ran out
-of memory).
-- Decode on the GPU when it has room (unload the chat model for the decode, or
-  a tiled decode that fits), and say the expected time on the tool's card.
-- **Done when:** a 2-second clip takes under 4 minutes with the chat model loaded.
+**T1 Prompt cache by design** *(S)*. The engine reuses the KV cache of a
+prompt's unchanged start. Keep the start unchanged: the system prompt first and
+stable (the date at day level already; tool instructions in a fixed order;
+project files after the instructions), `cache-reuse` and
+`slot-prompt-similarity` set in every model's preset, so a conversation's next
+turn lands on the slot that holds it. Show the cache-hit share per model on the
+LLM dashboard. *Done when:* the second turn of a long chat reads more than 90%
+of its prompt from the cache (measured in the usage events).
 
-### N8 — Smaller things
-- Queued messages live in the page: a closed tab drops them (keep them on the server).
-- Document previews draw the first 20 pages (page on through the rest).
-- Notifications for credit and alerts by email and webhook too, per person's choice.
-- The seven unpublished Argus packs published to the bucket.
-- The live e2e suite run one model-test at a time in CI (they time out in parallel on one GPU).
-- Podman in CI (a GPU runner), and the sound and video paths in the browser suite.
-- A Persian speech round trip (the Persian voice into Whisper) misheard a word; try a larger Persian voice.
+**T2 Tools on demand** *(M)*. Every tool's full schema goes into every request:
+with Argus, the web, Python and a few MCP servers that is 5,000 to 15,000
+tokens before the question. Send the names and one line each, plus a
+`load_tools` function; the full schemas join the conversation when the model
+asks (as Claude Code does). *Done when:* a chat with 40 tools sends under 1,500
+tokens of tool text on a turn that uses none.
+
+**T3 Tool results condensed** *(M)*. A web page, a file or an MCP result goes in
+whole up to a budget; past it, a small model (or the extraction rules per kind:
+tables kept, boilerplate dropped) condenses it to what the question needs, with
+a handle to read the rest (as `read_file` does). Fetches cached by URL for a
+day. This is also the main lever for deep research (N4). *Done when:* the
+live deep-research test finishes in under four minutes, with sources intact.
+
+**T4 Auto model** *(M)*. "Auto" in the model menu: a fast small model (a 4B on
+the GPU beside the big one, or the CPU) classifies the question (greeting,
+lookup, rewrite, code, reasoning, research) and answers the easy ones itself;
+the rest go to the big model, with thinking set by difficulty. Per answer the
+chat says which model answered and why; one click asks the big one. *Done
+when:* on a set of 200 real questions the answers rated equal or better stay
+above 95% while the big model's tokens fall by a third.
+
+**T5 Retrieval instead of stuffing** *(M)*. Project files, long attachments and
+chat history beyond the context go into pgvector (the embedder already runs);
+each turn takes the passages that match, with their place, instead of the
+first N characters. *Done when:* a project with 200 files answers about any of
+them without the files inlined.
+
+**T6 Answer cache for the API** *(S)*. An exact-match cache per key and model
+(opt-in, on Postgres), for pipelines and FAQ bots that ask the same thing;
+a semantic cache only where an admin turns it on. *Done when:* a repeated
+identical API call answers from the cache, costs nothing, and says so in a header.
+
+**T7 Concise by default, per person** *(S)*. A response-length preference
+(short, normal, thorough) in the account, applied as an instruction, and a
+"shorter" and "longer" action on each answer. *Done when:* the preference
+reaches every request and the actions re-answer at the new length.
+
+### v4.2 — Events, CI and plugins
+
+**W1 Index on push and merge** *(S)*. Argus already re-indexes a repository on
+GitLab's push event. Make it one step to turn on: the app makes the webhook
+secret, keeps it, gives it to Argus through its admin API (not `.env`), and
+**Admin → Indexing** shows the URL (`https://argus.DOMAIN/webhook/gitlab`) and
+the secret to paste into GitLab (group-level, so every project is covered);
+merge-request events re-index the target branch; a delivery log shows the
+last events. GitHub and Gitea too. *Done when:* a push to the test GitLab is
+searchable in Argus within a minute, with no manual run.
+
+**W2 Triggers: events that run an assistant** *(L)*. A trigger is: an event
+(a GitLab merge request opened or updated, a pipeline failed, an issue labelled;
+any CI posting JSON to `https://DOMAIN/api/hooks/<id>` with its secret; a
+schedule, as tasks do today), an assistant (W5: instructions, model, tools),
+and where the answer goes (a chat, the bell, email, an outbound webhook, a
+comment on the merge request or issue). The answers that write to GitLab use a
+**separate** bot token with only the comment scope, never Argus's read-only one;
+each write is audited. Built on the scheduled-task runner. Examples shipped:
+review a merge request (its diff, with Argus for context), explain a failed
+pipeline from its log, draft release notes from merged requests. *Done when:*
+opening a merge request in the test GitLab gets a review comment, and a failing
+pipeline gets an explanation, end to end.
+
+**W3 The API in CI** *(S)*. A GitLab CI template (`clients/gitlab-ci/`) and a
+small CLI (`arena ask`, `arena review`) that call the gateway with a project
+key: for teams that prefer the job in their own pipeline to a webhook. *Done
+when:* the template reviews a merge request in the test GitLab's CI.
+
+**P1 Plugins** *(L)*. A plugin is a signed folder with a manifest:
+
+```yaml
+name: jira
+version: 1.2.0
+title: Jira
+description: Search, read and create Jira issues.
+provides:
+  tools: { mcp: "https://jira-mcp.internal/mcp" }      # or openapi: ./openapi.yaml
+  prompts: [./prompts/*.md]                           # slash commands
+  assistants: [./assistants/triage.yaml]
+  knowledge: { connector: jira }                       # P3
+auth:
+  per_person: oauth2                                   # or api_key, or shared (admin)
+  oauth2: { authorize: ..., token: ..., scopes: [read:jira-work, write:jira-work] }
+writes: [create_issue, add_comment]                    # asked first, always
+settings:
+  - { key: base_url, type: url, required: true }
+```
+
+What it adds, the app shows and governs as it does tools today: who may use it
+(groups), asking first for every tool in `writes`, each person's own credentials
+(OAuth, kept encrypted with `APP_KEY`, refreshed by the app), every call in the
+audit log. Installed from a catalog (a signed index, as Argus's packs are
+published: the Binchitects bucket, or a company's own), an upload, or a URL.
+No plugin code runs in the app: a plugin's tools are a remote MCP server, an
+OpenAPI service (P2), or a container the admin adds to
+`docker-compose.override.yml` (the catalog gives the snippet). *Done when:*
+the Jira and GitLab-issues plugins install from the catalog, each person
+connects their own account, and a write asks first and is audited.
+
+**P2 OpenAPI actions** *(M)*. An OpenAPI document and its auth become tools (as
+GPT actions do): every internal REST API is a tool without writing an MCP
+server. Operations marked unsafe (POST, PUT, DELETE) ask first. *Done when:*
+a petstore-like test API's operations are callable from the chat, writes asking first.
+
+**P3 Company knowledge** *(L)*. Connectors (as plugins) that sync Confluence,
+SharePoint and OneDrive, Google Drive, Jira, GitLab wikis and issues, file
+shares and websites into knowledge bases: chunked, embedded (pgvector),
+re-synced on change, and **with each document's readers**, so
+`search_knowledge` returns only what the asker may read, with citations.
+Argus stays the code path; this is the documents path. *Done when:* a person
+without rights to a Confluence space gets nothing from it, and one with rights
+gets the passage with its link.
+
+### v4.3 — Parity: what people expect of a chat
+
+**E1 Memory** *(M)*. What a person tells the chat to remember, and what it
+proposes to remember (asked first), kept per person; listed, edited and
+deleted in the account; given to each answer in a few hundred tokens; off per
+person or for the company. *Done when:* "remember I deploy with Podman" is
+used in a new chat, and deleting it removes it from the next answer.
+
+**E2 Assistants, shared** *(M)*. Projects grow into assistants a team uses:
+instructions, model, thinking, tools, knowledge bases, conversation starters,
+shared with groups (use or edit), in a gallery with usage counts (N5 is part of
+this). *Done when:* an assistant shared with a group is usable by its members
+and invisible to others.
+
+**E3 Shared chats** *(S)*. A read-only link for people in the company (or a
+group), which they can fork into their own chat; revoked in one click. *Done
+when:* a shared chat opens for a colleague and not for someone outside the group.
+
+**E4 Canvas** *(L)*. A document or code beside the chat, edited by the person and
+by the model (by changes, not rewrites), with versions, comments on a
+selection ("make this paragraph shorter"), and export to Word, PDF and
+Markdown. *Done when:* a model's change to one section leaves the rest
+untouched, and every version can be restored.
+
+**E5 Prompt library and slash commands** *(S)*. Prompts with variables, personal,
+for a group or for the company; `/` in the composer finds them. Plugins add
+their own. *Done when:* `/review` fills its variables and sends.
+
+**E6 Feedback and arena mode** *(M)*. Thumbs on every answer with a reason;
+an admin quality page per model and assistant. Arena mode: one question to two
+models, side by side and blind, the person votes; a leaderboard of the
+company's models on its own questions. *Done when:* votes land on the
+leaderboard, and feedback is visible per model.
+
+**E7 Live voice** *(M)*. A voice conversation: streaming speech to text with
+voice activity, the answer spoken as it is written, interruptible (the speech
+server's realtime API, or an omni model's). *Done when:* a spoken question gets
+spoken words back in under two seconds, and speaking over it stops it.
+
+**E8 Where people already are** *(M each)*. A Teams, Slack and Mattermost bot (an
+assistant in a channel, each person as themselves); email in (forward a
+thread, get an answer); a browser extension (ask about the page or a
+selection); the web app installable as a PWA with push notifications. *Done
+when:* a question in a channel is answered with the asker's own rights.
+
+### v4.4 — Governance and scale
+
+**G1 Company sign-in** *(M)*. OIDC and SAML with Entra ID, Okta, Keycloak and
+Google (besides own accounts and LDAP), groups from the IdP, and SCIM for
+people joining and leaving. *Done when:* a person removed in the IdP is
+disabled here within minutes, keys included.
+
+**G2 Retention and legal hold** *(M)*. Chats and files kept N days per group (then
+deleted, audited), a legal hold that suspends it for named people, and an
+export of a person's data (eDiscovery, and a person's own copy). *Done when:*
+a chat past its retention is gone, and one under hold is not.
+
+**G3 Budgets per team** *(S)*. Credit for a group (shared or per member), cost
+centres, a monthly chargeback report; one credit across chat and keys (N1).
+*Done when:* a group's spend stops at its budget across chat and API.
+
+**G4 Safeguards everywhere** *(M)*. The chat's checks on the API path too (N3),
+secret scanning on the way in (keys, passwords, private keys refused or
+masked), and policies per group. *Done when:* a pasted private key is refused in
+the chat and through the API.
+
+**G5 Answer traces for admins** *(S)*. Per answer, a timeline: the prompt's size by
+part, each tool call and its time, tokens, the cache share, the model's speed.
+Content only where a policy allows it. *Done when:* a slow answer's trace says
+where the time went.
+
+**G6 Scale out** *(L)*. A Helm chart, several app replicas, an external Postgres,
+a pool of GPU hosts with load-aware routing (the remote servers, grown up),
+queue priorities per group, spend and search at scale (N2). *Done when:* two app
+replicas and two GPU hosts serve the scale test with no answer lost.
+
+**G7 Offline and recovery** *(M)*. The v4 air-gap bundle, the restore round trip,
+the rollback test (N6). *Done when:* each passes from a script.
+
+### Still open from before
+
+- N4 Deep research faster: carried by T3.
+- N7 Video faster on a shared GPU: decode on the GPU when it has room.
+- N8 Smaller things: queued messages kept on the server; document previews past
+  20 pages; credit and alert notifications by email and webhook; the seven
+  unpublished packs published; the live e2e suite one model test at a time in
+  CI; Podman and the media paths in CI; a better Persian voice.
+
+### Order, if one thing at a time
+
+1. W1, T1, T7 (days each: the push webhook back on, the cache, concise answers).
+2. T2, T3 (the biggest token cuts; T3 also fixes deep research).
+3. P1 with P2, then W2 (the platform: plugins and triggers).
+4. E1, E2, E3, E5 (what people miss first when they come from ChatGPT).
+5. T4, T5, E6 (auto model, retrieval, arena mode).
+6. G1, G3, G2 (what procurement asks).
+7. P3, E4, E7, E8, G4 to G7.
