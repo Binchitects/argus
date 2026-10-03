@@ -12,6 +12,43 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v3.2.0 (2026-10-03)
+
+### :rocket: Epics and highlights
+
+- **Argus Arena.** The product's name and logo
+- **Projects**: chats kept together, with instructions and files every answer
+  in them reads
+- **Deep research**: a plan, sub-agents that search and read the web, and a
+  report with numbered citations and its sources
+- **Safeguards** against abuse and harm, each part configurable: limits per
+  person, blocked words and patterns, the model checking each message,
+  personal data masked, the web's content marked as data, suspension after
+  repeated refusals
+
+### :sparkles: New features & Enhancements
+
+- **Chat**
+  - **Queue** a message while an answer runs, or **Send now** (stops the
+    answer and sends it)
+  - **Export** a chat as Markdown, a web page, PDF or JSON, or a summary the
+    model writes for a reader
+  - **Search** your chats: titles, your messages, answers, tool results, file
+    names; by time and model; a result opens the chat at that message
+  - Long tool calls are seen to work (a running bar, a timer, a placeholder
+    while a picture is drawn); waiting for the model counts the seconds
+  - After compacting, the context gauge shows what the next request carries
+- **Notifications** clear, one or all; the bell no longer scrolls sideways
+- **Argus**: a repository's index is removed or rebuilt from the Indexing page;
+  the four Windows packs are installed from the Binchitects bucket
+- An open page says when a new version is deployed, with a Reload
+
+### :bug: Bugs fixed
+
+- The chat header's title was a rename button; it is gone (rename from the
+  chat list)
+- An e2e test of a chat without a model left real chats in the admin's list
+
 ## v3.1.0 (2026-10-02)
 
 ### :rocket: Epics and highlights

@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { ChevronsLeft, ChevronsRight, Menu, Search } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useMatch, useMatches, useNavigate, useResolvedPath } from 'react-router'
 import { NotificationBell } from '@/components/app/notifications'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { infoQuery, meQuery, type Me } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -37,7 +38,8 @@ export function Shell() {
 }
 
 function SignedIn({ me }: { me: Me }) {
-  const info = useQuery(infoQuery)
+  const info = useQuery({ ...infoQuery, refetchInterval: 5 * 60_000, refetchOnWindowFocus: true })
+  useNewVersion(info.data?.version)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -237,4 +239,23 @@ function ShellSkeleton() {
       </div>
     </div>
   )
+}
+
+/**
+ * A new version deployed while the page is open: the page itself is still the old one,
+ * so it says so, once, with a Reload.
+ */
+function useNewVersion(version: string | undefined) {
+  const loaded = useRef<string | null>(null)
+  useEffect(() => {
+    if (!version) return
+    if (loaded.current === null) loaded.current = version
+    else if (version !== loaded.current)
+      toast(`Version ${version} is deployed`, {
+        id: 'new-version',
+        description: 'This page is still the one before it: reload to use the new one.',
+        duration: Infinity,
+        action: { label: 'Reload', onClick: () => window.location.reload() },
+      })
+  }, [version])
 }

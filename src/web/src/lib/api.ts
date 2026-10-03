@@ -90,7 +90,8 @@ function safeJson(text: string): unknown {
 export const infoQuery = {
   queryKey: ['info'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<AppInfo>('/api/info', { signal }),
-  staleTime: Infinity,
+  // Read again now and then: a deploy changes the version under an open page.
+  staleTime: 5 * 60_000,
 }
 
 /** Who is signed in; null when nobody is. */
