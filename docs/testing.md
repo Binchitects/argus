@@ -233,6 +233,21 @@ hostname really is denied.
 | S9.3 | the stack starts with `--network none` on the compose network, i.e. genuinely offline | **missing** — this is what the offline commits claim |
 | S9.4 | images build from a clean cache (all three local ones) | **missing** |
 
+### S11 — Many people at once (`scripts/scale-test.py`), 2026-10-03
+
+One RTX-class GPU serving Qwen3.8-Flash-Next (IQ4_XS), the sandbox on 2 slots:
+
+| scenario | result |
+|---|---|
+| 12 people send a chat message at the same moment | 12/12 answered; 10 waited their turn (up to 10 ahead); first word p50 12 s, p95 18 s; no answer carried another person's secret |
+| 30 people at once | 30/30; 28 waited (up to 28 ahead, 38 s); first word p50 20 s, p95 38 s; no leak |
+| 12 and 30 API keys at once (streaming) | all 200; first token p50 9 s / 20 s, p95 14 s / 39 s |
+| 24 and 60 one-second Python jobs in a burst | all done and right, in 15 s and 34 s on 2 slots; none lost |
+
+Nothing failed or was refused: the fair-use queue serves everyone in turn
+instead. What grows with people is the wait, about linearly with the engine's
+slots; more slots (`LLAMACPP_PARALLEL`) or a second engine shorten it.
+
 ### S10 — Migrations and upgrades
 
 `argus index` twice, compose `up` twice, `down`/`up`, and a version rollback.

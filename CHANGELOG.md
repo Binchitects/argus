@@ -42,6 +42,11 @@ Sections used:
 - **Argus**: a repository's index is removed or rebuilt from the Indexing page;
   the four Windows packs are installed from the Binchitects bucket
 - An open page says when a new version is deployed, with a Reload
+- **Tests as scripts**: `clients-check.py` (the API, Argus over MCP, Qwen Code
+  and DeepSeek Harness, 22 checks), `scale-test.py` (30 people chatting at
+  once through the fair-use queue, every key at once, 60 sandbox jobs: none
+  failed, no answer carried another's secret) and `upgrade-test.py` (an old
+  release from zero, data in, this one over it; or this one from zero)
 
 ### :bug: Bugs fixed
 
