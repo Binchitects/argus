@@ -32,6 +32,10 @@ public sealed class FakeModel : HttpMessageHandler
     /// <summary>Picture requests (the image tool), as sent.</summary>
     public ConcurrentQueue<JsonObject> ImageRequests { get; } = new();
 
+    /// <summary>What speech to text was sent (the form, as text), and what text to speech was asked.</summary>
+    public ConcurrentQueue<string> Transcriptions { get; } = new();
+    public ConcurrentQueue<JsonObject> SpeechRequests { get; } = new();
+
     /// <summary>A real 1x1 PNG.</summary>
     public static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 
@@ -41,7 +45,19 @@ public sealed class FakeModel : HttpMessageHandler
         {
             return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":{"message":"Authentication Error, Invalid proxy server token passed."}}""") };
         }
+        // Speech to text takes a form, and answers with what was said.
+        if (request.RequestUri!.AbsolutePath.EndsWith("/audio/transcriptions", StringComparison.Ordinal))
+        {
+            Transcriptions.Enqueue(await request.Content!.ReadAsStringAsync(cancellationToken));
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"text":"What is the capital of France?"}""", Encoding.UTF8, "application/json") };
+        }
         var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!.AsObject();
+        // Text to speech answers with an MP3.
+        if (request.RequestUri!.AbsolutePath.EndsWith("/audio/speech", StringComparison.Ordinal))
+        {
+            SpeechRequests.Enqueue(body);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([0x49, 0x44, 0x33, 4, 0]) { Headers = { ContentType = new("audio/mpeg") } } };
+        }
         if (request.RequestUri!.AbsolutePath.EndsWith("/images/generations", StringComparison.Ordinal))
         {
             ImageRequests.Enqueue(body);

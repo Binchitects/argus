@@ -233,7 +233,7 @@ public sealed class ChatToolsTests(AppFixture app)
         var (b, personId, email) = await PersonAsync(f);
         var listed = await admin.JsonAsync(await admin.GetAsync("/api/admin/tools"));
         var image = listed.EnumerateArray().Single(t => t.GetProperty("id").GetString() == "image");
-        Assert.Contains("no image model", image.GetProperty("unavailable").GetString(), StringComparison.Ordinal);
+        Assert.Contains("no picture model", image.GetProperty("unavailable").GetString(), StringComparison.Ordinal);
 
         // Off for everyone.
         await StatusAssert.Is(HttpStatusCode.NoContent, await SetToolAsync(admin, "calculator", new { enabled = false, audience = "Everyone", onByDefault = true, askFirst = false }));

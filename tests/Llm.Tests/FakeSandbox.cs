@@ -8,7 +8,8 @@ namespace Llm.Tests;
 ///   stdout lists the files it was given and echoes its first line;
 ///   "# chart" writes a picture, "# csv" a CSV, "# binary" a file that is neither;
 ///   "# fail" exits 1 with a traceback; "# slow" runs until it is stopped;
-///   "# pages" draws a document's first two pages of three (page-01.jpg, page-02.jpg).
+///   "# pages" draws a document's first two pages of three (page-01.jpg, page-02.jpg);
+///   the media script (it runs ffprobe) makes sound.mp3, and for a video two frames, 4 seconds long.
 /// </summary>
 public sealed class FakeSandbox : IAsyncDisposable
 {
@@ -86,11 +87,22 @@ public sealed class FakeSandbox : IAsyncDisposable
             await File.WriteAllBytesAsync(Path.Combine(draft, "files", "page-01.jpg"), [0xFF, 0xD8, 0xFF, 1]);
             await File.WriteAllBytesAsync(Path.Combine(draft, "files", "page-02.jpg"), [0xFF, 0xD8, 0xFF, 2]);
         }
+        var media = code.Contains("ffprobe", StringComparison.Ordinal);
+        if (media)
+        {
+            await File.WriteAllBytesAsync(Path.Combine(draft, "files", "sound.mp3"), [0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0, 1, 2]);
+            if ((await File.ReadAllTextAsync(Path.Combine(job, "files", "kind"))).Trim() == "video")
+            {
+                await File.WriteAllBytesAsync(Path.Combine(draft, "files", "frame-01.jpg"), [0xFF, 0xD8, 0xFF, 1]);
+                await File.WriteAllBytesAsync(Path.Combine(draft, "files", "frame-02.jpg"), [0xFF, 0xD8, 0xFF, 2]);
+            }
+        }
         var fail = code.Contains("# fail", StringComparison.Ordinal);
         await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), new JsonObject
         {
             ["exit_code"] = fail ? 1 : cancelled ? -9 : 0, ["timed_out"] = false, ["cancelled"] = cancelled,
-            ["stdout"] = $"given: {string.Join(",", given)}\nfirst line: {code.Split('\n')[0]}\n" + (pages ? "{\"total\": 3, \"error\": null}\n" : ""), ["stdout_cut"] = false,
+            ["stdout"] = $"given: {string.Join(",", given)}\nfirst line: {code.Split('\n')[0]}\n" + (pages ? "{\"total\": 3, \"error\": null}\n" : "")
+                + (media ? "{\"seconds\": 4.0, \"sound\": true, \"frames\": 2}\n" : ""), ["stdout_cut"] = false,
             ["stderr"] = fail ? "Traceback (most recent call last):\n  File \"main.py\", line 1\nValueError: bad\n" : "", ["stderr_cut"] = false,
             ["killed"] = null, ["error"] = null, ["skipped_files"] = new JsonArray(), ["duration_ms"] = 12,
             ["files"] = new JsonArray([.. Directory.GetFiles(Path.Combine(draft, "files")).Select(f => (JsonNode)Path.GetFileName(f))]),

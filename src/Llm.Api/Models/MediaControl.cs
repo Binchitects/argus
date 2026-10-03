@@ -115,9 +115,10 @@ public sealed partial class MediaControl(IServiceScopeFactory scopes, Modules mo
         {
             return $"{name} is turned off (Admin -> Models).";
         }
+        // Not this stack's server: the gateway answers for it from wherever it is, or says why not.
         if (!await modules.HasAsync(model.Server, ct))
         {
-            return $"Its server does not run here (the {model.Server} module).";
+            return null;
         }
         _asked[name] = clock.GetUtcNow();
         if (model.Id is not null || await UpAsync(model, ct))
