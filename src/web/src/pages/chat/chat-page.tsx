@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Search, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -479,6 +479,37 @@ function Thread({ id, config, onAdopt, onOpenList }: { id?: string; config: Chat
     queryClient.setQueryData<Conversation>(conversationQuery(id).queryKey, (c) => (c ? { ...c, currentLeafId: leaf } : c))
     await api(`/api/chat/conversations/${id}/leaf`, { method: 'PUT', body: { messageId } }).catch((e) => toast.error(errorMessage(e)))
   }
+
+  // Opened at a message (a search result): onto its branch, then to it, marked for a moment.
+  const [params, setParams] = useSearchParams()
+  const switchingTo = useRef<string | null>(null)
+  const at = params.get('at')
+  useEffect(() => {
+    if (!at || !data || streaming) return
+    const m = data.messages.find((x) => x.id === at)
+    const target = m?.role === 'tool' ? m.parentId : m?.id
+    if (!target) return
+    if (!path.some((x) => x.id === target)) {
+      if (switchingTo.current !== target) {
+        switchingTo.current = target
+        void switchTo(target)
+      }
+      return
+    }
+    const el = document.querySelector<HTMLElement>(`[data-question="${target}"], [data-message="${target}"]`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center' })
+    el.classList.add('found')
+    setTimeout(() => el.classList.remove('found'), 2400)
+    switchingTo.current = null
+    setParams(
+      (p) => {
+        p.delete('at')
+        return p
+      },
+      { replace: true },
+    )
+  })
 
   const openFile = (name: string) => {
     const f = [...files].reverse().find((x) => x.name === name)

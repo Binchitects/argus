@@ -302,7 +302,7 @@ export function AnswerTurn({
       {assistants.map((a, i) => {
         const isLast = i === assistants.length - 1
         return (
-          <div key={a.id}>
+          <div key={a.id} data-message={a.id} className="scroll-mt-4 rounded-lg">
             {a.reasoning && (
               <Thinking
                 text={a.reasoning}

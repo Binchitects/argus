@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { listQuery } from './api'
 import { useChatActions } from './chat-actions'
+import { ChatSearch } from './chat-search'
 import { bucket } from './format'
 import type { ConversationSummary } from './types'
 
@@ -33,9 +34,12 @@ export function ChatList({ activeId, onNew, onNavigate }: { activeId?: string; o
             <MessageSquarePlus /> New chat
           </Button>
         )}
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={archived ? 'Search archived chats' : 'Search chats'} aria-label="Search chats" className="h-8 pl-8" />
+        <div className="flex items-center gap-1">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={archived ? 'Search archived chats' : 'Search chats'} aria-label="Search chats" className="h-8 pl-8" />
+          </div>
+          <ChatSearch onNavigate={onNavigate} />
         </div>
       </div>
       {/* Titles are cut with an ellipsis: the list never scrolls sideways. */}

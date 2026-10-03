@@ -60,6 +60,9 @@ test.describe('chat without a model', () => {
   test.skip(live, 'only where no gateway answers')
 
   test('sending says the model cannot be reached, and the chat is kept', async ({ page, isMobile }) => {
+    // A model that answers makes this a real chat in someone's list: only where none does.
+    const config = await (await page.request.get('/api/chat/config')).json()
+    test.skip(config.models?.some((m: { loaded: boolean }) => m.loaded), 'a model is serving here')
     // Unique: every project and retry shares one database.
     const text = `hello there ${Date.now()}`
     await page.goto('/chat')
@@ -219,6 +222,35 @@ test.describe('context gauge', () => {
     await screenshot(page, info, 'context-gauge')
     await page.getByRole('button', { name: 'Compact now' }).click()
     await expect.poll(() => compacted).toBe(true)
+  })
+})
+
+test.describe('search', () => {
+  test('words found in an answer open the chat at that answer', async ({ page, isMobile }, info) => {
+    await serveArgusChat(page)
+    let asked = ''
+    await page.route('**/api/chat/search?*', (route) => {
+      asked = new URL(route.request().url()).search
+      return route.fulfill({
+        json: [
+          { conversationId: argusChat.id, title: argusChat.title, archived: false, messageId: 'a2', where: 'answer', snippet: '`DecodeFrame` is defined in `src/frame/decode.c` (lines 118–164)…', at: new Date().toISOString(), model: 'Test-Model' },
+          { conversationId: argusChat.id, title: argusChat.title, archived: false, messageId: null, where: 'title', snippet: argusChat.title, at: new Date().toISOString(), model: null },
+        ],
+      })
+    })
+    await page.goto('/chat')
+    await (await chatList(page, isMobile)).getByRole('button', { name: 'Advanced search' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Search your chats' })
+    await dialog.getByRole('button', { name: 'Tool results' }).click()
+    await dialog.getByLabel('Search for').fill('decode.c')
+    const results = dialog.getByRole('list', { name: 'Results' })
+    await expect(results.locator('mark').first()).toHaveText('decode.c')
+    expect(asked).toContain('in=title%2Cprompt%2Canswer%2Cfile')
+    await expectAccessible(page, info, 'chat-search')
+    await screenshot(page, info, `chat-search${isMobile ? '-phone' : ''}`)
+    await results.getByRole('button', { name: /defined in/ }).click()
+    await expect(page).toHaveURL(new RegExp(`/chat/${argusChat.id}$`))
+    await expect(page.locator('[data-message="a2"]')).toHaveClass(/found/)
   })
 })
 

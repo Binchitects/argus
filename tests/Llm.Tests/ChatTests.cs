@@ -372,6 +372,34 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Search_finds_words_in_titles_prompts_answers_and_file_names_only_in_ones_own_chats()
+    {
+        var (b, _) = await PersonAsync();
+        var (other, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        var file = await UploadAsync(b, "pineapple-budget.txt", "costs"u8.ToArray());
+        await SendAsync(b, id, "Pineapple pizza recipe please", [file.GetProperty("id").GetGuid()]);
+        async Task<List<JsonElement>> FindAsync(TestBrowser who, string query) =>
+            [.. (await who.JsonAsync(await who.GetAsync($"/api/chat/search?{query}"))).EnumerateArray()];
+
+        var all = await FindAsync(b, "q=pineapple");
+        Assert.Equal(["answer", "file", "prompt", "title"], all.Select(h => h.GetProperty("where").GetString()).Order(StringComparer.Ordinal));
+        Assert.All(all, h => Assert.Equal(id, h.GetProperty("conversationId").GetGuid()));
+        Assert.Contains("Pineapple pizza", all.Single(h => h.GetProperty("where").GetString() == "prompt").GetProperty("snippet").GetString(), StringComparison.Ordinal);
+        Assert.Equal("pineapple-budget.txt", all.Single(h => h.GetProperty("where").GetString() == "file").GetProperty("snippet").GetString());
+        Assert.Equal(["prompt"], (await FindAsync(b, "q=PINEAPPLE&in=prompt")).Select(h => h.GetProperty("where").GetString()));
+        Assert.Empty(await FindAsync(b, "q=pineapple&from=2999-01-01T00:00:00Z"));
+        Assert.Empty(await FindAsync(other, "q=pineapple"));
+        await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { archived = true });
+        Assert.Empty(await FindAsync(b, "q=pineapple&archived=false"));
+        Assert.NotEmpty(await FindAsync(b, "q=pineapple"));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.GetAsync("/api/chat/search?q=p"));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.GetAsync("/api/chat/search?q=pine&in=everywhere"));
+        // A % or _ is a letter here, not a wildcard.
+        Assert.Empty(await FindAsync(b, "q=pi%25le"));
+    }
+
+    [Fact]
     public async Task Regenerate_adds_an_answer_beside_the_old_one()
     {
         var (b, _) = await PersonAsync();

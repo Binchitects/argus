@@ -43,7 +43,7 @@ public sealed record Regenerate(Guid? MessageId = null, string? Model = null, st
 
 public sealed record LeafChange(Guid MessageId);
 
-public static class ChatEndpoints
+public static partial class ChatEndpoints
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -72,6 +72,7 @@ public static class ChatEndpoints
         g.MapPost("/attachments", UploadAsync).DisableAntiforgery();
         g.MapGet("/attachments/{id:guid}/content", ContentAsync);
         g.MapGet("/attachments/{id:guid}/pages", PagesAsync);
+        g.MapGet("/search", SearchAsync);
         g.MapGet("/attachments/{id:guid}/pages/{number:int}", PageAsync);
     }
 
