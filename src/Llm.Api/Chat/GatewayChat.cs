@@ -19,7 +19,7 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 }
 
 /// <summary>Streams a chat completion from LiteLLM and turns its SSE lines into events.</summary>
-public sealed class GatewayChat(HttpClient http, ChatKey key)
+public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes)
 {
     /// <summary>The person a request is for, as LiteLLM attributes spend (its user_header_mappings).</summary>
     public const string UserEmailHeader = "X-LLM-User-Email";
@@ -37,6 +37,13 @@ public sealed class GatewayChat(HttpClient http, ChatKey key)
             {
                 // The chat key was removed at the gateway: make a new one and try once more.
                 await key.ForgetAsync(ct);
+                continue;
+            }
+            catch (ChatGatewayException ex) when (ex.Status == 400 && attempt == 1 && ex.Message.Contains("Invalid model name", StringComparison.OrdinalIgnoreCase))
+            {
+                // A model the app has not registered yet (a first start, the gateway just up): register now, ask again.
+                await using var scope = scopes.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<Models.ModelCatalog>().SyncGatewayAsync(ct);
                 continue;
             }
             await foreach (var e in ReadAsync(res, ct))

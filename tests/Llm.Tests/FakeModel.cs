@@ -32,6 +32,9 @@ public sealed class FakeModel : HttpMessageHandler
     /// <summary>Picture requests (the image tool), as sent.</summary>
     public ConcurrentQueue<JsonObject> ImageRequests { get; } = new();
 
+    /// <summary>Models the gateway does not know yet, once each: the first request for one is refused as LiteLLM does.</summary>
+    public ConcurrentDictionary<string, bool> UnknownOnce { get; } = new();
+
     /// <summary>What speech to text was sent (the form, as text), and what text to speech was asked.</summary>
     public ConcurrentQueue<string> Transcriptions { get; } = new();
     public ConcurrentQueue<JsonObject> SpeechRequests { get; } = new();
@@ -64,6 +67,16 @@ public sealed class FakeModel : HttpMessageHandler
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(new JsonObject { ["created"] = 1, ["data"] = new JsonArray(new JsonObject { ["b64_json"] = Convert.ToBase64String(Png) }) }.ToJsonString(), Encoding.UTF8, "application/json"),
+            };
+        }
+        if (body["model"]?.GetValue<string>() is { } asked && UnknownOnce.TryRemove(asked, out _))
+        {
+            return new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent(new JsonObject
+                {
+                    ["error"] = new JsonObject { ["message"] = $"/chat/completions: Invalid model name passed in model={asked}. Call `/v1/models` to view available models for your key.", ["code"] = "400" },
+                }.ToJsonString(), Encoding.UTF8, "application/json"),
             };
         }
         Requests.Enqueue((body, request.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase)));

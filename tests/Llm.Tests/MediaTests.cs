@@ -164,4 +164,17 @@ public sealed class MediaTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/kokoro/access", UriKind.Relative), new { audience = "Everyone", groups = Array.Empty<Guid>() }));
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/no-such/enabled", UriKind.Relative), new { enabled = true }));
     }
+
+    [Fact]
+    public async Task A_model_the_gateway_does_not_know_yet_is_registered_and_asked_again()
+    {
+        var (f, b, sandbox) = await NewAppAsync();
+        await using var _f = f;
+        await using var _s = sandbox;
+        app.Model.UnknownOnce["Omni"] = true;
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { model = "Omni", useArgus = false }))).GetProperty("id").GetGuid();
+        var answer = await (await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello after a first start" })).Content.ReadAsStringAsync();
+        Assert.DoesNotContain("Invalid model name", answer, StringComparison.Ordinal);
+        Assert.Contains(app.Model.Requests, r => r.Body.ToJsonString().Contains("hello after a first start", StringComparison.Ordinal));
+    }
 }
