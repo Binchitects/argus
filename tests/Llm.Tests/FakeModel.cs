@@ -18,6 +18,7 @@ namespace Llm.Tests;
 /// Asked to compact a chat (the summarizer's system prompt), it answers
 /// "Summary of N characters." (N: the length of what it was given).
 ///   [budget]    refuses as LiteLLM does when credit is used up
+///   [harm]      flagged (as weapons) by the safeguards' check
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
 /// Its /v1/images/generations answers with a small PNG.
 /// </summary>
@@ -67,6 +68,13 @@ public sealed class FakeModel : HttpMessageHandler
         }
         IEnumerable<string> chunks;
         var delay = TimeSpan.Zero;
+        // The safeguards' check: "[harm]" in a message is flagged as weapons.
+        if (messages[0]!["content"]?.GetValue<string>().StartsWith("You check messages sent to an AI assistant", StringComparison.Ordinal) == true)
+        {
+            var flagged = lastUser.Contains("[harm]", StringComparison.Ordinal);
+            chunks = [Delta(new JsonObject { ["content"] = flagged ? "{\"flagged\": true, \"category\": \"weapons\"}" : "{\"flagged\": false, \"category\": null}" }), Finish("stop"), Usage(50, 0, 10)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         if (messages[0]!["content"]?.GetValue<string>().StartsWith("You compact a conversation", StringComparison.Ordinal) == true)
         {
             chunks = [Delta(new JsonObject { ["content"] = $"Summary of {lastUser.Length} characters." }), Finish("stop"), Usage(lastUser.Length / 4, 0, 8)];

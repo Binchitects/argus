@@ -115,6 +115,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Dashboards:StatementTimeout", "00:00:03");
             // Many apps at once here: the bell's watcher would hold their connections (its checks are called directly).
             b.UseSetting("Notifications:Watch", "false");
+            // Tests send many messages a minute; the safeguards' own tests set the limit.
+            b.UseSetting("Safeguards:MessagesPerMinute", "0");
             b.UseSetting("Argus:Url", "http://argus:7700");
             b.UseSetting("Argus:AdminToken", FakeArgus.Token);
             b.UseSetting("Stack:EnvSamplesDir", Path.Combine(DashboardsPath, "..", "..", "env-samples"));

@@ -22,6 +22,7 @@ public static class SettingsCatalog
     private const string Backup = "Backup";
     private const string Schedules = "Scheduled tasks";
     private const string Mail = "Email";
+    private const string Safeguards = "Safeguards";
 
     public static readonly IReadOnlyList<string> Profiles =
         ["gateway", "proxy", "llamacpp", "vllm", "multi-model", "argus", "image", "sandbox", "websearch", "logging", "tracing", "smi", "dcgm", "cadvisor"];
@@ -33,6 +34,37 @@ public static class SettingsCatalog
     public static readonly IReadOnlyList<SettingDefinition> All =
     [
         // ---------------------------------------------------------------- app, live --
+        // ---------------------------------------------------------------- safeguards, live --
+        new("Safeguards:Enabled", Safeguards, "Safeguards on", "Everything below. Off: no limits, no checks (the gateway's credit still applies).", SettingType.Boolean, SettingScope.Live)
+            { Default = "true", Optional = false },
+        new("Safeguards:MaxMessageChars", Safeguards, "Longest message", "In characters; longer ones are refused with a word to attach it as a file. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "100000", Min = 0, Max = 10_000_000 },
+        new("Safeguards:MaxAttachmentsPerMessage", Safeguards, "Files per message", "0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "20", Min = 0, Max = 1000 },
+        new("Safeguards:MessagesPerMinute", Safeguards, "Messages per minute, per person", "More are refused until the minute passes (HTTP 429). 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "20", Min = 0, Max = 10_000 },
+        new("Safeguards:MessagesPerDay", Safeguards, "Messages per day, per person", "0: no limit (credit still applies).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "0", Min = 0, Max = 1_000_000 },
+        new("Safeguards:ImagesPerDay", Safeguards, "Pictures per day, per person", "Drawn by the image tool. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "100", Min = 0, Max = 100_000 },
+        new("Safeguards:ResearchPerDay", Safeguards, "Deep research per day, per person", "Each one is several sub-agents reading the web for minutes. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "20", Min = 0, Max = 10_000 },
+        new("Safeguards:BlockedPatterns", Safeguards, "Blocked words and patterns", "A message with one is refused. Separate them with ; — a phrase matches as whole words, ignoring case; re: starts a regular expression (e.g. re:\\bproject falcon\\b).", SettingType.Text, SettingScope.Live)
+            { Max = 20_000 },
+        new("Safeguards:Moderation", Safeguards, "The model checks each message", "check: before answering, the chat's model reads the message as a classifier and refuses one asking for harm in the categories below (learning, safety, news and fiction stay allowed). It adds a short call to every message. off: no check.", SettingType.Choice, SettingScope.Live)
+            { Default = "off", Options = ["off", "check"], Optional = false },
+        new("Safeguards:ModerationCategories", Safeguards, "Categories it refuses", "What the check looks for.", SettingType.Choices, SettingScope.Live)
+            { Default = "violence,self-harm,sexual-minors,weapons,malware,hate", Options = ["violence", "self-harm", "sexual-minors", "weapons", "malware", "hate", "fraud"] },
+        new("Safeguards:RedactPii", Safeguards, "Mask personal data", "mask: e-mail addresses, phone and card numbers and IBANs in messages reach the model masked; the chat keeps them as written. off: as written.", SettingType.Choice, SettingScope.Live)
+            { Default = "off", Options = ["off", "mask"], Optional = false },
+        new("Safeguards:UntrustedToolResults", Safeguards, "Mark the web's content as data", "What web search and pages bring is marked so the model never follows instructions hidden in it (prompt injection).", SettingType.Boolean, SettingScope.Live)
+            { Default = "true", Optional = false },
+        new("Safeguards:StrikesToSuspend", Safeguards, "Refusals that suspend an account", "Refused messages in a day after which the account is disabled (an admin turns it back on under People). 0: never.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "0", Min = 0, Max = 1000 },
+        new("Safeguards:NotifyAdmins", Safeguards, "Tell the admins of each refusal", "In their bell; the audit log keeps every one (safeguard.refused).", SettingType.Boolean, SettingScope.Live)
+            { Default = "true", Optional = false },
+        new("Safeguards:RefusalMessage", Safeguards, "What a refused message says", "Shown to the person whose message was refused by a blocked word or the check.", SettingType.Text, SettingScope.Live)
+            { Default = "This message was not sent: it goes against your organisation's rules for the assistant. Ask an admin if you think it should be allowed.", Max = 500 },
         new("Branding:ProductName", Branding, "Product name", "Shown in the sidebar, on the sign-in page and in the browser tab.", SettingType.Text, SettingScope.Live)
             { Default = "Argus Arena", Optional = false, Max = 60 },
         new("Branding:SignInHeadline", Branding, "Sign-in headline", "The sentence beside the sign-in form.", SettingType.Text, SettingScope.Live)

@@ -235,6 +235,8 @@ public static class IdentityWiring
         services.AddHttpClient<Operations.ArgusAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
 
         services.Configure<Chat.ChatOptions>(config.GetSection("Chat"));
+        services.Configure<Safeguards.SafeguardOptions>(config.GetSection("Safeguards"));
+        services.AddScoped<Safeguards.Safeguards>();
         services.PostConfigure<Chat.ChatOptions>(o =>
         {
             if (config["Gateway:Url"] is { Length: > 0 } url && config["Chat:GatewayUrl"] is null)

@@ -237,7 +237,7 @@ public sealed class TimeTool(TimeProvider clock) : IChatTool
 }
 
 /// <summary>Pictures from the gateway's image model, kept as the person's files.</summary>
-public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, AppDbContext db) : IChatTool
+public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, AppDbContext db, Safeguards.Safeguards safeguards) : IChatTool
 {
     public static readonly string[] Sizes = ["1024x1024", "1024x768", "768x1024", "768x768", "512x512"];
 
@@ -270,6 +270,10 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
                     return new ToolResult("Say what to draw in 'prompt'.", IsError: true);
                 }
                 var size = Schema.Str(args, "size") is { } s && Sizes.Contains(s) ? s : Sizes[0];
+                if (await safeguards.TakeImageAsync(context.User.Id, token) is { } limit)
+                {
+                    return new ToolResult(limit, IsError: true);
+                }
                 byte[] png;
                 try
                 {

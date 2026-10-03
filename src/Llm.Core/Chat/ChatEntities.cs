@@ -148,3 +148,13 @@ public sealed class ProjectFile
     public Guid AttachmentId { get; set; }
     public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>Something a safeguard counts per person (a message refused, a picture drawn, a deep research), and when.</summary>
+public sealed class SafeguardMark
+{
+    public long Id { get; set; }
+    public Guid UserId { get; set; }
+    /// <summary>blocked, image, research.</summary>
+    public required string Kind { get; set; }
+    public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+}

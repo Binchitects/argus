@@ -443,7 +443,8 @@ public static partial class ChatEndpoints
         return Results.NoContent();
     }
 
-    private static async Task SendAsync(Guid id, NewMessage body, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
+    private static async Task SendAsync(Guid id, NewMessage body, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs,
+        Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models)
     {
         var me = await Me(http.User, users);
         if (await Owned(db, id, me) is not { } c)
@@ -470,6 +471,18 @@ public static partial class ChatEndpoints
         {
             await Problem(http, 400, "parent", "That message is not in this chat.");
             return;
+        }
+        // Safeguards first: limits, blocked words, and (when on) the model's check.
+        var model = c.Model ?? (await policy.ForAsync(me, await models.ListAsync(http.RequestAborted), http.RequestAborted)).Default?.Name;
+        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, http.RequestAborted);
+        if (!verdict.Allowed)
+        {
+            await Problem(http, verdict.Status, $"safeguard_{verdict.Kind}", verdict.Reason!);
+            return;
+        }
+        if (body.Research)
+        {
+            await safeguards.MarkResearchAsync(me.Id, http.RequestAborted);
         }
         await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Research: body.Research), async () =>
         {

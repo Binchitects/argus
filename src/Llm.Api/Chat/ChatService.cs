@@ -44,6 +44,7 @@ public sealed class Hurry
 public sealed partial class ChatService(
     AppDbContext db,
     GatewayChat gateway,
+    Safeguards.Safeguards safeguards,
     ToolRegistry registry,
     ToolApprovals approvals,
     AccessService access,
@@ -394,7 +395,7 @@ public sealed partial class ChatService(
                 conversation.CurrentLeafId = result.Id;
                 parent = result.Id;
                 await db.SaveChangesAsync(ct);
-                messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = text });
+                messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = safeguards.Untrusted(name, text) });
                 await emit(new
                 {
                     type = "tool_result", id, messageId = result.Id, name, text, isError, declined, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs,
@@ -641,7 +642,7 @@ public sealed partial class ChatService(
                 var shown = Cut(result, AgentShownChars);
                 await step(new AgentStep("tool_result", shown, new JsonObject { ["id"] = id }, isError, files));
                 steps.Add(new JsonObject { ["id"] = id, ["name"] = name, ["arguments"] = raw, ["result"] = shown, ["isError"] = isError, ["files"] = files?.DeepClone() });
-                messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = Cut(result, 30_000) });
+                messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = safeguards.Untrusted(name, Cut(result, 30_000)) });
             }
         }
     }
@@ -731,7 +732,7 @@ public sealed partial class ChatService(
             switch (m.Role)
             {
                 case "user":
-                    var text = new StringBuilder(m.Content);
+                    var text = new StringBuilder(safeguards.Mask(m.Content));
                     var images = new List<ChatAttachment>();
                     foreach (var id in ParseIds(m.AttachmentsJson))
                     {
@@ -786,7 +787,7 @@ public sealed partial class ChatService(
                     turns.Add((new JsonObject { ["role"] = "assistant", ["content"] = m.Content }, m.Content.Length, m));
                     break;
                 case "tool":
-                    turns.Add((new JsonObject { ["role"] = "tool", ["tool_call_id"] = m.ToolCallId, ["content"] = m.Content }, m.Content.Length, m));
+                    turns.Add((new JsonObject { ["role"] = "tool", ["tool_call_id"] = m.ToolCallId, ["content"] = safeguards.Untrusted(m.ToolName ?? "", m.Content) }, m.Content.Length, m));
                     break;
             }
         }

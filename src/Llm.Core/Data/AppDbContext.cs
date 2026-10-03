@@ -20,6 +20,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<AttachmentPage> AttachmentPages => Set<AttachmentPage>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<SafeguardMark> SafeguardMarks => Set<SafeguardMark>();
     public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
@@ -103,6 +104,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(x => new { x.ProjectId, x.AttachmentId });
             e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(x => x.AttachmentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<SafeguardMark>(e =>
+        {
+            e.ToTable("safeguard_marks");
+            e.Property(x => x.Kind).HasMaxLength(20);
+            e.HasIndex(x => new { x.UserId, x.Kind, x.At });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<AttachmentPage>(e =>
         {

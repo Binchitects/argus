@@ -276,6 +276,33 @@ your desktop while the app's tab is hidden, and an answer that finishes while
 you look elsewhere. The browser asks once; the switch turns them off again.
 Alerts and credit are looked at every minute and every five minutes.
 
+## Safeguards
+
+Under **Settings → Safeguards** an admin sets what keeps the chat from being
+abused or used to harm; each part can be turned off, and all of them with
+**Safeguards on**:
+
+- **Limits per person**: the longest message and files per message; messages a
+  minute (20) and a day; pictures a day (100) and deep research answers a day
+  (20). Past one, the message is refused with what to do instead (HTTP 429).
+- **Blocked words and patterns**: phrases matched as whole words, ignoring
+  case, or regular expressions (`re:`). A message with one is refused.
+- **The model checks each message** (off by default): before answering, the
+  chat's model reads the message as a classifier and refuses one asking for
+  harm in the chosen categories (violence, self-harm, sexual content involving
+  minors, mass-casualty weapons, malware, hate, fraud); learning, safety, news
+  and fiction stay allowed. When the check cannot run, the message goes.
+- **Mask personal data** (off by default): e-mail addresses, phone and card
+  numbers (Luhn-checked) and IBANs reach the model masked; the chat keeps them.
+- **The web's content is marked as data**, so the model never follows
+  instructions hidden in a page (prompt injection).
+- A refused message is in the audit log (`safeguard.refused`) and, by default,
+  in the admins' bell; **Refusals that suspend an account** (off by default)
+  disables an account after that many in a day.
+
+They apply to the chat; API keys go straight to the gateway, where the credit
+and the requests-at-once limit apply.
+
 ## Fair use
 
 The model serves few people at once (llama.cpp's `LLAMACPP_PARALLEL` slots).
