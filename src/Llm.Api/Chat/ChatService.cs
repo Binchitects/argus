@@ -62,8 +62,8 @@ public sealed partial class ChatService(
         "1. Plan: break the question into 3 to 6 research questions that cover its angles (facts, recent changes, numbers, " +
         "opposing views). Say the plan in one short line.\n" +
         "2. Research: call delegate once, one part per question: the parts run side by side, each with its own tools. Tell each " +
-        "part to search the web (web_search), open the best sources (fetch_url), and bring back findings with each source's title " +
-        "and URL. Only without delegate, research with the tools you have.\n" +
+        "part to search the web (web_search), open at most three of the best sources (fetch_url), and bring back findings with each " +
+        "source's title and URL, briefly. Only without delegate, research with the tools you have.\n" +
         "3. Fill gaps: if something important is missing or sources disagree, research that too.\n" +
         "4. Report: a title; a short summary of the answer; sections by theme; a table when it compares things; what is uncertain " +
         "or disputed; and numbered citations [1] in the text, listed under a Sources heading at the end with their URLs (always). Prefer primary, " +
@@ -450,6 +450,13 @@ public sealed partial class ChatService(
     /// <summary>What of a sub-agent's tool results and thinking is kept for the page (the model got them whole).</summary>
     private const int AgentShownChars = 4_000;
 
+    /// <summary>
+    /// A sub-agent's rounds of tool calls, and what of one tool result it keeps in its context:
+    /// each round reads its whole context again, so a few whole pages make every later call slow.
+    /// </summary>
+    private const int AgentRounds = 6;
+    private const int AgentToolChars = 12_000;
+
     private static string Cut(string text, int max) => text.Length <= max ? text : text[..max] + "\n[cut to fit]";
 
     /// <summary>
@@ -554,7 +561,7 @@ public sealed partial class ChatService(
                 request["chat_template_kwargs"] = kwargs;
             }
             // No tools on the last allowed round: it must answer with what it has.
-            if (tools.Count > 0 && round < chat.CurrentValue.MaxToolRounds)
+            if (tools.Count > 0 && round < Math.Min(chat.CurrentValue.MaxToolRounds, AgentRounds))
             {
                 request["tools"] = tools.DeepClone();
             }
@@ -642,7 +649,7 @@ public sealed partial class ChatService(
                 var shown = Cut(result, AgentShownChars);
                 await step(new AgentStep("tool_result", shown, new JsonObject { ["id"] = id }, isError, files));
                 steps.Add(new JsonObject { ["id"] = id, ["name"] = name, ["arguments"] = raw, ["result"] = shown, ["isError"] = isError, ["files"] = files?.DeepClone() });
-                messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = safeguards.Untrusted(name, Cut(result, 30_000)) });
+                messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = safeguards.Untrusted(name, Cut(result, AgentToolChars)) });
             }
         }
     }
