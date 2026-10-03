@@ -53,6 +53,10 @@ Sections used:
 - The chat header's title was a rename button; it is gone (rename from the
   chat list)
 - An e2e test of a chat without a model left real chats in the admin's list
+- On a new deployment the first chat failed with "the model gateway is not
+  reachable": the gateway sets up its database (161 migrations) for a minute or
+  more after the model already serves. The chat now waits for it, up to about
+  a minute and a half
 
 ## v3.1.0 (2026-10-02)
 

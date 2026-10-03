@@ -91,7 +91,7 @@ failed", not "everything passed".
 | G7 | **Built images other than Argus and the app** | the sandbox and cpu-temp-exporter images have no build-time test |
 | G8 | ~~No browser tests for chat~~ **closed** | the app's chat runs in a real browser against the real model, desktop and phone: streaming, thinking, stop and regenerate, attachments, code copy, history, and Argus's no-access notice for a person without access (`src/web/e2e/chat.spec.ts`, [chat.md](chat.md)) |
 | G9 | **Two clients executed, three transcribed** | DSH and Qwen Code now run end to end and their configs are in `clients/`, marked as executed. Claude Code and Continue are written from their own documentation and marked as such; Hermes is unexercised; the OpenAI SDK has no test at all. The distinction is recorded per file in `clients/README.md` so a transcribed config is never mistaken for a verified one |
-| G10 | ~~No upgrade test~~ **Closed** by `scripts/upgrade-test.py`: an old release from zero with fresh volumes, data put in, this checkout over it, `up` again and `down`/`up`; and this checkout from zero. Rollback is still untested | going back to an older image over newer migrations |
+| G10 | ~~No upgrade test~~ **Closed** by `scripts/upgrade-test.py`: an old release from zero with fresh volumes, data put in, this checkout over it, `up` again and `down`/`up`; and this checkout from zero. v3.2.0: from zero 13/13; from v3.0.0 30/32, the two misses being v3.0.0's own first chat on a new deployment (fixed in v3.2.0). Rollback is still untested | going back to an older image over newer migrations |
 | G11 | **Disaster recovery is untested** | restore onto a *clean host*, which is the actual scenario |
 | G12 | **Windows / WSL** | every `.ps1` is unexercised here |
 
