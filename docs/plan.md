@@ -574,7 +574,10 @@ The safeguards apply to the chat; API keys go straight to LiteLLM.
 - **Done when:** the clients check sees a blocked word refused through the API.
 
 ### N4 — Deep research, faster  *(M)*
-Four sub-agents reading whole pages take eight minutes or more on one GPU.
+Measured on 2026-10-03 on the one 24 GB GPU (Qwen3.8-Flash-Next): four
+sub-agents took 8 to 22 minutes each (75,000 to 137,000 prompt tokens over
+their rounds, three at once), so a whole report takes over 25 minutes, even
+with six rounds a sub-agent and 12,000 characters per tool result.
 - Pages condensed before they reach the sub-agent's context, fetches cached,
   sub-agents capped in rounds, and the report written while the last ones finish.
 - **Done when:** the live deep-research test finishes in under four minutes.

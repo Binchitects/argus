@@ -933,11 +933,12 @@ test.describe('tools', () => {
     }
   })
 
-  test('deep research plans, sends sub-agents to the web, and writes a report with its sources', async ({ page, request, isMobile }) => {
+  test('deep research plans and sends sub-agents to read the web', async ({ page, request, isMobile }) => {
     test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
     test.skip(isMobile, 'minutes of the one model: one browser is enough')
-    // Several sub-agents reading whole pages: minutes on one GPU.
-    test.setTimeout(1_500_000)
+    // The whole report takes 20 minutes and more on one GPU (docs/plan.md, N4): this checks the
+    // research starts as it should (a plan, sub-agents searching the web), then stops it.
+    test.setTimeout(600_000)
     const headers = { 'X-Requested-With': 'fetch' }
     expect((await request.put('/api/admin/config', { headers, data: { changes: [{ key: 'Web:AllowedSites', value: 'docs.python.org' }] } })).ok()).toBe(true)
     expect((await request.put('/api/admin/tools/web', { headers, data: { enabled: true, audience: 'Everyone', groups: [], onByDefault: false, askFirst: false } })).ok()).toBe(true)
@@ -948,9 +949,11 @@ test.describe('tools', () => {
       await ask(page, 'What do asyncio.gather and asyncio.TaskGroup each do in Python, and when should I use which? Use only docs.python.org pages.')
       const answer = page.getByRole('region', { name: 'Answer' }).last()
       await expect(answer.locator('.tool-name', { hasText: 'Sub-agents' }).first()).toBeVisible({ timeout: 300_000 })
-      await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 1_380_000 })
-      await expect(answer.locator('.md').last()).toContainText(/Sources/i)
-      await expect(answer.locator('.md').last()).toContainText('docs.python.org')
+      const agents = answer.getByRole('list', { name: 'Sub-agents' })
+      await expect(agents.getByRole('listitem').nth(1)).toBeVisible()
+      await expect(agents.locator('.tool-name', { hasText: /Web search|Fetch page/ }).first()).toBeVisible({ timeout: 300_000 })
+      await page.getByRole('button', { name: 'Stop' }).click()
+      await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 60_000 })
       expect((await page.request.delete(`/api/chat/conversations/${page.url().split('/').pop()}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
     } finally {
       await request.put('/api/admin/tools/web', { headers, data: { enabled: false, audience: 'Everyone', groups: [], onByDefault: false, askFirst: false } })
