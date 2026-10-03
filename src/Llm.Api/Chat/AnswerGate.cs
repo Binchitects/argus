@@ -45,8 +45,12 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
 
     private int PerPerson => Math.Max(1, options.CurrentValue.AnswersPerPerson);
 
-    /// <summary>As set; 0: as many as the engine serves at once (LLAMACPP_PARALLEL); unknown, no limit.</summary>
-    private int AtOnce => options.CurrentValue.AnswersAtOnce > 0 ? options.CurrentValue.AnswersAtOnce : Math.Max(0, options.CurrentValue.EngineSlots);
+    /// <summary>What the engine's loaded models serve at once, their parallel slots together (the engine watcher keeps it).</summary>
+    public int EngineSlots { get; set; }
+
+    /// <summary>As set; 0: as many as the engine serves at once; unknown, no limit.</summary>
+    private int AtOnce => options.CurrentValue.AnswersAtOnce > 0 ? options.CurrentValue.AnswersAtOnce
+        : Math.Max(0, options.CurrentValue.EngineSlots > 0 ? options.CurrentValue.EngineSlots : EngineSlots);
 
     /// <summary>
     /// Waits for a place. <paramref name="waiting"/> is told the line now and then

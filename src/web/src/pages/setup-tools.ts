@@ -36,8 +36,6 @@ export interface Tool {
   steps: (c: Context) => Step[]
   /** Argus over MCP, with the person's own GitLab token; a string when the tool cannot. */
   argus: ((c: Context) => Step[]) | string
-  /** How it is told to trust a private certificate. */
-  certificate: 'node' | 'python' | 'curl' | string
 }
 
 const json = (v: unknown) => JSON.stringify(v, null, 2)
@@ -60,7 +58,6 @@ claude`,
       },
     ],
     argus: (c) => [{ text: 'Add Argus once:', file: 'shell', code: `claude mcp add --transport http argus ${c.argusUrl} \\\n  --header "Authorization: Bearer $${GITLAB}"` }],
-    certificate: 'node',
   },
   {
     id: 'codex',
@@ -91,7 +88,6 @@ url = "${c.argusUrl}"
 bearer_token_env_var = "${GITLAB}"`,
       },
     ],
-    certificate: 'If it rejects the certificate, set SSL_CERT_FILE to the bundle (below) in the shell that starts it.',
   },
   {
     id: 'qwen',
@@ -109,7 +105,6 @@ qwen`,
       },
     ],
     argus: (c) => [{ text: 'Add Argus once (--trust runs its tools without asking each time):', file: 'shell', code: `qwen mcp add argus ${c.argusUrl} -t http \\\n  -H "Authorization: Bearer $${GITLAB}" --trust` }],
-    certificate: 'node',
   },
   {
     id: 'opencode',
@@ -142,7 +137,6 @@ qwen`,
         code: json({ mcp: { argus: { type: 'remote', url: c.argusUrl, enabled: true, headers: { Authorization: `Bearer {env:${GITLAB}}` } } } }),
       },
     ],
-    certificate: 'node',
   },
   {
     id: 'aider',
@@ -159,7 +153,6 @@ aider --model openai/${c.model}`,
       },
     ],
     argus: 'Aider has no MCP, so Argus is not available in it.',
-    certificate: 'python',
   },
   {
     id: 'hermes',
@@ -191,7 +184,6 @@ aider --model openai/${c.model}`,
       Authorization: Bearer <your GitLab token>`,
       },
     ],
-    certificate: "Hermes trusts its own CA bundle: append the certificate (below) to it.",
   },
   {
     id: 'openclaw',
@@ -225,7 +217,6 @@ aider --model openai/${c.model}`,
         code: json({ mcp: { servers: { argus: { url: c.argusUrl, transport: 'streamable-http', headers: { Authorization: 'Bearer <your GitLab token>' } } } } }),
       },
     ],
-    certificate: 'node',
   },
   {
     id: 'dsh',
@@ -267,7 +258,6 @@ aider --model openai/${c.model}`,
         Authorization: !!js '\`Bearer \${process.env.${GITLAB}}\`'`,
       },
     ],
-    certificate: 'node',
   },
   {
     id: 'continue',
@@ -304,7 +294,6 @@ models:
         Authorization: Bearer <your GitLab token>`,
       },
     ],
-    certificate: 'The editor runs it on Node: set NODE_EXTRA_CA_CERTS (below) where the editor is started.',
   },
   {
     id: 'cline',
@@ -320,7 +309,6 @@ models:
       { text: 'Add a remote MCP server (MCP Servers → Remote Servers) named argus, with this address:', file: 'Server URL', code: c.argusUrl },
       { text: 'and the header Authorization: Bearer <your GitLab token> (edit it in the MCP settings file if the form has no headers).' },
     ],
-    certificate: 'VS Code runs it on Node: set NODE_EXTRA_CA_CERTS (below) where VS Code is started.',
   },
   {
     id: 'python',
@@ -343,7 +331,6 @@ print(reply.choices[0].message.content)`,
       },
     ],
     argus: 'Any MCP client library connects to Argus with the address and header below.',
-    certificate: 'python',
   },
   {
     id: 'curl',
@@ -361,13 +348,5 @@ print(reply.choices[0].message.content)`,
       },
     ],
     argus: 'Argus speaks MCP over HTTP: a client library, not curl, is the way to call its tools.',
-    certificate: 'curl',
   },
 ]
-
-/** The setting that makes each kind of tool trust the deployment's certificate. */
-export const certificateHint: Record<'node' | 'python' | 'curl', string> = {
-  node: 'It runs on Node: set NODE_EXTRA_CA_CERTS to the certificate (below) before starting it.',
-  python: 'It runs on Python: set SSL_CERT_FILE to the bundle (below) before starting it.',
-  curl: 'Give curl the bundle (below) with --cacert.',
-}

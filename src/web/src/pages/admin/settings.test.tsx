@@ -7,7 +7,7 @@ import type { SettingsData, SettingView } from './settings-model'
 const s = (over: Partial<SettingView>): SettingView => ({
   key: 'Chat:MaxToolRounds', group: 'Chat', label: 'Tool calls per answer', help: 'Rounds of tool use.', type: 'wholenumber', scope: 'live',
   options: null, min: 1, max: 32, patternHelp: null, unit: null, optional: false, impact: null, dangerous: false, default: '8',
-  value: '8', isSet: true, source: 'default', environmentValue: null, pending: null, pendingSet: false, restartPending: false, ...over,
+  value: '8', isSet: true, source: 'default', environmentValue: null, restartPending: false, ...over,
 })
 
 function data(over: Partial<SettingsData> = {}): SettingsData {
@@ -30,14 +30,12 @@ function data(over: Partial<SettingsData> = {}): SettingsData {
       {
         title: 'Model',
         settings: [
-          s({ key: 'MODEL_CONTEXT', group: 'Model', label: 'Context window', scope: 'stack', value: '131072', source: 'stack', default: null, min: 1024, max: 4194304 }),
-          s({ key: 'LLAMACPP_EXTRA_ARGS', group: 'Model', label: 'Extra engine flags', type: 'text', scope: 'stack', value: '--flash-attn on', source: 'stack', dangerous: true, default: null, optional: true }),
+          s({ key: 'Engine:ModelsMax', group: 'Model', label: 'Models loaded at once', scope: 'apprestart', value: '1', default: '1', min: 1, max: 8 }),
+          s({ key: 'Chat:ThinkingPresets', group: 'Model', label: 'Thinking levels offered', type: 'text', value: 'medium:Balanced', dangerous: true, default: null, optional: true }),
         ],
       },
     ],
-    pendingStack: 0,
     restartNeeded: false,
-    pendingFileWritable: true,
     ...over,
   }
 }
@@ -88,10 +86,10 @@ describe('settings', () => {
   it('a dangerous change asks first', async () => {
     const calls = fakeApi(admin, { 'GET /api/admin/config': () => ({ json: data() }), 'PUT /api/admin/config': () => ({ json: data() }) })
     renderApp('/admin/settings#model')
-    await userEvent.type(await screen.findByLabelText('Extra engine flags'), ' -b 2048')
+    await userEvent.type(await screen.findByLabelText('Thinking levels offered'), ',low:Quick')
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     const ask = await screen.findByRole('alertdialog')
-    expect(ask).toHaveTextContent('Extra engine flags')
+    expect(ask).toHaveTextContent('Thinking levels offered')
     await userEvent.click(within(ask).getByRole('button', { name: 'Cancel' }))
     expect(calls.some((c) => c.method === 'PUT')).toBe(false)
   })
@@ -115,30 +113,18 @@ describe('settings', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ changes: [{ key: 'Ldap:BindPassword', reset: true }] }))
   })
 
-  it('pending .env changes show the one command that applies them', async () => {
-    const d = data({ pendingStack: 1 })
-    d.groups[2]!.settings[0] = { ...d.groups[2]!.settings[0]!, pending: '65536', pendingSet: true }
-    fakeApi(admin, { 'GET /api/admin/config': () => ({ json: d }) })
-    renderApp('/admin/settings#model')
-    expect(await screen.findByText('1 .env change is waiting to be applied')).toBeInTheDocument()
-    expect(screen.getByLabelText('apply command')).toHaveTextContent('./scripts/apply-settings.sh')
-    expect(screen.getByLabelText('Context window')).toHaveValue('65536')
-    expect(screen.getByText(/Now:/)).toHaveTextContent('131072')
-    expect(screen.getByRole('button', { name: /Discard pending change/ })).toBeInTheDocument()
-  })
-
   it('shows one group at a time, and a search spans them all', async () => {
     fakeApi(admin, { 'GET /api/admin/config': () => ({ json: data() }) })
     renderApp('/admin/settings')
     expect(await screen.findByLabelText('Tool calls per answer')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Context window')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Models loaded at once')).not.toBeInTheDocument()
     await userEvent.click(within(screen.getByRole('navigation', { name: 'Setting groups' })).getByRole('link', { name: /^Model/ }))
-    expect(await screen.findByLabelText('Context window')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Models loaded at once')).toBeInTheDocument()
     expect(screen.queryByLabelText('Tool calls per answer')).not.toBeInTheDocument()
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search settings' }), 'answer')
     expect(screen.getByLabelText('Tool calls per answer')).toBeInTheDocument()
     expect(screen.getByLabelText('Longest single answer')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Context window')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Models loaded at once')).not.toBeInTheDocument()
   })
 
   it('unsaved changes survive moving between groups', async () => {
@@ -148,9 +134,9 @@ describe('settings', () => {
     await userEvent.clear(rounds)
     await userEvent.type(rounds, '4')
     await userEvent.click(within(screen.getByRole('navigation', { name: 'Setting groups' })).getByRole('link', { name: /^Model/ }))
-    const context = await screen.findByLabelText('Context window')
+    const context = await screen.findByLabelText('Models loaded at once')
     await userEvent.clear(context)
-    await userEvent.type(context, '65536')
+    await userEvent.type(context, '2')
     await userEvent.click(within(screen.getByRole('region', { name: 'Unsaved changes' })).getByRole('button', { name: 'Save changes' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ changes: [{}, {}] }))
   })

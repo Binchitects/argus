@@ -1,0 +1,8 @@
+# Argus in this stack. GITLAB_URL and GITLAB_TOKEN in .env say which GitLab.
+gitlab:
+  url: https://gitlab.example.com
+index:
+  data_dir: /var/lib/argus
+  db_path: /var/lib/argus/index.db
+packs:
+  dir: /var/lib/argus/packs

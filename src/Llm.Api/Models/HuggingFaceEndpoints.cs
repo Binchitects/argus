@@ -91,7 +91,7 @@ public static class HuggingFaceEndpoints
             Repo = repo.Id, Revision = repo.Sha, Dir = repo.Id, CreatedBy = p.Identity?.Name ?? "admin",
             Files = [.. chosen.SelectMany(m => m.Files).Select(f => new DownloadFile { Path = f.Path, Size = f.Size, Sha256 = f.Sha256 })],
         };
-        if (d.Files.Any(f => downloads.PathOf(d, f.Path) is null))
+        if (d.Files.Any(f => downloads.PathOf(d, f) is null))
         {
             return AuthEndpoints.Problem(400, "path", "A file of this repository would land outside the model library.");
         }
@@ -102,7 +102,7 @@ public static class HuggingFaceEndpoints
             return AuthEndpoints.Problem(409, "exists", "These files have a download already: let it run, resume it, or remove it first.");
         }
         // Whole files present already are not counted; the disk must keep room to spare.
-        var needed = d.Files.Sum(f => downloads.PathOf(d, f.Path) is { } path && File.Exists(path) && new FileInfo(path).Length == f.Size ? 0 : f.Size);
+        var needed = d.Files.Sum(f => downloads.PathOf(d, f) is { } path && File.Exists(path) && new FileInfo(path).Length == f.Size ? 0 : f.Size);
         Directory.CreateDirectory(downloads.Root);
         var free = new DriveInfo(Path.GetFullPath(downloads.Root)).AvailableFreeSpace;
         if (needed + ModelDownloads.SpareBytes > free)

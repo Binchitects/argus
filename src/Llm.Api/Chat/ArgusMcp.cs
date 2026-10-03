@@ -473,11 +473,14 @@ public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOpt
 {
     public const string EmailHeader = "x-llm-user-email";
 
-    public bool Enabled => argus.Value.Deployed && !string.IsNullOrWhiteSpace(argus.Value.Url) && !string.IsNullOrWhiteSpace(chat.CurrentValue.ArgusChatToken);
+    /// <summary>The chat's credential at Argus: its own when set, else ARGUS_KEY (Argus takes it as both).</summary>
+    private string? Token => chat.CurrentValue.ArgusChatToken is { Length: > 0 } own ? own : argus.Value.AdminToken;
+
+    public bool Enabled => !string.IsNullOrWhiteSpace(argus.Value.Url) && !string.IsNullOrWhiteSpace(Token);
 
     public Task<McpSession> ConnectAsync(string email, CancellationToken ct) =>
         Mcp.ConnectAsync(http, new Uri(argus.Value.Url.TrimEnd('/') + "/mcp"),
-            new Dictionary<string, string> { ["Authorization"] = "Bearer " + chat.CurrentValue.ArgusChatToken, [EmailHeader] = email }, "Argus", ct, chat.CurrentValue.ToolCallTimeout);
+            new Dictionary<string, string> { ["Authorization"] = "Bearer " + Token, [EmailHeader] = email }, "Argus", ct, chat.CurrentValue.ToolCallTimeout);
 
     /// <summary>Argus's words when something exists but the person cannot read it (src/Argus/Access/Acl.cs).</summary>
     public const string NoAccessMarker = "Nothing you have access to matches this";

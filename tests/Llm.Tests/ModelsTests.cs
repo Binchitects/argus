@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Llm.Api.Gateway;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -18,7 +19,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
     /// <summary>Its own app, database and engine files, with a library of real (small) GGUF files of every kind.</summary>
-    private (WebApplicationFactory<Program> App, FakeGateway Gateway) NewApp(int max = 1)
+    private (WebApplicationFactory<Program> App, FakeGateway Gateway) NewApp(int max = 1, bool first = false)
     {
         GgufFile.Language("qwen3", name: "Tiny", context: 40960).Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"));
         new GgufFile().Text("general.architecture", "clip").Bool("clip.has_vision_encoder", true).U32("clip.vision.projection_dim", 64)
@@ -37,6 +38,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
             .Write(Path.Combine(Library, "plain", "Plain-Q8_0.gguf"));
         GgufFile.Language("qwen3", name: "Part").Write(Path.Combine(Library, "part", "Part-00001-of-00003.gguf"));
         Directory.CreateDirectory(Config);
+        File.WriteAllText(Path.Combine(Config, "keep"), "Qwen3.8-Flash-Next\n");
         app.Engine.Reset(Path.Combine(Config, "models.ini"));
         app.Engine.Max = max;
         var gateway = new FakeGateway();
@@ -44,8 +46,19 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         var f = app.Create(app.ConnectionStringFor("models_" + Guid.NewGuid().ToString("N")[..8]), gateway, new Dictionary<string, string?>
         {
             ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = Config, ["Engine:LibraryDir"] = Library,
-            ["StackEnv:LLAMACPP_THREADS"] = "12", ["StackEnv:LLAMACPP_MODELS_MAX"] = max.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Engine:Threads"] = "12", ["Engine:ModelsMax"] = max.ToString(System.Globalization.CultureInfo.InvariantCulture),
         });
+        // The first model as MODEL in .env adds it, on the engine, when a test needs it there.
+        if (first)
+        {
+            GgufFile.Language("qwen3", name: "Flash").Write(Path.Combine(Library, "flash", "Flash-Q4_K_M.gguf"));
+            // The app registers it at the gateway itself.
+            gateway.Models.RemoveAll(m => m.Name == "Qwen3.8-Flash-Next");
+            using var scope = f.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            db.LocalModels.Add(new Llm.Core.Models.LocalModel { Name = "Qwen3.8-Flash-Next", File = "flash/Flash-Q4_K_M.gguf", Context = 8192 });
+            db.SaveChanges();
+        }
         return (f, gateway);
     }
 
@@ -249,7 +262,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         Assert.False(chatModel.GetProperty("loaded").GetBoolean());
         Assert.True(chatModel.GetProperty("onRequest").GetBoolean());
 
-        // Kept: loaded now, beside the .env model, and written for the engine's next start.
+        // Kept: loaded now, beside the first model, and written for the engine's next start.
         await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "tiny-b", true));
         Assert.Equal("Qwen3.8-Flash-Next\ntiny-b\n", await File.ReadAllTextAsync(Path.Combine(Config, "keep")));
         await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("tiny-b") == "loaded" && app.Engine.StatusOf("Qwen3.8-Flash-Next") == "loaded"), "both kept models loaded");
@@ -340,7 +353,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public async Task A_kept_model_that_fails_to_load_is_not_tried_again_and_the_env_model_takes_its_place()
+    public async Task A_kept_model_that_fails_to_load_is_not_tried_again()
     {
         var (f, _) = NewApp();
         await using var _f = f;
@@ -348,28 +361,20 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
         await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("status").GetString() == "unloaded", "the engine lists tiny-b");
 
-        // Its file is incomplete: kept in the .env model's place, its load unloads that model, then fails.
+        // Its file is incomplete: kept in the other model's place, its load unloads that model, then fails.
         app.Engine.Broken.Add("tiny-b");
         await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "Qwen3.8-Flash-Next", false));
         await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "tiny-b", true));
         await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("status").GetString() == "failed", "the page shows tiny-b failed");
-        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("Qwen3.8-Flash-Next") == "loaded"), "the .env model loaded in its place");
+        // Not tried again every few seconds: each would fail.
         await Task.Delay(1500);
         Assert.Equal(1, app.Engine.LoadsOf("tiny-b"));
-
-        // Nothing else to fall back to: neither is tried again every few seconds.
-        app.Engine.Broken.Add("Qwen3.8-Flash-Next");
-        app.Engine.Restart();
-        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("Qwen3.8-Flash-Next") == "failed"), "the .env model failed too");
-        var loads = (app.Engine.LoadsOf("tiny-b"), app.Engine.LoadsOf("Qwen3.8-Flash-Next"));
-        await Task.Delay(1500);
-        Assert.Equal(loads, (app.Engine.LoadsOf("tiny-b"), app.Engine.LoadsOf("Qwen3.8-Flash-Next")));
     }
 
     [Fact]
     public async Task A_model_is_for_whom_an_admin_says_and_one_not_loaded_says_so()
     {
-        var (f, gateway) = NewApp();
+        var (f, gateway) = NewApp(first: true);
         await using var _f = f;
         var admin = await AdminAsync(f);
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
@@ -400,10 +405,10 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         var answer = await (await member.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello" })).Content.ReadAsStringAsync();
         Assert.Contains("tiny-b is not loaded right now", answer, StringComparison.Ordinal);
 
-        // The one place is kept for the .env model: until it is not, tiny-b cannot load.
+        // The one place is kept for the first model: until it is not, tiny-b cannot load.
         await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/models/tiny-b/load"));
         await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "Qwen3.8-Flash-Next", false));
-        // Loaded (the .env model goes), a chat that chose no model gets the loaded one.
+        // Loaded (the first model goes), a chat that chose no model gets the loaded one.
         await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
         await EventuallyAsync(async () => (await ChatModelsAsync(member)).GetValueOrDefault("tiny-b"), "tiny-b loaded for the chat");
         var fresh = (await member.JsonAsync(await member.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();

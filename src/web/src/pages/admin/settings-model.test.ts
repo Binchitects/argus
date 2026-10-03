@@ -16,10 +16,9 @@ describe('settings model', () => {
     expect(durationFromUnit('7', 'days')).toBe('7.00:00:00')
     expect(durationFromUnit('soon', 'days')).toBeNull()
   })
-  it('starts a stack setting from its pending value, and a secret empty', () => {
-    const base = { type: 'text', scope: 'stack', value: '131072', pending: '65536', pendingSet: true, unit: null } as SettingView
-    expect(initialValue(base)).toBe('65536')
-    expect(initialValue({ ...base, pendingSet: false, pending: null })).toBe('131072')
+  it('starts a setting from its value, and a secret empty', () => {
+    const base = { type: 'text', scope: 'live', value: 'medium', unit: null } as SettingView
+    expect(initialValue(base)).toBe('medium')
     expect(initialValue({ ...base, type: 'secret', value: null })).toBe('')
   })
 })

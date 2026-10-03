@@ -103,17 +103,24 @@ public sealed partial class HuggingFace(HttpClient http, IOptionsMonitor<Hugging
         {
             throw new HuggingFaceException("A repository is owner/name, e.g. Qwen/Qwen3-8B-GGUF.", 400);
         }
+        var (info, sha, files) = await TreeAsync(id, ct);
+        var gguf = info["gguf"] as JsonObject;
+        return new HfRepo(id, sha, info["gated"] is JsonValue g && (g.TryGetValue<bool>(out var b) ? b : g.TryGetValue<string>(out var s) && s.Length > 0),
+            info["cardData"]?["license"]?.ToString(), gguf?["architecture"]?.GetValue<string>(), gguf?["total"] is { } total ? Long(total) : null,
+            gguf?["context_length"] is { } ctx ? (int)Long(ctx) : null, Long(info["downloads"]), Long(info["likes"]), info["lastModified"]?.GetValue<string>(),
+            Group(files));
+    }
+
+    /// <summary>A repository's details, its current revision, and every file in it.</summary>
+    public async Task<(JsonObject Info, string Sha, IReadOnlyList<HfFile> Files)> TreeAsync(string id, CancellationToken ct)
+    {
         var info = await GetJsonAsync($"{Base}/api/models/{id}", ct) as JsonObject ?? throw new HuggingFaceException("Hugging Face sent nothing for this repository.");
         var sha = info["sha"]?.GetValue<string>() ?? "main";
         var tree = await GetJsonAsync($"{Base}/api/models/{id}/tree/{sha}?recursive=true", ct) as JsonArray ?? [];
         var files = tree.OfType<JsonObject>().Where(f => f["type"]?.GetValue<string>() == "file")
             .Select(f => new HfFile(f["path"]?.GetValue<string>() ?? "", Long(f["lfs"]?["size"]) is > 0 and var l ? l : Long(f["size"]), f["lfs"]?["oid"]?.GetValue<string>()))
             .ToList();
-        var gguf = info["gguf"] as JsonObject;
-        return new HfRepo(id, sha, info["gated"] is JsonValue g && (g.TryGetValue<bool>(out var b) ? b : g.TryGetValue<string>(out var s) && s.Length > 0),
-            info["cardData"]?["license"]?.ToString(), gguf?["architecture"]?.GetValue<string>(), gguf?["total"] is { } total ? Long(total) : null,
-            gguf?["context_length"] is { } ctx ? (int)Long(ctx) : null, Long(info["downloads"]), Long(info["likes"]), info["lastModified"]?.GetValue<string>(),
-            Group(files));
+        return (info, sha, files);
     }
 
     /// <summary>GGUF files as models: a split model's parts together, each with its quantisation and size; vision projectors apart.</summary>

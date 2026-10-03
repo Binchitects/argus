@@ -25,16 +25,11 @@ public enum SettingScope
     Live,
     /// <summary>The app's own setting, read at start: the app restarts itself to apply it.</summary>
     AppRestart,
-    /// <summary>A `.env` value other services read: saved as pending, applied on the host by scripts/apply-settings.sh.</summary>
-    Stack,
 }
 
 /// <summary>
-/// One setting the admin can change in the app.
-/// <para><b>Live</b> and <b>AppRestart</b> settings are configuration keys of the app
-/// (<c>Ldap:Url</c>); their value lives in the database and wins over the environment.</para>
-/// <para><b>Stack</b> settings are `.env` names (<c>MODEL_CONTEXT</c>); compose passes the
-/// current value to the app as <c>StackEnv:NAME</c> (a secret only as <c>NAME_SET</c>).</para>
+/// One setting the admin can change in the app: a configuration key of the app
+/// (<c>Ldap:Url</c>) whose value lives in the database and wins over the environment.
 /// </summary>
 public sealed record SettingDefinition(
     string Key,

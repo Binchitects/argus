@@ -40,8 +40,6 @@ public static class OperationsEndpoints
         g.MapGet("/overview", OverviewAsync);
         g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a, IOptions<Dashboards.DashboardOptions> d) =>
             Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value)));
-        g.MapGet("/model", ModelInfo);
-        g.MapGet("/settings", SettingsInfo);
         g.MapGet("/people.csv", PeopleCsvAsync);
 
         var argus = g.MapGroup("/argus");
@@ -200,7 +198,8 @@ public static class OperationsEndpoints
     }
 
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
-        IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, CancellationToken ct)
+        IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
+        CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Count(u => !u.IsDisabled);
@@ -249,7 +248,7 @@ public static class OperationsEndpoints
             warning,
             services = await probes,
             index = new { configured = argus.Enabled, summary = index, error = indexError },
-            model = stack.Value.ModelName,
+            model = models.DefaultName,
         });
     }
 
@@ -261,12 +260,13 @@ public static class OperationsEndpoints
             ProbeAsync(http, "Model gateway", "LiteLLM: API keys, credit, the chat's model", s.LiteLlmProbeUrl.TrimEnd('/') + "/health/liveliness"),
             ProbeAsync(http, "Prometheus", "metrics and alert rules", s.PrometheusUrl.TrimEnd('/') + "/-/healthy"),
             ProbeAsync(http, "Alertmanager", "firing alerts and their notifications", d.AlertmanagerUrl.TrimEnd('/') + "/-/healthy"),
+            ProbeAsync(http, "Loki", "every service's logs", d.LokiUrl.TrimEnd('/') + "/ready"),
+            ProbeAsync(http, "Engine", "llama.cpp: the chat models", "http://llamacpp:8080/health"),
+            ProbeAsync(http, "Pictures", "the image tool's server", Models.MediaModels.ImageUrl + "/v1/models"),
+            ProbeAsync(http, "Video", "the video tool's server", Models.MediaModels.VideoUrl + "/v1/models"),
+            ProbeAsync(http, "Speech", "speech to text and text to speech", Models.MediaModels.AudioUrl + "/health"),
+            ProbeAsync(http, "Web search", "SearXNG, the web tool's search", "http://searxng:8080/healthz"),
         };
-        // Loki runs with the logging profile only.
-        if (string.IsNullOrWhiteSpace(s.ComposeProfiles) || s.ComposeProfiles.Split(',', StringSplitOptions.TrimEntries).Contains("logging", StringComparer.OrdinalIgnoreCase))
-        {
-            checks.Add(ProbeAsync(http, "Loki", "every service's logs", d.LokiUrl.TrimEnd('/') + "/ready"));
-        }
         if (a.Enabled)
         {
             checks.Add(ProbeAsync(http, "Argus", "the code index", a.Url.TrimEnd('/') + "/healthz"));
@@ -291,63 +291,6 @@ public static class OperationsEndpoints
         {
             return new Probe(name, purpose, false, "no answer in time");
         }
-    }
-
-    private static IResult ModelInfo(IOptions<StackOptions> options)
-    {
-        var s = options.Value;
-        return Results.Ok(new
-        {
-            running = new
-            {
-                name = s.ModelName, file = s.ModelFile, context = s.ModelContext, maxOutput = s.ModelMaxOutput,
-                mtpDraftMax = s.MtpDraftMax, gpuPowerLimitW = s.GpuPowerLimitW, cpuPowerLimitW = s.CpuPowerLimitW,
-                thinkingPresets = s.ThinkingPresets,
-            },
-            prices = new { input = s.PriceInputPerMtok, cachedInput = s.PriceCachedInputPerMtok, output = s.PriceOutputPerMtok },
-            samples = EnvSamples.Read(s.EnvSamplesDir),
-        });
-    }
-
-    /// <summary>An allow-list of names, never the environment: a dump is how a console leaks a master key into a screenshot.</summary>
-    private static IResult SettingsInfo(IOptions<StackOptions> stack, IOptions<ArgusOptions> argus, IOptions<Identity.AuthOptions> auth, IOptions<Ldap.LdapOptions> ldap)
-    {
-        var s = stack.Value;
-        var a = argus.Value;
-        object Row(string name, string? value, string purpose) => new { name, value = string.IsNullOrEmpty(value) ? null : value, purpose };
-        return Results.Ok(new[]
-        {
-            new { title = "Deployment", rows = new[]
-            {
-                Row("LLM_DOMAIN", auth.Value.Domain, "the domain every address hangs off"),
-                Row("COMPOSE_PROFILES", s.ComposeProfiles, "which parts of the stack run"),
-                Row("ADMIN_GROUP", auth.Value.AdminGroup, "the group name admins carry in other services"),
-                Row("LDAP_URL", ldap.Value.Url, "the company directory, if any"),
-            } },
-            new { title = "Model", rows = new[]
-            {
-                Row("MODEL_NAME", s.ModelName, "what the gateway serves"),
-                Row("MODEL_CONTEXT", s.ModelContext, "token window"),
-                Row("MODEL_MAX_OUTPUT", s.ModelMaxOutput, "longest reply"),
-                Row("MODEL_REASONING_EFFORT", s.ModelReasoningEffort, "default thinking level"),
-                Row("MODEL_ENABLE_THINKING", s.ModelEnableThinking, "whether it thinks at all"),
-                Row("THINKING_PRESETS", s.ThinkingPresets, "per-chat presets offered in chat"),
-            } },
-            new { title = "Prices (per 1M tokens)", rows = new[]
-            {
-                Row("PRICE_INPUT_PER_MTOK", s.PriceInputPerMtok, "input, cache miss"),
-                Row("PRICE_CACHED_INPUT_PER_MTOK", s.PriceCachedInputPerMtok, "input served from the prefix cache"),
-                Row("PRICE_OUTPUT_PER_MTOK", s.PriceOutputPerMtok, "generated tokens, reasoning included"),
-                Row("LITELLM_DEFAULT_USER_BUDGET", s.DefaultUserBudget, "default credit per person"),
-            } },
-            new { title = "Argus", rows = new[]
-            {
-                Row("ARGUS_URL", a.Enabled ? a.Url : null, "where the code index is reached"),
-                Row("ARGUS_GITLAB_URL", a.GitlabUrl, "the GitLab it indexes"),
-                Row("ARGUS_GITLAB_AUTH", a.GitlabAuth, "token or password"),
-                Row("ARGUS_GITLAB_USERNAME", a.GitlabUsername, "who it signs in as, in password mode"),
-            } },
-        });
     }
 
     private static async Task<IResult> PeopleCsvAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, CancellationToken ct)

@@ -129,7 +129,7 @@ public static class ModelHoursEndpoints
         }
         var keep = (body.Keep ?? w.Keep).Select(k => k.Trim()).Where(k => k.Length > 0).Distinct(StringComparer.Ordinal).ToList();
         var local = await db.LocalModels.AsNoTracking().ToListAsync(ct);
-        var onEngine = local.Select(m => m.Name).Concat(e.DefaultModel is { Length: > 0 } d ? [d] : []).ToHashSet(StringComparer.Ordinal);
+        var onEngine = local.Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
         if (keep.Count > e.ModelsMax)
         {
             return AuthEndpoints.Problem(409, "full", $"The engine holds {e.ModelsMax} model{(e.ModelsMax == 1 ? "" : "s")} at once: keep at most that many, or raise \"Models loaded at once\" (LLAMACPP_MODELS_MAX) under Settings.");

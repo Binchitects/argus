@@ -48,7 +48,7 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
-        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, IOptions<StackOptions> stack, CancellationToken ct)
+        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, CancellationToken ct)
     {
         var e = engine.Value;
         var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
@@ -67,17 +67,6 @@ public static class ModelEndpoints
         var pinned = e.Enabled ? catalog.Pinned() : [];
         var hw = e.Enabled ? await hardware.GetAsync(ct) : null;
         var rows = new List<object>();
-        if (e.Enabled && e.DefaultModel is { Length: > 0 } d)
-        {
-            rows.Add(new
-            {
-                name = d, source = "env", mode = "chat", status = state.StatusOf(d), file = stack.Value.ModelFile, kept = pinned.Contains(d), keptNow = kept.Contains(d),
-                devices = e.DefaultSettings?.Devices,
-                context = int.TryParse(stack.Value.ModelContext, CultureInfo.InvariantCulture, out var c) ? c : (int?)null,
-                vision = At(d)?.Vision ?? false, access = Access(d),
-                profile = e.DefaultModelFile is { } df ? files.GetValueOrDefault(df) : null,
-            });
-        }
         foreach (var m in local)
         {
             rows.Add(new
@@ -105,7 +94,7 @@ public static class ModelEndpoints
             }
         }
         var onServers = servers.SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var m in atGateway.Where(m => m.Name != e.DefaultModel && local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name)))
+        foreach (var m in atGateway.Where(m => local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name)))
         {
             rows.Add(new { name = m.Name, source = "gateway", mode = m.Mode, status = (string?)null, context = m.Context, vision = m.Vision, access = Access(m.Name) });
         }
@@ -133,8 +122,7 @@ public static class ModelEndpoints
         return Results.Ok(library.List().Select(f => new
         {
             f.File.Path, f.File.Size, f.File.Parts, f.Profile,
-            usedBy = used.Where(u => u.File == f.File.Path || u.Projector == f.File.Path || u.DraftHead == f.File.Path).Select(u => u.Name)
-                .Concat(e.DefaultModelFile == f.File.Path && e.DefaultModel is { } d ? [d] : []),
+            usedBy = used.Where(u => u.File == f.File.Path || u.Projector == f.File.Path || u.DraftHead == f.File.Path).Select(u => u.Name),
         }));
     }
 
@@ -165,7 +153,7 @@ public static class ModelEndpoints
         {
             return AuthEndpoints.Problem(400, "name", bad);
         }
-        var taken = (await gatewayModels.AllAsync(ct)).Select(m => m.Name).Append(engine.Value.DefaultModel ?? "")
+        var taken = (await gatewayModels.AllAsync(ct)).Select(m => m.Name)
             .Concat(await db.LocalModels.Select(m => m.Name).ToListAsync(ct));
         if (taken.Contains(name, StringComparer.OrdinalIgnoreCase))
         {
@@ -318,7 +306,7 @@ public static class ModelEndpoints
         {
             if (kept.Count >= e.ModelsMax)
             {
-                return AuthEndpoints.Problem(409, "full", $"The engine holds {e.ModelsMax} model{(e.ModelsMax == 1 ? "" : "s")} at once, and {(kept.Count == 1 ? "one is" : $"{kept.Count} are")} kept loaded already. Stop keeping one, or raise \"Models loaded at once\" (LLAMACPP_MODELS_MAX) under Settings.");
+                return AuthEndpoints.Problem(409, "full", $"The engine holds {e.ModelsMax} model{(e.ModelsMax == 1 ? "" : "s")} at once, and {(kept.Count == 1 ? "one is" : $"{kept.Count} are")} kept loaded already. Stop keeping one, or raise \"Models loaded at once\" under Settings.");
             }
             var plan = Plan([.. kept, name], await db.LocalModels.AsNoTracking().ToListAsync(ct), e, library, await hardware.GetAsync(ct));
             if (plan.FirstError is { } error)
@@ -340,9 +328,9 @@ public static class ModelEndpoints
     }
 
     private static string FullMessage(int kept, int max) =>
-        $"Every place in the engine ({max}) keeps a model loaded, so no other can load beside them. Stop keeping one, or raise \"Models loaded at once\" (LLAMACPP_MODELS_MAX) under Settings.";
+        $"Every place in the engine ({max}) keeps a model loaded, so no other can load beside them. Stop keeping one, or raise \"Models loaded at once\" under Settings.";
 
-    /// <summary>Whether these models, kept loaded together, fit the machine (the .env model's settings come from .env).</summary>
+    /// <summary>Whether these models, kept loaded together, fit the machine.</summary>
     internal static KeptPlan Plan(IReadOnlyList<string> kept, IReadOnlyList<LocalModel> local, EngineOptions e, ModelLibrary library, Hardware? hw)
     {
         var entries = library.List();
@@ -352,10 +340,6 @@ public static class ModelEndpoints
             if (local.FirstOrDefault(m => m.Name == name) is { } m)
             {
                 models.Add((m, library.Find(m.File)));
-            }
-            else if (name == e.DefaultModel && e.DefaultSettings is { } d)
-            {
-                models.Add((d, e.DefaultModelFile is { } f ? library.Find(f) : null));
             }
         }
         return ModelAdvisor.PlanKept(models, entries, hw);
@@ -382,7 +366,7 @@ public static class ModelEndpoints
     private static async Task<IResult> AccessAsync(string name, ModelAccessRequest body, AppDbContext db, ChatModels gatewayModels, IOptions<EngineOptions> engine,
         KeyAccessWatcher keys, Audit audit, CancellationToken ct)
     {
-        var known = (await gatewayModels.AllAsync(ct)).Any(m => m.Name == name) || name == engine.Value.DefaultModel || await db.LocalModels.AnyAsync(m => m.Name == name, ct);
+        var known = (await gatewayModels.AllAsync(ct)).Any(m => m.Name == name) || await db.LocalModels.AnyAsync(m => m.Name == name, ct);
         if (!known)
         {
             return Results.NotFound();

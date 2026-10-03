@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Download, ExternalLink } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { ApiKey } from '@/components/app/api-key'
 import { CodeBlock } from '@/components/app/code-block'
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, errorMessage } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
-import { certificateHint, GITLAB, KEY, tools, type Context, type Step, type Tool } from './setup-tools'
+import { GITLAB, KEY, tools, type Context, type Step, type Tool } from './setup-tools'
 
 interface ChatConfig {
   model: string | null
@@ -26,12 +26,10 @@ const tokens = (n: number | null) => (n ? n.toLocaleString('en-US') : '—')
 
 /**
  * Connect your own tools: an API key, the gateway's address and your models,
- * setups to paste for the common coding agents and SDKs, Argus over MCP, and
- * the stack's certificate for tools that must be told to trust it.
+ * setups to paste for the common coding agents and SDKs, and Argus over MCP.
  */
 export function ConnectPage() {
   const config = useQuery({ queryKey: ['chat', 'config'], queryFn: ({ signal }) => api<ChatConfig>('/api/chat/config', { signal }) })
-  const connect = useQuery({ queryKey: ['account', 'connect'], queryFn: ({ signal }) => api<{ certificate: boolean }>('/api/account/connect', { signal }) })
   const [chosen, setChosen] = useState<string | null>(null)
   const [toolId, setToolId] = useState(remembered)
   const root = serviceUrl('gateway').replace(/\/$/, '')
@@ -135,7 +133,7 @@ export function ConnectPage() {
                 </Field>
               )}
             </div>
-            <Tutorial tool={tool} context={context} argus={config.data?.argus === true} certificate={connect.data?.certificate === true} />
+            <Tutorial tool={tool} context={context} argus={config.data?.argus === true} />
           </CardContent>
         </Card>
 
@@ -165,55 +163,6 @@ export function ConnectPage() {
           </Card>
         )}
 
-        {connect.data?.certificate && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Trust this deployment's certificate</CardTitle>
-              <CardDescription>
-                It is signed by this deployment's own certificate authority. Trust that once, in your browser and your tools, and every renewal after it is trusted too: no more warnings.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" asChild>
-                  <a href="/api/account/certificate" download="llm-service-ca.crt">
-                    <Download /> The CA certificate
-                  </a>
-                </Button>
-                <Button variant="outline" asChild>
-                  <a href="/api/account/certificate?bundle=true" download="llm-service-bundle.crt">
-                    <Download /> With the public CAs
-                  </a>
-                </Button>
-              </div>
-              <CodeBlock
-                code={`# Windows (Chrome, Edge): as administrator
-certutil -addstore -f Root llm-service-ca.crt
-# macOS (Safari, Chrome)
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain llm-service-ca.crt
-# Linux
-sudo cp llm-service-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`}
-                label="the commands to trust it on this computer"
-              />
-              <p className="text-sm text-muted-foreground">
-                Firefox, and Chrome on Linux, keep their own list: import the CA certificate under the browser's certificate settings (Authorities). A browser that remembers an old
-                certificate for this address forgets it once it trusts the CA.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                For your tools: Node adds a certificate to the ones it trusts; Python and curl replace them, so they take the bundle (the public CAs as well).
-              </p>
-              <CodeBlock
-                code={`# Node tools (Claude Code, Qwen Code, OpenCode, OpenClaw, DeepSeek Harness, editors)
-export NODE_EXTRA_CA_CERTS=~/llm-service-ca.crt
-# Python (the OpenAI SDK, Aider) and Codex
-export SSL_CERT_FILE=~/llm-service-bundle.crt
-# curl
-curl --cacert ~/llm-service-bundle.crt …`}
-                label="the certificate settings"
-              />
-            </CardContent>
-          </Card>
-        )}
       </div>
     </>
   )
@@ -230,11 +179,10 @@ function remembered(): string {
   }
 }
 
-/** One tool's steps, numbered: its settings with this deployment filled in, Argus where it speaks MCP, and its certificate setting. */
-function Tutorial({ tool, context, argus, certificate }: { tool: Tool; context: Context; argus: boolean; certificate: boolean }) {
+/** One tool's steps, numbered: its settings with this deployment filled in, and Argus where it speaks MCP. */
+function Tutorial({ tool, context, argus }: { tool: Tool; context: Context; argus: boolean }) {
   const steps: Step[] = [...tool.steps(context)]
   const argusSteps = argus && typeof tool.argus === 'function' ? tool.argus(context) : []
-  const hint = certificateHint[tool.certificate as keyof typeof certificateHint] ?? tool.certificate
   return (
     <section aria-label={`Setting up ${tool.title}`} className="grid gap-4">
       <p className="text-sm text-muted-foreground">{tool.about}</p>
@@ -249,7 +197,6 @@ function Tutorial({ tool, context, argus, certificate }: { tool: Tool; context: 
           )}
         </div>
       )}
-      {certificate && <p className="text-xs text-muted-foreground">If {tool.title} rejects the certificate: {hint.charAt(0).toLowerCase() + hint.slice(1)}</p>}
     </section>
   )
 }

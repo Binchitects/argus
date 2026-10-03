@@ -55,6 +55,7 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
                 // At start, then every minute: a gateway that was down, or restarted without the app's models, catches up.
                 if (DateTimeOffset.UtcNow >= nextSync)
                 {
+                    catalog.WriteMax();
                     await catalog.WritePresetsAsync(stoppingToken);
                     await catalog.SyncGatewayAsync(stoppingToken);
                     nextSync = DateTimeOffset.UtcNow.AddMinutes(1);
@@ -90,14 +91,7 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
                     else if (kept.Count > 0 && kept.All(k => Status(k) == "failed") && !models.Any(m => m.Status == "loaded"))
                     {
                         // Every kept model failed to load (they are not tried again: each would fail every few seconds).
-                        var fallback = options.Value.DefaultModel;
-                        if (fallback is { Length: > 0 } && !kept.Contains(fallback) && Status(fallback) is "unloaded")
-                        {
-                            LogFellBack(logger, string.Join(", ", kept), fallback);
-                            await engine.LoadAsync(fallback, stoppingToken);
-                            loading = true;
-                        }
-                        else if (reported != string.Join(',', kept))
+                        if (reported != string.Join(',', kept))
                         {
                             LogNothing(logger, string.Join(", ", kept));
                             reported = string.Join(',', kept);
@@ -184,10 +178,7 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
     [LoggerMessage(Level = LogLevel.Information, Message = "Engine: loading {Model}, a model kept loaded")]
     private static partial void LogLoading(ILogger logger, string model);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Engine: {Model} failed to load (the engine's log says why); loading {Fallback}, the .env model, in their place")]
-    private static partial void LogFellBack(ILogger logger, string model, string fallback);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "Engine: {Model} failed to load and there is no other to load in their place; load one from Admin -> Models")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Engine: {Model} failed to load (the engine's log says why); load another from Admin -> Models")]
     private static partial void LogNothing(ILogger logger, string model);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Engine: the gateway's model list could not be brought in step: {Reason}")]

@@ -1,0 +1,60 @@
+# This stack's container logs into Loki, for the app's Logs page.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        regex: "/(.*)"
+        target_label: container
+      - source_labels: [__meta_docker_container_log_stream]
+        target_label: stream
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        target_label: project
+      # Only this stack: not a test GitLab or another project on the same Docker.
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        regex: arena
+        action: keep
+    pipeline_stages:
+      # llama.cpp: "0.03.172.993 I srv ..." -- a single-letter level.
+      - match:
+          selector: '{container="llamacpp"}'
+          stages:
+            - regex: { expression: '^[^ ]+ +(?P<level>[DIWE]) ' }
+            - labels: { level: "" }
+      # The per-request timing lines are in Prometheus already.
+      - match:
+          selector: '{container="llamacpp"}'
+          action: drop
+          expression: ".*print_timing.*"
+      - match:
+          selector: '{container=~"prometheus|loki|promtail"}'
+          stages:
+            - regex: { expression: 'level=(?P<level>[a-zA-Z]+)' }
+            - labels: { level: "" }
+      # The app: one JSON object a line.
+      - match:
+          selector: '{container="app"} |~ "^[{]"'
+          stages:
+            - json: { expressions: { level: LogLevel } }
+            - labels: { level: "" }
+      # Argus: one JSON object per tool call or refused request.
+      - match:
+          selector: '{container="argus"} |~ "^[{]\"ts\""'
+          stages:
+            - json: { expressions: { event: event, outcome: outcome, tool: tool } }
+            - labels: { event: "", outcome: "", tool: "" }

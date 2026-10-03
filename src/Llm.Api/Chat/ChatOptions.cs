@@ -33,8 +33,17 @@ public sealed class ChatOptions
     /// <summary>Answers running at once in the whole chat; 0: as many as the engine serves at once (<see cref="EngineSlots"/>).</summary>
     public int AnswersAtOnce { get; set; }
 
-    /// <summary>LLAMACPP_PARALLEL: what the engine serves at once (set from the stack's .env).</summary>
+    /// <summary>What the engine serves at once, when set; 0: the loaded models' parallel slots together.</summary>
     public int EngineSlots { get; set; }
+
+    /// <summary>The model new chats use; empty: the first kept loaded (Admin -> Models).</summary>
+    public string? DefaultModel { get; set; }
+
+    /// <summary>The thinking levels a chat offers: level:Label pairs, comma-separated.</summary>
+    public string ThinkingPresets { get; set; } = "xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking";
+
+    /// <summary>How hard the model thinks when a chat does not choose.</summary>
+    public string DefaultThinking { get; set; } = "medium";
 
     /// <summary>Longest an answer waits in line before it gives up.</summary>
     public TimeSpan QueueTimeout { get; set; } = TimeSpan.FromMinutes(10);

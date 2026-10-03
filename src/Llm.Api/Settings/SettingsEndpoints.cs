@@ -7,7 +7,7 @@ namespace Llm.Api.Settings;
 
 public sealed record SettingsSave(List<SettingChange> Changes);
 
-/// <summary>The Settings page: every setting, saved (live or pending), a restart, and a directory test. Admins only.</summary>
+/// <summary>The Settings page: every setting, saved, a restart, and a directory test. Admins only.</summary>
 public static class SettingsEndpoints
 {
     public static void MapSettings(this IEndpointRouteBuilder app)
@@ -30,10 +30,6 @@ public static class SettingsEndpoints
             catch (SettingsValidationException ex)
             {
                 return Results.Json(new { status = "invalid", error = "Some settings are not valid.", errors = ex.Errors }, statusCode: 400);
-            }
-            catch (SettingsUnavailableException ex)
-            {
-                return AuthEndpoints.Problem(503, "unavailable", ex.Message);
             }
         });
 

@@ -35,17 +35,18 @@ public sealed class EngineState
 }
 
 /// <summary>
-/// The models the engine can load: the .env one and those admins added. Writes
+/// The models the engine can load: those admins added. Writes
 /// the engine's presets (config/engine/models.ini), the models to keep loaded
 /// (config/engine/keep, one name a line), Prometheus's scrape targets
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
 public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
-    RemoteServerClient remote, ModelHoursState hours, ILogger<ModelCatalog> logger)
+    RemoteServerClient remote, ModelHoursState hours, Modules modules, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
     public const string TargetsFile = "targets.json";
+    public const string MaxFile = "max";
 
     /// <summary>Preset keys a model may not set: they belong to the router, or would reach outside the library.</summary>
     private static readonly HashSet<string> Reserved = new(StringComparer.Ordinal)
@@ -233,13 +234,14 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// </summary>
     public IReadOnlyList<string> Kept() => hours.Now.Window is { } window ? window.Keep : Pinned();
 
-    /// <summary>The models admins pinned to keep loaded, else the .env model: what is kept outside working hours.</summary>
+    /// <summary>The models admins pinned to keep loaded: what is kept outside working hours.</summary>
     public IReadOnlyList<string> Pinned() =>
-        Read(KeepFile) is { } text
-            ? [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal)]
-            : options.Value.DefaultModel is { Length: > 0 } d ? [d] : [];
+        Read(KeepFile) is { } text ? [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal)] : [];
 
     public void SetKept(IEnumerable<string> models) => Write(KeepFile, string.Join('\n', models.Distinct(StringComparer.Ordinal)) + "\n");
+
+    /// <summary>How many models the engine may hold at once (it restarts when this changes).</summary>
+    public void WriteMax() => Write(MaxFile, options.Value.ModelsMax.ToString(CultureInfo.InvariantCulture) + "\n");
 
     /// <summary>Prometheus scrapes each loaded model's metrics (/metrics?model=NAME).</summary>
     public void WriteTargets(IEnumerable<string> loaded)
@@ -279,8 +281,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                 var litellm = new JsonObject { ["model"] = "openai/" + m.Remote, ["api_base"] = server.BaseUrl, ["api_key"] = key ?? "none" };
                 if (server.BaseUrl.StartsWith("https:", StringComparison.OrdinalIgnoreCase))
                 {
-                    // The stack's bundle (the public roots, its certificate and every CA in config/ca), or no check at all.
-                    litellm["ssl_verify"] = server.VerifyTls ? JsonValue.Create(GatewayBundle) : JsonValue.Create(false);
+                    // The public roots, or no check at all.
+                    litellm["ssl_verify"] = server.VerifyTls;
                 }
                 Prices(litellm, m.InputPerMtok, m.OutputPerMtok);
                 var keyPrint = key is null ? "" : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16];
@@ -288,6 +290,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                     m.InputPerMtok, m.OutputPerMtok)] = (m.Name, litellm, info);
             }
         }
+        await MediaAsync(wanted, ct);
         var managed = await gateway.ManagedModelsAsync(ct);
         foreach (var old in managed.Where(g => g.Fingerprint is null || !wanted.ContainsKey(g.Fingerprint)))
         {
@@ -302,8 +305,26 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         chatModels.Forget();
     }
 
-    /// <summary>Where the gateway finds the stack's CA bundle (tls-init writes it into traefik-certs, mounted read-only).</summary>
-    public const string GatewayBundle = "/certs/bundle.crt";
+    /// <summary>The picture and speech servers' models, while those servers run: people's keys reach them too.</summary>
+    private async Task MediaAsync(Dictionary<string, (string Name, JsonObject Params, JsonObject Info)> wanted, CancellationToken ct)
+    {
+        void Add(string name, string model, string url, JsonObject info)
+        {
+            var litellm = new JsonObject { ["model"] = model, ["api_base"] = url + "/v1", ["api_key"] = "none" };
+            wanted[Fingerprint("media", name, model, url, info.ToJsonString())] = (name, litellm, info);
+        }
+        if (await modules.HasAsync("imagegen", ct))
+        {
+            Add(MediaModels.ImageModel, "openai/sd-cpp-local", MediaModels.ImageUrl, new JsonObject { ["mode"] = "image_generation" });
+        }
+        if (await modules.HasAsync("audio", ct))
+        {
+            foreach (var (name, id, mode) in MediaModels.Speech)
+            {
+                Add(name, "openai/" + id, MediaModels.AudioUrl, new JsonObject { ["mode"] = mode });
+            }
+        }
+    }
 
     private static JsonObject Info(int? context, int? maxOutput, bool vision, bool tools, bool thinking)
     {
@@ -381,7 +402,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 /// <summary>Who may use which model, and whether it can answer now.</summary>
 public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineState engine, ModelCatalog catalog, ModelHoursState hours, IOptions<EngineOptions> options)
 {
-    /// <summary>The models on the engine: the .env one and the app's. Their answers need them loaded.</summary>
+    /// <summary>The models on the engine. Their answers need them loaded.</summary>
     public async Task<HashSet<string>> OnEngineAsync(CancellationToken ct = default)
     {
         if (!options.Value.Enabled)
@@ -389,10 +410,6 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
             return [];
         }
         var names = await db.LocalModels.AsNoTracking().Select(m => m.Name).ToListAsync(ct);
-        if (options.Value.DefaultModel is { Length: > 0 } d)
-        {
-            names.Add(d);
-        }
         // A model with a copy on another GPU server answers from there while it is not loaded here.
         var elsewhere = (await db.RemoteServers.AsNoTracking().ToListAsync(ct)).SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
         return [.. names.Where(n => !elsewhere.Contains(n))];

@@ -53,13 +53,13 @@ public sealed class AppFixture : IAsyncLifetime
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            var candidate = Path.Combine(dir.FullName, "deploy", "config", "dashboards");
+            var candidate = Path.Combine(dir.FullName, "src", "Llm.Api", "Dashboards", "json");
             if (Directory.Exists(candidate))
             {
                 return candidate;
             }
         }
-        throw new DirectoryNotFoundException("deploy/config/dashboards not found above the test binaries.");
+        throw new DirectoryNotFoundException("src/Llm.Api/Dashboards/json not found above the test binaries.");
     }
 
     public string DirectoryPath => Path.Combine(_webRoot, "..", Path.GetFileName(_webRoot) + "-directory", "users.yml");
@@ -119,14 +119,15 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Safeguards:MessagesPerMinute", "0");
             b.UseSetting("Argus:Url", "http://argus:7700");
             b.UseSetting("Argus:AdminToken", FakeArgus.Token);
-            b.UseSetting("Stack:EnvSamplesDir", Path.Combine(DashboardsPath, "..", "..", "env-samples"));
-            b.UseSetting("Stack:ModelName", "Qwen3.8-Flash-Next");
-            b.UseSetting("Stack:ThinkingPresets", "xhigh:Deep think,low:Quick,off:No thinking");
-            b.UseSetting("Stack:ModelContext", "32768");
-            b.UseSetting("Stack:ModelMaxOutput", "8192");
+            b.UseSetting("Chat:DefaultModel", "Qwen3.8-Flash-Next");
+            b.UseSetting("Chat:ThinkingPresets", "xhigh:Deep think,low:Quick,off:No thinking");
             b.UseSetting("Chat:ArgusChatToken", FakeArgus.ChatToken);
             b.UseSetting("Gateway:MasterKey", "sk-master-for-tests");
-            b.UseSetting("Stack:PriceInputPerMtok", "0.20");
+            // No engine and no media servers here unless a test brings them (the models tests do).
+            b.UseSetting("Engine:Enabled", "false");
+            b.UseSetting("Modules:imagegen", "false");
+            b.UseSetting("Modules:videogen", "false");
+            b.UseSetting("Modules:audio", "false");
             // Nothing listens here: probes are refused at once instead of waiting on DNS.
             b.UseSetting("Stack:LiteLlmProbeUrl", "http://127.0.0.1:9");
             b.UseSetting("Stack:PrometheusUrl", "http://127.0.0.1:9");

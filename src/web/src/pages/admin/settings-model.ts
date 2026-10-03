@@ -5,7 +5,7 @@ export interface SettingView {
   label: string
   help: string
   type: 'text' | 'wholenumber' | 'number' | 'boolean' | 'duration' | 'choice' | 'choices' | 'url' | 'secret'
-  scope: 'live' | 'apprestart' | 'stack'
+  scope: 'live' | 'apprestart'
   options: string[] | null
   min: number | null
   max: number | null
@@ -17,18 +17,14 @@ export interface SettingView {
   default: string | null
   value: string | null
   isSet: boolean
-  source: 'saved' | 'environment' | 'default' | 'stack'
+  source: 'saved' | 'environment' | 'default'
   environmentValue: string | null
-  pending: string | null
-  pendingSet: boolean
   restartPending: boolean
 }
 
 export interface SettingsData {
   groups: { title: string; settings: SettingView[] }[]
-  pendingStack: number
   restartNeeded: boolean
-  pendingFileWritable: boolean
 }
 
 const unitSeconds: Record<string, number> = { minutes: 60, hours: 3600, days: 86400 }
@@ -67,11 +63,10 @@ export function durationFromUnit(text: string, unit: string | null): string | nu
   return toTimeSpan(n * (unitSeconds[unit ?? 'minutes'] ?? 60))
 }
 
-/** What the editor starts with: the pending value when there is one, a secret never. */
+/** What the editor starts with: the value, a secret never. */
 export function initialValue(s: SettingView): string {
   if (s.type === 'secret') return ''
-  const v = s.scope === 'stack' ? (s.pendingSet ? s.pending : s.value) : s.value
-  return s.type === 'duration' ? durationInUnit(v, s.unit) : (v ?? '')
+  return s.type === 'duration' ? durationInUnit(s.value, s.unit) : (s.value ?? '')
 }
 
 /** What is sent for an edited value. */

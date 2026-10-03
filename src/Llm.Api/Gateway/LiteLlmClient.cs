@@ -88,7 +88,7 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
             }
             var info = row["model_info"] as JsonObject;
             var mode = info?["mode"]?.GetValue<string>() ?? "chat";
-            if (mode is not ("chat" or "image_generation"))
+            if (mode is not ("chat" or "image_generation" or "audio_transcription" or "audio_speech"))
             {
                 continue; // embeddings and the like are not for the chat
             }
@@ -97,7 +97,8 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
             decimal? PerMtok(string k) => info?[k] is JsonValue v && v.TryGetValue<decimal>(out var d) ? d * 1_000_000m : null;
             models.Add(new GatewayModel(name, Int("max_input_tokens"), Int("max_output_tokens"),
                 Flag("supports_vision") ?? false, Flag("supports_function_calling") ?? true, Flag("supports_reasoning") ?? true,
-                PerMtok("input_cost_per_token"), PerMtok("cache_read_input_token_cost"), PerMtok("output_cost_per_token"), mode));
+                PerMtok("input_cost_per_token"), PerMtok("cache_read_input_token_cost"), PerMtok("output_cost_per_token"), mode,
+                Flag("supports_audio_input") ?? false));
         }
         return models;
     }

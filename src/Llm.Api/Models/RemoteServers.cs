@@ -122,37 +122,6 @@ public sealed class RemoteServerClient(IHttpClientFactory http, IDataProtectionP
         }
         return null;
     }
-
-    /// <summary>
-    /// The certificate check for servers: the system's roots, and the stack's own bundle (its
-    /// certificate and every CA in config/ca), so a server signed by a private CA is trusted
-    /// once that CA is there.
-    /// </summary>
-    public static bool Trusted(X509Certificate2? certificate, X509Chain? chain, SslPolicyErrors errors, string bundlePath)
-    {
-        if (errors == SslPolicyErrors.None)
-        {
-            return true;
-        }
-        if (errors != SslPolicyErrors.RemoteCertificateChainErrors || certificate is null || !File.Exists(bundlePath))
-        {
-            return false;
-        }
-        using var custom = new X509Chain();
-        custom.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-        custom.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-        var roots = new X509Certificate2Collection();
-        roots.ImportFromPemFile(bundlePath);
-        custom.ChainPolicy.CustomTrustStore.AddRange(roots);
-        if (chain is not null)
-        {
-            foreach (var element in chain.ChainElements.Skip(1))
-            {
-                custom.ChainPolicy.ExtraStore.Add(element.Certificate);
-            }
-        }
-        return custom.Build(certificate);
-    }
 }
 
 /// <summary>Each server's last answer, kept a little while so the Models page does not ask on every look.</summary>

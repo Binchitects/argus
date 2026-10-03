@@ -1,6 +1,7 @@
-# Secrets — never commit. Copy a file from env-samples/ as the template.
+# Secrets: never commit. .env.example is the template.
 .env
 .env.*
+!.env.example
 
 # Local model weights (large, re-downloadable)
 models/*

@@ -9,37 +9,30 @@ namespace Llm.Api.Models;
 /// <summary>Configuration section "Engine": llama.cpp in router mode, and the files the app shares with it.</summary>
 public sealed class EngineOptions
 {
-    /// <summary>False when the stack does not run llama.cpp (vLLM, or no engine): set from COMPOSE_PROFILES at startup.</summary>
+    /// <summary>False only where no engine runs (tests): the other GPU servers' models still reach the gateway.</summary>
     public bool Enabled { get; set; } = true;
     public string Url { get; set; } = "http://llamacpp:8080";
-    /// <summary>LLAMACPP_API_KEY.</summary>
+    /// <summary>ENGINE_KEY.</summary>
     public string? ApiKey { get; set; }
-    /// <summary>MODEL_NAME: the model .env defines, always in the engine's list.</summary>
-    public string? DefaultModel { get; set; }
-    /// <summary>Where the app writes the engine's presets, the model to keep loaded, and Prometheus's targets (config/engine).</summary>
+    /// <summary>MODEL in .env: the first chat model, fetched on the first start (Hugging Face repo:quant, or a file in the library).</summary>
+    public string? FirstModel { get; set; }
+    /// <summary>Where the app writes the engine's presets, the models to keep loaded, how many at once, and Prometheus's targets.</summary>
     public string ConfigDir { get; set; } = "/engine-config";
-    /// <summary>The model library as the app sees it (read-only).</summary>
+    /// <summary>The model library as the app sees it (MODELS_DIR, writable: downloads land there).</summary>
     public string LibraryDir { get; set; } = "/library";
     /// <summary>The same library inside the engine container.</summary>
     public string EngineLibraryDir { get; set; } = "/library";
-
-    // From the stack's .env (StackEnv), set at startup.
-    /// <summary>LLAMACPP_THREADS: the .env model's CPU threads, for every model.</summary>
+    /// <summary>CPU threads for every model; null: llama.cpp's own choice.</summary>
     public int? Threads { get; set; }
-    /// <summary>IMAGEGEN_MAX_VRAM, when the image server runs: GPU memory it may take beside the engine.</summary>
-    public long ImageReserveBytes { get; set; }
-    /// <summary>LLAMACPP_RAM_RESERVE_GB: RAM kept for everything but the engine.</summary>
+    /// <summary>GPU memory the picture server may take beside the engine (its --max-vram).</summary>
+    public long ImageReserveBytes { get; set; } = 2L << 30;
+    /// <summary>RAM kept for everything but the engine.</summary>
     public long RamReserveBytes { get; set; } = 8L << 30;
-    /// <summary>IMAGEGEN_MODEL_DIR, relative to the library when inside it.</summary>
-    public string? ImageModelDir { get; set; }
-    /// <summary>IMAGEGEN_TEXT_ENCODER: a language model the image generator reads.</summary>
-    public string? ImageTextEncoder { get; set; }
-    /// <summary>The .env model's file relative to the library, when it is inside it.</summary>
-    public string? DefaultModelFile { get; set; }
-    /// <summary>LLAMACPP_MODELS_MAX: how many models may be loaded at once, those kept loaded included.</summary>
+    /// <summary>The picture model's folder in the library: its text encoder there is no chat model.</summary>
+    public string ImageModelDir { get; set; } = MediaModels.ImageDir;
+    public string ImageTextEncoder { get; set; } = MediaModels.ImageTextEncoder;
+    /// <summary>How many models may be loaded at once, those kept loaded included (Settings, Engine).</summary>
     public int ModelsMax { get; set; } = 1;
-    /// <summary>The .env model's settings (MODEL_CONTEXT, LLAMACPP_*), for the memory of the models kept loaded together.</summary>
-    public LocalModel? DefaultSettings { get; set; }
 }
 
 /// <summary>A model in the engine's list, and whether it is loaded.</summary>

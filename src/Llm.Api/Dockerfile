@@ -16,7 +16,8 @@ RUN dotnet restore src/Llm.Api/Llm.Api.csproj
 COPY src/Llm.Core/ src/Llm.Core/
 COPY src/Llm.Api/ src/Llm.Api/
 RUN dotnet publish src/Llm.Api/Llm.Api.csproj -c Release --no-restore -o /out ${APP_VERSION:+-p:AppVersion=$APP_VERSION} \
- && rm -f /out/*.pdb
+ && rm -f /out/*.pdb \
+ && mkdir -p /shared/engine-config /shared/directory /shared/sandbox
 
 # Chiseled: no shell, no package manager, runs as a non-root user.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled
@@ -25,7 +26,16 @@ COPY --from=api /out ./
 # Time zones for the chat's date and time tool: the chiseled image has none,
 # and the -extra image carries ICU as well, which nothing here needs.
 COPY --from=api /usr/share/zoneinfo /usr/share/zoneinfo
-ENV ASPNETCORE_HTTP_PORTS=8080
+# The dashboards, in Grafana's JSON: the app runs every panel's query itself.
+COPY src/Llm.Api/Dashboards/json /dashboards
+# What it shares with other services, as named volumes: a new volume starts as these, the app's.
+COPY --from=api --chown=1000:1000 /shared/ /
+ENV ASPNETCORE_HTTP_PORTS=8080 \
+    Database__Host=postgres \
+    Database__Username=arena \
+    Auth__DirectoryFile=/directory/users.yml
+# The owner of MODELS_DIR on most hosts: downloads land there as theirs.
+USER 1000:1000
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 CMD ["dotnet", "Llm.Api.dll", "healthcheck"]
 ENTRYPOINT ["dotnet", "Llm.Api.dll"]

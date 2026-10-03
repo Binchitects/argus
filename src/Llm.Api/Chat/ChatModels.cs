@@ -1,22 +1,32 @@
 using Llm.Api.Gateway;
-using Llm.Api.Operations;
 using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Chat;
 
 /// <summary>
-/// The models the chat offers (and the picture models its image tool uses): the gateway's list, cached for a minute. When the
-/// gateway cannot say, the deployment's own model (from .env) stands in, so the
-/// chat still opens and says why answers fail rather than failing to load.
+/// The models the chat offers (and the picture and speech models its tools use): the gateway's list, cached for a minute.
 /// </summary>
-public sealed class ChatModels(IServiceScopeFactory scopes, IOptions<StackOptions> stack, TimeProvider clock) : IDisposable
+public sealed class ChatModels(IServiceScopeFactory scopes, IOptionsMonitor<ChatOptions> chat, IOptions<Models.EngineOptions> engine, TimeProvider clock) : IDisposable
 {
     private static readonly TimeSpan Fresh = TimeSpan.FromMinutes(1);
     private readonly SemaphoreSlim _lock = new(1, 1);
     private IReadOnlyList<GatewayModel>? _cached;
     private DateTimeOffset _at;
 
-    public string? DefaultName => stack.Value.ModelName;
+    /// <summary>The model new chats use: as set under Settings, else the first kept loaded.</summary>
+    public string? DefaultName => chat.CurrentValue.DefaultModel is { Length: > 0 } set ? set : FirstKept();
+
+    private string? FirstKept()
+    {
+        try
+        {
+            return File.ReadLines(Path.Combine(engine.Value.ConfigDir, Models.ModelCatalog.KeepFile)).Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>The models one can chat with.</summary>
     public async Task<IReadOnlyList<GatewayModel>> ListAsync(CancellationToken ct = default) =>
@@ -25,6 +35,13 @@ public sealed class ChatModels(IServiceScopeFactory scopes, IOptions<StackOption
     /// <summary>The gateway's picture model, if it serves one.</summary>
     public async Task<GatewayModel?> ImageModelAsync(CancellationToken ct = default) =>
         (await AllAsync(ct)).FirstOrDefault(m => m.Mode == "image_generation");
+
+    /// <summary>The gateway's model of a kind (audio_transcription, audio_speech), by name first.</summary>
+    public async Task<GatewayModel?> OfModeAsync(string mode, string? name = null, CancellationToken ct = default)
+    {
+        var all = (await AllAsync(ct)).Where(m => m.Mode == mode).ToList();
+        return all.FirstOrDefault(m => m.Name == name) ?? all.FirstOrDefault();
+    }
 
     /// <summary>Every model at the gateway: chat and pictures.</summary>
     public async Task<IReadOnlyList<GatewayModel>> AllAsync(CancellationToken ct = default)
@@ -64,13 +81,8 @@ public sealed class ChatModels(IServiceScopeFactory scopes, IOptions<StackOption
         }
     }
 
-    private List<GatewayModel> Fallback()
-    {
-        var s = stack.Value;
-        return string.IsNullOrEmpty(s.ModelName)
-            ? []
-            : [new(s.ModelName, int.TryParse(s.ModelContext, out var c) ? c : null, int.TryParse(s.ModelMaxOutput, out var o) ? o : null, false, true, true, null, null, null)];
-    }
+    /// <summary>When the gateway cannot say: the default model alone, so the chat still opens and says why answers fail.</summary>
+    private List<GatewayModel> Fallback() => DefaultName is { } d ? [new(d, null, null, false, true, true, null, null, null)] : [];
 
     /// <summary>The model to use: the one asked for if the gateway serves it, else the default.</summary>
     public async Task<GatewayModel?> ResolveAsync(string? name, CancellationToken ct = default)

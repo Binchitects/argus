@@ -194,7 +194,6 @@ public static class IdentityWiring
 
         services.Configure<ThrottleOptions>(config.GetSection("Throttle"));
         services.Configure<Settings.BrandingOptions>(config.GetSection("Branding"));
-        services.Configure<Settings.SettingsFileOptions>(config.GetSection("Settings"));
         services.AddSingleton<Settings.SettingsAtStart>();
         services.AddSingleton<Settings.IAppRestarter, Settings.AppRestarter>();
         services.AddScoped<Settings.SettingsService>();
@@ -225,12 +224,7 @@ public static class IdentityWiring
 
         services.Configure<Operations.StackOptions>(config.GetSection("Stack"));
         services.Configure<Operations.ArgusOptions>(config.GetSection("Argus"));
-        services.PostConfigure<Operations.ArgusOptions>(o =>
-        {
-            var profiles = config["Stack:ComposeProfiles"];
-            o.Deployed = string.IsNullOrWhiteSpace(profiles) ||
-                profiles.Split(',', StringSplitOptions.TrimEntries).Contains("argus", StringComparer.OrdinalIgnoreCase);
-        });
+        services.AddSingleton<Operations.Modules>();
         services.AddHttpClient("probe", c => c.Timeout = TimeSpan.FromSeconds(3));
         services.AddHttpClient<Operations.ArgusAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
 
@@ -242,13 +236,6 @@ public static class IdentityWiring
             if (config["Gateway:Url"] is { Length: > 0 } url && config["Chat:GatewayUrl"] is null)
             {
                 o.GatewayUrl = url;
-            }
-            // What llama.cpp serves at once: the chat's default limit (AnswerGate).
-            var profiles = config["Stack:ComposeProfiles"] ?? "";
-            if (o.EngineSlots == 0 && profiles.Split(',', StringSplitOptions.TrimEntries).Contains("llamacpp", StringComparer.OrdinalIgnoreCase)
-                && int.TryParse(config["StackEnv:LLAMACPP_PARALLEL"], System.Globalization.CultureInfo.InvariantCulture, out var slots))
-            {
-                o.EngineSlots = slots;
             }
         });
         services.AddSingleton<Chat.AnswerGate>();
@@ -275,15 +262,6 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.SandboxClient>();
         services.AddScoped<Chat.Tools.PythonTool>();
         services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
-        services.PostConfigure<Chat.Tools.WebOptions>(o =>
-        {
-            // The websearch profile's own SearXNG, unless an admin set another.
-            var profiles = config["Stack:ComposeProfiles"] ?? "";
-            if (string.IsNullOrWhiteSpace(o.SearchUrl) && profiles.Split(',', StringSplitOptions.TrimEntries).Contains("websearch", StringComparer.OrdinalIgnoreCase))
-            {
-                o.SearchUrl = "http://searxng:8080";
-            }
-        });
         services.AddSingleton<Chat.Tools.WebResolver>();
         services.AddHttpClient(Chat.Tools.WebFetcher.Client).ConfigurePrimaryHttpMessageHandler(sp => Chat.Tools.WebFetcher.Handler(sp.GetRequiredService<Chat.Tools.WebResolver>()));
         services.AddHttpClient(Chat.Tools.WebFetcher.SearchClient, c => c.Timeout = TimeSpan.FromSeconds(30));
@@ -305,6 +283,9 @@ public static class IdentityWiring
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(20), PooledConnectionLifetime = TimeSpan.FromMinutes(10) });
         services.AddSingleton<Models.ModelDownloads>();
         services.AddHostedService(sp => sp.GetRequiredService<Models.ModelDownloads>());
+        // A new deployment's models, fetched by the app itself (MODEL in .env, and the picture, video and speech servers').
+        services.AddHttpClient(Models.Provisioning.Client, c => c.Timeout = TimeSpan.FromMinutes(30));
+        services.AddHostedService<Models.Provisioning>();
         services.Configure<Schedules.ScheduleOptions>(config.GetSection("Schedules"));
         services.Configure<Operations.ArgusIndexOptions>(config.GetSection("ArgusIndex"));
         services.AddHostedService<Operations.ArgusIndexSchedule>();
@@ -318,72 +299,13 @@ public static class IdentityWiring
         services.AddHostedService(sp => sp.GetRequiredService<Schedules.Scheduler>());
         services.AddSingleton<Models.ModelHoursState>();
         services.AddScoped<Models.ModelHours>();
-        services.PostConfigure<Models.EngineOptions>(o =>
-        {
-            if (config["Engine:Enabled"] is null)
-            {
-                var profiles = config["Stack:ComposeProfiles"] ?? "";
-                o.Enabled = profiles.Split(',', StringSplitOptions.TrimEntries).Contains("llamacpp", StringComparer.OrdinalIgnoreCase);
-            }
-            o.DefaultModel ??= config["Stack:ModelName"];
-            var inv = System.Globalization.CultureInfo.InvariantCulture;
-            if (int.TryParse(config["StackEnv:LLAMACPP_THREADS"], inv, out var threads) && threads > 0)
-            {
-                o.Threads = threads;
-            }
-            if (double.TryParse(config["StackEnv:LLAMACPP_RAM_RESERVE_GB"], System.Globalization.NumberStyles.Float, inv, out var ram) && ram >= 0)
-            {
-                o.RamReserveBytes = (long)(ram * (1L << 30));
-            }
-            var image = (config["Stack:ComposeProfiles"] ?? "").Split(',', StringSplitOptions.TrimEntries).Contains("image", StringComparer.OrdinalIgnoreCase);
-            if (image && double.TryParse(config["StackEnv:IMAGEGEN_MAX_VRAM"] ?? "2", System.Globalization.NumberStyles.Float, inv, out var vram) && vram > 0)
-            {
-                o.ImageReserveBytes = (long)(vram * (1L << 30));
-            }
-            // Host paths, as .env has them: what of them is inside the library.
-            static string? Inside(string? library, string? path) =>
-                library is { Length: > 0 } && path is { Length: > 0 } && (path.TrimEnd('/') + "/").StartsWith(library.TrimEnd('/') + "/", StringComparison.Ordinal)
-                    ? System.IO.Path.GetRelativePath(library, path).Replace('\\', '/') : null;
-            var library = config["StackEnv:LLAMACPP_LIBRARY_DIR"];
-            o.ImageModelDir ??= Inside(library, config["StackEnv:IMAGEGEN_MODEL_DIR"]);
-            o.ImageTextEncoder ??= config["StackEnv:IMAGEGEN_TEXT_ENCODER"];
-            if (Inside(library, config["StackEnv:LLAMACPP_MODEL_DIR"]) is { } modelDir && config["StackEnv:LLAMACPP_MODEL_FILE"] is { Length: > 0 } modelFile)
-            {
-                o.DefaultModelFile ??= modelDir == "." ? modelFile : modelDir + "/" + modelFile;
-            }
-            if (int.TryParse(config["StackEnv:LLAMACPP_MODELS_MAX"], inv, out var max) && max > 0)
-            {
-                o.ModelsMax = max;
-            }
-            int Int(string key, int fallback) => int.TryParse(config[key], inv, out var v) ? v : fallback;
-            if (o.DefaultModel is { Length: > 0 } defaultModel && o.DefaultSettings is null)
-            {
-                o.DefaultSettings = new Llm.Core.Models.LocalModel
-                {
-                    Name = defaultModel, File = o.DefaultModelFile ?? "", Placement = "manual",
-                    Context = Int("StackEnv:MODEL_CONTEXT", 32768), GpuLayers = Int("StackEnv:LLAMACPP_N_GPU_LAYERS", 99),
-                    CpuMoe = Int("StackEnv:LLAMACPP_N_CPU_MOE", 0), Parallel = Int("StackEnv:LLAMACPP_PARALLEL", 1),
-                    KvType = config["StackEnv:LLAMACPP_KV_TYPE"] is { Length: > 0 } kv ? kv : "q8_0",
-                    Mtp = Int("StackEnv:LLAMACPP_MTP_DRAFT_MAX", 0) > 0, DraftMax = Math.Max(1, Int("StackEnv:LLAMACPP_MTP_DRAFT_MAX", 3)),
-                    // Its GPUs and prompt step, when LLAMACPP_EXTRA_ARGS sets them (--device CUDA1, -ub 1024).
-                    Ubatch = System.Text.RegularExpressions.Regex.Match(config["StackEnv:LLAMACPP_EXTRA_ARGS"] ?? "", @"(?:^|\s)(?:-ub|--ubatch-size)[ =](\d+)") is { Success: true } ub
-                        ? int.Parse(ub.Groups[1].Value, inv) : null,
-                    Devices = System.Text.RegularExpressions.Regex.Match(config["StackEnv:LLAMACPP_EXTRA_ARGS"] ?? "", @"(?:^|\s)(?:-dev|--device)[ =]((?:CUDA\d+,?)+)") is { Success: true } dev
-                        ? string.Join(',', dev.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(d => d[4..])) : null,
-                };
-            }
-        });
         services.AddHttpClient<Models.EngineClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddSingleton<Models.EngineState>();
         services.AddSingleton<Models.ModelLibrary>();
         services.AddSingleton<Models.HardwareProbe>();
-        // Other GPU servers: their certificates are checked against the system's roots and the
-        // stack's own bundle (config/ca); a server an admin marked unchecked uses the other client.
-        var bundle = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(config["Connect:CertificatePath"] ?? "/tls/tls.crt")!, "bundle.crt");
-        services.AddHttpClient(Models.RemoteServerClient.Client).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-        {
-            SslOptions = { RemoteCertificateValidationCallback = (_, cert, chain, errors) => Models.RemoteServerClient.Trusted(cert as System.Security.Cryptography.X509Certificates.X509Certificate2, chain, errors, bundle) },
-        });
+        // Other GPU servers: their certificates are checked against the system's roots; a server
+        // an admin marked unchecked uses the other client.
+        services.AddHttpClient(Models.RemoteServerClient.Client);
 #pragma warning disable CA5359 // Only for a server an admin marked "do not check its certificate" (a self-signed one with no CA to trust); the page says what that gives up.
         services.AddHttpClient(Models.RemoteServerClient.Unchecked).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
         {

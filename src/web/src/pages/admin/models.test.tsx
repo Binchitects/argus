@@ -13,7 +13,7 @@ const view = (over: object = {}) => ({
     ...over,
   },
   models: [
-    { name: 'Big-Model', source: 'env', mode: 'chat', status: 'loaded', file: 'big/Big-Q4.gguf', context: 131072, vision: false, access: everyone, kept: true },
+    { name: 'Big-Model', source: 'local', mode: 'chat', status: 'loaded', file: 'big/Big-Q4.gguf', context: 131072, vision: false, access: everyone, kept: true },
     {
       name: 'Small-Model', source: 'local', mode: 'chat', status: 'unloaded', file: 'small/Small-Q8.gguf', projector: null, context: 32768, maxOutput: null,
       gpuLayers: 99, cpuMoe: 0, kvType: 'q8_0', parallel: 1, extraPreset: null, thinking: true, tools: true, inputPerMtok: null, outputPerMtok: null,
@@ -74,9 +74,10 @@ describe('admin models', () => {
     const image = screen.getByRole('heading', { name: /flux-image/ }).closest('section')!
     expect(within(big).getByText('Loaded')).toBeInTheDocument()
     expect(within(small).getByText('Not loaded')).toBeInTheDocument()
-    // Only the engine's models load; only the ones added here are edited.
-    expect(within(big).queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument()
+    // Only the engine's models load and are edited.
+    expect(within(big).getByRole('button', { name: /Edit/ })).toBeInTheDocument()
     expect(within(image).queryByRole('button', { name: /Load/ })).not.toBeInTheDocument()
+    expect(within(image).queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument()
 
     await userEvent.click(within(small).getByRole('button', { name: /Load/ }))
     await userEvent.click(await screen.findByRole('button', { name: 'Load' }))

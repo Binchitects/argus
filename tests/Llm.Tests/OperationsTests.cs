@@ -42,36 +42,6 @@ public sealed class OperationsTests(AppFixture app)
     }
 
     [Fact]
-    public async Task The_model_page_lists_every_shipped_sample_with_its_block()
-    {
-        var admin = await Admin();
-        var m = await admin.JsonAsync(await admin.GetAsync("/api/admin/model"));
-        Assert.Equal("Qwen3.8-Flash-Next", m.GetProperty("running").GetProperty("name").GetString());
-        var samples = m.GetProperty("samples").EnumerateArray().ToList();
-        var shipped = Directory.GetFiles(Path.Combine(AppFixture.DashboardsPath, "..", "..", "env-samples"), "*.env").Length;
-        Assert.Equal(shipped, samples.Count);
-        Assert.All(samples, s =>
-        {
-            Assert.StartsWith("# >>> MODEL", s.GetProperty("block").GetString(), StringComparison.Ordinal);
-            Assert.EndsWith("# <<< MODEL", s.GetProperty("block").GetString(), StringComparison.Ordinal);
-            Assert.DoesNotContain("PASSWORD", s.GetProperty("block").GetString(), StringComparison.Ordinal);
-            Assert.False(string.IsNullOrEmpty(s.GetProperty("title").GetString()));
-        });
-    }
-
-    [Fact]
-    public async Task Settings_show_named_values_and_no_secrets()
-    {
-        var admin = await Admin();
-        var text = await (await admin.GetAsync("/api/admin/settings")).Content.ReadAsStringAsync();
-        Assert.Contains("PRICE_INPUT_PER_MTOK", text, StringComparison.Ordinal);
-        Assert.Contains("0.20", text, StringComparison.Ordinal);
-        Assert.DoesNotContain(AppFixture.AdminPassword, text, StringComparison.Ordinal);
-        Assert.DoesNotContain(FakeArgus.Token, text, StringComparison.Ordinal);
-        Assert.DoesNotContain(AppFixture.LangfuseSecret, text, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task People_export_is_csv_and_defuses_spreadsheet_formulas()
     {
         var admin = await Admin();
@@ -218,22 +188,11 @@ public sealed class OperationsTests(AppFixture app)
         var name = "om" + Guid.NewGuid().ToString("N")[..8];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
         var member = await new TestBrowser(app.Factory).SignedInAsync(name, made.GetProperty("password").GetString()!);
-        foreach (var path in new[] { "/api/admin/overview", "/api/admin/services", "/api/admin/model", "/api/admin/settings", "/api/admin/people.csv", "/api/admin/argus/status", "/api/admin/argus/packs", "/api/admin/argus/explore?q=x" })
+        foreach (var path in new[] { "/api/admin/overview", "/api/admin/services", "/api/admin/people.csv", "/api/admin/argus/status", "/api/admin/argus/packs", "/api/admin/argus/explore?q=x" })
         {
             await StatusAssert.Is(HttpStatusCode.Forbidden, await member.GetAsync(path));
         }
         await StatusAssert.Is(HttpStatusCode.Forbidden, await member.PostAsync("/api/admin/argus/index", new { branches = Array.Empty<string>() }));
-    }
-
-    [Fact]
-    public async Task A_token_without_the_argus_profile_is_not_a_deployed_argus()
-    {
-        await using var noProfile = app.Create(app.ConnectionStringFor("noprof_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
-            new Dictionary<string, string?> { ["Stack:ComposeProfiles"] = "gateway,proxy,auth,llamacpp" });
-        var admin = await new TestBrowser(noProfile).SignedInAsync("admin", AppFixture.AdminPassword);
-        Assert.False((await admin.JsonAsync(await admin.GetAsync("/api/admin/argus/status"))).GetProperty("configured").GetBoolean());
-        var services = (await admin.JsonAsync(await admin.GetAsync("/api/admin/services"))).EnumerateArray();
-        Assert.DoesNotContain(services, s => s.GetProperty("name").GetString() == "Argus");
     }
 
     [Fact]

@@ -80,7 +80,7 @@ public static partial class ChatEndpoints
     }
 
     private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access, ModelPolicy policy,
-        IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
+        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
     {
         var me = await Me(p, users);
         // The models this person may use; a model of the engine that is not loaded is listed, marked so.
@@ -88,14 +88,14 @@ public static partial class ChatEndpoints
         var tools = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
         return Results.Ok(new
         {
-            model = first?.Name ?? stack.Value.ModelName,
+            model = first?.Name ?? models.DefaultName,
             models = list.Select(m => new
             {
                 m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, loaded = policy.Loaded(m.Name, onEngine), onRequest = policy.OnRequest(m.Name, onEngine),
                 prices = new { input = m.InputPerMtok, cachedInput = m.CachedInputPerMtok, output = m.OutputPerMtok },
             }),
-            presets = ThinkingPresets.Parse(stack.Value.ThinkingPresets),
-            defaultThinking = string.Equals(stack.Value.ModelEnableThinking, "false", StringComparison.OrdinalIgnoreCase) ? "off" : stack.Value.ModelReasoningEffort,
+            presets = ThinkingPresets.Parse(chat.CurrentValue.ThinkingPresets),
+            defaultThinking = chat.CurrentValue.DefaultThinking,
             argus = tools.Any(t => t.Tool.Id == "argus"),
             // The tools this person may use; a chat turns them on and off.
             tools = tools.Select(t => new
@@ -133,12 +133,12 @@ public static partial class ChatEndpoints
         return Results.Ok(list.Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.ProjectId, answering = jobs.IsAnswering(c.Id) }));
     }
 
-    private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
+    private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
         ToolRegistry registry, AccessService access, ModelPolicy policy, CancellationToken ct)
     {
         var me = await Me(p, users);
         var c = new Conversation { UserId = me.Id };
-        if (await ApplyAsync(c, new ConversationChange(null, body.Thinking, null, body.Model, body.SystemPrompt, body.Temperature, body.TopP, body.MaxTokens), stack.Value, models, me, policy) is { } problem)
+        if (await ApplyAsync(c, new ConversationChange(null, body.Thinking, null, body.Model, body.SystemPrompt, body.Temperature, body.TopP, body.MaxTokens), chat.CurrentValue, models, me, policy) is { } problem)
         {
             return problem;
         }
@@ -190,11 +190,11 @@ public static partial class ChatEndpoints
     }
 
     /// <summary>A chat's settings, checked. Null when all is well.</summary>
-    private static async Task<IResult?> ApplyAsync(Conversation c, ConversationChange body, StackOptions stack, ChatModels models, AppUser me, ModelPolicy policy)
+    private static async Task<IResult?> ApplyAsync(Conversation c, ConversationChange body, ChatOptions chat, ChatModels models, AppUser me, ModelPolicy policy)
     {
         if (body.Thinking is { } t)
         {
-            if (t != "" && !ValidThinking(t, stack))
+            if (t != "" && !ValidThinking(t, chat))
             {
                 return AuthEndpoints.Problem(400, "thinking", "Unknown thinking level.");
             }
@@ -248,8 +248,8 @@ public static partial class ChatEndpoints
         return null;
     }
 
-    private static bool ValidThinking(string level, StackOptions stack) =>
-        level == "off" || ThinkingPresets.Parse(stack.ThinkingPresets).Any(p => p.Level == level);
+    private static bool ValidThinking(string level, ChatOptions chat) =>
+        level == "off" || ThinkingPresets.Parse(chat.ThinkingPresets).Any(p => p.Level == level);
 
     private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolRegistry registry, AccessService access, AnswerJobs jobs,
         CancellationToken ct)
@@ -292,7 +292,7 @@ public static partial class ChatEndpoints
             c.CurrentLeafId, c.ArchivedAt, forkedFrom, project, c.CreatedAt, c.UpdatedAt, answering, messages,
         };
 
-    private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptions<StackOptions> stack, ChatModels models,
+    private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
         ToolRegistry registry, AccessService access, ModelPolicy policy, CancellationToken ct)
     {
         var me = await Me(p, users);
@@ -304,7 +304,7 @@ public static partial class ChatEndpoints
         {
             c.Title = string.IsNullOrWhiteSpace(title) ? "New chat" : title.Trim()[..Math.Min(200, title.Trim().Length)];
         }
-        if (await ApplyAsync(c, body, stack.Value, models, me, policy) is { } problem)
+        if (await ApplyAsync(c, body, chat.CurrentValue, models, me, policy) is { } problem)
         {
             return problem;
         }
@@ -506,7 +506,7 @@ public static partial class ChatEndpoints
     }
 
     /// <summary>A new answer beside the old one (which stays, as another branch).</summary>
-    private static async Task RegenerateAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, IOptions<StackOptions> stack, ChatModels models)
+    private static async Task RegenerateAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, IOptionsMonitor<ChatOptions> chat, ChatModels models)
     {
         var me = await Me(http.User, users);
         if (await Owned(db, id, me) is not { } c)
@@ -517,7 +517,7 @@ public static partial class ChatEndpoints
         // Writing in an archived chat brings it back to the list.
         c.ArchivedAt = null;
         var body = await ReadBodyAsync<Regenerate>(http) ?? new Regenerate();
-        if (body.Thinking is { Length: > 0 } t && !ValidThinking(t, stack.Value))
+        if (body.Thinking is { Length: > 0 } t && !ValidThinking(t, chat.CurrentValue))
         {
             await Problem(http, 400, "thinking", "Unknown thinking level.");
             return;

@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Clock, PlugZap, RotateCcw, RotateCw, Save, Search, Server, Terminal, Undo2, Zap } from 'lucide-react'
+import { AlertTriangle, PlugZap, RotateCcw, RotateCw, Save, Search, Undo2, Zap } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
-import { CodeBlock } from '@/components/app/code-block'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
@@ -90,7 +89,7 @@ export function SettingsPage() {
           const kinds = dirty.map(([k]) => byKey.get(k)!.scope)
           const n = (s: string) => kinds.filter((k) => k === s).length
           toast.success('Saved', {
-            description: [n('live') && `${n('live')} in effect now`, n('apprestart') && `${n('apprestart')} after a restart`, n('stack') && `${n('stack')} waiting for apply-settings.sh`]
+            description: [n('live') && `${n('live')} in effect now`, n('apprestart') && `${n('apprestart')} after a restart`]
               .filter(Boolean)
               .join(' · '),
           })
@@ -113,22 +112,16 @@ export function SettingsPage() {
     <>
       <PageHeader
         title="Settings"
-        description="Everything about this deployment. Each setting says when it applies: at once, after the app restarts, or when you apply .env changes on the host."
+        description="Everything about this deployment. Each setting says when it applies: at once, or after the app restarts."
       />
       <div className="mb-6 grid gap-3">
-        {!data.pendingFileWritable && (
-          <Alert variant="warning" title="Stack settings cannot be saved yet">
-            The app has no settings folder to write to. Run <code className="font-mono">docker compose up -d</code> in the stack folder once, so it gets one.
-          </Alert>
-        )}
-        {data.pendingStack > 0 && <PendingBanner count={data.pendingStack} />}
         {data.restartNeeded && <RestartBanner />}
       </div>
       <div className="grid gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
         <nav aria-label="Setting groups" className="hidden lg:block">
           <div className="sticky top-20 grid gap-0.5">
             {data.groups.map((g) => {
-              const changed = g.settings.filter((s) => s.source === 'saved' || s.pendingSet).length
+              const changed = g.settings.filter((s) => s.source === 'saved').length
               const current = !q && g === active
               return (
                 <Link
@@ -226,7 +219,6 @@ export function SettingsPage() {
 
 function groupNote(settings: SettingView[]): string {
   const scopes = new Set(settings.map((s) => s.scope))
-  if (scopes.size === 1 && scopes.has('stack')) return 'In .env: saved here, applied on the host with scripts/apply-settings.sh.'
   if (scopes.size === 1 && scopes.has('live')) return 'Applies as soon as you save.'
   return 'Each setting says when it applies.'
 }
@@ -234,7 +226,6 @@ function groupNote(settings: SettingView[]): string {
 const scopeBadge: Record<SettingView['scope'], { icon: typeof Zap; text: string; tip: string }> = {
   live: { icon: Zap, text: 'At once', tip: 'Applies as soon as it is saved.' },
   apprestart: { icon: RotateCw, text: 'Restart', tip: 'Read when the app starts: restart it to apply (a few seconds).' },
-  stack: { icon: Server, text: '.env', tip: 'Read by other services from .env: saved here, applied on the host with scripts/apply-settings.sh.' },
 }
 
 function SettingRow({ s, value, error, onChange }: { s: SettingView; value: string; error?: string; onChange: (v: string) => void }) {
@@ -259,11 +250,6 @@ function SettingRow({ s, value, error, onChange }: { s: SettingView; value: stri
             </button>
           </Tooltip>
           {s.source === 'saved' && <Badge>Changed</Badge>}
-          {s.pendingSet && (
-            <Badge variant="warning">
-              <Clock /> Pending
-            </Badge>
-          )}
           {s.restartPending && (
             <Badge variant="warning">
               <RotateCw /> Needs restart
@@ -291,16 +277,16 @@ function SettingRow({ s, value, error, onChange }: { s: SettingView; value: stri
           </p>
         )}
         <Provenance s={s} />
-        {(s.source === 'saved' || s.pendingSet) && (
+        {s.source === 'saved' && (
           <div>
             <Button
               variant="link"
               size="sm"
               className="h-auto px-0 text-xs"
               loading={save.isPending}
-              onClick={() => (s.pendingSet ? reset(s.key, 'Pending change discarded') : reset(s.key, `${s.label}: back to ${s.environmentValue !== null ? 'the .env value' : 'the default'}`))}
+              onClick={() => reset(s.key, `${s.label}: back to ${s.environmentValue !== null ? "the environment's value" : 'the default'}`)}
             >
-              {s.pendingSet ? <Undo2 /> : <RotateCcw />} {s.pendingSet ? 'Discard pending change' : s.environmentValue !== null ? 'Back to the .env value' : 'Back to the default'}
+              <RotateCcw /> {s.environmentValue !== null ? "Back to the environment's value" : 'Back to the default'}
             </Button>
           </div>
         )}
@@ -312,11 +298,8 @@ function SettingRow({ s, value, error, onChange }: { s: SettingView; value: stri
 /** Where the value comes from, in words. */
 function Provenance({ s }: { s: SettingView }) {
   let text: ReactNode = null
-  if (s.scope === 'stack') {
-    if (s.pendingSet) text = s.type === 'secret' ? 'A new value is waiting to be applied.' : <>Now: <code className="font-mono">{s.value || '(empty)'}</code>. The new value is waiting to be applied.</>
-    else if (s.type === 'secret') text = s.isSet ? 'Set in .env. Type a new value to replace it.' : 'Not set.'
-  } else if (s.source === 'saved' && s.environmentValue !== null && s.type !== 'secret') {
-    text = <>Overrides <code className="font-mono">{s.environmentValue || '(empty)'}</code> from .env.</>
+  if (s.source === 'saved' && s.environmentValue !== null && s.type !== 'secret') {
+    text = <>Overrides <code className="font-mono">{s.environmentValue || '(empty)'}</code> from the environment.</>
   } else if (s.type === 'secret') {
     text = s.isSet ? 'Set. Type a new value to replace it.' : 'Not set.'
   } else if (s.source === 'default' && s.default) {
@@ -391,7 +374,7 @@ function Editor({ s, id, value, onChange, describedBy, invalid }: { s: SettingVi
       )
     }
     case 'secret':
-      return <Input {...common} type="password" autoComplete="new-password" value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.isSet || s.pendingSet ? '•••••••• (unchanged)' : 'not set'} />
+      return <Input {...common} type="password" autoComplete="new-password" value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.isSet ? '•••••••• (unchanged)' : 'not set'} />
     default:
       return <Input {...common} value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.patternHelp ?? (s.optional ? 'not set' : undefined)} className={cn(s.key.includes('ARGS') || s.key.includes('FILES') ? 'font-mono text-xs' : undefined)} />
   }
@@ -412,21 +395,6 @@ function DirectoryTest({ draft }: { draft: Record<string, string> }) {
       {test.data && <Alert variant={test.data.ok ? 'success' : 'destructive'}>{test.data.message}</Alert>}
       {test.error && <Alert variant="destructive">{errorMessage(test.error)}</Alert>}
     </div>
-  )
-}
-
-function PendingBanner({ count }: { count: number }) {
-  return (
-    <Alert variant="warning" title={`${count} .env change${count === 1 ? ' is' : 's are'} waiting to be applied`}>
-      <p className="mb-2">
-        Other services read these from <code className="font-mono">.env</code>. On the host, in the stack folder, run the command below. It shows each change and asks before
-        writing <code className="font-mono">.env</code>, then restarts only what changed.
-      </p>
-      <CodeBlock code="./scripts/apply-settings.sh" label="apply command" />
-      <p className="mt-2 flex items-center gap-1.5 text-xs">
-        <Terminal className="size-3.5" aria-hidden="true" /> Settings you change here never reach Docker directly: this web app has no Docker access.
-      </p>
-    </Alert>
   )
 }
 

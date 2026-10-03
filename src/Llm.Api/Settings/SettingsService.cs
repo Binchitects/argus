@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
 using Llm.Api.Identity;
 using Llm.Core.Data;
@@ -7,13 +6,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Settings;
-
-/// <summary>Configuration section "Settings": where pending stack changes are written for scripts/apply-settings.sh.</summary>
-public sealed class SettingsFileOptions
-{
-    /// <summary>In a directory mounted from the host (deploy/config/app).</summary>
-    public string PendingFile { get; set; } = "/settings/pending.env";
-}
 
 /// <summary>Restarts the app so settings read at start apply. The container's restart policy brings it back.</summary>
 public interface IAppRestarter
@@ -48,13 +40,10 @@ public sealed class SettingsValidationException(IReadOnlyDictionary<string, stri
     public IReadOnlyDictionary<string, string> Errors { get; } = errors;
 }
 
-public sealed class SettingsUnavailableException(string message) : Exception(message);
-
 public sealed partial class SettingsService(
     AppDbContext db,
     IConfiguration config,
     DatabaseConfigurationProvider provider,
-    IOptions<SettingsFileOptions> files,
     IOptions<AuthOptions> auth,
     SettingsAtStart atStart,
     Audit audit)
@@ -65,14 +54,11 @@ public sealed partial class SettingsService(
     {
         var saved = (await db.Settings.AsNoTracking().Where(s => s.Key.StartsWith(Row)).Select(s => s.Key).ToListAsync(ct))
             .Select(k => k[Row.Length..]).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var pending = ReadPending(prune: true);
-        var rows = SettingsCatalog.All.Select(d => View(d, saved, pending)).ToList();
+        var rows = SettingsCatalog.All.Select(d => View(d, saved)).ToList();
         return new
         {
             groups = rows.GroupBy(r => r.Group).Select(g => new { title = g.Key, settings = g.ToList() }),
-            pendingStack = pending.Count,
             restartNeeded = rows.Any(r => r.RestartPending),
-            pendingFileWritable = PendingDirectoryWritable(),
         };
     }
 
@@ -80,45 +66,19 @@ public sealed partial class SettingsService(
         string Key, string Group, string Label, string Help, string Type, string Scope,
         IReadOnlyList<string>? Options, decimal? Min, decimal? Max, string? PatternHelp, string? Unit, bool Optional,
         string? Impact, bool Dangerous, string? Default,
-        string? Value, bool IsSet, string Source, string? EnvironmentValue,
-        string? Pending, bool PendingSet, bool RestartPending);
+        string? Value, bool IsSet, string Source, string? EnvironmentValue, bool RestartPending);
 
-    private SettingView View(SettingDefinition d, HashSet<string> saved, Dictionary<string, string> pending)
+    private SettingView View(SettingDefinition d, HashSet<string> saved)
     {
-        string? value;
-        bool isSet;
-        string source;
-        string? environment = null;
-        string? pendingValue = null;
-        var pendingSet = false;
-        var restart = false;
-        if (d.Scope == SettingScope.Stack)
-        {
-            value = d.IsSecret ? null : config[$"StackEnv:{d.Key}"];
-            isSet = d.IsSecret ? config[$"StackEnv:{d.Key}_SET"] == "yes" : !string.IsNullOrEmpty(value);
-            source = "stack";
-            if (pending.TryGetValue(d.Key, out var p))
-            {
-                pendingSet = true;
-                pendingValue = d.IsSecret ? null : p;
-            }
-        }
-        else
-        {
-            var effective = config[d.Key];
-            environment = EnvironmentValue(d.Key);
-            source = saved.Contains(d.Key) ? "saved" : environment is not null ? "environment" : "default";
-            isSet = !string.IsNullOrEmpty(effective) || (source == "default" && !string.IsNullOrEmpty(d.Default));
-            value = d.IsSecret ? null : effective ?? d.Default;
-            if (d.IsSecret)
-            {
-                environment = null;
-            }
-            restart = d.Scope == SettingScope.AppRestart && atStart.Changed(d.Key, effective);
-        }
+        var effective = config[d.Key];
+        var environment = d.IsSecret ? null : EnvironmentValue(d.Key);
+        var source = saved.Contains(d.Key) ? "saved" : EnvironmentValue(d.Key) is not null ? "environment" : "default";
+        var isSet = !string.IsNullOrEmpty(effective) || (source == "default" && !string.IsNullOrEmpty(d.Default));
+        var value = d.IsSecret ? null : effective ?? d.Default;
+        var restart = d.Scope == SettingScope.AppRestart && atStart.Changed(d.Key, effective);
         return new(d.Key, d.Group, d.Label, d.Help, d.Type.ToString().ToLowerInvariant(), d.Scope.ToString().ToLowerInvariant(),
             d.Options, d.Min, d.Max, d.PatternHelp, d.Unit, d.Optional, d.Impact, d.Dangerous, d.IsSecret ? null : d.Default,
-            value, isSet, source, environment, pendingValue, pendingSet, restart);
+            value, isSet, source, environment, restart);
     }
 
     /// <summary>What the configuration says without the Settings page (environment, appsettings).</summary>
@@ -162,34 +122,16 @@ public sealed partial class SettingsService(
             }
             normalised.Add((def, value, false));
         }
-        if (normalised.Any(n => n.Def.IsSecret && n.Def.Scope != SettingScope.Stack && !n.Reset) && string.IsNullOrEmpty(auth.Value.DataKey))
+        if (normalised.Any(n => n.Def.IsSecret && !n.Reset) && string.IsNullOrEmpty(auth.Value.DataKey))
         {
-            errors["_"] = "APP_DATA_KEY is not set, so secrets cannot be stored.";
+            errors["_"] = "APP_KEY is not set, so secrets cannot be stored.";
         }
         if (errors.Count > 0)
         {
             throw new SettingsValidationException(errors);
         }
 
-        var stack = normalised.Where(n => n.Def.Scope == SettingScope.Stack).ToList();
-        if (stack.Count > 0)
-        {
-            var pending = ReadPending(prune: false);
-            foreach (var (def, value, reset) in stack)
-            {
-                if (reset)
-                {
-                    pending.Remove(def.Key);
-                }
-                else
-                {
-                    pending[def.Key] = value!;
-                }
-            }
-            WritePending(pending);
-        }
-
-        foreach (var (def, value, reset) in normalised.Where(n => n.Def.Scope != SettingScope.Stack))
+        foreach (var (def, value, reset) in normalised)
         {
             var key = Row + def.Key;
             var row = await db.Settings.SingleOrDefaultAsync(s => s.Key == key, ct);
@@ -217,11 +159,8 @@ public sealed partial class SettingsService(
 
         foreach (var (def, value, reset) in normalised)
         {
-            var what = reset
-                ? def.Scope == SettingScope.Stack ? "pending change discarded" : "back to the environment or default"
-                : def.IsSecret ? "a new secret value" : $"set to \"{Shorten(value)}\"";
-            var where = def.Scope == SettingScope.Stack && !reset ? " (pending: apply-settings.sh)" : "";
-            await audit.WriteAsync("settings.change", def.Key, detail: what + where);
+            var what = reset ? "back to the environment or default" : def.IsSecret ? "a new secret value" : $"set to \"{Shorten(value)}\"";
+            await audit.WriteAsync("settings.change", def.Key, detail: what);
         }
     }
 
@@ -234,10 +173,6 @@ public sealed partial class SettingsService(
         if (value.Length == 0)
         {
             return d.Optional ? null : "Required.";
-        }
-        if (d.Scope == SettingScope.Stack && value.IndexOfAny(['\r', '\n', '"', '\'', '`', '$', '\\', '#']) >= 0)
-        {
-            return "Quotes, $, #, backslashes and line breaks are not allowed: .env would read them differently.";
         }
         if (value.Length > 4096)
         {
@@ -332,106 +267,5 @@ public sealed partial class SettingsService(
         return d.Min is { } min && v < min ? $"At least {min.ToString(CultureInfo.InvariantCulture)}{unit}."
             : d.Max is { } max && v > max ? $"At most {max.ToString(CultureInfo.InvariantCulture)}{unit}."
             : null;
-    }
-
-    // ------------------------------------------------------------ pending (.env) --
-
-    /// <summary>
-    /// Stack changes waiting for scripts/apply-settings.sh. With <paramref name="prune"/>,
-    /// changes that are already in effect (applied by hand, or by the script) are dropped.
-    /// </summary>
-    public Dictionary<string, string> ReadPending(bool prune)
-    {
-        var path = files.Value.PendingFile;
-        var pending = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!File.Exists(path))
-        {
-            return pending;
-        }
-        foreach (var line in File.ReadAllLines(path))
-        {
-            var eq = line.IndexOf('=', StringComparison.Ordinal);
-            if (line.StartsWith('#') || eq <= 0)
-            {
-                continue;
-            }
-            var key = line[..eq].Trim();
-            if (SettingsCatalog.ByKey.TryGetValue(key, out var d) && d.Scope == SettingScope.Stack)
-            {
-                pending[key] = line[(eq + 1)..];
-            }
-        }
-        if (prune)
-        {
-            var applied = pending.Where(p => !SettingsCatalog.ByKey[p.Key].IsSecret && string.Equals(config[$"StackEnv:{p.Key}"] ?? "", p.Value, StringComparison.Ordinal))
-                .Select(p => p.Key).ToList();
-            if (applied.Count > 0 && PendingDirectoryWritable())
-            {
-                applied.ForEach(k => pending.Remove(k));
-                WritePending(pending);
-            }
-        }
-        return pending;
-    }
-
-    private bool PendingDirectoryWritable()
-    {
-        var dir = Path.GetDirectoryName(files.Value.PendingFile);
-        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
-        {
-            return false;
-        }
-        try
-        {
-            var probe = Path.Combine(dir, $".probe-{Guid.NewGuid():N}");
-            File.WriteAllText(probe, "");
-            File.Delete(probe);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
-
-    private void WritePending(Dictionary<string, string> pending)
-    {
-        var path = files.Value.PendingFile;
-        var dir = Path.GetDirectoryName(path)!;
-        if (!Directory.Exists(dir))
-        {
-            throw new SettingsUnavailableException($"The app cannot save stack settings: {dir} is not mounted. Update the stack (docker compose up -d) so the app has its settings directory.");
-        }
-        if (pending.Count == 0)
-        {
-            File.Delete(path);
-            return;
-        }
-        var sb = new StringBuilder()
-            .AppendLine("# Settings saved in the app, waiting to be applied. Apply them on the host with")
-            .AppendLine("#   ./scripts/apply-settings.sh")
-            .AppendLine("# which shows each change, asks, writes .env and recreates what changed.");
-        foreach (var d in SettingsCatalog.StackSettings)
-        {
-            if (pending.TryGetValue(d.Key, out var v))
-            {
-                sb.Append(d.Key).Append('=').AppendLine(v);
-            }
-        }
-        var temp = path + ".tmp";
-        try
-        {
-            File.WriteAllText(temp, sb.ToString());
-            if (!OperatingSystem.IsWindows())
-            {
-                // It can hold a secret (a GitLab token): the owner only, like .env.
-                File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
-            File.Move(temp, path, overwrite: true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            throw new SettingsUnavailableException($"The app cannot write {path}: {ex.Message}");
-        }
     }
 }

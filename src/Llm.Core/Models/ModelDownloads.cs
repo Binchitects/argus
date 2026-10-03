@@ -27,6 +27,8 @@ public sealed class ModelDownload
 public sealed class DownloadFile
 {
     public required string Path { get; set; }
+    /// <summary>Where it goes under the download's folder, when not at its path in the repository.</summary>
+    public string? Target { get; set; }
     public long Size { get; set; }
     public string? Sha256 { get; set; }
 }

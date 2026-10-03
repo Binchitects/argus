@@ -26,18 +26,13 @@ public sealed partial class SettingsTests(AppFixture app)
     }
 
     /// <summary>Its own app and database: saved settings must never leak into other tests.</summary>
-    private (WebApplicationFactory<Program> App, string Pending, FakeRestarter Restarter, string Db) NewApp(Dictionary<string, string?>? extra = null, string? db = null, string? pendingDir = null)
+    private (WebApplicationFactory<Program> App, FakeRestarter Restarter, string Db) NewApp(Dictionary<string, string?>? extra = null, string? db = null)
     {
         db ??= app.ConnectionStringFor("settings_" + Guid.NewGuid().ToString("N")[..8]);
-        pendingDir ??= Directory.CreateTempSubdirectory("llm-settings-").FullName;
         var settings = new Dictionary<string, string?>
         {
             ["Auth:DataKey"] = DataKey,
-            ["Settings:PendingFile"] = Path.Combine(pendingDir, "pending.env"),
-            ["StackEnv:MODEL_CONTEXT"] = "131072",
-            ["StackEnv:MODEL_NAME"] = "Test-Model",
-            ["StackEnv:ARGUS_GITLAB_TOKEN_SET"] = "yes",
-            ["StackEnv:COMPOSE_PROFILES"] = "gateway,proxy,auth,llamacpp",
+            ["Mail:Password"] = "smtp-secret-from-the-environment",
             ["Ldap:AdminGroup"] = "env-admins",
         };
         foreach (var (k, v) in extra ?? [])
@@ -47,7 +42,7 @@ public sealed partial class SettingsTests(AppFixture app)
         var restarter = new FakeRestarter();
         var factory = app.Create(db, new FakeGateway(), settings)
             .WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton<IAppRestarter>(restarter)));
-        return (factory, Path.Combine(pendingDir, "pending.env"), restarter, db);
+        return (factory, restarter, db);
     }
 
     private static async Task<TestBrowser> Admin(WebApplicationFactory<Program> f) => await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
@@ -61,7 +56,7 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task Only_admins_see_the_settings()
     {
-        var (f, _, _, _) = NewApp();
+        var (f, _, _) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = "setmember", email = "setmember@example.test" }));
@@ -73,25 +68,24 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task The_view_shows_values_and_where_they_come_from_and_never_a_secret()
     {
-        var (f, _, _, _) = NewApp();
+        var (f, _, _) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         var view = await admin.JsonAsync(await admin.GetAsync("/api/admin/config"));
-        Assert.Equal("131072", Setting(view, "MODEL_CONTEXT").GetProperty("value").GetString());
-        Assert.Equal("stack", Setting(view, "MODEL_CONTEXT").GetProperty("source").GetString());
-        var token = Setting(view, "ARGUS_GITLAB_TOKEN");
-        Assert.Equal(JsonValueKind.Null, token.GetProperty("value").ValueKind);
-        Assert.True(token.GetProperty("isSet").GetBoolean());
+        var secret = Setting(view, "Mail:Password");
+        Assert.Equal(JsonValueKind.Null, secret.GetProperty("value").ValueKind);
+        Assert.Equal(JsonValueKind.Null, secret.GetProperty("environmentValue").ValueKind);
+        Assert.True(secret.GetProperty("isSet").GetBoolean());
+        Assert.DoesNotContain("smtp-secret-from-the-environment", view.GetRawText(), StringComparison.Ordinal);
         Assert.Equal("environment", Setting(view, "Ldap:AdminGroup").GetProperty("source").GetString());
         Assert.Equal("default", Setting(view, "Chat:MaxToolRounds").GetProperty("source").GetString());
         Assert.Equal("8", Setting(view, "Chat:MaxToolRounds").GetProperty("value").GetString());
-        Assert.True(view.GetProperty("pendingFileWritable").GetBoolean());
     }
 
     [Fact]
     public async Task A_live_setting_applies_when_saved_and_a_reset_brings_the_default_back()
     {
-        var (f, _, _, _) = NewApp();
+        var (f, _, _) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         var monitor = f.Services.GetRequiredService<IOptionsMonitor<ChatOptions>>();
@@ -110,7 +104,7 @@ public sealed partial class SettingsTests(AppFixture app)
     public async Task The_chat_links_to_gitlab_where_browsers_reach_it()
     {
         // Argus may reach GitLab by an internal name that no browser can open.
-        var (f, _, _, _) = NewApp(new() { ["Argus:GitlabUrl"] = "http://gitlab.internal:8929/" });
+        var (f, _, _) = NewApp(new() { ["Argus:GitlabUrl"] = "http://gitlab.internal:8929/" });
         await using var _f = f;
         var admin = await Admin(f);
         async Task<string?> Link() => (await admin.JsonAsync(await admin.GetAsync("/api/chat/config"))).GetProperty("gitlabUrl").GetString();
@@ -127,7 +121,7 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task A_saved_value_wins_over_the_environment_and_the_page_says_what_it_overrides()
     {
-        var (f, _, _, _) = NewApp();
+        var (f, _, _) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         var view = await admin.JsonAsync(await Save(admin, new { key = "Ldap:AdminGroup", value = "saved-admins" }));
@@ -140,19 +134,19 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task Invalid_values_are_refused_all_together_and_nothing_is_saved()
     {
-        var (f, _, _, _) = NewApp();
+        var (f, _, _) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         var res = await Save(admin,
             new { key = "Chat:MaxToolRounds", value = "5" },
             new { key = "Chat:MaxAttachmentChars", value = "a lot" },
             new { key = "Ldap:Url", value = "http://not-ldap" },
-            new { key = "MODEL_NAME", value = "bad$(id)" },
-            new { key = "COMPOSE_PROFILES", value = "gateway,nonsense" },
+            new { key = "Engine:ModelsMax", value = "99" },
+            new { key = "Chat:ThinkingPresets", value = "no levels here" },
             new { key = "No:Such", value = "x" });
         await StatusAssert.Is(HttpStatusCode.BadRequest, res);
         var errors = (await admin.JsonAsync(res)).GetProperty("errors");
-        foreach (var key in new[] { "Chat:MaxAttachmentChars", "Ldap:Url", "MODEL_NAME", "COMPOSE_PROFILES", "No:Such" })
+        foreach (var key in new[] { "Chat:MaxAttachmentChars", "Ldap:Url", "Engine:ModelsMax", "Chat:ThinkingPresets", "No:Such" })
         {
             Assert.True(errors.TryGetProperty(key, out _), key);
         }
@@ -163,7 +157,7 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task A_secret_is_stored_encrypted_used_in_plain_and_never_sent_back()
     {
-        var (f, _, _, db) = NewApp();
+        var (f, _, db) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         const string secret = "directory-service-password-123";
@@ -184,13 +178,12 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task Saved_settings_are_in_effect_from_the_start_after_a_restart()
     {
-        var dir = Directory.CreateTempSubdirectory("llm-settings-").FullName;
-        var (first, _, _, db) = NewApp(pendingDir: dir);
+        var (first, _, db) = NewApp();
         await using (first)
         {
             await StatusAssert.Is(HttpStatusCode.OK, await Save(await Admin(first), new { key = "Branding:ProductName", value = "Acme AI" }));
         }
-        var (second, _, _, _) = NewApp(db: db, pendingDir: dir);
+        var (second, _, _) = NewApp(db: db);
         await using var _s = second;
         var info = await new TestBrowser(second).JsonAsync(await new TestBrowser(second).GetAsync("/api/info"));
         Assert.Equal("Acme AI", info.GetProperty("name").GetString());
@@ -199,7 +192,7 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task Branding_shows_on_the_public_info_at_once()
     {
-        var (f, _, _, _) = NewApp();
+        var (f, _, _) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         await Save(admin, new { key = "Branding:SupportContact", value = "it-help@example.test" }, new { key = "Branding:SignInHeadline", value = "Ask anything." });
@@ -209,56 +202,9 @@ public sealed partial class SettingsTests(AppFixture app)
     }
 
     [Fact]
-    public async Task A_stack_setting_waits_in_the_pending_file_for_the_host_script()
-    {
-        var (f, pending, _, _) = NewApp();
-        await using var _f = f;
-        var admin = await Admin(f);
-        var view = await admin.JsonAsync(await Save(admin,
-            new { key = "MODEL_CONTEXT", value = "65536" },
-            new { key = "ARGUS_GITLAB_TOKEN", value = "glpat-new-token" },
-            new { key = "COMPOSE_PROFILES", value = "argus, gateway ,proxy" }));
-        var text = await File.ReadAllTextAsync(pending);
-        Assert.Contains("MODEL_CONTEXT=65536", text, StringComparison.Ordinal);
-        Assert.Contains("ARGUS_GITLAB_TOKEN=glpat-new-token", text, StringComparison.Ordinal);
-        // Normalised into the catalog's order, whatever order it was typed in.
-        Assert.Contains("COMPOSE_PROFILES=gateway,proxy,argus", text, StringComparison.Ordinal);
-        if (!OperatingSystem.IsWindows())
-        {
-            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(pending));
-        }
-
-        Assert.Equal(3, view.GetProperty("pendingStack").GetInt32());
-        Assert.Equal("65536", Setting(view, "MODEL_CONTEXT").GetProperty("pending").GetString());
-        Assert.Equal("131072", Setting(view, "MODEL_CONTEXT").GetProperty("value").GetString());
-        var token = Setting(view, "ARGUS_GITLAB_TOKEN");
-        Assert.True(token.GetProperty("pendingSet").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, token.GetProperty("pending").ValueKind);
-        Assert.DoesNotContain("glpat-new-token", view.GetRawText(), StringComparison.Ordinal);
-
-        // Discarding one keeps the others.
-        await Save(admin, new { key = "MODEL_CONTEXT", reset = true });
-        Assert.DoesNotContain("MODEL_CONTEXT", await File.ReadAllTextAsync(pending), StringComparison.Ordinal);
-        await Save(admin, new { key = "ARGUS_GITLAB_TOKEN", reset = true }, new { key = "COMPOSE_PROFILES", reset = true });
-        Assert.False(File.Exists(pending));
-    }
-
-    [Fact]
-    public async Task A_pending_change_already_in_effect_is_dropped()
-    {
-        var (f, pending, _, _) = NewApp();
-        await using var _f = f;
-        // The script applied it (or someone edited .env): the stack now has what was pending.
-        await File.WriteAllTextAsync(pending, "MODEL_CONTEXT=131072\nMODEL_NAME=Other-Model\n");
-        var view = await (await Admin(f)).JsonAsync(await (await Admin(f)).GetAsync("/api/admin/config"));
-        Assert.Equal(1, view.GetProperty("pendingStack").GetInt32());
-        Assert.Equal("MODEL_NAME=Other-Model", (await File.ReadAllLinesAsync(pending)).Single(l => !l.StartsWith('#')));
-    }
-
-    [Fact]
     public async Task A_setting_read_at_start_asks_for_a_restart_which_the_app_does_itself()
     {
-        var (f, _, restarter, _) = NewApp();
+        var (f, restarter, _) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         var view = await admin.JsonAsync(await Save(admin, new { key = "Auth:SessionIdle", value = "00:30:00" }));
@@ -274,7 +220,7 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task Durations_are_checked_in_their_unit()
     {
-        var (f, _, _, _) = NewApp();
+        var (f, _, _) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         var res = await Save(admin, new { key = "Auth:SessionIdle", value = "00:01:00" });
@@ -285,7 +231,7 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task The_directory_test_says_what_is_wrong_before_anything_is_saved()
     {
-        var (f, _, _, _) = NewApp();
+        var (f, _, _) = NewApp();
         await using var _f = f;
         var admin = await Admin(f);
         var none = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-test", new Dictionary<string, string?> { ["Ldap:Url"] = "" }));
@@ -314,24 +260,6 @@ public sealed partial class SettingsTests(AppFixture app)
     }
 
     [Fact]
-    public void Every_stack_setting_reaches_the_app_through_compose_and_nothing_else_does()
-    {
-        var compose = File.ReadAllText(Path.Combine(AppFixture.DashboardsPath, "..", "..", "docker-compose.yml"));
-        var passed = StackEnvName().Matches(compose).Select(m => m.Groups[1].Value).ToHashSet();
-        foreach (var d in SettingsCatalog.StackSettings)
-        {
-            Assert.Contains(d.IsSecret ? d.Key + "_SET" : d.Key, passed);
-        }
-        var known = SettingsCatalog.StackSettings.Select(d => d.IsSecret ? d.Key + "_SET" : d.Key).ToHashSet();
-        Assert.Empty(passed.Except(known));
-        // A secret is passed only as "is it set", never its value.
-        foreach (var d in SettingsCatalog.StackSettings.Where(d => d.IsSecret))
-        {
-            Assert.Contains($"StackEnv__{d.Key}_SET: ${{{d.Key}:+yes}}", compose, StringComparison.Ordinal);
-        }
-    }
-
-    [Fact]
     public void The_catalog_defaults_are_the_code_defaults()
     {
         var chat = new ChatOptions();
@@ -356,13 +284,13 @@ public sealed partial class SettingsTests(AppFixture app)
             ["Ldap:SyncInterval"] = ldap.SyncInterval.ToString("c"),
             ["Branding:ProductName"] = branding.ProductName,
             ["Branding:SignInHeadline"] = branding.SignInHeadline!,
+            ["Chat:ThinkingPresets"] = chat.ThinkingPresets,
+            ["Chat:DefaultThinking"] = chat.DefaultThinking,
+            ["Engine:ModelsMax"] = new Llm.Api.Models.EngineOptions().ModelsMax.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
         foreach (var (key, value) in expected)
         {
             Assert.Equal(value, SettingsCatalog.ByKey[key].Default);
         }
     }
-
-    [GeneratedRegex(@"StackEnv__([A-Z0-9_]+):")]
-    private static partial Regex StackEnvName();
 }

@@ -119,7 +119,7 @@ public sealed class RemoteServersTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Https_servers_are_checked_against_the_stacks_bundle_unless_an_admin_says_not_to()
+    public async Task Https_servers_are_checked_against_the_public_roots_unless_an_admin_says_not_to()
     {
         var (f, gateway) = NewApp();
         await using var _f = f;
@@ -129,7 +129,7 @@ public sealed class RemoteServersTests(AppFixture app)
             new { name = "Checked", baseUrl = "https://gpu-box:8000/v1", apiKey = FakeRemote.Key, models = new[] { new { remote = "big-remote", name = "checked" } } }));
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/servers",
             new { name = "Unchecked", baseUrl = "https://gpu-box:8000/v1", apiKey = FakeRemote.Key, verifyTls = false, models = new[] { new { remote = "big-remote", name = "unchecked" } } }));
-        Assert.Equal("/certs/bundle.crt", gateway.Managed.Values.Single(m => m.Name == "checked").Params["ssl_verify"]!.GetValue<string>());
+        Assert.True(gateway.Managed.Values.Single(m => m.Name == "checked").Params["ssl_verify"]!.GetValue<bool>());
         Assert.False(gateway.Managed.Values.Single(m => m.Name == "unchecked").Params["ssl_verify"]!.GetValue<bool>());
         // Two models of one name on one server, or a name that is not one, are refused.
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/servers",

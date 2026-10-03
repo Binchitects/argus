@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Boxes, CircleDot, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Pencil, Pin, Plus, Power, PowerOff, Settings2, Trash2, XCircle } from 'lucide-react'
+import { Boxes, CircleDot, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Pencil, Pin, Plus, Power, PowerOff, Trash2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -24,7 +24,7 @@ import { ServersSection } from './servers'
 
 interface ModelRow extends SavedModel {
   /** env: the .env model; local: added here; remote: on another GPU server; gateway: served by the gateway otherwise (cloud, pictures). */
-  source: 'env' | 'local' | 'remote' | 'gateway'
+  source: 'local' | 'remote' | 'gateway'
   /** For a remote model: its server, and its id there. */
   server?: string
   remote?: string
@@ -88,11 +88,6 @@ export function ModelsPage() {
         description="Every model at the gateway, and who may use each. The engine holds several at once: the ones kept loaded stay, and the others load when asked for."
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link to="/admin/model">
-                <Settings2 /> Deployment
-              </Link>
-            </Button>
             {engine.enabled && (
               <Button variant="outline" onClick={() => setHf(true)}>
                 <Search /> Find on Hugging Face
@@ -116,7 +111,7 @@ export function ModelsPage() {
       {engine.enabled && <EngineSummary engine={engine} />}
       {engine.enabled && (
         <WorkingHours
-          engineModels={models.data.models.filter((m) => m.source === 'env' || m.source === 'local').map((m) => m.name)}
+          engineModels={models.data.models.filter((m) => m.source === 'local').map((m) => m.name)}
           chatModels={[...new Set(models.data.models.filter((m) => (m.mode ?? 'chat') === 'chat').map((m) => m.name))]}
         />
       )}
@@ -266,7 +261,7 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
           <CardTitle className="flex flex-wrap items-center gap-2 [overflow-wrap:anywhere]">
             {m.name}
             <Badge variant={m.source === 'local' ? 'default' : 'secondary'}>
-              {m.source === 'env' ? '.env' : m.source === 'local' ? 'Added here' : m.source === 'remote' ? `On ${m.server}` : 'Gateway'}
+              {m.source === 'local' ? 'Added here' : m.source === 'remote' ? `On ${m.server}` : 'Gateway'}
             </Badge>
             {image && <Badge variant="outline">Pictures</Badge>}
             {m.kept && (

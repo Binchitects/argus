@@ -1,0 +1,43 @@
+# Traefik's routes. DOMAIN and ACME_EMAIL come from .env through compose.
+{{ $domain := env "DOMAIN" }}
+{{ $acme := env "ACME_EMAIL" }}
+http:
+  routers:
+    # The web on the bare domain, except the app's paths.
+    web:
+      rule: Host(`{{ $domain }}`)
+      service: web
+      middlewares: [secure]
+      tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
+    app:
+      rule: Host(`{{ $domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`))
+      service: app
+      middlewares: [secure]
+      tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
+    # The API for keys: OpenAI and Anthropic protocols.
+    gateway:
+      rule: Host(`gateway.{{ $domain }}`)
+      service: litellm
+      middlewares: [secure]
+      tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
+    # Argus's MCP, for coding agents with their own key.
+    argus:
+      rule: Host(`argus.{{ $domain }}`)
+      service: argus
+      middlewares: [secure]
+      tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
+
+  services:
+    web: { loadBalancer: { servers: [{ url: "http://web:8080" }] } }
+    app: { loadBalancer: { servers: [{ url: "http://app:8080" }] } }
+    litellm: { loadBalancer: { servers: [{ url: "http://litellm:4000" }] } }
+    argus: { loadBalancer: { servers: [{ url: "http://argus:7700" }] } }
+
+  middlewares:
+    secure:
+      chain: { middlewares: [headers, compress] }
+    headers:
+      headers: { contentTypeNosniff: true, referrerPolicy: same-origin }
+    # Not the answer streams: compressing them would hold words back.
+    compress:
+      compress: { excludedContentTypes: [text/event-stream] }

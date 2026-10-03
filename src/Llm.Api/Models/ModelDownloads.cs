@@ -53,6 +53,8 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
     }
 
     /// <summary>Where a download's file goes, under the library; null when the path would leave it.</summary>
+    public string? PathOf(ModelDownload d, DownloadFile f) => PathOf(d, f.Target ?? f.Path);
+
     public string? PathOf(ModelDownload d, string file)
     {
         var root = System.IO.Path.GetFullPath(Root);
@@ -65,7 +67,7 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
     {
         foreach (var f in d.Files)
         {
-            if (PathOf(d, f.Path) is { } path && File.Exists(path + ".part"))
+            if (PathOf(d, f) is { } path && File.Exists(path + ".part"))
             {
                 File.Delete(path + ".part");
             }
@@ -132,7 +134,7 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
         {
             foreach (var f in d.Files)
             {
-                var path = PathOf(d, f.Path) ?? throw new IOException($"{f.Path} would land outside the model library.");
+                var path = PathOf(d, f) ?? throw new IOException($"{f.Path} would land outside the model library.");
                 if (File.Exists(path) && new FileInfo(path).Length == f.Size)
                 {
                     done += f.Size;
@@ -160,7 +162,7 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
         {
             d.State = "failed";
             d.Error = ex is UnauthorizedAccessException
-                ? $"The app cannot write to the model library ({Root}): mount it writable for the app's user (LLM_UID)."
+                ? $"The app cannot write to the model library ({Root}): MODELS_DIR must be writable for the app's user (uid 1000)."
                 : ex.Message;
             LogDownloadFailed(logger, d.Repo, ex.Message);
         }

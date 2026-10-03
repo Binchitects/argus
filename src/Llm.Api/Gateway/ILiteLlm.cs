@@ -12,7 +12,7 @@ public sealed record GatewayUser(string UserId, decimal Spend, decimal? Budget);
 /// Prices are per million tokens.
 /// </summary>
 /// <summary>A model the gateway serves. Mode is "chat", or "image_generation" for a picture model.</summary>
-public sealed record GatewayModel(string Name, int? Context, int? MaxOutput, bool Vision, bool Tools, bool Thinking, decimal? InputPerMtok, decimal? CachedInputPerMtok, decimal? OutputPerMtok, string Mode = "chat");
+public sealed record GatewayModel(string Name, int? Context, int? MaxOutput, bool Vision, bool Tools, bool Thinking, decimal? InputPerMtok, decimal? CachedInputPerMtok, decimal? OutputPerMtok, string Mode = "chat", bool Audio = false);
 
 /// <summary>A model the app added to the gateway (model_info.llm_app = "local"): the gateway's id for it, and what it was added with.</summary>
 public sealed record ManagedModel(string Id, string Name, string? Fingerprint);

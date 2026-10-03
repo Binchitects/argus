@@ -156,7 +156,7 @@ public static class TaskEndpoints
 
     /// <summary>What checking a task needs: the clock, the options, and the chat's models and tools as this person may use them.</summary>
     public sealed record TaskContext(TimeProvider Clock, IOptionsMonitor<ScheduleOptions> Options, Mailer Mailer, Webhooks Webhooks, ModelPolicy Policy,
-        ChatModels Models, ToolRegistry Registry, AccessService Access, IOptions<StackOptions> Stack, IOptions<AuthOptions> Auth);
+        ChatModels Models, ToolRegistry Registry, AccessService Access, IOptionsMonitor<Chat.ChatOptions> Chat, IOptions<AuthOptions> Auth);
 
     private static async Task<IResult?> ApplyAsync(ScheduledTask task, TaskRequest body, AppUser me, TaskContext x, bool creating, CancellationToken ct)
     {
@@ -205,7 +205,7 @@ public static class TaskEndpoints
             }
         }
         var thinking = body.Thinking is null ? task.Thinking : body.Thinking.Trim() is { Length: > 0 } th ? th : null;
-        if (thinking is not null && thinking != "off" && !ThinkingPresets.Parse(x.Stack.Value.ThinkingPresets).Any(pr => pr.Level == thinking))
+        if (thinking is not null && thinking != "off" && !ThinkingPresets.Parse(x.Chat.CurrentValue.ThinkingPresets).Any(pr => pr.Level == thinking))
         {
             return AuthEndpoints.Problem(400, "thinking", "Unknown thinking level.");
         }

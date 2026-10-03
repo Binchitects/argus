@@ -23,6 +23,9 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Models\engine-options.txt" LogicalName="engine-options.txt" />
+    <!-- The dashboards go into the image at /dashboards (Dockerfile), not beside the app. -->
+    <Content Remove="Dashboards\json\**" />
+    <None Include="Dashboards\json\**" />
   </ItemGroup>
 
 </Project>
