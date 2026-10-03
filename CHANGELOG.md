@@ -12,6 +12,69 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v3.1.0 (2026-10-02)
+
+### :rocket: Epics and highlights
+
+- **Sub-agents.** The model splits a task into parts done side by side by
+  sub-agents with the chat's tools. Their work shows live, one under the
+  other, as the chat shows its own (thinking, tool cards, pictures, words),
+  folds when done, and is kept with the call; what they make (ten pictures at
+  once included) is the chat's, in the answer and the Files panel as soon as
+  it exists
+- **Scheduled tasks.** Questions asked on a schedule, as you, delivered as a
+  chat, a notification, an email and a webhook post
+- **Notifications that happen**: an answer ready while you were away, a task
+  run, credit at 80% and used up, system alerts for admins, model downloads;
+  on the desktop too while the tab is hidden
+
+### :sparkles: New features & Enhancements
+
+- **Chat**
+  - **Answer now** cuts a long thought short and answers at once
+  - A **context gauge** shows how full the model's context is and what fills
+    it (system prompt, tools, files, your messages, answers, tool results),
+    with **Compact now**; compaction by hand or on its own before it fills
+  - The model **asks you** with choices instead of guessing
+  - **Documents** (PDF, Word, PowerPoint, Excel, OpenDocument) show as their
+    pages; pictures and pages **zoom**
+  - **Download all** of a chat's files as one zip
+  - **Mermaid** diagrams drawn in the answer, tall and wide ones readable;
+    right-to-left text read in its own direction; tool calls show code and
+    output as code blocks; tool calls may run for hours and show progress
+  - Answers finish when the page is closed, and can be watched again
+- **Models**
+  - **Hugging Face**: search GGUF models, see which fit the machine, download
+    into the library (resumed, checked against their SHA-256)
+  - **Working hours**: which models are kept loaded, and which new chats start
+    on, by day and hour
+- **Argus indexing**: choose repositories and branches, update one, see each
+  at its commit with progress, on a schedule
+- **Sandbox**: OCR in Arabic, Persian and Chinese (simplified and
+  traditional); Chinese, Japanese and Korean fonts; LibreOffice runs in a job
+- **Accessibility**: focus comes back to what opened a dialog; the chat
+  announces only what matters; contrast and target sizes checked on every page
+- **One version everywhere**: `VERSION` at the repository's root sets the
+  app's, Argus's and the UI's
+- **TLS**: the stack makes its own CA once and signs the domain's certificate
+  with it (renewed, and reissued for a new domain, with no restart), so people
+  trust it once; or the operator's own certificate. No HSTS, so a browser can
+  still pass the warning before it trusts the CA
+
+### :bug: Bugs fixed
+
+- Spend: the overview, People, the export and each person's credit counted
+  only API keys (LiteLLM books the chat to the person as an end user); they now
+  read the gateway's request log as the dashboards do. An answer's cost counts
+  its sub-agents
+- Pictures made by sub-agents running side by side were lost (a shared
+  database context); each sub-agent now works in its own scope
+- The UI said v1.0.0 (an empty build argument hid `VERSION`)
+- A sent file stayed in the input box until the whole answer had finished
+- The time zone picker on the indexing page did not open
+- The Files sheet on a phone had two close buttons on top of each other; the
+  picture viewer opened with focus on a tooltip, so Escape closed only that
+
 ## v3.0.0 (2026-09-28)
 
 ### :rocket: Epics and highlights

@@ -485,6 +485,8 @@ test.describe('chat with the model', () => {
     await page.getByRole('button', { name: /^Files \(\d+\)$/ }).click()
     const panel = page.getByRole('complementary', { name: 'Files' })
     await panel.getByRole('button', { name: /budget\.xlsx/ }).click()
+    // A workbook shows its pages first; the text the model read is a tab away.
+    await panel.getByRole('tab', { name: 'Text' }).click()
     await expect(panel).toContainText('## Sheet: Budget')
   })
 
