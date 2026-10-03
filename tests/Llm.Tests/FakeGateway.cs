@@ -61,9 +61,17 @@ public sealed class FakeGateway : ILiteLlm
 
     public List<string> ServiceKeys { get; } = [];
 
+    /// <summary>Key requests refused as unreachable before one is made (a gateway still settling).</summary>
+    public int ServiceKeyFailures { get; set; }
+
     public Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default)
     {
         Check();
+        if (ServiceKeyFailures > 0)
+        {
+            ServiceKeyFailures--;
+            throw new GatewayException("The gateway is unreachable (still settling).");
+        }
         var secret = $"sk-{keyAlias}-" + Guid.NewGuid().ToString("N")[..12];
         lock (ServiceKeys)
         {

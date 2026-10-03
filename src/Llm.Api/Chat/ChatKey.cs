@@ -36,7 +36,21 @@ public sealed class ChatKey(IServiceScopeFactory scopes, IDataProtectionProvider
             {
                 return _cached = _protector.Unprotect(row.Value);
             }
-            var key = await scope.ServiceProvider.GetRequiredService<ILiteLlm>().GenerateServiceKeyAsync(Alias, ct);
+            // A new deployment: the gateway answers before it is ready to make keys. A few tries, a little apart.
+            var gateway = scope.ServiceProvider.GetRequiredService<ILiteLlm>();
+            string key;
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    key = await gateway.GenerateServiceKeyAsync(Alias, ct);
+                    break;
+                }
+                catch (Gateway.GatewayException) when (attempt < 5)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(500 * (1 << (attempt - 1))), ct);
+                }
+            }
             db.Settings.Add(new Setting { Key = SettingKey, Value = _protector.Protect(key) });
             await db.SaveChangesAsync(ct);
             return _cached = key;

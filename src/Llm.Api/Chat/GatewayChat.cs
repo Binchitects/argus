@@ -76,17 +76,10 @@ public sealed class GatewayChat(HttpClient http, ChatKey key)
 
     private async Task<HttpResponseMessage> PostAsync(string path, JsonObject request, string personEmail, string accept, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative))
-        {
-            Content = new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json"),
-        };
-        // Attribution (LiteLLM's user_header_mappings); enforcement is the body's
-        // `user` field, set by the caller.
-        req.Headers.Add(UserEmailHeader, personEmail);
-        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
+        string bearer;
         try
         {
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await key.GetAsync(ct));
+            bearer = await key.GetAsync(ct);
         }
         catch (Gateway.GatewayException ex)
         {
@@ -94,13 +87,31 @@ public sealed class GatewayChat(HttpClient http, ChatKey key)
         }
 
         HttpResponseMessage res;
-        try
+        // A dropped connection (the gateway restarting, a new deployment settling) is tried again, twice, a little apart.
+        for (var attempt = 1; ; attempt++)
         {
-            res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new ChatGatewayException("The model gateway is not reachable right now.", null) { Data = { ["inner"] = ex.Message } };
+            using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative))
+            {
+                Content = new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json"),
+            };
+            // Attribution (LiteLLM's user_header_mappings); enforcement is the body's
+            // `user` field, set by the caller.
+            req.Headers.Add(UserEmailHeader, personEmail);
+            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+            try
+            {
+                res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                break;
+            }
+            catch (HttpRequestException) when (attempt < 3)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(attempt), ct);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new ChatGatewayException("The model gateway is not reachable right now.", null) { Data = { ["inner"] = ex.Message } };
+            }
         }
         if (!res.IsSuccessStatusCode)
         {

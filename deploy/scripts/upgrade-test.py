@@ -115,13 +115,15 @@ def wait_model(c: Client, minutes: int = 15) -> str | None:
 def ask(c: Client, chat: str, text: str, attachments: list[str] | None = None) -> str:
     """Sends and reads the answer stream to its end: the answer's words."""
     status, body = c.call(f"/api/chat/conversations/{chat}/messages", {"content": text, "attachments": attachments or []}, timeout=600)
-    words = ""
+    words, errors = "", []
     for line in (body if isinstance(body, str) else "").split("\n"):
         if line.startswith("data: "):
             e = json.loads(line[6:])
             if e.get("type") == "content":
                 words += e.get("text", "")
-    return words if status == 200 else f"HTTP {status}"
+            elif e.get("type") in ("error", "notice"):
+                errors.append(f"{e['type']}: {e.get('message') or e.get('text')}")
+    return words if status == 200 and words else f"HTTP {status}; {'; '.join(errors) or str(body)[-300:]}"
 
 
 def compose(compose_file: Path, env_file: Path, project: str, *args: str) -> list[str]:
@@ -189,7 +191,7 @@ def main() -> int:
         check("a person is made", status in (200, 201) and bool(person_password), str(status))
         status, group = c.call("/api/admin/groups", {"name": f"Upgrade group {name}"})
         check("a group is made", status in (200, 201), str(status))
-        status, chat = c.call("/api/chat/conversations", {})
+        status, chat = c.call("/api/chat/conversations", {"thinking": "off"})
         chat_id = chat.get("id") if isinstance(chat, dict) else None
         status, file = c.upload("upgrade-facts.txt", b"The upgrade code word is MAPLE-17.\n")
         file_id = file.get("id") if isinstance(file, dict) else None
