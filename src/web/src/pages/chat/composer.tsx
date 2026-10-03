@@ -196,6 +196,7 @@ export function Composer({
               size="sm"
               className={cn('h-8 gap-1.5 rounded-full px-2.5', research && 'text-primary-ink')}
               aria-pressed={!!research}
+              aria-label="Deep research"
               onClick={() => onResearch(!research)}
             >
               <Telescope /> <span className="hidden sm:inline">Deep research</span>

@@ -933,8 +933,9 @@ test.describe('tools', () => {
     }
   })
 
-  test('deep research plans, sends sub-agents to the web, and writes a report with its sources', async ({ page, request }) => {
+  test('deep research plans, sends sub-agents to the web, and writes a report with its sources', async ({ page, request, isMobile }) => {
     test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+    test.skip(isMobile, 'minutes of the one model: one browser is enough')
     // Several sub-agents reading whole pages: minutes on one GPU.
     test.setTimeout(1_500_000)
     const headers = { 'X-Requested-With': 'fetch' }
