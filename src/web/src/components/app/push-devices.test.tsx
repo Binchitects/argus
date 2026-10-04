@@ -72,7 +72,7 @@ describe('push notifications in your account', () => {
   it('says why push cannot be turned on: no data key, or a browser without it', async () => {
     fakeApi(member, { 'GET /api/push': () => ({ json: { available: false, publicKey: null, devices: [] } }) })
     const first = renderApp('/account')
-    expect(await screen.findByText(/an admin must set APP_DATA_KEY/)).toBeInTheDocument()
+    expect(await screen.findByText(/APP_KEY is not set/)).toBeInTheDocument()
     first.unmount()
 
     browser.support = 'unsupported'

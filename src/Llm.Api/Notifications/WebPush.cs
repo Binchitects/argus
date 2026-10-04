@@ -28,7 +28,7 @@ public sealed record PushMessage(string Title, string? Body, string? Link, strin
 /// <summary>
 /// Web Push: the bell's news on people's devices, the installed app's and the browsers'
 /// (RFC 8030), even with no page open. The app signs each push with its own VAPID key
-/// (RFC 8292: made on first use, kept encrypted under APP_DATA_KEY), and encrypts it for
+/// (RFC 8292: made on first use, kept encrypted under APP_KEY), and encrypts it for
 /// the device (RFC 8291, aes128gcm): the push service carries it without reading it. Only
 /// the browsers' push services are posted to (Push:Hosts), so a subscription cannot make
 /// the app reach into the network. A device the push service no longer knows is removed.
@@ -44,7 +44,7 @@ public sealed partial class WebPush(IServiceScopeFactory scopes, IHttpClientFact
     private readonly SemaphoreSlim _lock = new(1, 1);
     private ECDsa? _key;
 
-    /// <summary>Whether pushes can be signed: the key is kept encrypted, so APP_DATA_KEY must be set.</summary>
+    /// <summary>Whether pushes can be signed: the key is kept encrypted, so APP_KEY must be set.</summary>
     public bool Available => !string.IsNullOrEmpty(auth.Value.DataKey);
 
     /// <summary>The app's VAPID public key (an uncompressed P-256 point, base64url), as browsers take it; null when pushes are not available.</summary>
@@ -71,7 +71,7 @@ public sealed partial class WebPush(IServiceScopeFactory scopes, IHttpClientFact
                 {
                     if (SettingsCrypto.Decrypt(row.Value, auth.Value.DataKey) is not { } pkcs8)
                     {
-                        // APP_DATA_KEY changed: the key is lost, and so are the subscriptions made with it.
+                        // APP_KEY changed: the key is lost, and so are the subscriptions made with it.
                         LogKeyLost(logger);
                         return null;
                     }
@@ -283,6 +283,6 @@ public sealed partial class WebPush(IServiceScopeFactory scopes, IHttpClientFact
     [LoggerMessage(Level = LogLevel.Warning, Message = "Web Push: a push could not be sent: {Reason}")]
     private static partial void LogFailed(ILogger logger, string reason);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Web Push: the VAPID key cannot be decrypted (APP_DATA_KEY changed); pushes are off until the webpush:vapid row is removed and people subscribe again")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Web Push: the VAPID key cannot be decrypted (APP_KEY changed); pushes are off until the webpush:vapid row is removed and people subscribe again")]
     private static partial void LogKeyLost(ILogger logger);
 }

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Argus Arena: options</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="options">
+    <form id="options">
+      <label for="app">The app's address</label>
+      <input id="app" type="text" placeholder="https://llm.example.com" required />
+      <p class="muted">Where you sign in to Argus Arena. Pages are handed to its /ask page.</p>
+      <fieldset>
+        <legend>Ask in the popup (optional)</legend>
+        <label for="apiKey">Your API key</label>
+        <input id="apiKey" type="password" autocomplete="off" placeholder="sk-…" />
+        <p class="muted">From Your account in the app. Kept in this browser only; questions asked with it use your credit.</p>
+        <label for="model">Model</label>
+        <input id="model" type="text" placeholder="The gateway's default" />
+        <label for="gateway">Gateway</label>
+        <input id="gateway" type="text" placeholder="https://gateway.llm.example.com" />
+      </fieldset>
+      <button type="submit">Save</button>
+      <p id="saved" class="muted" aria-live="polite"></p>
+    </form>
+    <script src="lib.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

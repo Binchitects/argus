@@ -92,7 +92,7 @@ export function PushDevices() {
         ) : push.error ? (
           <Alert variant="destructive">{errorMessage(push.error)}</Alert>
         ) : !push.data.available ? (
-          <Alert variant="warning">Push notifications are not available here: an admin must set APP_DATA_KEY first.</Alert>
+          <Alert variant="warning">Push notifications are not available here: APP_KEY is not set in the stack’s .env.</Alert>
         ) : (
           <>
             {support === 'unsupported' ? (

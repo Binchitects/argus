@@ -12,6 +12,7 @@
 | [settings.md](settings.md) | the Settings page: what applies at once, after a restart, or on the host |
 | [chat.md](chat.md) | the chat: models, thinking, files, tools and their limits |
 | [plugins.md](plugins.md) | plugins and APIs as tools: installing, each person's own account, the manifest, a catalog |
+| [integrations.md](integrations.md) | where people already are: Slack, Mattermost and Teams bots, email in, the installable app with push notifications, the browser extension |
 | [cpu-temperature.md](cpu-temperature.md) | how CPU temperature reaches the dashboards, on Linux and on Windows |
 | [hermes.md](hermes.md) | pointing Hermes at the model and at Argus |
 

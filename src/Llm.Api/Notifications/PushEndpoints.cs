@@ -76,7 +76,7 @@ public static class PushEndpoints
         var me = await Me(p, users);
         if (!push.Available)
         {
-            return AuthEndpoints.Problem(409, "unavailable", "Push notifications are not available here: APP_DATA_KEY is not set.");
+            return AuthEndpoints.Problem(409, "unavailable", "Push notifications are not available here: APP_KEY is not set.");
         }
         var endpoint = body.Endpoint?.Trim() ?? "";
         if (push.Refusal(endpoint) is { } refusal)
