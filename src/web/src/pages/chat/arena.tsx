@@ -164,7 +164,7 @@ export function ArenaTurn({
         {arena.answering
           ? `Comparing two models: answering ${arena.step ?? 1} of ${arena.of ?? 2}, one after the other`
           : arena.vote
-            ? `Compared: you voted ${voteWords[arena.vote].toLowerCase()}`
+            ? `Compared. Your vote: ${voteWords[arena.vote]}`
             : 'Compared: two models answered, their names hidden until you vote'}
       </p>
       <div className="grid gap-4 xl:grid-cols-2">

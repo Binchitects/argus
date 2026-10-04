@@ -423,7 +423,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       return true
     }
     const conversationId = await ensureChat()
-    if (!conversationId) return false
+    if (!conversationId) {
+      if (versus) setCompare(versus)
+      return false
+    }
     const parent = view.leaf
     const localId = newLocalId()
     const attachments = files ?? uploads.attachments
@@ -431,14 +434,18 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     const aloud = attachments.some((a) => a.fileName.startsWith(voicePrefix))
     // The files went with the question once the server has it: the box is free for the next one while the answer streams.
     const body = { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null, ...(deep && !versus ? { research: true } : {}), ...(versus?.models ? { models: versus.models } : {}) }
-    return run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
+    const sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
       if (e.type === 'question' && fromBox) uploads.clear()
-      if (e.type === 'done' && aloud) {
+      // Two answers to a comparison: neither is read aloud.
+      if (e.type === 'done' && aloud && !versus) {
         const s = liveRef.current
         const said = s?.messages.find((m) => m.id === s.current)?.content
         if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
       }
     })
+    // Not sent: it goes back into the box, and Compare stays on for it.
+    if (!sent && versus) setCompare(versus)
+    return sent
   }
 
   // A new chat made in a project: its name for the header.

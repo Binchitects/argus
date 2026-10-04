@@ -105,7 +105,7 @@ describe('arena mode', () => {
     const revealed = await screen.findByRole('region', { name: 'Comparison' })
     expect(await within(revealed).findByText('Your pick')).toBeInTheDocument()
     expect(within(within(revealed).getByRole('region', { name: 'Model B' })).getAllByText('Eyes-Model').length).toBeGreaterThan(0)
-    expect(within(revealed).getByText(/you voted b is better/i)).toBeInTheDocument()
+    expect(within(revealed).getByText('Compared. Your vote: B is better')).toBeInTheDocument()
     expect(within(revealed).getByRole('link', { name: 'leaderboard' })).toHaveAttribute('href', '/leaderboard')
   })
 
@@ -129,6 +129,22 @@ describe('arena mode', () => {
     expect(within(comparison).getByText('Comparing two models: answering 1 of 2, one after the other')).toBeInTheDocument()
     expect(within(comparison).getByText('Answers once Model A is done.')).toBeInTheDocument()
     expect(within(comparison).queryByRole('button', { name: 'A is better' })).not.toBeInTheDocument()
+  })
+
+  it('a comparison refused says why, and the question and Compare stay for another try', async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation({ messages: savedMessages().slice(0, 1), currentLeafId: 'q1' }) }),
+      'POST /api/chat/conversations/c1/compare': () => ({ status: 400, json: { status: 'models', error: 'Comparing needs two models you may use that can answer now, and only Main-Model can.' } }),
+    })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Compare' }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Compare two models' })).getByRole('button', { name: 'Compare the next question' }))
+    await ask('Which is fastest?')
+    expect(await screen.findByText(/only Main-Model can/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Which is fastest?')
+    expect(screen.getByRole('button', { name: 'Compare' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('a comparison stopped before both answered has nothing to vote on', () => {
