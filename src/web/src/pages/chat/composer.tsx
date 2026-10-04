@@ -8,12 +8,15 @@ import type { ContextView } from './context'
 import { ContextGauge } from './context-gauge'
 import { VoiceButton } from './media'
 import type { Attachment, ChatModel } from './types'
+import type { TalkTurn } from './use-talk'
 
 /** A message written while an answer runs: sent when it ends, or at once with Send now. */
 export interface Queued {
   key: string
   text: string
   attachments: Attachment[]
+  /** Said in Talk: its answer is read aloud. */
+  turn?: TalkTurn
 }
 import type { Uploads } from './uploads'
 
@@ -39,6 +42,7 @@ export function Composer({
   onUnqueue,
   research,
   onResearch,
+  talk,
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
@@ -61,6 +65,8 @@ export function Composer({
   /** Deep research for the next message: sub-agents search the web, and the answer is a sourced report. */
   research?: boolean
   onResearch?: (on: boolean) => void
+  /** The Talk button: a voice conversation. */
+  talk?: ReactNode
 }) {
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
@@ -189,6 +195,7 @@ export function Composer({
           </Button>
         </Tooltip>
         <VoiceButton onRecorded={(f) => uploads.add([f])} />
+        {talk}
         {tools}
         {onResearch && (
           <Tooltip content="Deep research: a plan, sub-agents that search the web, and a report with its sources. It takes minutes.">

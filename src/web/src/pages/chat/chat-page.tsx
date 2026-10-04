@@ -32,6 +32,8 @@ import type { ExportKind } from './header'
 import { saveBlob } from '@/lib/zip'
 import type { Queued } from './composer'
 import { speak, voicePrefix } from './sound'
+import { TalkBar, TalkButton } from './talk'
+import { useTalk, type TalkTurn } from './use-talk'
 import { tellDesktop } from '@/lib/desktop'
 
 /** The id a question is shown under until the server gives it its own. */
@@ -403,7 +405,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
   }
 
-  const send = async (text: string, files?: Attachment[]): Promise<boolean> => {
+  /** `talkTurn`: said in Talk, which hears the answer's events and its end, and reads it aloud. */
+  const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn): Promise<boolean> => {
     const fromBox = files === undefined
     // Deep research is for the message written with it on: off again once sent.
     const deep = fromBox && research
@@ -418,21 +421,28 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       return true
     }
     const conversationId = await ensureChat()
-    if (!conversationId) return false
+    if (!conversationId) {
+      talkTurn?.ended()
+      return false
+    }
     const parent = view.leaf
     const localId = newLocalId()
     const attachments = files ?? uploads.attachments
     // Asked by voice: answered aloud.
     const aloud = attachments.some((a) => a.fileName.startsWith(voicePrefix))
     // The files went with the question once the server has it: the box is free for the next one while the answer streams.
-    return run(conversationId, 'messages', { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null, ...(deep ? { research: true } : {}) }, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
+    const body = { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null, ...(deep ? { research: true } : {}), ...(talkTurn ? { spoken: true } : {}) }
+    const sent = await run(conversationId, 'messages', body, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
       if (e.type === 'question' && fromBox) uploads.clear()
+      talkTurn?.watch(e)
       if (e.type === 'done' && aloud) {
         const s = liveRef.current
         const said = s?.messages.find((m) => m.id === s.current)?.content
         if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
       }
     })
+    talkTurn?.ended()
+    return sent
   }
 
   // A new chat made in a project: its name for the header.
@@ -493,9 +503,19 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       const [next, ...rest] = queue
       if (!next) return
       setQueue(rest)
-      void send(next.text, next.attachments)
+      void send(next.text, next.attachments, next.turn)
     }
   })
+
+  // Talk: what is said is asked as a spoken question (after the answer running, if one is); speaking over an answer stops it.
+  const talk = useTalk({
+    onHeard: (text, turn) => {
+      if (streaming) setQueue((q) => [...q, { key: `t${Date.now()}${q.length}`, text, attachments: [], turn }])
+      else void send(text, [], turn)
+    },
+    onInterrupt: () => void stop(),
+  })
+  const talkButton = <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />
 
   const edit = (m: Message, text: string) => {
     if (!id) return
@@ -630,7 +650,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   {error}
                 </Alert>
               )}
-              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} autoFocus big />
+              <TalkBar state={talk.state} onEnd={talk.end} />
+              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} talk={talkButton} autoFocus big />
               <div className="stagger mt-4 grid gap-2 sm:grid-cols-3">
                 {(config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions).map((s) => (
                   <button
@@ -734,13 +755,19 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   <ArrowDown />
                 </Button>
               )}
+              <TalkBar state={talk.state} onEnd={talk.end} />
               <Composer
                 streaming={streaming}
                 onSend={send}
+                talk={talkButton}
                 queued={queue}
                 onQueue={enqueue}
                 onSendNow={sendNow}
-                onUnqueue={(key) => setQueue((q) => q.filter((x) => x.key !== key))}
+                onUnqueue={(key) => {
+                  // A spoken question taken back: Talk stops waiting for its answer.
+                  queue.find((x) => x.key === key)?.turn?.ended()
+                  setQueue((q) => q.filter((x) => x.key !== key))
+                }}
                 research={research}
                 onResearch={setResearch}
                 onStop={() => void stop()}

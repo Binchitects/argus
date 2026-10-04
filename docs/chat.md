@@ -279,6 +279,35 @@ attachments, instead of being lost.
 - The speech models are at the gateway too: `/v1/audio/transcriptions` and
   `/v1/audio/speech` with a person's key.
 
+### Talk
+
+**Talk** (the sound-wave button in the box) is a voice conversation in the
+chat. The browser asks for the microphone once.
+
+- **You speak, then pause.** The browser listens all along and cuts what you
+  said at a pause of about a second: louder than the room for a moment starts
+  it, quiet ends it. What was said is written down (Whisper, in your name) and
+  sent as your question. It is saved in the chat like a typed one, and answered
+  with the chat's model and tools, asked to answer in plain spoken sentences.
+- **The answer is read aloud as it is written.** Each sentence is spoken as
+  soon as it is complete, in order, while the next ones are still being
+  written: Kokoro's voice, or the Persian voice for a Persian sentence. Code
+  blocks are not read. The text appears as usual.
+- **Speak over it to stop it.** Your voice while the answer is read (or while
+  it is still thinking) stops the reading and the answer, which keeps what it
+  has; what you say next is the next question.
+- **The bar above the box** says what Talk is doing: listening, hearing you,
+  writing down what you said, thinking, speaking. **End talk** (or Esc, or the
+  button again) lets go of the microphone.
+- With loudspeakers the microphone may hear the answer: the browser's echo
+  cancelling removes most of it, and over an answer Talk waits for louder,
+  longer speech before it stops. Headphones work best.
+- Thinking makes the first words wait: a chat with **No thinking** answers
+  soonest.
+- Talk uses the speech server's plain endpoints. Its realtime API is not used:
+  it would answer with a model of its own, outside the chat's history, tools
+  and credit.
+
 ## Scheduled tasks
 
 **Scheduled tasks** (in the sidebar, `/tasks`) ask a question on a schedule, as
@@ -389,6 +418,9 @@ So that everyone gets their turn:
 - **API keys** (Qwen Code, IDEs, scripts) have at most two requests at once
   (API requests at once, per key); a third at the same time gets HTTP 429 and
   can retry. It applies to every key, within seconds of a change.
+- **Repeated API requests** can be answered from the answer cache, at no cost
+  and without the model (Settings → API keys → Answer cache; see
+  [admin.md](admin.md#the-answer-cache-for-api-keys)).
 
 ## Who sees what
 
@@ -494,7 +526,9 @@ branch.
   person's email, and removed, the calculator's parser (exact to 28 digits,
   code refused), the no-access notice, stop, the budget sentence,
   a revoked key being replaced, attachments, and ownership. Also the GitLab
-  link address applying at once.
+  link address applying at once, and Talk: a recording written down in the
+  person's name, a spoken question's note for its answer only, and each
+  sentence read in the voice of its language.
   Also branches (edits, answering again, switching, parents from another chat
   refused), archiving (and coming back when written in), forks (up to the
   chosen answer, with settings and files; never inside a tool round; the owner
@@ -521,6 +555,11 @@ branch.
     own words, and the image viewer (arrows, keys, actual size)
   - the list's fork, archive, Archived view and unarchive; fork from an
     answer; the question rail; the archived notice
+  - Talk, with the microphone, recording and playback faked: a spoken
+    question written down and sent as spoken, its first sentence read aloud
+    while the answer is still being written, speaking over it stopping both,
+    and End talk letting go of the microphone; the voice activity check, the
+    sentence cutting (code left out, Persian marks) and the reading queue
 - **Browser (Playwright), desktop and phone, both themes, with axe, in CI
   too:** a chat with Argus's answers and two images, served by the browser
   itself, from the links to the image viewer.
