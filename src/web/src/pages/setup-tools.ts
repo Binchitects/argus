@@ -30,7 +30,7 @@ export interface Step {
 export interface Tool {
   id: string
   title: string
-  group: 'Coding agents' | 'Agents' | 'Editors' | 'Code'
+  group: 'Coding agents' | 'Agents' | 'Editors' | 'Code' | 'Pipelines'
   /** One line: what it is and how it talks to the gateway. */
   about: string
   steps: (c: Context) => Step[]
@@ -348,5 +348,38 @@ print(reply.choices[0].message.content)`,
       },
     ],
     argus: 'Argus speaks MCP over HTTP: a client library, not curl, is the way to call its tools.',
+  },
+  {
+    id: 'gitlab-ci',
+    title: 'GitLab CI',
+    group: 'Pipelines',
+    about: 'A review of each merge request as one comment, and an explanation when a pipeline fails, from jobs in your own pipeline (the arena CLI: Python 3, no packages).',
+    steps: (c) => [
+      {
+        text: "In the project's Settings → CI/CD → Variables, add ARENA_KEY (an API key, masked), ARENA_GITLAB_TOKEN (a project access token, role Reporter, scope api, masked) and ARENA_URL:",
+        file: 'ARENA_URL',
+        code: c.root,
+      },
+      {
+        text: 'Copy clients/arena/arena from the Argus Arena repository into yours, as ci/arena, and include the template from that repository (its path in your GitLab in place of platform/argus-arena):',
+        file: '.gitlab-ci.yml',
+        code: `include:
+  - project: platform/argus-arena     # the Argus Arena repository in your GitLab
+    ref: main                         # or the release tag you run
+    file: clients/gitlab-ci/arena-review.yml
+
+variables:
+  ARENA_CLI: ci/arena                 # or ARENA_PROJECT: platform/argus-arena, when ARENA_GITLAB_TOKEN can read it
+  ARENA_MODEL: ${c.model}`,
+      },
+      {
+        text: 'Each merge request then gets a review, and a failed pipeline an explanation in its arena-explain job (ARENA_EXPLAIN_POST: "true" posts it on the merge request too). The same CLI answers in a terminal:',
+        file: 'shell',
+        code: `export ARENA_URL=${c.root}
+export ARENA_KEY="$${KEY}"
+git diff main | python3 ci/arena ask "Review this change"`,
+      },
+    ],
+    argus: 'The jobs call the gateway only: Argus is for agents, over MCP.',
   },
 ]

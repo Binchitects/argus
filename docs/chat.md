@@ -3,7 +3,7 @@
 The chat is at `https://DOMAIN/chat`, for everyone who can sign in. To use
 the models from your own tools (Claude Code, Qwen Code, an editor, a script),
 see **Connect your tools** (`/setup`): your API key, the gateway's address and
-setups to paste.
+setups to paste. For a GitLab pipeline, see [ci.md](ci.md).
 
 ## What it does
 
@@ -323,7 +323,9 @@ you: a morning digest, a weekly report on a repository with Argus.
   with scope `api`, Reporter in the projects), never Argus's read-only token;
   each comment is in the audit log (`task.gitlab_comment`). Examples: review
   every merge request with Argus for context; explain each failed pipeline;
-  triage new issues.
+  triage new issues. A team that wants the review and the explanation as jobs
+  in its own pipeline instead uses the `arena` CLI and its GitLab CI template
+  ([ci.md](ci.md)).
 
 ## Notifications
 

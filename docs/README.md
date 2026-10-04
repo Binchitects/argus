@@ -12,6 +12,7 @@
 | [settings.md](settings.md) | the Settings page: what applies at once, after a restart, or on the host |
 | [chat.md](chat.md) | the chat: models, thinking, files, tools and their limits |
 | [plugins.md](plugins.md) | plugins and APIs as tools: installing, each person's own account, the manifest, a catalog |
+| [ci.md](ci.md) | the API in CI: a review of each merge request and an explanation of each failed pipeline, from your own GitLab pipeline, with the `arena` CLI |
 | [cpu-temperature.md](cpu-temperature.md) | how CPU temperature reaches the dashboards, on Linux and on Windows |
 | [hermes.md](hermes.md) | pointing Hermes at the model and at Argus |
 
