@@ -13,6 +13,7 @@
 | [chat.md](chat.md) | the chat: models, thinking, files, tools and their limits |
 | [plugins.md](plugins.md) | plugins and APIs as tools: installing, each person's own account, the manifest, a catalog |
 | [ci.md](ci.md) | the API in CI: a review of each merge request and an explanation of each failed pipeline, from your own GitLab pipeline, with the `arena` CLI |
+| [mcp.md](mcp.md) | Arena MCP: each person's chat tools for their own agent at `/mcp`, signed in with their API key |
 | [cpu-temperature.md](cpu-temperature.md) | how CPU temperature reaches the dashboards, on Linux and on Windows |
 | [hermes.md](hermes.md) | pointing Hermes at the model and at Argus |
 

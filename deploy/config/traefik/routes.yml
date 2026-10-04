@@ -3,14 +3,14 @@
 {{ $acme := env "ACME_EMAIL" }}
 http:
   routers:
-    # The web on the bare domain, except the app's paths.
+    # The web on the bare domain, except the app's paths (/mcp: Arena MCP, each person's tools for their agents).
     web:
       rule: Host(`{{ $domain }}`)
       service: web
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
     app:
-      rule: Host(`{{ $domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`))
+      rule: Host(`{{ $domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`) || Path(`/mcp`))
       service: app
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}

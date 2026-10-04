@@ -21,7 +21,7 @@ public sealed class LiteLlmClientTests
         {
             var body = request.Content is null ? default : JsonDocument.Parse(await request.Content.ReadAsStringAsync(ct)).RootElement;
             Calls.Add((request.RequestUri!.PathAndQuery, body));
-            if (request.RequestUri.AbsolutePath == "/end_user/info" && EndUser is null)
+            if ((request.RequestUri.AbsolutePath == "/end_user/info" && EndUser is null) || (request.RequestUri.AbsolutePath == "/key/info" && KeyInfo is null))
             {
                 return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("""{"error":{"message":"does not exist"}}""") };
             }

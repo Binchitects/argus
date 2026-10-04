@@ -31,7 +31,7 @@ export default defineConfig({
     },
   },
   server: {
-    proxy: { '/api': proxy, '/connect': proxy, '/.well-known': proxy },
+    proxy: { '/api': proxy, '/connect': proxy, '/.well-known': proxy, '^/mcp$': proxy },
   },
   test: {
     environment: 'jsdom',

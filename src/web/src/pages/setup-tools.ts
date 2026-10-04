@@ -43,6 +43,23 @@ export interface Tool {
 
 const json = (v: unknown) => JSON.stringify(v, null, 2)
 
+/**
+ * Arena MCP: every chat tool of yours at one address, signed in with your API key. No
+ * --trust for Qwen Code: a tool that asks first in the chat is marked for the client to ask.
+ */
+export function arenaMcp(url: string): (Step & { title: string })[] {
+  return [
+    { title: 'Claude Code', text: 'Add it once:', file: 'shell', code: `claude mcp add --transport http arena ${url} \\\n  --header "Authorization: Bearer $${KEY}"` },
+    { title: 'Qwen Code', text: 'Add it once:', file: 'shell', code: `qwen mcp add arena ${url} -t http \\\n  -H "Authorization: Bearer $${KEY}"` },
+    {
+      title: 'Other MCP clients',
+      text: 'The address and the header are all a client needs (streamable HTTP):',
+      file: 'mcp.json',
+      code: json({ mcpServers: { arena: { type: 'http', url, headers: { Authorization: 'Bearer <your API key>' } } } }),
+    },
+  ]
+}
+
 export const tools: Tool[] = [
   {
     id: 'claude',

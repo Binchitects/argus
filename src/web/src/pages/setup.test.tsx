@@ -80,6 +80,50 @@ describe('connect your tools', () => {
     expect(screen.queryByText(/sk-just-made-key/)).not.toBeInTheDocument()
   })
 
+  it('offers Arena MCP with the tools it serves and setups for Claude Code, Qwen Code and other clients', async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config() }),
+      'GET /api/account/mcp': () => ({
+        json: {
+          enabled: true,
+          url: 'https://llm.example.com/mcp',
+          tools: [
+            { id: 'argus', title: 'Argus', askFirst: false },
+            { id: 'mcp:1', title: 'Jira', askFirst: true },
+          ],
+        },
+      }),
+    })
+    renderApp('/setup')
+    expect(await screen.findByText('Arena MCP (all your tools)')).toBeInTheDocument()
+    expect(screen.getByText('https://llm.example.com/mcp')).toBeInTheDocument()
+    const served = screen.getByRole('list', { name: 'Tools it serves you' })
+    expect(within(served).getByText('Argus')).toBeInTheDocument()
+    expect(within(served).getByText('Jira · asks first')).toBeInTheDocument()
+    expect(screen.getByText(/let it ask, rather than trusting every tool/)).toBeInTheDocument()
+    // Each with the person's key from the environment, never --trust (asking first is the client's job here).
+    const claude = screen.getByRole('region', { name: 'Arena MCP in Claude Code' })
+    expect(within(claude).getByText(/claude mcp add/)).toHaveTextContent(
+      'claude mcp add --transport http arena https://llm.example.com/mcp \\ --header "Authorization: Bearer $LLM_SERVICE_API_KEY"',
+    )
+    const qwen = screen.getByRole('region', { name: 'Arena MCP in Qwen Code' })
+    expect(within(qwen).getByText(/qwen mcp add/)).toHaveTextContent('qwen mcp add arena https://llm.example.com/mcp -t http \\ -H "Authorization: Bearer $LLM_SERVICE_API_KEY"')
+    expect(within(qwen).getByText(/qwen mcp add/)).not.toHaveTextContent('--trust')
+    const other = JSON.parse(within(screen.getByRole('region', { name: 'Arena MCP in Other MCP clients' })).getByText(/mcpServers/).textContent!)
+    expect(other.mcpServers.arena).toEqual({ type: 'http', url: 'https://llm.example.com/mcp', headers: { Authorization: 'Bearer <your API key>' } })
+  })
+
+  it('leaves Arena MCP out when an admin turned it off', async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config() }),
+      'GET /api/account/mcp': () => ({ json: { enabled: false, url: 'https://llm.example.com/mcp', tools: [] } }),
+    })
+    renderApp('/setup')
+    expect(await screen.findByRole('heading', { name: 'Connect your tools' })).toBeInTheDocument()
+    expect(await screen.findByText(/export ANTHROPIC_BASE_URL=/)).toBeInTheDocument()
+    expect(screen.queryByText('Arena MCP (all your tools)')).not.toBeInTheDocument()
+  })
+
   it('each tool has its own steps, filled in with the address, the model and its limits', async () => {
     fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config({ argus: true, gitlabUrl: null }) }),
