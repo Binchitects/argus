@@ -1,0 +1,32 @@
+# SearXNG for the chat's Web tool (compose profile websearch). Inside the stack
+# only: no port, no route; the app is its only client, asking for JSON. It
+# queries public search engines itself, from its own network.
+use_default_settings:
+  engines:
+    # Tor-only engines: they cannot load without Tor, and only log errors.
+    remove:
+      - ahmia
+      - torch
+
+general:
+  instance_name: "LLM Service search"
+  enable_metrics: false
+
+server:
+  # Replaced by SEARXNG_SECRET from .env (SearXNG refuses to start with this one).
+  secret_key: "ultrasecretkey"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0

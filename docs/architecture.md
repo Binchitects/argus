@@ -122,7 +122,40 @@ There are no setup containers; each running image prepares itself.
 | Argus pages say "not set up" | `ARGUS_KEY` is empty, or Argus is left out |
 | dashboards are empty | Prometheus is down, or the engine has no model loaded to scrape |
 
-## 9. What is generated, and what you edit
+## 9. Several app replicas
+
+The app can run as several replicas on one database (`scale.yml` with compose,
+or the Helm chart's `app.replicas`). What must happen once runs on one of them:
+
+- **The lead.** Each replica holds a Postgres connection of its own and tries
+  for an advisory lock on it every 5 seconds; the one holding it leads. It runs
+  the scheduled tasks' clock, the engine's models and presets, the gateway's
+  model list, the media servers' on/off, the downloads, the first model's
+  provisioning, the directory check, Argus's schedule, the key access sync and
+  the alerts for the bell. A replica that stops lets go of the lock; one that
+  dies loses it with its connection, and another leads within seconds.
+- **The start.** Replicas starting together go one at a time through creating
+  the database, migrating it, the first admin and the OIDC keys (a lock in the
+  server's `postgres` database).
+- **Signals.** The same connection listens (Postgres `LISTEN`/`NOTIFY`): a yes
+  or no to a tool call, a stop or "answer now" posted to one replica reaches the
+  one writing the answer; a saved setting is read again on all; a model loaded
+  or a download started on one wakes the leader.
+- **Scheduled tasks.** A run is claimed in the database first (the task row
+  names the replica running it, renewed every 20 seconds, let go after two
+  minutes without it): a task never runs twice at once. Events that come while
+  it runs wait in the `task_events` table, and the replica free next takes them
+  in order.
+- **The answers' line.** Each replica keeps its own, with its share of the
+  places the engine serves at once (rounded up). An answer runs on the replica
+  that was asked and streams from there: Traefik's sticky cookie keeps a browser
+  on one replica. A page that reaches another replica sees the answer when it
+  is saved, not live.
+- **Kept in the database already**: sessions and two-factor (the Data
+  Protection key ring), OIDC keys, settings, chats. Per replica: the sign-in
+  throttle and rate limits, the gateway's model list cache (a minute).
+
+## 10. What is generated, and what you edit
 
 You edit `.env`, `docker-compose.override.yml` and, if you want, the files in
 `config/`. The app writes the `engine` and `directory` volumes; nothing writes

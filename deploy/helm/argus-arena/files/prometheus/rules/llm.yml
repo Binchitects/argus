@@ -1,0 +1,133 @@
+# LLM-serving health, derived from vLLM's native Prometheus histograms.
+#
+# The three numbers that actually describe a serving system:
+#   TTFT   time to first token       - how responsive it feels
+#   TPOT   time per output token     - how fast it streams
+#   queue  requests waiting          - whether you are past capacity
+
+groups:
+
+  # Engine availability, deliberately NOT tied to one engine.
+  #
+  # This stack can serve on vLLM or on llama.cpp and exactly one of them runs,
+  # because both claim the whole GPU. The previous rules alerted on `vllm`
+  # specifically, so a perfectly healthy llama.cpp deployment fired VllmDown,
+  # VllmNoModelLoaded and TargetDown forever -- three permanent false alarms,
+  # which is worse than no alerting because it teaches people to ignore the
+  # ones that matter.
+  #
+  # What actually matters is "nothing is serving", so that is what is measured.
+  - name: engine-availability
+    interval: 30s
+    rules:
+
+      - alert: EngineDown
+        # component:inference is carried by every engine scrape job, so this
+        # holds whichever engine is configured -- and keeps holding if another
+        # is added later.
+        expr: sum(up{component="inference"}) == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: inference
+        annotations:
+          summary: "No inference engine is being scraped"
+          description: >-
+            Neither vLLM nor llama.cpp answered for 5 minutes. Either the engine
+            container is down, or it is still loading weights -- a large GGUF
+            can legitimately take minutes to page in. Check
+            `docker compose ps` and `docker logs -f $(docker compose ps -q)`.
+
+      - alert: EngineServingNothing
+        # An engine that is scrapeable but advertises no model is a different
+        # failure from one that is down, and needs a different fix (usually OOM
+        # or a context length the card cannot fit).
+        expr: >-
+          sum(up{component="inference"}) > 0
+          and absent(vllm:num_requests_running)
+          and absent(llamacpp:n_decode_total)
+        for: 15m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "An engine is up but exposes no model metrics"
+          description: >-
+            The engine answered a scrape but reports no model. Usually it never
+            finished initialising -- OOM, or a context length that does not fit.
+            On llama.cpp this also appears when --metrics is not enabled, in
+            which case /metrics returns 501 and there is nothing wrong.
+
+  # These query vllm: series. On a llama.cpp deployment those series do not
+  # exist, so every expression below evaluates to no data and the rules stay
+  # silent -- correct behaviour, and the reason they need no engine guard.
+  - name: vllm-performance
+    interval: 30s
+    rules:
+
+      - alert: VllmQueueBacklog
+        expr: vllm:num_requests_waiting > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} requests queued at vLLM"
+          description: >-
+            Arrival rate exceeds throughput. Options, cheapest first: raise
+            VLLM_MAX_NUM_SEQS, shorten VLLM_MAX_MODEL_LEN, quantise the model,
+            or add a GPU and raise tensor-parallel-size.
+
+      - alert: VllmKvCacheSaturated
+        expr: vllm:gpu_cache_usage_perc > 0.95
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "KV cache above 95% utilisation"
+          description: >-
+            vLLM will start preempting and recomputing sequences, which shows up
+            as latency spikes. Reduce max-model-len or concurrent sequences.
+
+      - alert: VllmHighTimeToFirstToken
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "p95 time-to-first-token above 5s"
+          description: >-
+            Currently {{ $value | printf "%.2f" }}s. TTFT is dominated by
+            prefill and queueing, so pair this with the queue-depth panel to
+            tell 'too many requests' apart from 'prompts too long'.
+
+      - alert: VllmSlowTokenGeneration
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le) (rate(vllm:time_per_output_token_seconds_bucket[5m]))) > 0.20
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "p95 inter-token latency above 200ms (<5 tok/s)"
+          description: >-
+            Decode has become slow. Check for GPU thermal throttling, CPU
+            offloading, or an oversized batch.
+
+      - alert: VllmErrorRateHigh
+        expr: >-
+          sum(rate(vllm:request_success_total{finished_reason="abort"}[10m]))
+          /
+          clamp_min(sum(rate(vllm:request_success_total[10m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "Over 5% of requests aborting"
+          description: "Clients are disconnecting or the engine is rejecting work."

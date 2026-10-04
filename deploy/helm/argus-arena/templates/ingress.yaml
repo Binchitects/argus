@@ -1,0 +1,49 @@
+{{- /* The only way in: DOMAIN (the web, and /api, /connect and /.well-known to the app), gateway.DOMAIN and argus.DOMAIN, with TLS. */}}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: arena
+  labels: {{- include "arena.labels" . | nindent 4 }}
+  annotations:
+    # Answers stream for minutes, token by token; uploads are up to tens of megabytes (NGINX's names; other controllers ignore them).
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: 64m
+    {{- if .Values.ingress.sticky }}
+    # Each browser stays on one app replica, where its answers run.
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/session-cookie-name: arena_replica
+    nginx.ingress.kubernetes.io/session-cookie-secure: "true"
+    nginx.ingress.kubernetes.io/session-cookie-samesite: Lax
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  tls:
+    - hosts: [{{ .Values.domain | quote }}, {{ printf "gateway.%s" .Values.domain | quote }}, {{ printf "argus.%s" .Values.domain | quote }}]
+      secretName: {{ .Values.ingress.tlsSecret }}
+  rules:
+    - host: {{ .Values.domain | quote }}
+      http:
+        paths:
+          {{- range list "/api" "/connect" "/.well-known" }}
+          - { path: {{ . }}, pathType: Prefix, backend: { service: { name: app, port: { number: 8080 } } } }
+          {{- end }}
+          - { path: /, pathType: Prefix, backend: { service: { name: web, port: { number: 8080 } } } }
+    - host: {{ printf "gateway.%s" .Values.domain | quote }}
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: litellm, port: { number: 4000 } } } }
+    {{- if .Values.argus.enabled }}
+    - host: {{ printf "argus.%s" .Values.domain | quote }}
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: argus, port: { number: 7700 } } } }
+    {{- end }}
+{{- end }}

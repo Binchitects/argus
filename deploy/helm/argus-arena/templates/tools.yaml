@@ -1,0 +1,153 @@
+{{- /* The code index (GitLab, a read-only token) and knowledge packs, over MCP. */}}
+{{- if .Values.argus.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argus
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # Its index is one file on its own volume: one Argus at a time.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "argus") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "argus") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      containers:
+        - name: argus
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.argus) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          args:
+            - serve
+            - --config=/etc/argus/config.yaml
+            - --host=0.0.0.0
+            - --port=7700
+            - --allowed-host=argus
+            - --allowed-host=argus:*
+            - --allowed-host=argus.{{ .Values.domain }}
+            - --allowed-host=argus.{{ .Values.domain }}:*
+          ports: [{ name: http, containerPort: 7700 }]
+          env:
+            {{- include "arena.secretEnv" (list $ "ARGUS_ADMIN_TOKEN" "ARGUS_KEY") | nindent 12 }}
+            {{- include "arena.secretEnv" (list $ "ARGUS_CHAT_CLIENT_TOKEN" "ARGUS_KEY") | nindent 12 }}
+            - { name: ARGUS_GITLAB_URL, value: {{ .Values.gitlab.url | quote }} }
+            {{- include "arena.optionalSecretEnv" (list $ "ARGUS_GITLAB_TOKEN" "GITLAB_TOKEN") | nindent 12 }}
+            {{- include "arena.optionalSecretEnv" (list $ "ARGUS_GITLAB_USERNAME" "GITLAB_USERNAME") | nindent 12 }}
+            {{- include "arena.optionalSecretEnv" (list $ "ARGUS_GITLAB_PASSWORD" "GITLAB_PASSWORD") | nindent 12 }}
+            - { name: ARGUS_GITLAB_VERIFY, value: {{ .Values.gitlab.verifyTls | quote }} }
+            - { name: ARGUS_USERS_FILE, value: /directory/users.yml }
+            - { name: ARGUS_EMBED_URL, value: "http://embed:8080" }
+            - { name: ARGUS_APP, value: "off" }
+          resources: {{- toYaml .Values.argus.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/argus/config.yaml, subPath: argus.yaml }
+            - { name: data, mountPath: /var/lib/argus }
+            - { name: directory, mountPath: /directory, readOnly: true }
+      volumes:
+        - { name: config, configMap: { name: arena-config } }
+        {{- include "arena.claim" (list "data" "arena-argus") | nindent 8 }}
+        {{- include "arena.claim" (list "directory" "arena-directory") | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argus
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "argus") | nindent 4 }}
+  ports: [{ name: http, port: 7700, targetPort: http }]
+---
+{{- end }}
+{{- /* The chat's Python: no network at all, a read-only root, each run its own user; the app hands it jobs through a volume. */}}
+{{- if .Values.sandbox.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "sandbox") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "sandbox") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      automountServiceAccountToken: false
+      shareProcessNamespace: false
+      containers:
+        - name: sandbox
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.sandbox) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          resources: {{- toYaml .Values.sandbox.resources | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL], add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL] }
+          volumeMounts:
+            - { name: jobs, mountPath: /jobs }
+            - { name: work, mountPath: /work }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        {{- include "arena.claim" (list "jobs" "arena-sandbox") | nindent 8 }}
+        - { name: work, emptyDir: { sizeLimit: 1Gi } }
+        - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+---
+# No way in or out: the sandbox's network is none, as in compose.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "sandbox") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+---
+{{- end }}
+{{- /* The chat's web search. A new secret each start: it signs nothing that outlives the process. */}}
+{{- if .Values.searxng.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "searxng") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "searxng") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      securityContext: { runAsUser: 977, runAsGroup: 977, runAsNonRoot: true }
+      containers:
+        - name: searxng
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.searxng) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: [/bin/sh, -c, 'export SEARXNG_SECRET=$(od -An -N32 -tx1 /dev/urandom | tr -d " \n"); exec /usr/local/searxng/entrypoint.sh']
+          ports: [{ name: http, containerPort: 8080 }]
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: config, mountPath: /etc/searxng/settings.yml, subPath: searxng.yml }
+            - { name: cache, mountPath: /var/cache/searxng }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: config, configMap: { name: arena-config } }
+        - { name: cache, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "searxng") | nindent 4 }}
+  ports: [{ name: http, port: 8080, targetPort: http }]
+{{- end }}

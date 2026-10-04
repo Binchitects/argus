@@ -1,0 +1,131 @@
+{{- /* Monitoring: the app's dashboards, logs and alerts read these. */}}
+{{- if .Values.monitoring.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "prometheus") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "prometheus") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      securityContext: { runAsUser: 65534, runAsGroup: 65534, fsGroup: 65534, runAsNonRoot: true }
+      containers:
+        - name: prometheus
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.prometheus) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: [/bin/sh, -c]
+          args:
+            - |
+              printf %s "$ENGINE_KEY" > /tmp/engine.token; printf %s "$ARGUS_KEY" > /tmp/argus.token
+              exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus \
+                --storage.tsdb.retention.time=30d --storage.tsdb.retention.size=20GB --web.enable-lifecycle --web.enable-admin-api
+          ports: [{ name: http, containerPort: 9090 }]
+          env:
+            {{- include "arena.secretEnv" (list $ "ENGINE_KEY" "ENGINE_KEY") | nindent 12 }}
+            {{- include "arena.secretEnv" (list $ "ARGUS_KEY" "ARGUS_KEY") | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus/prometheus.yml, subPath: prometheus.yml }
+            {{- range $path, $_ := .Files.Glob "files/prometheus/rules/*.yml" }}
+            - { name: config, mountPath: /etc/prometheus/rules/{{ base $path }}, subPath: rules-{{ base $path }} }
+            {{- end }}
+            - { name: engine, mountPath: /engine-sd, readOnly: true }
+            - { name: data, mountPath: /prometheus }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: config, configMap: { name: arena-prometheus } }
+        {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
+        {{- include "arena.claim" (list "data" "arena-prometheus") | nindent 8 }}
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "prometheus") | nindent 4 }}
+  ports: [{ name: http, port: 9090, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "alertmanager") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "alertmanager") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      securityContext: { runAsUser: 65534, runAsGroup: 65534, fsGroup: 65534, runAsNonRoot: true }
+      containers:
+        - name: alertmanager
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.alertmanager) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          args: [--config.file=/etc/alertmanager/alertmanager.yml, --storage.path=/alertmanager]
+          ports: [{ name: http, containerPort: 9093 }]
+          volumeMounts:
+            - { name: config, mountPath: /etc/alertmanager/alertmanager.yml, subPath: alertmanager.yml }
+            - { name: data, mountPath: /alertmanager }
+      volumes:
+        - { name: config, configMap: { name: arena-config } }
+        {{- include "arena.claim" (list "data" "arena-alertmanager") | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "alertmanager") | nindent 4 }}
+  ports: [{ name: http, port: 9093, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "loki") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "loki") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      securityContext: { runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, runAsNonRoot: true }
+      containers:
+        - name: loki
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.loki) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          args: [-config.file=/etc/loki/loki.yml]
+          ports: [{ name: http, containerPort: 3100 }]
+          volumeMounts:
+            - { name: config, mountPath: /etc/loki/loki.yml, subPath: loki.yml }
+            - { name: data, mountPath: /loki }
+      volumes:
+        - { name: config, configMap: { name: arena-config } }
+        {{- include "arena.claim" (list "data" "arena-loki") | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "loki") | nindent 4 }}
+  ports: [{ name: http, port: 3100, targetPort: http }]
+{{- end }}

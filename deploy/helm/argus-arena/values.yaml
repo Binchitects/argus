@@ -1,0 +1,155 @@
+# Argus Arena on Kubernetes: the services of deploy/docker-compose.yml.
+# One release per namespace: the services keep the names the app reaches them by
+# (litellm, llamacpp, argus, ...). docs/deployment.md, "Helm", says how to install.
+
+# The address people open: https://DOMAIN, gateway.DOMAIN (the API) and argus.DOMAIN (Argus's MCP).
+domain: arena.example.com
+adminEmail: admin@example.com
+# The first chat model, fetched from Hugging Face on the first start (repo:quant). More under Admin -> Models.
+model: unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL
+gitlab:
+  # Argus reads this GitLab with a read-only token (secrets.gitlabToken).
+  url: ""
+  verifyTls: true
+
+# Secrets: left empty, each is made once (randAlphaNum) and kept across upgrades (looked up in the
+# release's Secret). For GitOps tools that cannot look up, set them here or name an existingSecret
+# with the keys ADMIN_PASSWORD, DB_PASSWORD, APP_KEY, ENGINE_KEY, ARGUS_KEY, GATEWAY_KEY (sk-...),
+# and optionally HF_TOKEN, GITLAB_TOKEN, GITLAB_USERNAME, GITLAB_PASSWORD.
+# APP_KEY never changes after the first start: the app's key ring depends on it.
+secrets:
+  existingSecret: ""
+  adminPassword: ""
+  dbPassword: ""
+  appKey: ""
+  engineKey: ""
+  argusKey: ""
+  gatewayKey: ""
+  hfToken: ""
+  gitlabToken: ""
+  gitlabUsername: ""
+  gitlabPassword: ""
+
+# Images. The app, web, Argus and sandbox images are built from this repository (docker compose build)
+# and pushed to a registry the cluster can pull from; the tag defaults to the chart's appVersion.
+images:
+  app: { repository: arena-app, tag: "" }
+  web: { repository: arena-web, tag: "" }
+  argus: { repository: arena-argus, tag: "" }
+  sandbox: { repository: arena-sandbox, tag: "" }
+  postgres: { repository: pgvector/pgvector, tag: 0.8.0-pg16 }
+  litellm: { repository: ghcr.io/berriai/litellm, tag: main-stable }
+  llamacpp: { repository: ghcr.io/ggml-org/llama.cpp, tag: server-cuda }
+  sdcpp: { repository: ghcr.io/leejet/stable-diffusion.cpp, tag: master-cuda }
+  audio: { repository: ghcr.io/speaches-ai/speaches, tag: 0.9.0-rc.3-cpu }
+  searxng: { repository: ghcr.io/searxng/searxng, tag: latest }
+  prometheus: { repository: prom/prometheus, tag: v3.1.0 }
+  alertmanager: { repository: prom/alertmanager, tag: v0.28.0 }
+  loki: { repository: grafana/loki, tag: 3.4.1 }
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+app:
+  # Several replicas share the database: one leads (the once-only background work), and the
+  # ingress keeps each browser on one (ingress.sticky), where its answers run.
+  replicas: 2
+  resources: { requests: { cpu: 500m, memory: 512Mi }, limits: { memory: 2Gi } }
+  # More configuration for the app, as environment variables (Section__Key: value).
+  env: {}
+
+web:
+  replicas: 2
+  resources: { requests: { cpu: 50m, memory: 32Mi }, limits: { memory: 128Mi } }
+
+# This chart's Postgres, or an external one (externalDatabase). Postgres 16 or newer.
+postgresql:
+  enabled: true
+  size: 50Gi
+  resources: { requests: { cpu: 250m, memory: 512Mi } }
+externalDatabase:
+  host: ""
+  port: 5432
+  # The role needs to create the app's database (llmapp) and the gateway's (litellm), or have both made for it.
+  user: arena
+  # disable, prefer, require, verify-ca or verify-full (the gateway knows disable, prefer and require).
+  sslMode: require
+  # A Secret with the server's CA as ca.crt, for verify-ca and verify-full.
+  caSecret: ""
+
+litellm:
+  replicas: 1
+  resources: { requests: { cpu: 250m, memory: 1Gi } }
+
+# The chat models' engine (llama.cpp in router mode), on GPUs. Off: only other GPU servers' models.
+llamacpp:
+  enabled: true
+  gpus: 1
+  resources: { requests: { cpu: "4", memory: 16Gi } }
+  nodeSelector: {}
+  tolerations: []
+
+# Embeddings for Argus, on the CPU.
+embed:
+  enabled: true
+  resources: { requests: { cpu: "2", memory: 2Gi } }
+
+# The code index (GitLab, read-only token) and knowledge packs, over MCP.
+argus:
+  enabled: true
+  size: 50Gi
+  resources: { requests: { cpu: "1", memory: 2Gi } }
+
+# Pictures (FLUX.2 klein) and video (Wan2.2 TI2V 5B), on GPUs. Each GPU pod takes whole GPUs unless the
+# cluster shares them (the NVIDIA device plugin's time-slicing): video is off here; on one GPU share it, or turn pictures off too.
+imagegen:
+  enabled: true
+  gpus: 1
+  nodeSelector: {}
+  tolerations: []
+videogen:
+  enabled: false
+  gpus: 1
+  nodeSelector: {}
+  tolerations: []
+
+# Speech to text and text to speech, on the CPU.
+audio:
+  enabled: true
+  size: 20Gi
+
+# The chat's Python: no network (a NetworkPolicy), a read-only root, jobs through a shared volume.
+sandbox:
+  enabled: true
+  resources: { limits: { cpu: "2", memory: 4Gi } }
+
+# The chat's web search.
+searxng:
+  enabled: true
+
+# Prometheus, Alertmanager and Loki: what the app's dashboards, alerts and logs read. Shipping the
+# pods' logs to Loki (promtail, or the cluster's own agent) is the cluster's.
+monitoring:
+  enabled: true
+  prometheusSize: 50Gi
+  lokiSize: 20Gi
+
+# Volumes. The model library and the app's files are shared by several pods (the app's replicas, the
+# engines, the sandbox): on more than one node they need ReadWriteMany storage (NFS, CephFS, ...).
+persistence:
+  storageClass: ""
+  sharedStorageClass: ""
+  sharedAccessMode: ReadWriteMany
+  models: { size: 500Gi, existingClaim: "" }
+  engine: { size: 1Gi }
+  directory: { size: 1Gi }
+  sandbox: { size: 10Gi }
+
+ingress:
+  enabled: true
+  className: ""
+  # A TLS Secret (kubernetes.io/tls) for DOMAIN, gateway.DOMAIN and argus.DOMAIN (a wildcard, or one with the three names).
+  tlsSecret: arena-tls
+  # Keeps each browser on one app replica (its answers stream from there): the NGINX controller's
+  # cookie affinity and Traefik's sticky cookie are both set; another controller needs its own.
+  sticky: true
+  annotations: {}

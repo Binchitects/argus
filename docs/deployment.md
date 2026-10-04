@@ -119,6 +119,107 @@ the container's root, which under rootless Podman is you, so `MODELS_DIR` stays
 yours; it gives Promtail Podman's socket, and leaves the power caps out (they
 need the host's root).
 
+## External Postgres
+
+The stack's `postgres` holds the app's database (`llmapp`, made by the app) and
+the gateway's (`litellm`). To use your own server (16 or newer) instead, set in
+`.env`:
+
+```bash
+DB_HOST=db.example.com
+DB_PORT=5432
+DB_USER=arena
+DB_SSL_MODE=require     # disable, prefer or require
+```
+
+and leave the stack's out in `docker-compose.override.yml`:
+
+```yaml
+services:
+  postgres: { profiles: [off] }
+```
+
+`DB_PASSWORD` is that role's password. The role creates the app's database at
+the first start (or have `llmapp` made for it, owned by it), and the gateway's
+`litellm` must exist. The app connects to the server's `postgres` database at
+start, to make its own and to start replicas one at a time. With a CA of your
+own, the app also takes `Database__SslMode: verify-full` and
+`Database__RootCertificate` (a file mounted into it) in the override. Connect
+straight to Postgres, or through a pooler in session mode: the replicas' lead
+and signals need a session of their own (a transaction pooler breaks them).
+
+## Scale out
+
+Several app replicas share the database; one leads and runs the once-only
+background work (the scheduled tasks' clock, the engine's models, downloads,
+the directory check), and the others take over within seconds if it stops
+([architecture.md](architecture.md#9-several-app-replicas)). With compose, on one
+host:
+
+```bash
+echo APP_REPLICAS=2 >> .env
+docker compose -f docker-compose.yml -f scale.yml up -d
+```
+
+`scale.yml` runs the replicas (`arena-app-1`, `arena-app-2`, ...) and tells
+Traefik, whose routes then list them with a **sticky cookie** (`arena_replica`):
+a browser stays on one replica, where its answers run and stream. A replica that
+stops answering `/healthz` is left out. **Admin → Overview** says how many
+replicas run and whether the one answering leads.
+
+What to know:
+
+- An answer runs on the replica that was asked. A yes to a tool call, **Stop**
+  and **Answer now** reach it from any replica; a page on another replica sees
+  the answer when it is saved.
+- Each replica keeps its own line with its share of the places (**Settings →
+  Chat → Answers at once, everyone**, or the engine's slots, divided among the replicas,
+  rounded up).
+- A scheduled task runs once, whichever replica its event reaches.
+
+**More GPU servers**: add them under **Admin → Models → Other GPU servers**
+with the same model name. The gateway sends each request to the least busy
+copy (`routing_strategy: least-busy` in `config/litellm.yaml`), never past a
+copy's **At once**.
+
+## Helm
+
+`deploy/helm/argus-arena` runs the same services on Kubernetes: the app with
+several replicas, web, the gateway, Postgres (or an external one), llama.cpp
+and the media servers on GPUs, embed, Argus, the sandbox (no network: a
+NetworkPolicy), SearXNG, Prometheus, Alertmanager and Loki. Each module is
+turned on or off in `values.yaml`. One release per namespace: the services keep
+the names the app reaches them by.
+
+1. Build the app, web, Argus and sandbox images (`docker compose build`) and push
+   them to a registry the cluster pulls from; name them under `images` (the tag
+   defaults to the app's version).
+2. Make a TLS Secret for `DOMAIN`, `gateway.DOMAIN` and `argus.DOMAIN` (a
+   wildcard, or `scripts/make-cert.sh`'s files): `kubectl create secret tls
+   arena-tls --cert=... --key=...`.
+3. Install:
+
+   ```bash
+   helm install arena deploy/helm/argus-arena -n arena --create-namespace \
+     --set domain=arena.example.com --set gitlab.url=https://gitlab.example.com
+   ```
+
+Secrets left empty are made at the first install and kept across upgrades
+(`APP_KEY` must never change); for GitOps tools that cannot look them up, set
+them or name an `existingSecret`. The model library and the app's files are
+shared by several pods: on more than one node they need ReadWriteMany storage
+(`persistence.sharedStorageClass`). The ingress turns on cookie affinity for
+NGINX and a sticky cookie for Traefik; another controller needs its own.
+External Postgres: `postgresql.enabled=false` and `externalDatabase`. Logs reach
+Loki only with a log agent of the cluster's (promtail, or another), and the
+host exporters (node, GPU, CPU temperature, power caps) are left to the
+cluster's own monitoring.
+
+`python3 deploy/helm/check-chart.py` checks the chart without helm: its copies
+of `config/` are the same, every template's blocks close, and every value it
+reads is in `values.yaml`. `helm lint` and `helm template` render it where helm
+is installed.
+
 ## Models
 
 All of them are under **Admin → Models**, with the same controls:

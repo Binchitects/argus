@@ -30,6 +30,8 @@ Three places, each with one job:
 | `GITLAB_VERIFY_TLS` | optional, testing only: `false` accepts any certificate from GitLab. For a private CA, see [deployment.md](deployment.md#gitlab-and-argus) |
 | `BACKUP_DIR`, `BACKUP_COPY_DIR`, `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`, `BACKUP_TIME` | optional, for `scripts/backup.sh`: where backups go (`./backups`), a verified second copy on another disk, how many to keep (14), whether Loki and Prometheus data go too (1), when the daily timer runs (03:30) |
 | `HTTP_PORT`, `HTTPS_PORT` | optional: other ports than 80 and 443 (rootless Podman) |
+| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_SSL_MODE` | optional: an external Postgres instead of the stack's (`postgres`, 5432, `arena`, `prefer`); `DB_SSL_MODE` is `disable`, `prefer` or `require` ([deployment.md](deployment.md#external-postgres)) |
+| `APP_REPLICAS` | optional, with `scale.yml`: how many app replicas run behind Traefik (2) ([deployment.md](deployment.md#scale-out)) |
 | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | optional: power caps, kept applied |
 | `XDG_RUNTIME_DIR` | Podman only, from your shell (not `.env`): where Promtail finds the Podman socket |
 
@@ -42,9 +44,9 @@ each v3 option maps: [deployment.md](deployment.md#where-the-v3-env-options-went
 
 | file | what |
 |---|---|
-| `traefik/routes.yml` | Traefik's routes; `traefik/README.md` for a certificate of your own |
+| `traefik/routes.yml` | Traefik's routes (with `APP_REPLICAS` above 1, the app's replicas and the sticky cookie); `traefik/README.md` for a certificate of your own |
 | `traefik/certificate.yml` | written by `scripts/make-cert.sh`: the certificate Traefik serves, from `deploy/certs/` (not committed) |
-| `litellm.yaml` | the gateway: the default credit per person and period, retries. The models are registered by the app |
+| `litellm.yaml` | the gateway: the default credit per person and period, retries, and how a model on several servers is shared (the least busy copy). The models are registered by the app |
 | `argus.yaml` | Argus's paths; the GitLab comes from `.env` |
 | `prometheus/` | what is scraped, and the alert rules |
 | `alertmanager.yml` | where alerts go (nowhere by default: the app shows them) |

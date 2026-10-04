@@ -318,7 +318,8 @@ you: a morning digest, a weekly report on a repository with Argus.
   pipeline with the end of each failed job's log, a webhook's JSON as it came.
   An event the task does not take is acknowledged and dropped. Events that
   come while the task is answering wait their turn (up to 20; then the oldest
-  goes), so a busy repository loses none.
+  goes), so a busy repository loses none. They wait in the database: a restart
+  keeps them, and with several app replicas each runs once, in order.
 - **Answer as a comment in GitLab**: the answer goes on the merge request,
   issue or commit. Reading the changes and logs and commenting use the **GitLab
   bot token** an admin sets (Settings → Scheduled tasks, a bot account's token
@@ -474,7 +475,7 @@ branch.
 | "… cannot see images" | the chat's model has no vision | choose a model that shows "Sees images" |
 | "You may not use …" | an admin took the model away from you | choose another model |
 | "… is not loaded right now" | the chat's model is not the one the engine has loaded | choose a loaded model, or ask an admin to load it (Admin → Models) |
-| "Waiting for your turn: N answers ahead of you" | the model is serving others; your answer is in line | nothing: it starts on its own. An admin can change the limits (Settings → Chat) |
+| "Waiting for your turn: N answers ahead of you" | the model is serving others; your answer is in line | nothing: it starts on its own. A group with a higher priority goes first (Admin → Groups). An admin can change the limits (Settings → Chat) |
 | "The model has been busy for 10 minutes" | the line did not move for that long | ask again later; tell an admin if it happens often |
 | An API call answers **429** | the key already has as many requests running as it may | wait for one to finish, or retry; an admin sets the limit (API requests at once, per key) |
 | "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](argus/README.md) |

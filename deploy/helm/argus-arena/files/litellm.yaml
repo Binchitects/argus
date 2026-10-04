@@ -1,0 +1,26 @@
+# The gateway: one key per person, their credit, and every request's cost.
+# The app registers the models (chat, pictures, speech) as they come and go.
+model_list: []
+
+router_settings:
+  # A model on several GPU servers (Admin -> Models -> Other GPU servers) is a pool:
+  # each request goes to the copy with the fewest requests going, never past a
+  # copy's slots (the app sends max_parallel_requests with each copy).
+  routing_strategy: least-busy
+  num_retries: 2
+  timeout: 600
+
+litellm_settings:
+  drop_params: true
+  # A new person's credit, per period. Each person's own is set under People.
+  max_internal_user_budget: 50
+  internal_user_budget_duration: 1mo
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  # The chat's requests name their person; the spend is theirs.
+  user_header_mappings:
+    - header_name: X-LLM-User-Email
+      litellm_user_role: internal_user

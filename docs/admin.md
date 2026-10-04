@@ -18,9 +18,9 @@ page covers the rest.
 
 | Page | What it is for |
 |---|---|
-| **Overview** | Services up, people and admins, total spend, who is at or past their credit, and the code index's health. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). |
+| **Overview** | Services up, people and admins, total spend, who is at or past their credit, and the code index's health. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). With several app replicas, how many, and whether the one that answered leads ([deployment.md](deployment.md#scale-out)). |
 | **People** | Add, search, and per person: credit, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, delete. **Export CSV** downloads everyone with spend and credit left. |
-| **Groups** | App groups (the people you add) and directory groups (whoever the company directory puts in them, by name or DN). Tools and models are given to groups. |
+| **Groups** | App groups (the people you add) and directory groups (whoever the company directory puts in them, by name or DN). Tools and models are given to groups. A group's **priority in the answers' line** (-10 to 10, 0 for everyone) decides who goes first when the model is busy: higher first, and within one priority the line stays fair (fewest answers running, then served longest ago). Someone in several groups takes the highest. A change is audited. |
 | **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). |
 | **Models** | Every model at the gateway. The engine's models load and unload with one click (one at a time on one GPU); more are added from the model library on the host. Per model: who may use it, in the chat and with API keys. See [Models](#models) below. |
 | **Deployment** | The `.env` model the engine starts with (file, context, longest reply, multi-token prediction, thinking presets, power limits, prices) and every shipped sample with the exact `.env` block to paste to switch to it. |
@@ -107,8 +107,12 @@ loaded, and how full each GPU would be with them.
   the server's address and key; people use them from the chat, their API keys
   and agents, with the same access rules and spend as any model.
   - A name the gateway has already (a model here, or on another server) makes
-    it **a second copy** of that model: LiteLLM spreads requests between them,
-    and the chat can use the model while this machine's copy is not loaded.
+    it **a second copy** of that model, and the copies are a pool: LiteLLM sends
+    each request to the least busy copy, and the chat can use the model while
+    this machine's copy is not loaded. **At once** (a server model's parallel
+    slots; this machine's are its model's **Answers at once**) caps what one copy is
+    sent at a time and weighs the copies: a server with 8 slots takes twice the
+    requests of one with 4.
   - The key is kept encrypted with the app's key ring (`APP_KEY`) and never
     shown again; leave it empty when editing to keep it.
   - **Health.** Each server's card says whether it answers (checked every 30
