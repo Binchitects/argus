@@ -129,7 +129,7 @@ function ScheduleForm({ saved, onSaved }: { saved: IndexSchedule; onSaved: () =>
             <Button type="submit" loading={save.isPending}>
               Save
             </Button>
-            <span className="text-xs text-muted-foreground">{on ? `${describe(cronOf(schedule))}.` : 'Only GitLab pushes (when the webhook is set) and Index now update it.'}</span>
+            <span className="text-xs text-muted-foreground">{on ? `${describe(cronOf(schedule))}.` : 'Only GitLab pushes and merges (when the webhook is on) and Index now update it.'}</span>
           </div>
         </form>
       </CardContent>

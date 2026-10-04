@@ -81,6 +81,38 @@ public sealed class OperationsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task The_gitlab_webhook_secret_is_shown_once_and_argus_keeps_only_its_hash()
+    {
+        var admin = await Admin();
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/argus/webhook", new { }));
+        var token = made.GetProperty("token").GetString()!;
+        Assert.Equal(48, token.Length);
+        Assert.True(made.GetProperty("enabled").GetBoolean());
+        Assert.Equal($"https://argus.{AppFixture.Domain}/hook/gitlab", made.GetProperty("url").GetString());
+        Assert.Equal("X-Gitlab-Token", made.GetProperty("header").GetString());
+        Assert.Equal(Llm.Api.Operations.ArgusWebhook.Hash(token), app.Argus.WebhookHash);
+        Assert.DoesNotContain(app.Argus.Calls, c => c.Body?.ToString().Contains(token, StringComparison.Ordinal) == true);
+
+        // Afterwards: on, where, what came in; the secret never again.
+        var view = await admin.JsonAsync(await admin.GetAsync("/api/admin/argus/webhook"));
+        Assert.True(view.GetProperty("enabled").GetBoolean());
+        Assert.False(view.TryGetProperty("token", out _));
+        Assert.Equal("merge", view.GetProperty("deliveries")[0].GetProperty("event").GetString());
+
+        // A new one replaces it.
+        var again = (await admin.JsonAsync(await admin.PostAsync("/api/admin/argus/webhook", new { }))).GetProperty("token").GetString()!;
+        Assert.NotEqual(token, again);
+        Assert.Equal(Llm.Api.Operations.ArgusWebhook.Hash(again), app.Argus.WebhookHash);
+
+        var off = await admin.JsonAsync(await admin.Http.DeleteAsync(new Uri("/api/admin/argus/webhook", UriKind.Relative)));
+        Assert.False(off.GetProperty("enabled").GetBoolean());
+        Assert.Equal("", app.Argus.WebhookHash);
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=20"))).EnumerateArray().ToList();
+        Assert.Equal(2, audit.Count(e => e.GetProperty("action").GetString() == "argus.webhook_secret"));
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "argus.webhook_off");
+    }
+
+    [Fact]
     public async Task Repositories_are_chosen_updated_one_by_one_and_audited()
     {
         var admin = await Admin();

@@ -405,4 +405,56 @@ public sealed class ServerWithoutAppTests : IDisposable
         admin.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "admin-secret");
         Assert.Equal(HttpStatusCode.OK, (await _http.SendAsync(admin)).StatusCode);
     }
+
+    [Fact]
+    public async Task The_webhook_is_off_until_an_admin_gives_its_hash_and_takes_merges_as_well_as_pushes()
+    {
+        async Task<(HttpStatusCode, JsonNode)> Admin(HttpMethod method, object? body = null)
+        {
+            var req = new HttpRequestMessage(method, "/admin/webhook");
+            if (body is not null) req.Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+            req.Headers.Add("x-argus-admin-token", "admin-secret");
+            var resp = await _http.SendAsync(req);
+            return (resp.StatusCode, JsonNode.Parse(await resp.Content.ReadAsStringAsync())!);
+        }
+        async Task<(HttpStatusCode, JsonNode)> Hook(string token, object body)
+        {
+            var req = new HttpRequestMessage(HttpMethod.Post, "/hook/gitlab")
+            {
+                Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+            };
+            req.Headers.Add("x-gitlab-token", token);
+            var resp = await _http.SendAsync(req);
+            return (resp.StatusCode, JsonNode.Parse(await resp.Content.ReadAsStringAsync())!);
+        }
+        static string Sha(string s) => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(s)));
+
+        // No secret in the environment, none given: the address answers as if it were not there.
+        var (_, off) = await Admin(HttpMethod.Get);
+        Assert.False(off["enabled"]!.GetValue<bool>());
+        Assert.False(off["from_env"]!.GetValue<bool>());
+        Assert.Equal(HttpStatusCode.NotFound, (await Hook("anything", new { object_kind = "push" })).Item1);
+
+        // Only a SHA-256 is accepted, and only it is kept.
+        Assert.Equal(HttpStatusCode.BadRequest, (await Admin(HttpMethod.Put, new { token_sha256 = "the-secret-itself" })).Item1);
+        var (_, on) = await Admin(HttpMethod.Put, new { token_sha256 = Sha("hook-secret") });
+        Assert.True(on["enabled"]!.GetValue<bool>());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Hook("wrong", new { object_kind = "push" })).Item1);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Hook(Sha("hook-secret"), new { object_kind = "push" })).Item1);
+        // A merge request opened or updated changes no branch; one merged does.
+        var (_, opened) = await Hook("hook-secret", new { object_kind = "merge_request", object_attributes = new { action = "open" }, project = new { path_with_namespace = "grp/alpha" } });
+        Assert.Equal("ignored", opened["status"]!.GetValue<string>());
+        var (merged, noProject) = await Hook("hook-secret", new { object_kind = "merge_request", object_attributes = new { action = "merge" } });
+        Assert.Equal(HttpStatusCode.BadRequest, merged);
+        Assert.Equal("no project.path_with_namespace", noProject["error"]!.GetValue<string>());
+
+        var deliveries = (await Admin(HttpMethod.Get)).Item2["deliveries"]!.AsArray();
+        Assert.Contains(deliveries, d => d!["outcome"]!.GetValue<string>() == "ignored: open" && d["repo"]!.GetValue<string>() == "grp/alpha");
+        Assert.Contains(deliveries, d => d!["outcome"]!.GetValue<string>() == "refused: wrong secret");
+
+        // Cleared: off again.
+        Assert.False((await Admin(HttpMethod.Put, new { token_sha256 = "" })).Item2["enabled"]!.GetValue<bool>());
+        Assert.Equal(HttpStatusCode.NotFound, (await Hook("hook-secret", new { object_kind = "push" })).Item1);
+    }
 }

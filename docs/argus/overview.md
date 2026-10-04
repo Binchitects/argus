@@ -50,9 +50,10 @@ Three things keep the index fresh, and the first two are independent:
   a repository goes stale, and **Admin → Overview** shows the same
   numbers, so "the agent cannot find it" and "it is not in the index" stop
   looking alike.
-- **A push webhook.** `POST /hook/gitlab` takes a GitLab push event and indexes
-  the repository that changed, gated by its own `ARGUS_WEBHOOK_TOKEN` (unset =
-  the route does not exist). A push during a pass is queued rather than dropped
+- **A push and merge webhook.** `POST /hook/gitlab` takes a GitLab push or a
+  merged merge request and indexes the repository that changed, gated by its own
+  secret (made on Admin → Indexing, kept as a hash; or `ARGUS_WEBHOOK_TOKEN`;
+  none = the route answers 404). A push during a pass is queued rather than dropped
   and drained one repository per pass; an overfull queue collapses into one full
   pass. Events it has no use for are acknowledged rather than refused, because
   GitLab disables a webhook that keeps failing. The poll stays on as the floor.

@@ -14,6 +14,8 @@ public sealed class FakeArgus : HttpMessageHandler
 
     public List<(string Method, string PathAndQuery, string? Token, JsonElement? Body)> Calls { get; } = [];
     public bool IndexRunning { get; set; }
+    /// <summary>The webhook secret's SHA-256 as the app last gave it ("" = off).</summary>
+    public string WebhookHash { get; private set; } = "";
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -58,6 +60,11 @@ public sealed class FakeArgus : HttpMessageHandler
             ("POST", "/admin/packs/remove") => body?.GetProperty("name").GetString() == "dotnet-docs"
                 ? Json(HttpStatusCode.OK, """{"status":"removed","name":"dotnet-docs"}""")
                 : Json(HttpStatusCode.NotFound, """{"error":"no installed pack named 'x'"}"""),
+            ("GET", "/admin/webhook") => Json(HttpStatusCode.OK, $$"""
+                {"enabled":{{(WebhookHash.Length > 0 ? "true" : "false")}},"from_env":false,"path":"/hook/gitlab","header":"x-gitlab-token",
+                 "deliveries":[{"at":1790000000,"event":"merge","repo":"group/app","outcome":"started"}]}
+                """),
+            ("PUT", "/admin/webhook") => Webhook(body!.Value.GetProperty("token_sha256").GetString()!),
             ("GET", "/admin/explore") => Json(HttpStatusCode.OK, """
                 {"repos":[{"repo_id":1,"path_with_namespace":"group/app","branch":"main","files":12,"symbols":340,"public_symbols":80}],
                  "symbols":{"rows":[{"name":"ParseHeader","kind":"function","path":"src/parse.c","line":10,"path_with_namespace":"group/app","branch":"main"}],"capped":false,"limit":50},
@@ -65,6 +72,12 @@ public sealed class FakeArgus : HttpMessageHandler
                 """),
             _ => Json(HttpStatusCode.NotFound, """{"error":"not found"}"""),
         };
+    }
+
+    private HttpResponseMessage Webhook(string hash)
+    {
+        WebhookHash = hash;
+        return Json(HttpStatusCode.OK, hash.Length > 0 ? """{"enabled":true}""" : """{"enabled":false}""");
     }
 
     private static HttpResponseMessage Json(HttpStatusCode code, string json) =>

@@ -20,12 +20,13 @@ import { configQuery } from '../chat/api'
 import { passPercent, type IndexProgress } from './argus-progress'
 import { RepositoriesCard } from './argus-repos'
 import { ScheduleCard } from './argus-schedule'
+import { WebhookCard } from './argus-webhook'
 import { indexExit, type IndexSummary } from './ops-api'
 
 export function NotConfigured() {
   return (
     <EmptyState icon={Database} title="Argus is not set up in this deployment">
-      Add <code className="font-mono">argus</code> to the parts that run (Settings → Deployment) and set <code className="font-mono">ARGUS_ADMIN_TOKEN</code> in <code className="font-mono">deploy/.env</code>.
+      Set <code className="font-mono">ARGUS_KEY</code> in <code className="font-mono">deploy/.env</code>, and do not leave <code className="font-mono">argus</code> out in <code className="font-mono">docker-compose.override.yml</code>.
     </EmptyState>
   )
 }
@@ -88,7 +89,7 @@ export function IndexingPage() {
     )
   const { job, index: idx } = st.data
   const running = job.state === 'running'
-  const trigger = { schedule: 'the schedule', webhook: 'a GitLab push', manual: 'an admin' }[job.trigger ?? ''] ?? job.trigger
+  const trigger = { schedule: 'the schedule', webhook: 'a GitLab push or merge', manual: 'an admin' }[job.trigger ?? ''] ?? job.trigger
   return (
     <>
       <PageHeader title="Indexing" description="Argus's index of your GitLab: what it holds, how current it is, and runs on demand." />
@@ -103,7 +104,7 @@ export function IndexingPage() {
           <CardHeader>
             <CardTitle>Index now</CardTitle>
             <CardDescription>
-              A pass over every chosen repository and branch, now. {st.data.webhook ? 'GitLab pushes also update the repository pushed to.' : ''}
+              A pass over every chosen repository and branch, now. {st.data.webhook ? 'GitLab pushes and merges also update the repository they change.' : ''}
               {st.data.interval ? ` Argus's own timer also runs one every ${duration(st.data.interval)} (ARGUS_INDEX_INTERVAL).` : ''}
             </CardDescription>
           </CardHeader>
@@ -155,6 +156,7 @@ export function IndexingPage() {
           </CardContent>
         </Card>
         <ScheduleCard />
+        <WebhookCard />
         <RepositoriesCard running={running} progress={job.progress ?? null} pending={st.data.pending} gitlabUrl={gitlabUrl} />
       </div>
     </>

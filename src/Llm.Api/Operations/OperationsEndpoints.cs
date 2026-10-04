@@ -44,6 +44,23 @@ public static class OperationsEndpoints
 
         var argus = g.MapGroup("/argus");
         argus.MapGet("/status", (ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("index/status", ct), a));
+        // The GitLab webhook: on a push or a merge, the repository's index is brought up to date.
+        argus.MapGet("/webhook", (ArgusWebhook w, ArgusAdmin a, CancellationToken ct) => Relay(async () => (JsonNode?)await w.ViewAsync(ct), a));
+        argus.MapPost("/webhook", (ArgusWebhook w, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        {
+            var token = await w.RotateAsync(ct);
+            await audit.WriteAsync("argus.webhook_secret", "gitlab");
+            // The only time the secret is shown: Argus keeps its hash, the app nothing.
+            var view = await w.ViewAsync(ct);
+            view["token"] = token;
+            return (JsonNode?)view;
+        }, a));
+        argus.MapDelete("/webhook", (ArgusWebhook w, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        {
+            await w.DisableAsync(ct);
+            await audit.WriteAsync("argus.webhook_off", "gitlab");
+            return (JsonNode?)await w.ViewAsync(ct);
+        }, a));
         argus.MapPost("/index", (IndexRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             if (body.Repo is { Length: > 0 } repo)

@@ -11,6 +11,7 @@ using Argus.Packs;
 using Argus.Platform;
 using Argus.Store;
 using Argus.Util;
+using Microsoft.Data.Sqlite;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -70,7 +71,48 @@ public static partial class ArgusServer
 
     static string Env(string name) => (Environment.GetEnvironmentVariable(name) ?? "").Trim();
     public static string WebhookToken() => Env(WebhookTokenEnv);
-    static bool WebhookEnabled() => WebhookToken().Length > 0;
+
+    /// <summary>The webhook's secret, as its SHA-256 (hex), when an admin set it through the admin API (the platform's app does).</summary>
+    public const string WebhookHashKey = "webhook.token_sha256";
+
+    static string? _webhookDbPath;
+
+    static string StoredWebhookHash()
+    {
+        if (_webhookDbPath is null) return "";
+        try
+        {
+            using var conn = Db.Connect(_webhookDbPath);
+            return Sql.One(conn, "SELECT value FROM argus_meta WHERE key = ?", WebhookHashKey)?.Str("value") ?? "";
+        }
+        catch (SqliteException) { return ""; }
+    }
+
+    static bool WebhookEnabled() => WebhookToken().Length > 0 || StoredWebhookHash().Length > 0;
+
+    /// <summary>A delivery: the env token as it is, or the stored hash of the one set through the admin API.</summary>
+    static bool WebhookTokenMatches(string supplied)
+    {
+        if (supplied.Length == 0) return false;
+        if (WebhookToken() is { Length: > 0 } env) return SecretEquals(supplied, env);
+        var stored = StoredWebhookHash();
+        return stored.Length > 0 && SecretEquals(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(supplied))), stored);
+    }
+
+    /// <summary>The last deliveries, newest first, for the admin page: when, what, which repository, what came of it.</summary>
+    static readonly LinkedList<JsonObject> Deliveries = new();
+
+    static void Delivered(string @event, string? repo, string outcome)
+    {
+        lock (Deliveries)
+        {
+            Deliveries.AddFirst(new JsonObject
+            {
+                ["at"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["event"] = @event, ["repo"] = repo, ["outcome"] = outcome,
+            });
+            while (Deliveries.Count > 30) Deliveries.RemoveLast();
+        }
+    }
     static string AdminToken() => Env(AdminTokenEnv);
     static bool AdminEnabled() => AdminToken().Length > 0;
 
@@ -157,7 +199,8 @@ public static partial class ArgusServer
         app.MapGet(HealthzPath, () => Json(new JsonObject { ["status"] = "ok" }));
         MapAdmin(app, cfg, jobs);
         MapRepoAdmin(app, cfg, jobs);
-        if (WebhookEnabled()) MapWebhook(app, jobs);
+        _webhookDbPath = cfg.Index.DbPath;
+        MapWebhook(app, jobs);
         if (AppEnabled()) PlatformApi.Map(app, cfg, appDbPath, gateway, chat);
         app.MapMcp("/mcp");
 
@@ -332,10 +375,12 @@ public static partial class ArgusServer
     {
         app.MapPost(WebhookPath, async (HttpContext ctx) =>
         {
+            if (!WebhookEnabled()) return Json(new JsonObject { ["error"] = "the webhook is not set up" }, 404);
             var supplied = ctx.Request.Headers[WebhookHeader].ToString();
-            if (supplied.Length == 0 || !SecretEquals(supplied, WebhookToken()))
+            if (!WebhookTokenMatches(supplied))
             {
                 AuditLog.Denied("webhook_token_rejected", WebhookPath, $"header {WebhookHeader} missing or wrong");
+                Delivered("?", null, "refused: wrong secret");
                 return Json(new JsonObject { ["error"] = "forbidden" }, 401);
             }
             JsonNode? body;
@@ -344,14 +389,36 @@ public static partial class ArgusServer
             if (body is not JsonObject obj) return Json(new JsonObject { ["error"] = "body is not an object" }, 400);
             var kind = obj["object_kind"]?.ToString();
             if (string.IsNullOrEmpty(kind)) kind = ctx.Request.Headers["x-gitlab-event"].ToString();
-            if (kind.Length > 0 && kind.ToLowerInvariant() is not ("push" or "push hook"))
-                return Json(new JsonObject { ["status"] = "ignored", ["event"] = kind });
+            kind = kind.ToLowerInvariant();
             var repo = PyStr.Strip((obj["project"] as JsonObject)?["path_with_namespace"]?.ToString() ?? "");
-            if (repo.Length == 0) return Json(new JsonObject { ["error"] = "no project.path_with_namespace" }, 400);
-            var after = obj["after"]?.ToString() ?? "";
-            if (after.Length > 0 && after.All(c => c == '0'))
-                return Json(new JsonObject { ["status"] = "ignored", ["reason"] = "ref deleted", ["repo"] = repo });
-            return Json(jobs.EnqueueWebhook(repo), 202);
+            switch (kind)
+            {
+                case "push" or "push hook":
+                    if (repo.Length == 0) return Json(new JsonObject { ["error"] = "no project.path_with_namespace" }, 400);
+                    var after = obj["after"]?.ToString() ?? "";
+                    if (after.Length > 0 && after.All(c => c == '0'))
+                    {
+                        Delivered("push", repo, "ignored: a branch deleted");
+                        return Json(new JsonObject { ["status"] = "ignored", ["reason"] = "ref deleted", ["repo"] = repo });
+                    }
+                    break;
+                // A merge lands on the target branch: that is what changed (a push event follows only for pushes).
+                case "merge_request" or "merge request hook":
+                    var action = (obj["object_attributes"] as JsonObject)?["action"]?.ToString();
+                    if (action != "merge")
+                    {
+                        Delivered("merge request", repo, $"ignored: {action ?? "no action"}");
+                        return Json(new JsonObject { ["status"] = "ignored", ["event"] = kind, ["action"] = action });
+                    }
+                    if (repo.Length == 0) return Json(new JsonObject { ["error"] = "no project.path_with_namespace" }, 400);
+                    break;
+                default:
+                    Delivered(kind.Length > 0 ? kind : "?", repo.Length > 0 ? repo : null, "ignored: not a push or a merge");
+                    return Json(new JsonObject { ["status"] = "ignored", ["event"] = kind });
+            }
+            var queued = jobs.EnqueueWebhook(repo);
+            Delivered(kind.StartsWith("merge", StringComparison.Ordinal) ? "merge" : "push", repo, queued["status"]?.ToString() ?? "queued");
+            return Json(queued, 202);
         });
     }
 
@@ -396,6 +463,30 @@ public static partial class ArgusServer
                 ["branches"] = new JsonArray(branches.Select(x => (JsonNode?)x).ToArray()),
                 ["allow_partial"] = allowPartial,
             });
+        });
+
+        // The webhook: whether it is set up and its last deliveries; and its secret set (as a hash) or cleared.
+        app.MapGet(AdminPrefix + "webhook", (HttpRequest request) =>
+        {
+            if (!Authorised(request)) return Forbidden();
+            JsonArray recent;
+            lock (Deliveries) recent = new JsonArray([.. Deliveries.Select(d => (JsonNode)d.DeepClone())]);
+            return Json(new JsonObject
+            {
+                ["enabled"] = WebhookEnabled(), ["from_env"] = WebhookToken().Length > 0, ["path"] = WebhookPath, ["header"] = WebhookHeader, ["deliveries"] = recent,
+            });
+        });
+        app.MapPut(AdminPrefix + "webhook", async (HttpRequest request) =>
+        {
+            if (!Authorised(request)) return Forbidden();
+            var body = await BodyOrEmpty(request);
+            var hash = body["token_sha256"]?.ToString() ?? "";
+            if (hash.Length > 0 && (hash.Length != 64 || !hash.All(Uri.IsHexDigit)))
+                return Json(new JsonObject { ["error"] = "token_sha256 is 64 hex characters" }, 400);
+            using var conn = Db.Connect(cfg.Index.DbPath);
+            if (hash.Length == 0) Sql.Exec(conn, "DELETE FROM argus_meta WHERE key = ?", WebhookHashKey);
+            else Sql.Exec(conn, "INSERT INTO argus_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", WebhookHashKey, hash.ToLowerInvariant());
+            return Json(new JsonObject { ["enabled"] = WebhookEnabled() });
         });
 
         app.MapGet(AdminPrefix + "metrics", (HttpRequest request) =>

@@ -12,6 +12,16 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## Unreleased
+
+### :sparkles: New features & Enhancements
+
+- **Index on push and merge**: Admin → Indexing → Push and merge webhook makes
+  the GitLab webhook's secret (shown once; Argus keeps its hash, the app
+  nothing), shows the address and the steps for GitLab, and lists the last
+  deliveries. A push or a merged merge request updates that repository at once.
+  Argus's GitLab token stays read-only: a Maintainer adds the webhook in GitLab
+
 ## v4.0.0 (2026-10-03)
 
 ### :rocket: Epics and highlights

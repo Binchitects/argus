@@ -132,7 +132,7 @@ public static class ModelHoursEndpoints
         var onEngine = local.Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
         if (keep.Count > e.ModelsMax)
         {
-            return AuthEndpoints.Problem(409, "full", $"The engine holds {e.ModelsMax} model{(e.ModelsMax == 1 ? "" : "s")} at once: keep at most that many, or raise \"Models loaded at once\" (LLAMACPP_MODELS_MAX) under Settings.");
+            return AuthEndpoints.Problem(409, "full", $"The engine holds {e.ModelsMax} model{(e.ModelsMax == 1 ? "" : "s")} at once: keep at most that many, or raise \"Models loaded at once\" under Settings.");
         }
         if (keep.FirstOrDefault(k => !onEngine.Contains(k)) is { } unknown)
         {

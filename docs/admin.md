@@ -24,32 +24,31 @@ page covers the rest.
 | **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), and MCP servers you add. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). |
 | **Models** | Every model at the gateway. The engine's models load and unload with one click (one at a time on one GPU); more are added from the model library on the host. Per model: who may use it, in the chat and with API keys. See [Models](#models) below. |
 | **Deployment** | The `.env` model the engine starts with (file, context, longest reply, multi-token prediction, thinking presets, power limits, prices) and every shipped sample with the exact `.env` block to paste to switch to it. |
-| **Indexing** | The Argus code index: which repositories GitLab lists are indexed and which branches of each (with each branch's latest commit), every indexed branch at its commit (hash, message, when), **Update** per repository, the reindex schedule (in words or cron, in a time zone), and a run's progress (a percentage overall and per repository) and log. See [Choosing what is indexed](argus/README.md#choosing-what-is-indexed). |
+| **Indexing** | The Argus code index: which repositories GitLab lists are indexed and which branches of each (with each branch's latest commit), every indexed branch at its commit (hash, message, when), **Update** per repository, the reindex schedule (in words or cron, in a time zone), the GitLab push and merge webhook (its secret, shown once, the steps for GitLab, and the last deliveries), and a run's progress (a percentage overall and per repository) and log. See [Choosing what is indexed](argus/README.md#choosing-what-is-indexed). |
 | **Packs** | Knowledge packs, loaded like the models: the **pack library** (built packs on the host, the repository's `packs/` or `ARGUS_PACK_LIBRARY_DIR`) lists each with **Load** and **Unload**. Loading links the pack into Argus, instantly and without a copy, and only a pack built with Argus's embedding model loads (another's vectors would not compare). A pack not in the library can still be installed from a URL (with its SHA-256), updated from the published index, and removed. |
 | **Explore** | What Argus holds, searched across every repository: **symbols and paths**; **references**, every line where a name is used, the definitions marked (as `find_references` answers a model); **code**, words in the files (`"a phrase"`, `prefix*`); and the **documentation** packs by their words, an API's name, or meaning. Each result opens: a file at its line, or a page of a pack. For "a tool found nothing: is it absent, named differently, or never indexed?". |
 | **Monitoring** | Live probes of the gateway, Prometheus, Alertmanager, Loki and Argus, and links to Prometheus's and Alertmanager's own pages. |
 | **Dashboards** | Ten dashboards, drawn by the app: the model and the gateway (LLM Overview, Stack Performance), the machine (Resources, GPU Hardware, Host & Containers), the services (Stack Health & Alerts, Logs), Argus and its index, and usage by person. See [Dashboards](#dashboards) below. |
 | **Logs** | Every service's logs from Loki, newest first: by container, level (all, warnings and errors, errors) and text, over five minutes to a month, and **Live** for new lines as they are written. The filters are in the address, so a view can be linked. |
 | **Alerts** | What fires now (from Alertmanager, with silenced ones marked), every time an alert fired over a day, a week or a month, and every rule with its state, severity, how long its condition must hold, and its query. |
-| **Settings** | Every setting, grouped and searchable: applied at once, by a restart the app does itself, or with one host command for `.env` values. See [settings.md](settings.md). |
+| **Settings** | Every setting, grouped and searchable: applied at once, or by a restart the app does itself. See [settings.md](settings.md). |
 | **Audit log** | Every sign-in and every change to people or the index, with who, whom and from where. |
 | **Sign-in** | Local accounts and the company directory; "Check the directory now". |
 
 Indexing, Packs and Explore talk to Argus through the app's server with
-`ARGUS_KEY`, which never reaches a browser. Without the `argus` profile
-they say that Argus is not set up, and how to turn it on.
+`ARGUS_KEY`, which never reaches a browser. With Argus left out they say
+that it is not set up, and how to turn it on.
 
 ### Models
 
 llama.cpp runs in **router mode**: one server that knows several models and
-holds up to `LLAMACPP_MODELS_MAX` of them loaded at once (default 1; **Models
-loaded at once** under Settings). Loading and unloading is an API call, not a
+holds up to **Models loaded at once** (under Settings, default 1) of them. Loading and unloading is an API call, not a
 restart. The page opens with **the engine**: how many it holds, which are kept
 loaded, and how full each GPU would be with them.
 
 - **Keep loaded** (a switch on each engine model) pins a model: it loads now,
   loads again when the engine starts, and comes back whenever it is not loaded.
-  At most `LLAMACPP_MODELS_MAX` can be kept. Keeping one is refused when their
+  At most **Models loaded at once** can be kept. Keeping one is refused when their
   caches and buffers together cannot fit the GPUs and RAM; when they fit only
   by putting layers in RAM (two on one GPU that holds one, say), it is kept
   with that warning. The list is `config/engine/keep`, which the engine reads
@@ -65,7 +64,7 @@ loaded, and how full each GPU would be with them.
 - **Working hours** change the kept models by day and hour: a small fast model
   in busy hours, the big one at night. Each has days, a time from and until
   (until before from runs past midnight; the same is all day), the models kept
-  loaded meanwhile (at most `LLAMACPP_MODELS_MAX`, checked against the GPUs and
+  loaded meanwhile (at most **Models loaded at once**, checked against the GPUs and
   RAM as pinning is), and the model new chats start on. While one is in force,
   its models are kept instead of the pinned ones: they load, and the models only
   the previous window kept unload to make room. When it ends, the pinned models

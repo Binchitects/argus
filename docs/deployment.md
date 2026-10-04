@@ -131,6 +131,13 @@ account that is at least Reporter where it should index): `GITLAB_URL` and
 `GITLAB_TOKEN` in `.env`. It answers each person within their own GitLab
 membership; it never needs admin. Indexing starts from **Admin → Indexing**.
 
+To index a push or a merge at once, not at the next scheduled pass: **Admin →
+Indexing → Push and merge webhook → Turn on**, then add the webhook in GitLab
+(group or project → Settings → Webhooks) with the address and secret the page
+shows, for push and merge request events. Adding it is a one-time step for a
+GitLab Maintainer or Owner; Argus's token stays read-only. Details:
+[Indexing on push and merge](argus/README.md#indexing-on-push-and-merge).
+
 A GitLab on a private CA: the CA must be trusted inside the Argus container
 (mount it and set `ARGUS_GITLAB_CA_CERT` in `docker-compose.override.yml`).
 

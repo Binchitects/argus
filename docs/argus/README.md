@@ -395,7 +395,7 @@ Re-index to pick this up on an existing deployment. Adding the column bumps the
 symbol-extractor contract version, so the **first pass re-parses every file**
 once and then reports `embedded: N` — the index pass now embeds what it indexed,
 which is what keeps `semantic_search` current on a stack where nobody runs
-`argus embed` by hand. See [Indexing on push](#indexing-on-push) for why that
+`argus embed` by hand. See [Indexing on push](#indexing-on-push-and-merge) for why that
 mattered.
 
 ### Asking what you have
@@ -465,27 +465,45 @@ can see (each pass refreshes the list; **Refresh from GitLab** does at once):
 The choices live in the index database (`repo_choices`, migration 016), so a
 standalone Argus has them too (`/admin/repos`).
 
-### Indexing on push
+### Indexing on push and merge
 
 The poll is the floor, not the mechanism. With it alone a push sits unindexed
 for up to fifteen minutes, and every answer in that window comes from the
 previous commit with nothing saying so — the same failure as a stopped index,
-just smaller and more frequent. Set `ARGUS_WEBHOOK_TOKEN` and point a GitLab
-push webhook at Argus and the change is indexed in seconds:
+just smaller and more frequent. Point a GitLab webhook at Argus and the change
+is indexed in seconds.
+
+**Admin → Indexing → Push and merge webhook → Turn on** makes the secret. The
+app shows it once, with the address and the steps; Argus keeps only its SHA-256
+(in the index database, `argus_meta`), and the app keeps nothing. In GitLab,
+on the group (a group webhook covers every project in it) or on one project:
 
 ```
 URL:          https://argus.<domain>/hook/gitlab
-Secret token: <the value of ARGUS_WEBHOOK_TOKEN>
-Trigger:      Push events
+Secret token: <the secret, as the page showed it>
+Trigger:      Push events, Merge request events
 ```
 
-GitLab sends the secret back in `X-Gitlab-Token`; Argus compares it in constant
-time and answers `202`. With `ARGUS_WEBHOOK_TOKEN` unset the route **does not
-exist at all**, so an unconfigured deployment has no unauthenticated way to make
-the indexer run. It is a separate secret from `ARGUS_KEY` on purpose:
-this one is stored in GitLab's own configuration, so it is the lower-privilege
-credential. Leaking it lets somebody cause an index pass; leaking the admin
-token lets them read the estate.
+Making a webhook takes a Maintainer (project) or an Owner (group) in GitLab,
+once, by hand: Argus's own token stays read-only. Leave SSL verification on
+only with a trusted certificate (`ACME_EMAIL`). A GitLab on the same network
+refuses local addresses until **Admin → Settings → Network → Outbound requests
+→ Allow requests to the local network from webhooks** is set.
+
+A merge request counts only when it is **merged**: that is when its target
+branch changes. Opened, updated or closed, it is acknowledged and ignored. The
+card lists the last 30 deliveries (what came, for which repository, what came
+of it, a refused secret included), and **New secret** and **Turn off** do what
+they say; a rotation stops the old secret at once.
+
+GitLab sends the secret back in `X-Gitlab-Token`; Argus hashes it and compares
+in constant time, and answers `202`. With no secret set the route answers
+`404`, so an unconfigured deployment has no unauthenticated way to make the
+indexer run. It is a separate secret from `ARGUS_KEY` on purpose: this one is
+stored in GitLab's own configuration, so it is the lower-privilege credential.
+Leaking it lets somebody cause an index pass; leaking the admin token lets them
+read the estate. A standalone Argus can still take it from
+`ARGUS_WEBHOOK_TOKEN`; the environment's value then wins, and the page says so.
 
 A push that arrives while a pass is running is **queued**, not dropped — on a
 busy estate that is the normal case, and dropping it would mean the change waits
@@ -498,7 +516,7 @@ list. The Indexing page shows the queue, and each pass says whether a person,
 the schedule or a webhook started it.
 
 Deliveries Argus has no use for are still **acknowledged** — a tag push, an
-issue, a branch deletion. GitLab treats a non-2xx as a failed delivery, retries
+issue, a branch deletion, a merge request not yet merged. GitLab treats a non-2xx as a failed delivery, retries
 with backoff and eventually disables the webhook, so answering `400` to a tag
 push would cost the operator their webhook over a non-problem.
 

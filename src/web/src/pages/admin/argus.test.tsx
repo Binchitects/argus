@@ -102,3 +102,48 @@ describe('admin explore', () => {
     expect(within(dialog).getByRole('link', { name: /The original page/ })).toHaveAttribute('href', 'https://react.dev/reference/useEffect')
   })
 })
+
+describe('admin indexing webhook', () => {
+  it('turns the GitLab webhook on, shows its secret once with the steps for GitLab, and turns it off', async () => {
+    const status = {
+      job: { state: 'idle', branches: [], started: null, finished: null, returncode: null, tail: [], trigger: null },
+      index: { repos: 1, stale: 0, errored: 0, files: 10, symbols: 100 },
+      interval: 0,
+      webhook: false,
+      pending: [],
+    }
+    const view = { enabled: false, fromEnv: false, url: 'https://argus.llm.test/hook/gitlab', header: 'X-Gitlab-Token', deliveries: [] as object[] }
+    const calls = fakeApi(admin, {
+      'GET /api/admin/argus/status': () => ({ json: status }),
+      'GET /api/admin/argus/webhook': () => ({ json: view }),
+      'POST /api/admin/argus/webhook': () => {
+        Object.assign(view, { enabled: true, deliveries: [{ at: Math.floor(Date.now() / 1000) - 60, event: 'merge', repo: 'team/codec', outcome: 'started' }] })
+        return { json: { ...view, token: 'a1b2c3d4e5f6' } }
+      },
+      'DELETE /api/admin/argus/webhook': () => {
+        Object.assign(view, { enabled: false })
+        return { json: view }
+      },
+    })
+    renderApp('/admin/indexing')
+    const card = await screen.findByRole('region', { name: 'Push and merge webhook' })
+    expect(within(card).getByText('Off')).toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('button', { name: /Turn on/ }))
+
+    // The secret: hidden until asked, shown this once.
+    const secret = await within(card).findByLabelText('Secret token')
+    expect(secret).not.toHaveTextContent('a1b2c3d4e5f6')
+    await userEvent.click(within(card).getByRole('button', { name: 'Show Secret token' }))
+    expect(secret).toHaveTextContent('a1b2c3d4e5f6')
+    expect(within(card).getByText(/Shown this once/)).toBeInTheDocument()
+    expect(within(card).getByText('https://argus.llm.test/hook/gitlab')).toBeInTheDocument()
+    expect(within(card).getByText(/Push events and Merge request events/)).toBeInTheDocument()
+    expect(within(card).getByText('team/codec')).toBeInTheDocument()
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Turn off' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Turn off' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/argus/webhook')).toBe(true))
+    await waitFor(() => expect(within(card).getByText('Off')).toBeInTheDocument())
+    expect(within(card).queryByLabelText('Secret token')).not.toBeInTheDocument()
+  })
+})

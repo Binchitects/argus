@@ -227,6 +227,7 @@ public static class IdentityWiring
         services.AddSingleton<Operations.Modules>();
         services.AddHttpClient("probe", c => c.Timeout = TimeSpan.FromSeconds(3));
         services.AddHttpClient<Operations.ArgusAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
+        services.AddScoped<Operations.ArgusWebhook>();
 
         services.Configure<Chat.ChatOptions>(config.GetSection("Chat"));
         services.Configure<Safeguards.SafeguardOptions>(config.GetSection("Safeguards"));
