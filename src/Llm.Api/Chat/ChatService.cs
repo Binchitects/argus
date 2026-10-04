@@ -1023,7 +1023,7 @@ public sealed partial class ChatService(
         var attachmentIds = stored.Where(m => m.Role == "user").SelectMany(m => ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => attachmentIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
         // Long files, and a project's files past their room, go as their passages about the question when the embedder holds them.
-        var byPassages = await retrieval.PlanAsync(conversation.ProjectId, files.Values, ct);
+        var byPassages = await retrieval.PlanAsync(conversation.AssistantId, files.Values, ct);
         var vision = model?.Vision == true;
         var hears = model?.Audio == true;
         var imagesDropped = false;
@@ -1121,11 +1121,11 @@ public sealed partial class ChatService(
         {
             system += "\n\n" + memory;
         }
-        // A project's instructions, then the chat's own; then the project's files.
-        var project = conversation.ProjectId is { } pid ? await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == pid, ct) : null;
-        if (!string.IsNullOrWhiteSpace(project?.Instructions))
+        // An assistant's instructions, then the chat's own; then the assistant's files.
+        var assistant = conversation.AssistantId is { } aid ? await db.Assistants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == aid, ct) : null;
+        if (!string.IsNullOrWhiteSpace(assistant?.Instructions))
         {
-            system += $"\n\nThis conversation is in the person's project \"{project.Name}\". The project's instructions:\n" + project.Instructions.Trim();
+            system += $"\n\nThis conversation is with the assistant \"{assistant.Name}\". Its instructions:\n" + assistant.Instructions.Trim();
         }
         if (!string.IsNullOrWhiteSpace(conversation.SystemPrompt))
         {
@@ -1133,11 +1133,11 @@ public sealed partial class ChatService(
         }
         var person = system.Length - baseLength - toolNotes;
         var beforeFiles = system.Length;
-        if (project is not null)
+        if (assistant is not null)
         {
-            system += await ProjectFilesAsync(project, canReadFiles, byPassages, ct);
+            system += await AssistantFilesAsync(assistant, canReadFiles, byPassages, ct);
         }
-        var projectFiles = system.Length - beforeFiles;
+        var assistantFiles = system.Length - beforeFiles;
         if (await retrieval.PassagesAsync(byPassages, stored, question, ct) is { } passages)
         {
             Knowledge.Retrieval.AddToQuestion(turns, question.Id, passages);
@@ -1166,7 +1166,7 @@ public sealed partial class ChatService(
         }
 
         return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped,
-            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, projectFiles));
+            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, assistantFiles));
     }
 
     /// <summary>

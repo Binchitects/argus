@@ -107,9 +107,9 @@ public sealed class QualityTests(AppFixture app)
         Assert.Equal(2, model.GetProperty("rated").GetInt32());
         Assert.Equal(0.5, model.GetProperty("upRate").GetDouble());
         Assert.Equal(1, model.GetProperty("reasons").GetProperty("too_long").GetInt32());
-        var noProject = q.GetProperty("projects").EnumerateArray().Single();
-        Assert.Equal(JsonValueKind.Null, noProject.GetProperty("name").ValueKind);
-        Assert.Equal(2, noProject.GetProperty("counts").GetProperty("answers").GetInt32());
+        var noAssistant = q.GetProperty("assistants").EnumerateArray().Single();
+        Assert.Equal(JsonValueKind.Null, noAssistant.GetProperty("name").ValueKind);
+        Assert.Equal(2, noAssistant.GetProperty("counts").GetProperty("answers").GetInt32());
         var latest = q.GetProperty("latest").EnumerateArray().Single();
         Assert.Equal("How do I rotate logs?", latest.GetProperty("title").GetString());
         Assert.Equal(Main, latest.GetProperty("model").GetString());

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Search, Sparkles } from 'lucide-react'
+import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Lock, MessageSquare, Search, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -10,7 +10,8 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery, type Me } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, hurryChat, projectsQuery, stopChat, streamChat } from './api'
+import { archiveChat, assistantQuery, chatModel, configQuery, conversationQuery, forkChat, hurryChat, stopChat, streamChat } from './api'
+import { AssistantIcon } from './assistant-icon'
 import { Composer } from './composer'
 import { contextOf } from './context'
 import { collectFiles } from './files'
@@ -28,7 +29,8 @@ import { ArenaTurn, ComparePicker } from './arena'
 import { arenaView, type CompareChoice } from './quality'
 import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message } from './types'
 import { useUploads } from './uploads'
-import { ProjectView } from './project-view'
+import { AssistantView } from './assistant-view'
+import { ShareDialog } from './share-dialog'
 import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export'
 import type { ExportKind } from './header'
 import { saveBlob } from '@/lib/zip'
@@ -42,21 +44,33 @@ let localCount = 0
 const newLocalId = () => `local-${Date.now()}-${++localCount}`
 
 export function ChatPage() {
-  const { id, projectId } = useParams()
+  const { id, assistantId } = useParams()
   const navigate = useNavigate()
   const config = useQuery(configQuery)
   const [listOpen, setListOpen] = useState(false)
+  // "Start a chat" from the gallery (/chat?assistant=…): a new chat with it; the address is tidied after.
+  const [search, setSearch] = useSearchParams()
+  useEffect(() => {
+    if (search.has('assistant'))
+      setSearch(
+        (p) => {
+          p.delete('assistant')
+          return p
+        },
+        { replace: true },
+      )
+  }, [search, setSearch])
   // A new chat gets its id with its first message; the thread must survive that
   // navigation (it is mid-answer), so it is keyed by "which new chat" until then.
   const [fresh, setFresh] = useState(0)
   const [adopted, setAdopted] = useState<string | null>(null)
-  // A new chat may start in a project (from the project's page).
-  const [startIn, setStartIn] = useState<string | null>(null)
+  // A new chat may start with an assistant (from its page, or the gallery).
+  const [startIn, setStartIn] = useState<string | null>(() => (id ? null : search.get('assistant')))
   const threadKey = !id || id === adopted ? `new-${fresh}` : id
-  const startNew = (project?: string) => {
+  const startNew = (assistant?: string) => {
     setFresh((n) => n + 1)
     setAdopted(null)
-    setStartIn(project ?? null)
+    setStartIn(assistant ?? null)
     setListOpen(false)
     navigate('/chat')
   }
@@ -75,21 +89,21 @@ export function ChatPage() {
   return (
     <div className="grid h-[calc(100dvh-3.5rem)] min-h-0 lg:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[19rem_minmax(0,1fr)]">
       <div className="hidden min-h-0 border-r bg-sidebar lg:block">
-        <ChatList activeId={id} activeProject={projectId} onNew={() => startNew()} />
+        <ChatList activeId={id} activeAssistant={assistantId} onNew={() => startNew()} />
       </div>
       <Sheet open={listOpen} onOpenChange={setListOpen}>
         <SheetContent side="left" className="w-80 gap-0 bg-sidebar p-0">
           <SheetTitle className="sr-only">Chats</SheetTitle>
           <SheetDescription className="sr-only">Your chats</SheetDescription>
-          <ChatList activeId={id} activeProject={projectId} onNew={() => startNew()} onNavigate={() => setListOpen(false)} />
+          <ChatList activeId={id} activeAssistant={assistantId} onNew={() => startNew()} onNavigate={() => setListOpen(false)} />
         </SheetContent>
       </Sheet>
       {config.error ? (
         <div className="p-6">
           <QueryError error={config.error} retry={() => config.refetch()} />
         </div>
-      ) : projectId ? (
-        <ProjectView key={projectId} projectId={projectId} onOpenList={() => setListOpen(true)} onNewChat={() => startNew(projectId)} />
+      ) : assistantId ? (
+        <AssistantView key={assistantId} assistantId={assistantId} onOpenList={() => setListOpen(true)} onNewChat={() => startNew(assistantId)} />
       ) : config.data ? (
         <Thread key={threadKey} id={id} config={config.data} onAdopt={setAdopted} onOpenList={() => setListOpen(true)} startIn={id ? null : startIn} />
       ) : (
@@ -118,8 +132,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   // Admins open an answer's trace (where its time went) from the answer.
   const me = useOutletContext<Me | undefined>()
   const [tracing, setTracing] = useState<string | null>(null)
-  // A new chat started from a project's page is made in it.
-  const [draft, setDraft] = useState<ChatSettings>(() => (startIn ? { projectId: startIn } : {}))
+  // A new chat started from an assistant's page is made with it.
+  const [draft, setDraft] = useState<ChatSettings>(() => (startIn ? { assistantId: startIn } : {}))
   const [live, setLive] = useState<LiveState | null>(null)
   const liveRef = useRef<LiveState | null>(null)
   /** What to do once a run is over and saved: send the next queued message. */
@@ -452,16 +466,19 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     return sent
   }
 
-  // A new chat made in a project: its name for the header.
-  const projects = useQuery({ ...projectsQuery, enabled: !!draft.projectId && !id })
-  const projectName = draft.projectId ? { id: draft.projectId, name: projects.data?.find((p) => p.id === draft.projectId)?.name ?? 'Project' } : null
-  const move = async (projectId: string | null) => {
+  // A new chat with an assistant: its name, look and conversation starters.
+  const chosen = useQuery({ ...assistantQuery(draft.assistantId ?? ''), enabled: !!draft.assistantId && !id })
+  const assistant = data ? data.assistant : chosen.data ? { ...chosen.data, noAccess: false } : null
+  const move = async (assistantId: string | null) => {
     if (!id) return
-    await api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { projectId: projectId ?? '00000000-0000-0000-0000-000000000000' } })
-      .then(() => toast.success(projectId ? 'Moved to the project' : 'Taken out of the project', { description: 'The next answers read its instructions and files accordingly.' }))
+    await api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { assistantId: assistantId ?? '00000000-0000-0000-0000-000000000000' } })
+      .then(() => toast.success(assistantId ? 'Moved to the assistant' : 'Going on without the assistant', { description: 'The next answers read its instructions and files accordingly.' }))
       .catch((e) => toast.error(errorMessage(e)))
-    await Promise.all([queryClient.invalidateQueries({ queryKey: ['chat'] }), queryClient.invalidateQueries({ queryKey: ['projects'] })])
+    await Promise.all([queryClient.invalidateQueries({ queryKey: ['chat'] }), queryClient.invalidateQueries({ queryKey: ['assistants'] })])
   }
+  const [sharing, setSharing] = useState(false)
+  // An assistant's conversation starters take the place of the suggestions.
+  const starters = assistant?.starters.length ? assistant.starters.map((text) => ({ icon: MessageSquare, text })) : null
 
   /** The branch on screen as a file (made here, from what the page has), or its summary by the model. */
   const exportChat = (kind: ExportKind) => {
@@ -633,25 +650,42 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
           onOpenList={onOpenList}
           chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt } : undefined}
           onExport={id && path.length ? exportChat : undefined}
-          project={data?.project ?? (draft.projectId ? projectName : null)}
-          onMove={id ? (projectId) => void move(projectId) : undefined}
+          assistant={assistant}
+          onMove={id ? (assistantId) => void move(assistantId) : undefined}
+          onShare={id && path.length ? () => setSharing(true) : undefined}
           onCompact={canCompact ? () => void compact() : undefined}
         />
         {empty ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
             <div className="w-full max-w-2xl animate-enter">
-              <h1 className="mb-2 text-center text-2xl font-semibold tracking-tight">What can I help with?</h1>
-              <p className="mb-6 text-center text-muted-foreground">
-                {toolsOnHere.includes('argus') ? 'Ask anything. Argus searches the code you have access to in GitLab.' : 'Ask anything, or attach documents, spreadsheets, slides, PDFs, code and images to ask about them.'}
-              </p>
+              {assistant ? (
+                <div className="mb-6 grid justify-items-center gap-2 text-center">
+                  <AssistantIcon icon={assistant.icon} color={assistant.color} size="lg" />
+                  <h1 dir="auto" className="text-2xl font-semibold tracking-tight">
+                    {assistant.name}
+                  </h1>
+                  {chosen.data?.description && (
+                    <p dir="auto" className="text-muted-foreground">
+                      {chosen.data.description}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <h1 className="mb-2 text-center text-2xl font-semibold tracking-tight">What can I help with?</h1>
+                  <p className="mb-6 text-center text-muted-foreground">
+                    {toolsOnHere.includes('argus') ? 'Ask anything. Argus searches the code you have access to in GitLab.' : 'Ask anything, or attach documents, spreadsheets, slides, PDFs, code and images to ask about them.'}
+                  </p>
+                </>
+              )}
               {error && (
                 <Alert variant="destructive" className="mb-3">
                   {error}
                 </Alert>
               )}
               <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} compare={comparePicker} autoFocus big />
-              <div className="stagger mt-4 grid gap-2 sm:grid-cols-3">
-                {(config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions).map((s) => (
+              <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
+                {(starters ?? (config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
                   <button
                     key={s.text}
                     type="button"
@@ -678,6 +712,17 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                       <span className="flex-1">This chat is archived. Writing in it brings it back to the list.</span>
                       <Button variant="outline" size="sm" className="h-7" onClick={() => void unarchive()}>
                         Unarchive
+                      </Button>
+                    </output>
+                  )}
+                  {data?.assistant?.noAccess && (
+                    <output className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+                      <Lock className="size-4 text-warning-ink" aria-hidden="true" />
+                      <span className="flex-1">
+                        You no longer have access to the assistant <bdi className="font-medium">{data.assistant.name}</bdi>: this chat cannot go on with it.
+                      </span>
+                      <Button variant="outline" size="sm" className="h-7" onClick={() => void move(null)}>
+                        Go on without it
                       </Button>
                     </output>
                   )}
@@ -810,6 +855,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         </Sheet>
       )}
       {me?.isAdmin && <TraceSheet answerId={tracing} onClose={() => setTracing(null)} />}
+      {id && <ShareDialog chatId={id} leafId={view.leaf} open={sharing} onOpenChange={setSharing} />}
       {dragging && (
         <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/5 backdrop-blur-[1px]">
           <p className="flex items-center gap-2 rounded-lg bg-popover px-4 py-2 font-medium shadow-md">

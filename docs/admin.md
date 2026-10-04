@@ -36,7 +36,7 @@ page covers the rest.
 | **Traces** | The slowest answers of a time range (an hour to a month), across people: when, who, the model, the whole time, the slowest step, tokens and the tools used (the sub-agents' too). Each opens its trace: the wait in line, getting ready, each round of the model with its tokens, cache share, first token and the engine's read and write speeds (llama.cpp's own timings when the stream carries them, else worked out from the times), each tool call, and each sub-agent with its time, tokens and tool calls; the slowest step is named, with why. The same trace opens from the timer under an answer in the chat. Times, tokens, sizes and tool names only: what was asked and answered is never shown. |
 | **Settings** | Every setting, grouped and searchable: applied at once, or by a restart the app does itself. See [settings.md](settings.md). |
 | **Audit log** | Every sign-in and every change to people or the index, with who, whom and from where. |
-| **Quality** | How people rate the answers, over a day, a week, a month or three: per model and per project, the answers written, the share rated, the share rated up, and why they were rated down. The latest down-rated answers by title, model, reason and the person's words, never their content: a chat opens (read only, down to the rated answer) only when its owner shared it with the down vote, and each opening is audited. Below, the arena's leaderboard from the votes cast in the range. See [Quality](#quality) below. |
+| **Quality** | How people rate the answers, over a day, a week, a month or three: per model and per assistant, the answers written, the share rated, the share rated up, and why they were rated down. The latest down-rated answers by title, model, reason and the person's words, never their content: a chat opens (read only, down to the rated answer) only when its owner shared it with the down vote, and each opening is audited. Below, the arena's leaderboard from the votes cast in the range. See [Quality](#quality) below. |
 | **Sign-in** | Local accounts, the company directory ("Check the directory now") and company sign-in: the identity provider, its admin and required groups, and whether SCIM is on. |
 
 Indexing, Packs and Explore talk to Argus through the app's server with
@@ -231,8 +231,8 @@ period (empty: forever). A group can set its own (Admin → Groups → a group �
 Policies); a person in several groups keeps the shortest of those their groups
 set, and the company's when none does. Every hour a job deletes the chats
 whose last message is older than that, with their files, and the files nobody
-uses that are as old (uploaded, never sent). A project's files stay with the
-project. Each person's deletion is in the audit log (`retention.delete`) with
+uses that are as old (uploaded, never sent). An assistant's files stay with the
+assistant. Each person's deletion is in the audit log (`retention.delete`) with
 counts, never content. Your account shows people how long their chats are kept.
 
 **Legal hold.** Admin → People → a person → **Place on legal hold**, with a
@@ -243,7 +243,7 @@ deleted. **End the hold** erases the chats they deleted meanwhile
 (`person.legal_hold_end`); retention applies again from the next run.
 
 **Exports.** **Export their data** (on the person's page) downloads a zip for
-eDiscovery: their profile, groups and preferences, projects, scheduled tasks
+eDiscovery: their profile, groups and preferences, assistants, scheduled tasks
 (never a webhook's address), every chat with every branch as JSON and the
 branch on screen as Markdown, and every file (the file itself and the text the
 model read). The chats they deleted under hold are in it, marked with

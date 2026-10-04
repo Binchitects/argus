@@ -86,3 +86,8 @@ export function answerNews(answering: boolean, path: Message[]): string {
   if (last?.role === 'assistant' && last.status === 'complete') return 'Answer ready.'
   return ''
 }
+
+/** How many opened a shared chat, for its owner. */
+export function opened(s: { opens: number; people: number }) {
+  return s.opens === 0 ? 'Nobody has opened it yet.' : `Opened ${s.opens} ${s.opens === 1 ? 'time' : 'times'} by ${s.people} ${s.people === 1 ? 'person' : 'people'}.`
+}

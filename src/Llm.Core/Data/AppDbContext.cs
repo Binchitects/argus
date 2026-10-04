@@ -19,9 +19,11 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<AttachmentPage> AttachmentPages => Set<AttachmentPage>();
-    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<Assistant> Assistants => Set<Assistant>();
     public DbSet<SafeguardMark> SafeguardMarks => Set<SafeguardMark>();
-    public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
+    public DbSet<AssistantFile> AssistantFiles => Set<AssistantFile>();
+    public DbSet<ChatShare> ChatShares => Set<ChatShare>();
+    public DbSet<ChatShareView> ChatShareViews => Set<ChatShareView>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
@@ -82,8 +84,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(c => new { c.UserId, c.UpdatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(c => c.Messages).WithOne().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
-            e.HasIndex(c => c.ProjectId);
-            e.HasOne<Project>().WithMany().HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.SetNull);
+            // Assistants were projects: their tables and columns keep the old names.
+            e.Property(c => c.AssistantId).HasColumnName("ProjectId");
+            e.HasIndex(c => c.AssistantId);
+            e.HasOne<Assistant>().WithMany().HasForeignKey(c => c.AssistantId).OnDelete(DeleteBehavior.SetNull);
             // A chat deleted under legal hold is kept, and hidden from every query but the hold's own (IgnoreQueryFilters).
             e.HasQueryFilter(c => c.DeletedAt == null);
         });
@@ -110,21 +114,47 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(a => a.UserId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
         });
-        builder.Entity<Project>(e =>
+        builder.Entity<Assistant>(e =>
         {
             e.ToTable("projects");
             e.Property(x => x.Name).HasMaxLength(100);
             e.Property(x => x.Description).HasMaxLength(500);
             e.Property(x => x.Instructions).HasMaxLength(20_000);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Thinking).HasMaxLength(20);
+            e.Property(x => x.Starters).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Icon).HasMaxLength(20).HasDefaultValue("bot");
+            e.Property(x => x.Color).HasMaxLength(20).HasDefaultValue("blue");
+            e.Property(x => x.Groups).HasDefaultValueSql("'{}'::uuid[]");
+            e.Property(x => x.EditorPeople).HasDefaultValueSql("'{}'::uuid[]");
+            e.Property(x => x.EditorGroups).HasDefaultValueSql("'{}'::uuid[]");
             e.HasIndex(x => new { x.UserId, x.UpdatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
-        builder.Entity<ProjectFile>(e =>
+        builder.Entity<AssistantFile>(e =>
         {
             e.ToTable("project_files");
-            e.HasKey(x => new { x.ProjectId, x.AttachmentId });
-            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.AssistantId).HasColumnName("ProjectId");
+            e.HasKey(x => new { x.AssistantId, x.AttachmentId });
+            e.HasOne<Assistant>().WithMany().HasForeignKey(x => x.AssistantId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(x => x.AttachmentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ChatShare>(e =>
+        {
+            e.ToTable("chat_shares");
+            e.Property(x => x.Groups).HasDefaultValueSql("'{}'::uuid[]");
+            // One link per chat: sharing again changes it.
+            e.HasIndex(x => x.ConversationId).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ChatShareView>(e =>
+        {
+            e.ToTable("chat_share_views");
+            e.HasKey(x => new { x.ShareId, x.UserId });
+            e.HasOne<ChatShare>().WithMany().HasForeignKey(x => x.ShareId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<SafeguardMark>(e =>
         {

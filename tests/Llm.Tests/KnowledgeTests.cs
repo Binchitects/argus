@@ -8,7 +8,7 @@ namespace Llm.Tests;
 
 /// <summary>
 /// Company knowledge: sources (GitLab wikis and issues, a folder, a website) synced into passages with their readers,
-/// and search_knowledge returning only what the asker may read, with its link. And retrieval: a project's files and
+/// and search_knowledge returning only what the asker may read, with its link. And retrieval: an assistant's files and
 /// long attachments go to the model as the passages that match the question, not their first part.
 /// </summary>
 [Collection(nameof(AppCollection))]
@@ -297,24 +297,24 @@ public sealed class KnowledgeTests(AppFixture app)
         string.Join("\n\n", Enumerable.Range(0, 6).Select(i => $"Paragraph {i} of codec{n}: benchmark run{n}x{i} measured throughput{n} on machine{n}{i} with buffers{n}{i}."));
 
     [Fact]
-    public async Task A_project_with_many_files_answers_about_any_of_them_without_the_files_inlined()
+    public async Task An_assistant_with_many_files_answers_about_any_of_them_without_the_files_inlined()
     {
         await using var f = NewApp(new() { ["Chat:InlineAttachmentChars"] = "2000" });
         var admin = await AdminAsync(f);
         var (b, _) = await PersonAsync(f, admin, "pat");
-        var project = (await b.JsonAsync(await b.PostAsync("/api/projects", new { name = "Codecs" }))).GetProperty("id").GetGuid();
+        var assistant = (await b.JsonAsync(await b.PostAsync("/api/assistants", new { name = "Codecs" }))).GetProperty("id").GetGuid();
         for (var n = 1; n <= 60; n++)
         {
-            await StatusAssert.Is(HttpStatusCode.NoContent, await b.PostAsync($"/api/projects/{project}/files", new { attachmentId = await UploadAsync(b, $"notes-{n:00}.txt", Notes(n)) }));
+            await StatusAssert.Is(HttpStatusCode.NoContent, await b.PostAsync($"/api/assistants/{assistant}/files", new { attachmentId = await UploadAsync(b, $"notes-{n:00}.txt", Notes(n)) }));
         }
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { projectId = project, tools = new[] { "files" } }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { assistantId = assistant, tools = new[] { "files" } }))).GetProperty("id").GetGuid();
 
         foreach (var n in new[] { 7, 53 })
         {
             var (system, question) = await AskAsync(b, chat, $"How big is the frame header of codec{n}?");
             // The files are named, not inlined.
-            Assert.Contains($"[project file: notes-{n:00}.txt (", system, StringComparison.Ordinal);
-            Assert.DoesNotContain("<project_file", system, StringComparison.Ordinal);
+            Assert.Contains($"[assistant file: notes-{n:00}.txt (", system, StringComparison.Ordinal);
+            Assert.DoesNotContain("<assistant_file", system, StringComparison.Ordinal);
             Assert.DoesNotContain("frame header of codec", system, StringComparison.Ordinal);
             // The question carries the passage that answers it, with the file's name and lines.
             Assert.Contains($"<passage file=\"notes-{n:00}.txt\" lines=\"1-", question, StringComparison.Ordinal);

@@ -62,3 +62,15 @@ public enum Audience
     /// <summary>Members of the listed groups.</summary>
     Groups = 2,
 }
+
+/// <summary>How far something a person made is shared (an assistant, a chat's link).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<Reach>))]
+public enum Reach
+{
+    /// <summary>Its owner (and the people they chose to edit it) only.</summary>
+    Private = 0,
+    /// <summary>Members of the listed groups.</summary>
+    Groups = 1,
+    /// <summary>Everyone who can sign in.</summary>
+    Company = 2,
+}

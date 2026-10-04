@@ -428,7 +428,9 @@ public static class IdentityWiring
         Operations.OperationsEndpoints.MapOperations(app);
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
-        Chat.ProjectEndpoints.MapProjects(app);
+        Chat.AssistantEndpoints.MapAssistants(app);
+        Chat.ShareEndpoints.MapShares(app);
+        Access.SharingEndpoints.MapSharing(app);
         Chat.TraceEndpoints.MapTraces(app);
         Chat.MemoryEndpoints.MapMemories(app);
         Chat.PromptEndpoints.MapPrompts(app);

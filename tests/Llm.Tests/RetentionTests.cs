@@ -196,7 +196,7 @@ public sealed class RetentionTests(AppFixture app)
         var zip = await ZipAsync(res);
         Assert.Contains("README.txt", zip.Keys);
         Assert.Contains($"\"userName\": \"{annName}\"", zip["person.json"], StringComparison.Ordinal);
-        Assert.Contains("projects.json", zip.Keys);
+        Assert.Contains("assistants.json", zip.Keys);
         Assert.Contains("tasks.json", zip.Keys);
         var md = zip.Single(e => e.Key.EndsWith(".md", StringComparison.Ordinal)).Value;
         Assert.Contains("## You", md, StringComparison.Ordinal);

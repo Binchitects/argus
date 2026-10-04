@@ -70,7 +70,7 @@ public sealed class Retention(AppDbContext db, AccessService access, IOptionsMon
         var keep = elsewhere.SelectMany(ChatService.ParseIds).ToHashSet();
         var files = used.SelectMany(ChatService.ParseIds).Where(a => !keep.Contains(a)).Distinct().ToList();
         // A project's file stays with its project.
-        var inProjects = await db.ProjectFiles.AsNoTracking().Where(f => files.Contains(f.AttachmentId)).Select(f => f.AttachmentId).ToListAsync(ct);
+        var inProjects = await db.AssistantFiles.AsNoTracking().Where(f => files.Contains(f.AttachmentId)).Select(f => f.AttachmentId).ToListAsync(ct);
         files.RemoveAll(inProjects.Contains);
         var chats = await mine.Where(c => conversations.Contains(c.Id)).ExecuteDeleteAsync(ct);
         var removed = files.Count == 0 ? 0 : await db.ChatAttachments.Where(a => a.UserId == userId && files.Contains(a.Id)).ExecuteDeleteAsync(ct);
@@ -118,7 +118,7 @@ public sealed class Retention(AppDbContext db, AccessService access, IOptionsMon
     /// <summary>The person's files older than the cutoff that no chat of theirs (hidden ones too) and no project uses.</summary>
     private async Task<int> EraseUnusedFilesAsync(Guid userId, DateTimeOffset cutoff, CancellationToken ct)
     {
-        var candidates = await db.ChatAttachments.AsNoTracking().Where(a => a.UserId == userId && a.CreatedAt < cutoff && !db.ProjectFiles.Any(f => f.AttachmentId == a.Id))
+        var candidates = await db.ChatAttachments.AsNoTracking().Where(a => a.UserId == userId && a.CreatedAt < cutoff && !db.AssistantFiles.Any(f => f.AttachmentId == a.Id))
             .Select(a => a.Id).ToListAsync(ct);
         if (candidates.Count == 0)
         {

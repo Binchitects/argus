@@ -14,15 +14,18 @@ using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Chat;
 
-/// <summary>A new chat. Tools: the tool ids it may call (default: those on in new chats); UseArgus: Argus on or off in that list.</summary>
+/// <summary>
+/// A new chat. Tools: the tool ids it may call (default: those on in new chats); UseArgus: Argus on or off in that list.
+/// With an assistant, what is not sent comes from the assistant.
+/// </summary>
 public sealed record NewConversation(string? Thinking = null, bool? UseArgus = null, string? Model = null, string? SystemPrompt = null,
-    double? Temperature = null, double? TopP = null, int? MaxTokens = null, string[]? Tools = null, Guid? ProjectId = null);
+    double? Temperature = null, double? TopP = null, int? MaxTokens = null, string[]? Tools = null, Guid? AssistantId = null);
 
 /// <summary>Only what is sent changes. For the numbers, a negative value clears them (back to the model's default).</summary>
-/// <param name="ProjectId">Into this project; Guid.Empty takes it out of its project.</param>
+/// <param name="AssistantId">With this assistant; Guid.Empty takes it away from its assistant.</param>
 public sealed record ConversationChange(string? Title = null, string? Thinking = null, bool? UseArgus = null, string? Model = null,
     string? SystemPrompt = null, double? Temperature = null, double? TopP = null, int? MaxTokens = null, bool? Archived = null, string[]? Tools = null,
-    Guid? ProjectId = null);
+    Guid? AssistantId = null);
 
 /// <summary>The person's answer to a call waiting for them ("ask before running").</summary>
 public sealed record ToolDecision(bool Allow);
@@ -125,48 +128,54 @@ public static partial class ChatEndpoints
 
     /// <summary>The person's chats, newest first; archived ones only when asked for.</summary>
     private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, string? q = null, bool archived = false,
-        Guid? project = null)
+        Guid? assistant = null)
     {
         var me = await Me(p, users);
         var query = db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id && (archived ? c.ArchivedAt != null : c.ArchivedAt == null));
-        if (project is { } pid)
+        if (assistant is { } aid)
         {
-            query = query.Where(c => c.ProjectId == pid);
+            query = query.Where(c => c.AssistantId == aid);
         }
         if (!string.IsNullOrWhiteSpace(q))
         {
             query = query.Where(c => EF.Functions.ILike(c.Title, "%" + q.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
         }
-        var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300).Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.ProjectId }).ToListAsync();
-        return Results.Ok(list.Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.ProjectId, answering = jobs.IsAnswering(c.Id) }));
+        var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300).Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId }).ToListAsync();
+        return Results.Ok(list.Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, answering = jobs.IsAnswering(c.Id) }));
     }
 
     private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
         ToolRegistry registry, AccessService access, ModelPolicy policy, SmallModel small, CancellationToken ct)
     {
         var me = await Me(p, users);
-        var c = new Conversation { UserId = me.Id };
+        var membership = await access.MembershipAsync(me, ct);
+        var allowed = await registry.ForAsync(membership, ct);
+        Assistant? assistant = null;
+        if (body.AssistantId is { } aid)
+        {
+            if ((assistant = await Assistants.UsableAsync(db, me, membership, aid, ct)) is null)
+            {
+                return AuthEndpoints.Problem(400, "assistant", "There is no such assistant, or it is not shared with you.");
+            }
+            // What the request leaves out comes from the assistant: its model, thinking and tools.
+            body = await Assistants.StartAsync(body, assistant, me, allowed, policy, models, chat.CurrentValue, ct);
+        }
+        var c = new Conversation { UserId = me.Id, AssistantId = assistant?.Id };
         if (await ApplyAsync(c, new ConversationChange(null, body.Thinking, null, body.Model, body.SystemPrompt, body.Temperature, body.TopP, body.MaxTokens), chat.CurrentValue, models, me, policy, small) is { } problem)
         {
             return problem;
         }
-        var allowed = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
         if (ApplyTools(c, body.Tools, body.UseArgus, allowed) is { } refused)
         {
             return refused;
         }
-        object? project = null;
-        if (body.ProjectId is { } pid)
-        {
-            if (await db.Projects.AsNoTracking().Where(x => x.Id == pid && x.UserId == me.Id).Select(x => new { x.Id, x.Name }).SingleOrDefaultAsync(ct) is not { } owned)
-            {
-                return AuthEndpoints.Problem(400, "project", "There is no such project of yours.");
-            }
-            (c.ProjectId, project) = (pid, owned);
-        }
         db.Conversations.Add(c);
         await db.SaveChangesAsync(ct);
-        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, OnFor(c, allowed), null, [], false, project));
+        if (assistant is not null)
+        {
+            await db.Assistants.Where(x => x.Id == assistant.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.ChatsStarted, x => x.ChatsStarted + 1), ct);
+        }
+        return Results.Created($"/api/chat/conversations/{c.Id}", Shape(c, OnFor(c, allowed), null, [], false, Assistants.Brief(assistant)));
     }
 
     /// <summary>The ids of the tools a chat has on, of those the person may use.</summary>
@@ -264,7 +273,7 @@ public static partial class ChatEndpoints
         return null;
     }
 
-    private static bool ValidThinking(string level, ChatOptions chat) =>
+    internal static bool ValidThinking(string level, ChatOptions chat) =>
         level == "off" || ThinkingPresets.Parse(chat.ThinkingPresets).Any(p => p.Level == level);
 
     private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolRegistry registry, AccessService access, AnswerJobs jobs,
@@ -276,41 +285,48 @@ public static partial class ChatEndpoints
             return Results.NotFound();
         }
         var messages = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id).OrderBy(m => m.Sequence).ToListAsync(ct);
-        var ids = messages.SelectMany(m => ChatService.ParseIds(m.AttachmentsJson)).ToHashSet();
-        var files = await db.ChatAttachments.AsNoTracking().Where(a => ids.Contains(a.Id))
-            .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType, original = a.Kind != "image" && a.Data != null }).ToDictionaryAsync(a => a.Id, ct);
         var forkedFrom = c.ForkedFromId is { } from
             ? await db.Conversations.AsNoTracking().Where(x => x.Id == from && x.UserId == me.Id).Select(x => new { x.Id, x.Title }).SingleOrDefaultAsync(ct)
             : null;
-        var project = c.ProjectId is { } pid
-            ? await db.Projects.AsNoTracking().Where(x => x.Id == pid).Select(x => new { x.Id, x.Name }).SingleOrDefaultAsync(ct)
-            : null;
+        var assistant = await Assistants.OfChatAsync(db, access, me, c.AssistantId, ct);
         var tools = OnFor(c, await registry.ForAsync(await access.MembershipAsync(me, ct), ct));
         // The person's thumbs, and the arena's answers without their models until voted on.
         var quality = await Quality.ChatQuality.ForAsync(db, me.Id, id, messages, ct);
-        return Results.Ok(Shape(c, tools, forkedFrom, messages.Select(m => (object)new
+        return Results.Ok(Shape(c, tools, forkedFrom, await MessagesAsync(db, messages, ct, quality), jobs.IsAnswering(id), assistant, quality.Arenas));
+    }
+
+    /// <summary>
+    /// Messages as the page shows them, with their files (a chat, or a chat shared with the person). With the
+    /// owner's quality view: their thumbs, and the arena's answers without their models until voted on.
+    /// </summary>
+    internal static async Task<IEnumerable<object>> MessagesAsync(AppDbContext db, IReadOnlyList<ChatMessage> messages, CancellationToken ct, Quality.ChatQuality? quality = null)
+    {
+        var ids = messages.SelectMany(m => ChatService.ParseIds(m.AttachmentsJson)).ToHashSet();
+        var files = await db.ChatAttachments.AsNoTracking().Where(a => ids.Contains(a.Id))
+            .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType, original = a.Kind != "image" && a.Data != null }).ToDictionaryAsync(a => a.Id, ct);
+        return messages.Select(m => (object)new
         {
             m.Id, m.ParentId, m.Role, m.Content, m.Reasoning, m.ToolName, m.ToolCallId,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
-            details = quality.Details(m) is { } details ? JsonSerializer.Deserialize<JsonElement>(details) : (JsonElement?)null,
+            details = (quality is null ? m.DetailsJson : quality.Details(m)) is { } details ? JsonSerializer.Deserialize<JsonElement>(details) : (JsonElement?)null,
             context = m.ContextJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ContextJson),
             m.CutShort,
-            status = m.Status.ToString().ToLowerInvariant(), error = quality.Error(m), model = quality.Model(m),
+            status = m.Status.ToString().ToLowerInvariant(), error = quality is null ? m.Error : quality.Error(m), model = quality is null ? m.Model : quality.Model(m),
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
-            feedback = quality.Feedback(m.Id),
-        }), jobs.IsAnswering(id), project, quality.Arenas));
+            feedback = quality?.Feedback(m.Id),
+        });
     }
 
     /// <param name="answering">An answer is being written: the page watches it (GET …/stream).</param>
     /// <param name="arenas">The chat's comparisons of two models (arena mode).</param>
-    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? project = null,
+    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? assistant = null,
         object? arenas = null) =>
         new
         {
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
-            c.CurrentLeafId, c.ArchivedAt, forkedFrom, project, c.CreatedAt, c.UpdatedAt, answering, messages, arenas = arenas ?? Array.Empty<object>(),
+            c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, arenas = arenas ?? Array.Empty<object>(),
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
@@ -341,13 +357,13 @@ public static partial class ChatEndpoints
         {
             c.ArchivedAt = archive ? c.ArchivedAt ?? DateTimeOffset.UtcNow : null;
         }
-        if (body.ProjectId is { } pid)
+        if (body.AssistantId is { } aid)
         {
-            if (pid != Guid.Empty && !await db.Projects.AnyAsync(x => x.Id == pid && x.UserId == me.Id, ct))
+            if (aid != Guid.Empty && await Assistants.UsableAsync(db, me, await access.MembershipAsync(me, ct), aid, ct) is null)
             {
-                return AuthEndpoints.Problem(400, "project", "There is no such project of yours.");
+                return AuthEndpoints.Problem(400, "assistant", "There is no such assistant, or it is not shared with you.");
             }
-            c.ProjectId = pid == Guid.Empty ? null : pid;
+            c.AssistantId = aid == Guid.Empty ? null : aid;
         }
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
@@ -370,38 +386,16 @@ public static partial class ChatEndpoints
         {
             return AuthEndpoints.Problem(400, "message", byId.Count == 0 ? "This chat has nothing to fork yet." : "That message is not in this chat.");
         }
-        if (last.Role == "tool" || last.ToolCallsJson is not null)
+        if (ChatForks.Refusal(last) is { } why)
         {
-            return AuthEndpoints.Problem(400, "message", "Fork from a question or a finished answer.");
+            return AuthEndpoints.Problem(400, "message", why);
         }
-        var path = new List<ChatMessage>();
-        for (var m = last; m is not null; m = m.ParentId is { } parent ? byId.GetValueOrDefault(parent) : null)
-        {
-            path.Add(m);
-        }
-        path.Reverse();
-        var title = (c.Title + " (fork)")[..Math.Min(200, c.Title.Length + 7)];
         var fork = new Conversation
         {
-            UserId = me.Id, Title = title, Thinking = c.Thinking, Tools = c.Tools is null ? null : [.. c.Tools], Model = c.Model, SystemPrompt = c.SystemPrompt,
+            UserId = me.Id, Title = ChatForks.Title(c.Title), Thinking = c.Thinking, Tools = c.Tools is null ? null : [.. c.Tools], Model = c.Model, SystemPrompt = c.SystemPrompt,
             Temperature = c.Temperature, TopP = c.TopP, MaxTokens = c.MaxTokens, ForkedFromId = c.Id,
         };
-        var copies = new Dictionary<Guid, Guid>();
-        var sequence = 0;
-        foreach (var m in path)
-        {
-            var copy = new ChatMessage
-            {
-                ConversationId = fork.Id, ParentId = m.ParentId is { } parent ? copies[parent] : null, Sequence = ++sequence, Role = m.Role,
-                Content = m.Content, Reasoning = m.Reasoning, ToolCallsJson = m.ToolCallsJson, ToolCallId = m.ToolCallId, ToolName = m.ToolName,
-                AttachmentsJson = m.AttachmentsJson, DetailsJson = m.DetailsJson, ContextJson = m.ContextJson, CutShort = m.CutShort, Model = m.Model, PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens,
-                CompletionTokens = m.CompletionTokens, ThinkingMs = m.ThinkingMs, DurationMs = m.DurationMs, Status = m.Status, Error = m.Error,
-                Summary = m.Summary, CreatedAt = m.CreatedAt,
-            };
-            copies[m.Id] = copy.Id;
-            db.ChatMessages.Add(copy);
-        }
-        fork.CurrentLeafId = copies[last.Id];
+        ChatForks.Copy(db, fork, byId, last);
         db.Conversations.Add(fork);
         await db.SaveChangesAsync();
         return Results.Created($"/api/chat/conversations/{fork.Id}", new { fork.Id, fork.Title });
@@ -603,6 +597,12 @@ public static partial class ChatEndpoints
     private static async Task RunAsync(HttpContext http, Conversation c, AppUser me, AppDbContext db, AnswerJobs jobs, AnswerOverrides overrides,
         Func<Task<(ChatMessage Question, bool Titled)>> prepare, Action<AnswerJobs.Job, ChatMessage>? start = null)
     {
+        // A chat with an assistant the person lost access to says so, and answers no more.
+        if (await Assistants.LostAsync(db, http.RequestServices.GetRequiredService<AccessService>(), me, c, http.RequestAborted) is { } lost)
+        {
+            await Problem(http, 403, "assistant", lost);
+            return;
+        }
         if (jobs.Reserve(c.Id, me.Id) is not { } job)
         {
             await Problem(http, 409, "busy", "This chat is already answering. Stop it first, or wait.");
@@ -874,11 +874,11 @@ public static partial class ChatEndpoints
     /// An attachment for the Files panel and image previews: the picture itself, or
     /// the text that went to the model. Its owner's only; never served as HTML.
     /// </summary>
-    private static async Task<IResult> ContentAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, HttpContext http)
+    private static async Task<IResult> ContentAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, HttpContext http)
     {
         var me = await Me(p, users);
-        var a = await db.ChatAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.UserId == me.Id);
-        if (a is null)
+        var a = await db.ChatAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id);
+        if (a is null || (a.UserId != me.Id && !await ShareEndpoints.MayReadFileAsync(db, access, me, id, http.RequestAborted)))
         {
             return Results.NotFound();
         }
@@ -903,11 +903,11 @@ public static partial class ChatEndpoints
     }
 
     /// <summary>A document's pages as pictures (drawn on first look, in the sandbox): how many it has, and how many are drawn.</summary>
-    private static async Task<IResult> PagesAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, DocumentPages pages, CancellationToken ct)
+    private static async Task<IResult> PagesAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, DocumentPages pages, CancellationToken ct)
     {
         var me = await Me(p, users);
-        var a = await db.ChatAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.UserId == me.Id, ct);
-        if (a is null)
+        var a = await db.ChatAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (a is null || (a.UserId != me.Id && !await ShareEndpoints.MayReadFileAsync(db, access, me, id, ct)))
         {
             return Results.NotFound();
         }
@@ -926,13 +926,12 @@ public static partial class ChatEndpoints
         }
     }
 
-    private static async Task<IResult> PageAsync(Guid id, int number, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, HttpContext http, CancellationToken ct)
+    private static async Task<IResult> PageAsync(Guid id, int number, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, HttpContext http,
+        CancellationToken ct)
     {
         var me = await Me(p, users);
-        var page = await db.AttachmentPages.AsNoTracking()
-            .Where(x => x.AttachmentId == id && x.Number == number && db.ChatAttachments.Any(a => a.Id == id && a.UserId == me.Id))
-            .Select(x => x.Data).SingleOrDefaultAsync(ct);
-        if (page is null)
+        var page = await db.AttachmentPages.AsNoTracking().Where(x => x.AttachmentId == id && x.Number == number).Select(x => x.Data).SingleOrDefaultAsync(ct);
+        if (page is null || (!await db.ChatAttachments.AnyAsync(a => a.Id == id && a.UserId == me.Id, ct) && !await ShareEndpoints.MayReadFileAsync(db, access, me, id, ct)))
         {
             return Results.NotFound();
         }

@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Llm.Api.Retention;
 
 /// <summary>
-/// A person's data as one zip: their profile and preferences, projects, scheduled tasks
+/// A person's data as one zip: their profile and preferences, assistants, scheduled tasks
 /// (never a secret: a webhook's address is only said to be set), every chat (all its
 /// branches as JSON, and the branch on screen as Markdown) and every file. An admin's
 /// export for eDiscovery has the chats they deleted while on legal hold too, marked so.
@@ -50,13 +50,13 @@ public sealed class DataExport(AppDbContext db, AccessService access)
             legalHold = hidden && user.LegalHoldSince is { } since ? new { since, reason = user.LegalHoldReason } : null,
         }, ct);
 
-        var projects = await db.Projects.AsNoTracking().Where(p => p.UserId == user.Id).OrderBy(p => p.CreatedAt).ToListAsync(ct);
-        var projectIds = projects.Select(p => p.Id).ToList();
-        var projectFiles = await db.ProjectFiles.AsNoTracking().Where(f => projectIds.Contains(f.ProjectId)).ToListAsync(ct);
-        await JsonAsync(zip, "projects.json", projects.Select(p => new
+        var assistants = await db.Assistants.AsNoTracking().Where(p => p.UserId == user.Id).OrderBy(p => p.CreatedAt).ToListAsync(ct);
+        var assistantIds = assistants.Select(p => p.Id).ToList();
+        var assistantFiles = await db.AssistantFiles.AsNoTracking().Where(f => assistantIds.Contains(f.AssistantId)).ToListAsync(ct);
+        await JsonAsync(zip, "assistants.json", assistants.Select(p => new
         {
-            p.Id, p.Name, p.Description, p.Instructions, p.CreatedAt, p.UpdatedAt,
-            files = projectFiles.Where(f => f.ProjectId == p.Id).OrderBy(f => f.AddedAt).Select(f => f.AttachmentId),
+            p.Id, p.Name, p.Description, p.Instructions, p.Model, p.Thinking, p.Tools, p.Starters, p.Icon, p.Color, reach = p.Reach.ToString().ToLowerInvariant(), p.CreatedAt, p.UpdatedAt,
+            files = assistantFiles.Where(f => f.AssistantId == p.Id).OrderBy(f => f.AddedAt).Select(f => f.AttachmentId),
         }), ct);
 
         var tasks = await db.ScheduledTasks.AsNoTracking().Where(t => t.UserId == user.Id).OrderBy(t => t.CreatedAt).ToListAsync(ct);
@@ -78,7 +78,7 @@ public sealed class DataExport(AppDbContext db, AccessService access)
             var stem = $"chats/{c.CreatedAt:yyyy-MM-dd}-{Safe(c.Title, 60)}-{c.Id.ToString("N")[..8]}";
             await JsonAsync(zip, stem + ".json", new
             {
-                c.Id, c.Title, c.CreatedAt, c.UpdatedAt, c.DeletedAt, c.ArchivedAt, c.Model, c.Thinking, c.SystemPrompt, c.ProjectId, c.ForkedFromId, c.CurrentLeafId,
+                c.Id, c.Title, c.CreatedAt, c.UpdatedAt, c.DeletedAt, c.ArchivedAt, c.Model, c.Thinking, c.SystemPrompt, c.AssistantId, c.ForkedFromId, c.CurrentLeafId,
                 messages = messages.Select(m => new
                 {
                     m.Id, m.ParentId, m.Role, m.Content, m.Reasoning, m.ToolName, m.ToolCallId,
@@ -110,7 +110,7 @@ public sealed class DataExport(AppDbContext db, AccessService access)
         The data of {user.DisplayName} ({user.UserName}, {user.Email}), exported {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm} UTC.
 
         person.json     the profile, preferences and groups
-        projects.json   projects: instructions and the files they hold
+        assistants.json the assistants they made: instructions, settings and the files they hold
         tasks.json      scheduled tasks (a webhook's address is a secret: only whether one is set)
         chats/          every chat: .json has every branch and message, .md the branch on screen
         files/          every file: the file itself, and the text the model read (.txt)

@@ -1,5 +1,5 @@
 import { api, ApiError } from '@/lib/api'
-import type { Attachment, ChatConfig, ChatEvent, Conversation, ConversationSummary, Project, ProjectSummary } from './types'
+import type { Assistant, AssistantSummary, Attachment, ChatConfig, ChatEvent, ChatShare, Conversation, ConversationSummary, Named, SharedChat } from './types'
 
 export const configQuery = {
   queryKey: ['chat', 'config'] as const,
@@ -112,12 +112,33 @@ export const attachmentUrl = (id: string) => `/api/chat/attachments/${id}/conten
 /** The file itself, to save (never shown in the page). */
 export const downloadUrl = (id: string) => `${attachmentUrl(id)}?download=1`
 
-export const projectsQuery = {
-  queryKey: ['projects'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<ProjectSummary[]>('/api/projects', { signal }),
+/** Every assistant the person may use (the gallery); the chat list shows theirs and those they use. */
+export const assistantsQuery = {
+  queryKey: ['assistants'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<AssistantSummary[]>('/api/assistants', { signal }),
 }
 
-export const projectQuery = (id: string) => ({
-  queryKey: ['projects', id] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<Project>(`/api/projects/${id}`, { signal }),
+export const assistantQuery = (id: string) => ({
+  queryKey: ['assistants', id] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<Assistant>(`/api/assistants/${id}`, { signal }),
 })
+
+/** The groups the person can share with (every group, for an admin). */
+export const sharingGroupsQuery = {
+  queryKey: ['sharing', 'groups'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<(Named & { mine: boolean })[]>('/api/sharing/groups', { signal }),
+}
+
+/** A chat's link, if it has one. */
+export const shareQuery = (chatId: string) => ({
+  queryKey: ['chat', 'share', chatId] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ share: ChatShare | null }>(`/api/chat/conversations/${chatId}/share`, { signal }).then((r) => r.share),
+})
+
+export const sharedQuery = (shareId: string) => ({
+  queryKey: ['shared', shareId] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<SharedChat>(`/api/shared/${shareId}`, { signal }),
+})
+
+/** Where a shared chat opens. */
+export const shareUrl = (shareId: string) => `${window.location.origin}/shared/${shareId}`

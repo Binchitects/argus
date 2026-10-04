@@ -160,7 +160,7 @@ public static class QualityEndpoints
 
     /// <summary>
     /// Admin → Quality: for the answers written in a time range (default the last 30 days),
-    /// per model and per project, how many, how many were rated, the share rated up and the
+    /// per model and per assistant, how many, how many were rated, the share rated up and the
     /// reasons; the latest down-rated (no content, unless the person shared the chat); and
     /// the arena's leaderboard from the votes cast in it.
     /// </summary>
@@ -174,10 +174,10 @@ public static class QualityEndpoints
         }
         // An answer is the last message of its rounds (one that called no tool).
         var answers = db.ChatMessages.AsNoTracking().Where(m => m.Role == "assistant" && m.ToolCallsJson == null && m.CreatedAt >= since && m.CreatedAt < until)
-            .Join(db.Conversations, m => m.ConversationId, c => c.Id, (m, c) => new { m.Id, m.Model, c.ProjectId });
-        var written = await answers.GroupBy(x => new { x.Model, x.ProjectId }).Select(g => new { g.Key.Model, g.Key.ProjectId, Count = g.Count() }).ToListAsync(ct);
-        var rated = await db.AnswerFeedback.AsNoTracking().Join(answers, f => f.MessageId, x => x.Id, (f, x) => new { f.Up, f.Reason, x.Model, x.ProjectId })
-            .GroupBy(x => new { x.Model, x.ProjectId, x.Up, x.Reason }).Select(g => new { g.Key.Model, g.Key.ProjectId, g.Key.Up, g.Key.Reason, Count = g.Count() })
+            .Join(db.Conversations, m => m.ConversationId, c => c.Id, (m, c) => new { m.Id, m.Model, c.AssistantId });
+        var written = await answers.GroupBy(x => new { x.Model, x.AssistantId }).Select(g => new { g.Key.Model, g.Key.AssistantId, Count = g.Count() }).ToListAsync(ct);
+        var rated = await db.AnswerFeedback.AsNoTracking().Join(answers, f => f.MessageId, x => x.Id, (f, x) => new { f.Up, f.Reason, x.Model, x.AssistantId })
+            .GroupBy(x => new { x.Model, x.AssistantId, x.Up, x.Reason }).Select(g => new { g.Key.Model, g.Key.AssistantId, g.Key.Up, g.Key.Reason, Count = g.Count() })
             .ToListAsync(ct);
 
         object Row(IEnumerable<int> wrote, IEnumerable<(bool Up, string? Reason, int Count)> votes)
@@ -202,23 +202,23 @@ public static class QualityEndpoints
             })
             .OrderByDescending(x => x.n).Select(x => new { x.model, x.counts }).ToList();
 
-        var projectIds = written.Select(w => w.ProjectId).Concat(rated.Select(r => r.ProjectId)).Distinct().ToList();
-        var ids = projectIds.OfType<Guid>().ToList();
-        var names = await db.Projects.AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
-        var projects = projectIds
+        var assistantIds = written.Select(w => w.AssistantId).Concat(rated.Select(r => r.AssistantId)).Distinct().ToList();
+        var ids = assistantIds.OfType<Guid>().ToList();
+        var names = await db.Assistants.AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+        var assistants = assistantIds
             .Select(pid => new
             {
-                id = pid, name = pid is { } g ? names.GetValueOrDefault(g, "A project") : null,
-                counts = Row(written.Where(w => w.ProjectId == pid).Select(w => w.Count), rated.Where(r => r.ProjectId == pid).Select(r => (r.Up, r.Reason, r.Count))),
-                n = written.Where(w => w.ProjectId == pid).Sum(w => w.Count),
+                id = pid, name = pid is { } g ? names.GetValueOrDefault(g, "An assistant") : null,
+                counts = Row(written.Where(w => w.AssistantId == pid).Select(w => w.Count), rated.Where(r => r.AssistantId == pid).Select(r => (r.Up, r.Reason, r.Count))),
+                n = written.Where(w => w.AssistantId == pid).Sum(w => w.Count),
             })
             .OrderByDescending(x => x.n).Take(25).Select(x => new { x.id, x.name, x.counts }).ToList();
 
         var latest = await db.AnswerFeedback.AsNoTracking().Where(f => !f.Up && f.UpdatedAt >= since && f.UpdatedAt < until)
             .Join(db.ChatMessages, f => f.MessageId, m => m.Id, (f, m) => new { f, m.Model })
-            .Join(db.Conversations, x => x.f.ConversationId, c => c.Id, (x, c) => new { x.f, x.Model, c.Title, c.ProjectId })
+            .Join(db.Conversations, x => x.f.ConversationId, c => c.Id, (x, c) => new { x.f, x.Model, c.Title, c.AssistantId })
             .OrderByDescending(x => x.f.UpdatedAt).Take(Latest)
-            .Select(x => new { x.f.Id, x.f.UpdatedAt, x.Title, x.Model, x.f.Reason, x.f.Comment, x.f.Shared, x.f.UserId, x.ProjectId })
+            .Select(x => new { x.f.Id, x.f.UpdatedAt, x.Title, x.Model, x.f.Reason, x.f.Comment, x.f.Shared, x.f.UserId, x.AssistantId })
             .ToListAsync(ct);
         // Who rated is said only with a shared chat: they chose to show it to the admins.
         var sharers = latest.Where(x => x.Shared).Select(x => x.UserId).Distinct().ToList();
@@ -228,11 +228,11 @@ public static class QualityEndpoints
         {
             from = since, to = until,
             total = Row(written.Select(w => w.Count), rated.Select(r => (r.Up, r.Reason, r.Count))),
-            models, projects,
+            models, assistants,
             latest = latest.Select(x => new
             {
                 x.Id, at = x.UpdatedAt, x.Title, x.Model, x.Reason, x.Comment, x.Shared,
-                project = x.ProjectId is { } g ? names.GetValueOrDefault(g) : null,
+                assistant = x.AssistantId is { } g ? names.GetValueOrDefault(g) : null,
                 person = x.Shared ? people.GetValueOrDefault(x.UserId) : null,
             }),
             leaderboard = await BoardAsync(db, since, until, ct),

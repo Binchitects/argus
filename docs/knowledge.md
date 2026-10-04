@@ -4,9 +4,9 @@ The chat searches the company's own documents: GitLab wikis and issues,
 folders and websites. Each person finds only what they may read, with the
 title and link to cite. Argus stays the code path; this is the documents path.
 
-The same store also feeds **retrieval**: a chat's long files and a project's
+The same store also feeds **retrieval**: a chat's long files and an assistant's
 files go to the model as the passages that match each question, not their
-first part ([below](#long-files-and-projects)).
+first part ([below](#long-files-and-assistants)).
 
 ## What it needs
 
@@ -95,7 +95,7 @@ What the passages say is marked as data, never instructions (Settings →
 Safeguards → **Mark the web's content as data**): anyone who can write an
 issue or a page wrote it.
 
-## Long files and projects
+## Long files and assistants
 
 With the embedder:
 
@@ -103,17 +103,17 @@ With the embedder:
   (Settings → Chat, 30,000 characters) goes in as its first 2,000 characters
   and a note; the **passages that match the question** come with each
   question, with the file's name, lines and section.
-- A **project's files**, when together they do not fit (three times that
+- An **assistant's files**, when together they do not fit (three times that
   setting), are named in the system prompt and go by their passages the same
   way. Files that fit still go whole.
 - Up to **Passages of long files per question** (Settings → Company
   knowledge, 12,000 characters). A short question ("and the second one?")
   is searched with the question before it.
 - The model can still read any part with `read_file` and `search_file`.
-- Files are embedded in the background: a project's file when it is added, an
+- Files are embedded in the background: an assistant's file when it is added, an
   attachment when a question first needs it (an answer waits up to 15 seconds
   for it; one not ready goes in as before, and is ready for the next
-  question). A project may have 200 files.
+  question). An assistant may have 200 files.
 
 Without the embedder, files go in as before: whole when they fit, otherwise
 their start, and the rest by `read_file`.

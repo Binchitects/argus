@@ -1,24 +1,22 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, FolderKanban, FolderPlus, GitFork, MessageSquarePlus, MoreHorizontal, Pencil, Search, Trash2 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, GitFork, LayoutGrid, MessageSquarePlus, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { NavLink, useNavigate } from 'react-router'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Field } from '@/components/ui/field'
-import { toast } from '@/components/ui/toaster'
+import { Link, NavLink } from 'react-router'
 import { Tooltip } from '@/components/ui/tooltip'
-import { api, errorMessage } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { listQuery, projectsQuery } from './api'
+import { assistantsQuery, listQuery } from './api'
+import { AssistantIcon } from './assistant-icon'
+import { NewAssistant } from './assistant-new'
 import { useChatActions } from './chat-actions'
 import { ChatSearch } from './chat-search'
 import { bucket } from './format'
 import type { ConversationSummary } from './types'
 
-export function ChatList({ activeId, activeProject, onNew, onNavigate }: { activeId?: string; activeProject?: string; onNew: () => void; onNavigate?: () => void }) {
+export function ChatList({ activeId, activeAssistant, onNew, onNavigate }: { activeId?: string; activeAssistant?: string; onNew: () => void; onNavigate?: () => void }) {
   const [search, setSearch] = useState('')
   const [archived, setArchived] = useState(false)
   const list = useQuery(listQuery(search.trim(), archived))
@@ -49,7 +47,7 @@ export function ChatList({ activeId, activeProject, onNew, onNavigate }: { activ
       </div>
       {/* Titles are cut with an ellipsis: the list never scrolls sideways. */}
       <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 pb-3">
-        {!archived && !search && <Projects active={activeProject} onNavigate={onNavigate} />}
+        {!archived && !search && <Assistants active={activeAssistant} onNavigate={onNavigate} />}
         {list.isPending && Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="mx-1 mb-2 h-7" />)}
         {list.data?.length === 0 && (
           <p className="px-2 py-4 text-sm text-muted-foreground">{search ? 'No chat matches.' : archived ? 'No archived chats.' : 'No chats yet.'}</p>
@@ -135,11 +133,12 @@ function ChatItem({ chat, active, archived, onNavigate }: { chat: ConversationSu
   )
 }
 
-/** The person's projects, above their chats: each opens its page; a new one is a name away. */
-function Projects({ active, onNavigate }: { active?: string; onNavigate?: () => void }) {
-  const projects = useQuery(projectsQuery)
+/** The person's assistants (theirs, those they edit, those they chat with), above their chats; the gallery a click away. */
+function Assistants({ active, onNavigate }: { active?: string; onNavigate?: () => void }) {
+  const assistants = useQuery(assistantsQuery)
   const [open, setOpen] = useState(true)
   const [creating, setCreating] = useState(false)
+  const theirs = (assistants.data ?? []).filter((a) => a.canEdit || a.myChats > 0).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   return (
     <div className="mb-3 min-w-0">
       <div className="flex items-center gap-1 px-1 pb-1">
@@ -149,92 +148,50 @@ function Projects({ active, onNavigate }: { active?: string; onNavigate?: () => 
           aria-expanded={open}
           className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring"
         >
-          <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} aria-hidden="true" /> Projects
+          <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} aria-hidden="true" /> Assistants
         </button>
-        <Tooltip content="New project">
-          <Button variant="ghost" size="icon-sm" className="size-6" onClick={() => setCreating(true)} aria-label="New project">
-            <FolderPlus />
+        <Tooltip content="All assistants">
+          <Button variant="ghost" size="icon-sm" className="size-6" asChild>
+            <Link to="/assistants" onClick={onNavigate} aria-label="All assistants">
+              <LayoutGrid />
+            </Link>
+          </Button>
+        </Tooltip>
+        <Tooltip content="New assistant">
+          <Button variant="ghost" size="icon-sm" className="size-6" onClick={() => setCreating(true)} aria-label="New assistant">
+            <Plus />
           </Button>
         </Tooltip>
       </div>
       {open && (
-        <ul className="flex min-w-0 flex-col gap-0.5" aria-label="Projects">
-          {projects.data?.map((p) => (
-            <li key={p.id} className="min-w-0">
+        <ul className="flex min-w-0 flex-col gap-0.5" aria-label="Assistants">
+          {theirs.map((a) => (
+            <li key={a.id} className="min-w-0">
               <NavLink
-                to={`/chat/projects/${p.id}`}
+                to={`/chat/assistants/${a.id}`}
                 onClick={onNavigate}
-                title={p.name}
+                title={a.name}
                 className={cn(
                   'flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring',
-                  p.id === active ? 'bg-accent font-medium' : 'text-foreground/85',
+                  a.id === active ? 'bg-accent font-medium' : 'text-foreground/85',
                 )}
               >
-                <FolderKanban className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <bdi className="min-w-0 flex-1 truncate">{p.name}</bdi>
-                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{p.chats}</span>
+                <AssistantIcon icon={a.icon} color={a.color} size="sm" />
+                <bdi className="min-w-0 flex-1 truncate">{a.name}</bdi>
+                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{a.myChats}</span>
               </NavLink>
             </li>
           ))}
-          {projects.data?.length === 0 && (
+          {assistants.isSuccess && theirs.length === 0 && (
             <li>
-              <button type="button" onClick={() => setCreating(true)} className="w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring">
-                Keep chats together, with instructions and files…
-              </button>
+              <Link to="/assistants" onClick={onNavigate} className="block w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring">
+                {assistants.data.length > 0 ? `${assistants.data.length} shared with you: browse them…` : 'Instructions and files for chats, yours or your team’s…'}
+              </Link>
             </li>
           )}
         </ul>
       )}
-      <NewProject open={creating} onOpenChange={setCreating} onNavigate={onNavigate} />
+      <NewAssistant open={creating} onOpenChange={setCreating} onNavigate={onNavigate} />
     </div>
-  )
-}
-
-function NewProject({ open, onOpenChange, onNavigate }: { open: boolean; onOpenChange: (open: boolean) => void; onNavigate?: () => void }) {
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const [form, setForm] = useState({ name: '', description: '' })
-  const create = useMutation({
-    mutationFn: () => api<{ id: string }>('/api/projects', { body: form }),
-    onSuccess: async (made) => {
-      await queryClient.invalidateQueries({ queryKey: ['projects'] })
-      onOpenChange(false)
-      setForm({ name: '', description: '' })
-      onNavigate?.()
-      void navigate(`/chat/projects/${made.id}`)
-    },
-    onError: (e) => toast.error(errorMessage(e)),
-  })
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>New project</DialogTitle>
-          <DialogDescription>Chats kept together, with instructions and files every answer in them reads.</DialogDescription>
-        </DialogHeader>
-        <form
-          className="grid gap-4"
-          onSubmit={(e) => {
-            e.preventDefault()
-            create.mutate()
-          }}
-        >
-          <Field label="Name">
-            <Input autoFocus required maxLength={100} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </Field>
-          <Field label="What it is for" hint="Optional.">
-            <Input maxLength={500} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-          </Field>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={create.isPending}>
-              Create
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }

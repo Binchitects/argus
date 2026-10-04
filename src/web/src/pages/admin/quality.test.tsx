@@ -24,19 +24,19 @@ const quality = {
     { model: 'Main-Model', counts: counts(30, 5, 3, { too_long: 3 }) },
     { model: 'Eyes-Model', counts: counts(10, 1, 1, { wrong: 1 }) },
   ],
-  projects: [
+  assistants: [
     { id: null, name: null, counts: counts(35, 5, 4, { too_long: 3, wrong: 1 }) },
     { id: 'p1', name: 'Billing service', counts: counts(5, 1, 0) },
   ],
   latest: [
-    { id: 'f1', at: '2026-10-03T10:00:00Z', title: 'Rotate the logs', model: 'Main-Model', reason: 'too_long', comment: 'Half would do.', shared: true, project: null, person: 'Quinn' },
-    { id: 'f2', at: '2026-10-02T10:00:00Z', title: 'Payroll question', model: 'Eyes-Model', reason: 'wrong', comment: null, shared: false, project: 'Billing service', person: null },
+    { id: 'f1', at: '2026-10-03T10:00:00Z', title: 'Rotate the logs', model: 'Main-Model', reason: 'too_long', comment: 'Half would do.', shared: true, assistant: null, person: 'Quinn' },
+    { id: 'f2', at: '2026-10-02T10:00:00Z', title: 'Payroll question', model: 'Eyes-Model', reason: 'wrong', comment: null, shared: false, assistant: 'Billing service', person: null },
   ],
   leaderboard: board,
 }
 
 describe('quality page', () => {
-  it('shows ratings per model and project, the latest down-rated, and opens only a shared chat', async () => {
+  it('shows ratings per model and assistant, the latest down-rated, and opens only a shared chat', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/quality': () => ({ json: quality }),
       'GET /api/admin/quality/feedback/f1': () => ({
@@ -56,7 +56,7 @@ describe('quality page', () => {
     expect(main).toHaveTextContent('8 (27%)')
     expect(main).toHaveTextContent('63%')
     expect(main).toHaveTextContent('Too long 3')
-    expect(within(screen.getByRole('table', { name: 'By project' })).getByRole('row', { name: /No project/ })).toHaveTextContent('35')
+    expect(within(screen.getByRole('table', { name: 'By assistant' })).getByRole('row', { name: /No assistant/ })).toHaveTextContent('35')
     expect(screen.getByLabelText('Thumbs up')).toHaveTextContent('60%')
 
     const latest = screen.getByRole('list', { name: 'Latest down-rated answers' })

@@ -34,8 +34,8 @@ interface Quality {
   to: string
   total: Counts
   models: { model: string; counts: Counts }[]
-  projects: { id: string | null; name: string | null; counts: Counts }[]
-  latest: { id: string; at: string; title: string; model: string | null; reason: string | null; comment: string | null; shared: boolean; project: string | null; person: string | null }[]
+  assistants: { id: string | null; name: string | null; counts: Counts }[]
+  latest: { id: string; at: string; title: string; model: string | null; reason: string | null; comment: string | null; shared: boolean; assistant: string | null; person: string | null }[]
   leaderboard: Board
 }
 
@@ -87,7 +87,7 @@ function CountsTable({ rows, first, label }: { rows: { key: string; name: string
 }
 
 /**
- * Admin → Quality: how people rate the answers, per model and per project, in a time
+ * Admin → Quality: how people rate the answers, per model and per assistant, in a time
  * range; the latest down-rated answers (a chat only opens when its owner shared it);
  * and the arena's leaderboard from the votes cast in the range.
  */
@@ -101,7 +101,7 @@ export function QualityPage() {
   const d = q.data
   return (
     <>
-      <PageHeader title="Quality" description="How people rate the answers (thumbs up or down, and why), per model and per project, and how the models fare when people compare them blind." />
+      <PageHeader title="Quality" description="How people rate the answers (thumbs up or down, and why), per model and per assistant, and how the models fare when people compare them blind." />
       <div className="grid gap-6">
         <Segmented label="Time range" value={from} onChange={setFrom} options={presets.map((p) => ({ value: p.from, label: p.label.replace('Last ', '') }))} />
         {q.error && <QueryError error={q.error} retry={() => q.refetch()} />}
@@ -129,14 +129,14 @@ export function QualityPage() {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>By project</CardTitle>
-                <CardDescription>Chats in a project read its instructions and files: a project's ratings say how well those serve.</CardDescription>
+                <CardTitle>By assistant</CardTitle>
+                <CardDescription>Chats with an assistant read its instructions and files: its ratings say how well those serve.</CardDescription>
               </CardHeader>
               <CardContent>
-                {d.projects.length === 0 ? (
+                {d.assistants.length === 0 ? (
                   <EmptyState title="No answers in this time range" />
                 ) : (
-                  <CountsTable label="By project" first="Project" rows={d.projects.map((p) => ({ key: p.id ?? 'none', name: p.name ?? 'No project', counts: p.counts }))} />
+                  <CountsTable label="By assistant" first="Assistant" rows={d.assistants.map((p) => ({ key: p.id ?? 'none', name: p.name ?? 'No assistant', counts: p.counts }))} />
                 )}
               </CardContent>
             </Card>
@@ -157,7 +157,7 @@ export function QualityPage() {
                           <span className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                             <Badge variant="destructive">{reasonLabel(f.reason)}</Badge>
                             {f.model && <span>{f.model}</span>}
-                            {f.project && <span>· {f.project}</span>}
+                            {f.assistant && <span>· {f.assistant}</span>}
                             <time dateTime={f.at} title={when(f.at)}>
                               · {ago(f.at)}
                             </time>

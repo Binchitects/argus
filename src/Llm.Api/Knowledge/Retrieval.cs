@@ -112,7 +112,7 @@ public sealed class Retrieval(AppDbContext db, Embedder embedder, KnowledgeStore
         var wanted = attachments.Where(a => a.Kind == "text" && a.Text.Length > inline).ToDictionary(a => a.Id, a => a.FileName);
         if (projectId is { } pid)
         {
-            var files = await db.ProjectFiles.AsNoTracking().Where(f => f.ProjectId == pid)
+            var files = await db.AssistantFiles.AsNoTracking().Where(f => f.AssistantId == pid)
                 .Join(db.ChatAttachments, f => f.AttachmentId, a => a.Id, (f, a) => new { a.Id, a.FileName, a.Kind, Length = a.Text.Length })
                 .Where(a => a.Kind == "text" && a.Length > 0).ToListAsync(ct);
             var fit = files.Sum(f => (long)Math.Min(f.Length, inline)) <= inline * 3L;
