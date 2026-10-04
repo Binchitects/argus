@@ -50,6 +50,8 @@ public sealed class AppUser : IdentityUser<Guid>
     public DateTimeOffset? LegalHoldSince { get; set; }
     /// <summary>Why the hold was placed (a matter, a ticket), as the admin wrote it.</summary>
     public string? LegalHoldReason { get; set; }
+    /// <summary>Their API key's repeated requests are answered from the answer cache (when an admin lets people choose).</summary>
+    public bool CacheApiAnswers { get; set; }
 }
 
 public sealed class AppRole : IdentityRole<Guid>

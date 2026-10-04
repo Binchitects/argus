@@ -86,7 +86,9 @@ gateway's speech to text, made once. Frames go as pictures to a model that sees.
 
 **A tool calls the API.** Client → Traefik → `gateway.DOMAIN` with the person's
 key → LiteLLM → llama.cpp, another GPU server, the picture server or the speech
-server.
+server. While the answer cache is on (Settings → API keys), chat completions
+go by the app first: a repeated request is answered from its database, the
+rest go on to LiteLLM with the same key ([admin.md](admin.md#the-answer-cache-for-api-keys)).
 
 **Argus.** A developer's agent → `argus.DOMAIN/mcp` with the person's API key,
 which Argus checks with the app (`app:8080/api/authz/key`); the chat →

@@ -15,7 +15,7 @@ public sealed class LiteLlmClientTests
         public string? EndUser { get; set; } = """{"user_id":"p@example.test","budget_id":"b-1"}""";
 
         /// <summary>What /key/info answers: null = 404 (no such key).</summary>
-        public string? KeyInfo { get; set; }
+        public string? KeyInfo { get; set; } = """{"key":"abc123","info":{"user_id":"p@example.test","blocked":true,"expires":"2030-01-02T03:04:05Z","models":["qwen"],"key_alias":"p"}}""";
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -24,10 +24,6 @@ public sealed class LiteLlmClientTests
             if ((request.RequestUri.AbsolutePath == "/end_user/info" && EndUser is null) || (request.RequestUri.AbsolutePath == "/key/info" && KeyInfo is null))
             {
                 return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("""{"error":{"message":"does not exist"}}""") };
-            }
-            if (request.RequestUri.AbsolutePath == "/key/info" && KeyInfo is null)
-            {
-                return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("""{"error":{"message":"Key not found in database"}}""") };
             }
             var answer = request.RequestUri.AbsolutePath switch
             {
@@ -116,10 +112,15 @@ public sealed class LiteLlmClientTests
         var (client, recorder) = Create();
         recorder.KeyInfo = """{"key":"x","info":{"user_id":"p@example.test","blocked":true,"expires":"2026-11-04T10:00:00"}}""";
         var info = await client.KeyInfoAsync("sk-secret-key");
-        Assert.Equal(new GatewayKeyInfo("p@example.test", true, new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero)), info);
+        Assert.NotNull(info);
+        Assert.Equal(("p@example.test", true, new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero)), (info.UserId, info.Blocked, info.Expires));
+        Assert.Empty(info.Models);
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("sk-secret-key"u8.ToArray()));
         Assert.Equal($"/key/info?key={hash}", recorder.Calls.Single().Path);
         Assert.DoesNotContain("sk-secret-key", recorder.Calls.Single().Path, StringComparison.Ordinal);
+
+        recorder.KeyInfo = """{"key":"x","info":{"user_id":"p@example.test","blocked":false,"models":["qwen"]}}""";
+        Assert.Equal(["qwen"], (await client.KeyInfoAsync("sk-secret-key"))!.Models);
 
         recorder.KeyInfo = null;
         Assert.Null(await client.KeyInfoAsync("sk-unknown"));

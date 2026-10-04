@@ -45,6 +45,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<KnowledgeReaders> KnowledgeReaders => Set<KnowledgeReaders>();
     public DbSet<AnswerFeedback> AnswerFeedback => Set<AnswerFeedback>();
     public DbSet<ArenaMatch> ArenaMatches => Set<ArenaMatch>();
+    public DbSet<CachedAnswer> CachedAnswers => Set<CachedAnswer>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -310,6 +311,16 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(m => m.Model);
             e.Property(m => m.Model).HasMaxLength(200);
             e.Property(m => m.Groups).HasDefaultValueSql("'{}'::uuid[]");
+        });
+        builder.Entity<CachedAnswer>(e =>
+        {
+            e.ToTable("answer_cache");
+            e.Property(a => a.Hash).HasMaxLength(64);
+            e.Property(a => a.KeyHash).HasMaxLength(64);
+            e.Property(a => a.Model).HasMaxLength(200);
+            e.HasIndex(a => a.Hash).IsUnique();
+            e.HasIndex(a => a.KeyHash);
+            e.HasIndex(a => a.ExpiresAt);
         });
 
         builder.Entity<Memory>(e =>

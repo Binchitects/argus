@@ -17,7 +17,7 @@ namespace Llm.Api.Chat;
 /// <summary>For one answer only: another model or thinking level than the chat's (retry with…).</summary>
 /// <param name="Hurry">"Answer now", when the person asks for it while the model thinks.</param>
 /// <param name="Research">Deep research: the web and sub-agents on for this answer, a plan, and a sourced report.</param>
-/// <param name="Again">Said with the question for this answer only: answer again shorter or longer (AnswerLengths.Again).</param>
+/// <param name="Again">Said with the question for this answer only: answer again shorter or longer (AnswerLengths.Again), or answer in spoken sentences (Talk.Note).</param>
 /// <param name="Titled">The chat's first question: the model for small steps writes its title beside the answer (ChatTitles).</param>
 /// <param name="QueuedMs">How long the answer waited in line (AnswerGate) before it started, for its trace.</param>
 public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false, string? Again = null, bool Titled = false,

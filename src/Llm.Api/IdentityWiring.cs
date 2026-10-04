@@ -192,6 +192,8 @@ public static class IdentityWiring
             }
         });
 
+        services.AddAnswerCache(config);
+
         services.Configure<ThrottleOptions>(config.GetSection("Throttle"));
         services.Configure<Settings.BrandingOptions>(config.GetSection("Branding"));
         services.AddSingleton<Settings.SettingsAtStart>();
@@ -445,6 +447,7 @@ public static class IdentityWiring
         Schedules.TaskEndpoints.MapTasks(app);
         Models.RemoteServerEndpoints.MapRemoteServers(app);
         app.MapGovernance();
+        AnswerCacheEndpoints.MapAnswerCache(app);
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

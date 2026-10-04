@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/confirm'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { money, when } from '@/lib/format'
@@ -16,6 +17,47 @@ interface Keys {
   keys: { alias: string; preview: string | null; spend: number; blocked: boolean; createdAt: string | null }[]
   spend: number
   budget: number | null
+}
+
+/** The answer cache for the key: off, each person's choice (opt-in), or every key (all); and how long answers are kept. */
+interface AnswerCache {
+  mode: 'off' | 'opt-in' | 'all'
+  chosen: boolean
+  on: boolean
+  ttlHours: number
+}
+
+const hours = (h: number) => (h % 24 === 0 ? `${h / 24} day${h === 24 ? '' : 's'}` : `${h} hour${h === 1 ? '' : 's'}`)
+
+/** Repeated identical requests with the key answered from the cache: the person's switch when an admin lets them choose. */
+function CacheChoice() {
+  const queryClient = useQueryClient()
+  const cache = useQuery({ queryKey: ['account', 'answer-cache'], queryFn: () => api<AnswerCache>('/api/account/answer-cache'), retry: false })
+  const choose = useMutation({
+    mutationFn: (on: boolean) => api<AnswerCache>('/api/account/answer-cache', { method: 'PUT', body: { on } }),
+    onSuccess: (v) => {
+      queryClient.setQueryData(['account', 'answer-cache'], v)
+      toast.success(v.on ? 'Repeated requests come from the cache' : 'Every request goes to the model', {
+        description: v.on ? `For ${hours(v.ttlHours)}, at no cost.` : 'What was kept for your key is gone.',
+      })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const c = cache.data
+  if (!c || c.mode === 'off') return null
+  const explain = `The same request again with your key, within ${hours(c.ttlHours)}, is answered from the cache: no cost, and the response says x-arena-cache: hit. For scripts and FAQ bots that ask the same thing.`
+  if (c.mode === 'all') return <p className="rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">{explain} An admin turned it on for every key.</p>
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border px-3 py-2">
+      <div className="grid gap-0.5">
+        <span id="answer-cache-label" className="text-sm font-medium">
+          Answer repeated requests from the cache
+        </span>
+        <span className="text-xs text-muted-foreground">{explain} Leave it off for tools that must always ask the model.</span>
+      </div>
+      <Switch checked={c.chosen} disabled={choose.isPending} onCheckedChange={(on) => choose.mutate(on)} aria-labelledby="answer-cache-label" />
+    </div>
+  )
 }
 
 /** The person's API key: its spend against their credit, and a new one on demand (shown once, and handed to onNewKey). */
@@ -84,6 +126,7 @@ export function ApiKey({ onNewKey }: { onNewKey?: (key: string) => void } = {}) 
             ))}
           </ul>
         )}
+        <CacheChoice />
         {rotate.data && (
           <Alert variant="success" title="Your new key — shown only this once">
             <div className="mt-2 grid gap-2">

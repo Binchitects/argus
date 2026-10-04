@@ -165,13 +165,14 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         // The gateway keeps a key as its SHA-256 (hex) and looks it up by that too:
         // the key itself never goes into a URL, so never into an access log.
         var token = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
-        var res = await SendAsync(HttpMethod.Get, $"/key/info?key={token}", null, ct, allowStatus: [400, 404]);
+        var res = await SendAsync(HttpMethod.Get, $"/key/info?key={token}", null, ct, allowStatus: [400, 401, 404]);
         if (res?["info"] is not JsonObject info)
         {
             return null;
         }
         return new GatewayKeyInfo(Str(info, "user_id"), info["blocked"]?.GetValueKind() == JsonValueKind.True,
-            DateTimeOffset.TryParse(Str(info, "expires"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? at : null);
+            DateTimeOffset.TryParse(Str(info, "expires"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? at : null,
+            [.. (info["models"] as JsonArray ?? []).Select(m => m?.GetValue<string>() ?? "")]);
     }
 
     public async Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default)

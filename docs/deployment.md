@@ -364,3 +364,14 @@ server from looking. Then `docker compose up -d --pull never`.
 - **The browser warns about the certificate**: Traefik's own; set `ACME_EMAIL`
   or bring your own.
 - **Logs**: **Admin → Logs** (every service, by level), or `docker compose logs SERVICE`.
+- **Is the answer cache answering?** With it on (Settings → API keys), ask the
+  same thing twice with a key: the second response has `x-arena-cache: hit`.
+
+  ```bash
+  for i in 1 2; do curl -sk -D - -o /dev/null https://gateway.DOMAIN/v1/chat/completions \
+    -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+    -d '{"model":"MODEL","messages":[{"role":"user","content":"What are your opening hours?"}]}' | grep -i x-arena-cache; done
+  ```
+
+  No header at all: Traefik still sends the key straight to LiteLLM. It asks
+  the app every 10 seconds; `docker compose logs traefik` shows a failing check.

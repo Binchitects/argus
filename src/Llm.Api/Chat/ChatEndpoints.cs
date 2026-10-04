@@ -42,7 +42,8 @@ public sealed record SpeechRequest(string? Text);
 /// sending its new text with the old one's parent: a sibling, so both stay.
 /// </summary>
 /// <param name="Research">Deep research: the answer plans, has sub-agents search the web, and writes a sourced report.</param>
-public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false, bool Research = false);
+/// <param name="Spoken">Said aloud in Talk: the answer is read aloud as it is written, so it is asked for in spoken sentences.</param>
+public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false, bool Research = false, bool Spoken = false);
 
 /// <summary>Compact the branch down to this message (default: the end of the branch on screen).</summary>
 public sealed record CompactRequest(Guid? MessageId = null);
@@ -81,6 +82,7 @@ public static partial class ChatEndpoints
         g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
         g.MapPost("/attachments", UploadAsync).DisableAntiforgery();
         g.MapPost("/speech", SpeechAsync);
+        g.MapPost("/transcribe", Talk.TranscribeAsync).DisableAntiforgery();
         g.MapGet("/attachments/{id:guid}/content", ContentAsync);
         g.MapGet("/attachments/{id:guid}/pages", PagesAsync);
         g.MapGet("/search", SearchAsync);
@@ -494,7 +496,7 @@ public static partial class ChatEndpoints
         }
         // Its secrets masked, when the person's policy masks them.
         text = verdict.Text ?? text;
-        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Research: body.Research), async () =>
+        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Research: body.Research, Again: body.Spoken ? Talk.Note : null), async () =>
         {
             var next = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
             var first = next == 0;
@@ -765,8 +767,11 @@ public static partial class ChatEndpoints
         await http.Response.WriteAsJsonAsync(new { status = code, error = message });
     }
 
-    /// <summary>A text read aloud: an MP3 from the gateway's text to speech, in the person's name (Persian in a Persian voice).</summary>
-    private static async Task<IResult> SpeechAsync(SpeechRequest body, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, ChatModels models, CancellationToken ct)
+    /// <summary>
+    /// A text read aloud: an MP3 from the gateway's text to speech, in the person's name (Persian in a Persian voice),
+    /// passed on as the speech server writes it. Talk asks for each sentence of an answer as it is written.
+    /// </summary>
+    private static async Task<IResult> SpeechAsync(SpeechRequest body, HttpContext http, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, ChatModels models, CancellationToken ct)
     {
         var me = await Me(p, users);
         var text = Tools.Voices.Plain(body.Text ?? "");
@@ -781,7 +786,9 @@ public static partial class ChatEndpoints
         var (model, voice) = Tools.Voices.For(text);
         try
         {
-            return Results.File(await gateway.SpeakAsync(model, text, voice, me.Email!, ct), "audio/mpeg");
+            var res = await gateway.OpenSpeechAsync(model, text, voice, me.Email!, ct);
+            http.Response.RegisterForDispose(res);
+            return Results.Stream(await res.Content.ReadAsStreamAsync(ct), "audio/mpeg");
         }
         catch (ChatGatewayException ex)
         {
