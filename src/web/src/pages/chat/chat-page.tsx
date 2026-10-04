@@ -1,13 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Search, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { toast } from '@/components/ui/toaster'
-import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
+import { api, ApiError, errorMessage, infoQuery, type Me } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
 import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, hurryChat, projectsQuery, stopChat, streamChat } from './api'
@@ -33,6 +33,7 @@ import { saveBlob } from '@/lib/zip'
 import type { Queued } from './composer'
 import { speak, voicePrefix } from './sound'
 import { tellDesktop } from '@/lib/desktop'
+import { TraceSheet } from '@/pages/admin/trace-view'
 
 /** The id a question is shown under until the server gives it its own. */
 let localCount = 0
@@ -112,6 +113,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const queryClient = useQueryClient()
   const loaded = useQuery({ ...conversationQuery(id ?? ''), enabled: !!id })
   const brand = useQuery(infoQuery).data?.name
+  // Admins open an answer's trace (where its time went) from the answer.
+  const me = useOutletContext<Me | undefined>()
+  const [tracing, setTracing] = useState<string | null>(null)
   // A new chat started from a project's page is made in it.
   const [draft, setDraft] = useState<ChatSettings>(() => (startIn ? { projectId: startIn } : {}))
   const [live, setLive] = useState<LiveState | null>(null)
@@ -697,6 +701,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                             onAnswer={!streaming && i === lastTurn ? send : undefined}
                             onHurry={answering && i === lastTurn && id ? () => void hurryChat(id).catch((e) => toast.error(errorMessage(e))) : undefined}
                             onDecide={(callId, allow) => void decide(callId, allow)}
+                            research={answering && i === lastTurn && !!view.research}
+                            onTrace={me?.isAdmin ? setTracing : undefined}
                             busy={streaming}
                           />
                         )}
@@ -766,6 +772,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
           </SheetContent>
         </Sheet>
       )}
+      {me?.isAdmin && <TraceSheet answerId={tracing} onClose={() => setTracing(null)} />}
       {dragging && (
         <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/5 backdrop-blur-[1px]">
           <p className="flex items-center gap-2 rounded-lg bg-popover px-4 py-2 font-medium shadow-md">

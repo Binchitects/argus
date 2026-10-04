@@ -15,6 +15,7 @@ import { seconds, toolTitle } from './format'
 import { argsSummary, partsOf, partsSummary, splitArgs } from './tool-args'
 import { ToolOutput } from './tool-output'
 import { AgentsView } from './agents'
+import { partsDone } from './research'
 import type { ToolRunning } from './live'
 import type { AgentWork, Message, ToolCall } from './types'
 import { MediaPlayer } from './media'
@@ -162,6 +163,8 @@ export function ToolCard({
   const failed = result?.status === 'failed' || declined
   const value = useMemo(() => (result && !declined ? parseResult(result.content) : undefined), [result, declined])
   const count = resultCount(value)
+  // Sub-agents at work: how many of the parts are done, rather than just "Running".
+  const parts = delegate && running ? Math.max(partsOf(call.function.arguments).length, work?.length ?? 0) : 0
   return (
     <div className="my-2">
       <Collapsible.Root open={open} onOpenChange={setOpen} className="animate-enter overflow-hidden rounded-lg border bg-card transition-shadow hover:shadow-sm">
@@ -184,7 +187,8 @@ export function ToolCard({
               </span>
             ) : running ? (
               <>
-                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> {drawing ? 'Drawing' : filming ? 'Filming' : 'Running'}
+                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />{' '}
+                {drawing ? 'Drawing' : filming ? 'Filming' : parts ? partsDone(work?.filter((w) => w.status === 'done').length ?? 0, parts) : 'Running'}
                 {ran >= 1000 && <span className="tabular-nums"> · {seconds(Math.floor(ran / 1000) * 1000)}</span>}
               </>
             ) : declined ? (

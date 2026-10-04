@@ -1,7 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { fakeApi, member, renderApp } from '@/test/utils'
+import type { Me } from '@/lib/api'
+import type { AnswerTrace } from '@/pages/admin/traces-api'
+import { admin, fakeApi, member, renderApp } from '@/test/utils'
 import { blank } from './live'
 import type { ChatConfig, Conversation, Message } from './types'
 
@@ -41,11 +43,11 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
 const msg = (id: string, parentId: string | null, role: Message['role'], over: Partial<Message> = {}): Message => ({ ...blank(id, role, parentId), ...over })
 
 /** `saved` is what the server holds once the answer is over: the page reloads it, as it does for real. */
-function backend(opts: { events?: object[]; saved?: Message[]; hang?: boolean; start?: Conversation; config?: Partial<ChatConfig>; extra?: Parameters<typeof fakeApi>[1] }) {
+function backend(opts: { events?: object[]; saved?: Message[]; hang?: boolean; start?: Conversation; config?: Partial<ChatConfig>; extra?: Parameters<typeof fakeApi>[1]; me?: Me }) {
   let answered = false
   const saved = opts.saved ?? []
   const leaf = saved.at(-1)?.id ?? null
-  return fakeApi(member, {
+  return fakeApi(opts.me ?? member, {
     'GET /api/chat/config': () => ({ json: { ...config, ...opts.config } }),
     'GET /api/chat/conversations': () => ({ json: [] }),
     'POST /api/chat/conversations': () => ({ status: 201, json: conversation() }),
@@ -729,6 +731,58 @@ describe('chat', () => {
     await ask('Compare the codecs')
     await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toMatchObject({ content: 'Compare the codecs', research: true }))
     expect(await screen.findByRole('button', { name: 'Deep research' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('deep research says which step it is on, and the sub-agents card how many parts are done', async () => {
+    const parts = JSON.stringify({ tasks: [{ title: 'Speed', instructions: 'Find the speeds.' }, { title: 'Cost', instructions: 'Find the costs.' }] })
+    backend({
+      events: [
+        { type: 'question', id: 'q1', parentId: null },
+        { type: 'research' },
+        { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' },
+        { type: 'reasoning', text: 'Two questions.' },
+        { type: 'tool_call', id: 'd1', name: 'delegate', arguments: parts },
+        { type: 'agent', id: 'd1', index: 0, event: 'start', title: 'Speed', instructions: 'Find the speeds.' },
+        { type: 'agent', id: 'd1', index: 1, event: 'start', title: 'Cost', instructions: 'Find the costs.' },
+        { type: 'agent', id: 'd1', index: 0, event: 'done', ms: 1000 },
+      ],
+      hang: true,
+    })
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: 'Deep research' }))
+    await ask('Compare the codecs')
+    const a = await screen.findByRole('region', { name: 'Answer' })
+    expect(await within(a).findByText('Deep research: Researching 2 parts: 1 of 2 parts done…')).toBeInTheDocument()
+    // The card says it too, in place of "Running", and above its parts.
+    expect(within(a).getAllByText(/^1 of 2 parts done/).length).toBe(2)
+  })
+
+  it('an admin opens an answer’s trace from the answer; others have no such button', async () => {
+    const trace: AnswerTrace = {
+      id: 'a1', conversationId: 'c1', at: '2026-10-04T10:00:00Z', model: 'Main-Model', status: 'complete', ms: 5000, queueMs: 0, setupMs: 100, rounds: 1, toolCalls: 0, agents: 0,
+      tokens: { prompt: 1000, cached: 400, completion: 200, cacheShare: 0.4 }, agentTokens: { prompt: 0, cached: 0, completion: 0, cacheShare: null }, prompt: [], person: null,
+      slowest: { kind: 'round', label: 'Model, round 1', ms: 4900, share: 0.98, detail: 'Mostly writing: 200 tokens, at 41 a second.' },
+      steps: [
+        {
+          kind: 'round', label: 'Model, round 1', ms: 4900, slowest: true, index: 1, status: 'complete', thinkingMs: 2300, firstTokenMs: 300, tokens: { prompt: 1000, cached: 400, completion: 200, cacheShare: 0.4 },
+          readPerSecond: 2000, writePerSecond: 41, speedFrom: 'clock', name: null, resultChars: null, files: null, agents: null,
+        },
+      ],
+    }
+    const calls = backend({ me: admin, start: conversation({ messages: answered, currentLeafId: 'a1' }), extra: { 'GET /api/admin/traces/a1': () => ({ json: trace }) } })
+    const first = renderApp('/chat/c1')
+    const a = await screen.findByRole('region', { name: 'Answer' })
+    await userEvent.click(within(a).getByRole('button', { name: 'Answer trace' }))
+    const panel = await screen.findByRole('dialog', { name: 'Answer trace' })
+    expect(await within(panel).findByRole('region', { name: 'Slowest step' })).toHaveTextContent('Slowest step: Model, round 1 · 4.9 s (98% of the answer)')
+    expect(calls.some((c) => c.path === '/api/admin/traces/a1')).toBe(true)
+    first.unmount()
+
+    backend({ start: conversation({ messages: answered, currentLeafId: 'a1' }) })
+    renderApp('/chat/c1')
+    const theirs = await screen.findByRole('region', { name: 'Answer' })
+    expect(within(theirs).getByRole('button', { name: 'Copy answer' })).toBeInTheDocument()
+    expect(within(theirs).queryByRole('button', { name: 'Answer trace' })).not.toBeInTheDocument()
   })
 
   it('a sent file leaves the box as soon as the question is taken, while the answer still streams', async () => {

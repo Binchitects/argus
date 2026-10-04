@@ -36,6 +36,8 @@ export interface LiveState {
   compacting?: boolean
   /** "compact": this stream only compacts the chat (no answer is written). */
   mode?: 'answer' | 'compact'
+  /** The answer is deep research (its status line says which step it is on). */
+  research?: boolean
 }
 
 export const blank = (id: string, role: Message['role'], parentId: string | null, content = ''): Message => ({
@@ -133,6 +135,8 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     }
     case 'notice':
       return { ...state, notices: [...state.notices, { kind: e.kind, text: e.text }] }
+    case 'research':
+      return { ...state, research: true }
     case 'error': {
       // A compaction the person asked for has no answer to carry it: the page says it.
       if (state.mode === 'compact') return { ...state, compacting: false }

@@ -8,6 +8,7 @@ import { seconds, toolTitle } from './format'
 import { blank } from './live'
 import { Markdown } from './markdown'
 import { Thinking, ToolCard } from './parts'
+import { partsDone } from './research'
 import type { AgentWork, Message, ToolCall } from './types'
 
 type Part = { title: string; instructions: string }
@@ -42,7 +43,7 @@ export function AgentsView({ parts, agents, live, onOpenFile, onPreview }: {
   const all = (open: boolean) => setChosen(Object.fromEntries(statuses.map((_, i) => [i, open])))
   const tally = (s: Status) => statuses.filter((x) => x === s).length
   const summary = [
-    `${tally('done')} of ${count} done`,
+    partsDone(tally('done'), count),
     tally('running') && `${tally('running')} working`,
     tally('waiting') && `${tally('waiting')} waiting`,
     tally('failed') && `${tally('failed')} failed`,

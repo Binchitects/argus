@@ -218,6 +218,8 @@ export type ChatEvent =
       usage?: TokenUsage | null
     }
   | { type: 'notice'; kind: string; text: string }
+  /** The answer is deep research: the page says which step it is on. */
+  | { type: 'research' }
   /** Waiting for a turn: the model serves few at once, in turn (fair use). */
   | { type: 'queued'; ahead: number }
   | { type: 'error'; message: string }
