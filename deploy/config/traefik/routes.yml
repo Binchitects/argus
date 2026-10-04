@@ -20,6 +20,13 @@ http:
       service: litellm
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
+    # Chat completions with keys go by the app while its answer cache is on
+    # (Settings → API keys), and straight to LiteLLM otherwise or when the app is down.
+    gateway-completions:
+      rule: Host(`gateway.{{ $domain }}`) && (Path(`/v1/chat/completions`) || Path(`/chat/completions`))
+      service: completions
+      middlewares: [secure]
+      tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
     # Argus's MCP, for coding agents with their own key.
     argus:
       rule: Host(`argus.{{ $domain }}`)
@@ -32,6 +39,14 @@ http:
     app: { loadBalancer: { servers: [{ url: "http://app:8080" }] } }
     litellm: { loadBalancer: { servers: [{ url: "http://litellm:4000" }] } }
     argus: { loadBalancer: { servers: [{ url: "http://argus:7700" }] } }
+    # The app answers its health check only while the answer cache is on: Traefik
+    # asks every 10 seconds, so turning the cache on or off takes effect within that.
+    completions:
+      failover: { service: answer-cache, fallback: litellm }
+    answer-cache:
+      loadBalancer:
+        servers: [{ url: "http://app:8080" }]
+        healthCheck: { path: /v1/answer-cache, interval: 10s, timeout: 3s }
 
   middlewares:
     secure:

@@ -27,6 +27,8 @@ public sealed class AppUser : IdentityUser<Guid>
     public List<string> DirectoryGroups { get; set; } = [];
     /// <summary>How long answers should be: "short", "thorough", or null for the model's own judgement.</summary>
     public string? AnswerLength { get; set; }
+    /// <summary>Their API key's repeated requests are answered from the answer cache (when an admin lets people choose).</summary>
+    public bool CacheApiAnswers { get; set; }
 }
 
 public sealed class AppRole : IdentityRole<Guid>

@@ -21,6 +21,10 @@ public sealed record ManagedModel(string Id, string Name, string? Fingerprint);
 /// <remarks>Models: the models the key may call; empty means every model.</remarks>
 public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt, IReadOnlyList<string>? Models = null, int? MaxParallel = null);
 
+/// <summary>One key as the gateway knows it, found by its hash: whose it is, and whether it may still be used.</summary>
+/// <remarks>Models: the models the key may call; empty means every model.</remarks>
+public sealed record GatewayKeyInfo(string Token, string? Email, bool Blocked, DateTimeOffset? Expires, IReadOnlyList<string> Models);
+
 /// <summary>
 /// LiteLLM's admin API. People are known to it by email, which is what ties
 /// their spend (API keys and the chat path) to them.
@@ -43,6 +47,9 @@ public interface ILiteLlm
     /// <summary>A key that belongs to no person (the chat's): spend is attributed by the request's `user`.</summary>
     Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default);
     Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default);
+
+    /// <summary>A key by its hash (SHA-256 of the key, as the gateway keeps it); null when the gateway has no such key.</summary>
+    Task<GatewayKeyInfo?> KeyInfoAsync(string token, CancellationToken ct = default);
     Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default);
     Task SetBlockedAsync(IEnumerable<string> tokens, bool blocked, CancellationToken ct = default);
     Task<IReadOnlyDictionary<string, GatewayUser>> UsersAsync(CancellationToken ct = default);

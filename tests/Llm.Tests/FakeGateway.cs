@@ -43,7 +43,8 @@ public sealed class FakeGateway : ILiteLlm
     {
         Check();
         var secret = "sk-" + Guid.NewGuid().ToString("N");
-        var token = "hash-" + Guid.NewGuid().ToString("N");
+        // As LiteLLM keeps it: the key's SHA-256, in hex.
+        var token = AnswerCache.HashOf(secret);
         Keys[token] = new Key { Secret = secret, Token = token, Email = email, Alias = keyAlias, Models = models ?? [], MaxParallel = maxParallel };
         return Task.FromResult(secret);
     }
@@ -85,6 +86,12 @@ public sealed class FakeGateway : ILiteLlm
         Check();
         IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel))];
         return Task.FromResult(list);
+    }
+
+    public Task<GatewayKeyInfo?> KeyInfoAsync(string token, CancellationToken ct = default)
+    {
+        Check();
+        return Task.FromResult(Keys.TryGetValue(token, out var k) ? new GatewayKeyInfo(k.Token, k.Email, k.Blocked, null, k.Models) : null);
     }
 
     public Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default)

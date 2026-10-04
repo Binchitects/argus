@@ -171,7 +171,32 @@ public sealed class FakeModel : HttpMessageHandler
             ];
         }
         chunks = chunks.Append(Usage(100, 40, 12));
+        // Asked for the whole answer at once (an API caller): one chat.completion, as the gateway sends it.
+        if (body["stream"]?.GetValue<bool>() != true)
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Whole(chunks).ToJsonString(), Encoding.UTF8, "application/json") };
+        }
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+    }
+
+    /// <summary>The chunks as one chat.completion: the words, the finish and the usage.</summary>
+    private static JsonObject Whole(IEnumerable<string> chunks)
+    {
+        var content = new StringBuilder();
+        string? finish = null;
+        JsonNode? usage = null;
+        foreach (var c in chunks.Select(c => JsonNode.Parse(c)!))
+        {
+            content.Append(c["choices"]?[0]?["delta"]?["content"]?.GetValue<string>());
+            finish = c["choices"]?[0]?["finish_reason"]?.GetValue<string>() ?? finish;
+            usage = c["usage"]?.DeepClone() ?? usage;
+        }
+        return new JsonObject
+        {
+            ["id"] = "chatcmpl-" + Guid.NewGuid().ToString("N")[..12], ["object"] = "chat.completion", ["created"] = 1, ["model"] = "fake",
+            ["choices"] = new JsonArray(new JsonObject { ["index"] = 0, ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = content.ToString() }, ["finish_reason"] = finish }),
+            ["usage"] = usage,
+        };
     }
 
     private static string Delta(JsonObject delta) =>
@@ -188,8 +213,19 @@ public sealed class FakeModel : HttpMessageHandler
         }.ToJsonString();
 
     /// <summary>Written as it goes, with a pause between pieces, and stopping when the reader leaves.</summary>
-    private sealed class SseContent(IEnumerable<string> chunks, TimeSpan delay) : HttpContent
+    private sealed class SseContent : HttpContent
     {
+        private readonly IEnumerable<string> chunks;
+        private readonly TimeSpan delay;
+
+        public SseContent(IEnumerable<string> chunks, TimeSpan delay)
+        {
+            this.chunks = chunks;
+            this.delay = delay;
+            // As LiteLLM says it.
+            Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+        }
+
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
         {
             foreach (var c in chunks)

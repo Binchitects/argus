@@ -35,6 +35,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
+    public DbSet<CachedAnswer> CachedAnswers => Set<CachedAnswer>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -256,6 +257,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(m => m.Model);
             e.Property(m => m.Model).HasMaxLength(200);
             e.Property(m => m.Groups).HasDefaultValueSql("'{}'::uuid[]");
+        });
+        builder.Entity<CachedAnswer>(e =>
+        {
+            e.ToTable("answer_cache");
+            e.Property(a => a.Hash).HasMaxLength(64);
+            e.Property(a => a.KeyHash).HasMaxLength(64);
+            e.Property(a => a.Model).HasMaxLength(200);
+            e.HasIndex(a => a.Hash).IsUnique();
+            e.HasIndex(a => a.KeyHash);
+            e.HasIndex(a => a.ExpiresAt);
         });
 
         builder.Entity<AuditEvent>(e =>

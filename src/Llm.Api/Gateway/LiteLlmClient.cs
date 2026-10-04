@@ -157,6 +157,19 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         return keys;
     }
 
+    public async Task<GatewayKeyInfo?> KeyInfoAsync(string token, CancellationToken ct = default)
+    {
+        // The hash, never the key itself, goes in the address (addresses end up in logs).
+        if (await SendAsync(HttpMethod.Get, $"/key/info?key={Uri.EscapeDataString(token)}", null, ct, allowStatus: [400, 401, 404]) is not JsonObject res ||
+            res["info"] is not JsonObject info)
+        {
+            return null;
+        }
+        return new GatewayKeyInfo(token, Str(info, "user_id"), info["blocked"]?.GetValueKind() == JsonValueKind.True,
+            DateTimeOffset.TryParse(Str(info, "expires"), CultureInfo.InvariantCulture, out var expires) ? expires : null,
+            [.. (info["models"] as JsonArray ?? []).Select(m => m?.GetValue<string>() ?? "")]);
+    }
+
     public async Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default)
     {
         var list = tokens.ToList();

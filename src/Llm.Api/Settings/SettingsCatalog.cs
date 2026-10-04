@@ -17,6 +17,7 @@ public static class SettingsCatalog
     private const string Schedules = "Scheduled tasks";
     private const string Mail = "Email";
     private const string Safeguards = "Safeguards";
+    private const string Api = "API keys";
 
 
 
@@ -91,6 +92,10 @@ public static class SettingsCatalog
             { Default = "00:10:00", Unit = "minutes", Min = 1, Max = 120, Optional = false },
         new("Chat:ApiRequestsPerKey", Chat, "API requests at once, per key", "Requests one API key (Qwen Code, an IDE, a script) may have at the gateway at once; more are refused (HTTP 429) until one ends. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "2", Min = 0, Max = 64, Optional = false },
+        new("Gateway:AnswerCache", Api, "Answer cache", "A repeated identical request to /v1/chat/completions with the same API key and model is answered from the app's database instead of the model: it costs nothing, and the response says x-arena-cache: hit. For pipelines and FAQ bots that ask the same thing; the chat never uses it. opt-in: each person turns it on for their key (Your account → API key); all: every key; off: every request goes to the model.", SettingType.Choice, SettingScope.Live)
+            { Default = "off", Options = ["off", "opt-in", "all"], Optional = false },
+        new("Gateway:AnswerCacheTtl", Api, "Keep cached answers for", "An answer older than this is asked of the model again.", SettingType.Duration, SettingScope.Live)
+            { Default = "1.00:00:00", Unit = "hours", Min = 1, Max = 720, Optional = false },
         new("Chat:AgentsAtOnce", Chat, "Sub-agents at once", "How many sub-agents of one answer run side by side (the Sub-agents tool); the rest wait their turn. Each is a request to the model like an answer of its own, inside the answer's place in line: 1 runs them one after another.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "3", Min = 1, Max = 8, Optional = false },
         new("Chat:ToolCallTimeout", Chat, "Longest tool call", "A call to Argus or an MCP server still running after this long is stopped, and the model told so. An MCP server can have its own limit (Admin → Tools). The chat shows how long a call has run, and the progress the server reports.", SettingType.Duration, SettingScope.Live)

@@ -27,6 +27,7 @@ public sealed class LiteLlmClientTests
                 "/key/generate" => """{"key":"sk-new"}""",
                 "/end_user/info" => EndUser!,
                 "/budget/new" => """{"budget_id":"b-new"}""",
+                "/key/info" => """{"key":"abc123","info":{"user_id":"p@example.test","blocked":true,"expires":"2030-01-02T03:04:05Z","models":["qwen"],"key_alias":"p"}}""",
                 _ => "{}",
             };
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(answer) };
@@ -48,6 +49,19 @@ public sealed class LiteLlmClientTests
         Assert.Equal("/user/new", path);
         Assert.False(body.GetProperty("auto_create_key").GetBoolean());
         Assert.Equal("p@example.test", body.GetProperty("user_id").GetString());
+    }
+
+    [Fact]
+    public async Task A_key_is_looked_up_by_its_hash_never_by_the_key_itself()
+    {
+        var (client, recorder) = Create();
+        var info = await client.KeyInfoAsync("abc123");
+        Assert.Equal("/key/info?key=abc123", Assert.Single(recorder.Calls).Path);
+        Assert.NotNull(info);
+        Assert.Equal("p@example.test", info.Email);
+        Assert.True(info.Blocked);
+        Assert.Equal(new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero), info.Expires);
+        Assert.Equal(["qwen"], info.Models);
     }
 
     private static List<string> Paths(Recorder r) => [.. r.Calls.Select(c => c.Path.Split('?')[0])];
