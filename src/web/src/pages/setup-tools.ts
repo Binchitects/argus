@@ -5,10 +5,8 @@
  * documentation (the formats change: check its docs when one stops working).
  */
 
-/** Where the API key is kept in each setup: an environment variable, not pasted into a file. */
+/** Where the API key is kept in each setup: an environment variable, not pasted into a file. Argus takes the same key. */
 export const KEY = 'LLM_SERVICE_API_KEY'
-/** And the person's GitLab token, for Argus. */
-export const GITLAB = 'GITLAB_TOKEN'
 
 export interface Context {
   /** The gateway without /v1 (Anthropic's API lives there). */
@@ -18,7 +16,12 @@ export interface Context {
   context: number
   maxOutput: number
   argusUrl: string
+  /** The key the person just made, when they chose to see it filled in; else setups say <your API key>. */
+  apiKey?: string
 }
+
+/** The key in a setup that cannot read it from the environment. */
+const yourKey = (c: Context) => c.apiKey ?? '<your API key>'
 
 export interface Step {
   text: string
@@ -34,7 +37,7 @@ export interface Tool {
   /** One line: what it is and how it talks to the gateway. */
   about: string
   steps: (c: Context) => Step[]
-  /** Argus over MCP, with the person's own GitLab token; a string when the tool cannot. */
+  /** Argus over MCP, with the person's API key (Argus answers as their GitLab account); a string when the tool cannot. */
   argus: ((c: Context) => Step[]) | string
 }
 
@@ -57,7 +60,7 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL=${c.model}
 claude`,
       },
     ],
-    argus: (c) => [{ text: 'Add Argus once:', file: 'shell', code: `claude mcp add --transport http argus ${c.argusUrl} \\\n  --header "Authorization: Bearer $${GITLAB}"` }],
+    argus: (c) => [{ text: 'Add Argus once:', file: 'shell', code: `claude mcp add --transport http argus ${c.argusUrl} \\\n  --header "Authorization: Bearer $${KEY}"` }],
   },
   {
     id: 'codex',
@@ -85,7 +88,7 @@ wire_api = "responses"`,
         file: '~/.codex/config.toml',
         code: `[mcp_servers.argus]
 url = "${c.argusUrl}"
-bearer_token_env_var = "${GITLAB}"`,
+bearer_token_env_var = "${KEY}"`,
       },
     ],
   },
@@ -104,7 +107,7 @@ export OPENAI_MODEL=${c.model}
 qwen`,
       },
     ],
-    argus: (c) => [{ text: 'Add Argus once (--trust runs its tools without asking each time):', file: 'shell', code: `qwen mcp add argus ${c.argusUrl} -t http \\\n  -H "Authorization: Bearer $${GITLAB}" --trust` }],
+    argus: (c) => [{ text: 'Add Argus once (--trust runs its tools without asking each time):', file: 'shell', code: `qwen mcp add argus ${c.argusUrl} -t http \\\n  -H "Authorization: Bearer $${KEY}" --trust` }],
   },
   {
     id: 'opencode',
@@ -134,7 +137,7 @@ qwen`,
       {
         text: 'Add Argus to the same file, beside "provider":',
         file: 'opencode.json',
-        code: json({ mcp: { argus: { type: 'remote', url: c.argusUrl, enabled: true, headers: { Authorization: `Bearer {env:${GITLAB}}` } } } }),
+        code: json({ mcp: { argus: { type: 'remote', url: c.argusUrl, enabled: true, headers: { Authorization: `Bearer {env:${KEY}}` } } } }),
       },
     ],
   },
@@ -181,7 +184,7 @@ aider --model openai/${c.model}`,
   argus:
     url: ${c.argusUrl}
     headers:
-      Authorization: Bearer <your GitLab token>`,
+      Authorization: Bearer ${yourKey(c)}`,
       },
     ],
   },
@@ -214,7 +217,7 @@ aider --model openai/${c.model}`,
       {
         text: 'Add Argus to the same file:',
         file: '~/.openclaw/openclaw.json',
-        code: json({ mcp: { servers: { argus: { url: c.argusUrl, transport: 'streamable-http', headers: { Authorization: 'Bearer <your GitLab token>' } } } } }),
+        code: json({ mcp: { servers: { argus: { url: c.argusUrl, transport: 'streamable-http', headers: { Authorization: `Bearer ${yourKey(c)}` } } } } }),
       },
     ],
   },
@@ -246,7 +249,7 @@ aider --model openai/${c.model}`,
     ],
     argus: (c) => [
       {
-        text: 'Add Argus to the same file, after the provider (insert: appends the MCP client; !!js reads the token from the environment):',
+        text: 'Add Argus to the same file, after the provider (insert: appends the MCP client; !!js reads the key from the environment):',
         file: '$DSH_HOME/profiles/web/cordis.patch.yml',
         code: `- insert:
   - name: '@deepseek-ai/dsh-mcp-client'
@@ -255,7 +258,7 @@ aider --model openai/${c.model}`,
       transport: streamable-http
       url: ${c.argusUrl}
       headers:
-        Authorization: !!js '\`Bearer \${process.env.${GITLAB}}\`'`,
+        Authorization: !!js '\`Bearer \${process.env.${KEY}}\`'`,
       },
     ],
   },
@@ -291,7 +294,7 @@ models:
     url: ${c.argusUrl}
     requestOptions:
       headers:
-        Authorization: Bearer <your GitLab token>`,
+        Authorization: Bearer ${yourKey(c)}`,
       },
     ],
   },
@@ -307,7 +310,7 @@ models:
     ],
     argus: (c) => [
       { text: 'Add a remote MCP server (MCP Servers → Remote Servers) named argus, with this address:', file: 'Server URL', code: c.argusUrl },
-      { text: 'and the header Authorization: Bearer <your GitLab token> (edit it in the MCP settings file if the form has no headers).' },
+      { text: 'and this header (edit it in the MCP settings file if the form has no headers):', file: 'Header', code: `Authorization: Bearer ${yourKey(c)}` },
     ],
   },
   {

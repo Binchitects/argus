@@ -8,8 +8,9 @@ over MCP, directly and through Qwen Code and DeepSeek Harness.
     python3 scripts/clients-check.py --qwen ~/.local/lib/qwen-code/bin/qwen --dsh /path/to/node_modules/.bin/dsh
 
 It signs in as the admin (ADMIN_PASSWORD in .env), makes a test person with an
-API key (removed at the end unless --keep-person), and uses the test GitLab's
-dev_alpha token for Argus (tools/test-gitlab/seeded.json). Each client runs with
+API key (removed at the end unless --keep-person), and for Argus a second person
+named after the test GitLab's dev_alpha (tools/test-gitlab/seeded.json), whose
+API key Argus takes as that GitLab account. Each client runs with
 a throwaway home, so your own ~/.qwen and DeepSeek Harness settings are never
 read or changed. Secrets are never printed. Exit code 0 only if every check that
 ran passed; a check that cannot apply here says SKIP.
@@ -146,6 +147,7 @@ def main() -> int:
     key = secrets.get("apiKey") or ""
     check("the person gets an API key", key.startswith("sk-"), "key not shown")
     auth = {"Authorization": f"Bearer {key}"}
+    argus_pid = None
 
     try:
         print("API")
@@ -195,13 +197,20 @@ def main() -> int:
 
         print("Argus over MCP")
         seeded = REPO / "tools" / "test-gitlab" / "seeded.json"
-        token = json.loads(seeded.read_text())["users"]["dev_alpha"]["token"] if seeded.exists() else ""
+        gitlab_token = json.loads(seeded.read_text())["users"]["dev_alpha"]["token"] if seeded.exists() else ""
+        token = ""
+        if gitlab_token:
+            # Argus takes a person's API key and answers as their GitLab account (their username).
+            status, _, dev = call(f"{app}/api/admin/people", {"userName": "dev_alpha", "email": f"dev_alpha.{name}@example.test", "displayName": "Clients check (Argus)"}, xhr)
+            if status in (200, 201):
+                argus_pid = dev.get("id")
+                token = dev.get("apiKey") or ""
         if not token:
-            record("Argus MCP", "SKIP", "no test GitLab token (tools/test-gitlab/run.sh)")
+            record("Argus MCP", "SKIP", "no test GitLab (tools/test-gitlab/run.sh), or the app already has a dev_alpha")
         else:
             rpc = mcp_session(argus, token)
             status, init = rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "clients-check", "version": "1"}})
-            check("MCP initialize, with a GitLab token", status == 200 and "result" in init, f"{status}")
+            check("MCP initialize, with the person's API key", status == 200 and "result" in init, f"{status}")
             rpc("notifications/initialized", notify=True)
             _, listed = rpc("tools/list", {})
             names = [t["name"] for t in listed.get("result", {}).get("tools", [])]
@@ -212,8 +221,10 @@ def main() -> int:
             if docs:
                 _, hit = rpc("tools/call", {"name": docs, "arguments": {"query": "CreateFileW", "name": "CreateFileW"}})
                 check(f"the Windows packs answer ({docs} CreateFileW)", "CreateFile" in json.dumps(hit), json.dumps(hit)[:160])
-            status, _, _ = call(argus, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": "Bearer glpat-wrong", "Accept": "application/json, text/event-stream"})
-            check("a wrong GitLab token is refused", status in (401, 403), str(status))
+            status, _, _ = call(argus, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": "Bearer sk-wrong", "Accept": "application/json, text/event-stream"})
+            check("a wrong API key is refused", status in (401, 403), str(status))
+            status, _, _ = call(argus, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": f"Bearer {gitlab_token}", "Accept": "application/json, text/event-stream"})
+            check("a GitLab token is refused, even a good one", status == 401, str(status))
 
         work = Path(tempfile.mkdtemp(prefix="clients-"))
         openai = {"OPENAI_API_KEY": key, "OPENAI_BASE_URL": base, "OPENAI_MODEL": model["name"]}
@@ -280,6 +291,8 @@ def main() -> int:
     finally:
         if pid and not args.keep_person:
             call(f"{app}/api/admin/people/{pid}", method="DELETE", headers=xhr)
+        if argus_pid and not args.keep_person:
+            call(f"{app}/api/admin/people/{argus_pid}", method="DELETE", headers=xhr)
 
     failed = [n for n, s in results if s == "FAIL"]
     print(f"\n{sum(1 for _, s in results if s == 'PASS')} passed, {len(failed)} failed, {sum(1 for _, s in results if s == 'SKIP')} skipped")

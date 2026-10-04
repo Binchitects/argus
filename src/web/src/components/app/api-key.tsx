@@ -18,14 +18,17 @@ interface Keys {
   budget: number | null
 }
 
-/** The person's API key: its spend against their credit, and a new one on demand (shown once). */
-export function ApiKey() {
+/** The person's API key: its spend against their credit, and a new one on demand (shown once, and handed to onNewKey). */
+export function ApiKey({ onNewKey }: { onNewKey?: (key: string) => void } = {}) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const keys = useQuery({ queryKey: ['account', 'keys'], queryFn: () => api<Keys>('/api/account/keys') })
   const rotate = useMutation({
     mutationFn: () => api<{ apiKey: string }>('/api/account/keys/rotate', { body: {} }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['account', 'keys'] }),
+    onSuccess: (made) => {
+      onNewKey?.(made.apiKey)
+      return queryClient.invalidateQueries({ queryKey: ['account', 'keys'] })
+    },
     onError: (e) => toast.error(errorMessage(e)),
   })
   const d = keys.data

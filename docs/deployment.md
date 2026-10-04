@@ -56,7 +56,7 @@ The addresses, all on port 443:
 |---|---|
 | `https://DOMAIN` | the app |
 | `https://gateway.DOMAIN/v1` | the API (OpenAI and Anthropic protocols), with a person's key |
-| `https://argus.DOMAIN/mcp` | Argus for coding agents, with a GitLab token |
+| `https://argus.DOMAIN/mcp` | Argus for coding agents, with a person's API key (not a GitLab token) |
 
 `*.localhost` resolves to this machine in browsers; for other tools,
 `deploy/scripts/setup-hosts.sh` adds the names to `/etc/hosts`.
@@ -143,6 +143,11 @@ Argus reads GitLab with a **read-only** token (`read_api`, `read_repository`, an
 account that is at least Reporter where it should index): `GITLAB_URL` and
 `GITLAB_TOKEN` in `.env`. It answers each person within their own GitLab
 membership; it never needs admin. Indexing starts from **Admin → Indexing**.
+
+Coding agents connect to Argus with the person's own API key (**Connect your
+tools** has the setups); nobody hands out a GitLab token. Argus asks the app
+whose a key is (`ARGUS_KEY_CHECK_URL` in `docker-compose.yml`, with `ARGUS_KEY`),
+and the person's username must be their GitLab username.
 
 To index a push or a merge at once, not at the next scheduled pass: **Admin →
 Indexing → Push and merge webhook → Turn on**, then add the webhook in GitLab

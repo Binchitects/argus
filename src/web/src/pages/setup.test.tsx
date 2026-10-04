@@ -38,16 +38,46 @@ describe('connect your tools', () => {
     expect(screen.queryByText('Argus, the code index')).not.toBeInTheDocument()
   })
 
-  it('offers Argus over MCP, with a link to make a GitLab token', async () => {
+  it('offers Argus over MCP with the API key, not a GitLab token', async () => {
     fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config({ argus: true, gitlabUrl: 'https://gitlab.example.com' }) }),
     })
     renderApp('/setup')
     const argus = (await screen.findByText('Argus, the code index')).closest('section')!
-    expect(within(argus).getByRole('link', { name: /Make a GitLab token/ })).toHaveAttribute('href', 'https://gitlab.example.com/-/user_settings/personal_access_tokens?name=Argus&scopes=read_api')
-    // The chosen tool's steps carry Argus too, with this deployment's address.
+    expect(within(argus).getByText('your API key', { selector: 'strong' })).toBeInTheDocument()
+    expect(within(argus).queryByRole('link', { name: /GitLab token/ })).not.toBeInTheDocument()
+    expect(within(argus).getByText(/"Authorization": "Bearer <your API key>"/)).toBeInTheDocument()
+    // The chosen tool's steps carry Argus too, with this deployment's address and the key from the environment.
     const steps = screen.getByRole('region', { name: 'Setting up Claude Code' })
-    expect(within(steps).getByText(/claude mcp add --transport http argus/)).toHaveTextContent(`${window.location.protocol}//argus.${window.location.host}/mcp`)
+    const add = within(steps).getByText(/claude mcp add --transport http argus/)
+    expect(add).toHaveTextContent(`${window.location.protocol}//argus.${window.location.host}/mcp`)
+    expect(add).toHaveTextContent('--header "Authorization: Bearer $LLM_SERVICE_API_KEY"')
+    expect(screen.queryByText(/GITLAB_TOKEN/)).not.toBeInTheDocument()
+  })
+
+  it('fills a key just made into the Argus setups, only when asked', async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config({ argus: true }) }),
+      'POST /api/account/keys/rotate': () => ({ json: { apiKey: 'sk-just-made-key' } }),
+    })
+    renderApp('/setup')
+    const argus = (await screen.findByText('Argus, the code index')).closest('section')!
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /New key/ }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Make a new key' }))
+    const fill = await screen.findByRole('switch', { name: /Fill in my new key/ })
+    // Still hidden until asked.
+    expect(screen.queryByText(/sk-just-made-key/)).not.toBeInTheDocument()
+    await userEvent.click(fill)
+    expect(within(argus).getByText(/"Authorization": "Bearer sk-just-made-key"/)).toBeInTheDocument()
+    // A setup that reads the environment keeps reading it; one that cannot gets the key.
+    expect(screen.getByText(/claude mcp add --transport http argus/)).toHaveTextContent('$LLM_SERVICE_API_KEY')
+    await userEvent.click(screen.getByRole('combobox', { name: 'Your tool' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Continue' }))
+    expect(within(screen.getByRole('region', { name: 'Setting up Continue' })).getByText(/mcpServers:/)).toHaveTextContent('Authorization: Bearer sk-just-made-key')
+    await userEvent.click(screen.getByRole('switch', { name: /Fill in my new key/ }))
+    expect(screen.queryByText(/sk-just-made-key/)).not.toBeInTheDocument()
   })
 
   it('each tool has its own steps, filled in with the address, the model and its limits', async () => {
@@ -75,7 +105,7 @@ describe('connect your tools', () => {
     // DeepSeek Harness: the profile patch, and Argus appended to it.
     const dsh = await pick('DeepSeek Harness')
     expect(within(dsh).getAllByText(/apiKeyEnv: LLM_SERVICE_API_KEY/)[0]).toHaveTextContent(`baseURL: ${base}`)
-    expect(within(dsh).getByText(/- insert:/)).toHaveTextContent('process.env.GITLAB_TOKEN')
+    expect(within(dsh).getByText(/- insert:/)).toHaveTextContent('process.env.LLM_SERVICE_API_KEY')
     // Codex: the Responses API. Aider: no MCP, and it says so.
     const codex = await pick('Codex CLI')
     expect(within(codex).getAllByText(/wire_api = "responses"/)[0]).toBeInTheDocument()

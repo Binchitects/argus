@@ -2,7 +2,14 @@
 
 One directory per client, each holding the smallest file that makes that client
 work. Argus speaks standard MCP, so most of this is your client's own syntax
-around the same two facts: **the URL** and **your GitLab token**.
+around the same two facts: **the URL** and **your API key** (the app's **Your
+account → API key**, `sk-...`, the same key as for the gateway). Keep it in
+`LLM_SERVICE_API_KEY`, as the app's **Connect your tools** page does.
+
+Argus asks the app whose the key is and answers as that person's GitLab account,
+within their own GitLab access. It does not take GitLab tokens: give out no
+GitLab token for it. (A standalone Argus, outside the platform, still takes each
+developer's GitLab token; the stdio forms below run one locally.)
 
 | client | file | status |
 |---|---|---|
@@ -15,7 +22,8 @@ around the same two facts: **the URL** and **your GitLab token**.
 Say what you ran. The two that say "executed" were driven end to end against a
 live stack: the harness called `find_symbol`, got `root/eal-core` back, and
 Argus logged the call against the right person (`user=dev_alpha, outcome=ok`).
-The other three are written from each client's own documentation and are
+That was with a GitLab token; the files are the same with the API key in its
+place. The other three are written from each client's own documentation and are
 correct as far as that goes, but nobody has run them from this repository.
 
 ---
@@ -46,7 +54,7 @@ the tool calls fail.
 ## DeepSeek Harness
 
 ```bash
-ARGUS_TOKEN=<gitlab-pat> \
+LLM_SERVICE_API_KEY=<your API key> \
 NODE_EXTRA_CA_CERTS="$PWD/deploy/config/traefik/certs/ca.crt" \
   dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
   "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
@@ -58,8 +66,8 @@ Two details in that file are load-bearing and neither is guessable:
   of a server that does not exist yet, and dsh rejects the patch with
   `id is required for non-insert patches`.
 - **`!!js` is required** around the token template. Without it the backticks
-  arrive as literal text and Argus answers 401. Taking the token from
-  `process.env` keeps a PAT out of the file, so it can live in this repository.
+  arrive as literal text and Argus answers 401. Taking the key from
+  `process.env` keeps it out of the file, so the file can live in this repository.
 
 `--profile headless "task"` is how to exercise an MCP server from a script: no
 browser, no server left running, the tool calls visible in the transcript.
@@ -69,7 +77,7 @@ browser, no server left running, the tool calls visible in the transcript.
 ```bash
 # let the CLI write it (this is how the sample was produced)
 qwen mcp add argus https://argus.llm.localhost/mcp -t http \
-  -H 'Authorization: Bearer <gitlab-pat>' --trust \
+  -H "Authorization: Bearer $LLM_SERVICE_API_KEY" --trust \
   --description 'Organisation code index'
 
 NODE_EXTRA_CA_CERTS="$PWD/deploy/config/traefik/certs/ca.crt" \
@@ -113,8 +121,10 @@ to the app's sign-in and answers with a login redirect that reads as a 401.
 
 ## Claude Code
 
-`claude-code/add.sh <http|stdio>`. Not executed here; `claude` is not installed
-on the machine this was written on. Check it with `claude mcp list`.
+`claude-code/add.sh <http|stdio>`: HTTP with your API key in
+`LLM_SERVICE_API_KEY` (the platform), or stdio with a GitLab token in
+`ARGUS_TOKEN` (a local Argus). Not executed here; `claude` is not installed on
+the machine this was written on. Check it with `claude mcp list`.
 
 ### Forcing verify-after
 
@@ -170,7 +180,8 @@ renames a field stops checking rather than blocking every answer.
 ## Continue
 
 Merge `continue/config.example.yaml` into `~/.continue/config.yaml`. The HTTP
-form takes the same `url`/`headers` shape as everything else.
+form takes the same `url`/`headers` shape as everything else; the stdio form
+in it is for a local Argus.
 
 ## Anything else
 
@@ -182,7 +193,7 @@ object inside alone.
 | | HTTP | stdio |
 |---|---|---|
 | serves | many developers, one server | one client, one process |
-| credential | `Authorization: Bearer <pat>` per request | `ARGUS_TOKEN` in the environment |
+| credential | `Authorization: Bearer <your API key>` per request (a GitLab token for a standalone Argus) | a GitLab token in `ARGUS_TOKEN` |
 | identity | resolved per request | resolved once at startup |
 | needs | a running server, a port, TLS in production | nothing but the command |
 
@@ -232,7 +243,7 @@ Most clients do both by default. Hermes needed patches for the first; see
 ## Checking the connection without an agent
 
 ```bash
-python tools/smoke_test.py --url https://argus.<domain>/mcp --token <pat>
+python tools/smoke_test.py --url https://argus.<domain>/mcp --token "$LLM_SERVICE_API_KEY"
 ```
 
 Seven checks: health, a bad token refused, the MCP handshake, the server

@@ -1,25 +1,24 @@
 import { useQuery } from '@tanstack/react-query'
-import { ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { ApiKey } from '@/components/app/api-key'
 import { CodeBlock } from '@/components/app/code-block'
 import { PageHeader } from '@/components/app/page-header'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field } from '@/components/ui/field'
+import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import { api, errorMessage } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
-import { GITLAB, KEY, tools, type Context, type Step, type Tool } from './setup-tools'
+import { KEY, tools, type Context, type Step, type Tool } from './setup-tools'
 
 interface ChatConfig {
   model: string | null
   models: { name: string; context: number | null; maxOutput: number | null; vision: boolean; tools: boolean; thinking: boolean; loaded: boolean }[]
   argus: boolean
-  gitlabUrl: string | null
 }
 
 const tokens = (n: number | null) => (n ? n.toLocaleString('en-US') : '—')
@@ -32,13 +31,16 @@ export function ConnectPage() {
   const config = useQuery({ queryKey: ['chat', 'config'], queryFn: ({ signal }) => api<ChatConfig>('/api/chat/config', { signal }) })
   const [chosen, setChosen] = useState<string | null>(null)
   const [toolId, setToolId] = useState(remembered)
+  // A key made on this page, filled into the Argus setups only when the person asks (it is hidden elsewhere).
+  const [newKey, setNewKey] = useState<string | null>(null)
+  const [fill, setFill] = useState(false)
   const root = serviceUrl('gateway').replace(/\/$/, '')
   const models = config.data?.models ?? []
   const model = chosen ?? config.data?.model ?? models[0]?.name ?? 'your-model'
   const current = models.find((m) => m.name === model)
   const argusUrl = `${serviceUrl('argus')}mcp`
   const tool = tools.find((t) => t.id === toolId) ?? tools[0]!
-  const context: Context = { root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, argusUrl }
+  const context: Context = { root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, argusUrl, apiKey: fill && newKey ? newKey : undefined }
   const choose = (id: string) => {
     setToolId(id)
     try {
@@ -54,7 +56,7 @@ export function ConnectPage() {
         description="Use the models from your own tools: a coding agent, your editor, a script. They sign in with your API key and spend from your credit."
       />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
-        <ApiKey />
+        <ApiKey onNewKey={setNewKey} />
 
         <Card>
           <CardHeader>
@@ -133,7 +135,7 @@ export function ConnectPage() {
                 </Field>
               )}
             </div>
-            <Tutorial tool={tool} context={context} argus={config.data?.argus === true} />
+            <Tutorial tool={tool} context={context} argus={config.data?.argus === true} fill={newKey ? { on: fill, set: setFill } : null} />
           </CardContent>
         </Card>
 
@@ -142,23 +144,19 @@ export function ConnectPage() {
             <CardHeader>
               <CardTitle>Argus, the code index</CardTitle>
               <CardDescription>
-                For coding agents over MCP. It signs in with <strong>your GitLab token</strong>, not the API key, so it answers only from the code you may read.
+                For coding agents over MCP. It signs in with <strong>your API key</strong>, the same as the gateway, and answers as your GitLab account: only from the code you may read.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
               <CodeBlock code={argusUrl} label="Argus's address" />
-              {config.data.gitlabUrl && (
-                <Button variant="outline" className="w-fit" asChild>
-                  <a href={`${config.data.gitlabUrl}/-/user_settings/personal_access_tokens?name=Argus&scopes=read_api`} target="_blank" rel="noreferrer">
-                    <ExternalLink /> Make a GitLab token (read_api)
-                  </a>
-                </Button>
-              )}
               <p className="text-sm text-muted-foreground">
-                Your tool's steps above include Argus. For another MCP client, the address and this header are all it needs; keep the token in{' '}
-                <code className="font-mono">{GITLAB}</code>, not in a file you share.
+                Your tool's steps above include Argus. For another MCP client, the address and this header are all it needs; keep the key in{' '}
+                <code className="font-mono">{KEY}</code>, not in a file you share. A GitLab token is not accepted.
               </p>
-              <CodeBlock code={JSON.stringify({ mcpServers: { argus: { url: argusUrl, headers: { Authorization: 'Bearer <your GitLab token>' } } } }, null, 2)} label="the Argus setup for other MCP clients" />
+              <CodeBlock
+                code={JSON.stringify({ mcpServers: { argus: { url: argusUrl, headers: { Authorization: `Bearer ${context.apiKey ?? '<your API key>'}` } } } }, null, 2)}
+                label="the Argus setup for other MCP clients"
+              />
             </CardContent>
           </Card>
         )}
@@ -180,7 +178,7 @@ function remembered(): string {
 }
 
 /** One tool's steps, numbered: its settings with this deployment filled in, and Argus where it speaks MCP. */
-function Tutorial({ tool, context, argus }: { tool: Tool; context: Context; argus: boolean }) {
+function Tutorial({ tool, context, argus, fill }: { tool: Tool; context: Context; argus: boolean; fill: { on: boolean; set: (on: boolean) => void } | null }) {
   const steps: Step[] = [...tool.steps(context)]
   const argusSteps = argus && typeof tool.argus === 'function' ? tool.argus(context) : []
   return (
@@ -189,7 +187,12 @@ function Tutorial({ tool, context, argus }: { tool: Tool; context: Context; argu
       <StepList steps={steps} tool={tool.title} start={1} />
       {argus && (
         <div className="grid gap-3 border-t pt-4">
-          <h3 className="text-sm font-medium">Argus, with your GitLab token in {GITLAB}</h3>
+          <h3 className="text-sm font-medium">Argus, with your API key in {KEY}</h3>
+          {fill && (
+            <Label className="flex items-center gap-3 font-normal">
+              <Switch checked={fill.on} onCheckedChange={fill.set} /> Fill in my new key where a setup cannot read it from {KEY}
+            </Label>
+          )}
           {argusSteps.length > 0 ? (
             <StepList steps={argusSteps} tool={tool.title} start={steps.length + 1} />
           ) : (

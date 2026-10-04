@@ -15,13 +15,16 @@ The tools, the ACL and the audit log are identical on both.
 | | HTTP | stdio |
 |---|---|---|
 | serves | many developers, one server | one client, one process |
-| credential | `Authorization: Bearer <PAT>` per request | `ARGUS_TOKEN` in the environment |
+| credential | `Authorization: Bearer <key>` per request | a GitLab token in `ARGUS_TOKEN` |
 | identity | resolved per request | resolved once at startup |
 | needs | a running server, a port, TLS in production | nothing but the command |
 
-Use **HTTP** for a team: one indexed host, each developer's own GitLab token,
-per-request ACL. Use **stdio** for a single developer on one machine, or for a
-client that speaks nothing else.
+Use **HTTP** for a team: one indexed host, per-request ACL. In the platform the
+key is the person's **API key** (the app's **Your account → API key**,
+`sk-...`): Argus asks the app whose it is and answers as their GitLab account. It
+takes no GitLab token there. A standalone Argus takes each developer's own
+GitLab token instead. Use **stdio** for a single developer on one machine, or
+for a client that speaks nothing else.
 
 ## stdio
 
@@ -75,10 +78,13 @@ All take the same three fields under their own key -- `mcp`, `mcpServers` or
 argus serve --config /etc/argus/config.yaml --host 0.0.0.0 --port 7700
 ```
 
+Below, `<key>` is your API key in the platform (keep it in
+`LLM_SERVICE_API_KEY`), or your GitLab token for a standalone Argus.
+
 ### Claude Code
 
 ```bash
-claude mcp add --transport http argus https://argus.internal/mcp --header "Authorization: Bearer <pat>"
+claude mcp add --transport http argus https://argus.internal/mcp --header "Authorization: Bearer <key>"
 ```
 
 ### DeepSeek Harness
@@ -87,13 +93,14 @@ Executed end to end against a live stack; see
 [`clients/deepseek-harness/`](../../clients/deepseek-harness/).
 
 ```bash
-ARGUS_TOKEN=<pat> NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/ca.crt \
+LLM_SERVICE_API_KEY=<key> NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/ca.crt \
   dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
   "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
 ```
 
 Argus logged `tool=find_symbol user=dev_alpha outcome=ok` — the per-person
-identity arriving on the GitLab token, not the shared chat credential.
+identity arriving on the caller's own credential (then a GitLab token, now the
+API key), not the shared chat credential.
 
 ### Qwen Code
 
@@ -101,7 +108,7 @@ Executed end to end; see [`clients/qwen-code/`](../../clients/qwen-code/).
 
 ```bash
 qwen mcp add argus https://argus.internal/mcp -t http \
-  -H "Authorization: Bearer <pat>" --trust
+  -H "Authorization: Bearer <key>" --trust
 ```
 
 `--trust` is required in a headless run: without it Qwen Code stops for
@@ -112,7 +119,7 @@ confirmation before every Argus call and nothing proceeds.
 ```json
 {
   "url": "https://argus.internal/mcp",
-  "headers": { "Authorization": "Bearer <pat>" }
+  "headers": { "Authorization": "Bearer <key>" }
 }
 ```
 
@@ -126,7 +133,7 @@ argus serve --config /etc/argus/config.yaml --host 0.0.0.0 --allowed-host argus.
 ## Verifying, whichever client
 
 ```bash
-python tools/smoke_test.py --url https://argus.internal/mcp --token <pat>
+python tools/smoke_test.py --url https://argus.internal/mcp --token <key>
 ```
 
 Seven checks: health, that a bad token is refused, the MCP handshake, the

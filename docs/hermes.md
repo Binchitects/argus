@@ -165,12 +165,13 @@ mcp_servers:
   argus:
     url: https://argus.llm.localhost/mcp
     headers:
-      Authorization: Bearer <your GitLab personal access token>
+      Authorization: Bearer <your API key>
 ```
 
-Argus resolves every request's identity against GitLab, so the token is a
-GitLab PAT with `read_api` — **your own**, not the indexing service token.
-What you can see through Argus is exactly what you can see in GitLab.
+The key is your own API key (the app's **Your account → API key**, the same as
+for the gateway). Argus asks the app whose it is and answers as your GitLab
+account, so what you can see through Argus is exactly what you can see in
+GitLab. It takes no GitLab token.
 
 ## When the agent runs for an hour and lands nothing
 
