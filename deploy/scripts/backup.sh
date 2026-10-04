@@ -7,6 +7,7 @@
 #   sudo ./scripts/backup.sh --install-timer     run it daily through systemd
 #   ./scripts/backup.sh --restore --from DIR     put volumes and the database back (stack stopped)
 #   ./scripts/backup.sh --restore --from DIR --with-config   also .env, overrides and config files
+#   ./scripts/backup.sh --restore --from DIR --yes           without asking (restore-test.sh, rollback-test.sh)
 #
 # Settings, all in .env:
 #   BACKUP_DIR            where backups go                        default ./backups
@@ -56,7 +57,7 @@ case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
 SKIP_VOLUMES=" audio acme sandbox postgres "
 LOG_VOLUMES=" loki prometheus alertmanager "
 
-ACTION=backup; FROM=""; WITH_CONFIG=0; VERIFY_DIR=""
+ACTION=backup; FROM=""; WITH_CONFIG=0; VERIFY_DIR=""; YES=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --list) ACTION=list; shift ;;
@@ -65,9 +66,10 @@ while [[ $# -gt 0 ]]; do
     --restore) ACTION=restore; shift ;;
     --from) FROM="$2"; shift 2 ;;
     --with-config) WITH_CONFIG=1; shift ;;
+    --yes) YES=1; shift ;;
     --out) BACKUP_DIR="$2"; shift 2 ;;   # kept for compatibility
     --include-model-cache) SKIP_VOLUMES="${SKIP_VOLUMES/ audio / }"; shift ;;
-    -h|--help) sed -n '2,31p' "$0" | grep '^#'; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0" | grep '^#'; exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
   esac
 done
@@ -158,7 +160,9 @@ if [[ $ACTION == restore ]]; then
     die "the stack is running. Stop it first: docker compose down   (volumes are kept)"
   fi
   say "Restoring from $FROM. This OVERWRITES the current volumes${WITH_CONFIG:+ and config}."
-  read -r -p "Type RESTORE to continue: " answer; [[ "$answer" == "RESTORE" ]] || die "aborted"
+  if [[ $YES -eq 0 ]]; then
+    read -r -p "Type RESTORE to continue: " answer; [[ "$answer" == "RESTORE" ]] || die "aborted"
+  fi
 
   if [[ $WITH_CONFIG -eq 1 && -d "$FROM/config" ]]; then
     say "==> config (written through links, so files land where the live ones are)"
@@ -187,9 +191,10 @@ if [[ $ACTION == restore ]]; then
     say "==> gateway database"
     docker run --rm --network none -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
     docker compose up -d postgres >/dev/null 2>&1 || die "postgres did not start"
-    for _ in $(seq 1 60); do docker exec postgres pg_isready -U "$PG_USER" >/dev/null 2>&1 && break; sleep 2; done
+    # Through compose: the project's own postgres, whatever the project is called.
+    for _ in $(seq 1 60); do docker compose exec -T postgres pg_isready -U "$PG_USER" >/dev/null 2>&1 && break; sleep 2; done
     sleep 3
-    zcat "$FROM/postgres.sql.gz" | docker exec -i postgres psql -q -U "$PG_USER" -d postgres >/dev/null 2>"$FROM/.restore-psql.log" \
+    zcat "$FROM/postgres.sql.gz" | docker compose exec -T postgres psql -q -U "$PG_USER" -d postgres >/dev/null 2>"$FROM/.restore-psql.log" \
       || say "  psql reported errors; see $FROM/.restore-psql.log"
     docker compose stop postgres >/dev/null 2>&1
     say "  restored  postgres (people, keys, budgets, spend)"

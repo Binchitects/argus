@@ -12,6 +12,8 @@ What runs today, what it leaves out, and the tests that would close the gap.
 | **App** | `./tools/dn test tests/Llm.Tests` (xUnit, **345 tests**), `npm test` (Vitest, **186**) and `npm run e2e` (Playwright) in `src/web`, and CI on every push | sign-in, OIDC, LDAP against a real OpenLDAP, people and keys, the dashboards against LiteLLM's real schema and fakes of Prometheus and Loki, the admin pages, models kept loaded and loaded on request against a fake router, the picture, video and speech models' controls, sound and video attachments (what each kind of model gets, transcripts made once), read aloud, other GPU servers, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
 | **Deployment** | `scripts/upgrade-test.py --zero --stop-live` (and `--from TAG`) | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file; an upgrade keeps people, groups, chats and files, and survives `up` and `down`/`up` | a GPU host |
 | **arena CLI** | `python3 -m unittest discover clients/arena`, and CI | `arena ask`, `review` and `explain-failure` against a fake gateway and GitLab on a local socket: streaming, the model chosen, diffs and logs cut to the budget, the note posted, a private CA, every exit code; the GitLab CI template's jobs run by `sh` (with PyYAML) | nothing running |
+| **Recovery and offline, the scripts** | `python3 -m unittest discover -s tests/deploy`; also CI | `airgap.sh`: every image once, `deploy/` without `.env`, backups, keys or models, the registered models listed or copied, checksums written and checked, a damaged bundle or an unlisted file loads nothing, Podman; `restore-test.sh` and `rollback-test.sh`: their plans, and the guards (never the live project, its volumes or its ports); `recovery-check.py`: a dump's people, chats and settings, and the API checks against a fake app | nothing running (fake `docker` and `podman` on PATH) |
+| **Restore and rollback** | `scripts/restore-test.sh [--from DIR]`, `scripts/rollback-test.sh FROM_TAG TO_TAG` | a backup restores into a throwaway project beside the live one, with its people, chats, settings and spend; a release rolls back by restoring the backup taken before the upgrade | a host with the stack's images |
 | **Clients** | `scripts/clients-check.py` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
 | **Scale** | `scripts/scale-test.py` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
 | **Functional** | `scripts/functional-test.py` | what a person does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, per-person billing, access per model, fair use, dashboards and logs for admins only | a running stack |
@@ -26,9 +28,8 @@ message through the transcript, a picture model loaded on the GPU.
 
 | gap | what it would catch |
 |---|---|
-| A rollback test (older images over newer data) | a migration that cannot be undone |
-| A restore from `backup.sh` into an empty host | a backup that cannot be restored |
-| An offline (air-gapped) deployment | a first start that needs the internet |
+| `restore-test.sh` and `rollback-test.sh` run in CI (they need the stack's images) | a backup that cannot be restored, a release that cannot be rolled back |
+| An offline bundle loaded on a second host with no network, then `up` | a first start that needs the internet |
 | `podman.yml` in CI (needs a GPU runner) | a Podman regression |
 | Video generation in CI (minutes on a GPU) | a change in stable-diffusion.cpp's job API |
 
@@ -97,10 +98,10 @@ removed OAuth password grant) were each read off a live GitLab
 | test | asserts | status |
 |---|---|---|
 | S6.1 | `backup.sh` produces a complete directory and `--verify` passes | **missing** |
-| S6.2 | **restore round trip**: back up, destroy the volumes, restore, and compare row counts and file counts | **missing** — the most important test in this document |
+| S6.2 | **restore round trip**: back up, destroy the volumes, restore, and compare row counts and file counts | **scripted**: `scripts/restore-test.sh` restores into fresh volumes of a throwaway project and compares people, chats and settings with the backup's dump, through the API |
 | S6.3 | `--restore --with-config` restores `.env` and `config/` | **missing** |
 | S6.4 | `--install-timer` produces a working systemd unit | **missing** |
-| S6.5 | restore onto a **clean host** (no prior volumes) | **missing** (G11) |
+| S6.5 | restore onto a **clean host** (no prior volumes) | **scripted** on the same host: `restore-test.sh` starts from no volumes |
 
 ### S7 — Observability
 
@@ -137,8 +138,8 @@ hostname really is denied.
 
 | test | status |
 |---|---|
-| S9.1 | airgap bundle builds, its checksums verify, and `load.sh --check` passes | manual once |
-| S9.2 | full round trip: build → extract → load → `up` → the stack serves | **missing** |
+| S9.1 | airgap bundle builds, its checksums verify, and a damaged one loads nothing | `scripts/airgap.sh pack` and `load`; the logic in CI (`tests/deploy`) |
+| S9.2 | full round trip: build → extract → load → `up` → the stack serves | **missing**: needs a second host |
 | S9.3 | the stack starts with `--network none` on the compose network, i.e. genuinely offline | **missing** — this is what the offline commits claim |
 | S9.4 | images build from a clean cache (all three local ones) | **missing** |
 
@@ -160,7 +161,10 @@ slots; more slots (`LLAMACPP_PARALLEL`) or a second engine shorten it.
 ### S10 — Migrations and upgrades
 
 `argus index` twice, compose `up` twice, `down`/`up`, and a version rollback.
-The repo has been bitten by idempotency before; nothing asserts it now.
+The repo has been bitten by idempotency before. `upgrade-test.py --from TAG`
+runs `up` twice and `down`/`up`; `rollback-test.sh FROM_TAG TO_TAG` the
+rollback: the older images over the newer database, then the backup from
+before the upgrade restored under them.
 
 ---
 
@@ -294,12 +298,12 @@ Ordered by (risk × likelihood), not by effort:
 
 | # | test | why first |
 |---|---|---|
-| 1 | **S6.2 restore round trip** | the only operation that can destroy data, and untested |
+| 1 | **S6.2 restore round trip** — **scripted** (`restore-test.sh`); next, run it after every backup | the only operation that can destroy data |
 | 3 | **S2 for the ten unreferenced services** | closes the largest named hole |
 | 4 | **C2 TLS trust per runtime** | this is the failure users actually hit; four small tests |
 | 5 | **S9.3 genuinely offline start** | the offline commits claim it; nothing checks it |
 | ~~6~~ | ~~**S3.4 hash-free account list**~~ — **done** (`IdentityTests`) | |
-| 7 | **S9.1/S9.2 airgap round trip** | verified once by hand, easy to regress |
+| 7 | **S9.1/S9.2 airgap round trip** — S9.1 **scripted** (`airgap.sh`); S9.2 needs a second host | easy to regress |
 | ~~8~~ | ~~**Automate C3.5**~~ — **done.** `./tools/test-gitlab/run.sh` runs the whole lifecycle, and `ARGUS_TEST_WORK` moves the index off the NTFS volume that SQLite's WAL mode cannot use. All sixteen tools are contract-tested over the wire; the six `docs_*` tools are reported as NOT COVERED because the fixture has no documentation pack installed |
 | 9 | **S10 idempotency** | two `up`s, two indexes, one `down`/`up` |
 | 10 | **C4 browser** | highest effort, and the only way to test the UI layer at all |
@@ -314,7 +318,7 @@ cd deploy
 # unit (no stack needed), from the repository root
 ../tools/dn test tests/Llm.Tests -c Release
 ../tools/dn test tests/Argus.Tests -c Release
-python3 -m pytest ../tests/deploy
+(cd .. && python3 -m unittest discover -s tests/deploy)   # the recovery and offline scripts
 
 # with the stack up
 make health          # container state + in-network probes
@@ -347,6 +351,12 @@ E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 
 # it; and this checkout from zero. The live stack goes down meanwhile (volumes kept)
 ./scripts/upgrade-test.py --from v3.0.0 --stop-live
 ./scripts/upgrade-test.py --zero --stop-live
+
+# recovery, beside the live stack (never touching it): the newest backup restored
+# into a throwaway project and checked; a release rolled back by its backup
+./scripts/restore-test.sh
+./scripts/rollback-test.sh v4.1.0 v4.0.0
+./scripts/airgap.sh pack --dry-run /tmp/arena.tar   # what an offline bundle would hold
 
 # from inside the network
 docker run --rm --network llm-net -e MK=<master-key> \
