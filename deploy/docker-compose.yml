@@ -127,9 +127,11 @@ services:
     environment:
       ENGINE_KEY: ${ENGINE_KEY}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
+      # What llama.cpp fetches itself (a preset's hf-repo) lands in the library and stays.
+      LLAMA_CACHE: /library/.llama.cpp
     volumes:
       - ./services/llamacpp/router.sh:/router.sh:ro
-      - ${MODELS_DIR:-./models}:/library:ro
+      - ${MODELS_DIR:-./models}:/library
       - engine:/presets:ro
     ulimits: { memlock: -1 }
     shm_size: 2gb
@@ -139,7 +141,7 @@ services:
     <<: *service
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: embed
-    volumes: ["${MODELS_DIR:-./models}:/models:ro"]
+    volumes: ["${MODELS_DIR:-./models}:/models"]
     entrypoint: [/bin/sh, -c]
     command:
       - |
@@ -196,7 +198,7 @@ services:
       CUDA_DEVICE_ORDER: PCI_BUS_ID
       NAME: imagegen
       FILES: flux-2-klein-4b-Q4_0.gguf Qwen3-4B-Q4_K_M.gguf flux2-vae.safetensors
-    volumes: ["${MODELS_DIR:-./models}:/models:ro", "engine:/control:ro", "./services/sd-serve.sh:/sd-serve.sh:ro"]
+    volumes: ["${MODELS_DIR:-./models}:/models", "engine:/control:ro", "./services/sd-serve.sh:/sd-serve.sh:ro"]
     working_dir: /models/image/flux2-klein-4b
     entrypoint: [/bin/sh, /sd-serve.sh]
     command: >
@@ -216,7 +218,7 @@ services:
       CUDA_DEVICE_ORDER: PCI_BUS_ID
       NAME: videogen
       FILES: Wan2.2-TI2V-5B-Q4_K_M.gguf umt5-xxl-encoder-Q4_K_M.gguf wan2.2_vae.safetensors
-    volumes: ["${MODELS_DIR:-./models}:/models:ro", "engine:/control:ro", "./services/sd-serve.sh:/sd-serve.sh:ro"]
+    volumes: ["${MODELS_DIR:-./models}:/models", "engine:/control:ro", "./services/sd-serve.sh:/sd-serve.sh:ro"]
     working_dir: /models/video/wan2.2-ti2v-5b
     entrypoint: [/bin/sh, /sd-serve.sh]
     command: >
