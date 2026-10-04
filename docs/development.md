@@ -13,16 +13,18 @@ src/
   Llm.Api/              the platform's API: sign-in, OIDC, chat, tools, admin, dashboards (Dockerfile)
   Llm.Core/             its domain and data (EF Core, Postgres)
   Argus/                the code index service: indexer, knowledge packs, MCP, CLI (Dockerfile)
+  ArenaCode/            Arena Code, the coding agent people download: one self-contained file per system
   web/                  the platform's web: React, its own image (nginx)
   argus-web/            Argus's own web, for Argus alone; built into the Argus image
 tests/
   Llm.Tests/            xUnit; real Postgres, OpenLDAP and LiteLLM's schema via Testcontainers
   Argus.Tests/          xUnit
+  ArenaCode.Tests/      xUnit; a fake gateway and fake MCP servers on real sockets
   fixtures/argus/       a ctags corpus and documentation fixtures for Argus's tests
 deploy/                 the platform: docker-compose (and podman.yml), .env.example, config, scripts
   services/             what compose builds or mounts: sandbox, identity proxy, engine router...
   argus-standalone/     Argus alone: its own compose, config and scripts
-tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, the test GitLab, Hermes add-ons
+tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, publish-arena-code.sh, offline-nuget/, the test GitLab, Hermes add-ons
 clients/                editor and agent configurations (MCP)
 evals/                  evaluation harnesses and their results
 docs/                   this documentation; docs/plan.md is the plan and its phases
@@ -30,7 +32,7 @@ docs/                   this documentation; docs/plan.md is the plan and its pha
 
 ## .NET
 
-The API and Argus are one solution, `LlmService.slnx`, on .NET 10. Without the
+The API, Argus and Arena Code are one solution, `LlmService.slnx`, on .NET 10. Without the
 SDK installed, `tools/dn` runs it in Docker with the repository mounted, and
 Testcontainers can reach the databases it starts:
 
@@ -38,7 +40,13 @@ Testcontainers can reach the databases it starts:
 tools/dn build LlmService.slnx -c Release
 tools/dn test tests/Llm.Tests -c Release       # needs Docker (Testcontainers)
 tools/dn test tests/Argus.Tests -c Release
+tools/dn test tests/ArenaCode.Tests -c Release
 ```
+
+Arena Code uses the base class library only (no packages). Its standalone
+files, one per system, need .NET's runtime packs: `tools/publish-arena-code.sh
+--offline` builds them from `tools/offline-nuget/` into `dist/arena-code/`
+([arena-code.md](arena-code.md#building-it-admins)).
 
 Argus's tests need Universal Ctags (it decides which symbols exist) and the
 pinned sqlite-vec, fetched once and checked against its SHA-256:
@@ -142,7 +150,7 @@ runtime image carries the receipt at `/usr/share/argus/build-verified`.
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push: the API and Argus tests, both web
+`.github/workflows/ci.yml` runs on every push: the API, Argus and Arena Code tests, both web
 apps, each in a browser (the platform's images behind Traefik with no model,
 Argus with its fakes), the deployment tooling's tests, and every env sample
 resolving into a complete compose file. `release.yml` publishes the Argus image

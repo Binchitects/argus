@@ -1,4 +1,24 @@
-# Connecting an agent to Argus
+# Connecting an agent to Argus Arena
+
+## Arena Code: our own agent
+
+The simplest client is our own: **Arena Code**, one file with nothing to
+install, that talks only to the Arena (the model through the gateway, and all
+of the chat's tools, Argus included, through `https://DOMAIN/mcp` as you).
+Download it from **Your account → Connect your tools → Arena Code (our own
+agent)**, then:
+
+```bash
+arena-code login --url https://DOMAIN               # asks for your API key
+arena-code login --url https://DOMAIN --ca ca.crt   # when the Arena's certificate is from the company's own CA
+cd my-project && arena-code
+```
+
+Its source is `src/ArenaCode`; everything else is in
+[docs/arena-code.md](../docs/arena-code.md). The rest of this page is for
+other clients, connecting to Argus directly.
+
+## Other clients
 
 One directory per client, each holding the smallest file that makes that client
 work. Argus speaks standard MCP, so most of this is your client's own syntax
@@ -22,15 +42,21 @@ correct as far as that goes, but nobody has run them from this repository.
 
 ## Before anything: two settings that are not the client's fault
 
-**TLS.** The stack's certificate is signed by its own CA (`ca.crt`). Node-based clients
-(DeepSeek Harness, Qwen Code) have **no per-server TLS option**, so trust has to
-be established before the process starts:
+**TLS.** When the stack's certificate is signed by its own CA
+(`deploy/scripts/make-cert.sh` makes it: `deploy/certs/ca.crt`), every client
+has to trust that CA. Node-based clients (DeepSeek Harness, Qwen Code) have
+**no per-server TLS option**, so trust has to be established before the
+process starts:
 
 ```bash
-export NODE_EXTRA_CA_CERTS="$PWD/deploy/config/traefik/certs/ca.crt"
+export NODE_EXTRA_CA_CERTS="$PWD/deploy/certs/ca.crt"
 ```
 
-`deploy/scripts/with-ca.sh` prints the equivalents for curl, python and git.
+The equivalents for the others: `curl --cacert deploy/certs/ca.crt`, Python's
+`SSL_CERT_FILE=deploy/certs/ca.crt` (and `REQUESTS_CA_BUNDLE` for requests),
+git's `http.sslCAInfo` setting, or the CA trusted system-wide
+(`sudo cp deploy/certs/ca.crt /usr/local/share/ca-certificates/argus-arena.crt
+&& sudo update-ca-certificates`).
 Clients that offer an "insecure" switch (Qwen Code's `--insecure`) work too, but
 that turns off verification for **every** connection the process makes, not just
 this one.
@@ -47,7 +73,7 @@ the tool calls fail.
 
 ```bash
 ARGUS_TOKEN=<gitlab-pat> \
-NODE_EXTRA_CA_CERTS="$PWD/deploy/config/traefik/certs/ca.crt" \
+NODE_EXTRA_CA_CERTS="$PWD/deploy/certs/ca.crt" \
   dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
   "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
 ```
@@ -72,7 +98,7 @@ qwen mcp add argus https://argus.llm.localhost/mcp -t http \
   -H 'Authorization: Bearer <gitlab-pat>' --trust \
   --description 'Organisation code index'
 
-NODE_EXTRA_CA_CERTS="$PWD/deploy/config/traefik/certs/ca.crt" \
+NODE_EXTRA_CA_CERTS="$PWD/deploy/certs/ca.crt" \
   qwen --approval-mode yolo \
   "Use the argus MCP tool find_symbol to look up the symbol DecodeFrame."
 ```

@@ -10,6 +10,15 @@ export const KEY = 'LLM_SERVICE_API_KEY'
 /** And the person's GitLab token, for Argus. */
 export const GITLAB = 'GITLAB_TOKEN'
 
+/** A build of Arena Code the app serves (/api/downloads/arena-code). */
+export interface ArenaCodeBuild {
+  rid: string
+  system: string
+  fileName: string
+  size: number
+  sha256: string | null
+}
+
 export interface Context {
   /** The gateway without /v1 (Anthropic's API lives there). */
   root: string
@@ -18,6 +27,10 @@ export interface Context {
   context: number
   maxOutput: number
   argusUrl: string
+  /** This Arena's own address, https://DOMAIN. */
+  origin: string
+  /** Arena Code's builds; null when none could be listed. */
+  arenaCode: { version: string; builds: ArenaCodeBuild[] } | null
 }
 
 export interface Step {
@@ -25,6 +38,8 @@ export interface Step {
   code?: string
   /** What the code is: a file's path, or "shell". */
   file?: string
+  /** Files to download, one button each. */
+  links?: { label: string; href: string; detail?: string }[]
 }
 
 export interface Tool {
@@ -40,7 +55,48 @@ export interface Tool {
 
 const json = (v: unknown) => JSON.stringify(v, null, 2)
 
+const megabytes = (bytes: number) => `${Math.round(bytes / 1024 / 1024)} MB`
+
 export const tools: Tool[] = [
+  {
+    id: 'arena-code',
+    title: 'Arena Code (our own agent)',
+    group: 'Coding agents',
+    about:
+      'Our own coding agent, in your terminal: one file with nothing to install, that talks only to this Arena (the model through the gateway, all of Arena\'s tools as you), with file, shell and git tools on your machine.',
+    steps: (c) => {
+      const builds = c.arenaCode?.builds ?? []
+      return [
+        builds.length > 0
+          ? {
+              text: `Download it for your system (version ${c.arenaCode!.version}):`,
+              links: builds.map((b) => ({ label: b.system, href: `/api/downloads/arena-code/${b.rid}`, detail: megabytes(b.size) })),
+            }
+          : {
+              text: 'This Arena has no builds of it yet. An admin adds them once: put .NET\'s runtime packs in tools/offline-nuget (its README says how), then rebuild the app, or run tools/publish-arena-code.sh --offline and hand out the files in dist/arena-code.',
+            },
+        {
+          text: 'Make it runnable and put it on your PATH. On Windows, put arena-code.exe in a folder on your PATH instead.',
+          file: 'shell',
+          code: `chmod +x arena-code
+xattr -d com.apple.quarantine arena-code   # macOS only: the browser's download mark
+mkdir -p ~/.local/bin && mv arena-code ~/.local/bin/`,
+        },
+        {
+          text: 'Sign in with this Arena\'s address and your API key. It asks for the key, checks it with the gateway, and keeps it in your config folder, readable by you only.',
+          file: 'shell',
+          code: `arena-code login --url ${c.origin}`,
+        },
+        {
+          text: "If your Arena's certificate comes from your company's own CA, give that CA's file once (ask your admin for ca.crt), or set ARENA_CA_CERT:",
+          file: 'shell',
+          code: `arena-code login --url ${c.origin} --ca ca.crt`,
+        },
+        { text: 'Start it in your project (arena-code -p "…" answers once, for scripts):', file: 'shell', code: 'cd your-project\narena-code' },
+      ]
+    },
+    argus: "Nothing to add: Arena Code reaches Argus through Arena's own tools, as you, with the code you may read.",
+  },
   {
     id: 'claude',
     title: 'Claude Code',

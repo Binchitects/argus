@@ -415,6 +415,7 @@ public static class IdentityWiring
         Models.HuggingFaceEndpoints.MapHuggingFace(app);
         Schedules.TaskEndpoints.MapTasks(app);
         Models.RemoteServerEndpoints.MapRemoteServers(app);
+        Downloads.DownloadEndpoints.MapDownloads(app);
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

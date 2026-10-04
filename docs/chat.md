@@ -3,7 +3,8 @@
 The chat is at `https://DOMAIN/chat`, for everyone who can sign in. To use
 the models from your own tools (Claude Code, Qwen Code, an editor, a script),
 see **Connect your tools** (`/setup`): your API key, the gateway's address and
-setups to paste.
+setups to paste, and [Arena Code](arena-code.md), our own coding agent, to
+download.
 
 ## What it does
 
