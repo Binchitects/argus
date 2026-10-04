@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, errorMessage } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
-import { GITLAB, KEY, tools, type Context, type Step, type Tool } from './setup-tools'
+import { arenaMcp, GITLAB, KEY, tools, type Context, type Step, type Tool } from './setup-tools'
 
 interface ChatConfig {
   model: string | null
@@ -22,14 +22,23 @@ interface ChatConfig {
   gitlabUrl: string | null
 }
 
+/** Arena MCP for this person: whether it is on, its address, and the tools it serves them. */
+interface McpInfo {
+  enabled: boolean
+  url: string
+  tools: { id: string; title: string; askFirst: boolean }[]
+}
+
 const tokens = (n: number | null) => (n ? n.toLocaleString('en-US') : '—')
 
 /**
  * Connect your own tools: an API key, the gateway's address and your models,
- * setups to paste for the common coding agents and SDKs, and Argus over MCP.
+ * setups to paste for the common coding agents and SDKs, Arena MCP (every chat tool of
+ * yours, with the same key) and Argus over MCP.
  */
 export function ConnectPage() {
   const config = useQuery({ queryKey: ['chat', 'config'], queryFn: ({ signal }) => api<ChatConfig>('/api/chat/config', { signal }) })
+  const mcp = useQuery({ queryKey: ['account', 'mcp'], queryFn: ({ signal }) => api<McpInfo>('/api/account/mcp', { signal }) })
   const [chosen, setChosen] = useState<string | null>(null)
   const [toolId, setToolId] = useState(remembered)
   const root = serviceUrl('gateway').replace(/\/$/, '')
@@ -137,6 +146,8 @@ export function ConnectPage() {
           </CardContent>
         </Card>
 
+        {mcp.data?.enabled && <ArenaMcp info={mcp.data} />}
+
         {config.data?.argus && (
           <Card>
             <CardHeader>
@@ -177,6 +188,50 @@ function remembered(): string {
   } catch {
     return 'claude'
   }
+}
+
+/** Arena MCP: every chat tool of the person's, for their agent, at one address with their API key. */
+function ArenaMcp({ info }: { info: McpInfo }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Arena MCP (all your tools)</CardTitle>
+        <CardDescription>
+          The tools you have in the chat, listed below, for your coding agent over MCP (Argus through it needs no GitLab token). It signs in with{' '}
+          <strong>your API key</strong>, runs as you, and each call is in the audit log.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <CodeBlock code={info.url} label="Arena MCP's address" />
+        {info.tools.length > 0 ? (
+          <ul aria-label="Tools it serves you" className="flex flex-wrap gap-1.5">
+            {info.tools.map((t) => (
+              <li key={t.id}>
+                <Badge variant="outline">
+                  {t.title}
+                  {t.askFirst ? ' · asks first' : ''}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">No tools are on for you at the moment.</p>
+        )}
+        {info.tools.some((t) => t.askFirst) && (
+          <p className="text-sm text-muted-foreground">
+            A tool that asks first in the chat is marked so your agent asks you before each call: let it ask, rather than trusting every tool.
+          </p>
+        )}
+        {arenaMcp(info.url).map((s) => (
+          <section key={s.title} aria-label={`Arena MCP in ${s.title}`} className="grid gap-1.5">
+            <h3 className="text-sm font-medium">{s.title}</h3>
+            <p className="text-sm text-muted-foreground">{s.text}</p>
+            <CodeBlock code={s.code!} label={`the Arena MCP setup for ${s.title}`} />
+          </section>
+        ))}
+      </CardContent>
+    </Card>
+  )
 }
 
 /** One tool's steps, numbered: its settings with this deployment filled in, and Argus where it speaks MCP. */

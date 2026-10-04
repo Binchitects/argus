@@ -20,6 +20,36 @@ correct as far as that goes, but nobody has run them from this repository.
 
 ---
 
+## Arena MCP: every chat tool of yours, with your API key
+
+Argus alone is above and below. **Arena MCP** is the other server: everything a
+person has in the chat (Argus too, then with no GitLab token; the web, Python,
+pictures, the MCP servers, APIs and plugins the admins added), at
+`https://<domain>/mcp`, signed in with **their gateway API key** (Your account →
+API key). Details: [docs/mcp.md](../docs/mcp.md).
+
+```bash
+export LLM_SERVICE_API_KEY=sk-...
+
+claude mcp add --transport http arena https://<domain>/mcp \
+  --header "Authorization: Bearer $LLM_SERVICE_API_KEY"
+
+qwen mcp add arena https://<domain>/mcp -t http \
+  -H "Authorization: Bearer $LLM_SERVICE_API_KEY"
+```
+
+Any other client takes the same `url` and `headers` shape as `generic-mcp/http.json`,
+with the API key in place of the GitLab token. Two differences from Argus:
+
+- **No `--trust` here.** A tool an admin set to ask first is marked
+  `destructiveHint` and says to ask: the client is the only one who can ask
+  you. Trust the server only where none of your tools asks first.
+- **The host is the bare domain**, not `argus.<domain>`. The TLS note below
+  applies the same way.
+
+Tested in the suite with the app's own MCP client (`tests/Llm.Tests/ArenaMcpTests.cs`);
+**not executed here** against Claude Code or Qwen Code.
+
 ## Before anything: two settings that are not the client's fault
 
 **TLS.** The stack's certificate is signed by its own CA (`ca.crt`). Node-based clients

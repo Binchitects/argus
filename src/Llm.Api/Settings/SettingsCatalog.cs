@@ -14,6 +14,7 @@ public static class SettingsCatalog
     private const string Argus = "Argus (GitLab)";
     private const string Tools = "Python and web";
     private const string PluginsGroup = "Plugins";
+    private const string ArenaMcp = "Arena MCP";
     private const string Schedules = "Scheduled tasks";
     private const string Mail = "Email";
     private const string Safeguards = "Safeguards";
@@ -80,6 +81,8 @@ public static class SettingsCatalog
         new("Plugins:CatalogUrl", PluginsGroup, "Plugin catalog", "An index.json that lists plugins to install (each zip's address and SHA-256), besides those that come with the app. Empty: only those.", SettingType.Url, SettingScope.Live),
         new("Plugins:CatalogKey", PluginsGroup, "Catalog's public key", "The publisher's ECDSA P-256 public key (PEM). When set, the catalog's index.json.sig must verify against it, or nothing is installed from it.", SettingType.Text, SettingScope.Live)
             { Max = 1000 },
+        new("Mcp:Enabled", ArenaMcp, "Arena MCP", "Outside agents (Arena Code, Claude Code, Qwen Code, Continue) get each person's chat tools at https://DOMAIN/mcp, signed in with that person's API key: the tools they may use in the chat, run as them, each call audited (mcp.call).", SettingType.Boolean, SettingScope.Live)
+            { Default = "true" },
         new("Web:SearchUrl", Tools, "Search engine", "A SearXNG instance for the Web tool's search. Empty: the websearch profile's own when it is on; otherwise no search, only opening pages.", SettingType.Url, SettingScope.Live),
         new("Sandbox:TimeoutSeconds", Tools, "Longest Python run", "A run still going after this long is stopped, and the model told so.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "60", Min = 5, Max = 300, Unit = "seconds", Optional = false },

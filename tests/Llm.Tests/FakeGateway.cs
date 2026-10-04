@@ -87,6 +87,18 @@ public sealed class FakeGateway : ILiteLlm
         return Task.FromResult(list);
     }
 
+    /// <summary>How many times the app asked whose a key is (Arena MCP keeps the answer a little while).</summary>
+    public int KeyLookups => _keyLookups;
+    private int _keyLookups;
+
+    public Task<KeyOwner?> KeyOwnerAsync(string key, CancellationToken ct = default)
+    {
+        Check();
+        Interlocked.Increment(ref _keyLookups);
+        var found = Keys.Values.FirstOrDefault(k => k.Secret == key);
+        return Task.FromResult(found is null ? null : new KeyOwner(found.Email, found.Blocked, null));
+    }
+
     public Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default)
     {
         Check();

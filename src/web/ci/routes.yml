@@ -1,7 +1,7 @@
 http:
   routers:
     api:
-      rule: "PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`)"
+      rule: "PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`) || Path(`/mcp`)"
       entryPoints: [websecure]
       service: app
       tls: {}

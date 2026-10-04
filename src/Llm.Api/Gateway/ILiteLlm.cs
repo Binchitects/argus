@@ -14,6 +14,9 @@ public sealed record GatewayUser(string UserId, decimal Spend, decimal? Budget);
 /// <summary>A model the gateway serves. Mode is "chat", or "image_generation" for a picture model.</summary>
 public sealed record GatewayModel(string Name, int? Context, int? MaxOutput, bool Vision, bool Tools, bool Thinking, decimal? InputPerMtok, decimal? CachedInputPerMtok, decimal? OutputPerMtok, string Mode = "chat", bool Audio = false);
 
+/// <summary>A key's owner as the gateway knows it: the person's email (null for a key of no person, the chat's), whether it is blocked, when it expires.</summary>
+public sealed record KeyOwner(string? Email, bool Blocked, DateTimeOffset? Expires);
+
 /// <summary>A model the app added to the gateway (model_info.llm_app = "local"): the gateway's id for it, and what it was added with.</summary>
 public sealed record ManagedModel(string Id, string Name, string? Fingerprint);
 
@@ -43,6 +46,9 @@ public interface ILiteLlm
     /// <summary>A key that belongs to no person (the chat's): spend is attributed by the request's `user`.</summary>
     Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default);
     Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default);
+
+    /// <summary>Whose a key is (Arena MCP signs people in with theirs): asked by its hash, so the key itself never leaves the app. Null: the gateway does not know it.</summary>
+    Task<KeyOwner?> KeyOwnerAsync(string key, CancellationToken ct = default);
     Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default);
     Task SetBlockedAsync(IEnumerable<string> tokens, bool blocked, CancellationToken ct = default);
     Task<IReadOnlyDictionary<string, GatewayUser>> UsersAsync(CancellationToken ct = default);

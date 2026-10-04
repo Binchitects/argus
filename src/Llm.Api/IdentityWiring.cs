@@ -283,6 +283,7 @@ public static class IdentityWiring
         services.AddScoped<Chat.Tools.ToolRegistry>();
         services.AddSingleton<Chat.Tools.ToolApprovals>();
         services.AddScoped<Chat.ChatService>();
+        ArenaMcp.McpEndpoints.AddArenaMcp(services, config);
         // Answers outlive the page that asked: they run here, and a page re-attaches.
         services.AddSingleton<Chat.AnswerJobs>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.AnswerJobs>());
@@ -410,6 +411,7 @@ public static class IdentityWiring
         Chat.ProjectEndpoints.MapProjects(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Plugins.PluginEndpoints.MapPlugins(app);
+        ArenaMcp.McpEndpoints.MapArenaMcp(app);
         Models.ModelEndpoints.MapModels(app);
         Models.ModelHoursEndpoints.MapModelHours(app);
         Models.HuggingFaceEndpoints.MapHuggingFace(app);

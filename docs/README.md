@@ -12,6 +12,7 @@
 | [settings.md](settings.md) | the Settings page: what applies at once, after a restart, or on the host |
 | [chat.md](chat.md) | the chat: models, thinking, files, tools and their limits |
 | [plugins.md](plugins.md) | plugins and APIs as tools: installing, each person's own account, the manifest, a catalog |
+| [mcp.md](mcp.md) | Arena MCP: each person's chat tools for their own agent at `/mcp`, signed in with their API key |
 | [cpu-temperature.md](cpu-temperature.md) | how CPU temperature reaches the dashboards, on Linux and on Windows |
 | [hermes.md](hermes.md) | pointing Hermes at the model and at Argus |
 

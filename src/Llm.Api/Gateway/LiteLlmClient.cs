@@ -157,6 +157,20 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         return keys;
     }
 
+    public async Task<KeyOwner?> KeyOwnerAsync(string key, CancellationToken ct = default)
+    {
+        // LiteLLM keeps a key as its SHA-256 (hex), and /key/info takes that hash as it is: the key
+        // itself stays out of the URL and the gateway's logs.
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)));
+        var res = await SendAsync(HttpMethod.Get, $"/key/info?key={hash}", null, ct, allowStatus: [400, 404]);
+        if (res?["info"] is not JsonObject info)
+        {
+            return null;
+        }
+        return new KeyOwner(Str(info, "user_id"), info["blocked"]?.GetValueKind() == JsonValueKind.True,
+            DateTimeOffset.TryParse(Str(info, "expires"), CultureInfo.InvariantCulture, out var expires) ? expires : null);
+    }
+
     public async Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default)
     {
         var list = tokens.ToList();
