@@ -286,26 +286,31 @@ public static partial class ChatEndpoints
             ? await db.Projects.AsNoTracking().Where(x => x.Id == pid).Select(x => new { x.Id, x.Name }).SingleOrDefaultAsync(ct)
             : null;
         var tools = OnFor(c, await registry.ForAsync(await access.MembershipAsync(me, ct), ct));
+        // The person's thumbs, and the arena's answers without their models until voted on.
+        var quality = await Quality.ChatQuality.ForAsync(db, me.Id, id, messages, ct);
         return Results.Ok(Shape(c, tools, forkedFrom, messages.Select(m => (object)new
         {
             m.Id, m.ParentId, m.Role, m.Content, m.Reasoning, m.ToolName, m.ToolCallId,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
-            details = m.DetailsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.DetailsJson),
+            details = quality.Details(m) is { } details ? JsonSerializer.Deserialize<JsonElement>(details) : (JsonElement?)null,
             context = m.ContextJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ContextJson),
             m.CutShort,
-            status = m.Status.ToString().ToLowerInvariant(), m.Error, m.Model,
+            status = m.Status.ToString().ToLowerInvariant(), error = quality.Error(m), model = quality.Model(m),
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
-        }), jobs.IsAnswering(id), project));
+            feedback = quality.Feedback(m.Id),
+        }), jobs.IsAnswering(id), project, quality.Arenas));
     }
 
     /// <param name="answering">An answer is being written: the page watches it (GET …/stream).</param>
-    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? project = null) =>
+    /// <param name="arenas">The chat's comparisons of two models (arena mode).</param>
+    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? project = null,
+        object? arenas = null) =>
         new
         {
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
-            c.CurrentLeafId, c.ArchivedAt, forkedFrom, project, c.CreatedAt, c.UpdatedAt, answering, messages,
+            c.CurrentLeafId, c.ArchivedAt, forkedFrom, project, c.CreatedAt, c.UpdatedAt, answering, messages, arenas = arenas ?? Array.Empty<object>(),
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
@@ -599,9 +604,10 @@ public static partial class ChatEndpoints
     /// Starts the answer and streams it as server-sent events. The answer runs on
     /// its own (AnswerJobs): this request only watches it, so closing the page
     /// leaves it to finish, and the page picks it up again from GET …/stream.
+    /// <paramref name="start"/> starts another kind of answer (the arena's two).
     /// </summary>
     private static async Task RunAsync(HttpContext http, Conversation c, AppUser me, AppDbContext db, AnswerJobs jobs, AnswerOverrides overrides,
-        Func<Task<(ChatMessage Question, bool Titled)>> prepare)
+        Func<Task<(ChatMessage Question, bool Titled)>> prepare, Action<AnswerJobs.Job, ChatMessage>? start = null)
     {
         if (jobs.Reserve(c.Id, me.Id) is not { } job)
         {
@@ -631,7 +637,14 @@ public static partial class ChatEndpoints
         {
             job.Emit(new { type = "title", title = c.Title });
         }
-        jobs.Start(job, question.Id, overrides with { Titled = titled });
+        if (start is null)
+        {
+            jobs.Start(job, question.Id, overrides with { Titled = titled });
+        }
+        else
+        {
+            start(job, question);
+        }
         await StreamAsync(http, job);
     }
 

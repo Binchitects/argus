@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Blocks, Boxes, CalendarClock, Database, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, SquareSlash, Telescope, Timer, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, BarChart3, Blocks, Boxes, CalendarClock, Database, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -23,6 +23,7 @@ export const navigation: NavSection[] = [
       { title: 'Prompts', path: '/prompts', icon: SquareSlash, keywords: ['prompt library', 'slash commands', 'templates', 'snippets', 'saved prompts'] },
       { title: 'Scheduled tasks', path: '/tasks', icon: CalendarClock, keywords: ['schedule', 'cron', 'daily', 'weekly', 'report', 'digest', 'webhook', 'email', 'notification'] },
       { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'] },
+      { title: 'Leaderboard', path: '/leaderboard', icon: Trophy, keywords: ['arena', 'compare', 'models', 'elo', 'vote', 'ranking'] },
       { title: 'Connect your tools', path: '/setup', icon: Plug, keywords: ['api key', 'token', 'claude code', 'qwen code', 'opencode', 'continue', 'mcp', 'harness', 'sdk', 'certificate'] },
     ],
   },
@@ -40,6 +41,7 @@ export const navigation: NavSection[] = [
       { title: 'Knowledge', path: '/admin/knowledge', icon: Library, keywords: ['documents', 'wiki', 'gitlab', 'folder', 'website', 'confluence', 'sharepoint', 'search', 'embeddings', 'rag'] },
       { title: 'Settings', path: '/admin/settings', icon: Settings, keywords: ['configuration', 'config', 'env'] },
       { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'] },
+      { title: 'Quality', path: '/admin/quality', icon: ThumbsUp, keywords: ['feedback', 'thumbs', 'ratings', 'arena', 'leaderboard', 'answers'] },
     ],
   },
   {

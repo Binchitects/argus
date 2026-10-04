@@ -24,6 +24,8 @@ import { ToolsPicker } from './tools-picker'
 import { ChatList } from './sidebar'
 import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
+import { ArenaTurn, ComparePicker } from './arena'
+import { arenaView, type CompareChoice } from './quality'
 import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message } from './types'
 import { useUploads } from './uploads'
 import { ProjectView } from './project-view'
@@ -412,6 +414,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     // Deep research is for the message written with it on: off again once sent.
     const deep = fromBox && research
     if (deep) setResearch(false)
+    // Compare too: two models answer this message, side by side.
+    const versus = fromBox ? compare : null
+    if (versus) setCompare(null)
     // "/compact": a command, not a question.
     if (text === '/compact' && (files ?? uploads.attachments).length === 0) {
       if (!canCompact) {
@@ -422,21 +427,29 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       return true
     }
     const conversationId = await ensureChat()
-    if (!conversationId) return false
+    if (!conversationId) {
+      if (versus) setCompare(versus)
+      return false
+    }
     const parent = view.leaf
     const localId = newLocalId()
     const attachments = files ?? uploads.attachments
     // Asked by voice: answered aloud.
     const aloud = attachments.some((a) => a.fileName.startsWith(voicePrefix))
     // The files went with the question once the server has it: the box is free for the next one while the answer streams.
-    return run(conversationId, 'messages', { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null, ...(deep ? { research: true } : {}) }, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
+    const body = { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null, ...(deep && !versus ? { research: true } : {}), ...(versus?.models ? { models: versus.models } : {}) }
+    const sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
       if (e.type === 'question' && fromBox) uploads.clear()
-      if (e.type === 'done' && aloud) {
+      // Two answers to a comparison: neither is read aloud.
+      if (e.type === 'done' && aloud && !versus) {
         const s = liveRef.current
         const said = s?.messages.find((m) => m.id === s.current)?.content
         if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
       }
     })
+    // Not sent: it goes back into the box, and Compare stays on for it.
+    if (!sent && versus) setCompare(versus)
+    return sent
   }
 
   // A new chat made in a project: its name for the header.
@@ -479,6 +492,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   }
 
   const [research, setResearch] = useState(false)
+  const [compare, setCompare] = useState<CompareChoice | null>(null)
+  const comparePicker = <ComparePicker models={config.models} value={compare} onChange={setCompare} />
 
   // Written while an answer runs: each waits its turn, sent once the answer before is over
   // (saved too: a page with nothing live), or at once with Send now (which stops the answer).
@@ -634,7 +649,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   {error}
                 </Alert>
               )}
-              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} autoFocus big />
+              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} compare={comparePicker} autoFocus big />
               <div className="stagger mt-4 grid gap-2 sm:grid-cols-3">
                 {(config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions).map((s) => (
                   <button
@@ -676,10 +691,30 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   )}
                   {turns.map((t, i) => {
                     const summary = [t.question, ...t.answer].find((m) => m?.summary)?.summary
+                    // A question compared (arena mode): both answers side by side.
+                    const arena = t.question ? arenaView(t.question, data?.arenas, view.arena, answering && i === lastTurn) : null
                     return (
                       <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
                         {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} />}
-                        {(t.answer.length > 0 || (answering && i === lastTurn)) && (
+                        {arena && t.question ? (
+                          <ArenaTurn
+                            arena={arena}
+                            tree={tree}
+                            question={t.question}
+                            config={config}
+                            chatId={id}
+                            thinkingSince={answering && i === lastTurn ? view.thinkingSince : null}
+                            queued={answering && i === lastTurn ? view.queued : null}
+                            busy={streaming}
+                            onOpenFile={openFile}
+                            onPreview={openPreview}
+                            approvals={answering && i === lastTurn ? view.waiting : undefined}
+                            onDecide={(callId, allow) => void decide(callId, allow)}
+                            calls={answering && i === lastTurn ? view.calls : undefined}
+                            agents={i === lastTurn ? view.agents : undefined}
+                            onHurry={answering && i === lastTurn && id ? () => void hurryChat(id).catch((e) => toast.error(errorMessage(e))) : undefined}
+                          />
+                        ) : (t.answer.length > 0 || (answering && i === lastTurn)) && (
                           <AnswerTurn
                             answer={t.answer}
                             siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
@@ -704,6 +739,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                             research={answering && i === lastTurn && !!view.research}
                             onTrace={me?.isAdmin ? setTracing : undefined}
                             busy={streaming}
+                            feedbackIn={id}
                           />
                         )}
                         {summary && <CompactedMark summary={summary} onOpenFile={openFile} />}
@@ -749,6 +785,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 onUnqueue={(key) => setQueue((q) => q.filter((x) => x.key !== key))}
                 research={research}
                 onResearch={setResearch}
+                compare={comparePicker}
                 onStop={() => void stop()}
                 uploads={uploads}
                 model={model}

@@ -23,7 +23,7 @@ namespace Llm.Core.Data.Migrations
                 nullable: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_chat_messages_CreatedAt",
+                name: "IX_chat_messages_Answered",
                 table: "chat_messages",
                 column: "CreatedAt",
                 filter: "\"AnswerMs\" IS NOT NULL");
@@ -33,7 +33,7 @@ namespace Llm.Core.Data.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropIndex(
-                name: "IX_chat_messages_CreatedAt",
+                name: "IX_chat_messages_Answered",
                 table: "chat_messages");
 
             migrationBuilder.DropColumn(

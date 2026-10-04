@@ -2,8 +2,9 @@
 
 Everything an operator does happens in the app at `https://DOMAIN`. The
 **Admin** area needs the admin role; **Usage & cost** and **Your account** are
-for everyone, as is **Connect your tools** (each person's API key and the
-setups for their tools).
+for everyone, as are **Connect your tools** (each person's API key and the
+setups for their tools) and the **Leaderboard** (the models as people voted
+for them in the chat's Compare, unless an admin keeps it to the admins).
 
 People are a table with filters, bulk actions (credit, disable, enable, sign
 out) and a page each. The audit log has filters, paging and CSV export. The
@@ -35,6 +36,7 @@ page covers the rest.
 | **Traces** | The slowest answers of a time range (an hour to a month), across people: when, who, the model, the whole time, the slowest step, tokens and the tools used (the sub-agents' too). Each opens its trace: the wait in line, getting ready, each round of the model with its tokens, cache share, first token and the engine's read and write speeds (llama.cpp's own timings when the stream carries them, else worked out from the times), each tool call, and each sub-agent with its time, tokens and tool calls; the slowest step is named, with why. The same trace opens from the timer under an answer in the chat. Times, tokens, sizes and tool names only: what was asked and answered is never shown. |
 | **Settings** | Every setting, grouped and searchable: applied at once, or by a restart the app does itself. See [settings.md](settings.md). |
 | **Audit log** | Every sign-in and every change to people or the index, with who, whom and from where. |
+| **Quality** | How people rate the answers, over a day, a week, a month or three: per model and per project, the answers written, the share rated, the share rated up, and why they were rated down. The latest down-rated answers by title, model, reason and the person's words, never their content: a chat opens (read only, down to the rated answer) only when its owner shared it with the down vote, and each opening is audited. Below, the arena's leaderboard from the votes cast in the range. See [Quality](#quality) below. |
 | **Sign-in** | Local accounts and the company directory; "Check the directory now". |
 
 Indexing, Packs and Explore talk to Argus through the app's server with
@@ -202,6 +204,26 @@ The app writes `config/engine/models.ini` (the models added here),
 `config/engine/active` (the model to keep loaded) and
 `config/engine/targets.json` (which model Prometheus scrapes). The engine and
 Prometheus read them; nothing else does.
+
+### Quality
+
+Two things feed it, both from the chat ([chat.md](chat.md)):
+
+- **Thumbs** under each answer, with a reason on a down vote (wrong,
+  incomplete, too long, unsafe, ignored instructions, other) and a few words.
+  An answer counts once it is written (its last message); rated share and
+  thumbs up are of the answers written in the range.
+- **Compare** (arena mode): one question to two models, side by side and
+  blind, and the person's vote. Each vote moves an Elo rating: every model
+  starts at 1000, a vote moves both by at most 32, more when the lower rated
+  wins, and a tie or "both bad" counts half a win each. The leaderboard lists
+  each model's rating, wins, losses, ties, "both bad" and win rate (wins over
+  votes).
+
+Everyone sees the leaderboard of every vote (**Leaderboard** in the sidebar,
+"the company's models on its own questions") unless **Settings → Chat → Arena
+leaderboard for everyone** is off; this page shows it either way, for the
+range chosen.
 
 ### What the admin area deliberately does not do
 

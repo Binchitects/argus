@@ -41,6 +41,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
     public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
     public DbSet<KnowledgeReaders> KnowledgeReaders => Set<KnowledgeReaders>();
+    public DbSet<AnswerFeedback> AnswerFeedback => Set<AnswerFeedback>();
+    public DbSet<ArenaMatch> ArenaMatches => Set<ArenaMatch>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -89,7 +91,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(m => new { m.ConversationId, m.Sequence }).IsUnique();
             e.HasIndex(m => new { m.ConversationId, m.ParentId });
             // Admin → Traces: the slowest answers of a time range.
-            e.HasIndex(m => m.CreatedAt).HasFilter("\"AnswerMs\" IS NOT NULL");
+            // Answers by when (the quality page), and the finished answers by when (the slowest, for traces).
+            e.HasIndex(m => m.CreatedAt);
+            e.HasIndex(m => m.CreatedAt, "IX_chat_messages_Answered").HasFilter("\"AnswerMs\" IS NOT NULL");
         });
         builder.Entity<ChatAttachment>(e =>
         {
@@ -129,6 +133,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(p => new { p.AttachmentId, p.Number });
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(p => p.AttachmentId).OnDelete(DeleteBehavior.Cascade);
         });
+        QualityModel.Configure(builder);
 
         builder.Entity<Group>(e =>
         {

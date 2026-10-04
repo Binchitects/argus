@@ -38,6 +38,19 @@ export interface LiveState {
   mode?: 'answer' | 'compact'
   /** The answer is deep research (its status line says which step it is on). */
   research?: boolean
+  /** A comparison being answered: its question, the side answering now, and each side's first message once it started. */
+  arena?: LiveArena | null
+}
+
+/** A comparison as it streams: step `step` of `of` is `side`'s answer. */
+export interface LiveArena {
+  id: string
+  questionId: string
+  side: 'a' | 'b'
+  step: number
+  of: number
+  a?: string
+  b?: string
 }
 
 export const blank = (id: string, role: Message['role'], parentId: string | null, content = ''): Message => ({
@@ -87,13 +100,20 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     }
     case 'title':
       return { ...state, title: e.title }
-    case 'assistant':
+    case 'assistant': {
       put(messages, { ...blank(e.id, 'assistant', e.parentId), model: e.model })
-      return { ...state, messages, leaf: e.id, current: e.id, thinkingSince: null, queued: null }
+      // A comparison's answer: its first message is where that side starts.
+      const arena = e.side && state.arena && e.parentId === state.arena.questionId && !state.arena[e.side] ? { ...state.arena, [e.side]: e.id } : state.arena
+      return { ...state, messages, leaf: e.id, current: e.id, thinkingSince: null, queued: null, arena }
+    }
     case 'route': {
       const i = messages.findIndex((m) => m.id === e.id)
       if (i >= 0) messages[i] = { ...messages[i]!, details: { ...messages[i]!.details, route: e.route } }
       return { ...state, messages }
+    }
+    case 'arena': {
+      const same = state.arena?.id === e.id ? state.arena : null
+      return { ...state, arena: { a: same?.a, b: same?.b, id: e.id, questionId: e.questionId, side: e.side, step: e.step, of: e.of }, thinkingSince: null }
     }
     case 'queued':
       return { ...state, queued: e.ahead }

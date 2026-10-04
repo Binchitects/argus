@@ -82,6 +82,26 @@ setups to paste. For a GitLab pipeline, see [ci.md](ci.md). Your agent can use y
   (Workspace → Prompts): yours, your groups', the company's or a plugin's.
   Chosen, it asks for its blanks and sends it filled in
   ([below](#prompts-and-slash-commands)).
+- **Rating answers.** Thumbs up or down under each answer. Down asks why:
+  wrong, incomplete, too long, unsafe, ignored instructions or other, and a
+  few words if you like. One rating per answer; rate again to change it, or
+  press the thumb that is on to take it back. Admins see the ratings per model
+  and per project (Admin → Quality), with the chat's title, the model and your
+  reason, never its content, unless you tick **Share this chat with the
+  admins** with a down vote: then they can read the chat down to that answer.
+- **Compare (arena mode).** **Compare** beside Deep research sends your next
+  question to two models: two you choose, or two at random of those you may
+  use that can answer now. They answer one after the other (the engine may
+  hold one model at a time), and the answers show side by side as **Model A**
+  and **Model B**, which is which drawn. Vote **A is better**, **B is
+  better**, **a tie** or **both are bad**, and the names show. A vote for one
+  answer makes it the branch on screen, and the chat goes on from it. The
+  names stay out of everything the page is sent until the vote, the chat's
+  history included; a model may still name itself in its own words. Votes
+  make the **Leaderboard** (in the sidebar): the company's models on its own
+  questions, by Elo rating, with their wins, losses, ties and win rate.
+  Admins can keep it to themselves (Settings → Chat → **Arena leaderboard for
+  everyone**).
 - **Context.** The gauge beside Send shows how full the model's context is,
   from the last answer's prompt as the model counted it (and what it
   answered). Opened, it shows what fills it: the system prompt and the tools'
@@ -523,7 +543,14 @@ So that everyone gets their turn:
 ## Who sees what
 
 - A chat belongs to one person. Nobody else can read it, **admins included**:
-  every query is filtered by the signed-in person, attachments too.
+  every query is filtered by the signed-in person, attachments too. The one
+  exception is yours to make: a down vote with **Share this chat with the
+  admins** lets admins read that chat, down to the rated answer, from Admin →
+  Quality (each reading is in the audit log, `quality.read_shared`). Rate it
+  again without the box, or take the rating back, and it is closed again.
+- Ratings and arena votes are kept with their answers: deleting the chat
+  deletes its ratings. An arena vote stays on the leaderboard (without the
+  chat) until its person is deleted.
 - Deleting a person deletes their chats and attachments.
 - **Argus answers as the person asking.** The app calls Argus inside the
   network with `ARGUS_CHAT_CLIENT_TOKEN` and your email. Argus resolves the
@@ -585,6 +612,7 @@ The chat's limits are under Admin → Settings → Chat ([settings.md](settings.
 | Passages of long files per question (Settings → Company knowledge) | 12,000 characters | with the embedder, what of the chat's long files and its project's files comes with each question |
 | Longest single answer | 15 minutes | an answer still running after this is stopped |
 | Memory | on | answers read people's memories, and the model offers new ones; off for everyone when unticked |
+| Arena leaderboard for everyone | on | everyone sees the leaderboard of Compare's votes; off: admins only (Admin → Quality) |
 
 The thinking levels (`THINKING_PRESETS`) and **Model for sub-agents and small
 steps** are under Settings → Model.
@@ -611,6 +639,17 @@ in line and getting ready; the answer's last round keeps the whole answer's
 time. A sub-agent's time, tokens, speeds and each tool call's time are kept with
 its delegate call. `GET /api/admin/traces/{messageId}` (admins) puts an answer
 together from them; `GET /api/admin/traces?from=&to=` lists the slowest.
+
+`POST .../compare` takes the same as `.../messages` and `models` (two names, or
+none for two at random). Its two answers are siblings under the question; the
+chat's `arenas` lists each comparison (its question, each answer's first
+message, the vote, and the names once voted), and until the vote each answer's
+messages say "Model A" or "Model B" for their model. `POST
+/api/chat/arena/{id}/vote` takes `a`, `b`, `tie` or `bad`, once both answers
+are written, and answers with the names. `PUT` and `DELETE
+.../messages/{id}/feedback` rate an answer (`up`, and with a down vote
+`reason`, `comment` and `share`); each message of `GET` carries the person's
+own `feedback`.
 
 ## When something goes wrong
 
@@ -667,6 +706,13 @@ together from them; `GET /api/admin/traces?from=&to=` lists the slowest.
   (only the owner changes it), the company's (admins only, audited), the
   checks on names and groups, and a plugin's `/triage` installed with it, for
   whoever may use its tool, and removed with it.
+  Also ratings (kept, changed, taken back, answers and known reasons only, the
+  owner only), the quality page's numbers per model and project, a shared chat
+  read by an admin and audited, and closed again; arena mode (both models
+  answer one after the other, the question alone each, no name in any event
+  or in the chat until the vote, the vote once, the winner's branch shown,
+  chosen models checked, which is A drawn), the Elo update, and the
+  leaderboard kept to admins.
 - **UI (Vitest):**
   - the branch tree
   - the live-stream reducer
@@ -696,6 +742,10 @@ together from them; `GET /api/admin/traces?from=&to=` lists the slowest.
   - memory: an offer kept in the person's words and undone; the chat's Memory
     button listing and deleting; Your account → Memory (add, edit, delete,
     off)
+  - thumbs up and down with a reason, words and the chat shared; Compare at
+    random and with two chosen models, the two answers side by side and blind,
+    the progress while they answer, the vote and the names; the leaderboard
+    and Admin → Quality
 - **Browser (Playwright), desktop and phone, both themes, with axe, in CI
   too:** a chat with Argus's answers and two images, served by the browser
   itself, from the links to the image viewer.
