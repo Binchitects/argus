@@ -316,7 +316,9 @@ you: a morning digest, a weekly report on a repository with Argus.
   secret token; elsewhere the secret in `X-Hook-Secret`. The event, in words,
   follows the task's question: a merge request with its changes, a failed
   pipeline with the end of each failed job's log, a webhook's JSON as it came.
-  An event the task does not take is acknowledged and dropped.
+  An event the task does not take is acknowledged and dropped. Events that
+  come while the task is answering wait their turn (up to 20; then the oldest
+  goes), so a busy repository loses none.
 - **Answer as a comment in GitLab**: the answer goes on the merge request,
   issue or commit. Reading the changes and logs and commenting use the **GitLab
   bot token** an admin sets (Settings → Scheduled tasks, a bot account's token

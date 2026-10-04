@@ -234,9 +234,9 @@ public static class TaskEndpoints
         {
             return Results.Ok(new { status = "ignored", reason = "not an event this task takes" });
         }
-        return scheduler.Start(task.Id, manual: false, trigger)
+        return scheduler.StartOrQueue(task.Id, trigger)
             ? Results.Accepted(value: new { status = "started" })
-            : Results.Ok(new { status = "busy", reason = "the run before is still answering" });
+            : Results.Accepted(value: new { status = "queued", waiting = scheduler.Waiting(task.Id) });
     }
 
     private static async Task<IResult?> ApplyAsync(ScheduledTask task, TaskRequest body, AppUser me, TaskContext x, bool creating, CancellationToken ct)

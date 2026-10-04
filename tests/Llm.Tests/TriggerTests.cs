@@ -130,4 +130,28 @@ public sealed class TriggerTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/tasks", new { name = "X", prompt = "Y", trigger = "gitlab", events = Array.Empty<string>() }));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/tasks", new { name = "X", prompt = "Y", trigger = "sometimes" }));
     }
+
+    [Fact]
+    public async Task Events_that_come_while_the_task_answers_wait_their_turn_instead_of_being_dropped()
+    {
+        await using var f = NewApp();
+        var b = await PersonAsync(f);
+        // [steady] keeps each answer going for a second or two.
+        var made = await b.JsonAsync(await b.PostAsync("/api/tasks", new { name = "Busy", prompt = "Say it [steady]", trigger = "webhook" }));
+        var (url, secret, id) = (made.GetProperty("hookUrl").GetString()!, made.GetProperty("hookToken").GetString(), made.GetProperty("id").GetString()!);
+        var first = await (await PostEvent(f, url, secret, new { n = 1 }, "X-Hook-Secret")).Content.ReadAsStringAsync();
+        var second = await (await PostEvent(f, url, secret, new { n = 2 }, "X-Hook-Secret")).Content.ReadAsStringAsync();
+        Assert.Contains("started", first, StringComparison.Ordinal);
+        Assert.Contains("queued", second, StringComparison.Ordinal);
+        for (var i = 0; i < 150; i++)
+        {
+            var runs = (await b.JsonAsync(await b.GetAsync($"/api/tasks/{id}/runs"))).EnumerateArray().ToList();
+            if (runs.Count == 2 && runs.All(r => r.GetProperty("status").GetString() == "done"))
+            {
+                return;
+            }
+            await Task.Delay(100);
+        }
+        Assert.Fail("the queued event never ran");
+    }
 }

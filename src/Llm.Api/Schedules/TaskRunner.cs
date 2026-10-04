@@ -180,9 +180,49 @@ public sealed partial class Scheduler(IServiceScopeFactory scopes, TimeProvider 
     : BackgroundService
 {
     private readonly ConcurrentDictionary<Guid, Task> _running = new();
+    // Events that came while their task was answering: each runs after the one before, in order.
+    private readonly ConcurrentDictionary<Guid, ConcurrentQueue<TriggerEvent>> _waiting = new();
     private CancellationToken _stopping;
 
+    /// <summary>Events one task keeps waiting while it answers; past them the oldest goes.</summary>
+    public const int MaxWaiting = 20;
+
     public bool IsRunning(Guid task) => _running.ContainsKey(task);
+
+    /// <summary>Events waiting for a task's run to end.</summary>
+    public int Waiting(Guid task) => _waiting.TryGetValue(task, out var q) ? q.Count : 0;
+
+    /// <summary>
+    /// An event for a task: run now, or, while a run of it is going, queued to run after it
+    /// (a busy repository's events must not be lost). False when it had to wait.
+    /// </summary>
+    public bool StartOrQueue(Guid task, TriggerEvent trigger)
+    {
+        if (Start(task, manual: false, trigger))
+        {
+            return true;
+        }
+        var queue = _waiting.GetOrAdd(task, _ => new ConcurrentQueue<TriggerEvent>());
+        queue.Enqueue(trigger);
+        while (queue.Count > MaxWaiting && queue.TryDequeue(out _))
+        {
+        }
+        // The run may have ended meanwhile: then nobody would take the queue.
+        if (!IsRunning(task))
+        {
+            Next(task);
+        }
+        return false;
+    }
+
+    private void Next(Guid task)
+    {
+        if (_waiting.TryGetValue(task, out var queue) && queue.TryDequeue(out var next) && !Start(task, manual: false, next))
+        {
+            // Started meanwhile by another: back to the front is not possible, so back of the line.
+            queue.Enqueue(next);
+        }
+    }
 
     /// <summary>Runs the task now, in the background; false when a run of it is still going.</summary>
     public bool Start(Guid task, bool manual, TriggerEvent? trigger = null)
@@ -212,6 +252,10 @@ public sealed partial class Scheduler(IServiceScopeFactory scopes, TimeProvider 
             {
                 _running.TryRemove(task, out _);
                 gate.TrySetResult();
+                if (!_stopping.IsCancellationRequested)
+                {
+                    Next(task);
+                }
             }
         });
         return true;
