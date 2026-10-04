@@ -18,7 +18,8 @@ namespace Llm.Api.Chat;
 /// <param name="Hurry">"Answer now", when the person asks for it while the model thinks.</param>
 /// <param name="Research">Deep research: the web and sub-agents on for this answer, a plan, and a sourced report.</param>
 /// <param name="Again">Said with the question for this answer only: answer again shorter or longer (AnswerLengths.Again).</param>
-public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false, string? Again = null);
+/// <param name="Titled">The chat's first question: the model for small steps writes its title beside the answer (ChatTitles).</param>
+public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false, string? Again = null, bool Titled = false);
 
 /// <summary>
 /// "Answer now" (as in ChatGPT and Gemini): the person asked the answer to stop thinking.
@@ -51,6 +52,8 @@ public sealed partial class ChatService(
     AccessService access,
     Models.ModelPolicy policy,
     ChatModels models,
+    SmallModel small,
+    AutoModel auto,
     Media media,
     AnswerGate gate,
     Identity.Audit audit,
@@ -88,7 +91,15 @@ public sealed partial class ChatService(
     public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {
         var email = user.Email!.ToLowerInvariant();
+        // The model for sub-agents and small steps, when one is set and this person may use it now.
+        var helper = await small.ForAsync(user, ct);
         var (model, modelName, refusal) = await ModelForAsync(user, conversation, overrides.Model, ct);
+        // Auto: the small model answers an easy question itself, and hands the rest to the chat's main model.
+        var route = auto.IsAuto(conversation, overrides) ? await auto.RouteAsync(user, question, overrides, helper, modelName, ct) : null;
+        if (route is { Small: true })
+        {
+            (model, modelName, refusal) = (helper, helper!.Name, null);
+        }
         if (refusal is not null)
         {
             var sequence = (await db.ChatMessages.Where(m => m.ConversationId == conversation.Id).MaxAsync(m => (int?)m.Sequence, ct) ?? 0) + 1;
@@ -104,15 +115,17 @@ public sealed partial class ChatService(
             await emit(new { type = "error", message = refusal });
             return;
         }
-        var thinking = overrides.Thinking ?? conversation.Thinking;
+        var thinking = overrides.Thinking ?? route?.Thinking ?? conversation.Thinking;
 
         // The chat's tools that this person may use, each made ready for this answer.
         var runs = new Dictionary<string, (ToolChoice Choice, IToolRun Run)>();
         var progress = new ToolProgress(emit);
         var tools = new JsonArray();
         var instructions = new List<(string Tool, string Text)>();
-        // Sub-agents get the answer's model and tools, filled in below before any call.
-        var kit = new AgentKit(modelName, model?.Thinking == false ? null : thinking, email, runs, tools, instructions, progress, emit, user, conversation);
+        // Sub-agents get the answer's tools, filled in below before any call, and the small model without thinking
+        // when there is one that calls tools (else the answer's model and thinking).
+        var (agentModel, agentThinking) = helper is { Tools: true } ? (helper.Name, SmallModel.NoThinking(helper)) : (modelName, model?.Thinking == false ? null : thinking);
+        var kit = new AgentKit(agentModel, agentThinking, email, runs, tools, instructions, progress, emit, user, conversation);
         if (model?.Tools != false)
         {
             var allowed = await registry.ForAsync(await access.MembershipAsync(user, ct), ct);
@@ -167,7 +180,7 @@ public sealed partial class ChatService(
             conversation.LoadedTools = demand.Loaded;
         }
         kit = kit with { Demand = demand };
-        var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, email, demand.Notes(), runs.ContainsKey("read_file"),
+        var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
             AnswerLengths.Note(user.AnswerLength), emit, ct);
         // Said on the person's turn (models follow it more closely there), at the prompt's end (the
         // cache keeps the rest); the question kept stays as written.
@@ -193,6 +206,12 @@ public sealed partial class ChatService(
             db.ChatMessages.Add(msg);
             conversation.CurrentLeafId = msg.Id;
             await emit(new { type = "assistant", id = msg.Id, parentId = parent, model = modelName });
+            if (round == 0 && route is not null)
+            {
+                // Who answers on Auto, and why: kept with the answer, said under it.
+                msg.DetailsJson = new JsonObject { ["route"] = route.ToJson() }.ToJsonString();
+                await emit(new { type = "route", id = msg.Id, route = route.ToJson() });
+            }
 
             var request = new JsonObject
             {
@@ -847,7 +866,8 @@ public sealed partial class ChatService(
     /// <summary>The model an answer uses (a chat that chose none: the first loaded this person may use), and why it may not, if so.</summary>
     private async Task<(GatewayModel? Model, string Name, string? Refusal)> ModelForAsync(AppUser user, Conversation conversation, string? instead, CancellationToken ct)
     {
-        var requested = instead ?? conversation.Model;
+        // Auto's main model is the default one.
+        var requested = (instead ?? conversation.Model) is { } chosen && chosen != SmallModel.Auto ? chosen : null;
         var model = requested is null
             ? (await policy.ForAsync(user, await models.ListAsync(ct), ct)).Default
             : await models.ResolveAsync(requested, ct);
@@ -967,7 +987,7 @@ public sealed partial class ChatService(
     /// and as their names to one that cannot.
     /// </summary>
     private async Task<(JsonArray Messages, bool ImagesDropped, SystemParts System)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string modelName,
-        string email, string? toolInstructions, bool canReadFiles, string? lengthNote, Func<object, Task> emit, CancellationToken ct)
+        GatewayModel? summarizer, string email, string? toolInstructions, bool canReadFiles, string? lengthNote, Func<object, Task> emit, CancellationToken ct)
     {
         var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
         all[question.Id] = question;
@@ -1089,7 +1109,8 @@ public sealed partial class ChatService(
         var context = model?.Context ?? 32768;
         var output = conversation.MaxTokens ?? model?.MaxOutput ?? 8192;
         var budgetChars = (long)Math.Max(4096, context - output - 1024) * 7 / 2 - system.Length;
-        if (await AutoCompactAsync(turns, stored, from, summary, budgetChars, model, modelName, email, emit, ct) is { } compacted)
+        // The summary is the small model's work when there is one.
+        if (await AutoCompactAsync(turns, stored, from, summary, budgetChars, summarizer ?? model, summarizer?.Name ?? modelName, email, emit, ct) is { } compacted)
         {
             summary = compacted.Summary;
             turns.RemoveRange(0, compacted.Cut);

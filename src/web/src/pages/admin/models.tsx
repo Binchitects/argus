@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Pencil, Pin, Plus, Power, PowerOff, Trash2, XCircle } from 'lucide-react'
+import { AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -68,6 +68,8 @@ interface ModelsView {
     gpus: { index: number; name: string; total: number }[]
     plan: Plan | null
   }
+  /** The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well. */
+  small: { name: string; warning: string | null } | null
   models: ModelRow[]
 }
 
@@ -83,7 +85,7 @@ export function ModelsPage() {
   const [hf, setHf] = useState(false)
   if (models.isPending) return <PageSkeleton />
   if (models.error) return <QueryError error={models.error} retry={() => models.refetch()} />
-  const { engine } = models.data
+  const { engine, small } = models.data
   return (
     <>
       <PageHeader
@@ -111,6 +113,11 @@ export function ModelsPage() {
         </Alert>
       )}
       {engine.enabled && <DownloadsCard onAdd={(preset) => setEditing({ preset })} />}
+      {small?.warning && (
+        <Alert variant="warning" className="mb-4" title="The model for small steps">
+          {small.warning}
+        </Alert>
+      )}
       {engine.enabled && <EngineSummary engine={engine} />}
       {engine.enabled && (
         <WorkingHours
@@ -121,7 +128,14 @@ export function ModelsPage() {
       <ServersSection onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })} />
       <div className="stagger grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
         {models.data.models.map((m) => (
-          <ModelCard key={`${m.source}:${m.server ?? ''}:${m.name}`} model={m} engine={engine} onEdit={() => setEditing(m)} onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })} />
+          <ModelCard
+            key={`${m.source}:${m.server ?? ''}:${m.name}`}
+            model={m}
+            engine={engine}
+            small={m.name === small?.name && (m.mode ?? 'chat') === 'chat'}
+            onEdit={() => setEditing(m)}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })}
+          />
         ))}
       </div>
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
@@ -225,7 +239,7 @@ function Status({ status }: { status: ModelRow['status'] }) {
   return null
 }
 
-function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; engine: ModelsView['engine']; onEdit: () => void; onChanged: () => void }) {
+function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: ModelRow; engine: ModelsView['engine']; small: boolean; onEdit: () => void; onChanged: () => void }) {
   const confirm = useConfirm()
   const keep = useMutation({
     mutationFn: (on: boolean) => api<{ warning: string | null }>(`/api/admin/models/${encodeURIComponent(m.name)}/keep`, { method: 'PUT', body: { keep: on } }),
@@ -299,6 +313,11 @@ function ModelCard({ model: m, engine, onEdit, onChanged }: { model: ModelRow; e
             {m.vision && (
               <Badge variant="outline">
                 <Eye /> Sees images
+              </Badge>
+            )}
+            {small && (
+              <Badge variant="outline" title="The model for sub-agents and small steps (Settings → Model)">
+                <Sparkles /> Small steps
               </Badge>
             )}
           </CardTitle>

@@ -13,14 +13,19 @@ public sealed class ChatModels(IServiceScopeFactory scopes, IOptionsMonitor<Chat
     private IReadOnlyList<GatewayModel>? _cached;
     private DateTimeOffset _at;
 
-    /// <summary>The model new chats use: as set under Settings, else the first kept loaded.</summary>
-    public string? DefaultName => chat.CurrentValue.DefaultModel is { Length: > 0 } set ? set : FirstKept();
+    /// <summary>The model new chats use: as set under Settings, else the first kept loaded (also when Auto is the default: the model it hands on to).</summary>
+    public string? DefaultName => chat.CurrentValue.DefaultModel is { Length: > 0 } set && set != SmallModel.Auto ? set : FirstKept();
 
+    /// <summary>New chats (and chats that chose no model) use Auto, when it is offered.</summary>
+    public bool AutoByDefault => chat.CurrentValue.DefaultModel == SmallModel.Auto;
+
+    /// <summary>The first model kept loaded, the model for small steps last: it is kept beside the big one, not instead.</summary>
     private string? FirstKept()
     {
         try
         {
-            return File.ReadLines(Path.Combine(engine.Value.ConfigDir, Models.ModelCatalog.KeepFile)).Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
+            var kept = File.ReadLines(Path.Combine(engine.Value.ConfigDir, Models.ModelCatalog.KeepFile)).Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+            return kept.FirstOrDefault(k => k != chat.CurrentValue.SmallModel?.Trim()) ?? kept.FirstOrDefault();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

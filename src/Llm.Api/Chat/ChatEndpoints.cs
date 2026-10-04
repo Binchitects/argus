@@ -85,15 +85,18 @@ public static partial class ChatEndpoints
     }
 
     private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access, ModelPolicy policy,
-        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
+        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
     {
         var me = await Me(p, users);
         // The models this person may use; a model of the engine that is not loaded is listed, marked so.
         var (list, first, onEngine) = await policy.ForAsync(me, await models.ListAsync(ct), ct);
         var tools = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
+        // Auto, while a model for small steps is set that this person may use.
+        var helper = await small.OfferedAsync(me, ct);
         return Results.Ok(new
         {
             model = first?.Name ?? models.DefaultName,
+            auto = helper is null ? null : new { model = helper.Name, byDefault = models.AutoByDefault },
             models = list.Select(m => new
             {
                 m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, loaded = policy.Loaded(m.Name, onEngine), onRequest = policy.OnRequest(m.Name, onEngine),
@@ -139,11 +142,11 @@ public static partial class ChatEndpoints
     }
 
     private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
-        ToolRegistry registry, AccessService access, ModelPolicy policy, CancellationToken ct)
+        ToolRegistry registry, AccessService access, ModelPolicy policy, SmallModel small, CancellationToken ct)
     {
         var me = await Me(p, users);
         var c = new Conversation { UserId = me.Id };
-        if (await ApplyAsync(c, new ConversationChange(null, body.Thinking, null, body.Model, body.SystemPrompt, body.Temperature, body.TopP, body.MaxTokens), chat.CurrentValue, models, me, policy) is { } problem)
+        if (await ApplyAsync(c, new ConversationChange(null, body.Thinking, null, body.Model, body.SystemPrompt, body.Temperature, body.TopP, body.MaxTokens), chat.CurrentValue, models, me, policy, small) is { } problem)
         {
             return problem;
         }
@@ -195,7 +198,7 @@ public static partial class ChatEndpoints
     }
 
     /// <summary>A chat's settings, checked. Null when all is well.</summary>
-    private static async Task<IResult?> ApplyAsync(Conversation c, ConversationChange body, ChatOptions chat, ChatModels models, AppUser me, ModelPolicy policy)
+    private static async Task<IResult?> ApplyAsync(Conversation c, ConversationChange body, ChatOptions chat, ChatModels models, AppUser me, ModelPolicy policy, SmallModel small)
     {
         if (body.Thinking is { } t)
         {
@@ -205,7 +208,15 @@ public static partial class ChatEndpoints
             }
             c.Thinking = t == "" ? null : t;
         }
-        if (body.Model is { } model)
+        if (body.Model == SmallModel.Auto)
+        {
+            if (await small.OfferedAsync(me) is null)
+            {
+                return AuthEndpoints.Problem(403, "model", "Auto is not available to you: it needs a model for small steps that you may use.");
+            }
+            c.Model = SmallModel.Auto;
+        }
+        else if (body.Model is { } model)
         {
             if (model != "" && (await models.ListAsync()).All(m => m.Name != model))
             {
@@ -298,7 +309,7 @@ public static partial class ChatEndpoints
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
-        ToolRegistry registry, AccessService access, ModelPolicy policy, CancellationToken ct)
+        ToolRegistry registry, AccessService access, ModelPolicy policy, SmallModel small, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me) is not { } c)
@@ -309,7 +320,7 @@ public static partial class ChatEndpoints
         {
             c.Title = string.IsNullOrWhiteSpace(title) ? "New chat" : title.Trim()[..Math.Min(200, title.Trim().Length)];
         }
-        if (await ApplyAsync(c, body, chat.CurrentValue, models, me, policy) is { } problem)
+        if (await ApplyAsync(c, body, chat.CurrentValue, models, me, policy, small) is { } problem)
         {
             return problem;
         }
@@ -449,7 +460,7 @@ public static partial class ChatEndpoints
     }
 
     private static async Task SendAsync(Guid id, NewMessage body, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs,
-        Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models)
+        Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models, SmallModel small)
     {
         var me = await Me(http.User, users);
         if (await Owned(db, id, me) is not { } c)
@@ -477,8 +488,9 @@ public static partial class ChatEndpoints
             await Problem(http, 400, "parent", "That message is not in this chat.");
             return;
         }
-        // Safeguards first: limits, blocked words, and (when on) the model's check.
-        var model = c.Model ?? (await policy.ForAsync(me, await models.ListAsync(http.RequestAborted), http.RequestAborted)).Default?.Name;
+        // Safeguards first: limits, blocked words, and (when on) the model's check: the small model's when there is one.
+        var model = (await small.ForAsync(me, http.RequestAborted))?.Name ?? (c.Model is { } chosen && chosen != SmallModel.Auto ? chosen : null)
+            ?? (await policy.ForAsync(me, await models.ListAsync(http.RequestAborted), http.RequestAborted)).Default?.Name;
         var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, http.RequestAborted);
         if (!verdict.Allowed)
         {
@@ -619,7 +631,7 @@ public static partial class ChatEndpoints
         {
             job.Emit(new { type = "title", title = c.Title });
         }
-        jobs.Start(job, question.Id, overrides);
+        jobs.Start(job, question.Id, overrides with { Titled = titled });
         await StreamAsync(http, job);
     }
 

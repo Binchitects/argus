@@ -416,4 +416,52 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         Assert.Equal("tiny-b", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == "modelmember@example.test").Body["model"]!.GetValue<string>());
         Assert.Equal("tiny-b", (await member.JsonAsync(await member.GetAsync("/api/chat/config"))).GetProperty("model").GetString());
     }
+
+    private static Task<HttpResponseMessage> SetAsync(TestBrowser admin, string key, string value) =>
+        admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes = new[] { new { key, value } } });
+
+    /// <summary>What the Settings page says under one setting, if anything.</summary>
+    private static async Task<string?> SettingWarningAsync(TestBrowser admin, string key) =>
+        (await admin.JsonAsync(await admin.GetAsync("/api/admin/config"))).GetProperty("groups").EnumerateArray().SelectMany(g => g.GetProperty("settings").EnumerateArray())
+            .Single(x => x.GetProperty("key").GetString() == key).GetProperty("warning").GetString();
+
+    [Fact]
+    public async Task The_model_for_small_steps_is_marked_and_warned_about_until_the_engine_keeps_it_beside_the_big_one()
+    {
+        var (f, _) = NewApp(max: 2);
+        await using var _f = f;
+        var admin = await AdminAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
+        await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("atGateway").GetBoolean(), "tiny-b at the gateway");
+        Assert.Equal(JsonValueKind.Null, (await ModelsAsync(admin)).GetProperty("small").ValueKind);
+        Assert.Null(await SettingWarningAsync(admin, "Chat:SmallModel"));
+
+        // Set, not kept: each step would wait for it to load.
+        await StatusAssert.Is(HttpStatusCode.OK, await SetAsync(admin, "Chat:SmallModel", "tiny-b"));
+        var small = (await ModelsAsync(admin)).GetProperty("small");
+        Assert.Equal("tiny-b", small.GetProperty("name").GetString());
+        Assert.Contains("tiny-b is not kept loaded", small.GetProperty("warning").GetString(), StringComparison.Ordinal);
+        Assert.Equal(small.GetProperty("warning").GetString(), await SettingWarningAsync(admin, "Chat:SmallModel"));
+
+        // Kept beside the big one: nothing to say.
+        await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "tiny-b", true));
+        Assert.Equal(JsonValueKind.Null, (await ModelsAsync(admin)).GetProperty("small").GetProperty("warning").ValueKind);
+        Assert.Null(await SettingWarningAsync(admin, "Chat:SmallModel"));
+
+        // A name the gateway does not serve.
+        await StatusAssert.Is(HttpStatusCode.OK, await SetAsync(admin, "Chat:SmallModel", "nothing-like-it"));
+        Assert.Contains("is not a chat model at the gateway", await SettingWarningAsync(admin, "Chat:SmallModel"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_engine_that_holds_one_model_cannot_hold_the_small_one_beside_it_and_says_so()
+    {
+        var (f, _) = NewApp(max: 1);
+        await using var _f = f;
+        var admin = await AdminAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
+        await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("atGateway").GetBoolean(), "tiny-b at the gateway");
+        await StatusAssert.Is(HttpStatusCode.OK, await SetAsync(admin, "Chat:SmallModel", "tiny-b"));
+        Assert.StartsWith("The engine holds one model at once", (await ModelsAsync(admin)).GetProperty("small").GetProperty("warning").GetString(), StringComparison.Ordinal);
+    }
 }

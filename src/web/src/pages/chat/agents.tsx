@@ -102,6 +102,7 @@ function lineOf(status: Status, work: AgentWork | undefined): string {
     steps.length && `${steps.length} tool call${steps.length === 1 ? '' : 's'}`,
     made && `${made} file${made === 1 ? '' : 's'}`,
     work?.ms != null && seconds(work.ms),
+    work?.model,
     status === 'stopped' && 'Stopped',
   ].filter(Boolean).join(' · ')
 }

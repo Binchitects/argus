@@ -20,6 +20,8 @@ export interface SettingView {
   source: 'saved' | 'environment' | 'default'
   environmentValue: string | null
   restartPending: boolean
+  /** What is wrong with the value for the rest of the deployment now (a model for small steps that is not kept loaded). */
+  warning?: string | null
 }
 
 export interface SettingsData {

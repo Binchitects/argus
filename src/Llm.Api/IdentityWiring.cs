@@ -283,6 +283,10 @@ public static class IdentityWiring
         services.AddScoped<Chat.Tools.ToolRegistry>();
         services.AddSingleton<Chat.Tools.ToolApprovals>();
         services.AddScoped<Chat.ChatService>();
+        services.AddScoped<Chat.SmallModel>();
+        services.AddScoped<Chat.AutoModel>();
+        services.AddSingleton<Chat.ChatTitles>();
+        services.AddScoped<Settings.ISettingWarning>(sp => sp.GetRequiredService<Chat.SmallModel>());
         // Answers outlive the page that asked: they run here, and a page re-attaches.
         services.AddSingleton<Chat.AnswerJobs>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.AnswerJobs>());

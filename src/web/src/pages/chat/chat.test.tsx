@@ -769,4 +769,59 @@ describe('chat', () => {
     expect(a.querySelector('.katex')).not.toBeNull()
     expect((window as { hacked?: number }).hacked).toBeUndefined()
   })
+
+  it('Auto is in the model menu with a model for small steps; the answer says who answered and why, and the big model answers again in one click', async () => {
+    const route = { kind: 'chat', reason: 'looks like chat', model: 'Small-Model', main: 'Main-Model', thinking: 'off', small: true }
+    const events = [
+      { type: 'question', id: 'q1', parentId: null },
+      { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Small-Model' },
+      { type: 'route', id: 'a1', route },
+      { type: 'content', text: 'Hello!' },
+      { type: 'usage', prompt: 100, cached: 0, completion: 5, thinkingMs: null, durationMs: 300 },
+      { type: 'done', id: 'a1' },
+    ]
+    const saved = [msg('q1', null, 'user', { content: 'hi' }), msg('a1', 'q1', 'assistant', { content: 'Hello!', model: 'Small-Model', details: { route } })]
+    const calls = backend({ events, saved, config: { auto: { model: 'Small-Model', byDefault: false } } })
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: /^Model:/ }))
+    const auto = await screen.findByRole('menuitem', { name: /Auto/ })
+    expect(auto).toHaveTextContent('Small-Model answers easy questions itself, and hands the rest to Main-Model')
+    await userEvent.click(auto)
+    expect(await screen.findByRole('button', { name: 'Model: Auto' })).toBeInTheDocument()
+    await ask('hi')
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations')?.body).toEqual({ model: 'auto' })
+    const a = await screen.findByRole('region', { name: 'Answer' })
+    const note = await within(a).findByRole('note', { name: 'Auto' })
+    expect(note).toHaveTextContent('Answered by Small-Model, the small model: small talk (looks like chat).')
+    await userEvent.click(within(note).getByRole('button', { name: 'Ask the big model' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/regenerate')?.body).toEqual({ messageId: 'q1', model: 'Main-Model' }))
+  })
+
+  it('an answer Auto handed on says to which model and how hard it thought; without a small model there is no Auto', async () => {
+    const route = { kind: 'reasoning', reason: 'a proof', model: 'Main-Model', main: 'Main-Model', thinking: 'xhigh', small: false }
+    const saved = [msg('q1', null, 'user', { content: 'prove it' }), msg('a1', 'q1', 'assistant', { content: 'Proof.', model: 'Main-Model', details: { route } })]
+    backend({ start: conversation({ model: 'auto', messages: saved, currentLeafId: 'a1' }), config: { auto: { model: 'Small-Model', byDefault: false } } })
+    renderApp('/chat/c1')
+    const note = await screen.findByRole('note', { name: 'Auto' })
+    expect(note).toHaveTextContent('Handed to Main-Model (thinking: Deep think): it needs careful reasoning (a proof).')
+    expect(within(note).queryByRole('button', { name: 'Ask the big model' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Model: Auto' })).toBeInTheDocument()
+  })
+
+  it('without a model for small steps the menu has no Auto, and sub-agents on another model say so under the answer', async () => {
+    const agents = [{ title: 'Sum', instructions: 'Add', reasoning: '', text: '4', steps: [], status: 'done', error: null, ms: 1200, model: 'Small-Model', usage: { prompt: 10, cached: 0, completion: 2 } }]
+    const saved = [
+      msg('q1', null, 'user', { content: 'split it' }),
+      msg('a1', 'q1', 'assistant', { model: 'Main-Model', toolCalls: [{ id: 't1', function: { name: 'delegate', arguments: '{"tasks":[{"title":"Sum","instructions":"Add"}]}' } }] }),
+      msg('t1r', 'a1', 'tool', { toolCallId: 't1', toolName: 'delegate', content: '[]', details: { agents } as Message['details'] }),
+      msg('a2', 't1r', 'assistant', { content: 'Done.', model: 'Main-Model' }),
+    ]
+    backend({ start: conversation({ messages: saved, currentLeafId: 'a2' }) })
+    renderApp('/chat/c1')
+    const a = await screen.findByRole('region', { name: 'Answer' })
+    expect(await within(a).findByText('· sub-agents: Small-Model')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /^Model:/ }))
+    expect(await screen.findByRole('menuitem', { name: /Main-Model/ })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /Auto/ })).not.toBeInTheDocument()
+  })
 })

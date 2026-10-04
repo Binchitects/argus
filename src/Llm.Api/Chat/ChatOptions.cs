@@ -42,8 +42,11 @@ public sealed class ChatOptions
     /// <summary>What the engine serves at once, when set; 0: the loaded models' parallel slots together.</summary>
     public int EngineSlots { get; set; }
 
-    /// <summary>The model new chats use; empty: the first kept loaded (Admin -> Models).</summary>
+    /// <summary>The model new chats use ("auto": Auto, while <see cref="SmallModel"/> is set); empty: the first kept loaded (Admin -> Models).</summary>
     public string? DefaultModel { get; set; }
+
+    /// <summary>The model for sub-agents and small steps (titles, compaction, the safeguards' check, Auto); empty: each step uses the answer's own model.</summary>
+    public string? SmallModel { get; set; }
 
     /// <summary>The thinking levels a chat offers: level:Label pairs, comma-separated.</summary>
     public string ThinkingPresets { get; set; } = "xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking";

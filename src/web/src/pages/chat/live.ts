@@ -88,6 +88,11 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     case 'assistant':
       put(messages, { ...blank(e.id, 'assistant', e.parentId), model: e.model })
       return { ...state, messages, leaf: e.id, current: e.id, thinkingSince: null, queued: null }
+    case 'route': {
+      const i = messages.findIndex((m) => m.id === e.id)
+      if (i >= 0) messages[i] = { ...messages[i]!, details: { ...messages[i]!.details, route: e.route } }
+      return { ...state, messages }
+    }
     case 'queued':
       return { ...state, queued: e.ahead }
     case 'reasoning': {

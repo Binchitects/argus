@@ -12,6 +12,28 @@ setups to paste.
   images. A chat keeps its model. The default is the loaded model. An engine
   model that is not loaded is listed greyed out, "Not loaded now": an admin
   loads it.
+- **A model for small steps.** With **Settings → Model → Model for sub-agents
+  and small steps** set, the many short steps around an answer go to that
+  small, fast model instead of waiting on the big one: sub-agents, the chat's
+  title, compaction summaries, the safeguards' check, and Auto's sorting (below).
+  It never thinks for them. The answer itself stays with the chat's model.
+  Under an answer, the sub-agents' model shows beside the answer's when it is
+  another, and each sub-agent's line names its model. For someone who may not
+  use the small model, or while it cannot load, each step uses the answer's
+  own model.
+- **Auto.** While a model for small steps is set, the picker offers **Auto**
+  (an admin can make it the default: **Model new chats use** `auto`). The small
+  model sorts each question in one short call: small talk, a quick lookup or
+  rewrite, code, reasoning, or research. It answers small talk and quick
+  lookups itself, without thinking. The rest go to the main model (the
+  default one), thinking as hard as they need: code a little, research
+  lightly, reasoning at the deepest level the chat offers. Questions with
+  files, deep research, and an answer again with a thinking level go to the
+  main model unasked; so does a question the small model cannot sort. A note
+  under each answer says which model answered and why. Under the small
+  model's, **Ask the big model** answers again with the main model, beside it.
+  Auto is offered only to people who may use the small model; a chat on Auto
+  whose person may no longer use it gets the main model, and the note says so.
 - **Thinking.** Each chat has a thinking level from the deployment's
   `THINKING_PRESETS`. A new chat starts at the deployment's default,
   `MODEL_REASONING_EFFORT` (medium unless changed). While the model thinks, its reasoning shows with a timer.
@@ -238,7 +260,9 @@ setups to paste.
   in a new tab, and the model, time, tokens and cost under each answer. Model
   output is sanitised: HTML in an answer never runs.
 - **History.** Chats are grouped by date and can be searched. The first
-  question becomes the title and the browser tab's name. Long titles are cut
+  question becomes the title and the browser tab's name; with a model for
+  small steps, it writes a short title from the question while the answer is
+  written (a title you gave meanwhile stays). Long titles are cut
   with an ellipsis; the list never scrolls sideways. From the list, or the
   **⋯** menu in a chat's header, a chat can be:
   - **renamed**;
@@ -357,10 +381,11 @@ abused or used to harm; each part can be turned off, and all of them with
 - **Blocked words and patterns**: phrases matched as whole words, ignoring
   case, or regular expressions (`re:`). A message with one is refused.
 - **The model checks each message** (off by default): before answering, the
-  chat's model reads the message as a classifier and refuses one asking for
-  harm in the chosen categories (violence, self-harm, sexual content involving
-  minors, mass-casualty weapons, malware, hate, fraud); learning, safety, news
-  and fiction stay allowed. When the check cannot run, the message goes.
+  chat's model (the model for small steps, when one is set) reads the message
+  as a classifier and refuses one asking for harm in the chosen categories
+  (violence, self-harm, sexual content involving minors, mass-casualty
+  weapons, malware, hate, fraud); learning, safety, news and fiction stay
+  allowed. When the check cannot run, the message goes.
 - **Mask personal data** (off by default): e-mail addresses, phone and card
   numbers (Luhn-checked) and IBANs reach the model masked; the chat keeps them.
 - **The web's content is marked as data**, so the model never follows
@@ -443,7 +468,8 @@ The chat's limits are under Admin → Settings → Chat ([settings.md](settings.
 | Text kept per attachment | 200,000 characters | longer files are cut and marked |
 | Longest single answer | 15 minutes | an answer still running after this is stopped |
 
-The thinking levels (`THINKING_PRESETS`) are under Settings → Model.
+The thinking levels (`THINKING_PRESETS`) and **Model for sub-agents and small
+steps** are under Settings → Model.
 **GitLab address for links** (Settings → Argus, applies at once) is where
 browsers open GitLab from Argus's answers. Leave it empty to use the address
 Argus indexes. Set it when Argus reaches GitLab by an internal name.
@@ -453,12 +479,13 @@ Argus indexes. Set it when Argus reaches GitLab by an internal name.
 Messages form a tree: each has a parent, and the conversation remembers its
 current leaf. `POST .../messages` takes a `parentId` (default: the leaf) or
 `root: true`. `POST .../regenerate` takes the question and, optionally, a model
-and a thinking level. `PUT .../leaf` switches branch. `POST .../fork` takes a
-`messageId` (default: the leaf) and copies the path to it into a new chat. The
-fork must end on a question or a finished answer, never inside a tool round.
-`PATCH` with `archived` archives a chat, and `GET /conversations?archived=true`
-lists the archived ones. Chats from before branches were each migrated to one
-branch.
+and a thinking level. A chat on Auto has `auto` as its model; each answer
+on Auto keeps who answered and why (`details.route` on its first message).
+`PUT .../leaf` switches branch. `POST .../fork` takes a `messageId` (default:
+the leaf) and copies the path to it into a new chat. The fork must end on a
+question or a finished answer, never inside a tool round. `PATCH` with
+`archived` archives a chat, and `GET /conversations?archived=true` lists the
+archived ones. Chats from before branches were each migrated to one branch.
 
 ## When something goes wrong
 
@@ -471,6 +498,8 @@ branch.
 | "This conversation is longer than the model can read" | the question and its attachments alone do not fit | start a new chat, or attach less |
 | "… cannot see images" | the chat's model has no vision | choose a model that shows "Sees images" |
 | "You may not use …" | an admin took the model away from you | choose another model |
+| "Auto is not available to you" | Auto needs a model for small steps that you may use | choose a model; an admin sets the small model and who may use it (Admin → Models) |
+| An Auto answer says "The model for small steps is not available to you now" | the small model is not yours to use, or cannot load now | nothing: the main model answered. An admin can keep it loaded (Admin → Models) |
 | "… is not loaded right now" | the chat's model is not the one the engine has loaded | choose a loaded model, or ask an admin to load it (Admin → Models) |
 | "Waiting for your turn: N answers ahead of you" | the model is serving others; your answer is in line | nothing: it starts on its own. An admin can change the limits (Settings → Chat) |
 | "The model has been busy for 10 minutes" | the line did not move for that long | ask again later; tell an admin if it happens often |
@@ -498,8 +527,13 @@ branch.
   chosen answer, with settings and files; never inside a tool round; the owner
   only), a deleted chat's files (kept while a fork uses them), a chat's instructions and parameters, retries with another model,
   images to a model that can see and one that can't, SVG never served as an
-  image, and the migration of existing chats. Real Postgres, a fake model and
-  a fake Argus.
+  image, and the migration of existing chats. The model for small steps
+  (sub-agents, the title, compaction before an answer and on demand, the
+  safeguards' check go to it; the answer to the chat's model; all back to the
+  chat's model without it) and Auto (each kind of question routed, thinking
+  by difficulty, the route kept, **Ask the big model**, deep research unasked,
+  Auto as the default, and who may use the small model). Real Postgres, a fake
+  model and a fake Argus.
 - **UI (Vitest):**
   - the branch tree
   - the live-stream reducer
@@ -519,6 +553,9 @@ branch.
     own words, and the image viewer (arrows, keys, actual size)
   - the list's fork, archive, Archived view and unarchive; fork from an
     answer; the question rail; the archived notice
+  - Auto in the model menu, its note under an answer (the small model's, or
+    handed on with a thinking level), **Ask the big model**, no Auto without
+    a small model, and the sub-agents' model under an answer
 - **Browser (Playwright), desktop and phone, both themes, with axe, in CI
   too:** a chat with Argus's answers and two images, served by the browser
   itself, from the links to the image viewer.

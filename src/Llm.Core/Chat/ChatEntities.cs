@@ -70,7 +70,10 @@ public sealed class ChatMessage
     public string? ToolName { get; set; }
     /// <summary>Attachment ids (JSON array) whose text went with this user turn.</summary>
     public string? AttachmentsJson { get; set; }
-    /// <summary>What a tool's call shows the person beyond what the model read (sub-agents' work: their thinking, tool calls and words), as JSON.</summary>
+    /// <summary>
+    /// What a message shows the person beyond what the model read, as JSON: a tool call's sub-agents' work (their thinking,
+    /// tool calls and words); an answer on Auto, on its first message, who answered and why ("route").
+    /// </summary>
     public string? DetailsJson { get; set; }
     /// <summary>Assistant: what filled the request it answered, in characters by kind (system, tools, files, your messages...), as JSON; scaled to its prompt tokens for the context gauge.</summary>
     public string? ContextJson { get; set; }

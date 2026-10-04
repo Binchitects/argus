@@ -10,9 +10,15 @@ export const configQuery = {
   refetchOnWindowFocus: true,
 }
 
-/** The model a chat answers with: its own choice, else the default (the loaded one), not simply the first listed. */
+/** The model a chat answers with: its own choice, else the default (the loaded one), not simply the first listed. On Auto, the main model it hands on to. */
 export const chatModel = (config: ChatConfig, chosen: string | null | undefined) =>
   config.models.find((m) => m.name === chosen) ?? config.models.find((m) => m.name === config.model) ?? config.models[0]
+
+/** What a chat that chose Auto has as its model. */
+export const AUTO = 'auto'
+
+/** The chat is on Auto: it chose it, or chose no model while Auto is the default. */
+export const onAuto = (config: ChatConfig, chosen: string | null | undefined) => !!config.auto && (chosen === AUTO || (!chosen && config.auto.byDefault))
 
 export const listQuery = (search: string, archived = false) => ({
   queryKey: ['chat', 'list', search, archived] as const,

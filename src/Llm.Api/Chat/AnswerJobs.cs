@@ -227,7 +227,18 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
                 job.Emit(new { type = "error", message = "The question is gone." });
                 return;
             }
-            await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question, overrides with { Hurry = job.Hurry }, job.EmitAsync, ct);
+            // A new chat's title, by the model for small steps beside the answer (when there is one).
+            var titling = overrides.Titled
+                ? services.GetRequiredService<ChatTitles>().WriteAsync(user.Id, conversation.Id, question.Content, job.EmitAsync, ct)
+                : Task.CompletedTask;
+            try
+            {
+                await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question, overrides with { Hurry = job.Hurry }, job.EmitAsync, ct);
+            }
+            finally
+            {
+                await titling;
+            }
         });
 
     /// <summary>Compacts the branch down to <paramref name="leafId"/> in the background (the model writes a summary: it waits its turn as an answer does).</summary>

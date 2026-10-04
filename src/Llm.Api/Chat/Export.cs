@@ -62,7 +62,7 @@ public sealed partial class ChatService
     public async Task<string> SummaryForReaderAsync(AppUser user, Conversation conversation, CancellationToken ct)
     {
         var email = user.Email!.ToLowerInvariant();
-        var (model, modelName, refusal) = await ModelForAsync(user, conversation, null, ct);
+        var (model, modelName, refusal) = await small.ForAsync(user, ct) is { } helper ? (helper, helper.Name, null) : await ModelForAsync(user, conversation, null, ct);
         if (refusal is not null)
         {
             throw new ChatGatewayException(refusal);
