@@ -43,7 +43,7 @@ public sealed class MediaTests(AppFixture app)
     /// services/sd-serve.sh's choice of where the video server decodes, run by /bin/sh with a fake
     /// nvidia-smi that reports <paramref name="free"/> MB (or fails, as when the GPU cannot be read).
     /// </summary>
-    private static async Task<(string Vae, string Where)> PlaceVaeAsync(string? needs, string free)
+    private static async Task<(string Vae, string Where)> PlaceVaeAsync(string? needs, string free, string? gpuFlags = null)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -70,9 +70,14 @@ public sealed class MediaTests(AppFixture app)
             run.Environment["SD_SERVE_LIB"] = "1";
             run.Environment["NAME"] = "videogen";
             run.Environment.Remove("VAE_GPU_MB");
+            run.Environment.Remove("VAE_GPU_FLAGS");
             if (needs is not null)
             {
                 run.Environment["VAE_GPU_MB"] = needs;
+            }
+            if (gpuFlags is not null)
+            {
+                run.Environment["VAE_GPU_FLAGS"] = gpuFlags;
             }
             using var p = System.Diagnostics.Process.Start(run)!;
             var output = await p.StandardOutput.ReadToEndAsync();
@@ -95,6 +100,9 @@ public sealed class MediaTests(AppFixture app)
         // Room (on the first GPU, the one the server uses): on the GPU.
         Assert.Equal(("", " (decoding on the GPU: 12000 MB free)"), await PlaceVaeAsync("8192", "12000 24000"));
         Assert.Equal(("", " (decoding on the GPU: 8192 MB free)"), await PlaceVaeAsync("8192", "8192"));
+        // On the GPU, the flags it needs there: a budget the decode fits in, the weights in RAM until needed.
+        Assert.Equal(("--max-vram 12 --offload-to-cpu", " (decoding on the GPU: 20000 MB free)"), await PlaceVaeAsync("13312", "20000", "--max-vram 12 --offload-to-cpu"));
+        Assert.Equal("--vae-on-cpu", (await PlaceVaeAsync("13312", "2187", "--max-vram 12 --offload-to-cpu")).Vae);
         // The GPU cannot be read: the CPU, which always fits.
         Assert.Equal(("--vae-on-cpu", " (decoding on the CPU: unknown MB free of the 8192 it needs)"), await PlaceVaeAsync("8192", "fail"));
         Assert.Equal("--vae-on-cpu", (await PlaceVaeAsync("8192", "[N/A]")).Vae);

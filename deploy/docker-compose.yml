@@ -224,9 +224,11 @@ services:
       CUDA_DEVICE_ORDER: PCI_BUS_ID
       NAME: videogen
       FILES: Wan2.2-TI2V-5B-Q4_K_M.gguf umt5-xxl-encoder-Q4_K_M.gguf wan2.2_vae.safetensors
-      # Decode on the GPU when it has this much free (MB) as the server loads: its 3 GB
-      # (--max-vram) and the decode's, with room to spare. Less, and it decodes on the CPU.
-      VAE_GPU_MB: "8192"
+      # Decode on the GPU when it has this much free (MB) as the server loads, with a
+      # 12 GB budget then (the decode alone needs about 11) and the weights in RAM until
+      # each is needed. Less free, and it decodes on the CPU within its usual 3 GB.
+      VAE_GPU_MB: "13312"
+      VAE_GPU_FLAGS: "--max-vram 12 --offload-to-cpu"
     volumes: ["${MODELS_DIR:-./models}:/models", "engine:/control:ro", "./services/sd-serve.sh:/sd-serve.sh:ro"]
     working_dir: /models/video/wan2.2-ti2v-5b
     entrypoint: [/bin/sh, /sd-serve.sh]

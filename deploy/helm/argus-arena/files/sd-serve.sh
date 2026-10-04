@@ -6,6 +6,8 @@
 # VAE_GPU_MB (the video server's): the free GPU memory, in MB, that decoding on the
 # GPU needs. Each time the server loads, it decodes there when the GPU has that much
 # free, and on the CPU (--vae-on-cpu: slower) when the chat model holds the rest.
+# VAE_GPU_FLAGS: the server's flags while it decodes there (a larger GPU budget, and
+# its weights kept in RAM until needed), given after its own: the last one counts.
 set -u
 pid=
 want() { [ "$(cat "/control/$NAME" 2>/dev/null)" = on ]; }
@@ -21,6 +23,7 @@ place_vae() {
   free=$(gpu_free_mb)
   if [ -n "$free" ] && [ "$free" -ge "$VAE_GPU_MB" ]; then
     where=" (decoding on the GPU: $free MB free)"
+    vae=${VAE_GPU_FLAGS:-}
   else
     vae=--vae-on-cpu
     where=" (decoding on the CPU: ${free:-unknown} MB free of the $VAE_GPU_MB it needs)"
@@ -36,7 +39,7 @@ while true; do
     if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
       place_vae
       echo "$NAME: loading$where"
-      # $vae unquoted: one flag, or none at all.
+      # $vae unquoted: its flags, or none at all.
       /sd-server "$@" $vae &
       pid=$!
     fi

@@ -104,7 +104,7 @@ spec:
   (dict "name" "imagegen" "on" .Values.imagegen "dir" "image/flux2-klein-4b" "files" "flux-2-klein-4b-Q4_0.gguf Qwen3-4B-Q4_K_M.gguf flux2-vae.safetensors"
     "args" "--listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model flux-2-klein-4b-Q4_0.gguf --llm Qwen3-4B-Q4_K_M.gguf --vae flux2-vae.safetensors --max-vram 2 --diffusion-fa --cfg-scale 1.0 --steps 4")
   (dict "name" "videogen" "on" .Values.videogen "dir" "video/wan2.2-ti2v-5b" "files" "Wan2.2-TI2V-5B-Q4_K_M.gguf umt5-xxl-encoder-Q4_K_M.gguf wan2.2_vae.safetensors"
-    "args" "--listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model Wan2.2-TI2V-5B-Q4_K_M.gguf --t5xxl umt5-xxl-encoder-Q4_K_M.gguf --vae wan2.2_vae.safetensors --max-vram 3 --diffusion-fa --vae-tiling --vae-on-cpu --cfg-scale 5.0 --flow-shift 5.0 --sampling-method euler") }}
+    "args" "--listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model Wan2.2-TI2V-5B-Q4_K_M.gguf --t5xxl umt5-xxl-encoder-Q4_K_M.gguf --vae wan2.2_vae.safetensors --max-vram 3 --diffusion-fa --vae-tiling --cfg-scale 5.0 --flow-shift 5.0 --sampling-method euler") }}
 {{- range $media }}
 {{- if .on.enabled }}
 apiVersion: apps/v1
@@ -141,6 +141,11 @@ spec:
             - { name: NAME, value: {{ .name }} }
             - { name: FILES, value: {{ .files | quote }} }
             - { name: CUDA_DEVICE_ORDER, value: PCI_BUS_ID }
+            {{- if eq .name "videogen" }}
+            {{- /* Decodes on the GPU when it has room as it loads (sd-serve.sh), else on the CPU. */}}
+            - { name: VAE_GPU_MB, value: "13312" }
+            - { name: VAE_GPU_FLAGS, value: "--max-vram 12 --offload-to-cpu" }
+            {{- end }}
           resources: { limits: { nvidia.com/gpu: {{ .on.gpus }} } }
           securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }
           volumeMounts:
