@@ -354,6 +354,18 @@ abused or used to harm; each part can be turned off, and all of them with
 - **Limits per person**: the longest message and files per message; messages a
   minute (20) and a day; pictures a day (100) and deep research answers a day
   (20). Past one, the message is refused with what to do instead (HTTP 429).
+- **Secrets in messages and files** (refuse by default): private keys (PEM
+  blocks), cloud and service tokens (AWS `AKIA…`, GitHub `ghp_`/`github_pat_`,
+  GitLab `glpat-`, Slack `xox…`, `sk-` keys) and passwords in obvious places
+  (`password=…`, a connection string's `Password=…;`, `user:password@` in an
+  address). **refuse**: the message is not sent, or the file not attached, and
+  the person is told what kind was found. **mask**: it goes with each secret
+  replaced by `[removed: GitHub token]`, in the chat as well as to the model.
+  **off**: as written. A placeholder (`$DB_PASSWORD`, `<password>`, `***`) or a
+  name in code (`config.password`) is not a secret. Each one found is in the
+  audit log by its kind, never the secret (`safeguard.refused`,
+  `safeguard.secret_masked`). A refused secret is not a strike: it is an
+  accident, not abuse.
 - **Blocked words and patterns**: phrases matched as whole words, ignoring
   case, or regular expressions (`re:`). A message with one is refused.
 - **The model checks each message** (off by default): before answering, the
@@ -369,8 +381,20 @@ abused or used to harm; each part can be turned off, and all of them with
   in the admins' bell; **Refusals that suspend an account** (off by default)
   disables an account after that many in a day.
 
-They apply to the chat; API keys go straight to the gateway, where the credit
-and the requests-at-once limit apply.
+**Per group** (Admin → Groups → a group → Policies): secrets, personal data, the
+model's check and blocked words can each be set for the group's members; the
+company's setting applies otherwise. A person in several groups gets the
+strictest of the groups that set one (refuse over mask over off). So the
+security team can paste keys while everyone else cannot, or one team has every
+message checked.
+
+**On the API path too** (Check API requests too, on by default): before each
+request with an API key, the gateway asks the app (its guardrail,
+`config/litellm.yaml`). Secrets are looked for in all of the request's text;
+the blocked words and the model's check read its last question; personal data
+is masked when the policy says so. A refused request gets the gateway's error
+with the same sentence the chat shows. The chat's limits per person (length, messages a
+minute) are the chat's only: keys have their own requests-at-once limit.
 
 ## Fair use
 
@@ -387,12 +411,23 @@ So that everyone gets their turn:
 - **API keys** (Qwen Code, IDEs, scripts) have at most two requests at once
   (API requests at once, per key); a third at the same time gets HTTP 429 and
   can retry. It applies to every key, within seconds of a change.
+- **Credit** is one per person, over the chat and their keys together, per
+  calendar month (UTC), and a group can have one too, shared by its members or
+  each member's (Admin → Groups). Past any of them, the chat says which, and API
+  requests are refused with the same sentence.
 
 ## Who sees what
 
-- A chat belongs to one person. Nobody else can read it, **admins included**:
-  every query is filtered by the signed-in person, attachments too.
-- Deleting a person deletes their chats and attachments.
+- A chat belongs to one person. Nobody else can read it in the app, **admins
+  included**: every query is filtered by the signed-in person, attachments too.
+  The one exception is an admin's export of a person's data for eDiscovery
+  (Admin → People), and each one is in the audit log.
+- Deleting a person deletes their chats and attachments, unless they are on
+  legal hold (then they cannot be deleted).
+- **Chats are kept** as long as the company or the person's groups say
+  (Your account → Your data says how long), then deleted with their files. A
+  person on legal hold keeps everything, and a chat they delete is only hidden
+  until the hold ends ([admin.md](admin.md#retention-legal-hold-and-exports)).
 - **Argus answers as the person asking.** The app calls Argus inside the
   network with `ARGUS_CHAT_CLIENT_TOKEN` and your email. Argus resolves the
   email to a GitLab account and its access. Without a GitLab account for the
@@ -428,7 +463,11 @@ What a person has spent is what the gateway's request log puts to them, over
 every path (chat, API keys, agents), by the same rule as the usage dashboards;
 the overview, People, the export and Home all read it. LiteLLM's own counters
 split a person in two (the chat is booked to them as an end user, their keys
-as an internal user), and each limits its own path to the budget.
+as an internal user), and each would let the whole budget through on its path.
+So the credit is one: before each answer the app adds up what the log puts to
+the person this month, over every path, and checks it against their credit and
+their groups'; the gateway asks the same of the app before each API request.
+LiteLLM's own limits stay, as a backstop.
 
 ## Settings
 
@@ -466,6 +505,9 @@ branch.
 |---|---|---|
 | "The model gateway is not reachable right now" or "The model could not answer: …" | LiteLLM or the engine is down or still loading | Admin → Overview shows which; loading a model takes minutes |
 | "You have used all your credit. Ask an admin to raise it." | the person's credit is spent | an admin raises it under People; it takes effect within about a minute |
+| "You have used all your credit for this month (…, the chat and your API keys together)" | the chat and the person's keys together reached their credit | an admin raises it under People, or wait for the first of the month |
+| "… has used its credit for this month" or "You have used your credit as a member of …" | a group's credit is spent | an admin raises it under Admin → Groups → the group → Policies |
+| "This message was not sent: it holds a private key." | secret scanning found a secret | remove it (a placeholder will do) and send again |
 | "The message did not reach the server" | the network or TLS failed before the server got it | the text is back in the box; send again |
 | "This chat is already answering" | one answer at a time per chat | stop it, or wait |
 | "This conversation is longer than the model can read" | the question and its attachments alone do not fit | start a new chat, or attach less |

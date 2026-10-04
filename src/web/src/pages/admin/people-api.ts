@@ -15,6 +15,9 @@ export interface Person {
   createdAt: string
   spend: number | null
   budget: number | null
+  /** Set while on legal hold: nothing of theirs is deleted. */
+  legalHoldSince?: string | null
+  legalHoldReason?: string | null
 }
 
 export interface Created {

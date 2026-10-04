@@ -19,8 +19,8 @@ page covers the rest.
 | Page | What it is for |
 |---|---|
 | **Overview** | Services up, people and admins, total spend, who is at or past their credit, and the code index's health. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). |
-| **People** | Add, search, and per person: credit, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, delete. **Export CSV** downloads everyone with spend and credit left. |
-| **Groups** | App groups (the people you add) and directory groups (whoever the company directory puts in them, by name or DN). Tools and models are given to groups. |
+| **People** | Add, search, and per person: credit, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, legal hold, an export of their data, delete. **Export CSV** downloads everyone with spend and credit left. |
+| **Groups** | App groups (the people you add) and directory groups (whoever the company directory puts in them, by name or DN). Tools and models are given to groups. Per group: how long members' chats are kept, a credit a month (shared or each member's), a cost centre, and which safeguards apply. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports) and [Credit for groups](#credit-for-groups). |
 | **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). |
 | **Models** | Every model at the gateway. The engine's models load and unload with one click (one at a time on one GPU); more are added from the model library on the host. Per model: who may use it, in the chat and with API keys. See [Models](#models) below. |
 | **Deployment** | The `.env` model the engine starts with (file, context, longest reply, multi-token prediction, thinking presets, power limits, prices) and every shipped sample with the exact `.env` block to paste to switch to it. |
@@ -188,6 +188,63 @@ The app writes `config/engine/models.ini` (the models added here),
 `config/engine/targets.json` (which model Prometheus scrapes). The engine and
 Prometheus read them; nothing else does.
 
+### Retention, legal hold and exports
+
+**Retention.** Settings → Data retention → **Keep chats for** is the company's
+period (empty: forever). A group can set its own (Admin → Groups → a group →
+Policies); a person in several groups keeps the shortest of those their groups
+set, and the company's when none does. Every hour a job deletes the chats
+whose last message is older than that, with their files, and the files nobody
+uses that are as old (uploaded, never sent). A project's files stay with the
+project. Each person's deletion is in the audit log (`retention.delete`) with
+counts, never content. Your account shows people how long their chats are kept.
+
+**Legal hold.** Admin → People → a person → **Place on legal hold**, with a
+reason (the matter or a ticket), audited (`person.legal_hold`). While it lasts
+nothing of theirs is deleted: the job passes them by, and a chat they delete is
+hidden from them, not erased. They are not told. A person on hold cannot be
+deleted. **End the hold** erases the chats they deleted meanwhile
+(`person.legal_hold_end`); retention applies again from the next run.
+
+**Exports.** **Export their data** (on the person's page) downloads a zip for
+eDiscovery: their profile, groups and preferences, projects, scheduled tasks
+(never a webhook's address), every chat with every branch as JSON and the
+branch on screen as Markdown, and every file (the file itself and the text the
+model read). The chats they deleted under hold are in it, marked with
+`deletedAt`. Each export is audited (`person.export`). People download their own
+copy from Your account → **Your data** (`account.export`), without hidden chats.
+
+### Credit for groups
+
+A group's **credit a month** (Admin → Groups → a group → Policies) is shared by
+its members, or **each member's**. It counts everything: the chat, API keys,
+agents, from the first of the month (UTC). A person's own credit (People) counts
+the same way: the chat and their keys together, one credit. Before each chat
+answer the app checks the person's spend this month against their credit and
+each of their groups'; for API keys the gateway asks the app before each
+request (its guardrail, below) and refuses with the same sentence.
+
+Each group with a credit is also a team at the gateway (`group-...`): the credit
+per month, its members, and their keys in it, so the gateway itself holds keys
+to it. A key is in one team: a person in several groups has theirs in the one
+with the least credit (the app holds them to all of them). The teams follow
+group changes within a minute, and every ten minutes. A team no group needs is
+removed only once no key is in it (LiteLLM deletes a team's keys with it).
+
+**Cost centre** is a label per group. **Chargeback** (below the groups list):
+spend per group and per cost centre, month by month, and the people in no group;
+**CSV** downloads it. A person in several groups counts in each group, and once
+in a cost centre.
+
+**The gateway's guardrail.** `config/litellm.yaml` has LiteLLM's generic
+guardrail API call the app (`http://app:8080/internal/guardrail`, with the
+gateway's master key) before each request. The app answers in milliseconds:
+the credit, and the safeguards ([chat.md](chat.md#safeguards)) for API keys; the
+chat's own requests pass at once (the chat checked them). The path is not
+routed by Traefik: only the gateway, inside the network, reaches it. With
+`unreachable_fallback: fail_closed`, API requests are refused while the app is
+down (a restart); `fail_open` lets them through unchecked instead.
+
 ### What the admin area deliberately does not do
 
 **It does not recreate containers.** Admin → Models loads and unloads models
@@ -202,7 +259,8 @@ and first characters into every screenshot. A secret can be replaced, never
 read back.
 
 **Prices are each model's** (Admin → Models); a new person's credit is in
-`config/litellm.yaml`, and each person's own under People.
+`config/litellm.yaml`, each person's own under People, and a group's under
+Groups.
 
 ## Usage & cost
 

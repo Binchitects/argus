@@ -23,6 +23,7 @@ import { api, errorMessage, meQuery, type Me } from '@/lib/api'
 import { ago } from '@/lib/format'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
+import { YourData } from './account-data'
 
 export function AccountPage() {
   const me = useOutletContext<Me>()
@@ -35,6 +36,7 @@ export function AccountPage() {
           <ApiKey />
           <Answers />
           <Appearance />
+          <YourData />
         </div>
         <div className="grid content-start gap-6">
           <Connections />

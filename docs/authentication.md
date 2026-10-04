@@ -98,7 +98,9 @@ person's API key at the gateway instead, so their usage is attributed to them.
 - set their credit (empty = unlimited), make a new API key, reset their password
   or their two-factor sign-in,
 - make them an admin, disable them (signed out within a minute, API keys
-  blocked), sign them out everywhere, or delete them.
+  blocked), sign them out everywhere, or delete them,
+- place them on legal hold, or export their data
+  ([admin.md](admin.md#retention-legal-hold-and-exports)).
 
 You cannot remove the last admin, or disable, demote or delete yourself.
 Every sign-in and every change is in **Admin → Audit log**, with who, whom and

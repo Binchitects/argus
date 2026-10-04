@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, money, when } from '@/lib/format'
+import { LegalHoldCard } from './legal-hold'
 import { CreditMeter, PersonBadges } from './person-badges'
 import { parseCredit, personQuery, type Person, type PersonDetail } from './people-api'
 
@@ -50,6 +51,7 @@ export function PersonPage() {
             <Badge variant={p.isAdmin ? 'default' : 'secondary'}>{p.isAdmin ? 'Admin' : 'Member'}</Badge>
             <Badge variant="outline">{ldap ? 'Company directory' : 'Local account'}</Badge>
             <PersonBadges p={p} />
+            {p.legalHoldSince && <Badge variant="warning">Legal hold</Badge>}
             {self && <Badge variant="outline">You</Badge>}
           </div>
         </div>
@@ -74,6 +76,7 @@ export function PersonPage() {
         </div>
         <div className="grid content-start gap-6">
           <Access p={p} self={self} onSecret={setSecret} />
+          <LegalHoldCard p={p} />
           {!self && <Danger p={p} />}
         </div>
       </div>
