@@ -605,6 +605,28 @@ says it is done. The releases are ordered by value per effort: speed and
 tokens first (every person feels it daily), then automation and plugins (what
 makes it a platform), then parity, then governance.
 
+### Done in v4.1.0 (2026-10-04)
+
+W1, T1, T2, T3, T7, P1, P2 and W2 below are done; T4–T6, W3, P3 and v4.3–v4.4
+are open. Measured on the live stack:
+
+- T1: turns 2 to 5 of a 7,000-token chat read 99.6–99.7% of their prompt from
+  the cache (the gauge: tool rounds 86–98%, the misses being the hybrid model's
+  checkpoint after a tool call).
+- T2: with every tool on, a first question reads 927 tokens (about 6,000 with
+  every tool whole; Argus alone is 18,600 characters of definitions).
+- T3: deep research is **not** under four minutes on this host. The engine
+  generates about 10 tokens a second and reads about 160 (Flash-Next with its
+  experts on the CPU), so the sub-agents' writing dominates: four sub-agents
+  took 255–518 s each (1,700–2,900 tokens written, 70–84k read, 72–83% from
+  the cache) before the caps on their calls and steps. A sourced report needs
+  a GPU that holds the model whole, or a smaller model for the sub-agents
+  (T4).
+- Found on the way and fixed: tool arguments with a key written twice failed
+  the whole answer; the answer line and sub-agents ignored the engine's slots
+  (never set); GitLab sign-in with a username and password could no longer be
+  set in v4.
+
 ### v4.1 — Faster answers, fewer tokens
 
 **T1 Prompt cache by design** *(S)*. The engine reuses the KV cache of a

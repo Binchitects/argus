@@ -20,7 +20,7 @@ public sealed class ToolSetting
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-/// <summary>An MCP server an admin added: its tools become a tool in the chat.</summary>
+/// <summary>An MCP server, or an API by its OpenAPI document, that an admin added: its tools become a tool in the chat.</summary>
 public sealed class McpServer
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
@@ -35,5 +35,32 @@ public sealed class McpServer
     public string? EmailHeader { get; set; }
     /// <summary>Longest one call may take, in minutes; null: Chat:ToolCallTimeout. Some tools run for an hour.</summary>
     public int? CallTimeoutMinutes { get; set; }
+    /// <summary>An API's OpenAPI document (JSON or YAML): then it is an API, Url is where it is, and its operations are the tools.</summary>
+    public string? Spec { get; set; }
+    /// <summary>The plugin it was installed from (its name), with its version and manifest; null for one an admin added by hand.</summary>
+    public string? Plugin { get; set; }
+    public string? PluginVersion { get; set; }
+    public string? Manifest { get; set; }
+    /// <summary>The admin's values for the plugin's settings, as JSON; a secret's value is encrypted (Settings crypto).</summary>
+    public string? PluginSettings { get; set; }
+    /// <summary>"api_key" or "oauth2": each person connects their own account, and calls go as them; null: one key for everyone (the header).</summary>
+    public string? PersonAuth { get; set; }
+    /// <summary>Functions (their own names, without the prefix) that change something: each call asks the person first.</summary>
+    public List<string> Writes { get; set; } = [];
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A person's own account at a plugin's service: an API key, or OAuth tokens. Encrypted (Settings crypto).</summary>
+public sealed class PersonCredential
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserId { get; set; }
+    /// <summary>The tool it is for ("mcp:{server id}").</summary>
+    public required string ToolId { get; set; }
+    public required string SecretEncrypted { get; set; }
+    public string? RefreshEncrypted { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    /// <summary>Who the service says it is, when it says (for the person's own page).</summary>
+    public string? Account { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

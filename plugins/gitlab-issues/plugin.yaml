@@ -1,0 +1,32 @@
+name: gitlab-issues
+version: 1.0.0
+title: GitLab issues
+description: Finds projects, reads issues, creates them and comments on them in GitLab, as the person asking.
+tools:
+  openapi: openapi.yaml
+  url: "{gitlab_url}/api/v4"
+auth:
+  per_person: oauth2
+  header: Authorization
+  value: "Bearer {token}"
+  oauth2:
+    authorize: "{gitlab_url}/oauth/authorize"
+    token: "{gitlab_url}/oauth/token"
+    scopes: [api]
+  help: Sign in to GitLab and allow the chat to work with issues as you.
+writes: [create_issue, add_note]
+settings:
+  - key: gitlab_url
+    title: GitLab address
+    type: url
+    required: true
+    help: For example https://gitlab.example.com
+  - key: client_id
+    title: Application ID
+    type: text
+    required: true
+    help: "In GitLab, Admin → Applications → Add new application: redirect URI https://DOMAIN/api/account/connections/callback, scope api."
+  - key: client_secret
+    title: Application secret
+    type: secret
+    required: true

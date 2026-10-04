@@ -40,8 +40,8 @@ describe('admin tools', () => {
       'POST /api/admin/tools/servers': () => ({ status: 201, json: { id: 's1', toolId: 'mcp:s1' } }),
     })
     renderApp('/admin/tools')
-    await userEvent.click(await screen.findByRole('button', { name: 'Add MCP server' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Add an MCP server' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a server or API' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a server or API' })
     await userEvent.type(within(dialog).getByLabelText('Name'), 'Echo desk')
     await userEvent.type(within(dialog).getByLabelText('Address'), 'https://tools.example.test/mcp')
     await userEvent.type(within(dialog).getByLabelText('Header name'), 'X-Api-Key')
@@ -52,6 +52,29 @@ describe('admin tools', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add server' }))
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/tools/servers')?.body).toMatchObject({ name: 'Echo desk', url: 'https://tools.example.test/mcp', headerName: 'X-Api-Key', headerValue: 'secret' }),
+    )
+  })
+
+  it('an API is added by its OpenAPI document, its writes marked as asking first', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/tools': () => ({ json: [] }),
+      'POST /api/admin/tools/servers/test': () => ({
+        json: { ok: true, url: 'https://pets.example.test/v1', tools: [{ name: 'pets__list_pets', description: 'Lists the pets (GET /pets)', asksFirst: false }, { name: 'pets__add_pet', description: 'Adds a pet (POST /pets)', asksFirst: true }] },
+      }),
+      'POST /api/admin/tools/servers': () => ({ status: 201, json: { id: 's2', toolId: 'mcp:s2' } }),
+    })
+    renderApp('/admin/tools')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a server or API' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a server or API' })
+    await userEvent.click(within(dialog).getByRole('tab', { name: 'API (OpenAPI)' }))
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Pets')
+    await userEvent.type(within(dialog).getByLabelText("Or the document's address"), 'https://pets.example.test/openapi.json')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Read it' }))
+    expect(await within(dialog).findByText('2 operations at https://pets.example.test/v1')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('asks first')).toHaveLength(1)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add API' }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/tools/servers')?.body).toMatchObject({ name: 'Pets', url: '', spec: null, specUrl: 'https://pets.example.test/openapi.json' }),
     )
   })
 })

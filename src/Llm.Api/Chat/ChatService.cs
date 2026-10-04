@@ -52,6 +52,8 @@ public sealed partial class ChatService(
     Models.ModelPolicy policy,
     ChatModels models,
     Media media,
+    AnswerGate gate,
+    Identity.Audit audit,
     IOptionsMonitor<ChatOptions> chat,
     IServiceScopeFactory scopes,
     ILogger<ChatService> logger)
@@ -61,10 +63,10 @@ public sealed partial class ChatService(
 
     internal const string ResearchNote =
         "Deep research: the person asked for a thorough, sourced report, and waits for it. Work in steps.\n" +
-        "1. Plan: break the question into 3 to 6 research questions that cover its angles (facts, recent changes, numbers, " +
+        "1. Plan: break the question into 2 to 4 research questions that cover its angles (facts, recent changes, numbers, " +
         "opposing views). Say the plan in one short line.\n" +
         "2. Research: call delegate once, one part per question: the parts run side by side, each with its own tools. Tell each " +
-        "part to search the web (web_search), open at most three of the best sources (fetch_url), and bring back findings with each " +
+        "part to search the web (web_search), open at most two of the best sources (fetch_page, with a focus), and bring back findings with each " +
         "source's title and URL, briefly. Only without delegate, research with the tools you have.\n" +
         "3. Fill gaps: if something important is missing or sources disagree, research that too.\n" +
         "4. Report: a title; a short summary of the answer; sections by theme; a table when it compares things; what is uncertain " +
@@ -164,6 +166,7 @@ public sealed partial class ChatService(
         {
             conversation.LoadedTools = demand.Loaded;
         }
+        kit = kit with { Demand = demand };
         var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, email, demand.Notes(), runs.ContainsKey("read_file"),
             AnswerLengths.Note(user.AnswerLength), emit, ct);
         // Said on the person's turn (models follow it more closely there), at the prompt's end (the
@@ -362,7 +365,7 @@ public sealed partial class ChatService(
                 var took = Stopwatch.StartNew();
                 try
                 {
-                    var args = JsonNode.Parse(rawArgs.Length == 0 ? "{}" : rawArgs) as JsonObject ?? [];
+                    var args = Arguments(rawArgs);
                     if (loading)
                     {
                         outcome = LoadTools(demand, args);
@@ -371,7 +374,7 @@ public sealed partial class ChatService(
                     {
                         outcome = new ToolResult($"There is no tool named {name}.", IsError: true);
                     }
-                    else if (target.Choice.Setting.AskFirst && !await AskAsync(conversation, id, name, rawArgs, target.Choice.Tool, emit, ct))
+                    else if ((target.Choice.Setting.AskFirst || target.Run.AsksFirst(name)) && !await AskAsync(conversation, id, name, rawArgs, target.Choice.Tool, emit, ct))
                     {
                         declined = true;
                         outcome = new ToolResult($"The person did not allow {target.Choice.Tool.Title} to run this call. Do not try it again unless they ask.", IsError: true);
@@ -391,11 +394,23 @@ public sealed partial class ChatService(
                 {
                     outcome = new ToolResult(ex.Message, IsError: true);
                 }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // A tool's own fault ends that call, not the answer: the model is told, and can go on.
+                    LogToolFailed(logger, name, ex);
+                    outcome = new ToolResult($"{name} failed: {ex.Message}", IsError: true);
+                }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     await FinishAsync(conversation, CancellationToken.None);
                     await emit(new { type = "stopped", id = (Guid?)null });
                     return;
+                }
+                await AuditPluginAsync(known ? target.Choice.Tool : null, name, outcome, user, declined);
+                if (!outcome.IsError && Oversized(name, outcome.Text, chat.CurrentValue.ToolResultChars, runs.ContainsKey("read_file"), user.Id) is { } kept)
+                {
+                    db.ChatAttachments.Add(kept.File);
+                    outcome = outcome with { Text = kept.Text, Files = [.. outcome.Files ?? [], kept.File] };
                 }
                 var (text, isError) = (outcome.Text, outcome.IsError);
                 ends |= outcome.EndsAnswer;
@@ -439,6 +454,61 @@ public sealed partial class ChatService(
         }
     }
 
+    /// <summary>
+    /// A tool's result past the budget (Chat:ToolResultChars): the model reads its start, at a line's
+    /// end, and the whole of it is a file in the chat that read_file reads on from there. Every later
+    /// round and turn reads the result again, so one huge result would fill each of them.
+    /// </summary>
+    public static (string Text, ChatAttachment File)? Oversized(string tool, string text, int budget, bool canRead, Guid userId)
+    {
+        if (budget <= 0 || text.Length <= budget)
+        {
+            return null;
+        }
+        var cut = text.LastIndexOf('\n', budget);
+        var atLineEnd = cut >= budget / 2;
+        cut = atLineEnd ? cut : budget;
+        var name = $"{tool}-result-{Guid.CreateVersion7().ToString("N")[^6..]}.txt";
+        var file = new ChatAttachment { UserId = userId, FileName = name, ContentType = "text/plain", Size = Encoding.UTF8.GetByteCount(text), Kind = "text", Text = text };
+        // The first line not read whole.
+        var lines = text.AsSpan(0, cut).Count('\n') + (atLineEnd ? 2 : 1);
+        var said = canRead
+            ? $"[The result is {text.Length:N0} characters; above are its first {cut:N0}. All of it is the file {name} in this chat: read_file reads on from line {lines}, search_file finds lines in it.]"
+            : $"[The result is {text.Length:N0} characters; above are its first {cut:N0}. The rest is in the file {name}, which the person can open.]";
+        return (text[..cut] + "\n\n" + said, file);
+    }
+
+    /// <summary>
+    /// A call's arguments as the model wrote them. A key written twice (models do) keeps its last
+    /// value, at every depth: JsonObject would otherwise throw on the first read.
+    /// </summary>
+    public static JsonObject Arguments(string raw)
+    {
+        using var doc = JsonDocument.Parse(raw.Trim().Length == 0 ? "{}" : raw);
+        return Node(doc.RootElement) as JsonObject ?? [];
+
+        static JsonNode? Node(JsonElement e) => e.ValueKind switch
+        {
+            JsonValueKind.Object => e.EnumerateObject().Aggregate(new JsonObject(), (o, p) =>
+            {
+                o[p.Name] = Node(p.Value);
+                return o;
+            }),
+            JsonValueKind.Array => new JsonArray([.. e.EnumerateArray().Select(Node)]),
+            JsonValueKind.Null or JsonValueKind.Undefined => null,
+            _ => JsonNode.Parse(e.GetRawText()),
+        };
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The tool function {Function} failed")]
+    private static partial void LogToolFailed(ILogger logger, string function, Exception ex);
+
+    /// <summary>Every call of a plugin's tool, in the audit log: who, which function, whether it went through.</summary>
+    private Task AuditPluginAsync(IChatTool? tool, string function, ToolResult outcome, AppUser user, bool declined) =>
+        tool is IServerTool { Server.Plugin: { } plugin }
+            ? audit.WriteAsync("plugin.call", plugin, success: !outcome.IsError, detail: declined ? $"{function}, not allowed by the person" : function, actor: user)
+            : Task.CompletedTask;
+
     /// <summary>load_tools: the functions asked for join the request from the next step on.</summary>
     private static ToolResult LoadTools(OnDemandTools demand, JsonObject args)
     {
@@ -459,7 +529,11 @@ public sealed partial class ChatService(
 
     /// <summary>What sub-agents of an answer work with: its model, thinking, person, tools and their instructions, and where events go.</summary>
     private sealed record AgentKit(string Model, string? Thinking, string Email, Dictionary<string, (ToolChoice Choice, IToolRun Run)> Runs, JsonArray Tools,
-        List<(string Tool, string Text)> Instructions, ToolProgress Progress, Func<object, Task> Emit, AppUser User, Conversation Conversation);
+        List<(string Tool, string Text)> Instructions, ToolProgress Progress, Func<object, Task> Emit, AppUser User, Conversation Conversation)
+    {
+        /// <summary>The answer's tools on demand: sub-agents start with what it has loaded.</summary>
+        public OnDemandTools? Demand { get; init; }
+    }
 
     /// <summary>
     /// A sub-agent's own tools: the answer's tools made ready again in a scope of the sub-agent's
@@ -500,6 +574,12 @@ public sealed partial class ChatService(
     /// each round reads its whole context again, so a few whole pages make every later call slow.
     /// </summary>
     private const int AgentRounds = 6;
+
+    /// <summary>A sub-agent's tool calls in all: past them it answers with what it has (measured: unbounded, they opened 12 pages each).</summary>
+    private const int AgentCalls = 5;
+
+    /// <summary>The longest a sub-agent's step may write: its reply is for the assistant, and every token takes time.</summary>
+    private const int AgentMaxTokens = 1_200;
     private const int AgentToolChars = 12_000;
 
     /// <summary>Text added to the newest question, in the request only.</summary>
@@ -557,17 +637,19 @@ public sealed partial class ChatService(
         var callId = kit.Progress.CallId;
         var usable = kit.Tools.OfType<JsonObject>()
             .Where(f => f["function"]?["name"]?.GetValue<string>() is { } n && n is not AgentsTool.Function and not AskTool.Function
-                && kit.Runs.TryGetValue(n, out var r) && !r.Choice.Setting.AskFirst)
+                && kit.Runs.TryGetValue(n, out var r) && !r.Choice.Setting.AskFirst && !r.Run.AsksFirst(n))
             .Select(f => (JsonNode)f.DeepClone())
             .ToList();
-        var notes = string.Join("\n\n", kit.Instructions.Where(i => i.Tool is not "agents" and not "ask").Select(i => i.Text));
+        var notes = kit.Instructions.Where(i => i.Tool is not "agents" and not "ask").ToList();
         var toolIds = usable.Select(f => kit.Runs[f["function"]!["name"]!.GetValue<string>()].Choice.Tool.Id).ToHashSet(StringComparer.Ordinal);
-        using var gate = new SemaphoreSlim(Math.Max(1, chat.CurrentValue.AgentsAtOnce));
+        // No more at once than the engine has places: one more would push another's cache out, and it would read its whole context again.
+        var atOnce = Math.Max(1, gate.EngineSlots > 0 ? Math.Min(chat.CurrentValue.AgentsAtOnce, gate.EngineSlots) : chat.CurrentValue.AgentsAtOnce);
+        using var turns = new SemaphoreSlim(atOnce);
         var done = 0;
         async Task<(JsonObject Result, JsonObject Shown, List<ChatAttachment> Files)> RunAsync(AgentTask part, int index)
         {
             Task Say(object e) => callId is null ? Task.CompletedTask : kit.Emit(e);
-            await gate.WaitAsync(ct);
+            await turns.WaitAsync(ct);
             try
             {
                 await Say(new { type = "agent", id = callId, index, @event = "start", title = part.Title, instructions = part.Instructions });
@@ -575,7 +657,9 @@ public sealed partial class ChatService(
                 var took = Stopwatch.StartNew();
                 await using var scope = scopes.CreateAsyncScope();
                 var own = await AgentToolsAsync(scope.ServiceProvider, kit, toolIds, ct);
-                var run = await AgentAsync(part, kit, own, new JsonArray([.. usable.Select(u => u.DeepClone())]), notes,
+                // Its own tools on demand: what the answer has loaded, and load_tools for the rest.
+                var demand = new OnDemandTools(new JsonArray([.. usable.Select(u => u.DeepClone())]), kit.Runs, notes, kit.Demand?.Loaded, chat.CurrentValue.ToolTextChars);
+                var run = await AgentAsync(part, kit, own, demand,
                     doing => kit.Progress.ReportAsync(new McpProgress(done, parts.Count, $"{part.Title}: {doing}")),
                     e => Say(new { type = "agent", id = callId, index, e.Event, e.Text, e.Call, e.IsError, e.Files }), ct);
                 var finished = Interlocked.Increment(ref done);
@@ -597,7 +681,7 @@ public sealed partial class ChatService(
             }
             finally
             {
-                gate.Release();
+                turns.Release();
             }
         }
         var outcomes = await Task.WhenAll(parts.Select((p, i) => RunAsync(p, i)));
@@ -617,16 +701,17 @@ public sealed partial class ChatService(
     private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error, List<ChatAttachment> Files, UsageReport Usage);
 
     /// <summary>One sub-agent: its own little answer loop, kept out of the chat (only its result goes to the model).</summary>
-    private async Task<AgentRun> AgentAsync(AgentTask part, AgentKit kit, Dictionary<string, IToolRun> own, JsonArray tools, string notes, Func<string, Task> say,
+    private async Task<AgentRun> AgentAsync(AgentTask part, AgentKit kit, Dictionary<string, IToolRun> own, OnDemandTools demand, Func<string, Task> say,
         Func<AgentStep, Task> step, CancellationToken ct)
     {
-        var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC).\n\n" +
+        var preamble = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC).\n\n" +
             "You are a sub-agent: an assistant gave you one part of a larger task, and does the other parts elsewhere. Do only this part, with " +
-            "your tools when they help, and reply with its result: complete but compact, with the facts, names, file paths and links you found, " +
-            "for the assistant to put together with the other parts. Nobody else reads your reply, and you cannot ask questions." +
-            (notes.Length > 0 ? "\n\n" + notes : "");
-        var messages = new JsonArray(new JsonObject { ["role"] = "system", ["content"] = system }, new JsonObject { ["role"] = "user", ["content"] = part.Instructions });
-        var names = tools.OfType<JsonObject>().Select(f => f["function"]?["name"]?.GetValue<string>()).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            "your tools when they help, and reply with its result: the facts, names, file paths and links you found, as short bullets, in at most " +
+            "about 200 words (every word you write takes time), for the assistant to put together with the other parts. Nobody else reads your " +
+            "reply, and you cannot ask questions.";
+        string System() => demand.Notes() is { Length: > 0 } notes ? preamble + "\n\n" + notes : preamble;
+        var messages = new JsonArray(new JsonObject { ["role"] = "system", ["content"] = System() }, new JsonObject { ["role"] = "user", ["content"] = part.Instructions });
+        var tools = demand.Request();
         var steps = new List<JsonNode>();
         var made = new List<ChatAttachment>();
         var reasoning = new StringBuilder();
@@ -640,13 +725,18 @@ public sealed partial class ChatService(
                 ["model"] = kit.Model, ["messages"] = messages.DeepClone(), ["stream"] = true,
                 ["stream_options"] = new JsonObject { ["include_usage"] = true }, ["user"] = kit.Email,
             };
+            // Without thinking, a cap on each step's words; a model that thinks needs its room.
+            if (kit.Thinking is null or "off")
+            {
+                request["max_tokens"] = AgentMaxTokens;
+            }
             if (ThinkingPresets.TemplateKwargs(kit.Thinking) is { } kwargs)
             {
                 request["chat_template_kwargs"] = kwargs;
             }
             if (tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0)
             {
-                Tools(request, tools, last: round >= Math.Min(chat.CurrentValue.MaxToolRounds, AgentRounds));
+                Tools(request, demand.Request(), last: round >= Math.Min(chat.CurrentValue.MaxToolRounds, AgentRounds) || steps.Count >= AgentCalls);
             }
             text.Clear();
             var pending = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
@@ -689,6 +779,7 @@ public sealed partial class ChatService(
                 ["function"] = new JsonObject { ["name"] = kv.Value.Name ?? "", ["arguments"] = kv.Value.Args.ToString() },
             })]);
             messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = text.ToString(), ["tool_calls"] = toolCalls });
+            var loadedBefore = demand.Loaded.Count;
             foreach (var call in toolCalls.OfType<JsonObject>())
             {
                 var id = call["id"]!.GetValue<string>();
@@ -702,13 +793,20 @@ public sealed partial class ChatService(
                 JsonArray? files = null;
                 try
                 {
-                    if (!names.Contains(name) || !own.TryGetValue(name, out var target))
+                    if (demand.Active && name == OnDemandTools.Function)
+                    {
+                        var loaded = LoadTools(demand, Arguments(raw));
+                        (result, isError) = (loaded.Text, loaded.IsError);
+                    }
+                    else if (!own.TryGetValue(name, out var target))
                     {
                         (result, isError) = ($"There is no tool named {name}.", true);
                     }
                     else
                     {
-                        var outcome = await target.CallAsync(name, JsonNode.Parse(raw.Length == 0 ? "{}" : raw) as JsonObject ?? [], ct);
+                        demand.Load([name]);
+                        var outcome = await target.CallAsync(name, Arguments(raw), ct);
+                        await AuditPluginAsync(kit.Runs.TryGetValue(name, out var chosen) ? chosen.Choice.Tool : null, name, outcome, kit.User, false);
                         (result, isError) = (outcome.Text, outcome.IsError);
                         if (outcome.Files is { Count: > 0 } got)
                         {
@@ -729,10 +827,19 @@ public sealed partial class ChatService(
                 {
                     (result, isError) = (ex.Message, true);
                 }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogToolFailed(logger, name, ex);
+                    (result, isError) = ($"{name} failed: {ex.Message}", true);
+                }
                 var shown = Cut(result, AgentShownChars);
                 await step(new AgentStep("tool_result", shown, new JsonObject { ["id"] = id }, isError, files));
                 steps.Add(new JsonObject { ["id"] = id, ["name"] = name, ["arguments"] = raw, ["result"] = shown, ["isError"] = isError, ["files"] = files?.DeepClone() });
                 messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = safeguards.Untrusted(name, Cut(result, AgentToolChars)) });
+            }
+            if (demand.Loaded.Count != loadedBefore)
+            {
+                messages[0]!["content"] = System();
             }
         }
     }

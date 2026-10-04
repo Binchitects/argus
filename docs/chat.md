@@ -105,7 +105,11 @@ setups to paste.
     made are read the same way.
   - **Web** (off until an admin turns it on): search (the stack's SearXNG)
     and reading pages, from the sites an admin allows only.
-    Pages are read in parts, as text; PDFs and documents on the web too.
+    Pages are read in parts, as text; PDFs and documents on the web too. With
+    a **focus** (what the model looks for), a long page comes back as its
+    passages about that, each with where it starts, instead of its first
+    part. A page read lately comes from a cache for a day: reading on, or the
+    same page in another answer, does not download it again.
   - **Questions for you**: when a request leaves a choice open, the model asks
     instead of guessing, as Claude does: one to four questions, each with a
     few choices (pick one, or several where it says so), and a box to write
@@ -117,11 +121,16 @@ setups to paste.
     into two to ten parts, each done by a sub-agent of its own: a clean
     context with only its instructions, and the chat's tools (but not
     delegating again, asking you questions, or tools that ask before each
-    call). They run side by side, up to **Sub-agents at once** (Settings →
-    Chat, 3), inside the answer's place in line; their results, in order,
+    call; on demand, they start with the tools the chat loaded). They run
+    side by side, up to **Sub-agents at once** (Settings → Chat, 3) and never
+    more than the engine serves at once (one more would push another's cache
+    out), inside the answer's place in line; their results, in order,
     come back to the model, which puts them together. The card shows how many
     are done and what each is doing, then each part's result.
   - **MCP servers** an admin added: their tools, by name.
+  - **APIs** an admin added by their OpenAPI document: each operation is a
+    function (`pets__list_pets`); a call that changes something (anything but
+    GET) waits for **Allow**, whatever the tool's own setting.
   - A tool set to **ask before each call** waits with **Allow** and **Don't
     allow**. A call you do not allow is not run, and the model is told so.
 - **Tool calls.** Each call is a card: the tool, what it was asked, whether it
@@ -299,6 +308,22 @@ you: a morning digest, a weekly report on a repository with Argus.
 - A task that was due while the app was down runs once when it is back. A
   removed task leaves its chats. Each person sees and changes only their own;
   admins set **Tasks per person** (10).
+- **Run by events** instead of a schedule: **On GitLab events** (a merge
+  request opened or updated with new commits, a pipeline failed, an issue
+  opened) or **On a webhook** (any system posting JSON). The task gets an
+  address, `https://DOMAIN/api/hooks/<id>`, and a secret shown once (**New
+  secret** makes another): in GitLab, a project's or group's webhook with that
+  secret token; elsewhere the secret in `X-Hook-Secret`. The event, in words,
+  follows the task's question: a merge request with its changes, a failed
+  pipeline with the end of each failed job's log, a webhook's JSON as it came.
+  An event the task does not take is acknowledged and dropped.
+- **Answer as a comment in GitLab**: the answer goes on the merge request,
+  issue or commit. Reading the changes and logs and commenting use the **GitLab
+  bot token** an admin sets (Settings → Scheduled tasks, a bot account's token
+  with scope `api`, Reporter in the projects), never Argus's read-only token;
+  each comment is in the audit log (`task.gitlab_comment`). Examples: review
+  every merge request with Argus for context; explain each failed pipeline;
+  triage new issues.
 
 ## Notifications
 
@@ -413,6 +438,7 @@ The chat's limits are under Admin → Settings → Chat ([settings.md](settings.
 |---|---|---|
 | Tool calls per answer | 8 | how many rounds of tool use one answer may take |
 | Tool definitions sent whole up to | 6,000 characters | past it, tools go on demand (below); 0: always whole |
+| Tool result the model reads whole up to | 24,000 characters | a longer result goes as its start, and the whole of it becomes a file in the chat that the model reads on with `read_file`; 0: always whole |
 | Largest attachment | 20 MB | per file (up to 100 MB) |
 | Text kept per attachment | 200,000 characters | longer files are cut and marked |
 | Longest single answer | 15 minutes | an answer still running after this is stopped |

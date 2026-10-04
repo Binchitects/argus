@@ -28,6 +28,14 @@ public sealed class ScheduledTask
     public bool Email { get; set; }
     /// <summary>A URL the answer is posted to (Slack, Teams, Mattermost), encrypted: such a URL is a secret.</summary>
     public string? WebhookEncrypted { get; set; }
+    /// <summary>What runs it: "schedule" (its cron), "webhook" (any system posting to its address) or "gitlab" (GitLab's events).</summary>
+    public string Trigger { get; set; } = "schedule";
+    /// <summary>The SHA-256 of the secret a webhook or GitLab sends with each event.</summary>
+    public string? TriggerSecretHash { get; set; }
+    /// <summary>The GitLab events it takes: merge_request, pipeline_failed, issue.</summary>
+    public List<string> Events { get; set; } = [];
+    /// <summary>Its answer goes back to GitLab as a comment on the merge request, issue or commit (by the GitLab bot, never Argus's token).</summary>
+    public bool ReplyInGitLab { get; set; }
     public bool Enabled { get; set; } = true;
     public DateTimeOffset? NextRunAt { get; set; }
     public DateTimeOffset? LastRunAt { get; set; }

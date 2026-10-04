@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarClock, CircleCheck, CircleX, Loader2, Pencil, Play, Plus, Trash2 } from 'lucide-react'
+import { CalendarClock, CircleCheck, CircleX, KeyRound, Loader2, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
+import { CodeBlock } from '@/components/app/code-block'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
+import { Secret } from '@/components/app/secret'
 import { TimeZonePicker } from '@/components/app/time-zone-picker'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +18,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { configQuery } from './chat/api'
@@ -49,6 +52,28 @@ interface Task {
   running: boolean
   nextRuns: string[]
   lastRun: Run | null
+  trigger: Trigger
+  events: string[]
+  replyInGitLab: boolean
+  /** Where events go, for a task they run. */
+  hookUrl: string | null
+  /** Only in the answer that made it. */
+  hookToken?: string | null
+}
+
+type Trigger = 'schedule' | 'webhook' | 'gitlab'
+
+const gitlabEvents: { value: string; label: string }[] = [
+  { value: 'merge_request', label: 'A merge request opened or updated' },
+  { value: 'pipeline_failed', label: 'A pipeline failed' },
+  { value: 'issue', label: 'An issue opened' },
+]
+
+/** "On a schedule" in words, or what runs it. */
+function runsOn(t: Task) {
+  if (t.trigger === 'webhook') return 'On a webhook'
+  if (t.trigger === 'gitlab') return `On GitLab: ${t.events.map((e) => gitlabEvents.find((g) => g.value === e)?.label.toLowerCase() ?? e).join(', ')}`
+  return `${describe(t.cron)} · ${t.timeZone}`
 }
 
 interface TasksView {
@@ -59,6 +84,8 @@ interface TasksView {
   /** Where email goes, when the app can send it. */
   email: string | null
   tasks: Task[]
+  /** Whether tasks can read GitLab and comment there (Settings → Scheduled tasks → GitLab bot token). */
+  gitlabBot: boolean
 }
 
 const when = (at: string, timeZone?: string) =>
@@ -74,6 +101,12 @@ export function TasksPage() {
     refetchInterval: (q) => (q.state.data?.tasks.some((t) => t.running) ? 3000 : 30_000),
   })
   const [editing, setEditing] = useState<Task | 'new' | null>(null)
+  const [connect, setConnect] = useState<{ name: string; url: string; secret: string; gitlab: boolean } | null>(null)
+  const rotate = useMutation({
+    mutationFn: (t: Task) => api<{ hookToken: string }>(`/api/tasks/${t.id}/secret`, { method: 'POST' }),
+    onSuccess: (r, t) => setConnect({ name: t.name, url: t.hookUrl ?? '', secret: r.hookToken, gitlab: t.trigger === 'gitlab' }),
+    onError: (e) => toast.error(errorMessage(e)),
+  })
   const changed = () => queryClient.invalidateQueries({ queryKey: ['tasks'] })
   const run = useMutation({
     mutationFn: (t: Task) => api(`/api/tasks/${t.id}/run`, { method: 'POST' }),
@@ -138,7 +171,8 @@ export function TasksPage() {
                     )}
                   </CardTitle>
                   <CardDescription>
-                    {describe(t.cron)} · {t.timeZone}
+                    {runsOn(t)}
+                    {t.replyInGitLab ? ' · answers in GitLab' : ''}
                     {t.model ? ` · ${t.model}` : ''}
                     {t.sameChat ? ' · one chat' : ''}
                     {t.email ? ' · email' : ''}
@@ -156,6 +190,7 @@ export function TasksPage() {
                     Next: {t.nextRuns.map((r) => when(r, t.timeZone)).join(' · ')}
                   </p>
                 )}
+                {t.hookUrl && <CodeBlock code={t.hookUrl} label={`${t.name} address`} />}
                 {t.lastRun && <LastRun run={t.lastRun} />}
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" onClick={() => run.mutate(t)} disabled={t.running || run.isPending}>
@@ -164,6 +199,18 @@ export function TasksPage() {
                   <Button variant="outline" size="sm" onClick={() => setEditing(t)}>
                     <Pencil /> Edit
                   </Button>
+                  {t.hookUrl && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        if (await confirm({ title: 'Make a new secret?', description: 'The current secret stops working at once: set the new one where events come from.', confirm: 'Make a new secret', destructive: true }))
+                          rotate.mutate(t)
+                      }}
+                    >
+                      <KeyRound /> New secret
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -181,7 +228,42 @@ export function TasksPage() {
       )}
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
-          {editing !== null && <TaskForm key={editing === 'new' ? 'new' : editing.id} saved={editing === 'new' ? null : editing} view={view} onClose={() => setEditing(null)} onSaved={changed} />}
+          {editing !== null && (
+            <TaskForm
+              key={editing === 'new' ? 'new' : editing.id}
+              saved={editing === 'new' ? null : editing}
+              view={view}
+              onClose={() => setEditing(null)}
+              onSaved={async (made) => {
+                await changed()
+                if (made?.hookToken && made.hookUrl) setConnect({ name: made.name, url: made.hookUrl, secret: made.hookToken, gitlab: made.trigger === 'gitlab' })
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={connect !== null} onOpenChange={(o) => !o && setConnect(null)}>
+        <DialogContent className="sm:max-w-xl">
+          {connect && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Send events to {connect.name}</DialogTitle>
+                <DialogDescription>
+                  {connect.gitlab
+                    ? 'In GitLab: the project (or group) → Settings → Webhooks → Add new webhook, with this address and secret token, and the events the task takes.'
+                    : 'Have the system post JSON to this address, with the secret in the X-Hook-Secret header.'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-3">
+                <CodeBlock code={connect.url} label="Address" />
+                <Secret label="Secret" value={connect.secret} />
+                <p className="text-xs text-muted-foreground">The secret is shown this once. Lost it? Make a new one on the task's card.</p>
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setConnect(null)}>Done</Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </>
@@ -214,7 +296,7 @@ function LastRun({ run }: { run: Run }) {
 
 const DEFAULT = '(default)'
 
-function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view: TasksView; onClose: () => void; onSaved: () => Promise<unknown> }) {
+function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view: TasksView; onClose: () => void; onSaved: (made?: Task) => Promise<unknown> }) {
   const config = useQuery(configQuery)
   const [form, setForm] = useState({
     name: saved?.name ?? '',
@@ -225,6 +307,9 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
     sameChat: saved?.sameChat ?? false,
     email: saved?.email ?? false,
     webhook: '',
+    trigger: saved?.trigger ?? ('schedule' as Trigger),
+    events: saved?.events ?? ['merge_request'],
+    replyInGitLab: saved?.replyInGitLab ?? false,
   })
   const [schedule, setSchedule] = useState<Schedule>(saved ? scheduleOf(saved.cron) : blankSchedule)
   const [error, setError] = useState<string | null>(null)
@@ -232,11 +317,11 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
   const toolsOn = form.tools ?? tools.filter((t) => t.onByDefault).map((t) => t.id)
   const save = useMutation({
     mutationFn: () => {
-      const body = { ...form, cron: cronOf(schedule), webhook: form.webhook || (saved ? null : '') }
-      return saved ? api(`/api/tasks/${saved.id}`, { method: 'PATCH', body }) : api('/api/tasks', { body })
+      const body = { ...form, cron: form.trigger === 'schedule' ? cronOf(schedule) : '', webhook: form.webhook || (saved ? null : '') }
+      return saved ? api<Task>(`/api/tasks/${saved.id}`, { method: 'PATCH', body }) : api<Task>('/api/tasks', { body })
     },
-    onSuccess: async () => {
-      await onSaved()
+    onSuccess: async (made) => {
+      await onSaved(made)
       toast.success(saved ? 'Task saved.' : 'Task added.', { description: 'Run it now to see what it brings.' })
       onClose()
     },
@@ -246,8 +331,10 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{saved ? `Edit ${saved.name}` : 'New scheduled task'}</DialogTitle>
-        <DialogDescription>Asked as you, with your model and tools, at the times you choose. Not more often than every {view.minIntervalMinutes} minutes.</DialogDescription>
+        <DialogTitle>{saved ? `Edit ${saved.name}` : 'New task'}</DialogTitle>
+        <DialogDescription>
+          Asked as you, with your model and tools: at the times you choose (not more often than every {view.minIntervalMinutes} minutes), or when an event comes in.
+        </DialogDescription>
       </DialogHeader>
       <form
         className="grid gap-4"
@@ -264,7 +351,44 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
         <Field label="What to ask" hint="As you would write it in the chat. With Argus on, it can read your repositories.">
           <Textarea dir="auto" required maxLength={20000} className="min-h-28" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} />
         </Field>
+        <Tabs value={form.trigger} onValueChange={(v) => setForm({ ...form, trigger: v as Trigger })}>
+          <TabsList aria-label="Runs">
+            <TabsTrigger value="schedule">On a schedule</TabsTrigger>
+            <TabsTrigger value="gitlab">On GitLab events</TabsTrigger>
+            <TabsTrigger value="webhook">On a webhook</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {form.trigger === 'gitlab' && (
+          <fieldset className="grid gap-2">
+            <legend className="mb-1 text-sm font-medium">Events</legend>
+            {gitlabEvents.map((g) => (
+              <Label key={g.value} className="font-normal">
+                <input
+                  type="checkbox"
+                  className="size-3.5 accent-primary"
+                  checked={form.events.includes(g.value)}
+                  onChange={(e) => setForm({ ...form, events: e.target.checked ? [...form.events, g.value] : form.events.filter((x) => x !== g.value) })}
+                />
+                {g.label}
+              </Label>
+            ))}
+            <div className="mt-1 flex items-start gap-2">
+              <Switch id="task-reply" checked={form.replyInGitLab} disabled={!view.gitlabBot && !form.replyInGitLab} onCheckedChange={(replyInGitLab) => setForm({ ...form, replyInGitLab })} />
+              <div className="grid gap-0.5">
+                <Label htmlFor="task-reply">Answer as a comment in GitLab</Label>
+                <p className="text-xs text-muted-foreground">
+                  {view.gitlabBot
+                    ? 'On the merge request, issue or commit, by the GitLab bot; each comment is audited.'
+                    : 'The GitLab bot is not set up (an admin sets its token under Settings → Scheduled tasks). It also reads a merge request’s changes and a failed job’s log.'}
+                </p>
+              </div>
+            </div>
+          </fieldset>
+        )}
+        {form.trigger === 'webhook' && <p className="text-sm text-muted-foreground">Any system can run it by posting JSON to its address, with its secret. What it posts is added to the question.</p>}
         <div className="grid gap-4 sm:grid-cols-2">
+          {form.trigger === 'schedule' && (
+            <>
           <Field label="Repeat">
             <Select value={schedule.repeat} onValueChange={(v) => set({ repeat: v as Repeat, cron: cronOf(schedule) })}>
               <SelectTrigger>
@@ -318,6 +442,8 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
             <Field label="On day">
               <Input type="number" min={1} max={28} required value={schedule.date} onChange={(e) => set({ date: Number(e.target.value) })} />
             </Field>
+          )}
+            </>
           )}
           <Field label="Time zone">
             <TimeZonePicker value={form.timeZone} onChange={(timeZone) => setForm({ ...form, timeZone })} />
@@ -379,11 +505,11 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
           <Input type="url" autoComplete="off" placeholder="https://hooks.slack.com/services/…" value={form.webhook} onChange={(e) => setForm({ ...form, webhook: e.target.value })} />
         </Field>
         {saved?.webhookSet && (
-          <Button type="button" variant="link" className="h-auto justify-self-start p-0 text-xs" onClick={() => void api(`/api/tasks/${saved.id}`, { method: 'PATCH', body: { webhook: '' } }).then(onSaved).then(() => toast.success('Webhook removed.'))}>
+          <Button type="button" variant="link" className="h-auto justify-self-start p-0 text-xs" onClick={() => void api(`/api/tasks/${saved.id}`, { method: 'PATCH', body: { webhook: '' } }).then(() => onSaved()).then(() => toast.success('Webhook removed.'))}>
             Stop posting to the webhook
           </Button>
         )}
-        <p className="text-xs text-muted-foreground">{describe(cronOf(schedule))}.</p>
+        {form.trigger === 'schedule' && <p className="text-xs text-muted-foreground">{describe(cronOf(schedule))}.</p>}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel

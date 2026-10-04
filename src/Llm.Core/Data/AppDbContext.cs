@@ -26,6 +26,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
     public DbSet<McpServer> McpServers => Set<McpServer>();
+    public DbSet<PersonCredential> PersonCredentials => Set<PersonCredential>();
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
     public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
     public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
@@ -153,7 +154,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.Url).HasMaxLength(2000);
             e.Property(m => m.HeaderName).HasMaxLength(200);
             e.Property(m => m.EmailHeader).HasMaxLength(200);
+            e.Property(m => m.Plugin).HasMaxLength(100);
+            e.Property(m => m.PluginVersion).HasMaxLength(50);
+            e.Property(m => m.PersonAuth).HasMaxLength(20);
+            e.Property(m => m.Writes).HasDefaultValueSql("'{}'::text[]");
             e.HasIndex(m => m.Name).IsUnique();
+        });
+        builder.Entity<PersonCredential>(e =>
+        {
+            e.ToTable("person_credentials");
+            e.Property(c => c.ToolId).HasMaxLength(100);
+            e.Property(c => c.Account).HasMaxLength(200);
+            e.HasIndex(c => new { c.UserId, c.ToolId }).IsUnique();
+            e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<LocalModel>(e =>
@@ -184,6 +197,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.ToTable("scheduled_tasks");
             e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Trigger).HasMaxLength(20).HasDefaultValue("schedule");
+            e.Property(x => x.TriggerSecretHash).HasMaxLength(64);
+            e.Property(x => x.Events).HasDefaultValueSql("'{}'::text[]");
             e.Property(x => x.Cron).HasMaxLength(200);
             e.Property(x => x.TimeZone).HasMaxLength(100);
             e.Property(x => x.Model).HasMaxLength(200);

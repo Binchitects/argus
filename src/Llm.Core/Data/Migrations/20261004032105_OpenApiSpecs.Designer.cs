@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Llm.Core.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261004032105_OpenApiSpecs")]
+    partial class OpenApiSpecs
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -336,28 +339,10 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("HeaderValueEncrypted")
                         .HasColumnType("text");
 
-                    b.Property<string>("Manifest")
-                        .HasColumnType("text");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
-
-                    b.Property<string>("PersonAuth")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("Plugin")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("PluginSettings")
-                        .HasColumnType("text");
-
-                    b.Property<string>("PluginVersion")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
 
                     b.Property<string>("Spec")
                         .HasColumnType("text");
@@ -366,12 +351,6 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
-
-                    b.PrimitiveCollection<List<string>>("Writes")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text[]")
-                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.HasKey("Id");
 
@@ -432,45 +411,6 @@ namespace Llm.Core.Data.Migrations
                         .HasFilter("\"Key\" IS NOT NULL");
 
                     b.ToTable("notifications", (string)null);
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.PersonCredential", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Account")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("RefreshEncrypted")
-                        .HasColumnType("text");
-
-                    b.Property<string>("SecretEncrypted")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("ToolId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "ToolId")
-                        .IsUnique();
-
-                    b.ToTable("person_credentials", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.Project", b =>
@@ -616,12 +556,6 @@ namespace Llm.Core.Data.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
-                    b.PrimitiveCollection<List<string>>("Events")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text[]")
-                        .HasDefaultValueSql("'{}'::text[]");
-
                     b.Property<DateTimeOffset?>("LastRunAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -641,9 +575,6 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<bool>("ReplyInGitLab")
-                        .HasColumnType("boolean");
-
                     b.Property<bool>("SameChat")
                         .HasColumnType("boolean");
 
@@ -658,17 +589,6 @@ namespace Llm.Core.Data.Migrations
 
                     b.PrimitiveCollection<List<string>>("Tools")
                         .HasColumnType("text[]");
-
-                    b.Property<string>("Trigger")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasDefaultValue("schedule");
-
-                    b.Property<string>("TriggerSecretHash")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1568,15 +1488,6 @@ namespace Llm.Core.Data.Migrations
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.Notification", b =>
-                {
-                    b.HasOne("Llm.Core.Identity.AppUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.PersonCredential", b =>
                 {
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()

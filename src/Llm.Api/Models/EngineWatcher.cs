@@ -1,5 +1,6 @@
 using Llm.Api.Chat;
 using Llm.Api.Gateway;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Models;
@@ -13,7 +14,7 @@ namespace Llm.Api.Models;
 /// seconds); when every kept model failed, the .env model takes their place.
 /// </summary>
 public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineClient engine, EngineState state, ChatModels chatModels,
-    IOptions<EngineOptions> options, ILogger<EngineWatcher> logger) : BackgroundService
+    AnswerGate gate, IOptions<EngineOptions> options, ILogger<EngineWatcher> logger) : BackgroundService
 {
     private readonly SemaphoreSlim _wake = new(0);
 
@@ -101,8 +102,12 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
                 var now = string.Join(',', models.Where(m => m.Status == "loaded").Select(m => m.Name).Order(StringComparer.Ordinal));
                 if (now != loaded)
                 {
-                    catalog.WriteTargets(models.Where(m => m.Status == "loaded").Select(m => m.Name));
+                    var names = models.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
+                    catalog.WriteTargets(names);
                     chatModels.Forget();
+                    // What the loaded models serve at once: the answers' line, and sub-agents, keep within it.
+                    gate.EngineSlots = await scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().LocalModels
+                        .Where(m => names.Contains(m.Name)).SumAsync(m => m.Parallel, stoppingToken);
                     loaded = now;
                 }
             }

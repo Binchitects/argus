@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Boxes, CalendarClock, Database, Home, KeyRound, LayoutDashboard, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, Telescope, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, BarChart3, Blocks, Boxes, CalendarClock, Database, Home, KeyRound, LayoutDashboard, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, Telescope, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -34,7 +34,8 @@ export const navigation: NavSection[] = [
       { title: 'Groups', path: '/admin/groups', icon: UsersRound, keywords: ['teams', 'access', 'directory groups', 'permissions'] },
       { title: 'Sign-in', path: '/admin/sign-in', icon: KeyRound, keywords: ['ldap', 'directory', 'active directory', '2fa'] },
       { title: 'Models', path: '/admin/models', icon: Boxes, keywords: ['switch', 'load', 'llama', 'library', 'gguf', 'permissions'] },
-      { title: 'Tools', path: '/admin/tools', icon: Wrench, keywords: ['mcp', 'argus', 'image generation', 'calculator', 'permissions'] },
+      { title: 'Tools', path: '/admin/tools', icon: Wrench, keywords: ['mcp', 'argus', 'image generation', 'calculator', 'permissions', 'openapi', 'api'] },
+      { title: 'Plugins', path: '/admin/plugins', icon: Blocks, keywords: ['catalog', 'install', 'jira', 'gitlab issues', 'oauth', 'integrations'] },
       { title: 'Settings', path: '/admin/settings', icon: Settings, keywords: ['configuration', 'config', 'env'] },
       { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'] },
     ],

@@ -18,13 +18,14 @@ namespace Llm.Api.Schedules;
 /// model, tools and credit), then delivered: a notification, and if asked an email and
 /// a webhook post.
 /// </summary>
-public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer mailer, Webhooks webhooks, TimeProvider clock,
+public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer mailer, Webhooks webhooks, GitLabBot gitlab, Audit audit, TimeProvider clock,
     IOptions<AuthOptions> auth, ILogger<TaskRunner> logger)
 {
     /// <summary>Longest an answer of a task is kept for a notification and a webhook post.</summary>
     private const int Excerpt = 3000;
 
-    public async Task<ScheduledRun> RunAsync(Guid taskId, bool manual, CancellationToken ct)
+    /// <param name="trigger">The event that started it (a webhook, GitLab), said after the task's question; null: its schedule, or a person.</param>
+    public async Task<ScheduledRun> RunAsync(Guid taskId, bool manual, CancellationToken ct, TriggerEvent? trigger = null)
     {
         var task = await db.ScheduledTasks.SingleAsync(t => t.Id == taskId, ct);
         var run = new ScheduledRun { TaskId = task.Id, Manual = manual, StartedAt = clock.GetUtcNow() };
@@ -57,7 +58,10 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
         }
         c.ArchivedAt = null;
         var sequence = (await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence, ct) ?? 0) + 1;
-        var question = new ChatMessage { ConversationId = c.Id, ParentId = c.CurrentLeafId, Role = "user", Sequence = sequence, Content = task.Prompt };
+        var question = new ChatMessage
+        {
+            ConversationId = c.Id, ParentId = c.CurrentLeafId, Role = "user", Sequence = sequence, Content = trigger is null ? task.Prompt : $"{task.Prompt}\n\n{trigger.Text}",
+        };
         db.ChatMessages.Add(question);
         c.CurrentLeafId = question.Id;
         c.UpdatedAt = run.StartedAt;
@@ -128,6 +132,20 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
                 }
             }
         }
+        if (trigger?.Reply is { } target && task.ReplyInGitLab && !failed && text is not null)
+        {
+            try
+            {
+                await gitlab.CommentAsync(target, $"{text}\n\n---\n*{task.Name}, by Argus Arena for {owner.DisplayName}: [the chat]({link})*", ct);
+                delivered.Add("commented in GitLab");
+                await audit.WriteAsync("task.gitlab_comment", task.Name, detail: $"project {target.Project}, {target.Kind} {target.Id}", actor: owner);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
+            {
+                LogDelivery(logger, task.Id, "GitLab comment", ex.Message);
+                delivered.Add($"GitLab comment failed: {ex.Message}");
+            }
+        }
         run.Delivery = delivered.Count > 0 ? Cut(string.Join("; ", delivered), 1000) : null;
         return await EndAsync(run, failed ? "failed" : "done", error, ct);
     }
@@ -167,7 +185,7 @@ public sealed partial class Scheduler(IServiceScopeFactory scopes, TimeProvider 
     public bool IsRunning(Guid task) => _running.ContainsKey(task);
 
     /// <summary>Runs the task now, in the background; false when a run of it is still going.</summary>
-    public bool Start(Guid task, bool manual)
+    public bool Start(Guid task, bool manual, TriggerEvent? trigger = null)
     {
         var gate = new TaskCompletionSource();
         if (!_running.TryAdd(task, gate.Task))
@@ -180,7 +198,7 @@ public sealed partial class Scheduler(IServiceScopeFactory scopes, TimeProvider 
             try
             {
                 await using var scope = scopes.CreateAsyncScope();
-                await scope.ServiceProvider.GetRequiredService<TaskRunner>().RunAsync(task, manual, _stopping);
+                await scope.ServiceProvider.GetRequiredService<TaskRunner>().RunAsync(task, manual, _stopping, trigger);
             }
             catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
             {
@@ -246,7 +264,8 @@ public sealed partial class Scheduler(IServiceScopeFactory scopes, TimeProvider 
     }
 
     /// <summary>When a task runs next after <paramref name="after"/>; null: never (its schedule names no real day).</summary>
-    public static DateTimeOffset? Next(ScheduledTask task, DateTimeOffset after) =>
+    /// <summary>When its schedule runs it next; never for a task that events run.</summary>
+    public static DateTimeOffset? Next(ScheduledTask task, DateTimeOffset after) => task.Trigger != Triggers.Schedule ? null :
         Cron.Parse(task.Cron).Cron?.Next(after, Models.Hours.Zone(task.TimeZone).Zone);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Scheduled task {Task}: the run failed")]

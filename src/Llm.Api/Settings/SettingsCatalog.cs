@@ -13,6 +13,7 @@ public static class SettingsCatalog
     private const string Model = "Model";
     private const string Argus = "Argus (GitLab)";
     private const string Tools = "Python and web";
+    private const string PluginsGroup = "Plugins";
     private const string Schedules = "Scheduled tasks";
     private const string Mail = "Email";
     private const string Safeguards = "Safeguards";
@@ -64,6 +65,8 @@ public static class SettingsCatalog
             { Default = "8", Min = 1, Max = 32, Optional = false },
         new("Chat:ToolTextChars", Chat, "Tool definitions sent whole up to", "Past this many characters of tool definitions, a chat gets in full only the tools it has loaded, and a line for each of the others that the model loads when a question needs it (it stays loaded in that chat). Saves thousands of tokens before the first answer of every chat. 0: always every tool whole.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "6000", Unit = "characters", Min = 0, Max = 500000, Optional = false },
+        new("Chat:ToolResultChars", Chat, "Tool result the model reads whole up to", "A longer result (an MCP server's, a file's) goes to the model as its start, and the whole of it becomes a file in the chat that the model reads on with read_file: every later step reads the results again, so one huge result would fill each of them. 0: always whole.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "24000", Unit = "characters", Min = 0, Max = 1000000, Optional = false },
         new("Chat:AutoCompactPercent", Chat, "Compact a chat at (% of context)", "When a chat fills this share of the model's context, its older messages become a summary the model reads instead (people still see them), and the chat goes on. 0: never; the oldest messages are left out instead. Anyone can also compact a chat with /compact.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "80", Unit = "%", Min = 0, Max = 95, Optional = false },
         new("Chat:MaxUploadBytes", Chat, "Largest attachment", "Per file.", SettingType.WholeNumber, SettingScope.Live)
@@ -74,6 +77,9 @@ public static class SettingsCatalog
             { Default = "30000", Min = 2000, Max = 1000000, Optional = false },
         new("Web:AllowedSites", Tools, "Sites the chat may open", "Host names, comma separated: docs.python.org, *.microsoft.com (a domain and its subdomains), or * for any public site. Empty: the Web tool stays off. Addresses inside your network are never opened.", SettingType.Text, SettingScope.Live)
             { Default = "" },
+        new("Plugins:CatalogUrl", PluginsGroup, "Plugin catalog", "An index.json that lists plugins to install (each zip's address and SHA-256), besides those that come with the app. Empty: only those.", SettingType.Url, SettingScope.Live),
+        new("Plugins:CatalogKey", PluginsGroup, "Catalog's public key", "The publisher's ECDSA P-256 public key (PEM). When set, the catalog's index.json.sig must verify against it, or nothing is installed from it.", SettingType.Text, SettingScope.Live)
+            { Max = 1000 },
         new("Web:SearchUrl", Tools, "Search engine", "A SearXNG instance for the Web tool's search. Empty: the websearch profile's own when it is on; otherwise no search, only opening pages.", SettingType.Url, SettingScope.Live),
         new("Sandbox:TimeoutSeconds", Tools, "Longest Python run", "A run still going after this long is stopped, and the model told so.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "60", Min = 5, Max = 300, Unit = "seconds", Optional = false },
@@ -139,6 +145,8 @@ public static class SettingsCatalog
             { Default = "10", Min = 1, Max = 100, Optional = false },
         new("Schedules:MinInterval", Schedules, "Most often", "A task may not run more often than this, so nobody fills the model's day.", SettingType.Duration, SettingScope.Live)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 1440, Optional = false },
+        new("GitLab:Url", Schedules, "GitLab address for tasks", "Where tasks run by GitLab's events read details (a merge request's changes, a failed job's log) and comment. Empty: Argus's (GITLAB_URL).", SettingType.Url, SettingScope.Live),
+        new("GitLab:BotToken", Schedules, "GitLab bot token", "A bot account's token (scope api, Reporter in the projects): reads what an event leaves out and writes the comments of tasks that reply in GitLab. Never Argus's read-only token; each comment is audited.", SettingType.Secret, SettingScope.Live),
         new("Schedules:WebhookHosts", Schedules, "Webhook hosts", "Hosts a task's answer may be posted to, comma separated; *.example.com for a domain and its subdomains. Add your Mattermost or chat server here. Empty: no webhooks.", SettingType.Text, SettingScope.Live)
             { Default = "hooks.slack.com, *.webhook.office.com, *.logic.azure.com, discord.com" },
         new("Mail:Host", Mail, "SMTP server", "The mail server the app sends email through (scheduled tasks' answers). Empty: no email.", SettingType.Text, SettingScope.Live),

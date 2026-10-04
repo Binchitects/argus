@@ -12,9 +12,32 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
-## Unreleased
+## v4.1.0 (2026-10-04)
+
+### :rocket: Epics and highlights
+
+- **Fewer tokens, faster answers**: the prompt cache by design (over 99% of a
+  chat's next turn read from the cache), tools on demand (a first question
+  reads about 900 tokens instead of 6,000 or more), long tool results
+  condensed, and answers as long as each person wants
+- **A platform**: plugins (installed from a catalog, each person connecting
+  their own account, writes asking first, every call audited), any REST API as
+  tools by its OpenAPI document, and tasks run by events (GitLab merge
+  requests, failed pipelines, issues, or any system's JSON), answering back in
+  GitLab
+- **Index on push and merge**, the GitLab webhook in one step
 
 ### :sparkles: New features & Enhancements
+
+- **Tasks run by events**: a task runs on a schedule, on GitLab's events (a
+  merge request opened or updated, a pipeline failed, an issue opened) or on
+  any system's JSON posted to its address with its secret (shown once). A
+  merge request brings its changes and a failed pipeline the end of its jobs'
+  logs, read by a GitLab bot of the admin's (Settings → Scheduled tasks), which
+  also comments the answer back when asked; each comment is audited. Argus's
+  read-only token is never used for it
+- Sub-agents make at most 5 tool calls each, and write at most 1,200 tokens a
+  step (without thinking)
 
 - **Index on push and merge**: Admin → Indexing → Push and merge webhook makes
   the GitLab webhook's secret (shown once; Argus keeps its hash, the app
@@ -32,6 +55,28 @@ Sections used:
   other; the model loads one with `load_tools` and it stays loaded in that
   chat. With every tool on, a first question reads about 900 tokens instead
   of over 6,000
+- **Tool results condensed**: `fetch_page` takes a focus and returns a long
+  page's passages about it; pages read lately come from a day's cache; a tool
+  result past 24,000 characters goes to the model as its start and is kept
+  whole as a file the model reads on with `read_file`. Sub-agents start with
+  the tools the chat loaded, and never run more at once than the engine has
+  places
+- **Plugins**: Admin → Plugins installs ready-made tools (from the app's own
+  plugins, a catalog checked by SHA-256 and optionally signed, a zip or an
+  address), with their settings; a plugin that signs in per person calls its
+  service as the person (OAuth or their own key, in Your account →
+  Connections); its writes ask first; every call is audited. Comes with
+  GitLab issues
+- **APIs as tools (OpenAPI)**: Admin → Tools → Add a server or API takes an
+  OpenAPI 3 document (JSON or YAML, pasted or fetched); its operations become
+  functions, and every call that changes something asks the person first
+- A model's tool arguments with a key written twice no longer fail the whole
+  answer, and a tool's own fault ends only that call
+- GitLab sign-in with a username and password (`GITLAB_USERNAME`,
+  `GITLAB_PASSWORD`) can be set again; v4.0.0 had stopped passing it to Argus.
+  docs/deployment.md maps every v3 `.env` option to where it went
+- The answer line and sub-agents now keep to what the engine serves at once:
+  the engine watcher reports the loaded models' places, as documented
 - **Answer length**: Your account → Answers picks Short, Normal or Thorough for
   every chat; **Shorter** and **Longer** under an answer answer again at about
   half or twice its words

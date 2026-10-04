@@ -10,8 +10,17 @@ using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Chat.Tools;
 
+/// <summary>A tool an admin added: an MCP server, or an API by its OpenAPI document.</summary>
+public interface IServerTool : IChatTool
+{
+    McpServer Server { get; }
+
+    /// <summary>"Jira Cloud" -> "jira_cloud": the prefix of its functions' names.</summary>
+    string Slug { get; }
+}
+
 /// <summary>An MCP server an admin added, as a tool: its functions are named "{server}__{function}".</summary>
-public sealed partial class McpServerTool(McpServer server, HttpClient http, string? dataKey, TimeSpan callTimeout) : IChatTool
+public sealed partial class McpServerTool(McpServer server, HttpClient http, string? dataKey, TimeSpan callTimeout) : IServerTool
 {
     public const string Prefix = "mcp:";
 
@@ -32,7 +41,32 @@ public sealed partial class McpServerTool(McpServer server, HttpClient http, str
 
     public Task<string?> UnavailableAsync(CancellationToken ct) => Task.FromResult<string?>(null);
 
-    public IReadOnlyDictionary<string, string> Headers(string? email)
+    public IReadOnlyDictionary<string, string> Headers(string? email) => HeadersFor(server, dataKey, email);
+
+    /// <summary>Each person's own account, for a plugin whose calls go as the person.</summary>
+    public Plugins.PersonCredentials? People { get; init; }
+
+    /// <summary>
+    /// The headers for one person's calls: the server's, and for a plugin that signs in per person,
+    /// theirs. Throws when they have not connected their account yet (the chat says so, and where).
+    /// </summary>
+    public static async Task<IReadOnlyDictionary<string, string>> PersonHeadersAsync(McpServer server, string? dataKey, Plugins.PersonCredentials? people, ToolContext context,
+        CancellationToken ct)
+    {
+        var headers = new Dictionary<string, string>(HeadersFor(server, dataKey, context.Email), StringComparer.OrdinalIgnoreCase);
+        if (server.PersonAuth is null || people is null)
+        {
+            return headers;
+        }
+        var token = await people.TokenAsync(server, context.User.Id, ct)
+            ?? throw new McpException($"connect your {server.Name} account first, in Your account → Connections");
+        var manifest = Plugins.PluginManifest.Parse(server.Manifest!);
+        headers[manifest.Header] = Plugins.PluginManifest.Fill(manifest.Value, new Dictionary<string, string> { ["token"] = token });
+        return headers;
+    }
+
+    /// <summary>What every request to an admin's server carries: its key header (decrypted), and the person's email where it asks for it.</summary>
+    public static IReadOnlyDictionary<string, string> HeadersFor(McpServer server, string? dataKey, string? email)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (server.HeaderName is { Length: > 0 } name && server.HeaderValueEncrypted is { } stored && SettingsCrypto.Decrypt(stored, dataKey) is { } value)
@@ -55,7 +89,7 @@ public sealed partial class McpServerTool(McpServer server, HttpClient http, str
 
     public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
     {
-        var session = await Mcp.ConnectAsync(http, new Uri(server.Url), Headers(context.Email), server.Name, ct, CallTimeout);
+        var session = await Mcp.ConnectAsync(http, new Uri(server.Url), await PersonHeadersAsync(server, dataKey, People, context, ct), server.Name, ct, CallTimeout);
         var prefix = Slug + "__";
         var functions = Mcp.ToOpenAiTools(await session.ToolsAsync(ct), name => prefix + name);
         return new LocalRun(functions, session.Instructions, async (function, args, token) =>
@@ -63,7 +97,11 @@ public sealed partial class McpServerTool(McpServer server, HttpClient http, str
             var (text, isError) = await session.CallAsync(function.StartsWith(prefix, StringComparison.Ordinal) ? function[prefix.Length..] : function, args,
                 context.Progress is { } p ? p.ReportAsync : null, token);
             return new ToolResult(text, isError);
-        });
+        })
+        {
+            // A plugin's writes ask first, by their own names.
+            AsksFirst = function => function.StartsWith(prefix, StringComparison.Ordinal) && server.Writes.Contains(function[prefix.Length..]),
+        };
     }
 
     [GeneratedRegex("[^a-z0-9]+")]
@@ -79,7 +117,7 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 /// </summary>
 public sealed class ToolRegistry(
     AppDbContext db, ArgusTool argus, ImageTool image, VideoTool video, SpeechTool speech, CalculatorTool calculator, TimeTool time, FilesTool files, PythonTool python, WebTool web, AskTool ask, AgentsTool agents,
-    IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat)
+    IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people)
 {
     public const string McpClient = "mcp";
 
@@ -96,7 +134,9 @@ public sealed class ToolRegistry(
         return all;
     }
 
-    public McpServerTool Server(McpServer server) => new(server, http.CreateClient(McpClient), auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout);
+    public IServerTool Server(McpServer server) => server.Spec is { Length: > 0 }
+        ? new OpenApiTool(server, http.CreateClient(McpClient), auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people }
+        : new McpServerTool(server, http.CreateClient(McpClient), auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people };
 
     /// <summary>The tools this person may use now: on, allowed to them, and available.</summary>
     public async Task<IReadOnlyList<ToolChoice>> ForAsync(Membership member, CancellationToken ct = default) =>

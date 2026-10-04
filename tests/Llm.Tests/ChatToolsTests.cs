@@ -83,6 +83,28 @@ public sealed class ChatToolsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Sub_agents_start_with_the_tools_the_chat_loaded_and_load_the_rest_themselves()
+    {
+        await using var f = NewApp(settings: new() { ["Chat:ToolTextChars"] = "200" });
+        var (b, _, email) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { tools = new[] { "agents", "calculator", "time" } });
+        var parts = new
+        {
+            tasks = new[] { new { title = "Sum", instructions = """Work it out: [call calculate {"expression":"2+2"}]""" }, new { title = "Colour", instructions = "Name a colour." } },
+        };
+        var events = await SendAsync(b, id, $"Split it: [call delegate {System.Text.Json.JsonSerializer.Serialize(parts)}]");
+
+        var done = JsonDocument.Parse(Event(events, "tool_result").GetProperty("text").GetString()!).RootElement.EnumerateArray().First();
+        Assert.Equal("Found it.", done.GetProperty("result").GetString());
+        var agent = app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email)
+            .Select(r => r.Body).First(r => r["messages"]![0]!["content"]!.GetValue<string>().Contains("You are a sub-agent", StringComparison.Ordinal));
+        // The chat had loaded only delegate, which sub-agents never get: they start with load_tools and the list.
+        Assert.Equal([OnDemandTools.Function], agent["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
+        Assert.Contains("[calculator]", agent["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.DoesNotContain("[agents]", agent["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task The_calculator_and_the_clock_answer_for_the_model()
     {
         var (b, _, _) = await PersonAsync(app.Factory);
@@ -291,6 +313,66 @@ public sealed class ChatToolsTests(AppFixture app)
         var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().Select(e => e.GetProperty("action").GetString()).ToList();
         Assert.Contains("tool.update", audit);
         await StatusAssert.Is(HttpStatusCode.Forbidden, await b.GetAsync("/api/admin/tools"));
+    }
+
+    [Fact]
+    public void An_openapi_document_becomes_functions_with_its_parameters_body_and_references()
+    {
+        var ops = OpenApi.Operations(OpenApi.Parse(FakeMcp.PetsSpec), "pets__");
+        Assert.Equal(["pets__list_pets", "pets__add_pet", "pets__delete_pets_pet_id"], ops.Select(o => o.Function));
+        Assert.Equal("https://pets.test/v1", OpenApi.ServerUrl(OpenApi.Parse(FakeMcp.PetsSpec), null));
+        var list = ops[0].Definition["function"]!;
+        Assert.Equal("Lists the pets (GET /pets)", list["description"]!.GetValue<string>());
+        Assert.Equal("integer", list["parameters"]!["properties"]!["limit"]!["type"]!.GetValue<string>());
+        Assert.Empty(list["parameters"]!["required"]!.AsArray());
+        Assert.False(ops[0].Writes);
+        // The body's schema with its reference in place, its examples left out; required as the document says.
+        var add = ops[1].Definition["function"]!["parameters"]!;
+        Assert.Equal("string", add["properties"]!["body"]!["properties"]!["name"]!["type"]!.GetValue<string>());
+        Assert.Null(add["properties"]!["body"]!["properties"]!["name"]!["example"]);
+        Assert.Equal(["body"], add["required"]!.AsArray().Select(r => r!.GetValue<string>()));
+        Assert.True(ops[1].Writes);
+        // A path's own parameters apply to its operations.
+        Assert.Equal(["petId"], ops[2].Definition["function"]!["parameters"]!["required"]!.AsArray().Select(r => r!.GetValue<string>()));
+        Assert.Throws<OpenApi.SpecException>(() => OpenApi.Operations(OpenApi.Parse("""{"swagger":"2.0","paths":{}}"""), ""));
+        Assert.Throws<OpenApi.SpecException>(() => OpenApi.Parse("{ not json"));
+    }
+
+    [Fact]
+    public async Task An_api_added_by_its_document_is_called_from_the_chat_and_its_writes_ask_first()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/tools/servers", new { name = "Bad", spec = "openapi: 3.0.0\npaths: {}" }));
+        var test = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test", new { name = "Pets", spec = FakeMcp.PetsSpec }));
+        Assert.True(test.GetProperty("ok").GetBoolean());
+        Assert.Equal("https://pets.test/v1", test.GetProperty("url").GetString());
+        Assert.Equal([false, true, true], test.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("asksFirst").GetBoolean()));
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers", new { name = "Pets", spec = FakeMcp.PetsSpec, headerName = "X-Api-Key", headerValue = "pets-key" }));
+        var toolId = made.GetProperty("toolId").GetString()!;
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/tools"))).EnumerateArray().Single(t => t.GetProperty("id").GetString() == toolId);
+        Assert.Equal("openapi", row.GetProperty("server").GetProperty("kind").GetString());
+        Assert.Equal("https://pets.test/v1", row.GetProperty("server").GetProperty("url").GetString());
+
+        var (b, _, _) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { useArgus = false, tools = new[] { toolId } });
+        // A read runs at once, with the key and the arguments in place.
+        var listed = Event(await SendAsync(b, id, """Which pets? [call pets__list_pets {"limit":1}]"""), "tool_result");
+        Assert.Equal("HTTP 200 OK\n[{\"name\":\"Rex\"}]", listed.GetProperty("text").GetString());
+        Assert.Contains(app.Mcp.PetCalls, c => c is { Method: "GET", PathAndQuery: "/v1/pets?limit=1", Key: "pets-key" });
+
+        // A write waits for the person.
+        var adding = SendAsync(b, id, """Add one: [call pets__add_pet {"body":{"name":"Kit"}}]""");
+        for (var i = 0; (await b.PostAsync($"/api/chat/conversations/{id}/tool-calls/call_1", new { allow = true })).StatusCode != HttpStatusCode.NoContent; i++)
+        {
+            Assert.True(i < 100, "the write never waited to be allowed");
+            await Task.Delay(100);
+        }
+        var events = await adding;
+        Assert.Equal(toolId, Event(events, "approval").GetProperty("tool").GetString());
+        Assert.StartsWith("HTTP 201", Event(events, "tool_result").GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Kit", app.Mcp.Pets);
+        Assert.Contains(app.Mcp.PetCalls, c => c is { Method: "POST", Body: """{"name":"Kit"}""" });
     }
 
     [Fact]

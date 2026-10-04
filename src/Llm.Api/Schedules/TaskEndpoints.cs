@@ -20,8 +20,11 @@ namespace Llm.Api.Schedules;
 /// <param name="TimeZone">IANA, e.g. Europe/Berlin; the schedule is its wall clock.</param>
 /// <param name="Tools">The chat tools its runs use; null: those on in new chats.</param>
 /// <param name="Webhook">A URL to post the answer to; "": none; null: unchanged.</param>
+/// <param name="Trigger">"schedule" (Cron), "webhook" (any system posting to its address) or "gitlab" (GitLab's events, <paramref name="Events"/>).</param>
+/// <param name="ReplyInGitLab">Its answer goes back to GitLab as a comment (by the GitLab bot).</param>
 public sealed record TaskRequest(string? Name = null, string? Prompt = null, string? Cron = null, string? TimeZone = null, string? Model = null, string? Thinking = null,
-    List<string>? Tools = null, bool? SameChat = null, bool? Email = null, string? Webhook = null, bool? Enabled = null);
+    List<string>? Tools = null, bool? SameChat = null, bool? Email = null, string? Webhook = null, bool? Enabled = null,
+    string? Trigger = null, List<string>? Events = null, bool? ReplyInGitLab = null);
 
 /// <summary>Scheduled tasks: questions asked on a schedule, as their owner. Each person sees and changes only their own.</summary>
 public static class TaskEndpoints
@@ -34,6 +37,9 @@ public static class TaskEndpoints
         g.MapPatch("/{id:guid}", UpdateAsync);
         g.MapDelete("/{id:guid}", RemoveAsync);
         g.MapPost("/{id:guid}/run", RunAsync);
+        g.MapPost("/{id:guid}/secret", SecretAsync);
+        // Events that run a task: anyone may post, only with its secret.
+        app.MapPost("/api/hooks/{id:guid}", HookAsync).AllowAnonymous().DisableAntiforgery();
         g.MapGet("/{id:guid}/runs", RunsAsync);
 
         var n = app.MapGroup("/api/notifications").RequireAuthorization();
@@ -47,7 +53,7 @@ public static class TaskEndpoints
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
     private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Scheduler scheduler, Mailer mailer,
-        TimeProvider clock, IOptionsMonitor<ScheduleOptions> options, CancellationToken ct)
+        TimeProvider clock, IOptionsMonitor<ScheduleOptions> options, IOptions<AuthOptions> auth, GitLabBot bot, CancellationToken ct)
     {
         var me = await Me(p, users);
         var tasks = await db.ScheduledTasks.AsNoTracking().Where(t => t.UserId == me.Id).OrderBy(t => t.CreatedAt).ToListAsync(ct);
@@ -59,17 +65,30 @@ public static class TaskEndpoints
         {
             enabled = o.Enabled, perPerson = o.PerPerson, minIntervalMinutes = (int)o.MinInterval.TotalMinutes, webhookHosts = o.WebhookHosts,
             email = mailer.Configured ? me.Email : null,
-            tasks = tasks.Select(t => View(t, lastRuns.GetValueOrDefault(t.Id), scheduler.IsRunning(t.Id), clock.GetUtcNow())),
+            tasks = tasks.Select(t => View(t, lastRuns.GetValueOrDefault(t.Id), scheduler.IsRunning(t.Id), clock.GetUtcNow(), auth.Value.Origin)),
+            gitlabBot = bot.Ready,
         });
     }
 
-    private static object View(ScheduledTask t, ScheduledRun? last, bool running, DateTimeOffset now) => new
+    private static object View(ScheduledTask t, ScheduledRun? last, bool running, DateTimeOffset now, string origin, string? secret = null) => new
     {
         t.Id, t.Name, t.Prompt, t.Cron, t.TimeZone, t.Model, t.Thinking, t.Tools, t.SameChat, t.Email, webhookSet = t.WebhookEncrypted is not null,
         t.Enabled, t.NextRunAt, t.LastRunAt, running,
-        nextRuns = t.Enabled && Cron.Parse(t.Cron).Cron is { } cron ? cron.NextRuns(now, Hours.Zone(t.TimeZone).Zone, 3) : [],
+        nextRuns = t.Enabled && t.Trigger == Triggers.Schedule && Cron.Parse(t.Cron).Cron is { } cron ? cron.NextRuns(now, Hours.Zone(t.TimeZone).Zone, 3) : [],
         lastRun = last is null ? null : RunView(last),
+        t.Trigger, t.Events, t.ReplyInGitLab,
+        hookUrl = t.Trigger == Triggers.Schedule ? null : $"{origin}/api/hooks/{t.Id}",
+        // Only in the answer that made it.
+        hookToken = secret,
     };
+
+    /// <summary>A new secret for a task that events run (the old one stops working); only its hash is kept.</summary>
+    private static string NewSecret(ScheduledTask task)
+    {
+        var secret = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
+        task.TriggerSecretHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(secret)));
+        return secret;
+    }
 
     private static object RunView(ScheduledRun r) => new { r.Id, r.StartedAt, r.FinishedAt, r.Status, r.ConversationId, r.Error, r.Manual, r.Delivery };
 
@@ -90,10 +109,11 @@ public static class TaskEndpoints
         {
             return problem;
         }
+        var secret = task.Trigger != Triggers.Schedule ? NewSecret(task) : null;
         db.ScheduledTasks.Add(task);
         await db.SaveChangesAsync(ct);
-        await audit.WriteAsync("task.add", task.Name, detail: $"{task.Cron} ({task.TimeZone})");
-        return Results.Created($"/api/tasks/{task.Id}", View(task, null, false, context.Clock.GetUtcNow()));
+        await audit.WriteAsync("task.add", task.Name, detail: task.Trigger == Triggers.Schedule ? $"{task.Cron} ({task.TimeZone})" : $"on {task.Trigger} events");
+        return Results.Created($"/api/tasks/{task.Id}", View(task, null, false, context.Clock.GetUtcNow(), context.Auth.Value.Origin, secret));
     }
 
     private static async Task<IResult> UpdateAsync(Guid id, TaskRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, TaskContext context,
@@ -108,9 +128,10 @@ public static class TaskEndpoints
         {
             return problem;
         }
+        var secret = task.Trigger != Triggers.Schedule && task.TriggerSecretHash is null ? NewSecret(task) : null;
         await db.SaveChangesAsync(ct);
-        await audit.WriteAsync("task.update", task.Name, detail: $"{(task.Enabled ? "" : "off, ")}{task.Cron} ({task.TimeZone})");
-        return Results.Ok(View(task, null, scheduler.IsRunning(task.Id), context.Clock.GetUtcNow()));
+        await audit.WriteAsync("task.update", task.Name, detail: $"{(task.Enabled ? "" : "off, ")}{(task.Trigger == Triggers.Schedule ? $"{task.Cron} ({task.TimeZone})" : $"on {task.Trigger} events")}");
+        return Results.Ok(View(task, null, scheduler.IsRunning(task.Id), context.Clock.GetUtcNow(), context.Auth.Value.Origin, secret));
     }
 
     private static async Task<IResult> RemoveAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Audit audit, CancellationToken ct)
@@ -158,6 +179,66 @@ public static class TaskEndpoints
     public sealed record TaskContext(TimeProvider Clock, IOptionsMonitor<ScheduleOptions> Options, Mailer Mailer, Webhooks Webhooks, ModelPolicy Policy,
         ChatModels Models, ToolRegistry Registry, AccessService Access, IOptionsMonitor<Chat.ChatOptions> Chat, IOptions<AuthOptions> Auth);
 
+    private static async Task<IResult> SecretAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Audit audit, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (await db.ScheduledTasks.SingleOrDefaultAsync(t => t.Id == id && t.UserId == me.Id && t.Trigger != Triggers.Schedule, ct) is not { } task)
+        {
+            return Results.NotFound();
+        }
+        var secret = NewSecret(task);
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync("task.secret", task.Name);
+        return Results.Ok(new { hookToken = secret });
+    }
+
+    /// <summary>
+    /// An event for a task: GitLab's (its secret in X-Gitlab-Token) or any system's JSON (in X-Hook-Secret). An event the
+    /// task does not take is acknowledged and dropped, as GitLab turns off a webhook that keeps failing.
+    /// </summary>
+    private static async Task<IResult> HookAsync(Guid id, HttpRequest request, AppDbContext db, Scheduler scheduler, GitLabBot bot, IOptionsMonitor<ScheduleOptions> options,
+        CancellationToken ct)
+    {
+        var task = await db.ScheduledTasks.AsNoTracking().SingleOrDefaultAsync(t => t.Id == id && t.Trigger != Triggers.Schedule, ct);
+        var supplied = request.Headers["X-Gitlab-Token"].FirstOrDefault() ?? request.Headers["X-Hook-Secret"].FirstOrDefault() ?? "";
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(supplied)));
+        if (task?.TriggerSecretHash is not { } expected || supplied.Length == 0
+            || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.ASCII.GetBytes(hash), System.Text.Encoding.ASCII.GetBytes(expected)))
+        {
+            return Results.Json(new { error = "unknown task or wrong secret" }, statusCode: 401);
+        }
+        if (!task.Enabled || !options.CurrentValue.Enabled)
+        {
+            return Results.Ok(new { status = "ignored", reason = "the task is off" });
+        }
+        using var reader = new StreamReader(request.Body);
+        var body = await reader.ReadToEndAsync(ct);
+        if (body.Length > 1_000_000)
+        {
+            return Results.Json(new { error = "the event is larger than 1 MB" }, statusCode: 413);
+        }
+        TriggerEvent? trigger;
+        if (task.Trigger == Triggers.GitLab)
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(body.Length == 0 ? "{}" : body) is not System.Text.Json.Nodes.JsonObject e)
+            {
+                return Results.BadRequest(new { error = "the event is not a JSON object" });
+            }
+            trigger = await Triggers.FromGitLabAsync(e, task.Events, bot, ct);
+        }
+        else
+        {
+            trigger = Triggers.FromJson(body);
+        }
+        if (trigger is null)
+        {
+            return Results.Ok(new { status = "ignored", reason = "not an event this task takes" });
+        }
+        return scheduler.Start(task.Id, manual: false, trigger)
+            ? Results.Accepted(value: new { status = "started" })
+            : Results.Ok(new { status = "busy", reason = "the run before is still answering" });
+    }
+
     private static async Task<IResult?> ApplyAsync(ScheduledTask task, TaskRequest body, AppUser me, TaskContext x, bool creating, CancellationToken ct)
     {
         var name = body.Name?.Trim() ?? task.Name;
@@ -176,20 +257,34 @@ public static class TaskEndpoints
         {
             return AuthEndpoints.Problem(400, "time_zone", $"\"{zoneName}\" is not a time zone: use an IANA name such as Europe/Berlin.");
         }
-        var (cron, cronProblem) = Cron.Parse(body.Cron ?? task.Cron);
-        if (cron is null)
+        var trigger = body.Trigger?.Trim() ?? task.Trigger;
+        if (!Triggers.Kinds.Contains(trigger))
         {
-            return AuthEndpoints.Problem(400, "cron", cronProblem!);
+            return AuthEndpoints.Problem(400, "trigger", "A task runs on a schedule, on a webhook, or on GitLab's events.");
+        }
+        var events = body.Events is { } given ? given.Distinct().ToList() : task.Events;
+        if (trigger == Triggers.GitLab && (events.Count == 0 || events.Any(e => !Triggers.GitLabEvents.Contains(e))))
+        {
+            return AuthEndpoints.Problem(400, "events", "Choose the GitLab events that run it: merge_request, pipeline_failed, issue.");
         }
         var now = x.Clock.GetUtcNow();
-        if (cron.Next(now, zone) is null)
+        Cron? cron = null;
+        if (trigger == Triggers.Schedule)
         {
-            return AuthEndpoints.Problem(400, "cron", "That schedule never comes round (31 February?).");
-        }
-        var min = x.Options.CurrentValue.MinInterval;
-        if (cron.ShortestGap(now, zone) is { } gap && gap < min)
-        {
-            return AuthEndpoints.Problem(400, "cron", $"It would run every {Describe(gap)}: at most once every {Describe(min)} here.");
+            (cron, var cronProblem) = Cron.Parse(body.Cron ?? task.Cron);
+            if (cron is null)
+            {
+                return AuthEndpoints.Problem(400, "cron", cronProblem!);
+            }
+            if (cron.Next(now, zone) is null)
+            {
+                return AuthEndpoints.Problem(400, "cron", "That schedule never comes round (31 February?).");
+            }
+            var min = x.Options.CurrentValue.MinInterval;
+            if (cron.ShortestGap(now, zone) is { } gap && gap < min)
+            {
+                return AuthEndpoints.Problem(400, "cron", $"It would run every {Describe(gap)}: at most once every {Describe(min)} here.");
+            }
         }
         var model = body.Model is null ? task.Model : body.Model.Trim() is { Length: > 0 } m ? m : null;
         if (model is not null)
@@ -251,7 +346,14 @@ public static class TaskEndpoints
         }
         task.Name = name;
         task.Prompt = prompt;
-        task.Cron = cron.Expression;
+        task.Cron = cron?.Expression ?? "";
+        task.Trigger = trigger;
+        task.Events = trigger == Triggers.GitLab ? events : [];
+        task.ReplyInGitLab = trigger == Triggers.GitLab && (body.ReplyInGitLab ?? task.ReplyInGitLab);
+        if (trigger == Triggers.Schedule)
+        {
+            task.TriggerSecretHash = null;
+        }
         task.TimeZone = zone.Id;
         task.Model = model;
         task.Thinking = thinking;
@@ -259,7 +361,7 @@ public static class TaskEndpoints
         task.SameChat = sameChat;
         task.Email = email;
         task.Enabled = body.Enabled ?? (creating || task.Enabled);
-        task.NextRunAt = task.Enabled ? cron.Next(now, zone) : null;
+        task.NextRunAt = task.Enabled ? cron?.Next(now, zone) : null;
         task.UpdatedAt = now;
         return null;
     }

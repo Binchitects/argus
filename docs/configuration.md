@@ -31,6 +31,12 @@ Three places, each with one job:
 | `BACKUP_DIR`, `BACKUP_COPY_DIR`, `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`, `BACKUP_TIME` | optional, for `scripts/backup.sh`: where backups go (`./backups`), a verified second copy on another disk, how many to keep (14), whether Loki and Prometheus data go too (1), when the daily timer runs (03:30) |
 | `HTTP_PORT`, `HTTPS_PORT` | optional: other ports than 80 and 443 (rootless Podman) |
 | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | optional: power caps, kept applied |
+| `XDG_RUNTIME_DIR` | Podman only, from your shell (not `.env`): where Promtail finds the Podman socket |
+
+Everything else is set in the app, not here: Admin → Settings (the company
+directory, mail, chat limits, the plugin catalog, the GitLab bot for tasks run
+by GitLab's events, …), Admin → Models, Admin → Tools and Admin → Plugins. How
+each v3 option maps: [deployment.md](deployment.md#where-the-v3-env-options-went).
 
 ## Files under `deploy/config/`
 

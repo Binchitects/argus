@@ -13,8 +13,10 @@ public sealed record ToolSettingRequest(bool Enabled, Audience Audience, Guid[]?
 
 /// <summary>An MCP server. HeaderValue: null keeps the stored one, "" removes it.</summary>
 /// <param name="CallTimeoutMinutes">Longest one call may take; 0: the chat's limit (Chat:ToolCallTimeout); null: unchanged.</param>
+/// <param name="Spec">An API's OpenAPI document (JSON or YAML): it is then an API, not an MCP server; "" makes it an MCP server again; null: unchanged.</param>
+/// <param name="SpecUrl">Where to fetch the OpenAPI document from, now (instead of <paramref name="Spec"/>).</param>
 public sealed record McpServerRequest(string? Name = null, string? Description = null, string? Url = null, string? HeaderName = null, string? HeaderValue = null, string? EmailHeader = null,
-    int? CallTimeoutMinutes = null);
+    int? CallTimeoutMinutes = null, string? Spec = null, string? SpecUrl = null);
 
 /// <summary>Admin → Tools: which tools exist, for whom, and the MCP servers that add more.</summary>
 public static class ToolEndpoints
@@ -41,10 +43,12 @@ public static class ToolEndpoints
                 t.Setting.Enabled, t.Setting.Audience, t.Setting.OnByDefault, t.Setting.AskFirst,
                 groups = t.Setting.Groups.Where(groups.ContainsKey).Select(x => new { id = x, name = groups[x] }),
             },
-            server = t.Tool is McpServerTool m ? new
+            server = t.Tool is IServerTool m ? new
             {
                 m.Server.Id, m.Server.Name, m.Server.Description, m.Server.Url, m.Server.HeaderName, headerSet = m.Server.HeaderValueEncrypted is not null,
-                m.Server.EmailHeader, m.Server.CallTimeoutMinutes, prefix = m.Slug + "__",
+                m.Server.EmailHeader, m.Server.CallTimeoutMinutes, prefix = m.Slug + "__", kind = m is OpenApiTool ? "openapi" : "mcp",
+                // A long document stays out of the list (an edit keeps it unless a new one is given).
+                spec = m.Server.Spec is { Length: <= 200_000 } spec ? spec : null,
             } : null,
         }));
     }
@@ -82,26 +86,26 @@ public static class ToolEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> AddServerAsync(McpServerRequest body, AppDbContext db, Audit audit, IOptions<AuthOptions> auth, CancellationToken ct)
+    private static async Task<IResult> AddServerAsync(McpServerRequest body, AppDbContext db, Audit audit, IOptions<AuthOptions> auth, IHttpClientFactory http, CancellationToken ct)
     {
         var server = new McpServer { Name = "", Url = "" };
-        if (await ApplyAsync(server, body, db, auth.Value.DataKey, creating: true, ct) is { } problem)
+        if (await ApplyAsync(server, body, db, auth.Value.DataKey, http, creating: true, ct) is { } problem)
         {
             return problem;
         }
         db.McpServers.Add(server);
         await db.SaveChangesAsync(ct);
-        await audit.WriteAsync("tool.server_add", server.Name, detail: server.Url);
+        await audit.WriteAsync("tool.server_add", server.Name, detail: server.Spec is null ? server.Url : $"API {server.Url}");
         return Results.Created($"/api/admin/tools/servers/{server.Id}", new { server.Id, toolId = McpServerTool.Prefix + server.Id });
     }
 
-    private static async Task<IResult> UpdateServerAsync(Guid id, McpServerRequest body, AppDbContext db, Audit audit, IOptions<AuthOptions> auth, CancellationToken ct)
+    private static async Task<IResult> UpdateServerAsync(Guid id, McpServerRequest body, AppDbContext db, Audit audit, IOptions<AuthOptions> auth, IHttpClientFactory http, CancellationToken ct)
     {
         if (await db.McpServers.SingleOrDefaultAsync(s => s.Id == id, ct) is not { } server)
         {
             return Results.NotFound();
         }
-        if (await ApplyAsync(server, body, db, auth.Value.DataKey, creating: false, ct) is { } problem)
+        if (await ApplyAsync(server, body, db, auth.Value.DataKey, http, creating: false, ct) is { } problem)
         {
             return problem;
         }
@@ -124,9 +128,25 @@ public static class ToolEndpoints
     }
 
     /// <summary>Connects with these details (or a saved server's secret) and lists its tools, before anyone relies on it.</summary>
-    private static async Task<IResult> TestAsync(McpServerRequest body, Guid? id, AppDbContext db, ToolRegistry registry, IOptions<AuthOptions> auth, CancellationToken ct)
+    private static async Task<IResult> TestAsync(McpServerRequest body, Guid? id, AppDbContext db, ToolRegistry registry, IOptions<AuthOptions> auth, IHttpClientFactory http,
+        CancellationToken ct)
     {
         var saved = id is { } sid ? await db.McpServers.AsNoTracking().SingleOrDefaultAsync(s => s.Id == sid, ct) : null;
+        // An API: its document read, its operations listed (what changes something marked), nothing called.
+        if (body.Spec is { Length: > 0 } || body.SpecUrl is { Length: > 0 } || (body.Spec is null && saved?.Spec is not null))
+        {
+            var api = new McpServer { Name = string.IsNullOrWhiteSpace(body.Name) ? saved?.Name ?? "The API" : body.Name.Trim(), Url = (body.Url ?? saved?.Url ?? "").Trim() };
+            if (await SpecAsync(api, body, saved?.Spec, http, ct) is { } bad)
+            {
+                return Results.Ok(new { ok = false, error = bad });
+            }
+            var ops = ((OpenApiTool)registry.Server(api)).Operations();
+            return Results.Ok(new
+            {
+                ok = true, url = api.Url,
+                tools = ops.Select(o => new { name = o.Function, description = o.Definition["function"]!["description"]!.GetValue<string>(), asksFirst = o.Writes }),
+            });
+        }
         var server = new McpServer
         {
             Name = string.IsNullOrWhiteSpace(body.Name) ? saved?.Name ?? "The server" : body.Name.Trim(),
@@ -143,7 +163,7 @@ public static class ToolEndpoints
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(20));
-            var tools = await registry.Server(server).ListAsync(timeout.Token);
+            var tools = await ((McpServerTool)registry.Server(server)).ListAsync(timeout.Token);
             return Results.Ok(new
             {
                 ok = true,
@@ -159,8 +179,77 @@ public static class ToolEndpoints
     private static bool ValidUrl(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttps || u.Scheme == Uri.UriSchemeHttp);
 
-    private static async Task<IResult?> ApplyAsync(McpServer server, McpServerRequest body, AppDbContext db, string? dataKey, bool creating, CancellationToken ct)
+    /// <summary>
+    /// Puts the API's document in place (given, fetched from SpecUrl, or kept), checks it lists at
+    /// least one operation, and takes the address from it when none is given. Why not, or null.
+    /// </summary>
+    private static async Task<string?> SpecAsync(McpServer api, McpServerRequest body, string? kept, IHttpClientFactory http, CancellationToken ct)
     {
+        var text = body.Spec is { Length: > 0 } given ? given : kept;
+        Uri? from = null;
+        if (body.SpecUrl is { Length: > 0 } specUrl)
+        {
+            if (!Uri.TryCreate(specUrl.Trim(), UriKind.Absolute, out from) || from.Scheme is not ("http" or "https"))
+            {
+                return "The document's address must be an http(s) URL.";
+            }
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(TimeSpan.FromSeconds(20));
+                text = await http.CreateClient(ToolRegistry.McpClient).GetStringAsync(from, timeout.Token);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+            {
+                return $"The document could not be fetched from {from}: {(ex is OperationCanceledException ? "no answer within 20 seconds" : ex.Message)}";
+            }
+        }
+        if (string.IsNullOrWhiteSpace(text) || text.Length > MaxSpecChars)
+        {
+            return $"Give the API's OpenAPI document (JSON or YAML, up to {MaxSpecChars / 1_000_000} MB), or the address to fetch it from.";
+        }
+        try
+        {
+            var doc = OpenApi.Parse(text);
+            if (OpenApi.Operations(doc, "").Count == 0)
+            {
+                return "The document lists no operations (paths).";
+            }
+            api.Spec = text;
+            if (string.IsNullOrWhiteSpace(body.Url) && string.IsNullOrWhiteSpace(api.Url))
+            {
+                api.Url = OpenApi.ServerUrl(doc, from) ?? "";
+            }
+            return null;
+        }
+        catch (OpenApi.SpecException ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    private const int MaxSpecChars = 5_000_000;
+
+    private static async Task<IResult?> ApplyAsync(McpServer server, McpServerRequest body, AppDbContext db, string? dataKey, IHttpClientFactory http, bool creating, CancellationToken ct)
+    {
+        if (body.Spec == "")
+        {
+            server.Spec = null;
+        }
+        else if (body.Spec is { Length: > 0 } || body.SpecUrl is { Length: > 0 })
+        {
+            var address = server.Url;
+            server.Url = body.Url?.Trim() ?? "";
+            if (await SpecAsync(server, body, null, http, ct) is { } bad)
+            {
+                server.Url = address;
+                return AuthEndpoints.Problem(400, "spec", bad);
+            }
+            if (string.IsNullOrWhiteSpace(body.Url))
+            {
+                body = body with { Url = server.Url.Length > 0 ? server.Url : address };
+            }
+        }
         var name = body.Name?.Trim() ?? server.Name;
         if (name.Length is 0 or > 100)
         {
@@ -173,7 +262,9 @@ public static class ToolEndpoints
         var url = body.Url?.Trim() ?? server.Url;
         if (!ValidUrl(url) || url.Length > 2000)
         {
-            return AuthEndpoints.Problem(400, "url", "The address must be an http(s) URL, e.g. https://tools.example.com/mcp.");
+            return AuthEndpoints.Problem(400, "url", server.Spec is null
+                ? "The address must be an http(s) URL, e.g. https://tools.example.com/mcp."
+                : "The API's address must be an http(s) URL, e.g. https://api.example.com/v1 (its document names none).");
         }
         if (body.CallTimeoutMinutes is < 0 or > 1440)
         {

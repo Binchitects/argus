@@ -134,4 +134,47 @@ public sealed class PromptCacheTests
         Assert.Equal(["find_symbol", "read_file", "run_python"], next.Request().Select(f => f!["function"]!["name"]!.GetValue<string>()));
         Assert.DoesNotContain("Tools to load", next.Notes(), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void A_huge_tool_result_is_read_from_its_start_and_kept_whole_as_a_file()
+    {
+        var text = string.Join("\n", Enumerable.Range(1, 3000).Select(i => $"line {i}: " + new string('x', 20)));
+        Assert.Null(ChatService.Oversized("search_code", "short", 24_000, true, Guid.NewGuid()));
+        Assert.Null(ChatService.Oversized("search_code", text, 0, true, Guid.NewGuid()));
+
+        var (said, file) = ChatService.Oversized("search_code", text, 24_000, true, Guid.NewGuid())!.Value;
+        Assert.Equal(text, file.Text);
+        Assert.StartsWith("search_code-result-", file.FileName, StringComparison.Ordinal);
+        Assert.True(said.Length < 24_500);
+        // Cut at a line's end, and the next line is where read_file reads on.
+        var lastRead = said[..said.IndexOf("\n\n[The result", StringComparison.Ordinal)].Split('\n')[^1];
+        var next = int.Parse(lastRead["line ".Length..lastRead.IndexOf(':')], System.Globalization.CultureInfo.InvariantCulture) + 1;
+        Assert.Contains($"read_file reads on from line {next},", said, StringComparison.Ordinal);
+        Assert.Contains(file.FileName, said, StringComparison.Ordinal);
+
+        Assert.Contains("which the person can open", ChatService.Oversized("search_code", text, 24_000, false, Guid.NewGuid())!.Value.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Passages_about_a_question_are_its_best_blocks_in_order_with_their_headings()
+    {
+        var text = "# Install\n\nRun the installer on each server.\n\n# Licensing\n\nThe license key renews yearly.\n\n# Upgrade\n\nUpgrade servers one at a time.";
+        var picked = Passages.Pick(text, "license renewal", 1000);
+        Assert.Equal(["# Licensing", "The license key renews yearly."], picked.Select(p => p.Text));
+        Assert.InRange(picked[1].Start, text.IndexOf("The license", StringComparison.Ordinal) - 2, text.IndexOf("The license", StringComparison.Ordinal));
+        Assert.Empty(Passages.Pick(text, "the and", 1000));
+        Assert.Empty(Passages.Pick(text, "kubernetes", 1000));
+    }
+
+    [Fact]
+    public void A_key_the_model_wrote_twice_keeps_its_last_value_at_every_depth()
+    {
+        var args = ChatService.Arguments("""{"url":"https://x.test","start":0,"start":8000,"body":{"a":1,"a":2},"list":[{"k":1,"k":3}]}""");
+        Assert.Equal(8000, args["start"]!.GetValue<int>());
+        Assert.Equal(2, args["body"]!["a"]!.GetValue<int>());
+        Assert.Equal(3, args["list"]![0]!["k"]!.GetValue<int>());
+        Assert.Empty(ChatService.Arguments(""));
+        Assert.Empty(ChatService.Arguments("[1,2]"));
+        Assert.ThrowsAny<System.Text.Json.JsonException>(() => ChatService.Arguments("{not json"));
+    }
 }

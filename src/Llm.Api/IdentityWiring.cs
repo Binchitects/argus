@@ -267,10 +267,18 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.SandboxClient>();
         services.AddScoped<Chat.Tools.PythonTool>();
         services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
+        services.Configure<Plugins.PluginOptions>(config.GetSection("Plugins"));
+        services.Configure<Schedules.GitLabOptions>(config.GetSection("GitLab"));
+        services.AddSingleton<Schedules.GitLabBot>();
+        services.AddHttpClient(Schedules.GitLabBot.Client, c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.AddSingleton<Plugins.PluginCatalog>();
+        services.AddScoped<Plugins.PersonCredentials>();
+        services.AddHttpClient(Plugins.PluginCatalog.Client, c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddSingleton<Chat.Tools.WebResolver>();
         services.AddHttpClient(Chat.Tools.WebFetcher.Client).ConfigurePrimaryHttpMessageHandler(sp => Chat.Tools.WebFetcher.Handler(sp.GetRequiredService<Chat.Tools.WebResolver>()));
         services.AddHttpClient(Chat.Tools.WebFetcher.SearchClient, c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddSingleton<Chat.Tools.WebFetcher>();
+        services.AddSingleton<Chat.Tools.WebPageCache>();
         services.AddScoped<Chat.Tools.WebTool>();
         services.AddScoped<Chat.Tools.ToolRegistry>();
         services.AddSingleton<Chat.Tools.ToolApprovals>();
@@ -372,7 +380,8 @@ public static class IdentityWiring
         app.Use(async (ctx, next) =>
         {
             var m = ctx.Request.Method;
-            if (ctx.Request.Path.StartsWithSegments("/api") && !ctx.Request.Path.StartsWithSegments("/api/authz") &&
+            // Events for tasks (/api/hooks) come from other systems, with no session: their secret is the guard.
+            if (ctx.Request.Path.StartsWithSegments("/api") && !ctx.Request.Path.StartsWithSegments("/api/authz") && !ctx.Request.Path.StartsWithSegments("/api/hooks") &&
                 !(HttpMethods.IsGet(m) || HttpMethods.IsHead(m) || HttpMethods.IsOptions(m)) &&
                 !ctx.Request.Headers.ContainsKey("X-Requested-With"))
             {
@@ -400,6 +409,7 @@ public static class IdentityWiring
         Chat.ChatEndpoints.MapChat(app);
         Chat.ProjectEndpoints.MapProjects(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
+        Plugins.PluginEndpoints.MapPlugins(app);
         Models.ModelEndpoints.MapModels(app);
         Models.ModelHoursEndpoints.MapModelHours(app);
         Models.HuggingFaceEndpoints.MapHuggingFace(app);

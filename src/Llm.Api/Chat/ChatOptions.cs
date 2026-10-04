@@ -11,6 +11,9 @@ public sealed class ChatOptions
     /// <summary>Tool definitions past this many characters go on demand (OnDemandTools); 0: always whole.</summary>
     public int ToolTextChars { get; set; } = 6000;
 
+    /// <summary>A tool result past this many characters: the model reads its start, the whole is a file in the chat; 0: no limit.</summary>
+    public int ToolResultChars { get; set; } = 24_000;
+
     /// <summary>
     /// A chat is compacted (its older messages summarized) before an answer when it
     /// fills more than this share of the model's context, in percent. 0: never; the

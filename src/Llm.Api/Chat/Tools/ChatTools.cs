@@ -60,6 +60,9 @@ public interface IToolRun
     string? Instructions { get; }
 
     Task<ToolResult> CallAsync(string name, JsonObject arguments, CancellationToken ct);
+
+    /// <summary>Whether a call of this function always waits for the person to allow it (an API's writes), whatever the tool's setting.</summary>
+    bool AsksFirst(string name) => false;
 }
 
 /// <summary>A tool the chat can use: built in, or an MCP server an admin added.</summary>
@@ -111,7 +114,9 @@ internal sealed class LocalRun(JsonArray functions, string? instructions, Func<s
 {
     public JsonArray Functions { get; } = functions;
     public string? Instructions { get; } = instructions;
+    public Func<string, bool>? AsksFirst { get; init; }
     public Task<ToolResult> CallAsync(string name, JsonObject arguments, CancellationToken ct) => call(name, arguments, ct);
+    bool IToolRun.AsksFirst(string name) => AsksFirst?.Invoke(name) == true;
 }
 
 /// <summary>Argus: the organisation's code, searched with the person's own GitLab access.</summary>

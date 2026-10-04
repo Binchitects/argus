@@ -49,6 +49,9 @@ public sealed class AppFixture : IAsyncLifetime
     /// <summary>The real dashboard files, found by walking up to the repository.</summary>
     public static string DashboardsPath { get; } = FindDashboards();
 
+    /// <summary>The repository's plugins/ folder: the plugins that come with the app.</summary>
+    public static string PluginsPath { get; } = Path.GetFullPath(Path.Combine(DashboardsPath, "..", "..", "..", "..", "plugins"));
+
     private static string FindDashboards()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
@@ -111,6 +114,7 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Oidc:LangfuseSecret", LangfuseSecret);
             b.UseSetting("Oidc:ApiSecret", ApiSecret);
             b.UseSetting("Dashboards:Path", DashboardsPath);
+            b.UseSetting("Plugins:Directory", PluginsPath);
             b.UseSetting("Dashboards:SqlDatabase", "litellm_test" + _run);
             b.UseSetting("Dashboards:StatementTimeout", "00:00:03");
             // Many apps at once here: the bell's watcher would hold their connections (its checks are called directly).
@@ -145,6 +149,8 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddHttpClient<Llm.Api.Chat.ArgusMcp>().ConfigurePrimaryHttpMessageHandler(() => Argus);
                 s.AddHttpClient<Llm.Api.Chat.GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => Model);
                 s.AddHttpClient(Llm.Api.Chat.Tools.ToolRegistry.McpClient).ConfigurePrimaryHttpMessageHandler(() => Mcp);
+                s.AddHttpClient(Llm.Api.Plugins.PluginCatalog.Client).ConfigurePrimaryHttpMessageHandler(() => Mcp);
+                s.AddHttpClient(Llm.Api.Schedules.GitLabBot.Client).ConfigurePrimaryHttpMessageHandler(() => Mcp);
                 s.AddHttpClient<Llm.Api.Models.EngineClient>().ConfigurePrimaryHttpMessageHandler(() => Engine);
                 s.AddHttpClient(Llm.Api.Models.RemoteServerClient.Client).ConfigurePrimaryHttpMessageHandler(() => Remote);
                 s.AddHttpClient(Llm.Api.Models.RemoteServerClient.Unchecked).ConfigurePrimaryHttpMessageHandler(() => Remote);

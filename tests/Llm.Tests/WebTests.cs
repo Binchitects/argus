@@ -158,6 +158,28 @@ public sealed class WebTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_long_page_is_read_once_and_comes_back_as_its_passages_about_the_focus()
+    {
+        await using var f = NewApp(sites: "manual.example.test");
+        var (b, chat) = await PersonWithWebAsync(f);
+        var url = "https://manual.example.test/" + Guid.NewGuid().ToString("N")[..8];
+        var filler = string.Join("", Enumerable.Range(1, 400).Select(i => $"<p>Section {i} talks about installing and upgrading the product on servers.</p>"));
+        app.Web.Html(url, $"<html><head><title>Manual</title></head><body>{filler}<h2>Licensing</h2><p>A license key is renewed every year from the portal.</p>{filler}</body></html>");
+
+        var found = JsonDocument.Parse((await CallAsync(b, chat, $$"""[call fetch_page {"url":"{{url}}","focus":"license key renewal"}]""")).GetProperty("text").GetString()!).RootElement;
+        var passages = found.GetProperty("passages").EnumerateArray().ToList();
+        Assert.Contains(passages, p => p.GetProperty("text").GetString() == "A license key is renewed every year from the portal.");
+        Assert.Contains(passages, p => p.GetProperty("text").GetString() == "## Licensing");
+        Assert.True(found.GetProperty("total_characters").GetInt32() > 20_000);
+
+        // Read on in parts: from the cache, not downloaded again.
+        var start = passages.First(p => p.GetProperty("text").GetString()!.StartsWith("A license", StringComparison.Ordinal)).GetProperty("start").GetInt32();
+        var around = JsonDocument.Parse((await CallAsync(b, chat, $$"""[call fetch_page {"url":"{{url}}","start":{{start}}}]""")).GetProperty("text").GetString()!).RootElement;
+        Assert.Contains("A license key is renewed", around.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Single(app.Web.Requests, u => u.AbsoluteUri == url);
+    }
+
+    [Fact]
     public async Task Even_an_allowed_name_is_not_opened_when_it_points_inside()
     {
         await using var f = NewApp(sites: "*");

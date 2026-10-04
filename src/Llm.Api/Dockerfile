@@ -28,6 +28,8 @@ COPY --from=api /out ./
 COPY --from=api /usr/share/zoneinfo /usr/share/zoneinfo
 # The dashboards, in Grafana's JSON: the app runs every panel's query itself.
 COPY src/Llm.Api/Dashboards/json /dashboards
+# The plugins that come with the app (Admin → Plugins).
+COPY plugins /plugins
 # What it shares with other services, as named volumes: a new volume starts as these, the app's.
 COPY --from=api --chown=1000:1000 /shared/ /
 ENV ASPNETCORE_HTTP_PORTS=8080 \

@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Llm.Core.Chat;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Chat.Tools;
@@ -312,7 +313,26 @@ public static partial class Html
 /// The web, for the chat: search (SearXNG) and reading pages, only from the sites
 /// an admin allows. Off until an admin turns it on; an air-gapped install leaves it off.
 /// </summary>
-public sealed class WebTool(WebFetcher web, IOptionsMonitor<WebOptions> options) : IChatTool
+/// <summary>
+/// Pages read lately, as text, by address, for a day: reading a long page in parts, or the same
+/// page again in another answer, does not download it again. At most about 64 million
+/// characters; the oldest go first.
+/// </summary>
+public sealed class WebPageCache : IDisposable
+{
+    public sealed record Page(Uri Url, string Title, string Text, bool Cut);
+
+    private readonly MemoryCache _pages = new(new MemoryCacheOptions { SizeLimit = 64_000_000 });
+
+    public Page? Get(Uri url) => _pages.TryGetValue(url.AbsoluteUri, out Page? page) ? page : null;
+
+    public void Put(Uri asked, Page page) =>
+        _pages.Set(asked.AbsoluteUri, page, new MemoryCacheEntryOptions { Size = Math.Max(1, page.Text.Length), AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1) });
+
+    public void Dispose() => _pages.Dispose();
+}
+
+public sealed class WebTool(WebFetcher web, WebPageCache cache, IOptionsMonitor<WebOptions> options) : IChatTool
 {
     public string Id => "web";
     public string Title => "Web";
@@ -328,10 +348,12 @@ public sealed class WebTool(WebFetcher web, IOptionsMonitor<WebOptions> options)
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
     {
         var functions = new JsonArray(Schema.Function("fetch_page",
-            "Opens a web page (or a PDF, text or JSON file on the web) and returns its readable text, in parts: read on with next_start.",
+            "Opens a web page (or a PDF, text or JSON file on the web) and returns its readable text, in parts: read on with next_start. " +
+            "Say what you look for in focus: a long page then comes back as its passages about that, not just its start.",
             new JsonObject
             {
                 ["url"] = Schema.Text("The page's full address, https://..."),
+                ["focus"] = Schema.Text("What you look for on the page, in a few words (optional)"),
                 ["start"] = new JsonObject { ["type"] = "integer", ["description"] = "Where to read from, in characters (default 0)" },
             }, "url"));
         if (web.CanSearch)
@@ -350,7 +372,7 @@ public sealed class WebTool(WebFetcher web, IOptionsMonitor<WebOptions> options)
                     return function switch
                     {
                         "web_search" => await SearchAsync(Schema.Str(args, "query") ?? "", token),
-                        "fetch_page" => await FetchAsync(Schema.Str(args, "url") ?? "", Start(args), token),
+                        "fetch_page" => await FetchAsync(Schema.Str(args, "url") ?? "", Start(args), Schema.Str(args, "focus"), token),
                         _ => new ToolResult($"There is no function {function}.", IsError: true),
                     };
                 }
@@ -380,44 +402,73 @@ public sealed class WebTool(WebFetcher web, IOptionsMonitor<WebOptions> options)
         }.ToJsonString(Mcp.Plain));
     }
 
-    private async Task<ToolResult> FetchAsync(string address, int start, CancellationToken ct)
+    private async Task<ToolResult> FetchAsync(string address, int start, string? focus, CancellationToken ct)
     {
         if (!Uri.TryCreate(address.Trim(), UriKind.Absolute, out var url))
         {
             return new ToolResult("Give a full address in 'url', starting with https://.", IsError: true);
         }
-        var page = await web.FetchAsync(url, ct);
-        string title = "", text;
-        var type = page.ContentType.ToLowerInvariant();
-        if (type is "text/html" or "application/xhtml+xml" || (type.Length == 0 && page.Body.AsSpan(0, Math.Min(page.Body.Length, 512)).IndexOf("<html"u8) >= 0))
+        if (cache.Get(url) is not { } page)
         {
-            (title, text) = Html.Read(Encoding.UTF8.GetString(page.Body));
+            var got = await web.FetchAsync(url, ct);
+            string title = "", text;
+            var type = got.ContentType.ToLowerInvariant();
+            if (type is "text/html" or "application/xhtml+xml" || (type.Length == 0 && got.Body.AsSpan(0, Math.Min(got.Body.Length, 512)).IndexOf("<html"u8) >= 0))
+            {
+                (title, text) = Html.Read(Encoding.UTF8.GetString(got.Body));
+            }
+            else
+            {
+                try
+                {
+                    text = Attachments.Extract(Path.GetFileName(got.Url.AbsolutePath) is { Length: > 0 } name ? name : "page", type, got.Body, 1_000_000).Text;
+                }
+                catch (AttachmentException)
+                {
+                    return new ToolResult($"{got.Url} is {(type.Length > 0 ? type : "a file")}, not a page the chat can read.", IsError: true);
+                }
+            }
+            page = new WebPageCache.Page(got.Url, title, text, got.Cut);
+            cache.Put(url, page);
         }
-        else
+        // Read lately: the sites allowed may have changed since, so they are asked again.
+        else if ((await web.RefusalAsync(url, ct) ?? await web.RefusalAsync(page.Url, ct)) is { } refused)
         {
-            try
-            {
-                text = Attachments.Extract(Path.GetFileName(page.Url.AbsolutePath) is { Length: > 0 } name ? name : "page", type, page.Body, 1_000_000).Text;
-            }
-            catch (AttachmentException)
-            {
-                return new ToolResult($"{page.Url} is {(type.Length > 0 ? type : "a file")}, not a page the chat can read.", IsError: true);
-            }
+            return new ToolResult(refused, IsError: true);
         }
         var max = options.CurrentValue.MaxPageChars;
-        start = Math.Clamp(start, 0, text.Length);
-        var end = Math.Min(text.Length, start + max);
+        var cut = page.Cut ? "the page was larger than 5 MB: only its start was read" : null;
+        // A long page and something to look for: its passages about that (dense, so fewer than a part holds),
+        // where each starts to read around it.
+        if (start == 0 && page.Text.Length > max && focus is { Length: > 0 } && Passages.Pick(page.Text, focus, Math.Min(max, FocusChars)) is { Count: > 0 } passages)
+        {
+            return new ToolResult(new JsonObject
+            {
+                ["url"] = page.Url.ToString(),
+                ["title"] = page.Title.Length > 0 ? page.Title : null,
+                ["total_characters"] = page.Text.Length,
+                ["focus"] = focus,
+                ["passages"] = new JsonArray([.. passages.Select(x => (JsonNode)new JsonObject { ["start"] = x.Start, ["text"] = x.Text })]),
+                ["how_to_read_more"] = "These are the parts of the page about the focus, in its order. Read around one with start, or the page from its beginning with start 0 and no focus.",
+                ["cut_when_downloaded"] = cut,
+            }.ToJsonString(Mcp.Plain));
+        }
+        start = Math.Clamp(start, 0, page.Text.Length);
+        var end = Math.Min(page.Text.Length, start + max);
         return new ToolResult(new JsonObject
         {
             ["url"] = page.Url.ToString(),
-            ["title"] = title.Length > 0 ? title : null,
+            ["title"] = page.Title.Length > 0 ? page.Title : null,
             ["start"] = start,
-            ["total_characters"] = text.Length,
-            ["next_start"] = end < text.Length ? end : null,
-            ["cut_when_downloaded"] = page.Cut ? "the page was larger than 5 MB: only its start was read" : null,
-            ["text"] = text[start..end],
+            ["total_characters"] = page.Text.Length,
+            ["next_start"] = end < page.Text.Length ? end : null,
+            ["cut_when_downloaded"] = cut,
+            ["text"] = page.Text[start..end],
         }.ToJsonString(Mcp.Plain));
     }
+
+    /// <summary>What the passages about a focus may take of a long page.</summary>
+    private const int FocusChars = 8_000;
 
     private static int Start(JsonObject args) => args["start"] switch
     {

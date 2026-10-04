@@ -8,6 +8,7 @@ import { useForm } from 'react-hook-form'
 import { useOutletContext } from 'react-router'
 import { z } from 'zod'
 import { ApiKey } from '@/components/app/api-key'
+import { Connections } from '@/components/app/connections'
 import { PageHeader } from '@/components/app/page-header'
 import { Alert } from '@/components/ui/alert'
 import { Avatar } from '@/components/ui/avatar'
@@ -36,6 +37,7 @@ export function AccountPage() {
           <Appearance />
         </div>
         <div className="grid content-start gap-6">
+          <Connections />
           <TwoFactor enabled={me.twoFactorEnabled} />
           {me.source === 'local' ? (
             <Password />

@@ -1,0 +1,74 @@
+openapi: 3.0.3
+info:
+  title: GitLab issues
+  version: "4"
+paths:
+  /projects:
+    get:
+      operationId: findProjects
+      summary: Finds the projects the person is a member of, by name
+      parameters:
+        - { name: search, in: query, schema: { type: string }, description: Part of the project's name or path }
+        - { name: membership, in: query, schema: { type: boolean, default: true }, description: Only the person's projects }
+        - { name: simple, in: query, schema: { type: boolean, default: true }, description: Short answers }
+        - { name: per_page, in: query, schema: { type: integer, default: 20 } }
+  /issues:
+    get:
+      operationId: myIssues
+      summary: Lists issues across projects, by default those assigned to the person and open
+      parameters:
+        - { name: scope, in: query, schema: { type: string, enum: [assigned_to_me, created_by_me, all], default: assigned_to_me } }
+        - { name: state, in: query, schema: { type: string, enum: [opened, closed, all], default: opened } }
+        - { name: search, in: query, schema: { type: string }, description: Words in the title or description }
+        - { name: per_page, in: query, schema: { type: integer, default: 20 } }
+  /projects/{id}/issues:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: "The project's ID, or its path (group/project)" }
+    get:
+      operationId: listIssues
+      summary: Lists a project's issues
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [opened, closed, all], default: opened } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: labels, in: query, schema: { type: string }, description: Comma-separated label names }
+        - { name: per_page, in: query, schema: { type: integer, default: 20 } }
+    post:
+      operationId: createIssue
+      summary: Creates an issue in a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                description: { type: string, description: Markdown }
+                labels: { type: string, description: Comma-separated label names }
+  /projects/{id}/issues/{issue_iid}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: "The project's ID, or its path (group/project)" }
+      - { name: issue_iid, in: path, required: true, schema: { type: integer }, description: "The issue's number in the project (#12 is 12)" }
+    get:
+      operationId: getIssue
+      summary: Reads one issue
+  /projects/{id}/issues/{issue_iid}/notes:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: issue_iid, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: listNotes
+      summary: Reads an issue's comments
+    post:
+      operationId: addNote
+      summary: Comments on an issue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, description: The comment, in Markdown }

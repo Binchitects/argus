@@ -10,9 +10,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { toolIcon } from '../chat/tools'
@@ -26,7 +27,19 @@ interface ToolRow {
   icon: string
   unavailable: string | null
   setting: { enabled: boolean; audience: Audience; onByDefault: boolean; askFirst: boolean; groups: { id: string; name: string }[] }
-  server: { id: string; name: string; description: string | null; url: string; headerName: string | null; headerSet: boolean; emailHeader: string | null; callTimeoutMinutes: number | null; prefix: string } | null
+  server: {
+    id: string
+    name: string
+    description: string | null
+    url: string
+    headerName: string | null
+    headerSet: boolean
+    emailHeader: string | null
+    callTimeoutMinutes: number | null
+    prefix: string
+    kind: 'mcp' | 'openapi'
+    spec: string | null
+  } | null
 }
 
 interface Setting {
@@ -51,10 +64,10 @@ export function ToolsPage() {
     <>
       <PageHeader
         title="Tools"
-        description="What the chat's model may call, and for whom. Turn a tool off, give it to some groups only, have it ask before each call, or add an MCP server."
+        description="What the chat's model may call, and for whom. Turn a tool off, give it to some groups only, have it ask before each call, or add an MCP server or an API."
         actions={
           <Button onClick={() => setEditing('new')}>
-            <Plus /> Add MCP server
+            <Plus /> Add a server or API
           </Button>
         }
       />
@@ -94,7 +107,7 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
         <div className="min-w-0 flex-1">
           <CardTitle className="flex flex-wrap items-center gap-2">
             {tool.title}
-            <Badge variant={tool.server ? 'outline' : 'secondary'}>{tool.server ? 'MCP server' : 'Built in'}</Badge>
+            <Badge variant={tool.server ? 'outline' : 'secondary'}>{tool.server ? (tool.server.kind === 'openapi' ? 'API' : 'MCP server') : 'Built in'}</Badge>
           </CardTitle>
           <CardDescription>{tool.description}</CardDescription>
         </div>
@@ -124,6 +137,7 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
             )}
             <p className="text-muted-foreground">
               Its functions are named <span className="font-mono text-foreground">{tool.server.prefix}…</span>
+              {tool.server.kind === 'openapi' && '; calls that change something (not GET) always ask first'}
             </p>
           </div>
         )}
@@ -178,6 +192,7 @@ function ServerDialog({ server, onClose }: { server: ToolRow['server'] | 'new' |
 
 function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () => void }) {
   const queryClient = useQueryClient()
+  const [kind, setKind] = useState<'mcp' | 'openapi'>(saved?.kind ?? 'mcp')
   const [form, setForm] = useState({
     name: saved?.name ?? '',
     description: saved?.description ?? '',
@@ -186,10 +201,20 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
     headerValue: '',
     emailHeader: saved?.emailHeader ?? '',
     callTimeoutMinutes: saved?.callTimeoutMinutes ? String(saved.callTimeoutMinutes) : '',
+    spec: saved?.spec ?? '',
+    specUrl: '',
   })
   const [error, setError] = useState<string | null>(null)
-  const [test, setTest] = useState<{ ok: boolean; error?: string; tools?: { name: string; description: string | null }[] } | null>(null)
-  const body = { ...form, headerValue: form.headerValue || (saved ? null : ''), callTimeoutMinutes: Number(form.callTimeoutMinutes) || 0 }
+  const [test, setTest] = useState<{ ok: boolean; error?: string; url?: string; tools?: { name: string; description: string | null; asksFirst?: boolean }[] } | null>(null)
+  const api_ = kind === 'openapi'
+  // An MCP server sends "" for the document (it is not an API); an API sends it, or where to fetch it.
+  const body = {
+    ...form,
+    headerValue: form.headerValue || (saved ? null : ''),
+    callTimeoutMinutes: Number(form.callTimeoutMinutes) || 0,
+    spec: api_ ? (form.specUrl ? null : form.spec || null) : saved?.kind === 'openapi' ? '' : null,
+    specUrl: api_ ? form.specUrl || null : null,
+  }
   const check = useMutation({
     mutationFn: () => api<NonNullable<typeof test>>(`/api/admin/tools/servers/test${saved ? `?id=${saved.id}` : ''}`, { body }),
     onSuccess: setTest,
@@ -199,7 +224,7 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
     mutationFn: () => (saved ? api(`/api/admin/tools/servers/${saved.id}`, { method: 'PATCH', body }) : api('/api/admin/tools/servers', { body })),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'tools'] })
-      toast.success(saved ? 'Server saved.' : 'Server added. Its tools are on for everyone: set who may use them on its card.')
+      toast.success(saved ? 'Saved.' : `${api_ ? 'API' : 'Server'} added. Its tools are on for everyone: set who may use them on its card.`)
       onClose()
     },
     onError: (e) => setError(errorMessage(e)),
@@ -208,8 +233,12 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{saved ? `Edit ${saved.name}` : 'Add an MCP server'}</DialogTitle>
-        <DialogDescription>A server that speaks MCP over HTTP (streamable HTTP). Its tools join the chat as one tool you can turn on for some people.</DialogDescription>
+        <DialogTitle>{saved ? `Edit ${saved.name}` : 'Add a server or API'}</DialogTitle>
+        <DialogDescription>
+          {api_
+            ? 'A REST API, by its OpenAPI document: each operation becomes a function. Calls that change something (POST, PUT, PATCH, DELETE) always ask the person first.'
+            : 'A server that speaks MCP over HTTP (streamable HTTP). Its tools join the chat as one tool you can turn on for some people.'}
+        </DialogDescription>
       </DialogHeader>
       <form
         className="grid gap-4"
@@ -220,11 +249,33 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
         }}
       >
         {error && <Alert variant="destructive">{error}</Alert>}
+        <Tabs
+          value={kind}
+          onValueChange={(v) => {
+            setKind(v as 'mcp' | 'openapi')
+            setTest(null)
+          }}
+        >
+          <TabsList aria-label="Kind">
+            <TabsTrigger value="mcp">MCP server</TabsTrigger>
+            <TabsTrigger value="openapi">API (OpenAPI)</TabsTrigger>
+          </TabsList>
+        </Tabs>
         <Field label="Name" hint="Shown to people in the chat's Tools menu.">
           <Input required maxLength={100} autoComplete="off" {...field('name')} />
         </Field>
-        <Field label="Address">
-          <Input required type="url" placeholder="https://tools.example.com/mcp" autoComplete="off" {...field('url')} />
+        {api_ && (
+          <>
+            <Field label="OpenAPI document" hint="JSON or YAML, OpenAPI 3. Or give the address to fetch it from below.">
+              <Textarea className="min-h-32 font-mono text-xs" spellCheck={false} placeholder={'openapi: 3.0.3\npaths:\n  /pets:\n    get: ...'} {...field('spec')} />
+            </Field>
+            <Field label="Or the document's address" hint="Fetched once, now; save again to fetch a newer one.">
+              <Input type="url" placeholder="https://api.example.com/openapi.json" autoComplete="off" {...field('specUrl')} />
+            </Field>
+          </>
+        )}
+        <Field label="Address" hint={api_ ? "The API's base address. Empty: the document's first server." : undefined}>
+          <Input required={!api_} type="url" placeholder={api_ ? 'https://api.example.com/v1' : 'https://tools.example.com/mcp'} autoComplete="off" {...field('url')} />
         </Field>
         <Field label="What it does">
           <Input maxLength={500} autoComplete="off" {...field('description')} />
@@ -247,31 +298,32 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
         </div>
         {test &&
           (test.ok ? (
-            <Alert variant="success" title={`Connected: ${test.tools?.length ?? 0} tools`}>
-              <ul className="mt-1 grid gap-0.5 text-xs">
+            <Alert variant="success" title={api_ ? `${test.tools?.length ?? 0} operations${test.url ? ` at ${test.url}` : ''}` : `Connected: ${test.tools?.length ?? 0} tools`}>
+              <ul className="mt-1 grid max-h-48 gap-0.5 overflow-y-auto text-xs">
                 {test.tools?.map((t) => (
                   <li key={t.name}>
                     <span className="font-mono">{t.name}</span>
+                    {t.asksFirst && <Badge variant="warning" className="ml-1.5">asks first</Badge>}
                     {t.description && <span className="text-muted-foreground"> · {t.description}</span>}
                   </li>
                 ))}
               </ul>
             </Alert>
           ) : (
-            <Alert variant="destructive" title="Could not connect">
+            <Alert variant="destructive" title={api_ ? 'The document does not work' : 'Could not connect'}>
               {test.error}
             </Alert>
           ))}
         <DialogFooter className="sm:justify-between">
-          <Button type="button" variant="outline" onClick={() => check.mutate()} loading={check.isPending} disabled={!form.url}>
-            <PlugZap /> Test
+          <Button type="button" variant="outline" onClick={() => check.mutate()} loading={check.isPending} disabled={api_ ? !form.spec && !form.specUrl && !saved?.spec : !form.url}>
+            <PlugZap /> {api_ ? 'Read it' : 'Test'}
           </Button>
           <span className="flex gap-2">
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit" loading={save.isPending}>
-              {saved ? 'Save' : 'Add server'}
+              {saved ? 'Save' : api_ ? 'Add API' : 'Add server'}
             </Button>
           </span>
         </DialogFooter>
