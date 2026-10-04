@@ -150,6 +150,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Chat:DefaultModel", "Qwen3.8-Flash-Next");
             b.UseSetting("Chat:ThinkingPresets", "xhigh:Deep think,low:Quick,off:No thinking");
             b.UseSetting("Chat:ArgusChatToken", FakeArgus.ChatToken);
+            // Every tool whole, unless a test sends tools on demand: the default set grows with each new tool.
+            b.UseSetting("Chat:ToolTextChars", "0");
             b.UseSetting("Gateway:MasterKey", "sk-master-for-tests");
             // No engine and no media servers here unless a test brings them (the models tests do).
             b.UseSetting("Engine:Enabled", "false");

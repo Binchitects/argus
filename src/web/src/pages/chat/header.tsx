@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Trash2, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FilePen, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Trash2, Wrench } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router'
@@ -220,10 +220,13 @@ export function ChatHeader({
   assistant,
   onMove,
   onShare,
+  canvas,
 }: {
   config: ChatConfig
   settings: ChatSettings
   onChange: (change: ChatSettings) => void
+  /** The chat's canvases (once the chat exists): how many, and the panel that shows them. */
+  canvas?: { count: number; open: boolean; onToggle: () => void }
   filesCount: number
   filesOpen: boolean
   onToggleFiles: () => void
@@ -262,6 +265,13 @@ export function ChatHeader({
       <span className="ml-auto flex shrink-0 items-center gap-1">
         <MemoryButton />
         <ChatSettingsPopover config={config} settings={settings} onChange={onChange} />
+        {canvas && (
+          <Tooltip content={canvas.open ? 'Hide the canvas' : 'Canvas: documents and code you and the model edit'}>
+            <Button variant={canvas.open ? 'secondary' : 'ghost'} size="sm" className="h-8 gap-1.5" onClick={canvas.onToggle} aria-pressed={canvas.open} aria-label={`Canvas (${canvas.count})`}>
+              <FilePen /> <span className="tabular-nums">{canvas.count}</span>
+            </Button>
+          </Tooltip>
+        )}
         <Tooltip content={filesOpen ? 'Hide files' : 'Files in this chat'}>
           <Button variant={filesOpen ? 'secondary' : 'ghost'} size="sm" className="h-8 gap-1.5" onClick={onToggleFiles} aria-pressed={filesOpen} aria-label={`Files (${filesCount})`}>
             <FolderOpen /> <span className="tabular-nums">{filesCount}</span>

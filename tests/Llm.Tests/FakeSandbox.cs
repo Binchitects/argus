@@ -9,7 +9,8 @@ namespace Llm.Tests;
 ///   "# chart" writes a picture, "# csv" a CSV, "# binary" a file that is neither;
 ///   "# fail" exits 1 with a traceback; "# slow" runs until it is stopped;
 ///   "# pages" draws a document's first two pages of three (page-01.jpg, page-02.jpg);
-///   the media script (it runs ffprobe) makes sound.mp3, and for a video two frames, 4 seconds long.
+///   the media script (it runs ffprobe) makes sound.mp3, and for a video two frames, 4 seconds long;
+///   "# canvas pdf" turns canvas.docx into canvas.pdf (a PDF header, then the Word file's size).
 /// </summary>
 public sealed class FakeSandbox : IAsyncDisposable
 {
@@ -96,6 +97,10 @@ public sealed class FakeSandbox : IAsyncDisposable
                 await File.WriteAllBytesAsync(Path.Combine(draft, "files", "frame-01.jpg"), [0xFF, 0xD8, 0xFF, 1]);
                 await File.WriteAllBytesAsync(Path.Combine(draft, "files", "frame-02.jpg"), [0xFF, 0xD8, 0xFF, 2]);
             }
+        }
+        if (code.Contains("# canvas pdf", StringComparison.Ordinal) && File.Exists(Path.Combine(job, "files", "canvas.docx")))
+        {
+            await File.WriteAllTextAsync(Path.Combine(draft, "files", "canvas.pdf"), $"%PDF-1.7\n% from {new FileInfo(Path.Combine(job, "files", "canvas.docx")).Length} bytes\n%%EOF\n");
         }
         var fail = code.Contains("# fail", StringComparison.Ordinal);
         await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), new JsonObject

@@ -1,4 +1,4 @@
-import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Collapsible } from 'radix-ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNow } from './use-now'
@@ -16,6 +16,7 @@ import { argsSummary, partsOf, partsSummary, splitArgs } from './tool-args'
 import { ToolOutput } from './tool-output'
 import { AgentsView } from './agents'
 import { partsDone } from './research'
+import { useCanvasOpener } from './canvas-context'
 import type { ToolRunning } from './live'
 import type { AgentWork, Message, ToolCall } from './types'
 import { MediaPlayer } from './media'
@@ -73,6 +74,7 @@ export function Thinking({ text, live, ms, since, onHurry, hurried }: { text: st
 const toolIcons: [RegExp, LucideIcon][] = [
   [/^delegate$/, Network],
   [/^remember$/, Brain],
+  [/^canvas_/, FilePen],
   [/python|run_code/, SquareTerminal],
   [/web|url|fetch/, Globe],
   [/image|picture|draw/, ImageIcon],
@@ -166,6 +168,9 @@ export function ToolCard({
   const count = resultCount(value)
   // Sub-agents at work: how many of the parts are done, rather than just "Running".
   const parts = delegate && running ? Math.max(partsOf(call.function.arguments).length, work?.length ?? 0) : 0
+  // A canvas the call made or changed: opened beside the chat from here.
+  const openCanvas = useCanvasOpener()
+  const canvas = result?.status === 'complete' ? result.details?.canvas : undefined
   return (
     <div className="my-2">
       <Collapsible.Root open={open} onOpenChange={setOpen} className="animate-enter overflow-hidden rounded-lg border bg-card transition-shadow hover:shadow-sm">
@@ -326,6 +331,18 @@ export function ToolCard({
             </li>
           ))}
         </ul>
+      )}
+      {canvas && openCanvas && (
+        <button
+          type="button"
+          onClick={() => openCanvas(canvas.id)}
+          className="mt-2 flex max-w-full items-center gap-2 rounded-lg border bg-card px-2.5 py-1.5 text-left text-sm shadow-xs outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring"
+          aria-label={`Open ${canvas.title} in the canvas`}
+        >
+          <FilePen className="size-4 shrink-0 text-primary" aria-hidden="true" />
+          <span className="min-w-0 truncate font-medium">{canvas.title}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">version {canvas.version} · Open</span>
+        </button>
       )}
       {result?.noAccess && (
         <Alert variant="warning" title="You do not have access to some of this code." className="mt-2" role="note">

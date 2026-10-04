@@ -24,6 +24,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AssistantFile> AssistantFiles => Set<AssistantFile>();
     public DbSet<ChatShare> ChatShares => Set<ChatShare>();
     public DbSet<ChatShareView> ChatShareViews => Set<ChatShareView>();
+    public DbSet<Canvas> Canvases => Set<Canvas>();
+    public DbSet<CanvasVersion> CanvasVersions => Set<CanvasVersion>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
@@ -173,6 +175,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(p => p.AttachmentId).OnDelete(DeleteBehavior.Cascade);
         });
         QualityModel.Configure(builder);
+        CanvasTables.Configure(builder);
 
         builder.Entity<Group>(e =>
         {

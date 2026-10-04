@@ -40,6 +40,8 @@ import { TalkBar, TalkButton } from './talk'
 import { useTalk, type TalkTurn } from './use-talk'
 import { tellDesktop } from '@/lib/desktop'
 import { TraceSheet } from '@/pages/admin/trace-view'
+import { CanvasPanel } from './canvas-panel'
+import { CanvasOpener, useCanvasState } from './canvas-context'
 
 /** The id a question is shown under until the server gives it its own. */
 let localCount = 0
@@ -155,6 +157,13 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   /** How a file that can run is shown, and whether the panel takes half the page (for a preview). */
   const [fileView, setFileView] = useState<'preview' | 'code'>('preview')
   const [panelWide, setPanelWide] = useState(false)
+  // The canvas shares the Files panel's place: one shows at a time.
+  const closeFiles = useCallback(() => setFilesOpen(false), [])
+  const canvas = useCanvasState(id, wide, closeFiles)
+  const canvasEvents = useRef(canvas.onEvent)
+  useEffect(() => {
+    canvasEvents.current = canvas.onEvent
+  })
   const [dragging, setDragging] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -331,6 +340,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
           (e) => {
             received = true
             watch?.(e)
+            canvasEvents.current(e)
             setLive((s) => reduce(s ?? start, e, localId))
             // Done while the tab is hidden: the desktop says so (when the person turned that on).
             if (e.type === 'done' && endpoint !== 'compact') {
@@ -603,6 +613,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     setSelectedFile(f?.key ?? null)
     setFileView('preview')
     setFilesOpen(true)
+    canvas.setOpen(false)
   }
 
   const openPreview = (code: string) => {
@@ -611,6 +622,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     setFileView('preview')
     setPanelWide(true)
     setFilesOpen(true)
+    canvas.setOpen(false)
   }
 
   if (id && loaded.isPending) return <div className="p-6"><PageSkeleton /></div>
@@ -634,258 +646,288 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       onWide={setPanelWide}
     />
   )
+  const canvasOpen = canvas.open && !!id
+  const sideOpen = filesOpen || canvasOpen
+  const sideWide = canvasOpen ? canvas.wide : panelWide
+  const side = canvasOpen ? (
+    <CanvasPanel
+      chatId={id}
+      selected={canvas.selected}
+      onSelect={canvas.setSelected}
+      onClose={() => canvas.setOpen(false)}
+      wide={wide ? canvas.wide : undefined}
+      onWide={canvas.setWide}
+      onSend={(text) => send(text, [])}
+      busy={streaming}
+    />
+  ) : (
+    panel
+  )
 
   return (
-    <div
-      className={cn(
-        'relative grid min-h-0 min-w-0',
-        filesOpen && wide && (panelWide ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : 'grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_34rem]'),
-      )}
-      onDragEnter={(e) => {
-        if (e.dataTransfer.types.includes('Files')) {
+    <CanvasOpener value={canvas.reveal}>
+      <div
+        className={cn(
+          'relative grid min-h-0 min-w-0',
+          sideOpen && wide && (sideWide ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : 'grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_34rem]'),
+        )}
+        onDragEnter={(e) => {
+          if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault()
+            setDragging(true)
+          }
+        }}
+        onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
+        onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && setDragging(false)}
+        onDrop={(e) => {
           e.preventDefault()
-          setDragging(true)
-        }
-      }}
-      onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
-      onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && setDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault()
-        setDragging(false)
-        if (e.dataTransfer.files.length) uploads.add(e.dataTransfer.files)
-      }}
-    >
-      <div className="flex min-h-0 min-w-0 flex-col">
-        <ChatHeader
-          config={config}
-          settings={settings}
-          onChange={change}
-          filesCount={files.length}
-          filesOpen={filesOpen}
-          onToggleFiles={() => setFilesOpen(!filesOpen)}
-          onOpenList={onOpenList}
-          chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt } : undefined}
-          onExport={id && path.length ? exportChat : undefined}
-          assistant={assistant}
-          onMove={id ? (assistantId) => void move(assistantId) : undefined}
-          onShare={id && path.length ? () => setSharing(true) : undefined}
-          onCompact={canCompact ? () => void compact() : undefined}
-        />
-        {empty ? (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
-            <div className="w-full max-w-2xl animate-enter">
-              {assistant ? (
-                <div className="mb-6 grid justify-items-center gap-2 text-center">
-                  <AssistantIcon icon={assistant.icon} color={assistant.color} size="lg" />
-                  <h1 dir="auto" className="text-2xl font-semibold tracking-tight">
-                    {assistant.name}
-                  </h1>
-                  {chosen.data?.description && (
-                    <p dir="auto" className="text-muted-foreground">
-                      {chosen.data.description}
+          setDragging(false)
+          if (e.dataTransfer.files.length) uploads.add(e.dataTransfer.files)
+        }}
+      >
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <ChatHeader
+            config={config}
+            settings={settings}
+            onChange={change}
+            filesCount={files.length}
+            filesOpen={filesOpen && !canvasOpen}
+            onToggleFiles={() => {
+              setFilesOpen(!filesOpen || canvasOpen)
+              canvas.setOpen(false)
+            }}
+            canvas={id ? { count: canvas.count, open: canvasOpen, onToggle: () => (canvasOpen ? canvas.setOpen(false) : canvas.reveal(canvas.selected)) } : undefined}
+            onOpenList={onOpenList}
+            chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt } : undefined}
+            onExport={id && path.length ? exportChat : undefined}
+            assistant={assistant}
+            onMove={id ? (assistantId) => void move(assistantId) : undefined}
+            onShare={id && path.length ? () => setSharing(true) : undefined}
+            onCompact={canCompact ? () => void compact() : undefined}
+          />
+          {empty ? (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
+              <div className="w-full max-w-2xl animate-enter">
+                {assistant ? (
+                  <div className="mb-6 grid justify-items-center gap-2 text-center">
+                    <AssistantIcon icon={assistant.icon} color={assistant.color} size="lg" />
+                    <h1 dir="auto" className="text-2xl font-semibold tracking-tight">
+                      {assistant.name}
+                    </h1>
+                    {chosen.data?.description && (
+                      <p dir="auto" className="text-muted-foreground">
+                        {chosen.data.description}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <h1 className="mb-2 text-center text-2xl font-semibold tracking-tight">What can I help with?</h1>
+                    <p className="mb-6 text-center text-muted-foreground">
+                      {toolsOnHere.includes('argus') ? 'Ask anything. Argus searches the code you have access to in GitLab.' : 'Ask anything, or attach documents, spreadsheets, slides, PDFs, code and images to ask about them.'}
                     </p>
-                  )}
+                  </>
+                )}
+                {error && (
+                  <Alert variant="destructive" className="mb-3">
+                    {error}
+                  </Alert>
+                )}
+                <TalkBar state={talk.state} onEnd={talk.end} />
+                <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} compare={comparePicker} talk={talkButton} autoFocus big />
+                <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
+                  {(starters ?? (config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
+                    <button
+                      key={s.text}
+                      type="button"
+                      disabled={streaming}
+                      onClick={() => void send(s.text)}
+                      className="flex items-start gap-2 rounded-xl border bg-card p-3 text-left text-sm text-muted-foreground transition-[color,border-color,box-shadow,translate] duration-200 outline-none hover:-translate-y-0.5 hover:border-primary/40 hover:text-foreground hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring"
+                    >
+                      <s.icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+                      {s.text}
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                <>
-                  <h1 className="mb-2 text-center text-2xl font-semibold tracking-tight">What can I help with?</h1>
-                  <p className="mb-6 text-center text-muted-foreground">
-                    {toolsOnHere.includes('argus') ? 'Ask anything. Argus searches the code you have access to in GitLab.' : 'Ask anything, or attach documents, spreadsheets, slides, PDFs, code and images to ask about them.'}
-                  </p>
-                </>
-              )}
-              {error && (
-                <Alert variant="destructive" className="mb-3">
-                  {error}
-                </Alert>
-              )}
-              <TalkBar state={talk.state} onEnd={talk.end} />
-              <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} compare={comparePicker} talk={talkButton} autoFocus big />
-              <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
-                {(starters ?? (config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
-                  <button
-                    key={s.text}
-                    type="button"
-                    disabled={streaming}
-                    onClick={() => void send(s.text)}
-                    className="flex items-start gap-2 rounded-xl border bg-card p-3 text-left text-sm text-muted-foreground transition-[color,border-color,box-shadow,translate] duration-200 outline-none hover:-translate-y-0.5 hover:border-primary/40 hover:text-foreground hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring"
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                <output className="sr-only">{answerNews(answering, path)}</output>
+                <div ref={thread} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto">
+                  <div className="mx-auto grid w-full max-w-(--thread-max) gap-6 px-4 py-6 sm:px-6">
+                    {data?.archivedAt && (
+                      <output className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+                        <Archive className="size-4 text-muted-foreground" aria-hidden="true" />
+                        <span className="flex-1">This chat is archived. Writing in it brings it back to the list.</span>
+                        <Button variant="outline" size="sm" className="h-7" onClick={() => void unarchive()}>
+                          Unarchive
+                        </Button>
+                      </output>
+                    )}
+                    {data?.assistant?.noAccess && (
+                      <output className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+                        <Lock className="size-4 text-warning-ink" aria-hidden="true" />
+                        <span className="flex-1">
+                          You no longer have access to the assistant <bdi className="font-medium">{data.assistant.name}</bdi>: this chat cannot go on with it.
+                        </span>
+                        <Button variant="outline" size="sm" className="h-7" onClick={() => void move(null)}>
+                          Go on without it
+                        </Button>
+                      </output>
+                    )}
+                    {data?.forkedFrom && (
+                      <p className="-mb-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                        <GitFork className="size-3.5 shrink-0" aria-hidden="true" /> Forked from
+                        <Link to={`/chat/${data.forkedFrom.id}`} className="truncate font-medium text-foreground underline-offset-2 hover:underline">
+                          {data.forkedFrom.title}
+                        </Link>
+                      </p>
+                    )}
+                    {turns.map((t, i) => {
+                      const summary = [t.question, ...t.answer].find((m) => m?.summary)?.summary
+                      // A question compared (arena mode): both answers side by side.
+                      const arena = t.question ? arenaView(t.question, data?.arenas, view.arena, answering && i === lastTurn) : null
+                      return (
+                        <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
+                          {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} />}
+                          {arena && t.question ? (
+                            <ArenaTurn
+                              arena={arena}
+                              tree={tree}
+                              question={t.question}
+                              config={config}
+                              chatId={id}
+                              thinkingSince={answering && i === lastTurn ? view.thinkingSince : null}
+                              queued={answering && i === lastTurn ? view.queued : null}
+                              busy={streaming}
+                              onOpenFile={openFile}
+                              onPreview={openPreview}
+                              approvals={answering && i === lastTurn ? view.waiting : undefined}
+                              onDecide={(callId, allow) => void decide(callId, allow)}
+                              calls={answering && i === lastTurn ? view.calls : undefined}
+                              agents={i === lastTurn ? view.agents : undefined}
+                              onHurry={answering && i === lastTurn && id ? () => void hurryChat(id).catch((e) => toast.error(errorMessage(e))) : undefined}
+                            />
+                          ) : (t.answer.length > 0 || (answering && i === lastTurn)) && (
+                            <AnswerTurn
+                              answer={t.answer}
+                              siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
+                              live={answering && i === lastTurn}
+                              thinkingSince={answering && i === lastTurn ? view.thinkingSince : null}
+                              queued={answering && i === lastTurn ? view.queued : null}
+                              compacting={answering && i === lastTurn && !!view.compacting}
+                              notices={i === lastTurn ? view.notices : []}
+                              config={config}
+                              question={t.question}
+                              onSwitch={switchTo}
+                              onRegenerate={regenerate}
+                              onOpenFile={openFile}
+                              onPreview={openPreview}
+                              onFork={id ? (messageId) => void forkFrom(messageId) : undefined}
+                              approvals={answering && i === lastTurn ? view.waiting : undefined}
+                              calls={answering && i === lastTurn ? view.calls : undefined}
+                              agents={i === lastTurn ? view.agents : undefined}
+                              onAnswer={!streaming && i === lastTurn ? send : undefined}
+                              onHurry={answering && i === lastTurn && id ? () => void hurryChat(id).catch((e) => toast.error(errorMessage(e))) : undefined}
+                              onDecide={(callId, allow) => void decide(callId, allow)}
+                              research={answering && i === lastTurn && !!view.research}
+                              onTrace={me?.isAdmin ? setTracing : undefined}
+                              busy={streaming}
+                              feedbackIn={id}
+                            />
+                          )}
+                          {summary && <CompactedMark summary={summary} onOpenFile={openFile} />}
+                        </div>
+                      )
+                    })}
+                    {streaming && view.mode === 'compact' && (
+                      <output className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <span className="flex gap-1" aria-hidden="true">
+                          <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+                          <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+                          <span className="size-1.5 animate-bounce rounded-full bg-current" />
+                        </span>
+                        {view.queued != null ? `Waiting for the model to compact the chat (${view.queued} ahead)…` : 'Compacting the chat: summarizing it so the next answers read the summary…'}
+                      </output>
+                    )}
+                    {error && <Alert variant="destructive">{error}</Alert>}
+                  </div>
+                </div>
+                <QuestionRail questions={turns.flatMap((t) => (t.question ? [t.question] : []))} active={readingQuestion} onJump={jumpTo} gutter={gutter} />
+              </div>
+              <div className="relative mx-auto w-full max-w-(--thread-max) px-4 pb-4 sm:px-6">
+                {!atBottom && (
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    className="absolute -top-12 left-1/2 -translate-x-1/2 animate-pop rounded-full shadow-md"
+                    onClick={() => {
+                      setAtBottom(true)
+                      scroller.current?.scrollTo?.({ top: scroller.current.scrollHeight, behavior: 'smooth' })
+                    }}
+                    aria-label="Jump to the latest"
                   >
-                    <s.icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-                    {s.text}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="relative flex min-h-0 flex-1 flex-col">
-              <output className="sr-only">{answerNews(answering, path)}</output>
-              <div ref={thread} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto">
-                <div className="mx-auto grid w-full max-w-(--thread-max) gap-6 px-4 py-6 sm:px-6">
-                  {data?.archivedAt && (
-                    <output className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
-                      <Archive className="size-4 text-muted-foreground" aria-hidden="true" />
-                      <span className="flex-1">This chat is archived. Writing in it brings it back to the list.</span>
-                      <Button variant="outline" size="sm" className="h-7" onClick={() => void unarchive()}>
-                        Unarchive
-                      </Button>
-                    </output>
-                  )}
-                  {data?.assistant?.noAccess && (
-                    <output className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
-                      <Lock className="size-4 text-warning-ink" aria-hidden="true" />
-                      <span className="flex-1">
-                        You no longer have access to the assistant <bdi className="font-medium">{data.assistant.name}</bdi>: this chat cannot go on with it.
-                      </span>
-                      <Button variant="outline" size="sm" className="h-7" onClick={() => void move(null)}>
-                        Go on without it
-                      </Button>
-                    </output>
-                  )}
-                  {data?.forkedFrom && (
-                    <p className="-mb-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                      <GitFork className="size-3.5 shrink-0" aria-hidden="true" /> Forked from
-                      <Link to={`/chat/${data.forkedFrom.id}`} className="truncate font-medium text-foreground underline-offset-2 hover:underline">
-                        {data.forkedFrom.title}
-                      </Link>
-                    </p>
-                  )}
-                  {turns.map((t, i) => {
-                    const summary = [t.question, ...t.answer].find((m) => m?.summary)?.summary
-                    // A question compared (arena mode): both answers side by side.
-                    const arena = t.question ? arenaView(t.question, data?.arenas, view.arena, answering && i === lastTurn) : null
-                    return (
-                      <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                        {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} />}
-                        {arena && t.question ? (
-                          <ArenaTurn
-                            arena={arena}
-                            tree={tree}
-                            question={t.question}
-                            config={config}
-                            chatId={id}
-                            thinkingSince={answering && i === lastTurn ? view.thinkingSince : null}
-                            queued={answering && i === lastTurn ? view.queued : null}
-                            busy={streaming}
-                            onOpenFile={openFile}
-                            onPreview={openPreview}
-                            approvals={answering && i === lastTurn ? view.waiting : undefined}
-                            onDecide={(callId, allow) => void decide(callId, allow)}
-                            calls={answering && i === lastTurn ? view.calls : undefined}
-                            agents={i === lastTurn ? view.agents : undefined}
-                            onHurry={answering && i === lastTurn && id ? () => void hurryChat(id).catch((e) => toast.error(errorMessage(e))) : undefined}
-                          />
-                        ) : (t.answer.length > 0 || (answering && i === lastTurn)) && (
-                          <AnswerTurn
-                            answer={t.answer}
-                            siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
-                            live={answering && i === lastTurn}
-                            thinkingSince={answering && i === lastTurn ? view.thinkingSince : null}
-                            queued={answering && i === lastTurn ? view.queued : null}
-                            compacting={answering && i === lastTurn && !!view.compacting}
-                            notices={i === lastTurn ? view.notices : []}
-                            config={config}
-                            question={t.question}
-                            onSwitch={switchTo}
-                            onRegenerate={regenerate}
-                            onOpenFile={openFile}
-                            onPreview={openPreview}
-                            onFork={id ? (messageId) => void forkFrom(messageId) : undefined}
-                            approvals={answering && i === lastTurn ? view.waiting : undefined}
-                            calls={answering && i === lastTurn ? view.calls : undefined}
-                            agents={i === lastTurn ? view.agents : undefined}
-                            onAnswer={!streaming && i === lastTurn ? send : undefined}
-                            onHurry={answering && i === lastTurn && id ? () => void hurryChat(id).catch((e) => toast.error(errorMessage(e))) : undefined}
-                            onDecide={(callId, allow) => void decide(callId, allow)}
-                            research={answering && i === lastTurn && !!view.research}
-                            onTrace={me?.isAdmin ? setTracing : undefined}
-                            busy={streaming}
-                            feedbackIn={id}
-                          />
-                        )}
-                        {summary && <CompactedMark summary={summary} onOpenFile={openFile} />}
-                      </div>
-                    )
-                  })}
-                  {streaming && view.mode === 'compact' && (
-                    <output className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <span className="flex gap-1" aria-hidden="true">
-                        <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-current" />
-                      </span>
-                      {view.queued != null ? `Waiting for the model to compact the chat (${view.queued} ahead)…` : 'Compacting the chat: summarizing it so the next answers read the summary…'}
-                    </output>
-                  )}
-                  {error && <Alert variant="destructive">{error}</Alert>}
-                </div>
-              </div>
-              <QuestionRail questions={turns.flatMap((t) => (t.question ? [t.question] : []))} active={readingQuestion} onJump={jumpTo} gutter={gutter} />
-            </div>
-            <div className="relative mx-auto w-full max-w-(--thread-max) px-4 pb-4 sm:px-6">
-              {!atBottom && (
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  className="absolute -top-12 left-1/2 -translate-x-1/2 animate-pop rounded-full shadow-md"
-                  onClick={() => {
-                    setAtBottom(true)
-                    scroller.current?.scrollTo?.({ top: scroller.current.scrollHeight, behavior: 'smooth' })
+                    <ArrowDown />
+                  </Button>
+                )}
+                <TalkBar state={talk.state} onEnd={talk.end} />
+                <Composer
+                  streaming={streaming}
+                  onSend={send}
+                  talk={talkButton}
+                  queued={queue}
+                  onQueue={enqueue}
+                  onSendNow={sendNow}
+                  onUnqueue={(key) => {
+                    // A spoken question taken back: Talk stops waiting for its answer.
+                    queue.find((x) => x.key === key)?.turn?.ended()
+                    setQueue((q) => q.filter((x) => x.key !== key))
                   }}
-                  aria-label="Jump to the latest"
-                >
-                  <ArrowDown />
-                </Button>
-              )}
-              <TalkBar state={talk.state} onEnd={talk.end} />
-              <Composer
-                streaming={streaming}
-                onSend={send}
-                talk={talkButton}
-                queued={queue}
-                onQueue={enqueue}
-                onSendNow={sendNow}
-                onUnqueue={(key) => {
-                  // A spoken question taken back: Talk stops waiting for its answer.
-                  queue.find((x) => x.key === key)?.turn?.ended()
-                  setQueue((q) => q.filter((x) => x.key !== key))
-                }}
-                research={research}
-                onResearch={setResearch}
-                compare={comparePicker}
-                onStop={() => void stop()}
-                uploads={uploads}
-                model={model}
-                tools={toolsPicker}
-                context={context}
-                onCompact={canCompact ? () => void compact() : undefined}
-                autoFocus
-              />
-            </div>
-          </>
+                  research={research}
+                  onResearch={setResearch}
+                  compare={comparePicker}
+                  onStop={() => void stop()}
+                  uploads={uploads}
+                  model={model}
+                  tools={toolsPicker}
+                  context={context}
+                  onCompact={canCompact ? () => void compact() : undefined}
+                  autoFocus
+                />
+              </div>
+            </>
+          )}
+        </div>
+        {/* Beside the thread on a wide screen; over it, as a panel, on a narrow one. */}
+        {sideOpen && wide && <div className="min-h-0 border-l">{side}</div>}
+        {!wide && (
+          <Sheet
+            open={sideOpen}
+            onOpenChange={(open) => {
+              if (open) return
+              setFilesOpen(false)
+              canvas.setOpen(false)
+            }}
+          >
+            <SheetContent side="right" hideClose className={cn('gap-0 p-0', (canvasOpen || fileView === 'preview') && 'sm:max-w-3xl')}>
+              <SheetTitle className="sr-only">{canvasOpen ? 'Canvas' : 'Files'}</SheetTitle>
+              <SheetDescription className="sr-only">{canvasOpen ? 'Documents and code of this chat' : 'Files in this chat'}</SheetDescription>
+              {side}
+            </SheetContent>
+          </Sheet>
+        )}
+        {me?.isAdmin && <TraceSheet answerId={tracing} onClose={() => setTracing(null)} />}
+        {id && <ShareDialog chatId={id} leafId={view.leaf} open={sharing} onOpenChange={setSharing} />}
+        {dragging && (
+          <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/5 backdrop-blur-[1px]">
+            <p className="flex items-center gap-2 rounded-lg bg-popover px-4 py-2 font-medium shadow-md">
+              <FileUp className="size-5 text-primary" aria-hidden="true" /> Drop files to attach them
+            </p>
+          </div>
         )}
       </div>
-      {/* Beside the thread on a wide screen; over it, as a panel, on a narrow one. */}
-      {filesOpen && wide && <div className="min-h-0 border-l">{panel}</div>}
-      {!wide && (
-        <Sheet open={filesOpen} onOpenChange={setFilesOpen}>
-          <SheetContent side="right" hideClose className={cn('gap-0 p-0', fileView === 'preview' && 'sm:max-w-3xl')}>
-            <SheetTitle className="sr-only">Files</SheetTitle>
-            <SheetDescription className="sr-only">Files in this chat</SheetDescription>
-            {panel}
-          </SheetContent>
-        </Sheet>
-      )}
-      {me?.isAdmin && <TraceSheet answerId={tracing} onClose={() => setTracing(null)} />}
-      {id && <ShareDialog chatId={id} leafId={view.leaf} open={sharing} onOpenChange={setSharing} />}
-      {dragging && (
-        <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/5 backdrop-blur-[1px]">
-          <p className="flex items-center gap-2 rounded-lg bg-popover px-4 py-2 font-medium shadow-md">
-            <FileUp className="size-5 text-primary" aria-hidden="true" /> Drop files to attach them
-          </p>
-        </div>
-      )}
-    </div>
+    </CanvasOpener>
   )
 }

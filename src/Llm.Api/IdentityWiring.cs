@@ -273,6 +273,8 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.AskTool>();
         services.AddSingleton<Chat.Tools.AgentsTool>();
         services.AddScoped<Chat.Tools.FilesTool>();
+        services.AddScoped<Chat.Canvases>();
+        services.AddScoped<Chat.Tools.CanvasTool>();
         services.Configure<Chat.Tools.SandboxOptions>(config.GetSection("Sandbox"));
         services.AddSingleton<Chat.Tools.SandboxClient>();
         services.AddScoped<Chat.Tools.PythonTool>();
@@ -440,6 +442,7 @@ public static class IdentityWiring
         Chat.MemoryEndpoints.MapMemories(app);
         Chat.PromptEndpoints.MapPrompts(app);
         Quality.QualityEndpoints.MapQuality(app);
+        Chat.CanvasEndpoints.MapCanvases(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Plugins.PluginEndpoints.MapPlugins(app);
         ArenaMcp.McpEndpoints.MapArenaMcp(app);
