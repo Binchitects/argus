@@ -933,3 +933,42 @@ Downloads are asked for first, with name, source and size:
 
 T4a needs none: Qwen3-4B is in the library.
 
+
+## v5.0.0 — Parity, knowledge, governance and scale (2026-10-05)
+
+Everything in v4.2 to v4.5 and Later above is built and released at once as
+v5.0.0, each package on its own branch, then merged and tested together (511
+backend, 150 Argus, 42 Arena Code and 310 web tests; the CLI's and the deploy
+scripts' too). Arena Code, our own coding agent, came with it, and Argus now
+takes a person's API key instead of a GitLab token.
+
+Checked on the live stack after the merge: assistants and their gallery; a
+canvas saved as a version and exported to Word; a share link refused for an
+empty chat; Arena MCP (initialize, the person's 12 tools, the calculator, the
+prompt library); Argus refusing an unknown API key and resolving a known one
+to its person; the gateway with the key; a message queued during an answer and
+answered right after it; one replica, leading; the Arena Code builds listed
+for download.
+
+Shipped on tests alone, to prove next:
+
+- W3: the CI template reviewing a merge request in the test GitLab's CI.
+- T4a: deep research under 6 minutes with the small model (not measured).
+- G1: OIDC against a real identity provider (a Keycloak image is a download).
+- E8: the bots against real Slack, Mattermost and Teams workspaces.
+- E7: Talk with a real microphone and loudspeakers.
+- G6: two app replicas live, and the Helm chart rendered by `helm` (not
+  installed here; `check-chart.py` checks it without).
+- N7: the video server's decode on the GPU (the 8 GB threshold).
+- T6: the answer cache through Traefik's health-checked route.
+
+## Next (after v5.0.0)
+
+1. **Prove what shipped on tests** *(S each)*: the list above, on the test
+   GitLab and the live stack, with what each needs asked for first.
+2. **SAML** *(M)*: needs `System.Security.Cryptography.Xml`, which is not in
+   the shared framework (a package: asked for first).
+3. **Confluence and SharePoint** *(M each)*: connectors behind
+   `IKnowledgeConnector`, with their vendors' sandboxes.
+4. **The rest of N8** *(S each)*: the seven unpublished packs published; the
+   live e2e suite one model test at a time in CI; a better Persian voice.

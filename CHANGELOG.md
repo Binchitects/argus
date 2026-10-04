@@ -12,6 +12,142 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.0.0 (2026-10-05)
+
+### :rocket: Epics and highlights
+
+- **What people expect of a chat**: memory across chats, a prompt library with
+  slash commands, assistants a team shares (projects grew into them), read-only
+  links to chats, a canvas for documents and code beside the chat, Talk (a
+  voice conversation read aloud as it is written), thumbs on every answer and
+  Compare (two models blind, with a leaderboard)
+- **Company knowledge and the company's own tools**: GitLab wikis and issues,
+  folders and websites searched by each person within their rights; long
+  files read by their passages; Arena MCP serves each person's chat tools to
+  their own agent; **Arena Code**, our own coding agent, one standalone file
+  per system, built offline
+- **Governance and scale**: company sign-in (OIDC) and SCIM, retention and
+  legal hold, exports for eDiscovery, credit per group with chargeback,
+  safeguards and secret scanning on the API path too, app replicas on one
+  database, a Helm chart, an offline bundle, and restore and rollback tests
+
+### :sparkles: New features & Enhancements
+
+- **Memory**: "remember that I deploy with Podman" is kept and read by every
+  later answer, in any chat (a short block after the fixed notes, so the
+  prompt cache keeps its start). The model offers to remember what you mention
+  and keeps it only when you accept. Your account → Memory lists, edits and
+  deletes them; each person or the company can turn it off. Nobody else sees
+  them
+- **Prompt library**: Workspace → Prompts keeps prompts with `{{blanks}}`,
+  yours, shared with your groups, or the company's. `/` in the composer opens
+  them; plugins bring their own (`gitlab-issues` brings `/triage`). Arena MCP
+  serves them to agents as MCP prompts
+- **Assistants**: instructions, files (up to 200), a model, thinking, tools,
+  starters, an icon and a colour, shared with chosen groups or everyone, with
+  editors. Workspace → Assistants is the gallery, with how much each is used.
+  Nobody it is not shared with sees it, admins included. Existing projects are
+  private assistants
+- **Shared chats**: a read-only link for the company or chosen groups, to the
+  whole chat or the branch on screen; signed in only; **Fork into my chats**
+  copies it with its files; the owner sees the opens and revokes it
+- **Canvas**: documents (Markdown) and code beside the chat, which you and the
+  model both edit. The model changes them by exact edits, all or none; every
+  change is a version with a diff and restore; a selection can be asked
+  about. Export to Markdown, Word (built by the app) and PDF
+- **Talk**: the sound-wave button starts a voice conversation. It listens,
+  writes down what was said, and reads each sentence of the answer aloud as
+  soon as it is written; speaking over it stops it
+- **Feedback and arena**: thumbs up or down with a reason on every answer;
+  **Compare** sends a question to two models side by side and blind, the vote
+  moves an Elo leaderboard; Admin → Quality per model and assistant
+- **A model for small steps, and Auto**: sub-agents, titles, compaction and
+  the safeguards' check go to a small model; **Auto** routes each question to
+  the small or the big model by kind and difficulty, with the reason shown and
+  **Ask the big model**
+- **Company knowledge**: Admin → Knowledge adds GitLab projects or groups
+  (wikis and issues, read by each project's members), folders under
+  `/knowledge` and websites (for chosen groups). The **Company knowledge**
+  tool returns only what the asker may read, with its link. Long attachments
+  and an assistant's files go to the model as the passages that match each
+  question
+- **Answer traces**: admins open where an answer's time went (the wait in
+  line, each round with its tokens, cache share and speeds, each tool call and
+  sub-agent), from a timer under the answer or Admin → Traces. Deep research
+  says which step it is on
+- **Arena MCP** at `https://DOMAIN/mcp`: each person's chat tools for their own
+  agent (Claude Code, Qwen Code, Arena Code), signed in with their API key,
+  run as them, each call audited
+- **Arena Code**: a terminal coding agent in .NET 10 with the base library
+  only, one self-contained file for Linux, Windows and macOS (x64 and Arm),
+  built from `tools/offline-nuget`. It gets the gateway's models and every
+  chat tool over Arena MCP, plus files, shell and git on the person's machine;
+  permission modes, sessions, `ARENA.md`. Downloaded from Connect your tools
+- **Argus by API key**: coding agents connect to Argus with the person's
+  gateway API key; Argus asks the app whose it is and answers as their GitLab
+  account. Nobody hands out a GitLab token any more
+- **The API in CI**: a GitLab CI template and the `arena` CLI review each merge
+  request and explain each failed pipeline, from your own pipeline
+- **Answer cache for API keys**: an identical request with the same key is
+  answered from the app's database at no cost (`x-arena-cache: hit`), off by
+  default, opt-in per key or for all keys
+- **Chat bots and the installable app**: Slack, Mattermost and Teams bots and
+  email in answer as the person in a chat of theirs; the web app installs,
+  works offline for its shell and gets push notifications; a browser extension
+  asks about the page
+- **Queued messages on the server**: a message sent while a chat answers waits
+  on the server, survives a reload, and runs next; Send now and Cancel
+- Document previews show every page, 20 more at a time
+- Credit and alert news also go by email, and the admins' to an alerts webhook
+- The certificate's expiry on Admin → Overview, with alerts 30 and 7 days
+  before
+- A plugin's OAuth sign-in is renewed, and a lapsed one says to connect again
+- Video decodes on the GPU when 8 GB is free as the server loads, else on the
+  CPU
+- Events that come while a task answers wait their turn instead of being
+  dropped
+- The model servers may write into the model library (`LLAMA_CACHE` in it)
+- **Company sign-in (OIDC)**: Entra ID, Okta, Keycloak, Google or GitLab, with
+  PKCE; groups from the provider's claim; an admin group and a required group.
+  **SCIM 2.0** at `/scim/v2` creates, updates and deactivates people and
+  groups
+- **Retention and legal hold**: how long chats are kept, for the company and
+  per group; legal hold keeps everything of a person; exports of a person's
+  data for eDiscovery, and Your account → Your data for their own
+- **Credit for groups**: a credit a month per group, shared or each member's,
+  over the chat and API keys together; groups mirrored as gateway teams; a
+  chargeback report per group and cost centre
+- **Safeguards everywhere**: secret scanning (refuse, mask or let through) in
+  messages, files and on the API path, through the gateway's guardrail; groups
+  choose which checks apply
+- **Scale out**: app replicas share one database (`scale.yml`,
+  `APP_REPLICAS`): one leads the once-only work and another takes over within
+  seconds; approvals, Stop and settings reach every replica; scheduled tasks
+  run once. Groups get a priority in the answers' line. A model on several GPU
+  servers is a pool. An external Postgres through `DB_HOST` and friends
+- **Helm chart** (`deploy/helm/argus-arena`) for Kubernetes
+- **Offline and recovery**: `scripts/airgap.sh` packs and loads a bundle for a
+  host with no network; `restore-test.sh` and `rollback-test.sh` prove a
+  backup restores and a release rolls back, in a throwaway project
+
+### :bug: Bugs fixed
+
+- A comparison not voted on yet stays blind in search, and a question that
+  could not be compared goes back into the box with Compare still on
+- The web's own headers blocked the microphone and sound from `blob:`, which
+  voice messages and Read aloud need
+
+### :boom: Breaking changes & Deprecations
+
+- Projects are now assistants: `/api/projects` is `/api/assistants`, a chat's
+  `projectId` is `assistantId`, and a person's export has `assistants.json`
+  in place of `projects.json`
+- In the platform, Argus refuses a GitLab token from coding agents: they
+  connect with the person's API key (`LLM_SERVICE_API_KEY` in the client
+  files). A standalone Argus is unchanged
+- `ILiteLlm.KeyInfoAsync` takes the key itself and returns the models it may
+  call
+
 ## v4.1.0 (2026-10-04)
 
 ### :rocket: Epics and highlights
