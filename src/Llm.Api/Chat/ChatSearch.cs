@@ -79,7 +79,12 @@ public static partial class ChatEndpoints
                 }
             }
         }
-        return Results.Ok(hits.OrderByDescending(h => h.At).Take(limit));
+        // A comparison's answers not voted on yet stay blind here too.
+        var blind = await Quality.ChatQuality.BlindAsync(db, me.Id, hits.Select(h => h.ConversationId), ct);
+        bool Blind(SearchHit h) => h.Where == "answer" && h.MessageId is { } m && blind.ContainsKey(m);
+        return Results.Ok(hits.Where(h => model is null || !Blind(h))
+            .Select(h => Blind(h) ? h with { Model = Quality.Arena.Label(blind[h.MessageId!.Value]) } : h)
+            .OrderByDescending(h => h.At).Take(limit));
     }
 
     /// <summary>The words with some of what is around them, on one line.</summary>

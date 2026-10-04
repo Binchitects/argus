@@ -62,6 +62,11 @@ public sealed partial class AnswerJobs
                 }
                 if (stopped || ct.IsCancellationRequested)
                 {
+                    // Stopped between the two: B never starts, and every page hears so.
+                    if (!stopped)
+                    {
+                        job.Emit(new { type = "stopped", id = (Guid?)null });
+                    }
                     return;
                 }
             }

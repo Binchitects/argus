@@ -174,6 +174,11 @@ public sealed class QualityTests(AppFixture app)
         Assert.Equal(a, chat.GetProperty("currentLeafId").GetGuid());
         Assert.Equal(["Model A", "Model B"], Messages(chat).Where(m => m.GetProperty("role").GetString() == "assistant").Select(m => m.GetProperty("model").GetString()));
 
+        // Search too: the answers say Model A and Model B, and are not found by their model.
+        var found = await b.JsonAsync(await b.GetAsync("/api/chat/search?q=Answer%20to&in=answer"));
+        Assert.Equal(["Model A", "Model B"], found.EnumerateArray().Select(h => h.GetProperty("model").GetString()).Order());
+        Assert.Empty((await b.JsonAsync(await b.GetAsync($"/api/chat/search?q=Answer%20to&in=answer&model={Other}"))).EnumerateArray());
+
         // Not someone else's, and only a known vote.
         var (stranger, _, _) = await PersonAsync(f);
         var vote = $"/api/chat/arena/{arena.GetProperty("id").GetGuid()}/vote";
@@ -237,6 +242,46 @@ public sealed class QualityTests(AppFixture app)
         var alone = await b.PostAsync(compare, new { content = "x" });
         await StatusAssert.Is(HttpStatusCode.BadRequest, alone);
         Assert.Contains($"only {Main} can", await alone.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_comparison_stopped_during_the_first_answer_never_starts_the_second_and_has_no_vote()
+    {
+        await using var f = TwoModels();
+        var (b, email, _) = await PersonAsync(f);
+        var id = await NewChatAsync(b);
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri($"/api/chat/conversations/{id}/compare", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new { content = "Write a lot [slow]" }),
+        };
+        using var res = await b.Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        var stream = await res.Content.ReadAsStreamAsync();
+        var buffer = new byte[4096];
+        var seen = new System.Text.StringBuilder();
+        while (!seen.ToString().Contains("w3 ", StringComparison.Ordinal))
+        {
+            seen.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, await stream.ReadAsync(buffer)));
+        }
+        await StatusAssert.Is(HttpStatusCode.Accepted, await b.PostAsync($"/api/chat/conversations/{id}/stop", new { }));
+        using var reader = new StreamReader(stream);
+        var rest = seen.ToString() + await reader.ReadToEndAsync();
+        Assert.Contains("\"type\":\"stopped\"", rest, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"step\":2", rest, StringComparison.Ordinal);
+
+        JsonElement arena = default;
+        for (var i = 0; i < 50; i++)
+        {
+            var (chat, _) = await ChatAsync(b, id);
+            arena = chat.GetProperty("arenas")[0];
+            if (!chat.GetProperty("answering").GetBoolean())
+            {
+                break;
+            }
+            await Task.Delay(100);
+        }
+        Assert.Equal(JsonValueKind.Null, arena.GetProperty("b").ValueKind);
+        Assert.Single(app.Model.Requests, r => r.Body["user"]!.GetValue<string>() == email);
+        await StatusAssert.Is(HttpStatusCode.Conflict, await b.PostAsync($"/api/chat/arena/{arena.GetProperty("id").GetGuid()}/vote", new { vote = "a" }));
     }
 
     [Fact]

@@ -23,23 +23,49 @@ public sealed class ChatQuality
     {
         var matches = await db.ArenaMatches.AsNoTracking().Where(m => m.ConversationId == conversationId).OrderBy(m => m.CreatedAt).ToListAsync(ct);
         var feedback = await db.AnswerFeedback.AsNoTracking().Where(f => f.ConversationId == conversationId && f.UserId == userId).ToDictionaryAsync(f => f.MessageId, ct);
+        return new ChatQuality(matches, Blind(matches, messages), feedback);
+    }
+
+    /// <summary>Each message of an answer to a comparison not voted on yet, with its comparison and side.</summary>
+    private static Dictionary<Guid, (ArenaMatch, string)> Blind(IEnumerable<ArenaMatch> matches, IReadOnlyList<ChatMessage> messages)
+    {
         var blind = new Dictionary<Guid, (ArenaMatch, string)>();
-        if (matches.Any(m => m.Vote is null))
+        var open = matches.Where(m => m.Vote is null).ToList();
+        if (open.Count == 0)
         {
-            var byId = messages.ToDictionary(m => m.Id);
-            var children = messages.Where(m => m.ParentId is not null).ToLookup(m => m.ParentId!.Value);
-            foreach (var match in matches.Where(m => m.Vote is null))
+            return blind;
+        }
+        var byId = messages.ToDictionary(m => m.Id);
+        var children = messages.Where(m => m.ParentId is not null).ToLookup(m => m.ParentId!.Value);
+        foreach (var match in open)
+        {
+            foreach (var (side, first) in new[] { ("a", match.AnswerA), ("b", match.AnswerB) })
             {
-                foreach (var (side, first) in new[] { ("a", match.AnswerA), ("b", match.AnswerB) })
+                foreach (var id in first is { } f ? Arena.Chain(f, byId, children) : [])
                 {
-                    foreach (var id in first is { } f ? Arena.Chain(f, byId, children) : [])
-                    {
-                        blind[id] = (match, side);
-                    }
+                    blind[id] = (match, side);
                 }
             }
         }
-        return new ChatQuality(matches, blind, feedback);
+        return blind;
+    }
+
+    /// <summary>
+    /// The person's messages, in these chats, that answer a comparison not voted on yet, with
+    /// their side: search shows "Model A" or "Model B" for them, and never finds them by model.
+    /// </summary>
+    public static async Task<Dictionary<Guid, string>> BlindAsync(AppDbContext db, Guid userId, IEnumerable<Guid> conversations, CancellationToken ct)
+    {
+        var ids = conversations.Distinct().ToList();
+        var open = await db.ArenaMatches.AsNoTracking().Where(m => m.UserId == userId && m.Vote == null && m.ConversationId != null && ids.Contains(m.ConversationId.Value)).ToListAsync(ct);
+        if (open.Count == 0)
+        {
+            return [];
+        }
+        var chats = open.Select(m => m.ConversationId!.Value).Distinct().ToList();
+        var messages = await db.ChatMessages.AsNoTracking().Where(m => chats.Contains(m.ConversationId))
+            .Select(m => new ChatMessage { Id = m.Id, ConversationId = m.ConversationId, ParentId = m.ParentId, Role = m.Role, Sequence = m.Sequence }).ToListAsync(ct);
+        return Blind(open, messages).ToDictionary(x => x.Key, x => x.Value.Item2);
     }
 
     public string? Model(ChatMessage m) => _blind.TryGetValue(m.Id, out var b) ? Arena.Label(b.Side) : m.Model;
