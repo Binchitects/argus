@@ -2,7 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Llm.Api.Plugins;
+using Llm.Core.Data;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -109,6 +112,57 @@ public sealed class PluginTests(AppFixture app)
         // Removed: its tool, and everyone's accounts with it.
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/plugins/{made.GetProperty("id").GetGuid()}", UriKind.Relative)));
         Assert.Empty((await b.JsonAsync(await b.GetAsync("/api/account/connections"))).EnumerateArray());
+    }
+
+    [Fact]
+    public async Task An_expired_oauth_token_is_refreshed_at_the_plugins_token_address_and_a_failed_refresh_says_to_connect_again()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install",
+            new { name = "gitlab-issues", settings = new { gitlab_url = "https://gitlab.test", client_id = "app-id", client_secret = "app-secret" } }));
+        var toolId = made.GetProperty("toolId").GetString()!;
+        var (b, _) = await PersonAsync(f);
+        var go = await b.GetAsync($"/api/account/connections/{Uri.EscapeDataString(toolId)}/connect");
+        var state = System.Web.HttpUtility.ParseQueryString(go.Headers.Location!.Query)["state"]!;
+        Assert.Equal("/account?connected=GitLab%20issues", (await b.GetAsync($"/api/account/connections/callback?code=good-code&state={Uri.EscapeDataString(state)}")).Headers.Location!.ToString());
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+
+        async Task ExpireAsync()
+        {
+            await using var scope = f.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.PersonCredentials.Where(c => c.ToolId == toolId).ExecuteUpdateAsync(s => s.SetProperty(c => c.ExpiresAt, DateTimeOffset.UtcNow.AddMinutes(-5)));
+        }
+        async Task<DateTimeOffset?> ExpiresAsync()
+        {
+            await using var scope = f.Services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<AppDbContext>().PersonCredentials.Where(c => c.ToolId == toolId).Select(c => c.ExpiresAt).SingleAsync();
+        }
+        int Seen() { lock (app.Mcp.GitLabCalls) { return app.Mcp.GitLabCalls.Count; } }
+        List<(string Method, string PathAndQuery, string? Authorization, string? Body)> Since(int from) { lock (app.Mcp.GitLabCalls) { return app.Mcp.GitLabCalls[from..]; } }
+
+        // Expired: the next call trades the refresh token for a new one at the plugin's token address, and goes with it.
+        await ExpireAsync();
+        var before = Seen();
+        var read = Event(await SendAsync(b, chat, "Mine? [call gitlab_issues__my_issues {}]"), "tool_result");
+        Assert.StartsWith("HTTP 200", read.GetProperty("text").GetString(), StringComparison.Ordinal);
+        var calls = Since(before);
+        var refresh = Assert.Single(calls, c => c is { Method: "POST", PathAndQuery: "/oauth/token" });
+        var form = System.Web.HttpUtility.ParseQueryString(refresh.Body!);
+        Assert.Equal("refresh_token", form["grant_type"]);
+        Assert.Equal("refresh-1", form["refresh_token"]);
+        Assert.Contains(calls, c => c.PathAndQuery.StartsWith("/api/v4/issues", StringComparison.Ordinal) && c.Authorization == "Bearer token-2");
+        Assert.True(await ExpiresAsync() > DateTimeOffset.UtcNow.AddHours(1));
+
+        // Expired again, and GitLab no longer takes the refresh token (refresh-2 here): the chat says to connect again, and nothing is called as the person.
+        await ExpireAsync();
+        before = Seen();
+        var events = await SendAsync(b, chat, "Mine again? [call gitlab_issues__my_issues {}]");
+        var notice = Event(events, "notice").GetProperty("text").GetString()!;
+        Assert.Contains("GitLab issues sign-in has expired and could not be renewed: connect again, in Your account → Connections", notice, StringComparison.Ordinal);
+        Assert.Contains(Since(before), c => c is { Method: "POST", PathAndQuery: "/oauth/token" });
+        Assert.DoesNotContain(Since(before), c => c.PathAndQuery.StartsWith("/api/v4/issues", StringComparison.Ordinal));
     }
 
     [Fact]

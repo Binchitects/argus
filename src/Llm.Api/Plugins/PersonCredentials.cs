@@ -16,22 +16,25 @@ public sealed class PersonCredentials(AppDbContext db, IHttpClientFactory http, 
 {
     private string Key => auth.Value.DataKey is { Length: > 0 } k ? k : throw new InvalidOperationException("APP_DATA_KEY is not set.");
 
-    /// <summary>The person's token for a tool, refreshed when it has expired; null when they have not connected (or it cannot be refreshed).</summary>
-    public async Task<string?> TokenAsync(McpServer server, Guid userId, CancellationToken ct)
+    /// <summary>
+    /// The person's token for a tool, refreshed when it has expired. No token when they have not
+    /// connected, or when it expired and could not be refreshed (Lapsed: they connect again).
+    /// </summary>
+    public async Task<(string? Token, bool Lapsed)> TokenAsync(McpServer server, Guid userId, CancellationToken ct)
     {
         var toolId = Chat.Tools.McpServerTool.Prefix + server.Id;
         if (await db.PersonCredentials.SingleOrDefaultAsync(c => c.UserId == userId && c.ToolId == toolId, ct) is not { } saved)
         {
-            return null;
+            return (null, false);
         }
         if (saved.ExpiresAt is { } expires && expires < DateTimeOffset.UtcNow.AddMinutes(1))
         {
             if (saved.RefreshEncrypted is null || await RefreshAsync(server, saved, ct) is false)
             {
-                return null;
+                return (null, true);
             }
         }
-        return SettingsCrypto.Decrypt(saved.SecretEncrypted, Key);
+        return (SettingsCrypto.Decrypt(saved.SecretEncrypted, Key), false);
     }
 
     public async Task SaveAsync(Guid userId, string toolId, string secret, string? refresh, DateTimeOffset? expires, string? account, CancellationToken ct)
