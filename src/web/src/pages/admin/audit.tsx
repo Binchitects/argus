@@ -27,7 +27,7 @@ const PAGE = 500
 /** What kind of event, for the filter. */
 function kind(action: string): 'sign-in' | 'people' | 'settings' | 'argus' | 'other' {
   if (action.startsWith('sign_') || action.startsWith('account.')) return 'sign-in'
-  if (action.startsWith('person.') || action === 'ldap.sync') return 'people'
+  if (action.startsWith('person.') || action === 'ldap.sync' || action.startsWith('scim.')) return 'people'
   if (action.startsWith('settings.')) return 'settings'
   if (action.startsWith('argus.')) return 'argus'
   return 'other'

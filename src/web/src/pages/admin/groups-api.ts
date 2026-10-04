@@ -6,6 +6,8 @@ export interface GroupSummary {
   description: string | null
   /** A directory group's name or DN; null for an app group. */
   directory: string | null
+  /** Made by the company's identity provider through SCIM: it decides the name and the members. */
+  scim: boolean
   members: number
   createdAt: string
 }

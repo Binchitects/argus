@@ -15,6 +15,8 @@ public sealed record MembersRequest(Guid[] UserIds);
 /// <summary>Groups for access rules: app groups whose members are chosen here, and directory groups.</summary>
 public static class GroupEndpoints
 {
+    private const string ScimOwned = "The company's identity provider decides this group's name and members (SCIM).";
+
     public static void MapGroups(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/admin/groups").RequireAuthorization(AdminEndpoints.Policy);
@@ -37,7 +39,7 @@ public static class GroupEndpoints
             : [];
         return Results.Ok(groups.Select(x => new
         {
-            x.Id, x.Name, x.Description, x.Directory, x.CreatedAt,
+            x.Id, x.Name, x.Description, x.Directory, x.Scim, x.CreatedAt,
             members = x.Directory is { } d ? directoryPeople.Count(m => AccessService.InDirectoryGroup(m, d)) : counts.GetValueOrDefault(x.Id),
         }));
     }
@@ -70,7 +72,7 @@ public static class GroupEndpoints
         }
         return Results.Ok(new
         {
-            group.Id, group.Name, group.Description, group.Directory, group.CreatedAt,
+            group.Id, group.Name, group.Description, group.Directory, group.Scim, group.CreatedAt,
             members = people.OrderBy(u => u.DisplayName, StringComparer.OrdinalIgnoreCase)
                 .Select(u => new { u.Id, u.UserName, u.DisplayName, u.Email, u.IsDisabled }),
         });
@@ -95,6 +97,10 @@ public static class GroupEndpoints
         if (await db.Groups.SingleOrDefaultAsync(x => x.Id == id) is not { } group)
         {
             return Results.NotFound();
+        }
+        if (group.Scim && body.Name is not null && body.Name.Trim() != group.Name)
+        {
+            return AuthEndpoints.Problem(400, "scim", ScimOwned);
         }
         var name = body.Name is null ? group.Name : body.Name.Trim();
         var directory = body.Directory is null ? group.Directory : Clean(body.Directory);
@@ -141,6 +147,10 @@ public static class GroupEndpoints
         {
             return AuthEndpoints.Problem(400, "directory", "The directory decides who is in a directory group.");
         }
+        if (group.Scim)
+        {
+            return AuthEndpoints.Problem(400, "scim", ScimOwned);
+        }
         var ids = (body.UserIds ?? []).Distinct().ToList();
         var people = await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).Select(u => new { u.Id, u.UserName }).ToListAsync();
         if (people.Count != ids.Count)
@@ -163,6 +173,10 @@ public static class GroupEndpoints
         if (await db.GroupMembers.SingleOrDefaultAsync(m => m.GroupId == id && m.UserId == userId) is not { } member)
         {
             return Results.NotFound();
+        }
+        if (await db.Groups.AnyAsync(x => x.Id == id && x.Scim))
+        {
+            return AuthEndpoints.Problem(400, "scim", ScimOwned);
         }
         db.GroupMembers.Remove(member);
         await db.SaveChangesAsync();

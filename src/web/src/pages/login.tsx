@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, LifeBuoy, ShieldCheck } from 'lucide-react'
+import { Building2, KeyRound, LifeBuoy, ShieldCheck } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useSearchParams } from 'react-router'
@@ -22,11 +22,36 @@ const passwordSchema = z.object({
 })
 const codeSchema = z.object({ code: z.string().trim().min(1, 'Enter the code.') })
 
+/** Company sign-in (OIDC): the button's label when an admin has set it up. */
+const companyQuery = {
+  queryKey: ['auth', 'company'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ label: string | null }>('/api/auth/company', { signal }),
+  staleTime: 5 * 60_000,
+}
+
+/** What the identity provider's answer came to (login?error=company_...), for people. */
+const companyErrors: Record<string, string> = {
+  company_not_allowed: 'Your company account is not allowed to sign in here. Ask an admin.',
+  company_disabled: 'This account is disabled. Ask an admin.',
+  company_refused: 'Your company account cannot be used here. Ask an admin: the audit log says why.',
+  company_failed: 'Company sign-in did not work. Try again; if it keeps failing, ask an admin (the audit log says why).',
+  company_unavailable: "Your company's sign-in cannot be reached right now. Try again shortly.",
+  company_cancelled: 'Company sign-in was cancelled.',
+  company_off: 'Company sign-in is not set up here.',
+}
+
+/** Where the company button goes: the app starts the sign-in at the identity provider. */
+function companyHref(redirect: string, remember: boolean): string {
+  return `/api/auth/company/start?rd=${encodeURIComponent(redirect)}${remember ? '&remember=true' : ''}`
+}
+
 /** Sign-in for the app and for everything that trusts it (the chat, tools). */
 export function LoginPage() {
   const [params] = useSearchParams()
   const redirect = params.get('rd') ?? '/'
+  const companyError = companyErrors[params.get('error') ?? ''] ?? null
   const info = useQuery(infoQuery)
+  const company = useQuery(companyQuery)
   const [step, setStep] = useState<'password' | '2fa'>('password')
   const [remember, setRemember] = useState(false)
   const name = info.data?.name ?? 'Argus Arena'
@@ -52,7 +77,7 @@ export function LoginPage() {
             <img src="/favicon.svg" alt="" className="size-8 rounded-md" /> {name}
           </div>
           {step === 'password' ? (
-            <PasswordStep redirect={redirect} onTwoFactor={(r) => { setRemember(r); setStep('2fa') }} />
+            <PasswordStep redirect={redirect} company={company.data?.label ?? null} companyError={companyError} onTwoFactor={(r) => { setRemember(r); setStep('2fa') }} />
           ) : (
             <CodeStep redirect={redirect} remember={remember} onBack={() => setStep('password')} />
           )}
@@ -72,9 +97,9 @@ function useFinish() {
   }
 }
 
-function PasswordStep({ redirect, onTwoFactor }: { redirect: string; onTwoFactor: (remember: boolean) => void }) {
+function PasswordStep({ redirect, company, companyError, onTwoFactor }: { redirect: string; company: string | null; companyError: string | null; onTwoFactor: (remember: boolean) => void }) {
   const finish = useFinish()
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(companyError)
   const form = useForm({ resolver: zodResolver(passwordSchema), defaultValues: { userName: '', password: '', remember: false } })
   const submit = form.handleSubmit(async (v) => {
     setError(null)
@@ -96,6 +121,18 @@ function PasswordStep({ redirect, onTwoFactor }: { redirect: string; onTwoFactor
         <p className="mt-1 text-muted-foreground">With your account or your company directory login.</p>
       </div>
       {error && <Alert variant="destructive">{error}</Alert>}
+      {company && (
+        <>
+          <Button variant="outline" size="lg" asChild>
+            <a href={companyHref(redirect, form.watch('remember'))}>
+              <Building2 /> Sign in with {company}
+            </a>
+          </Button>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground" aria-hidden="true">
+            <span className="h-px flex-1 bg-border" /> or <span className="h-px flex-1 bg-border" />
+          </div>
+        </>
+      )}
       <Field label="Username or email" error={errors.userName?.message}>
         <Input autoComplete="username" autoFocus {...form.register('userName')} />
       </Field>

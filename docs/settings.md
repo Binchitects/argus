@@ -16,7 +16,7 @@ Each setting has a badge that says when it applies:
 
 | Badge | When it applies |
 |---|---|
-| **At once** | Immediately. Examples: the company directory, chat limits, sign-in lockouts, branding, the default model and thinking levels. |
+| **At once** | Immediately. Examples: the company directory, company sign-in, chat limits, sign-in lockouts, branding, the default model and thinking levels. |
 | **Restart** | When the app restarts. The page offers **Restart the app now**: the app stops itself and Docker's restart policy starts it again, in a few seconds. Examples: session lifetimes, the longest chat answer, how many models the engine holds at once. |
 
 A value saved here wins over one the environment gives. The page shows the
@@ -27,9 +27,12 @@ value it overrides, and **Back to the environment's value** removes the saved on
 - A secret is write-only in the page. It shows whether it is set, never its
   value, not even masked: a masked value still leaks its length into every
   screenshot.
-- A saved secret (the directory's service password, the mail password) is
-  stored AES-256-GCM encrypted under a key derived from `APP_KEY`. A database
-  dump alone does not reveal it.
+- A saved secret (the directory's service password, the company sign-in client
+  secret, the mail password) is stored AES-256-GCM encrypted under a key derived
+  from `APP_KEY`. A database dump alone does not reveal it.
+- The SCIM token is not a setting: **Company sign-in** makes it, shows it once
+  and keeps only its SHA-256. The same group shows the redirect URI to register
+  at the identity provider, and tests the provider before you save.
 
 ## What cannot be changed here, and why
 

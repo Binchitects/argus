@@ -38,14 +38,25 @@ export function AccountPage() {
         </div>
         <div className="grid content-start gap-6">
           <Connections />
-          <TwoFactor enabled={me.twoFactorEnabled} />
+          {me.source === 'oidc' ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Two-factor sign-in</CardTitle>
+                <CardDescription>Your company account's sign-in asks for it, when your company has set it up.</CardDescription>
+              </CardHeader>
+            </Card>
+          ) : (
+            <TwoFactor enabled={me.twoFactorEnabled} />
+          )}
           {me.source === 'local' ? (
             <Password />
           ) : (
             <Card>
               <CardHeader>
                 <CardTitle>Password</CardTitle>
-                <CardDescription>Your password is managed by the company directory. Change it there.</CardDescription>
+                <CardDescription>
+                  {me.source === 'oidc' ? 'You sign in with your company account: its password is changed there.' : 'Your password is managed by the company directory. Change it there.'}
+                </CardDescription>
               </CardHeader>
             </Card>
           )}
@@ -67,7 +78,7 @@ function Profile({ me }: { me: Me }) {
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {me.isAdmin && <Badge>Admin</Badge>}
-            <Badge variant="secondary">{me.source === 'ldap' ? 'Company directory' : 'Local account'}</Badge>
+            <Badge variant="secondary">{me.source === 'ldap' ? 'Company directory' : me.source === 'oidc' ? 'Company sign-in' : 'Local account'}</Badge>
             <Badge variant="outline">Signed in {ago(me.signedInAt)}</Badge>
           </div>
         </div>

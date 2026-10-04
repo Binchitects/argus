@@ -98,7 +98,7 @@ public static class AdminEndpoints
         displayName = u.DisplayName,
         email = u.Email,
         isAdmin = admin,
-        source = u.Source == UserSource.Ldap ? "ldap" : "local",
+        source = UserSources.Name(u.Source),
         disabled = u.IsDisabled,
         disabledReason = u.DisabledReason,
         twoFactorEnabled = u.TwoFactorEnabled,
@@ -157,9 +157,9 @@ public static class AdminEndpoints
         {
             if (body.DisplayName is { } name && name.Trim() != u.DisplayName)
             {
-                if (u.Source == UserSource.Ldap)
+                if (u.Source != UserSource.Local)
                 {
-                    throw new PeopleException("The directory owns this person's name.");
+                    throw new PeopleException(u.Source == UserSource.Ldap ? "The directory owns this person's name." : "The company's identity provider owns this person's name.");
                 }
                 u.DisplayName = name.Trim();
                 await users.UpdateAsync(u);
@@ -167,9 +167,11 @@ public static class AdminEndpoints
             }
             if (body.Admin is { } admin)
             {
-                if (u.Source == UserSource.Ldap)
+                if (u.Source != UserSource.Local)
                 {
-                    throw new PeopleException("The directory decides this person's role (its admin group).");
+                    throw new PeopleException(u.Source == UserSource.Ldap
+                        ? "The directory decides this person's role (its admin group)."
+                        : "The company's identity provider decides this person's role (its admin group, at each sign-in).");
                 }
                 await people.SetAdminAsync(actor, u, admin);
             }

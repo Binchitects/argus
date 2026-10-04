@@ -4,6 +4,16 @@ import { describe, expect, it } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
 
 describe('account', () => {
+  it('someone who signs in with the company account changes their password and two-factor sign-in there', async () => {
+    fakeApi({ ...member, source: 'oidc' })
+    renderApp('/account')
+    expect(await screen.findByText('Company sign-in')).toBeInTheDocument()
+    expect(screen.getByText('You sign in with your company account: its password is changed there.')).toBeInTheDocument()
+    expect(screen.getByText(/Your company account's sign-in asks for it/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Set up/ })).toBeNull()
+    expect(screen.queryByLabelText('Current password')).toBeNull()
+  })
+
   it('a new API key needs confirming, then is shown once', async () => {
     const calls = fakeApi(member, {
       'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: '2026-09-01T10:00:00Z' }], spend: 1, budget: 10 } }),

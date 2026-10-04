@@ -6,7 +6,7 @@ export interface Person {
   displayName: string
   email: string
   isAdmin: boolean
-  source: 'local' | 'ldap'
+  source: 'local' | 'ldap' | 'oidc'
   disabled: boolean
   disabledReason: string | null
   twoFactorEnabled: boolean

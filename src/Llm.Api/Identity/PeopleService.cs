@@ -154,7 +154,9 @@ public sealed partial class PeopleService(
     {
         if (user.Source != UserSource.Local)
         {
-            throw new PeopleException($"{user.UserName} signs in through LDAP; change the password in the directory.");
+            throw new PeopleException(user.Source == UserSource.Ldap
+                ? $"{user.UserName} signs in through LDAP; change the password in the directory."
+                : $"{user.UserName} signs in with their company account; its password is changed there.");
         }
         var password = GeneratePassword();
         Check(await users.RemovePasswordAsync(user));

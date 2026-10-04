@@ -50,7 +50,7 @@ public static class AuthEndpoints
             displayName = user.DisplayName,
             email = user.Email,
             isAdmin = await users.IsInRoleAsync(user, Roles.Admin),
-            source = user.Source == UserSource.Ldap ? "ldap" : "local",
+            source = UserSources.Name(user.Source),
             twoFactorEnabled = user.TwoFactorEnabled,
             signedInAt = AppClaimsFactory.SignedInAt(principal)?.ToUnixTimeSeconds(),
         });

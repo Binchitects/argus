@@ -29,7 +29,7 @@ A broken Traefik is a total outage; a broken Prometheus is not.
 ## 2. Hostnames
 
 `DOMAIN` in `.env` names three addresses: `https://DOMAIN` (the web, with
-`/api`, `/connect` and `/.well-known` going to the app), `gateway.DOMAIN`
+`/api`, `/connect`, `/.well-known` and `/scim` going to the app), `gateway.DOMAIN`
 (LiteLLM) and `argus.DOMAIN` (Argus's MCP). Nothing else is published:
 Prometheus, Alertmanager, Loki, the exporters and the engines are reached only
 inside the stack, and the app shows their data to admins.

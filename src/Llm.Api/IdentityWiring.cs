@@ -201,6 +201,12 @@ public static class IdentityWiring
         services.AddSingleton<ILdapDirectory, LdapDirectory>();
         services.AddSingleton<LdapSync>();
         services.AddHostedService(sp => sp.GetRequiredService<LdapSync>());
+        services.Configure<Company.CompanySignInOptions>(config.GetSection("CompanySignIn"));
+        services.AddSingleton<Company.CompanyIdp>();
+        services.AddHttpClient(Company.CompanyIdp.Client, c => c.Timeout = TimeSpan.FromSeconds(15));
+        services.AddScoped<Company.CompanyPeople>();
+        services.AddScoped<Company.CompanySignIn>();
+        services.AddScoped<Scim.ScimTokens>();
         services.AddScoped<Audit>();
         services.AddScoped<DirectoryFile>();
         services.AddScoped<PeopleService>();
@@ -400,6 +406,8 @@ public static class IdentityWiring
         Access.GroupEndpoints.MapGroups(app);
         app.MapForwardAuth();
         app.MapOidc();
+        Company.CompanyEndpoints.MapCompany(app);
+        Scim.ScimEndpoints.MapScim(app);
         Dashboards.DashboardEndpoints.MapDashboards(app);
         Dashboards.UsageEndpoints.MapUsage(app);
         Dashboards.LogEndpoints.MapLogs(app);

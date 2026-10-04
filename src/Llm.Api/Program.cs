@@ -72,7 +72,7 @@ api.MapGet("/info", (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settin
 });
 api.MapFallback(() => Results.NotFound());
 // Pages come from the web container (src/web); Traefik sends only /api,
-// /connect and /.well-known here. Anything else that arrives is a plain 404.
+// /connect, /.well-known and /scim here. Anything else that arrives is a plain 404.
 app.MapFallback(() => Results.NotFound());
 
 if (app.Configuration.GetValue("Database:MigrateOnStartup", true))

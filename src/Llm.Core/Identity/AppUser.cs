@@ -6,6 +6,19 @@ public enum UserSource
 {
     Local = 0,
     Ldap = 1,
+    /// <summary>Company sign-in (an OIDC identity provider), or made by its SCIM provisioning.</summary>
+    Oidc = 2,
+}
+
+public static class UserSources
+{
+    /// <summary>The name the API and the pages use: local, ldap or oidc.</summary>
+    public static string Name(UserSource source) => source switch
+    {
+        UserSource.Ldap => "ldap",
+        UserSource.Oidc => "oidc",
+        _ => "local",
+    };
 }
 
 /// <summary>
@@ -18,12 +31,16 @@ public sealed class AppUser : IdentityUser<Guid>
     public UserSource Source { get; set; }
     /// <summary>For LDAP people: their entry, so the sync can find them again.</summary>
     public string? LdapDn { get; set; }
+    /// <summary>For company sign-in people: the identity provider's subject (sub), set at their first sign-in.</summary>
+    public string? OidcSubject { get; set; }
+    /// <summary>For people SCIM made or manages: the identity provider's own id for them (externalId).</summary>
+    public string? ScimExternalId { get; set; }
     public bool IsDisabled { get; set; }
-    /// <summary>"admin" or "ldap": the directory sync only re-enables people it disabled itself.</summary>
+    /// <summary>"admin", "ldap", "oidc" or "scim": each source only re-enables people it disabled itself.</summary>
     public string? DisabledReason { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSignInAt { get; set; }
-    /// <summary>For directory people: the groups the directory lists (DNs), as of the last sign-in or sync.</summary>
+    /// <summary>For directory and company sign-in people: the groups the directory or the identity provider lists, as of the last sign-in or sync.</summary>
     public List<string> DirectoryGroups { get; set; } = [];
     /// <summary>How long answers should be: "short", "thorough", or null for the model's own judgement.</summary>
     public string? AnswerLength { get; set; }

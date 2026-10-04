@@ -10,8 +10,8 @@ out) and a page each. The audit log has filters, paging and CSV export. The
 Settings page edits everything ([settings.md](settings.md)), and the Model page
 has **Switch to this model**.
 
-Sign-in, people, the company directory and 2FA are in
-[authentication.md](authentication.md), and the chat in [chat.md](chat.md). This
+Sign-in, people, the company directory, company sign-in (OIDC and SCIM) and 2FA
+are in [authentication.md](authentication.md), and the chat in [chat.md](chat.md). This
 page covers the rest.
 
 ## Admin
@@ -20,7 +20,7 @@ page covers the rest.
 |---|---|
 | **Overview** | Services up, people and admins, total spend, who is at or past their credit, and the code index's health. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). |
 | **People** | Add, search, and per person: credit, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, delete. **Export CSV** downloads everyone with spend and credit left. |
-| **Groups** | App groups (the people you add) and directory groups (whoever the company directory puts in them, by name or DN). Tools and models are given to groups. |
+| **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. |
 | **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). |
 | **Models** | Every model at the gateway. The engine's models load and unload with one click (one at a time on one GPU); more are added from the model library on the host. Per model: who may use it, in the chat and with API keys. See [Models](#models) below. |
 | **Deployment** | The `.env` model the engine starts with (file, context, longest reply, multi-token prediction, thinking presets, power limits, prices) and every shipped sample with the exact `.env` block to paste to switch to it. |
@@ -33,7 +33,7 @@ page covers the rest.
 | **Alerts** | What fires now (from Alertmanager, with silenced ones marked), every time an alert fired over a day, a week or a month, and every rule with its state, severity, how long its condition must hold, and its query. |
 | **Settings** | Every setting, grouped and searchable: applied at once, or by a restart the app does itself. See [settings.md](settings.md). |
 | **Audit log** | Every sign-in and every change to people or the index, with who, whom and from where. |
-| **Sign-in** | Local accounts and the company directory; "Check the directory now". |
+| **Sign-in** | Local accounts, the company directory ("Check the directory now") and company sign-in: the identity provider, its admin and required groups, and whether SCIM is on. |
 
 Indexing, Packs and Explore talk to Argus through the app's server with
 `ARGUS_KEY`, which never reaches a browser. With Argus left out they say

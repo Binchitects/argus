@@ -53,6 +53,7 @@ const columns: ColumnDef<Person>[] = [
       <div className="flex flex-wrap gap-1">
         <Badge variant={p.isAdmin ? 'default' : 'secondary'}>{p.isAdmin ? 'Admin' : 'Member'}</Badge>
         {p.source === 'ldap' && <Badge variant="outline">Directory</Badge>}
+        {p.source === 'oidc' && <Badge variant="outline">Company</Badge>}
       </div>
     ),
   },

@@ -323,7 +323,7 @@ public static class OperationsEndpoints
             sb.AppendJoin(',', new[]
             {
                 Csv(u.UserName), Csv(u.DisplayName), Csv(u.Email), admins.Contains(u.Id) ? "admin" : "member",
-                u.Source == UserSource.Ldap ? "ldap" : "local", u.IsDisabled ? "yes" : "no",
+                UserSources.Name(u.Source), u.IsDisabled ? "yes" : "no",
                 spend.ToString("0.0000", CultureInfo.InvariantCulture),
                 g?.Budget?.ToString(CultureInfo.InvariantCulture) ?? "", left,
             }).Append('\n');

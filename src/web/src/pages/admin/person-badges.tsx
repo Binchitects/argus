@@ -2,12 +2,15 @@ import { Lock, ShieldCheck, UserX } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { Person } from './people-api'
 
+/** Who disabled someone, when it was not an admin. */
+const disabledBy: Record<string, string> = { ldap: ' by directory', oidc: ' by company sign-in', scim: ' by SCIM' }
+
 export function PersonBadges({ p }: { p: Person }) {
   return (
     <span className="inline-flex flex-wrap gap-1">
       {p.disabled && (
         <Badge variant="destructive">
-          <UserX /> Disabled{p.disabledReason === 'ldap' ? ' by directory' : ''}
+          <UserX /> Disabled{disabledBy[p.disabledReason ?? ''] ?? ''}
         </Badge>
       )}
       {p.lockedOut && (

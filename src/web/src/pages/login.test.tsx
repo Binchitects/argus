@@ -56,3 +56,30 @@ describe('sign-in', () => {
     expect(calls.find((c) => c.path === '/api/auth/login/2fa')?.body).toMatchObject({ code: 'abcd-1234', recovery: true })
   })
 })
+
+describe('company sign-in', () => {
+  it('offers the company button when it is set up, keeping where the person was headed', async () => {
+    fakeApi(null, { 'GET /api/auth/company': () => ({ json: { label: 'Okta' } }) })
+    renderApp('/login?rd=%2Fusage')
+    const button = await screen.findByRole('link', { name: 'Sign in with Okta' })
+    expect(button).toHaveAttribute('href', '/api/auth/company/start?rd=%2Fusage')
+    await userEvent.click(screen.getByRole('checkbox', { name: /Keep me signed in/ }))
+    expect(button).toHaveAttribute('href', '/api/auth/company/start?rd=%2Fusage&remember=true')
+    // The password form stays, for local accounts.
+    expect(screen.getByLabelText('Username or email')).toBeInTheDocument()
+  })
+
+  it('shows no company button while it is off', async () => {
+    fakeApi(null, { 'GET /api/auth/company': () => ({ json: { label: null } }) })
+    renderApp('/login')
+    expect(await screen.findByLabelText('Username or email')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Sign in with/ })).toBeNull()
+  })
+
+  it('words what the identity provider’s answer came to', async () => {
+    fakeApi(null, { 'GET /api/auth/company': () => ({ json: { label: 'Okta' } }) })
+    renderApp('/login?error=company_not_allowed&rd=%2Fchat')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your company account is not allowed to sign in here. Ask an admin.')
+    expect(await screen.findByRole('link', { name: 'Sign in with Okta' })).toHaveAttribute('href', '/api/auth/company/start?rd=%2Fchat')
+  })
+})
