@@ -12,6 +12,7 @@
 | [settings.md](settings.md) | the Settings page: what applies at once, after a restart, or on the host |
 | [chat.md](chat.md) | the chat: models, thinking, files, tools and their limits |
 | [plugins.md](plugins.md) | plugins and APIs as tools: installing, each person's own account, the manifest, a catalog |
+| [knowledge.md](knowledge.md) | company knowledge: GitLab wikis and issues, folders and websites, searched by each person within their rights; long files by their passages |
 | [cpu-temperature.md](cpu-temperature.md) | how CPU temperature reaches the dashboards, on Linux and on Windows |
 | [hermes.md](hermes.md) | pointing Hermes at the model and at Argus |
 

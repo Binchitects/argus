@@ -74,6 +74,11 @@ setups to paste.
   which of them this chat has on; a new chat starts with those an admin put
   on in new chats. The model calls a tool when a question needs it.
   - **Argus**: the code you can read in GitLab (below).
+  - **Company knowledge**: the company's documents you may read (GitLab
+    wikis and issues, folders, websites an admin added under Admin →
+    Knowledge), found by meaning; the model cites each passage with its
+    title and link. A project's wiki is found only by its members in GitLab.
+    See [knowledge.md](knowledge.md).
   - **Image generation**: a picture from a description, made by the picture
     model (FLUX.2 klein). It shows in the answer, opens full size, and is a
     file of the chat.
@@ -102,7 +107,9 @@ setups to paste.
   - **Reading files**: a long attachment goes into the question only up to a
     budget (30,000 characters), with a note saying how long it really is; the
     model reads on by lines, or searches it, when it needs more. Files a tool
-    made are read the same way.
+    made are read the same way. With the embedder, a long attachment goes in
+    as its start, and the passages that match each question come with the
+    question, with the file's name and lines (below).
   - **Web** (off until an admin turns it on): search (the stack's SearXNG)
     and reading pages, from the sites an admin allows only.
     Pages are read in parts, as text; PDFs and documents on the web too. With
@@ -262,6 +269,24 @@ setups to paste.
 A question that never reached the server goes back into the box with its
 attachments, instead of being lost.
 
+## Long files and projects
+
+With the embedder (the `embed` module), files are read by their passages
+instead of their first part ([knowledge.md](knowledge.md#long-files-and-projects)):
+
+- An attachment longer than **Text of an attachment in the question** goes in
+  as its first 2,000 characters and a note; with each question come the
+  passages of the chat's long files that match it, best first, each with the
+  file's name, its lines and its section, up to **Passages of long files per
+  question** (12,000 characters).
+- A project's files that together do not fit (three times that budget) are
+  named in the system prompt, and go by their passages the same way. A project
+  may have 200 files.
+- Files are embedded in the background, a project's file when it is added; one
+  not ready yet goes in as before for that answer.
+
+Without the embedder, files go in as before.
+
 ## Sound and video
 
 - **Voice messages**: the microphone beside the paperclip records one; the
@@ -414,6 +439,10 @@ So that everyone gets their turn:
   one), and never an address inside the network, whatever a name or a
   redirect points to: every connection is checked as it is made. Pages are
   data to the model, not instructions.
+- **Company knowledge is what each person may read.** A GitLab project's wiki
+  and issues are found only by its members (matched by username, as Argus
+  does; admins too only when they are members); a folder or a website only by
+  the groups an admin chose. The search filters by reader before it ranks.
 - **MCP servers** get the person's email only if the admin set a header for
   it. A server's key is stored encrypted under `APP_KEY` and never shown.
 
@@ -441,6 +470,7 @@ The chat's limits are under Admin → Settings → Chat ([settings.md](settings.
 | Tool result the model reads whole up to | 24,000 characters | a longer result goes as its start, and the whole of it becomes a file in the chat that the model reads on with `read_file`; 0: always whole |
 | Largest attachment | 20 MB | per file (up to 100 MB) |
 | Text kept per attachment | 200,000 characters | longer files are cut and marked |
+| Passages of long files per question (Settings → Company knowledge) | 12,000 characters | with the embedder, what of the chat's long files and its project's files comes with each question |
 | Longest single answer | 15 minutes | an answer still running after this is stopped |
 
 The thinking levels (`THINKING_PRESETS`) are under Settings → Model.
