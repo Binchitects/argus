@@ -48,6 +48,14 @@ setups to paste.
   the older messages, and the next answers read the summary instead. **Compact
   now** in the gauge (or the chat's menu, or sending `/compact`) does it at
   once. Nothing is deleted: the messages stay on screen above a mark.
+- **Tools on demand.** Every tool's definition in every request is thousands of
+  tokens before the question (Argus alone is about 5,000). Past **Tool
+  definitions sent whole up to**, a chat sends in full only the tools it has
+  loaded, and a line for each other tool (its name, what it does, its
+  functions); the model calls `load_tools` when a question needs one, and it
+  stays loaded in that chat. A first question that needs no tool reads about
+  900 tokens instead of 6,000 or more. Loading costs the engine one read of the
+  chat, once per tool and chat.
 - **Prompt cache.** The engine reads a prompt's unchanged start from its
   cache, so each request keeps its start unchanged: the date (to the day), the
   tools' notes in a fixed order, your instructions, then the project's files;
@@ -404,6 +412,7 @@ The chat's limits are under Admin → Settings → Chat ([settings.md](settings.
 | Setting | Default | What it is |
 |---|---|---|
 | Tool calls per answer | 8 | how many rounds of tool use one answer may take |
+| Tool definitions sent whole up to | 6,000 characters | past it, tools go on demand (below); 0: always whole |
 | Largest attachment | 20 MB | per file (up to 100 MB) |
 | Text kept per attachment | 200,000 characters | longer files are cut and marked |
 | Longest single answer | 15 minutes | an answer still running after this is stopped |

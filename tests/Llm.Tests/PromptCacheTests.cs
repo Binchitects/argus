@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Llm.Api.Chat;
+using Llm.Api.Chat.Tools;
 using Llm.Api.Models;
 using Llm.Core.Chat;
 using Llm.Core.Models;
@@ -69,5 +70,68 @@ public sealed class PromptCacheTests
         Assert.Equal(dropped[0], dropped[2]);
         // Past the next quarter: the next step.
         Assert.Equal(100, dropped[3]);
+    }
+
+    private sealed class FakeTool(string id, string title, string description) : IChatTool
+    {
+        public string Id => id;
+        public string Title => title;
+        public string Description => description;
+        public string Icon => "plug";
+        public Task<string?> UnavailableAsync(CancellationToken ct) => Task.FromResult<string?>(null);
+        public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => throw new NotSupportedException();
+    }
+
+    private static (JsonArray Tools, Dictionary<string, (ToolChoice, IToolRun)> Runs) Kit(params (string Tool, string Function)[] functions)
+    {
+        var tools = new JsonArray();
+        var runs = new Dictionary<string, (ToolChoice, IToolRun)>();
+        foreach (var group in functions.GroupBy(f => f.Tool))
+        {
+            var tool = new FakeTool(group.Key, group.Key.ToUpperInvariant(), $"The {group.Key} tool.");
+            foreach (var (_, name) in group)
+            {
+                tools.Add(new JsonObject { ["type"] = "function", ["function"] = new JsonObject { ["name"] = name, ["description"] = new string('d', 400) } });
+                runs[name] = (new ToolChoice(tool, new Llm.Core.Chat.ToolSetting { ToolId = group.Key }, null), null!);
+            }
+        }
+        return (tools, runs);
+    }
+
+    [Fact]
+    public void Tools_past_the_budget_are_listed_and_loaded_when_asked_and_stay_loaded()
+    {
+        var (tools, runs) = Kit(("argus", "find_symbol"), ("argus", "read_file"), ("python", "run_python"));
+        List<(string, string)> notes = [("argus", "Argus notes."), ("python", "Python notes."), ("research", "Research notes.")];
+
+        // Under the budget: as before, every tool whole and every note.
+        var whole = new OnDemandTools(tools, runs, notes, [], 100_000);
+        Assert.False(whole.Active);
+        Assert.Equal(3, whole.Request().Count);
+        Assert.Equal("Argus notes.\n\nPython notes.\n\nResearch notes.", whole.Notes());
+
+        // Past it: only load_tools, a line per tool, and the notes of what has no tools.
+        var demand = new OnDemandTools(tools, runs, notes, [], 500);
+        Assert.True(demand.Active);
+        Assert.Equal([OnDemandTools.Function], demand.Request().Select(f => f!["function"]!["name"]!.GetValue<string>()));
+        var listed = demand.Notes();
+        Assert.StartsWith("Research notes.\n\nTools to load:", listed, StringComparison.Ordinal);
+        Assert.Contains("- ARGUS [argus]: The argus tool. Functions: find_symbol, read_file.", listed, StringComparison.Ordinal);
+        Assert.Contains("- PYTHON [python]: The python tool. Functions: run_python.", listed, StringComparison.Ordinal);
+
+        // A tool by its name loads all its functions; its notes join, its line goes.
+        var (added, unknown) = demand.Load(["argus", "nothing"]);
+        Assert.Equal(["find_symbol", "read_file"], added);
+        Assert.Equal(["nothing"], unknown);
+        Assert.Equal(["find_symbol", "read_file", OnDemandTools.Function], demand.Request().Select(f => f!["function"]!["name"]!.GetValue<string>()));
+        Assert.DoesNotContain("[argus]", demand.Notes(), StringComparison.Ordinal);
+        Assert.StartsWith("Argus notes.\n\nResearch notes.\n\nTools to load:", demand.Notes(), StringComparison.Ordinal);
+
+        // The next turn starts with what the chat loaded; with everything loaded, load_tools goes too.
+        var next = new OnDemandTools(tools, runs, notes, demand.Loaded, 500);
+        Assert.Equal(demand.Request().ToJsonString(), next.Request().ToJsonString());
+        next.Load(["run_python"]);
+        Assert.Equal(["find_symbol", "read_file", "run_python"], next.Request().Select(f => f!["function"]!["name"]!.GetValue<string>()));
+        Assert.DoesNotContain("Tools to load", next.Notes(), StringComparison.Ordinal);
     }
 }

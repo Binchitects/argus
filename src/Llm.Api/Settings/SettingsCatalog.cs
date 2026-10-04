@@ -62,6 +62,8 @@ public static class SettingsCatalog
 
         new("Chat:MaxToolRounds", Chat, "Tool calls per answer", "How many rounds of tool use (Argus searches) one answer may take before it must answer.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "8", Min = 1, Max = 32, Optional = false },
+        new("Chat:ToolTextChars", Chat, "Tool definitions sent whole up to", "Past this many characters of tool definitions, a chat gets in full only the tools it has loaded, and a line for each of the others that the model loads when a question needs it (it stays loaded in that chat). Saves thousands of tokens before the first answer of every chat. 0: always every tool whole.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "6000", Unit = "characters", Min = 0, Max = 500000, Optional = false },
         new("Chat:AutoCompactPercent", Chat, "Compact a chat at (% of context)", "When a chat fills this share of the model's context, its older messages become a summary the model reads instead (people still see them), and the chat goes on. 0: never; the oldest messages are left out instead. Anyone can also compact a chat with /compact.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "80", Unit = "%", Min = 0, Max = 95, Optional = false },
         new("Chat:MaxUploadBytes", Chat, "Largest attachment", "Per file.", SettingType.WholeNumber, SettingScope.Live)

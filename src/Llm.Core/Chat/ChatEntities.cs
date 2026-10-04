@@ -12,6 +12,8 @@ public sealed class Conversation
     /// are on in new chats. What the person may use still applies.
     /// </summary>
     public List<string>? Tools { get; set; }
+    /// <summary>The functions this chat loaded with load_tools, when its tools go on demand: they stay loaded.</summary>
+    public List<string> LoadedTools { get; set; } = [];
     /// <summary>The model this chat talks to; null = the deployment's default.</summary>
     public string? Model { get; set; }
     /// <summary>The person's own instructions for this chat, sent after the app's system prompt.</summary>

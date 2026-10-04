@@ -63,6 +63,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.ToTable("conversations");
             e.Property(c => c.Title).HasMaxLength(200);
             e.Property(c => c.Thinking).HasMaxLength(20);
+            e.Property(c => c.LoadedTools).HasDefaultValueSql("'{}'::text[]");
             e.Property(c => c.Model).HasMaxLength(200);
             e.Property(c => c.SystemPrompt).HasMaxLength(20000);
             e.HasIndex(c => new { c.UserId, c.UpdatedAt });

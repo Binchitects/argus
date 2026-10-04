@@ -27,6 +27,11 @@ Sections used:
   every model's preset sets `cache-reuse`. The next turn of a long chat reads
   over 99% of its prompt from the cache. LLM Overview shows the cache hit per
   model
+- **Tools on demand**: past 6,000 characters of tool definitions (Settings →
+  Chat), a chat sends whole only the tools it loaded, and a line for each
+  other; the model loads one with `load_tools` and it stays loaded in that
+  chat. With every tool on, a first question reads about 900 tokens instead
+  of over 6,000
 - **Answer length**: Your account → Answers picks Short, Normal or Thorough for
   every chat; **Shorter** and **Longer** under an answer answer again at about
   half or twice its words

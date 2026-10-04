@@ -158,7 +158,13 @@ public sealed partial class ChatService(
         {
             instructions.Add(("research", ResearchNote));
         }
-        var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, email, string.Join("\n\n", instructions.Select(i => i.Text)), runs.ContainsKey("read_file"),
+        // Past the budget, the tools go on demand: those the chat loaded whole, a line for each other.
+        var demand = new OnDemandTools(tools, runs, instructions, conversation.LoadedTools, chat.CurrentValue.ToolTextChars);
+        if (overrides.Research && demand.Load(["web", "agents"]).Added.Count > 0)
+        {
+            conversation.LoadedTools = demand.Loaded;
+        }
+        var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, email, demand.Notes(), runs.ContainsKey("read_file"),
             AnswerLengths.Note(user.AnswerLength), emit, ct);
         // Said on the person's turn (models follow it more closely there), at the prompt's end (the
         // cache keeps the rest); the question kept stays as written.
@@ -213,7 +219,7 @@ public sealed partial class ChatService(
             }
             if (tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0)
             {
-                Tools(request, tools, last: round >= (overrides.Research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds));
+                Tools(request, demand.Request(), last: round >= (overrides.Research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds));
             }
 
             // What fills this request, for the context gauge (scaled to the prompt tokens the model reports).
@@ -337,12 +343,19 @@ public sealed partial class ChatService(
 
             // Questions for the person end the answer: their reply comes as their next message.
             var ends = false;
+            var loadedBefore = demand.Loaded.Count;
             foreach (var call in toolCalls.OfType<JsonObject>())
             {
                 var id = call["id"]!.GetValue<string>();
                 var name = call["function"]!["name"]!.GetValue<string>();
                 var rawArgs = call["function"]!["arguments"]!.GetValue<string>();
                 var known = runs.TryGetValue(name, out var target);
+                var loading = demand.Active && name == OnDemandTools.Function;
+                if (known && !demand.IsLoaded(name))
+                {
+                    // Called straight from the list: it is loaded now.
+                    demand.Load([name]);
+                }
                 await emit(new { type = "tool_call", id, name, arguments = rawArgs, tool = known ? target.Choice.Tool.Id : null });
                 ToolResult outcome;
                 var declined = false;
@@ -350,7 +363,11 @@ public sealed partial class ChatService(
                 try
                 {
                     var args = JsonNode.Parse(rawArgs.Length == 0 ? "{}" : rawArgs) as JsonObject ?? [];
-                    if (!known)
+                    if (loading)
+                    {
+                        outcome = LoadTools(demand, args);
+                    }
+                    else if (!known)
                     {
                         outcome = new ToolResult($"There is no tool named {name}.", IsError: true);
                     }
@@ -402,6 +419,17 @@ public sealed partial class ChatService(
                     attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType, original = f.Kind != "image" && f.Data != null }),
                 });
             }
+            if (demand.Loaded.Count != loadedBefore)
+            {
+                // Loaded tools stay with the chat; their notes join the system prompt, the list loses them.
+                conversation.LoadedTools = demand.Loaded;
+                await db.SaveChangesAsync(ct);
+                var system = messages[0]!["content"]!.GetValue<string>();
+                var notes = demand.Notes();
+                var spliced = system[..systemParts.Base] + (notes.Length > 0 ? "\n\n" + notes : "") + system[(systemParts.Base + systemParts.ToolNotes)..];
+                messages[0]!["content"] = spliced;
+                systemParts = systemParts with { ToolNotes = systemParts.ToolNotes + spliced.Length - system.Length };
+            }
             if (ends)
             {
                 await FinishAsync(conversation, CancellationToken.None);
@@ -409,6 +437,24 @@ public sealed partial class ChatService(
                 return;
             }
         }
+    }
+
+    /// <summary>load_tools: the functions asked for join the request from the next step on.</summary>
+    private static ToolResult LoadTools(OnDemandTools demand, JsonObject args)
+    {
+        var names = args["names"] switch
+        {
+            JsonArray a => a.Select(n => n?.ToString() ?? ""),
+            JsonValue v => v.ToString().Split(',', StringSplitOptions.TrimEntries),
+            _ => [],
+        };
+        var (added, unknown) = demand.Load(names);
+        var said = added.Count > 0 ? $"Loaded: {string.Join(", ", added)}. Call them from now on." : "Nothing new was loaded: what you asked for is already loaded.";
+        if (unknown.Count > 0)
+        {
+            said += $" Not found: {string.Join(", ", unknown)}. The names are in the list under \"Tools to load\".";
+        }
+        return new ToolResult(said, IsError: added.Count == 0 && unknown.Count > 0);
     }
 
     /// <summary>What sub-agents of an answer work with: its model, thinking, person, tools and their instructions, and where events go.</summary>

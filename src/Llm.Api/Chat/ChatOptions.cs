@@ -8,6 +8,9 @@ public sealed class ChatOptions
 
     public int MaxToolRounds { get; set; } = 8;
 
+    /// <summary>Tool definitions past this many characters go on demand (OnDemandTools); 0: always whole.</summary>
+    public int ToolTextChars { get; set; } = 6000;
+
     /// <summary>
     /// A chat is compacted (its older messages summarized) before an answer when it
     /// fills more than this share of the model's context, in percent. 0: never; the

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Llm.Api.Chat;
 using Llm.Api.Chat.Tools;
 using Llm.Api.Gateway;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -50,6 +51,36 @@ public sealed class ChatToolsTests(AppFixture app)
 
     private static Task<HttpResponseMessage> SetToolAsync(TestBrowser admin, string tool, object setting) =>
         admin.Http.PutAsJsonAsync(new Uri($"/api/admin/tools/{tool}", UriKind.Relative), setting);
+
+    [Fact]
+    public async Task Past_the_budget_the_model_loads_a_tool_and_the_chat_keeps_it()
+    {
+        await using var f = NewApp(settings: new() { ["Chat:ToolTextChars"] = "200" });
+        var (b, _, email) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { useArgus = true, tools = new[] { "argus", "calculator", "time" } });
+
+        var events = await SendAsync(b, id, """Where is ParseHeader? [call load_tools {"names":["argus"]}]""");
+        var requests = app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email).ToList();
+        // First: load_tools only, and a line for each tool in the system prompt.
+        Assert.Equal([OnDemandTools.Function], requests[0].Body["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
+        var system = requests[0].Body["messages"]![0]!["content"]!.GetValue<string>();
+        Assert.Contains("[argus]", system, StringComparison.Ordinal);
+        Assert.Contains("[calculator]", system, StringComparison.Ordinal);
+        Assert.DoesNotContain(FakeArgus.Instructions, system, StringComparison.Ordinal);
+        Assert.Equal("Loaded: find_symbol. Call them from now on.", Event(events, "tool_result").GetProperty("text").GetString());
+        // Then: Argus whole, its notes in, its line out; the rest still listed.
+        Assert.Equal(["find_symbol", OnDemandTools.Function], requests[1].Body["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
+        var after = requests[1].Body["messages"]![0]!["content"]!.GetValue<string>();
+        Assert.Contains(FakeArgus.Instructions, after, StringComparison.Ordinal);
+        Assert.DoesNotContain("[argus]", after, StringComparison.Ordinal);
+        Assert.Contains("[calculator]", after, StringComparison.Ordinal);
+
+        // The next turn starts with Argus loaded: the same prompt start as the round before.
+        await SendAsync(b, id, "And its callers?");
+        var next = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body;
+        Assert.Equal(requests[1].Body["tools"]!.ToJsonString(), next["tools"]!.ToJsonString());
+        Assert.Equal(after, next["messages"]![0]!["content"]!.GetValue<string>());
+    }
 
     [Fact]
     public async Task The_calculator_and_the_clock_answer_for_the_model()
