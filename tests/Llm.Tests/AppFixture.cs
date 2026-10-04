@@ -45,6 +45,7 @@ public sealed class AppFixture : IAsyncLifetime
     public FakeObserve Observe { get; } = new();
     public FakeWebhook Webhook { get; } = new();
     public FakeHuggingFace HuggingFace { get; } = new();
+    public FakeEmbedder Embedder { get; } = new();
     public string AppConnectionString { get; private set; } = "";
     /// <summary>The real dashboard files, found by walking up to the repository.</summary>
     public static string DashboardsPath { get; } = FindDashboards();
@@ -132,6 +133,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Modules:imagegen", "false");
             b.UseSetting("Modules:videogen", "false");
             b.UseSetting("Modules:audio", "false");
+            // No embedder unless a test brings it (company knowledge and retrieval do).
+            b.UseSetting("Modules:embed", "false");
             // Nothing listens here: probes are refused at once instead of waiting on DNS.
             b.UseSetting("Stack:LiteLlmProbeUrl", "http://127.0.0.1:9");
             b.UseSetting("Stack:PrometheusUrl", "http://127.0.0.1:9");
@@ -162,6 +165,7 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddHttpClient<Llm.Api.Dashboards.AlertmanagerClient>().ConfigurePrimaryHttpMessageHandler(() => Observe);
                 s.AddHttpClient(Llm.Api.Schedules.Webhooks.Client).ConfigurePrimaryHttpMessageHandler(() => Webhook);
                 s.AddHttpClient<Llm.Api.Models.HuggingFace>().ConfigurePrimaryHttpMessageHandler(() => HuggingFace);
+                s.AddHttpClient(Llm.Api.Knowledge.Embedder.Client).ConfigurePrimaryHttpMessageHandler(() => Embedder);
             });
         });
 

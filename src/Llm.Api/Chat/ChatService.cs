@@ -55,6 +55,7 @@ public sealed partial class ChatService(
     AnswerGate gate,
     Identity.Audit audit,
     IOptionsMonitor<ChatOptions> chat,
+    Knowledge.Retrieval retrieval,
     IServiceScopeFactory scopes,
     ILogger<ChatService> logger)
 {
@@ -977,6 +978,8 @@ public sealed partial class ChatService(
         // Only questions' files go to the model; pictures a tool made are for the person.
         var attachmentIds = stored.Where(m => m.Role == "user").SelectMany(m => ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => attachmentIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, ct);
+        // Long files, and a project's files past their room, go as their passages about the question when the embedder holds them.
+        var byPassages = await retrieval.PlanAsync(conversation.ProjectId, files.Values, ct);
         var vision = model?.Vision == true;
         var hears = model?.Audio == true;
         var imagesDropped = false;
@@ -1022,7 +1025,8 @@ public sealed partial class ChatService(
                             continue;
                         }
                         text.Append("\n\n<attachment name=\"").Append(f.FileName.Replace("\"", "'", StringComparison.Ordinal)).Append("\">\n")
-                            .Append(Inline(f, chat.CurrentValue.InlineAttachmentChars, canReadFiles)).Append("\n</attachment>");
+                            .Append(byPassages.Has(f.Id) ? Knowledge.Retrieval.Head(f, canReadFiles) : Inline(f, chat.CurrentValue.InlineAttachmentChars, canReadFiles))
+                            .Append("\n</attachment>");
                     }
                     if (images.Count == 0 && heard.Count == 0)
                     {
@@ -1081,9 +1085,13 @@ public sealed partial class ChatService(
         var beforeFiles = system.Length;
         if (project is not null)
         {
-            system += await ProjectFilesAsync(project, canReadFiles, ct);
+            system += await ProjectFilesAsync(project, canReadFiles, byPassages, ct);
         }
         var projectFiles = system.Length - beforeFiles;
+        if (await retrieval.PassagesAsync(byPassages, stored, question, ct) is { } passages)
+        {
+            Knowledge.Retrieval.AddToQuestion(turns, question.Id, passages);
+        }
 
         // Rough, and on the safe side: ~3.5 characters a token for English and code.
         var context = model?.Context ?? 32768;

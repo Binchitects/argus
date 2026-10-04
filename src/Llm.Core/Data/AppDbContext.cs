@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Core.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options)
+public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     : IdentityDbContext<AppUser, AppRole, Guid>(options), IDataProtectionKeyContext
 {
     public DbSet<Setting> Settings => Set<Setting>();
@@ -35,6 +35,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
+    public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
+    public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
+    public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
+    public DbSet<KnowledgeReaders> KnowledgeReaders => Set<KnowledgeReaders>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -257,6 +261,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.Model).HasMaxLength(200);
             e.Property(m => m.Groups).HasDefaultValueSql("'{}'::uuid[]");
         });
+
+        KnowledgeModel(builder);
 
         builder.Entity<AuditEvent>(e =>
         {

@@ -28,7 +28,11 @@ public sealed class WebOptions
     public int MaxPageChars { get; set; } = 20_000;
 }
 
-public sealed class WebAccessException(string message) : Exception(message);
+/// <summary>A page that may not, or could not, be opened. Status: what the site answered, when it answered.</summary>
+public sealed class WebAccessException(string message, int? status = null) : Exception(message)
+{
+    public int? Status => status;
+}
 
 /// <summary>Where a name points. Tests put their own in.</summary>
 public class WebResolver
@@ -138,8 +142,8 @@ public sealed class WebFetcher(IHttpClientFactory http, WebResolver resolver, IO
 
     public bool CanSearch => !string.IsNullOrWhiteSpace(options.CurrentValue.SearchUrl);
 
-    /// <summary>Why the address may not be opened, or null.</summary>
-    public async Task<string?> RefusalAsync(Uri url, CancellationToken ct)
+    /// <summary>Why the address may not be opened, or null. <paramref name="sites"/>: other allowed sites than the chat's (a website knowledge source's hosts).</summary>
+    public async Task<string?> RefusalAsync(Uri url, CancellationToken ct, string? sites = null)
     {
         if (url.Scheme is not ("http" or "https"))
         {
@@ -149,7 +153,11 @@ public sealed class WebFetcher(IHttpClientFactory http, WebResolver resolver, IO
         {
             return "Addresses with a user name or password cannot be opened.";
         }
-        if (!WebGuard.Allowed(url.Host, options.CurrentValue.AllowedSites))
+        if (sites is not null && !WebGuard.Allowed(url.Host, sites))
+        {
+            return $"{url.Host} is not one of the source's hosts.";
+        }
+        if (sites is null && !WebGuard.Allowed(url.Host, options.CurrentValue.AllowedSites))
         {
             return $"{url.Host} is not one of the sites the chat may open. An admin can allow it (Settings → Python and web).";
         }
@@ -165,14 +173,14 @@ public sealed class WebFetcher(IHttpClientFactory http, WebResolver resolver, IO
         return addresses.Length == 0 || addresses.Any(a => !WebGuard.IsPublic(a)) ? $"{url.Host} is not on the public internet." : null;
     }
 
-    public async Task<WebPage> FetchAsync(Uri url, CancellationToken ct)
+    public async Task<WebPage> FetchAsync(Uri url, CancellationToken ct, string? sites = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
         var client = http.CreateClient(Client);
         for (var hop = 0; hop <= MaxRedirects; hop++)
         {
-            if (await RefusalAsync(url, timeout.Token) is { } refusal)
+            if (await RefusalAsync(url, timeout.Token, sites) is { } refusal)
             {
                 throw new WebAccessException(refusal);
             }
@@ -201,7 +209,7 @@ public sealed class WebFetcher(IHttpClientFactory http, WebResolver resolver, IO
                 }
                 if (!res.IsSuccessStatusCode)
                 {
-                    throw new WebAccessException($"{url.Host} answered {(int)res.StatusCode} {res.ReasonPhrase}.");
+                    throw new WebAccessException($"{url.Host} answered {(int)res.StatusCode} {res.ReasonPhrase}.", (int)res.StatusCode);
                 }
                 await using var body = await res.Content.ReadAsStreamAsync(timeout.Token);
                 using var ms = new MemoryStream();

@@ -281,6 +281,7 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.WebPageCache>();
         services.AddScoped<Chat.Tools.WebTool>();
         services.AddScoped<Chat.Tools.ToolRegistry>();
+        Knowledge.KnowledgeWiring.AddKnowledge(services, config);
         services.AddSingleton<Chat.Tools.ToolApprovals>();
         services.AddScoped<Chat.ChatService>();
         // Answers outlive the page that asked: they run here, and a page re-attaches.
@@ -410,6 +411,7 @@ public static class IdentityWiring
         Chat.ProjectEndpoints.MapProjects(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Plugins.PluginEndpoints.MapPlugins(app);
+        Knowledge.KnowledgeEndpoints.MapKnowledge(app);
         Models.ModelEndpoints.MapModels(app);
         Models.ModelHoursEndpoints.MapModelHours(app);
         Models.HuggingFaceEndpoints.MapHuggingFace(app);

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
@@ -32,9 +33,10 @@ public sealed partial class ChatService
 
     /// <summary>
     /// A project's files as every answer of its chats reads them: text inline (cut to the
-    /// same size as an attachment, the rest by read_file), the others by name.
+    /// same size as an attachment, the rest by read_file), the others by name. Past their
+    /// room, with the embedder, by name too: their passages about each question come with it.
     /// </summary>
-    private async Task<string> ProjectFilesAsync(Project project, bool canReadFiles, CancellationToken ct)
+    private async Task<string> ProjectFilesAsync(Project project, bool canReadFiles, Knowledge.Retrieval.Plan byPassages, CancellationToken ct)
     {
         var files = await db.ProjectFiles.AsNoTracking().Where(f => f.ProjectId == project.Id).OrderBy(f => f.AddedAt)
             .Join(db.ChatAttachments, f => f.AttachmentId, a => a.Id, (f, a) => a).ToListAsync(ct);
@@ -46,6 +48,12 @@ public sealed partial class ChatService
         var room = chat.CurrentValue.InlineAttachmentChars * 3;
         foreach (var f in files)
         {
+            if (byPassages.Has(f.Id))
+            {
+                text.Append("\n[project file: ").Append(f.FileName).Append(CultureInfo.InvariantCulture, $" ({f.Text.Length:N0} characters): the passages that match each question come with it")
+                    .Append(canReadFiles ? "; read_file reads any part]" : "]");
+                continue;
+            }
             if (f.Kind == "image" || f.Kind == "file" || f.Text.Length == 0 || room <= 0)
             {
                 text.Append("\n[project file: ").Append(f.FileName).Append(f.Kind == "image" ? " (a picture)" : canReadFiles ? " (read_file or run_python can open it)" : "").Append(']');
