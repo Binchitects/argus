@@ -169,3 +169,7 @@ jobs:
           done
       - name: Scripts parse
         run: for f in deploy/scripts/*.sh deploy/argus-standalone/scripts/*.sh tools/*.sh tools/test-gitlab/*.sh clients/claude-code/*.sh tools/dn; do bash -n "$f"; done
+      # The air-gap bundle, the restore and rollback tests and their guards, with
+      # fake docker and podman on PATH: nothing is pulled, built or started.
+      - name: Recovery and offline scripts
+        run: python3 -m unittest discover -s tests/deploy -v

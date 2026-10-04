@@ -209,15 +209,118 @@ became fixed, or went away:
 | `PROMETHEUS_RETENTION_TIME`, `_SIZE`, `*_CPUS`, `*_MEM_LIMIT`, `SANDBOX_*`, `LITELLM_WORKERS`, `EMBED_CPUS` | fixed in `docker-compose.yml` (30 days or 20 GB of metrics; the sandbox's limits); change one in `docker-compose.override.yml`. The longest Python run is Settings → Python and web |
 | `LITELLM_SALT_KEY`, `SEARXNG_SECRET`, `ENGINE_API_BASE`, `LLAMACPP_ENGINE_URL` and `_SHA256`, `ARGUS_VERSION`, `LLM_UID`, `LLM_GID`, `LLM_CONFIG_DIR`, `LLM_SERVICES_DIR`, `LLM_ENV_SAMPLES_DIR`, `COMPOSE_PROJECT_NAME`, `BIND_ADDRESS`, `DOCKER_SOCKET`, `HOST_*`, `LLAMACPP_RAM_RESERVE_GB`, `HOST_SWAPPINESS` | gone: the stack makes or knows them itself (the search secret is new at each start; no web app gets the Docker socket) |
 
-## Backups
+## Backups and restore
 
 `scripts/backup.sh` backs up the database (a consistent dump), every named
-volume and the configuration into `backups/`; `--install-timer` runs it daily,
-`--restore --from DIR` puts it back. Models are not backed up: they are in
-`MODELS_DIR` and can be fetched again. `BACKUP_DIR`, `BACKUP_COPY_DIR` (a
-verified second copy on another disk), `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`
-and `BACKUP_TIME` in `.env` change where, how many and when
-([configuration.md](configuration.md#env)).
+volume and the configuration into `backups/`; `--install-timer` runs it daily.
+Models are not backed up: they are in `MODELS_DIR` and can be fetched again.
+`BACKUP_DIR`, `BACKUP_COPY_DIR` (a verified second copy on another disk),
+`BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS` and `BACKUP_TIME` in `.env` change where,
+how many and when ([configuration.md](configuration.md#env)).
+
+To put a backup back, stop the stack and restore it: the volumes and the
+database, and with `--with-config` also `.env` and the files under `config/`.
+
+```bash
+docker compose down                                   # volumes are kept
+scripts/backup.sh --verify backups/2026-10-04_033000
+scripts/backup.sh --restore --from backups/2026-10-04_033000
+docker compose up -d
+```
+
+`scripts/restore-test.sh` proves a backup restores, without touching the live
+stack. It restores the newest backup (or `--from DIR`) into a throwaway project
+beside it, with its own name, volumes, network and port (127.0.0.1:18443), and
+only `postgres`, `app`, `web`, `traefik` and `litellm`. Its network has no way
+out, so the restored copy sends no mail and calls no webhook. It checks through
+the API that the backup's people, chats and saved settings are there and that
+spend reads from the restored gateway, then removes the project and its
+volumes.
+
+- It signs in as `admin` with the backup's `ADMIN_PASSWORD`;
+  `RESTORE_TEST_PASSWORD` and `--user` sign in as someone else.
+- It pulls and builds nothing: it runs the images the live stack runs.
+- `--dry-run` prints the plan; `--keep` leaves it running to look at, and
+  `--down` removes it later.
+- It refuses the live project's name, and every volume it removes must carry
+  its own.
+
+## Rollback
+
+EF migrations only go forward. An older app on a database a newer one migrated
+may start, but nothing undoes the newer schema. A rollback is the backup taken
+before the upgrade:
+
+1. Before upgrading, take a backup: `scripts/backup.sh`.
+2. Upgrade: the new release's images, then `docker compose up -d`. The app
+   migrates the database at its first start.
+3. To roll back: `docker compose down`, the release you came from checked out
+   and its images built, `scripts/backup.sh --restore --from <the backup from
+   step 1>`, then `docker compose up -d`.
+
+What was written after the upgrade is lost: the backup is from before it.
+
+`scripts/rollback-test.sh FROM_TAG TO_TAG` (for example `v4.1.0 v4.0.0`) proves
+it in a throwaway project, as `restore-test.sh` does, on port 18444:
+
+1. It builds both releases' app and web images from their tags.
+2. `TO_TAG` from zero; a person, a group, a chat and a setting go in; the
+   backup is taken.
+3. `FROM_TAG` over it: it must migrate forward and keep everything.
+4. `TO_TAG`'s images straight over the newer database: the older app must come
+   up.
+5. The procedure above: the backup restored, and `TO_TAG` back on its own last
+   migration, with what went in before the upgrade and nothing from after it.
+
+The project, its volumes and the images it built are removed at the end.
+
+## Offline install
+
+`scripts/airgap.sh` carries the whole stack to a host with no network, in one
+file. On a host where the stack runs:
+
+```bash
+scripts/airgap.sh pack --models /media/usb/arena.tar
+```
+
+The bundle holds:
+
+- every image the compose files name (`docker save`);
+- this `deploy/` folder without `.env`, backups, certificate keys or models;
+- the speech server's models (the `arena_audio` volume);
+- the models: the chat models the app registered (Admin → Models) and the
+  picture, video and embedding files, copied with `--models` and listed
+  without it;
+- a `MANIFEST` with the version and commit, and `SHA256SUMS`, a checksum for
+  every file. `arena.tar.sha256` beside the bundle checks the copy.
+
+On the other host:
+
+```bash
+sha256sum -c arena.tar.sha256
+tar -xOf arena.tar arena-airgap/deploy/scripts/airgap.sh > airgap.sh
+bash airgap.sh load --into /srv/arena arena.tar
+```
+
+`load` checks every file against its checksum before it changes anything. Then
+it loads the images, puts `deploy/` in `/srv/arena/deploy` (an `.env`,
+`docker-compose.override.yml`, certificates or backups already there are
+kept), moves the models into
+`MODELS_DIR`, fills the `arena_audio` volume, and prints what to put in `.env`.
+
+`MODEL` is printed as a file in the library, never `repo:quant`: the app adds a
+library file as it is and never asks Hugging Face. The picture, video and
+embedding files are there, so the app fetches none of them, and
+`HF_HUB_OFFLINE=1` for `audio` in `docker-compose.override.yml` keeps the speech
+server from looking. Then `docker compose up -d --pull never`.
+
+- `--podman` packs from and loads into Podman's store, and prints Podman's
+  ports and command. `--dry-run` prints the plan for either. Nothing is ever
+  pulled.
+- A certificate: `scripts/make-cert.sh` (openssl, no network), or Traefik's
+  own.
+- What needs the internet stays without it: web search, and Hugging Face search
+  under Admin → Models. Knowledge packs go in `packs/` beside `deploy/`.
 
 ## Testing a deployment
 
@@ -225,6 +328,9 @@ and `BACKUP_TIME` in `.env` change where, how many and when
 |---|---|
 | `scripts/upgrade-test.py --zero --stop-live` | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file |
 | `scripts/upgrade-test.py --from TAG --stop-live` | a release from zero with data in, then this checkout over it: everything kept, the old chat goes on |
+| `scripts/restore-test.sh [--from DIR]` | a backup restores: in a throwaway project beside the live one, its people, chats, settings and spend are there |
+| `scripts/rollback-test.sh FROM_TAG TO_TAG` | a release rolls back by restoring the backup taken before the upgrade, in a throwaway project |
+| `scripts/airgap.sh pack --dry-run X.tar` | what an offline bundle would hold, and that every image is on this host |
 | `scripts/clients-check.py` | the API (OpenAI and Anthropic, streaming, tools), Argus over MCP, Qwen Code and DeepSeek Harness |
 | `scripts/scale-test.py` | many people at once: the chat's queue, every key, a burst of sandbox jobs |
 | `scripts/sandbox-check.py` | the Python sandbox's limits and escapes |
