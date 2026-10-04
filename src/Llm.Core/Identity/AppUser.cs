@@ -27,6 +27,10 @@ public sealed class AppUser : IdentityUser<Guid>
     public List<string> DirectoryGroups { get; set; } = [];
     /// <summary>How long answers should be: "short", "thorough", or null for the model's own judgement.</summary>
     public string? AnswerLength { get; set; }
+    /// <summary>Set while the person is on legal hold: nothing of theirs is deleted, by retention or by them.</summary>
+    public DateTimeOffset? LegalHoldSince { get; set; }
+    /// <summary>Why the hold was placed (a matter, a ticket), as the admin wrote it.</summary>
+    public string? LegalHoldReason { get; set; }
 }
 
 public sealed class AppRole : IdentityRole<Guid>

@@ -33,6 +33,15 @@ public sealed class SafeguardOptions
     /// <summary>off, or mask: e-mail addresses, phone and card numbers, IBANs in messages reach the model masked (the chat keeps them).</summary>
     public string RedactPii { get; set; } = "off";
 
+    /// <summary>
+    /// Secrets in messages and files (private keys, cloud and service tokens, passwords): refuse (the message
+    /// or file is not taken), mask (it goes with each secret replaced by a marker), or off.
+    /// </summary>
+    public string SecretScanning { get; set; } = "refuse";
+
+    /// <summary>API keys' requests pass the same checks (secrets, blocked words, the model's check, personal data): the gateway asks the app before each one.</summary>
+    public bool CheckApi { get; set; } = true;
+
     /// <summary>What the web gives the model is marked as data, never instructions to follow (against prompt injection).</summary>
     public bool UntrustedToolResults { get; set; } = true;
 

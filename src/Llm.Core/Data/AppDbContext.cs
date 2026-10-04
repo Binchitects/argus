@@ -55,6 +55,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(u => u.DisplayName).HasMaxLength(200);
             e.Property(u => u.LdapDn).HasMaxLength(1000);
             e.Property(u => u.AnswerLength).HasMaxLength(16);
+            e.Property(u => u.LegalHoldReason).HasMaxLength(500);
             e.Property(u => u.DirectoryGroups).HasDefaultValueSql("'{}'::text[]");
             e.HasIndex(u => u.NormalizedEmail).IsUnique();
         });
@@ -72,6 +73,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasMany(c => c.Messages).WithOne().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(c => c.ProjectId);
             e.HasOne<Project>().WithMany().HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.SetNull);
+            // A chat deleted under legal hold is kept, and hidden from every query but the hold's own (IgnoreQueryFilters).
+            e.HasQueryFilter(c => c.DeletedAt == null);
         });
         builder.Entity<ChatMessage>(e =>
         {
@@ -129,6 +132,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(g => g.Description).HasMaxLength(500);
             e.Property(g => g.Directory).HasMaxLength(1000);
             e.HasIndex(g => g.Name).IsUnique();
+            e.Property(g => g.CostCentre).HasMaxLength(100);
+            e.Property(g => g.SecretScanning).HasMaxLength(10);
+            e.Property(g => g.RedactPii).HasMaxLength(10);
+            e.Property(g => g.Moderation).HasMaxLength(10);
         });
         builder.Entity<GroupMember>(e =>
         {

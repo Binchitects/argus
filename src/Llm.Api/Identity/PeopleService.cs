@@ -201,6 +201,10 @@ public sealed partial class PeopleService(
         {
             throw new PeopleException("You cannot delete yourself.");
         }
+        if (user.LegalHoldSince is not null)
+        {
+            throw new PeopleException($"{user.UserName} is on legal hold: their data may not be deleted. End the hold first.");
+        }
         if (await users.IsInRoleAsync(user, Roles.Admin))
         {
             await EnsureAnotherAdminAsync(user);

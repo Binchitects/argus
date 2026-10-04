@@ -17,6 +17,7 @@ public static class SettingsCatalog
     private const string Schedules = "Scheduled tasks";
     private const string Mail = "Email";
     private const string Safeguards = "Safeguards";
+    private const string Retention = "Data retention";
 
 
 
@@ -139,6 +140,14 @@ public static class SettingsCatalog
             { Default = "true", Optional = false },
         new("Safeguards:RefusalMessage", Safeguards, "What a refused message says", "Shown to the person whose message was refused by a blocked word or the check.", SettingType.Text, SettingScope.Live)
             { Default = "This message was not sent: it goes against your organisation's rules for the assistant. Ask an admin if you think it should be allowed.", Max = 500 },
+        new("Safeguards:SecretScanning", Safeguards, "Secrets in messages and files", "Private keys, cloud and service tokens (AWS, GitHub, GitLab, Slack, sk- keys) and passwords (password=..., connection strings, user:password@ in an address). refuse: the message or file is not taken, and the person is told what kind was found. mask: it goes with each secret replaced by a marker. Each one found is audited by its kind, never the secret. A group can set its own (Admin → Groups).", SettingType.Choice, SettingScope.Live)
+            { Default = "refuse", Options = ["refuse", "mask", "off"], Optional = false },
+        new("Safeguards:CheckApi", Safeguards, "Check API requests too", "API keys' requests pass the same checks: secrets, blocked words, the model's check (on the last question) and personal data. The gateway asks the app before each one (its guardrail in config/litellm.yaml). Credit applies either way.", SettingType.Boolean, SettingScope.Live)
+            { Default = "true", Optional = false },
+
+        // ---------------------------------------------------------------- retention, live --
+        new("Retention:Days", Retention, "Keep chats for", "A chat and its files are deleted this many days after its last message, and so are files nobody uses that are as old. A group can set its own (Admin → Groups); the shortest of a person's groups applies. People on legal hold keep everything. Each deletion is audited, with counts. Empty: forever.", SettingType.WholeNumber, SettingScope.Live)
+            { Unit = "days", Min = 1, Max = 36500 },
         new("Schedules:Enabled", Schedules, "Scheduled tasks", "People may set questions to be asked on a schedule (a daily digest, a weekly report), answered as them, with their model, tools and credit.", SettingType.Boolean, SettingScope.Live)
             { Default = "true" },
         new("Schedules:PerPerson", Schedules, "Tasks per person", "How many scheduled tasks one person may have.", SettingType.WholeNumber, SettingScope.Live)

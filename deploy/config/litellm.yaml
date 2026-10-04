@@ -21,3 +21,19 @@ general_settings:
   user_header_mappings:
     - header_name: X-LLM-User-Email
       litellm_user_role: internal_user
+
+# Before each request the gateway asks the app (http://app:8080, inside the network):
+# secrets, blocked words, the model's check and personal data (Settings → Safeguards,
+# and each group's own), and the credit, one over the chat and API keys, groups' too.
+# The app answers within milliseconds; the chat's own requests pass at once.
+# fail_closed: while the app is down (a restart), API requests are refused rather than
+# go unchecked; fail_open lets them through instead.
+guardrails:
+  - guardrail_name: arena-safeguards
+    litellm_params:
+      guardrail: generic_guardrail_api
+      mode: pre_call
+      default_on: true
+      api_base: http://app:8080/internal/guardrail
+      api_key: os.environ/LITELLM_MASTER_KEY
+      unreachable_fallback: fail_closed

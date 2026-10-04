@@ -19,7 +19,12 @@ public sealed record ManagedModel(string Id, string Name, string? Fingerprint);
 
 /// <summary>A key as the gateway lists it: the hashed token (never the key itself), alias, spend and state.</summary>
 /// <remarks>Models: the models the key may call; empty means every model.</remarks>
-public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt, IReadOnlyList<string>? Models = null, int? MaxParallel = null);
+public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt, IReadOnlyList<string>? Models = null, int? MaxParallel = null,
+    string? TeamId = null);
+
+/// <summary>A group's credit at the gateway: a LiteLLM team (id "group-..."), its members and the budget it holds the keys in it to.</summary>
+/// <param name="MemberBudget">Each member's own ceiling in the team; null: the team's budget is shared.</param>
+public sealed record GatewayTeam(string Id, string Alias, decimal? Budget, decimal? MemberBudget, IReadOnlyList<string> Members);
 
 /// <summary>
 /// LiteLLM's admin API. People are known to it by email, which is what ties
@@ -58,6 +63,18 @@ public interface ILiteLlm
     Task AddModelAsync(string name, JsonObject litellmParams, JsonObject modelInfo, string fingerprint, CancellationToken ct = default);
 
     Task DeleteModelAsync(string id, CancellationToken ct = default);
+
+    /// <summary>The teams the app made for groups (their ids start with "group-").</summary>
+    Task<IReadOnlyList<GatewayTeam>> TeamsAsync(CancellationToken ct = default);
+
+    /// <summary>Creates or updates a group's team: its budget per <paramref name="duration"/> (shared, or each member's), and exactly these members.</summary>
+    Task SetTeamAsync(GatewayTeam team, string duration, CancellationToken ct = default);
+
+    /// <summary>Removes a team. The gateway deletes the keys still in it: move them out first.</summary>
+    Task DeleteTeamAsync(string id, CancellationToken ct = default);
+
+    /// <summary>Puts a key in a team (its budget then holds the key), or out of any (null).</summary>
+    Task SetKeyTeamAsync(string token, string? teamId, CancellationToken ct = default);
 }
 
 public sealed class GatewayException(string message, int? status = null, Exception? inner = null) : Exception(message, inner)

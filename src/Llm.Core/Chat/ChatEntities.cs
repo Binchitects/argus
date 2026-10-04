@@ -35,6 +35,8 @@ public sealed class Conversation
     public Guid? ScheduledTaskId { get; set; }
     /// <summary>The project this chat belongs to, if any: its instructions and files go with every answer.</summary>
     public Guid? ProjectId { get; set; }
+    /// <summary>Deleted by its owner while on legal hold: hidden from them, kept until the hold ends.</summary>
+    public DateTimeOffset? DeletedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];

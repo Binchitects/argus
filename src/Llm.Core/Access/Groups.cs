@@ -15,6 +15,30 @@ public sealed class Group
     /// <summary>For a directory group: its common name or full DN. Null for an app group.</summary>
     public string? Directory { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Members' chats and their files are kept this many days, then deleted; null: the company's setting. The shortest of a person's groups applies.</summary>
+    public int? RetentionDays { get; set; }
+
+    /// <summary>What the group may spend in a calendar month, across the chat and API keys; null: no group limit.</summary>
+    public decimal? Credit { get; set; }
+
+    /// <summary>The credit is each member's, not shared by them all.</summary>
+    public bool CreditPerMember { get; set; }
+
+    /// <summary>The label its spend is charged to in the monthly chargeback report.</summary>
+    public string? CostCentre { get; set; }
+
+    /// <summary>Secret scanning for members: refuse, mask or off; null: the company's setting.</summary>
+    public string? SecretScanning { get; set; }
+
+    /// <summary>Personal data masked for members: mask or off; null: the company's setting.</summary>
+    public string? RedactPii { get; set; }
+
+    /// <summary>The model's check of members' messages: check or off; null: the company's setting.</summary>
+    public string? Moderation { get; set; }
+
+    /// <summary>Whether the blocked words apply to members; null: they do.</summary>
+    public bool? BlockedPatterns { get; set; }
 }
 
 /// <summary>Someone an admin put in an app group.</summary>
