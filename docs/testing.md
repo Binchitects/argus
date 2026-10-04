@@ -9,7 +9,7 @@ What runs today, what it leaves out, and the tests that would close the gap.
 | layer | entry point | asserts | needs |
 |---|---|---|---|
 | **Argus** | `./tools/dn test tests/Argus.Tests`; also the image's `test` stage and CI | config and credentials, the parser, the index store (FTS, the allowlist on every scoped query, references, impact), indexing against a git fixture, packs, the server (MCP, the admin surface, the chat-client token) and the standalone app | nothing running |
-| **App** | `./tools/dn test tests/Llm.Tests` (xUnit, **345 tests**), `npm test` (Vitest, **186**) and `npm run e2e` (Playwright) in `src/web`, and CI on every push | sign-in, OIDC, LDAP against a real OpenLDAP, people and keys, the dashboards against LiteLLM's real schema and fakes of Prometheus and Loki, the admin pages, models kept loaded and loaded on request against a fake router, the picture, video and speech models' controls, sound and video attachments (what each kind of model gets, transcripts made once), read aloud, other GPU servers, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
+| **App** | `./tools/dn test tests/Llm.Tests` (xUnit, **345 tests**), `npm test` (Vitest, **186**) and `npm run e2e` (Playwright) in `src/web`, and CI on every push | sign-in, OIDC, LDAP against a real OpenLDAP, people and keys, the dashboards against LiteLLM's real schema and fakes of Prometheus and Loki, the admin pages, models kept loaded and loaded on request against a fake router, the picture, video and speech models' controls, sound and video attachments (what each kind of model gets, transcripts made once), read aloud, where the video server decodes (`sd-serve.sh` under `/bin/sh` with a fake `nvidia-smi`), messages queued while a chat answers, long documents' pages drawn twenty at a time, credit and alert news by email and webhook, other GPU servers, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
 | **Deployment** | `scripts/upgrade-test.py --zero --stop-live` (and `--from TAG`) | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file; an upgrade keeps people, groups, chats and files, and survives `up` and `down`/`up` | a GPU host |
 | **Clients** | `scripts/clients-check.py` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
 | **Scale** | `scripts/scale-test.py` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
@@ -19,7 +19,10 @@ What runs today, what it leaves out, and the tests that would close the gap.
 
 **Podman** was checked by hand (2026-10-03, Podman 5.7, rootless): every service
 up with `podman.yml`, GPUs through CDI, a chat answer, a Python run, a voice
-message through the transcript, a picture model loaded on the GPU.
+message through the transcript, a picture model loaded on the GPU. CI renders
+the stack with `podman.yml` (and with `podman compose` when the runner has it),
+and parses every script, the services' (the picture and video servers', the
+engine's) with `/bin/sh` too, the shell they run under.
 
 ## 2. What is not tested
 
@@ -28,7 +31,7 @@ message through the transcript, a picture model loaded on the GPU.
 | A rollback test (older images over newer data) | a migration that cannot be undone |
 | A restore from `backup.sh` into an empty host | a backup that cannot be restored |
 | An offline (air-gapped) deployment | a first start that needs the internet |
-| `podman.yml` in CI (needs a GPU runner) | a Podman regression |
+| The stack running under Podman in CI (needs a GPU runner; CI only renders `podman.yml`) | a Podman regression past the compose files |
 | Video generation in CI (minutes on a GPU) | a change in stable-diffusion.cpp's job API |
 
 ## 4. Server-side tests

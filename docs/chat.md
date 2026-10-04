@@ -33,6 +33,14 @@ setups to paste.
     also use another model or thinking level, for that answer only.
   - **Shorter** and **Longer** (in the same menu) answer again at about half
     or twice the words of the answer on screen.
+  - **Queue.** A message sent while an answer runs waits its turn on the
+    server, shown above the box as queued. It survives a reload, another tab
+    and closing the page, and becomes the next question when the answer before
+    it ends (however it ended), on the branch on screen. **Cancel** takes one
+    out of line; **Send now** stops the answer (keeping what it has) and sends
+    it at once. Up to 10 wait per chat. Each is checked as a sent message is
+    (the safeguards), when it is queued. Messages still waiting when the app
+    restarts go once it is back.
 - **Answer length.** Your account → Answers: **Short** (the answer first, a few
   sentences or a short list, no preamble), **Normal** (the model judges) or
   **Thorough** (reasons, cases, examples). Said to the model on every
@@ -187,9 +195,11 @@ setups to paste.
   tool or a sub-agent show as soon as they exist. **Download all** (the
   archive icon) saves every file listed as one zip.
   - **Documents** (PDF, Word, PowerPoint, Excel, OpenDocument) show as their
-    pages, drawn on first look in the sandbox (LibreOffice to PDF, then each
-    page a picture) and kept: the first 20 pages, the rest in the download.
-    **Text** beside **Pages** shows what the model read.
+    pages, drawn in the sandbox (LibreOffice to PDF, then each page a
+    picture) and kept: the first 20 on first look, and the next 20 as you
+    scroll to the end (or with **Show pages 21 to 40**), to the last page.
+    Each page is drawn once. **Text** beside **Pages** shows what the model
+    read.
   - **Zoom**: pages zoom in the panel; a picture or a page opens full size
     with zoom in and out (the buttons, `+` `-` `0`, Ctrl and the wheel).
 - **Previews.** Like Claude's artifacts and ChatGPT's canvas: code the model
@@ -346,6 +356,13 @@ every 15 seconds and when the tab comes back, and shows what arrives as a toast:
 your desktop while the app's tab is hidden, and an answer that finishes while
 you look elsewhere. The browser asks once; the switch turns them off again.
 Alerts and credit are looked at every minute and every five minutes.
+
+**By email and webhook.** The credit news (yours) and the alerts and used-up
+credit (the admins') also go by email, once each, when email is set up
+(**Settings → Email**; **Settings → Notifications → Email the credit and
+alert news** turns it off). The admins' news is also posted to the **Alerts
+webhook** when an admin sets one (Slack, Teams, Mattermost); its host must be
+one of the webhook hosts, as a task's.
 
 ## Safeguards
 

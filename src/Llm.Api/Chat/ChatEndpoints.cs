@@ -286,15 +286,17 @@ public static partial class ChatEndpoints
             status = m.Status.ToString().ToLowerInvariant(), m.Error, m.Model,
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
-        }), jobs.IsAnswering(id), project));
+        }), jobs.IsAnswering(id), project, await QueuedMessages.ListAsync(db, id, ct)));
     }
 
     /// <param name="answering">An answer is being written: the page watches it (GET …/stream).</param>
-    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? project = null) =>
+    /// <param name="queued">Messages waiting for the answer to end (QueuedMessages).</param>
+    private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? project = null,
+        IEnumerable<object>? queued = null) =>
         new
         {
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
-            c.CurrentLeafId, c.ArchivedAt, forkedFrom, project, c.CreatedAt, c.UpdatedAt, answering, messages,
+            c.CurrentLeafId, c.ArchivedAt, forkedFrom, project, c.CreatedAt, c.UpdatedAt, answering, messages, queued = queued ?? [],
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
@@ -873,8 +875,12 @@ public static partial class ChatEndpoints
             : Results.Text(a.Text, "text/plain; charset=utf-8");
     }
 
-    /// <summary>A document's pages as pictures (drawn on first look, in the sandbox): how many it has, and how many are drawn.</summary>
-    private static async Task<IResult> PagesAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, DocumentPages pages, CancellationToken ct)
+    /// <summary>
+    /// A document's pages as pictures (drawn in the sandbox as they are first asked for): how many it has, and how
+    /// many are drawn, at least <paramref name="upTo"/> when it has them (the next twenty at most per request).
+    /// </summary>
+    private static async Task<IResult> PagesAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, DocumentPages pages, CancellationToken ct,
+        int upTo = DocumentPages.Batch)
     {
         var me = await Me(p, users);
         var a = await db.ChatAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.UserId == me.Id, ct);
@@ -888,7 +894,7 @@ public static partial class ChatEndpoints
         }
         try
         {
-            var (total, drawn) = await pages.PagesAsync(a, ct);
+            var (total, drawn) = await pages.PagesAsync(a, upTo, ct);
             return Results.Ok(new { total, drawn, pages = Enumerable.Range(1, drawn).Select(n => $"/api/chat/attachments/{id}/pages/{n}") });
         }
         catch (DocumentPagesException ex)

@@ -1,5 +1,5 @@
 import { api, ApiError } from '@/lib/api'
-import type { Attachment, ChatConfig, ChatEvent, Conversation, ConversationSummary, Project, ProjectSummary } from './types'
+import type { Attachment, ChatConfig, ChatEvent, Conversation, ConversationSummary, Project, ProjectSummary, QueuedMessage } from './types'
 
 export const configQuery = {
   queryKey: ['chat', 'config'] as const,
@@ -35,6 +35,22 @@ export const stopChat = (id: string) => api(`/api/chat/conversations/${id}/stop`
 
 /** "Answer now": the answer stops thinking and answers with what it has. */
 export const hurryChat = (id: string) => api(`/api/chat/conversations/${id}/hurry`, { body: {} })
+
+/** What the chat's line is after a change, and whether it is answering (a message that went at once). */
+export interface QueueState {
+  queued: QueuedMessage[]
+  answering: boolean
+}
+
+/** Queues a message to send when the answer ends (at once when the chat is not answering). */
+export const queueMessage = (id: string, body: { content: string; attachments: string[]; research?: boolean }) =>
+  api<QueueState>(`/api/chat/conversations/${id}/queue`, { body })
+
+/** Takes a queued message out of line. */
+export const cancelQueued = (id: string, queuedId: string) => api(`/api/chat/conversations/${id}/queue/${queuedId}`, { method: 'DELETE' })
+
+/** Send now: first in line, and the answer running stops so it goes at once. */
+export const sendQueuedNow = (id: string, queuedId: string) => api<QueueState>(`/api/chat/conversations/${id}/queue/${queuedId}/now`, { body: {} })
 
 export const archiveChat = (id: string, archived: boolean) => api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { archived } })
 

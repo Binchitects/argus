@@ -19,6 +19,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<AttachmentPage> AttachmentPages => Set<AttachmentPage>();
+    public DbSet<QueuedMessage> QueuedMessages => Set<QueuedMessage>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<SafeguardMark> SafeguardMarks => Set<SafeguardMark>();
     public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
@@ -91,6 +92,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(a => a.Kind).HasMaxLength(20);
             e.HasIndex(a => a.UserId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<QueuedMessage>(e =>
+        {
+            e.ToTable("queued_messages");
+            e.HasIndex(q => new { q.ConversationId, q.Position });
+            e.HasOne<Conversation>().WithMany().HasForeignKey(q => q.ConversationId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Project>(e =>
         {

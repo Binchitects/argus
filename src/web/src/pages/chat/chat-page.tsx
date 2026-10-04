@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, chatModel, configQuery, conversationQuery, forkChat, hurryChat, projectsQuery, stopChat, streamChat } from './api'
+import { archiveChat, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, projectsQuery, queueMessage, sendQueuedNow, stopChat, streamChat } from './api'
 import { Composer } from './composer'
 import { contextOf } from './context'
 import { collectFiles } from './files'
@@ -24,7 +24,7 @@ import { ToolsPicker } from './tools-picker'
 import { ChatList } from './sidebar'
 import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
-import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message } from './types'
+import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message, QueuedMessage } from './types'
 import { useUploads } from './uploads'
 import { ProjectView } from './project-view'
 import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export'
@@ -116,8 +116,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const [draft, setDraft] = useState<ChatSettings>(() => (startIn ? { projectId: startIn } : {}))
   const [live, setLive] = useState<LiveState | null>(null)
   const liveRef = useRef<LiveState | null>(null)
-  /** What to do once a run is over and saved: send the next queued message. */
-  const afterRun = useRef<() => void>(() => {})
+  /** What to do once a run is over and saved (given where it ended): watch the queued message answered next. */
+  const afterRun = useRef<(leaf: string | null | undefined) => void>(() => {})
+  /** The page left the chat: nothing more is watched from here. */
+  const gone = useRef(false)
   useEffect(() => {
     liveRef.current = live
   }, [live])
@@ -347,7 +349,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         // clearing now would wipe the new answer off the screen as it streams.
         if (runs.current === me) {
           setLive(null)
-          afterRun.current()
+          afterRun.current(leaf)
         }
       }
       return received || wasStopped
@@ -365,7 +367,13 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   }
 
   // Leaving the chat stops watching its answer, not the answer.
-  useEffect(() => () => abort.current?.abort(leaving), [])
+  useEffect(
+    () => () => {
+      gone.current = true
+      abort.current?.abort(leaving)
+    },
+    [],
+  )
 
   // A chat answering already (its page was closed, or another tab asked): watch the answer from its start.
   useEffect(() => {
@@ -476,24 +484,77 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
 
   const [research, setResearch] = useState(false)
 
-  // Written while an answer runs: each waits its turn, sent once the answer before is over
-  // (saved too: a page with nothing live), or at once with Send now (which stops the answer).
-  const [queue, setQueue] = useState<Queued[]>([])
-  const enqueue = (text: string) => {
-    setQueue((q) => [...q, { key: `q${Date.now()}${q.length}`, text, attachments: uploads.attachments }])
-    uploads.clear()
+  // Written while an answer runs: each waits on the server (a reload, or another tab, still shows it)
+  // and becomes the next question once the answer before is over, or at once with Send now (which
+  // stops the answer). This page then watches that answer as it watched the one before.
+  const queue: Queued[] = (data?.queued ?? []).map((q) => ({ key: q.id, text: q.content, attachments: q.attachments }))
+  const setQueued = (chat: string, queued: QueuedMessage[]) =>
+    queryClient.setQueryData<Conversation>(conversationQuery(chat).queryKey, (c) => (c ? { ...c, queued } : c))
+  /** Watches the answer the chat is writing now (a queued message's): from its start, then live. */
+  const watchNext = (chat: string, saved: Conversation) => {
+    // Asked by voice: answered aloud, a queued voice message too.
+    const asked = saved.messages.find((m) => m.id === saved.currentLeafId)
+    const aloud = asked?.role === 'user' && asked.attachments.some((a) => a.fileName.startsWith(voicePrefix))
+    void run(chat, 'stream', null, { messages: saved.messages, leaf: saved.currentLeafId, notices: [], title: null, thinkingSince: null }, null, (e) => {
+      if (e.type !== 'done' || !aloud) return
+      const s = liveRef.current
+      const said = s?.messages.find((m) => m.id === s.current)?.content
+      if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
+    })
   }
-  const sendNow = (key: string) => {
-    setQueue((q) => [...q.filter((x) => x.key === key), ...q.filter((x) => x.key !== key)])
-    void stop()
+  const enqueue = async (text: string): Promise<boolean> => {
+    const chat = streamingIn.current ?? id
+    if (!chat) return false
+    if (text === '/compact' && uploads.attachments.length === 0) {
+      toast.error('Compact when the answer is done.')
+      return false
+    }
+    try {
+      const r = await queueMessage(chat, { content: text, attachments: uploads.attachments.map((a) => a.id), ...(research ? { research: true } : {}) })
+      setResearch(false)
+      uploads.clear()
+      setQueued(chat, r.queued)
+      // The answer ended meanwhile: it went at once.
+      if (r.answering && !abort.current) await refreshThenWatch(chat)
+      return true
+    } catch (e) {
+      toast.error(errorMessage(e, 'The message could not be queued. It is back in the box.'))
+      return false
+    }
   }
-  // Called by an answer's run once it is over and saved.
+  const sendNow = async (key: string) => {
+    const chat = streamingIn.current ?? id
+    if (!chat) return
+    try {
+      // The server stops the answer; when its stream ends, this page watches the one that follows.
+      const r = await sendQueuedNow(chat, key)
+      setQueued(chat, r.queued)
+      if (r.answering && !abort.current) await refreshThenWatch(chat)
+    } catch (e) {
+      toast.error(errorMessage(e))
+      void queryClient.invalidateQueries({ queryKey: conversationQuery(chat).queryKey })
+    }
+  }
+  const unqueue = async (key: string) => {
+    const chat = streamingIn.current ?? id
+    if (!chat) return
+    setQueued(chat, (data?.queued ?? []).filter((q) => q.id !== key))
+    await cancelQueued(chat, key).catch((e) => toast.error(errorMessage(e)))
+    void queryClient.invalidateQueries({ queryKey: conversationQuery(chat).queryKey })
+  }
+  /** The chat as the server has it now, then its answer watched when it is writing one. */
+  const refreshThenWatch = async (chat: string) => {
+    await queryClient.invalidateQueries({ queryKey: conversationQuery(chat).queryKey })
+    const saved = queryClient.getQueryData<Conversation>(conversationQuery(chat).queryKey)
+    if (saved?.answering && !abort.current) watchNext(chat, saved)
+  }
+  // Called by an answer's run once it is over and saved: a queued message is the chat's new question by then,
+  // answering. Only a new one: the same answer still listed as answering is not watched again.
   useEffect(() => {
-    afterRun.current = () => {
-      const [next, ...rest] = queue
-      if (!next) return
-      setQueue(rest)
-      void send(next.text, next.attachments)
+    afterRun.current = (leaf) => {
+      const chat = streamingIn.current ?? id
+      const saved = chat ? queryClient.getQueryData<Conversation>(conversationQuery(chat).queryKey) : undefined
+      if (chat && saved?.answering && saved.currentLeafId !== leaf && !abort.current && !gone.current) watchNext(chat, saved)
     }
   })
 
@@ -739,8 +800,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 onSend={send}
                 queued={queue}
                 onQueue={enqueue}
-                onSendNow={sendNow}
-                onUnqueue={(key) => setQueue((q) => q.filter((x) => x.key !== key))}
+                onSendNow={(key) => void sendNow(key)}
+                onUnqueue={(key) => void unqueue(key)}
                 research={research}
                 onResearch={setResearch}
                 onStop={() => void stop()}

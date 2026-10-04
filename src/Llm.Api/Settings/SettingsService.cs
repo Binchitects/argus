@@ -122,6 +122,17 @@ public sealed partial class SettingsService(
             }
             normalised.Add((def, value, false));
         }
+        // The alerts webhook goes only to a host an admin allowed, as a task's does (the hosts may change in the same save).
+        if (normalised.FirstOrDefault(n => n.Def.Key == "Notifications:AlertsWebhook") is { Def: { } hook, Value: { Length: > 0 } url })
+        {
+            var hosts = normalised.FirstOrDefault(n => n.Def.Key == "Schedules:WebhookHosts") is { Def: { } h } change
+                ? change.Reset ? EnvironmentValue(h.Key) ?? h.Default : change.Value
+                : config["Schedules:WebhookHosts"] ?? SettingsCatalog.ByKey["Schedules:WebhookHosts"].Default;
+            if (Schedules.Webhooks.Refusal(url, hosts) is { } refusal)
+            {
+                errors[hook.Key] = refusal;
+            }
+        }
         if (normalised.Any(n => n.Def.IsSecret && !n.Reset) && string.IsNullOrEmpty(auth.Value.DataKey))
         {
             errors["_"] = "APP_KEY is not set, so secrets cannot be stored.";

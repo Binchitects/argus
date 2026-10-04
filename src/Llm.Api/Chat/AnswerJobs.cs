@@ -16,13 +16,18 @@ namespace Llm.Api.Chat;
 /// reloading it or losing the connection does not stop one. Each answer keeps its
 /// events so far, so a page that comes back (or a second tab) is shown the answer
 /// from its start and then live. Stopping is its own request. One answer at a time
-/// per chat; shutting down stops them all, and each keeps what it had.
+/// per chat; shutting down stops them all, and each keeps what it had. When one ends,
+/// the next message queued in its chat starts (QueuedMessages).
 /// </summary>
-public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate gate, ILogger<AnswerJobs> logger) : IHostedService
+public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate gate, ILogger<AnswerJobs> logger) : IHostedService, IDisposable
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    /// <summary>How long after a start the messages queued before it go (the gateway starts beside the app).</summary>
+    private static readonly TimeSpan QueuedAfterStart = TimeSpan.FromSeconds(30);
+
     private readonly ConcurrentDictionary<Guid, Job> _jobs = new();
+    private readonly CancellationTokenSource _closing = new();
 
     /// <summary>One answer being written: its events so far and the pages watching it.</summary>
     public sealed class Job
@@ -286,7 +291,20 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         finally
         {
             var (outcome, error, watched) = job.Ending();
-            Release(job);
+            _jobs.TryRemove(new KeyValuePair<Guid, Job>(job.Conversation, job));
+            try
+            {
+                // The next message queued in this chat starts before this answer's watchers are let go,
+                // so a page that watched this one finds the chat answering again.
+                if (!_closing.IsCancellationRequested)
+                {
+                    await StartQueuedAsync(job.Conversation);
+                }
+            }
+            finally
+            {
+                job.End();
+            }
             if (job.Notify && !watched && outcome is "done" or "error")
             {
                 await NotifyAsync(job, outcome == "error" ? error ?? "The answer failed." : null);
@@ -318,11 +336,41 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         }
     }
 
-    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public void Dispose() => _closing.Dispose();
+
+    private async Task StartQueuedAsync(Guid conversation)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<QueuedMessages>().StartNextAsync(conversation);
+    }
+
+    /// <summary>Messages still queued from before a restart go once the app (and the gateway with it) is up.</summary>
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(QueuedAfterStart, _closing.Token);
+                await using var scope = scopes.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<QueuedMessages>().StartWaitingAsync(_closing.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutting down first.
+            }
+            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException or ObjectDisposedException)
+            {
+                LogQueuedFailed(logger, ex);
+            }
+        }, CancellationToken.None);
+        return Task.CompletedTask;
+    }
 
     /// <summary>Shutting down: every answer stops and keeps what it has.</summary>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        await _closing.CancelAsync();
         var running = _jobs.Values.ToList();
         foreach (var job in running)
         {
@@ -343,4 +391,7 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Conversation {Conversation}: the bell could not be told the answer ended")]
     private static partial void LogNotifyFailed(ILogger logger, Guid conversation, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The messages queued before the restart could not start")]
+    private static partial void LogQueuedFailed(ILogger logger, Exception ex);
 }

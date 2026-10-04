@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Download, ExternalLink, FileArchive, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, Maximize2, Minimize2, Play, X, ZoomIn, ZoomOut } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -227,19 +227,42 @@ function Viewer({ file }: { file: FileItem }) {
   )
 }
 
+/** Pages the server draws at a time: the first on first look, then the next as the reader reaches the end. */
+const pageBatch = 20
+
+interface PagesState {
+  total: number
+  drawn: number
+  pages: string[]
+}
+
 /**
  * A document's pages, drawn as pictures on first look (in the sandbox), one under
  * the other: zoomed in the panel with the buttons, or opened one by one full size.
+ * A long one shows its first twenty; the next twenty are drawn as the reader
+ * reaches the end (or asks with the button), to the last page.
  */
 function DocumentPages({ attachment }: { attachment: Attachment }) {
-  const pages = useQuery({
+  const pages = useInfiniteQuery({
     queryKey: ['chat', 'pages', attachment.id],
-    queryFn: ({ signal }) => api<{ total: number; drawn: number; pages: string[] }>(`/api/chat/attachments/${attachment.id}/pages`, { signal }),
+    initialPageParam: pageBatch,
+    queryFn: ({ pageParam, signal }) => api<PagesState>(`/api/chat/attachments/${attachment.id}/pages?upTo=${pageParam}`, { signal }),
+    getNextPageParam: (last) => (last.drawn < last.total ? last.drawn + pageBatch : undefined),
     staleTime: Infinity,
     retry: false,
   })
   const [width, setWidth] = useState(100)
   const [viewing, setViewing] = useState<number | null>(null)
+  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = pages
+  // Reaching the end of the pages drawn asks for the next ones (not again after a failure: the button retries).
+  const end = useRef<HTMLLIElement>(null)
+  useEffect(() => {
+    const el = end.current
+    if (!el || !hasNextPage || isFetchingNextPage || isFetchNextPageError || typeof IntersectionObserver === 'undefined') return
+    const seen = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && void fetchNextPage(), { rootMargin: '600px 0px' })
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage])
   if (pages.isPending) {
     return (
       <div className="grid gap-2" aria-busy="true">
@@ -248,7 +271,7 @@ function DocumentPages({ attachment }: { attachment: Attachment }) {
       </div>
     )
   }
-  if (pages.error) {
+  if (pages.isError && !pages.data) {
     return (
       <div className="grid gap-2">
         <p className="text-sm text-destructive-ink">{errorMessage(pages.error)}</p>
@@ -258,8 +281,10 @@ function DocumentPages({ attachment }: { attachment: Attachment }) {
       </div>
     )
   }
-  const { total, drawn } = pages.data
-  const images = pages.data.pages.map((src, i) => ({
+  // Each answer lists every page drawn so far: the last is the whole of it.
+  const { total, drawn, pages: drawnPages } = pages.data.pages.at(-1)!
+  const nextTo = Math.min(total, drawn + pageBatch)
+  const images = drawnPages.map((src, i) => ({
     key: src, src, name: attachment.fileName, detail: `Page ${i + 1} of ${total}`, download: { href: downloadUrl(attachment.id), name: attachment.fileName },
   }))
   return (
@@ -284,14 +309,29 @@ function DocumentPages({ attachment }: { attachment: Attachment }) {
       </div>
       <ol className="grid gap-3 overflow-x-auto" aria-label={`Pages of ${attachment.fileName}`}>
         {images.map((p, i) => (
-          <li key={p.key} style={{ width: `${width}%` }} className="mx-auto max-w-none">
+          <li key={p.key} ref={i === images.length - 1 ? end : undefined} style={{ width: `${width}%` }} className="mx-auto max-w-none">
             <button type="button" onClick={() => setViewing(i)} className="block w-full cursor-zoom-in rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`Page ${i + 1}: view full size`}>
               <img src={p.src} alt={`Page ${i + 1} of ${total}`} loading="lazy" className="w-full rounded-md border bg-white shadow-sm" />
             </button>
           </li>
         ))}
       </ol>
-      {drawn < total && <p className="text-center text-xs text-muted-foreground">Download it for the other {total - drawn} pages.</p>}
+      {drawn < total && (
+        <div className="grid justify-items-center gap-1.5 py-1 text-center">
+          {isFetchingNextPage ? (
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              Drawing pages {drawn + 1} to {nextTo}…
+            </p>
+          ) : (
+            <>
+              {isFetchNextPageError && <p className="text-xs text-destructive-ink">{errorMessage(pages.error)}</p>}
+              <Button variant="outline" size="sm" onClick={() => void fetchNextPage()}>
+                {isFetchNextPageError ? 'Try again: pages' : 'Show pages'} {drawn + 1} to {nextTo}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       <ImageViewer images={images} index={viewing} onIndex={setViewing} />
     </div>
   )

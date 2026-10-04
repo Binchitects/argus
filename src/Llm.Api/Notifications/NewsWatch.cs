@@ -12,7 +12,8 @@ namespace Llm.Api.Notifications;
 /// News nobody asks for, looked for now and then: a system alert that starts firing
 /// (to every admin), and a person's credit at 80% and used up (to them; used up, to
 /// the admins too). Each is said once: per alert firing, per credit threshold and
-/// budget (a raised budget says it again when reached).
+/// budget (a raised budget says it again when reached); by email and the alerts
+/// webhook too (NewsDelivery).
 /// </summary>
 /// <remarks>Notifications:Watch=false turns the looking off (tests, which call the checks themselves).</remarks>
 public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguration config, TimeProvider clock, ILogger<NewsWatch> logger) : BackgroundService
@@ -55,11 +56,11 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
         {
             await using var scope = scopes.CreateAsyncScope();
             var alerts = await scope.ServiceProvider.GetRequiredService<AlertmanagerClient>().AlertsAsync(ct);
-            var notifier = scope.ServiceProvider.GetRequiredService<Notifier>();
+            var news = scope.ServiceProvider.GetRequiredService<NewsDelivery>();
             foreach (var a in alerts.Where(a => a.State == "active"))
             {
                 var severity = a.Severity is { Length: > 0 } s ? char.ToUpperInvariant(s[0]) + s[1..] : "Alert";
-                await notifier.ToAdminsAsync(new News("alert", $"{severity}: {a.Summary ?? a.Name}", a.Description ?? a.Summary, "/admin/alerts",
+                await news.ToAdminsAsync(new News("alert", $"{severity}: {a.Summary ?? a.Name}", a.Description ?? a.Summary, "/admin/alerts",
                     $"alert:{a.Name}:{Fingerprint(a.Labels)}:{a.StartsAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)}"), ct);
             }
         }
@@ -77,7 +78,7 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
             await using var scope = scopes.CreateAsyncScope();
             var spending = await scope.ServiceProvider.GetRequiredService<Ledger>().ReadAsync(ct);
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var notifier = scope.ServiceProvider.GetRequiredService<Notifier>();
+            var news = scope.ServiceProvider.GetRequiredService<NewsDelivery>();
             foreach (var u in await db.Users.AsNoTracking().Where(u => !u.IsDisabled && u.Email != null).ToListAsync(ct))
             {
                 if (!spending.People.TryGetValue(u.Email!, out var g) || g.Budget is not > 0)
@@ -89,16 +90,16 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
                 var key = limit.ToString("0.####", CultureInfo.InvariantCulture);
                 if (g.Spend >= limit)
                 {
-                    if (await notifier.SendAsync(u.Id, new News("usage", "Your credit is used up",
+                    if (await news.SendAsync(u, new News("usage", "Your credit is used up",
                         $"You have spent {of}. The chat and your API keys are refused until an admin adds credit.", "/", $"credit:100:{key}"), ct))
                     {
-                        await notifier.ToAdminsAsync(new News("usage", $"{u.DisplayName ?? u.UserName} has used up their credit",
+                        await news.ToAdminsAsync(new News("usage", $"{u.DisplayName ?? u.UserName} has used up their credit",
                             $"{of}. Their chat and API keys are refused until you add credit (People).", "/admin/people", $"credit-of:{u.Id}:100:{key}"), ct);
                     }
                 }
                 else if (g.Spend >= limit * 0.8m)
                 {
-                    await notifier.SendAsync(u.Id, new News("usage", $"{Math.Floor(100 * g.Spend / limit)}% of your credit is used",
+                    await news.SendAsync(u, new News("usage", $"{Math.Floor(100 * g.Spend / limit)}% of your credit is used",
                         $"You have spent {of}. Ask an admin for more before it runs out.", "/", $"credit:80:{key}"), ct);
                 }
             }

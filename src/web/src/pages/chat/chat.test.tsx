@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
@@ -700,23 +700,90 @@ describe('chat', () => {
     expect(within(a).getByRole('button', { name: 'Answering now…' })).toBeDisabled()
   })
 
-  it('a message written while the answer runs is queued, and Send now stops the answer and sends it', async () => {
-    const calls = backend({
-      events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'Working on it' }],
-      hang: true,
-      saved: [msg('q1', null, 'user', { content: 'first' }), msg('a1', 'q1', 'assistant', { content: 'Working on it', status: 'stopped' })],
+  it('a message written while the answer runs waits on the server, shown as queued with Cancel, and a reload still shows it', async () => {
+    const queued: { id: string; content: string; attachments: []; research: boolean; createdAt: string }[] = []
+    const routes = {
+      'POST /api/chat/conversations/c1/queue': (body: unknown) => {
+        queued.push({ id: `q${queued.length + 1}`, content: (body as { content: string }).content, attachments: [], research: false, createdAt: '' })
+        return { json: { queued, answering: true } }
+      },
+      'DELETE /api/chat/conversations/c1/queue/q2': () => {
+        queued.splice(1, 1)
+        return { status: 204 }
+      },
+      'GET /api/chat/conversations/c1': () => ({ json: conversation({ queued }) }),
+    }
+    const calls = backend({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'Working on it' }], hang: true, extra: routes })
+    renderApp('/chat')
+    await ask('first')
+    await screen.findByRole('button', { name: 'Stop' })
+    await ask('second')
+    const list = await screen.findByRole('list', { name: 'Queued messages' })
+    expect(list).toHaveTextContent('second')
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/queue')?.body).toEqual({ content: 'second', attachments: [] })
+    await ask('third')
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(2))
+    expect(calls.filter((c) => c.path === '/api/chat/conversations/c1/messages')).toHaveLength(1)
+
+    await userEvent.click(within(list).getByRole('button', { name: 'Cancel queued message: third' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/chat/conversations/c1/queue/q2')).toBe(true))
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(1))
+    expect(list).not.toHaveTextContent('third')
+
+    // Another page (a reload): the chat is answering, and the message still waits.
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation({ messages: [msg('q1', null, 'user', { content: 'first' })], currentLeafId: 'q1', answering: true, queued }) }),
+      'GET /api/chat/conversations/c1/stream': () => ({ events: [{ type: 'question', id: 'q1', parentId: null }], hang: true }),
+    })
+    cleanup()
+    renderApp('/chat/c1')
+    const again = await screen.findByRole('list', { name: 'Queued messages' })
+    expect(again).toHaveTextContent('second')
+    expect(within(again).getByRole('button', { name: 'Send now' })).toBeInTheDocument()
+  })
+
+  it('Send now asks the server to stop the answer, and the page then watches the queued message being answered', async () => {
+    let stop = () => {}
+    const stopped = new Promise<void>((r) => (stop = r))
+    let phase: 'first' | 'next' | 'done' = 'first'
+    const q2 = msg('q2', 'a1', 'user', { content: 'second' })
+    const before = [msg('q1', null, 'user', { content: 'first' }), msg('a1', 'q1', 'assistant', { content: 'Working on it', status: 'stopped' })]
+    const waiting = [{ id: 'w1', content: 'second', attachments: [], research: false, createdAt: '' }]
+    const calls = fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'POST /api/chat/conversations': () => ({ status: 201, json: conversation() }),
+      'GET /api/chat/conversations/c1': () => ({
+        json: phase === 'first' ? conversation({ queued: waiting })
+          : phase === 'next' ? conversation({ messages: [...before, q2], currentLeafId: 'q2', answering: true })
+          : conversation({ messages: [...before, q2, msg('a2', 'q2', 'assistant', { content: 'Second answer' })], currentLeafId: 'a2' }),
+      }),
+      'POST /api/chat/conversations/c1/messages': () => ({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'Working on it' }], until: stopped }),
+      'POST /api/chat/conversations/c1/queue': () => ({ json: { queued: waiting, answering: true } }),
+      'POST /api/chat/conversations/c1/queue/w1/now': () => {
+        // The server stops the answer and the queued message becomes the next question.
+        phase = 'next'
+        stop()
+        return { json: { queued: waiting, answering: true } }
+      },
+      'GET /api/chat/conversations/c1/stream': () => {
+        phase = 'done'
+        return { events: [{ type: 'question', id: 'q2', parentId: 'a1' }, { type: 'assistant', id: 'a2', parentId: 'q2', model: 'Main-Model' }, { type: 'content', text: 'Second answer' }, { type: 'done', id: 'a2' }] }
+      },
     })
     renderApp('/chat')
     await ask('first')
     await screen.findByRole('button', { name: 'Stop' })
     await ask('second')
-    const queued = await screen.findByRole('list', { name: 'Queued messages' })
-    expect(queued).toHaveTextContent('second')
+    const list = await screen.findByRole('list', { name: 'Queued messages' })
+    await userEvent.click(within(list).getByRole('button', { name: 'Send now' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/queue/w1/now')).toBe(true))
+    expect(await screen.findByText('Second answer', {}, { timeout: 4000 })).toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/api/chat/conversations/c1/stream')).toBe(true)
     expect(calls.filter((c) => c.path === '/api/chat/conversations/c1/messages')).toHaveLength(1)
-    await userEvent.click(within(queued).getByRole('button', { name: 'Send now' }))
-    await waitFor(() => expect(calls.some((c) => c.path === '/api/chat/conversations/c1/stop')).toBe(true))
-    await waitFor(() => expect(calls.filter((c) => c.path === '/api/chat/conversations/c1/messages').map((c) => (c.body as { content: string }).content)).toEqual(['first', 'second']), { timeout: 4000 })
-    expect(screen.queryByRole('list', { name: 'Queued messages' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Queued messages' })).not.toBeInTheDocument())
   })
 
   it('deep research goes with the message written with it on, then turns off', async () => {
@@ -754,6 +821,47 @@ describe('chat', () => {
     await userEvent.type(screen.getByLabelText('Temperature'), '0.2')
     await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ systemPrompt: 'Be brief.', temperature: 0.2, topP: -1, maxTokens: -1 }))
+  })
+
+  it('a long document shows its first twenty pages, then twenty more at a time to the last, and a batch that failed can be tried again', async () => {
+    const pdf = { id: 'd1', fileName: 'handbook.pdf', size: 9000, truncated: false, kind: 'text' as const, contentType: 'application/pdf', original: true }
+    const messages = [msg('q1', null, 'user', { content: 'summarise', attachments: [pdf] }), msg('a1', 'q1', 'assistant', { content: 'Done.' })]
+    let failOnce = true
+    const calls = backend({
+      start: conversation({ messages, currentLeafId: 'a1' }),
+      extra: {
+        'GET /api/chat/attachments/d1/pages': (_b, _i, url) => {
+          const upTo = Number(url.searchParams.get('upTo'))
+          if (upTo === 40 && failOnce) {
+            failOnce = false
+            return { status: 503, json: { status: 'pages', error: 'The Python sandbox stopped answering.' } }
+          }
+          const drawn = Math.min(45, upTo)
+          return { json: { total: 45, drawn, pages: Array.from({ length: drawn }, (_, i) => `/api/chat/attachments/d1/pages/${i + 1}`) } }
+        },
+      },
+    })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: /^Files \(/ }))
+    const panel = await screen.findByRole('complementary', { name: 'Files' })
+    await userEvent.click(within(panel).getByRole('button', { name: /handbook\.pdf/ }))
+    const list = await within(panel).findByRole('list', { name: 'Pages of handbook.pdf' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(20)
+    expect(within(panel).getByText('45 pages · the first 20 shown')).toBeInTheDocument()
+
+    // The next batch fails: the pages shown stay, with why, and the button tries again.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Show pages 21 to 40' }))
+    expect(await within(panel).findByText('The Python sandbox stopped answering.')).toBeInTheDocument()
+    expect(within(list).getAllByRole('listitem')).toHaveLength(20)
+    await userEvent.click(within(panel).getByRole('button', { name: 'Try again: pages 21 to 40' }))
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(40))
+    expect(within(list).getAllByRole('img').at(-1)).toHaveAttribute('src', '/api/chat/attachments/d1/pages/40')
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Show pages 41 to 45' }))
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(45))
+    expect(within(panel).queryByRole('button', { name: /pages \d+ to/ })).not.toBeInTheDocument()
+    expect(within(panel).getByText('45 pages')).toBeInTheDocument()
+    expect(calls.filter((c) => c.path.startsWith('/api/chat/attachments/d1/pages')).map((c) => c.path.split('?')[1])).toEqual(['upTo=20', 'upTo=40', 'upTo=40', 'upTo=60'])
   })
 
   it('model HTML never runs, links open safely, and maths is typeset', async () => {
