@@ -1,5 +1,6 @@
 using Llm.Api.Chat;
 using Llm.Api.Gateway;
+using Llm.Api.Operations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -12,14 +13,42 @@ namespace Llm.Api.Models;
 /// whichever models are loaded. Checks every 10 seconds, every 3 while a model
 /// loads. A model that fails to load is not tried again (it would fail every few
 /// seconds); when every kept model failed, the .env model takes their place.
+/// With several replicas, only the one that leads changes anything; the others
+/// only read what the engine has loaded (their line and model list need it).
 /// </summary>
-public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineClient engine, EngineState state, ChatModels chatModels,
-    AnswerGate gate, IOptions<EngineOptions> options, ILogger<EngineWatcher> logger) : BackgroundService
+public sealed partial class EngineWatcher : BackgroundService
 {
+    private const string WakeTopic = "engine:wake";
     private readonly SemaphoreSlim _wake = new(0);
+    private readonly IServiceScopeFactory scopes;
+    private readonly EngineClient engine;
+    private readonly EngineState state;
+    private readonly ChatModels chatModels;
+    private readonly AnswerGate gate;
+    private readonly Replicas replicas;
+    private readonly IOptions<EngineOptions> options;
+    private readonly ILogger<EngineWatcher> logger;
 
-    /// <summary>Check now (after an admin loads or unloads a model).</summary>
+    public EngineWatcher(IServiceScopeFactory scopes, EngineClient engine, EngineState state, ChatModels chatModels, AnswerGate gate, Replicas replicas,
+        IOptions<EngineOptions> options, ILogger<EngineWatcher> logger)
+    {
+        (this.scopes, this.engine, this.state, this.chatModels, this.gate, this.replicas, this.options, this.logger) =
+            (scopes, engine, state, chatModels, gate, replicas, options, logger);
+        replicas.On(WakeTopic, _ =>
+        {
+            WakeHere();
+            return true;
+        });
+    }
+
+    /// <summary>Check now (after an admin loads or unloads a model), on whichever replica leads.</summary>
     public void Wake()
+    {
+        WakeHere();
+        replicas.Tell(WakeTopic);
+    }
+
+    private void WakeHere()
     {
         if (_wake.CurrentCount == 0)
         {
@@ -45,6 +74,7 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
         string? reported = null;
         // The working hours in force last round, and what they kept: at a change, what is no longer kept unloads.
         (Guid? Window, IReadOnlyList<string> Kept)? before = null;
+        var led = false;
         while (!stoppingToken.IsCancellationRequested)
         {
             var loading = false;
@@ -53,8 +83,15 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
                 await using var scope = scopes.CreateAsyncScope();
                 var catalog = scope.ServiceProvider.GetRequiredService<ModelCatalog>();
                 var hours = await scope.ServiceProvider.GetRequiredService<ModelHours>().RefreshAsync(stoppingToken);
+                var lead = replicas.IsLeader;
+                if (lead && !led)
+                {
+                    // Taking over: the files and the gateway are written again now, as at a start.
+                    (nextSync, loaded) = (DateTimeOffset.MinValue, "");
+                }
+                led = lead;
                 // At start, then every minute: a gateway that was down, or restarted without the app's models, catches up.
-                if (DateTimeOffset.UtcNow >= nextSync)
+                if (lead && DateTimeOffset.UtcNow >= nextSync)
                 {
                     catalog.WriteMax();
                     await catalog.WritePresetsAsync(stoppingToken);
@@ -67,7 +104,7 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
                 string? Status(string name) => models.FirstOrDefault(m => m.Name == name)?.Status;
                 // Never more than the engine holds at once: past that, each load would unload another kept model.
                 var kept = catalog.Kept().Where(k => Status(k) is not null).Take(options.Value.ModelsMax).ToList();
-                if (before is { } was && (was.Window != hours.Window?.Id || (hours.Window is not null && !was.Kept.SequenceEqual(kept))))
+                if (lead && before is { } was && (was.Window != hours.Window?.Id || (hours.Window is not null && !was.Kept.SequenceEqual(kept))))
                 {
                     // Working hours began, ended or changed: the models only they kept make room (not on the app's
                     // first round, when nothing is known of what kept them).
@@ -79,7 +116,7 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
                     chatModels.Forget();
                 }
                 before = (hours.Window?.Id, kept);
-                if (!loading)
+                if (lead && !loading)
                 {
                     // One at a time: a load at the engine's limit first unloads the model used least recently,
                     // which may be a kept one that sat idle; it comes back on a later round.
@@ -103,7 +140,10 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
                 if (now != loaded)
                 {
                     var names = models.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
-                    catalog.WriteTargets(names);
+                    if (lead)
+                    {
+                        catalog.WriteTargets(names);
+                    }
                     chatModels.Forget();
                     // What the loaded models serve at once: the answers' line, and sub-agents, keep within it.
                     gate.EngineSlots = await scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().LocalModels
@@ -151,8 +191,11 @@ public sealed partial class EngineWatcher(IServiceScopeFactory scopes, EngineCli
         {
             try
             {
-                await using var scope = scopes.CreateAsyncScope();
-                await scope.ServiceProvider.GetRequiredService<ModelCatalog>().SyncGatewayAsync(stoppingToken);
+                if (replicas.IsLeader)
+                {
+                    await using var scope = scopes.CreateAsyncScope();
+                    await scope.ServiceProvider.GetRequiredService<ModelCatalog>().SyncGatewayAsync(stoppingToken);
+                }
             }
             catch (GatewayException ex)
             {

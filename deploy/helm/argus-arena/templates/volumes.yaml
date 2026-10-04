@@ -1,0 +1,47 @@
+{{- /* The shared volumes: the model library and the app's files, read and written by several pods. */}}
+{{- $p := .Values.persistence }}
+{{- $claims := list (list "arena-engine" $p.engine.size) (list "arena-directory" $p.directory.size) (list "arena-sandbox" $p.sandbox.size) }}
+{{- if not $p.models.existingClaim }}
+{{- $claims = prepend $claims (list "arena-models" $p.models.size) }}
+{{- end }}
+{{- range $claims }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ index . 0 }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ $p.sharedAccessMode }}]
+  {{- with ($p.sharedStorageClass | default $p.storageClass) }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources: { requests: { storage: {{ index . 1 }} } }
+{{- end }}
+{{- /* Volumes of one service each. */}}
+{{- $own := list }}
+{{- if .Values.argus.enabled }}{{ $own = append $own (list "arena-argus" .Values.argus.size) }}{{ end }}
+{{- if .Values.audio.enabled }}{{ $own = append $own (list "arena-audio" .Values.audio.size) }}{{ end }}
+{{- if .Values.monitoring.enabled }}
+{{- $own = append $own (list "arena-prometheus" .Values.monitoring.prometheusSize) }}
+{{- $own = append $own (list "arena-loki" .Values.monitoring.lokiSize) }}
+{{- $own = append $own (list "arena-alertmanager" "1Gi") }}
+{{- end }}
+{{- range $own }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ index . 0 }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $p.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources: { requests: { storage: {{ index . 1 }} } }
+{{- end }}

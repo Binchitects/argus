@@ -28,7 +28,10 @@ const columns: ColumnDef<GroupSummary>[] = [
     sortingFn: (a, b) => a.original.name.localeCompare(b.original.name),
     cell: ({ row: { original: g } }) => (
       <div className="min-w-48">
-        <p className="font-medium">{g.name}</p>
+        <p className="flex flex-wrap items-center gap-1.5 font-medium">
+          {g.name}
+          {!!g.priority && <PriorityBadge priority={g.priority} />}
+        </p>
         {g.description && <p className="truncate text-xs text-muted-foreground">{g.description}</p>}
       </div>
     ),
@@ -114,6 +117,15 @@ export function GroupsPage() {
       </div>
       <NewGroupDialog open={adding} onOpenChange={setAdding} onMade={(id) => navigate(`/admin/groups/${id}`)} />
     </>
+  )
+}
+
+/** A group's place in the answers' line, when it is not everyone's. */
+export function PriorityBadge({ priority }: { priority: number }) {
+  return (
+    <Badge variant={priority > 0 ? 'default' : 'outline'} title="Its members' place in the answers' line: higher goes first">
+      Priority {priority > 0 ? `+${priority}` : priority}
+    </Badge>
   )
 }
 

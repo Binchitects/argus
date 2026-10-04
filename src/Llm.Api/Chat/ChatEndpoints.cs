@@ -406,14 +406,15 @@ public static partial class ChatEndpoints
     }
 
     /// <summary>Yes or no to a tool call waiting for the person ("ask before running").</summary>
-    private static async Task<IResult> DecideAsync(Guid id, string callId, ToolDecision body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolApprovals approvals)
+    private static async Task<IResult> DecideAsync(Guid id, string callId, ToolDecision body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolApprovals approvals,
+        CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me) is null)
         {
             return Results.NotFound();
         }
-        return approvals.Decide(id, callId, body.Allow)
+        return await approvals.DecideAnywhereAsync(id, callId, body.Allow, ct)
             ? Results.NoContent()
             : AuthEndpoints.Problem(409, "not_waiting", "That tool call is not waiting for an answer any more.");
     }
@@ -696,14 +697,14 @@ public static partial class ChatEndpoints
     }
 
     /// <summary>Stops the chat's answer; it keeps what it has, marked stopped.</summary>
-    private static async Task<IResult> StopAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
+    private static async Task<IResult> StopAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me) is null)
         {
             return Results.NotFound();
         }
-        return jobs.Stop(id) ? Results.Accepted() : AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
+        return await jobs.StopAnywhereAsync(id, ct) ? Results.Accepted() : AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
     }
 
     /// <summary>The branch on screen summarized by the model for a reader (to export): made now, kept nowhere.</summary>
@@ -725,19 +726,14 @@ public static partial class ChatEndpoints
     }
 
     /// <summary>"Answer now": the answer being written stops thinking and answers with what it has.</summary>
-    private static async Task<IResult> HurryAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
+    private static async Task<IResult> HurryAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me) is null)
         {
             return Results.NotFound();
         }
-        if (jobs.Find(id) is not { } job)
-        {
-            return AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
-        }
-        job.Hurry.Ask();
-        return Results.Accepted();
+        return await jobs.HurryAnywhereAsync(id, ct) ? Results.Accepted() : AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
     }
 
     /// <summary>Server-sent events: one JSON object per event, flushed as it happens. Leaving stops the watching, not the answer.</summary>

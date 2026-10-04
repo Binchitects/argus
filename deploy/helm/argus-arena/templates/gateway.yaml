@@ -1,0 +1,94 @@
+{{- /* Postgres (the app's and the gateway's databases), unless an external one is used. */}}
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "postgres") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      containers:
+        - name: postgres
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.postgres) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports: [{ name: postgres, containerPort: 5432 }]
+          env:
+            - { name: POSTGRES_USER, value: arena }
+            {{- include "arena.secretEnv" (list $ "POSTGRES_PASSWORD" "DB_PASSWORD") | nindent 12 }}
+            # The gateway's; the app makes its own.
+            - { name: POSTGRES_DB, value: litellm }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          readinessProbe: { exec: { command: [pg_isready, -U, arena] }, periodSeconds: 10 }
+          resources: {{- toYaml .Values.postgresql.resources | nindent 12 }}
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.postgresql.size }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "postgres") | nindent 4 }}
+  ports: [{ name: postgres, port: 5432, targetPort: postgres }]
+---
+{{- end }}
+{{- /* The gateway (LiteLLM): a key and a credit per person, every request's cost. The app registers the models. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.litellm.replicas }}
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "litellm") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "litellm") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      containers:
+        - name: litellm
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.litellm) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          args: [--config, /app/arena.yaml, --port, "4000"]
+          ports: [{ name: http, containerPort: 4000 }]
+          env:
+            {{- include "arena.secretEnv" (list $ "LITELLM_MASTER_KEY" "GATEWAY_KEY") | nindent 12 }}
+            {{- include "arena.secretEnv" (list $ "DB_PASSWORD" "DB_PASSWORD") | nindent 12 }}
+            {{- $ssl := include "arena.dbSslMode" . }}
+            - name: DATABASE_URL
+              value: "postgresql://{{ include "arena.dbUser" . }}:$(DB_PASSWORD)@{{ include "arena.dbHost" . }}:{{ include "arena.dbPort" . }}/litellm{{ if not .Values.postgresql.enabled }}?sslmode={{ $ssl }}{{ end }}"
+            - { name: ENGINE_API_BASE, value: "http://llamacpp:8080/v1" }
+            {{- include "arena.secretEnv" (list $ "ENGINE_API_KEY" "ENGINE_KEY") | nindent 12 }}
+            - { name: STORE_MODEL_IN_DB, value: "True" }
+            - { name: LITELLM_LOCAL_MODEL_COST_MAP, value: "True" }
+          readinessProbe: { httpGet: { path: /health/readiness, port: http }, periodSeconds: 15, timeoutSeconds: 5 }
+          resources: {{- toYaml .Values.litellm.resources | nindent 12 }}
+          volumeMounts: [{ name: config, mountPath: /app/arena.yaml, subPath: litellm.yaml }]
+      volumes: [{ name: config, configMap: { name: arena-config } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "litellm") | nindent 4 }}
+  ports: [{ name: http, port: 4000, targetPort: http }]

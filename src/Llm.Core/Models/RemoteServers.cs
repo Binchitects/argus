@@ -33,6 +33,8 @@ public sealed class RemoteModel
     public bool Vision { get; set; }
     public bool Tools { get; set; } = true;
     public bool Thinking { get; set; }
+    /// <summary>Requests it serves at once (its parallel slots); null: not said. With other servers of the same model, the gateway sends it no more.</summary>
+    public int? Parallel { get; set; }
     /// <summary>Per million tokens; null: free.</summary>
     public decimal? InputPerMtok { get; set; }
     public decimal? OutputPerMtok { get; set; }

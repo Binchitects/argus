@@ -48,4 +48,6 @@ export interface Overview {
   model: string | null
   /** Null when Prometheus does not know it. */
   certificate?: CertificateStatus | null
+  /** The app's replicas on the database; leads: the one that answered runs the once-only background work. */
+  replicas?: { count: number; leads: boolean; id: string }
 }

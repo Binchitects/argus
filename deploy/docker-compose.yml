@@ -75,6 +75,11 @@ services:
       Auth__AdminEmail: ${ADMIN_EMAIL:-admin@example.com}
       Auth__AdminPassword: ${ADMIN_PASSWORD:-}
       Auth__DataKey: ${APP_KEY:?set APP_KEY in .env}
+      # Postgres: this stack's, or an external one (DB_HOST and the rest in .env).
+      Database__Host: ${DB_HOST:-postgres}
+      Database__Port: ${DB_PORT:-5432}
+      Database__Username: ${DB_USER:-arena}
+      Database__SslMode: ${DB_SSL_MODE:-prefer}
       Database__Password: ${DB_PASSWORD:?set DB_PASSWORD in .env}
       Gateway__MasterKey: ${GATEWAY_KEY:?set GATEWAY_KEY in .env}
       Engine__ApiKey: ${ENGINE_KEY:?set ENGINE_KEY in .env}
@@ -89,7 +94,8 @@ services:
       - engine:/engine-config
       - directory:/directory
       - sandbox:/sandbox
-    depends_on: { postgres: { condition: service_healthy } }
+    # Not required: with an external Postgres this stack's is left out.
+    depends_on: { postgres: { condition: service_healthy, required: false } }
 
   postgres:
     <<: *service
@@ -110,13 +116,13 @@ services:
     command: [--config, /app/arena.yaml, --port, "4000"]
     environment:
       LITELLM_MASTER_KEY: ${GATEWAY_KEY}
-      DATABASE_URL: postgresql://arena:${DB_PASSWORD}@postgres:5432/litellm
+      DATABASE_URL: postgresql://${DB_USER:-arena}:${DB_PASSWORD}@${DB_HOST:-postgres}:${DB_PORT:-5432}/litellm${DB_SSL_MODE:+?sslmode=}${DB_SSL_MODE:-}
       ENGINE_API_BASE: http://llamacpp:8080/v1
       ENGINE_API_KEY: ${ENGINE_KEY}
       STORE_MODEL_IN_DB: "True"
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
     volumes: [./config/litellm.yaml:/app/arena.yaml:ro]
-    depends_on: { postgres: { condition: service_healthy } }
+    depends_on: { postgres: { condition: service_healthy, required: false } }
 
   # The chat models (Admin -> Models), loaded and unloaded live.
   llamacpp:

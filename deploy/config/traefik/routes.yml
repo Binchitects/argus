@@ -1,6 +1,7 @@
 # Traefik's routes. DOMAIN and ACME_EMAIL come from .env through compose.
 {{ $domain := env "DOMAIN" }}
 {{ $acme := env "ACME_EMAIL" }}
+{{ $replicas := atoi (env "APP_REPLICAS") }}
 http:
   routers:
     # The web on the bare domain, except the app's paths (/mcp: Arena MCP, each person's tools for their agents).
@@ -36,7 +37,20 @@ http:
 
   services:
     web: { loadBalancer: { servers: [{ url: "http://web:8080" }] } }
+{{ if gt $replicas 1 }}
+    # Several app replicas (scale.yml): a sticky cookie keeps each browser on one,
+    # where its answers run; a replica that stops answering is left out.
+    app:
+      loadBalancer:
+        sticky: { cookie: { name: arena_replica, secure: true, httpOnly: true, sameSite: lax } }
+        healthCheck: { path: /healthz, interval: 10s, timeout: 3s }
+        servers:
+{{ range $i := until $replicas }}
+          - url: "http://arena-app-{{ add1 $i }}:8080"
+{{ end }}
+{{ else }}
     app: { loadBalancer: { servers: [{ url: "http://app:8080" }] } }
+{{ end }}
     litellm: { loadBalancer: { servers: [{ url: "http://litellm:4000" }] } }
     argus: { loadBalancer: { servers: [{ url: "http://argus:7700" }] } }
     # The app answers its health check only while the answer cache is on: Traefik

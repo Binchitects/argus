@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
+using Llm.Api.Operations;
 using Llm.Core.Data;
 using Llm.Core.Models;
 using Microsoft.EntityFrameworkCore;
@@ -16,12 +17,18 @@ namespace Llm.Api.Models;
 /// A download paused, stopped by a restart, or cut off goes on from where it got to
 /// (an HTTP range request); one the app found running when it started is queued again.
 /// </summary>
-public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions<EngineOptions> engine, TimeProvider clock, ILogger<ModelDownloads> logger)
-    : BackgroundService
+public sealed partial class ModelDownloads : BackgroundService
 {
     /// <summary>Room left on the disk after a download, besides its files.</summary>
     public const long SpareBytes = 2L * 1024 * 1024 * 1024;
 
+    private const string WakeTopic = "downloads:wake";
+    private const string StopTopic = "downloads:stop";
+    private readonly IServiceScopeFactory scopes;
+    private readonly IOptions<EngineOptions> engine;
+    private readonly TimeProvider clock;
+    private readonly Replicas replicas;
+    private readonly ILogger<ModelDownloads> logger;
     private readonly SemaphoreSlim _wake = new(0);
     private readonly ConcurrentDictionary<Guid, Live> _live = new();
     private CancellationTokenSource? _current;
@@ -30,12 +37,34 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
     /// <summary>A download as it runs: bytes so far, and how fast (bytes a second, over the last few seconds).</summary>
     public sealed record Live(long Bytes, double Speed);
 
+    /// <remarks>With several replicas, only the one that leads downloads: it alone has them live.</remarks>
+    public ModelDownloads(IServiceScopeFactory scopes, IOptions<EngineOptions> engine, TimeProvider clock, Replicas replicas, ILogger<ModelDownloads> logger)
+    {
+        (this.scopes, this.engine, this.clock, this.replicas, this.logger) = (scopes, engine, clock, replicas, logger);
+        replicas.On(WakeTopic, _ =>
+        {
+            WakeHere();
+            return true;
+        });
+        replicas.On(StopTopic, id =>
+        {
+            StopHere(Guid.TryParse(id, out var g) ? g : Guid.Empty);
+            return true;
+        });
+    }
+
     public Live? Now(Guid id) => _live.GetValueOrDefault(id);
 
     public string Root => engine.Value.LibraryDir;
 
-    /// <summary>Look for queued downloads now.</summary>
+    /// <summary>Look for queued downloads now (on the replica that leads).</summary>
     public void Wake()
+    {
+        WakeHere();
+        replicas.Tell(WakeTopic);
+    }
+
+    private void WakeHere()
     {
         if (_wake.CurrentCount == 0)
         {
@@ -43,8 +72,14 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
         }
     }
 
-    /// <summary>Stops the download running, if it is this one (its row says what next: paused or removed).</summary>
+    /// <summary>Stops the download running, if it is this one (its row says what next: paused or removed), on whichever replica runs it.</summary>
     public void Stop(Guid id)
+    {
+        StopHere(id);
+        replicas.Tell(StopTopic, id.ToString());
+    }
+
+    private void StopHere(Guid id)
     {
         if (_currentId == id)
         {
@@ -82,16 +117,25 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // What was running when the app stopped goes on.
-        await using (var scope = scopes.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.ModelDownloads.Where(d => d.State == "running").ExecuteUpdateAsync(s => s.SetProperty(d => d.State, "queued"), stoppingToken);
-        }
+        var led = false;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                if (!replicas.IsLeader)
+                {
+                    led = false;
+                    await _wake.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken);
+                    continue;
+                }
+                if (!led)
+                {
+                    // Leading now (the app started, or the replica that led stopped): what was running goes on.
+                    await using var scope = scopes.CreateAsyncScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    await db.ModelDownloads.Where(d => d.State == "running").ExecuteUpdateAsync(s => s.SetProperty(d => d.State, "queued"), stoppingToken);
+                    led = true;
+                }
                 Guid? next;
                 await using (var scope = scopes.CreateAsyncScope())
                 {
@@ -155,7 +199,7 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
             await db.Entry(d).ReloadAsync(CancellationToken.None);
             if (d.State == "running")
             {
-                d.State = stoppingToken.IsCancellationRequested ? "queued" : "paused";
+                d.State = stoppingToken.IsCancellationRequested || !replicas.IsLeader ? "queued" : "paused";
             }
         }
         catch (Exception ex) when (ex is HuggingFaceException or IOException or HttpRequestException or UnauthorizedAccessException)
@@ -239,6 +283,11 @@ public sealed partial class ModelDownloads(IServiceScopeFactory scopes, IOptions
                     d.Bytes = before + have;
                     await db.SaveChangesAsync(CancellationToken.None);
                     savedAt = now;
+                    if (!replicas.IsLeader)
+                    {
+                        // Another replica leads now, and goes on with it from here.
+                        _current?.Cancel();
+                    }
                 }
             }
         }

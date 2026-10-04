@@ -1,0 +1,16 @@
+Argus Arena is starting in {{ .Release.Namespace }}.
+
+  The app:     https://{{ .Values.domain }}
+  The API:     https://gateway.{{ .Values.domain }}/v1
+  Argus (MCP): https://argus.{{ .Values.domain }}/mcp
+
+Sign in as admin with ADMIN_PASSWORD:
+
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "arena.secretName" . }} -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d; echo
+
+The first start fetches {{ .Values.model }} into the model library; Admin -> Models shows the downloads.
+{{- if gt (int .Values.app.replicas) 1 }}
+
+{{ .Values.app.replicas }} app replicas share the database: one leads (Admin -> Overview says which), and the
+ingress keeps each browser on one replica. The shared volumes need ReadWriteMany storage across nodes.
+{{- end }}

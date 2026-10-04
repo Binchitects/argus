@@ -19,6 +19,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { money } from '@/lib/format'
 import { GroupPoliciesCard } from './group-policies'
+import { PriorityBadge } from './groups'
 import { groupQuery, type GroupDetail, type GroupMember } from './groups-api'
 import { peopleQuery } from './people-api'
 
@@ -108,6 +109,7 @@ export function GroupPage() {
           {g.description && <p className="mt-1 text-muted-foreground">{g.description}</p>}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {app ? <Badge variant="secondary">App group</Badge> : <Badge variant="outline">{g.scim ? 'SCIM group' : 'Directory group'}</Badge>}
+            {!!g.priority && <PriorityBadge priority={g.priority} />}
             {g.directory && <span className="font-mono text-xs text-muted-foreground">{g.directory}</span>}
           </div>
         </div>
@@ -163,9 +165,11 @@ function EditDialog({ group, open, onOpenChange }: { group: GroupDetail; open: b
   const [name, setName] = useState(group.name)
   const [description, setDescription] = useState(group.description ?? '')
   const [directory, setDirectory] = useState(group.directory ?? '')
+  const [priority, setPriority] = useState(String(group.priority ?? 0))
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: () => api(`/api/admin/groups/${group.id}`, { method: 'PATCH', body: { name, description, ...(group.directory !== null ? { directory } : {}) } }),
+    mutationFn: () =>
+      api(`/api/admin/groups/${group.id}`, { method: 'PATCH', body: { name, description, priority: Number(priority) || 0, ...(group.directory !== null ? { directory } : {}) } }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'groups'] })
       onOpenChange(false)
@@ -200,6 +204,9 @@ function EditDialog({ group, open, onOpenChange }: { group: GroupDetail; open: b
           )}
           <Field label="Description">
             <Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} />
+          </Field>
+          <Field label="Priority in the answers' line" hint="-10 to 10. When the model is busy, higher goes first; 0 is everyone's. Someone in several groups takes the highest.">
+            <Input type="number" min={-10} max={10} step={1} value={priority} onChange={(e) => setPriority(e.target.value)} className="w-28" />
           </Field>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

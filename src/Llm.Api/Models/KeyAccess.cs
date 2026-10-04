@@ -1,5 +1,6 @@
 using Llm.Api.Chat;
 using Llm.Api.Gateway;
+using Llm.Api.Operations;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -49,18 +50,29 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
     }
 }
 
-/// <summary>Runs <see cref="KeyAccess.SyncAsync"/> and <see cref="Gateway.GroupTeams.SyncAsync"/> when access or groups change, and every 10 minutes (the directory's groups change on their own).</summary>
+/// <summary>
+/// Runs <see cref="KeyAccess.SyncAsync"/> and <see cref="Gateway.GroupTeams.SyncAsync"/> when access or groups change, and every 10 minutes (the directory's groups change on their own).
+/// With several replicas, the one that leads runs it.
+/// </summary>
 public sealed partial class KeyAccessWatcher : BackgroundService
 {
+    private const string WakeTopic = "keys:wake";
     private readonly SemaphoreSlim _wake = new(0);
     private readonly IServiceScopeFactory scopes;
+    private readonly Replicas replicas;
     private readonly ILogger<KeyAccessWatcher> logger;
     private readonly IDisposable? _onChange;
 
-    public KeyAccessWatcher(IServiceScopeFactory scopes, ILogger<KeyAccessWatcher> logger, IOptionsMonitor<ChatOptions> chat)
+    public KeyAccessWatcher(IServiceScopeFactory scopes, Replicas replicas, ILogger<KeyAccessWatcher> logger, IOptionsMonitor<ChatOptions> chat)
     {
         this.scopes = scopes;
+        this.replicas = replicas;
         this.logger = logger;
+        replicas.On(WakeTopic, _ =>
+        {
+            WakeHere();
+            return true;
+        });
         // A new limit of requests per key reaches every key at once, not in ten minutes.
         var perKey = chat.CurrentValue.ApiRequestsPerKey;
         _onChange = chat.OnChange(o =>
@@ -74,6 +86,12 @@ public sealed partial class KeyAccessWatcher : BackgroundService
     }
 
     public void Wake()
+    {
+        WakeHere();
+        replicas.Tell(WakeTopic);
+    }
+
+    private void WakeHere()
     {
         if (_wake.CurrentCount == 0)
         {
@@ -97,6 +115,11 @@ public sealed partial class KeyAccessWatcher : BackgroundService
             try
             {
                 await _wake.WaitAsync(wait, stoppingToken);
+                if (!replicas.IsLeader)
+                {
+                    wait = TimeSpan.FromMinutes(1);
+                    continue;
+                }
                 wait = TimeSpan.FromMinutes(10);
                 await using var scope = scopes.CreateAsyncScope();
                 var changed = await scope.ServiceProvider.GetRequiredService<KeyAccess>().SyncAsync(stoppingToken);

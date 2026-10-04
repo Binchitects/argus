@@ -18,6 +18,8 @@ public sealed class Group
     public bool Scim { get; set; }
     /// <summary>For a SCIM group: the identity provider's own id for it (externalId), when it sends one.</summary>
     public string? ExternalId { get; set; }
+    /// <summary>Its members' place in the answers' line: higher goes first; 0 is everyone's. A person in several groups takes the highest.</summary>
+    public int Priority { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>Members' chats and their files are kept this many days, then deleted; null: the company's setting. The shortest of a person's groups applies.</summary>

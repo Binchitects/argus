@@ -216,7 +216,7 @@ public static class OperationsEndpoints
 
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
         IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
-        Dashboards.PromDatasource prom, TimeProvider clock, CancellationToken ct)
+        Dashboards.PromDatasource prom, TimeProvider clock, Replicas replicas, CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Count(u => !u.IsDisabled);
@@ -268,6 +268,8 @@ public static class OperationsEndpoints
             index = new { configured = argus.Enabled, summary = index, error = indexError },
             model = models.DefaultName,
             certificate = await certificate,
+            // The app's replicas on the database, and whether the one answering leads (runs the once-only background work).
+            replicas = new { count = replicas.Count, leads = replicas.IsLeader, id = replicas.Id },
         });
     }
 

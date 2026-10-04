@@ -38,6 +38,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ModelDownload> ModelDownloads => Set<ModelDownload>();
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
+    public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
     public DbSet<Memory> Memories => Set<Memory>();
@@ -272,6 +273,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Model).HasMaxLength(200);
             e.Property(x => x.Thinking).HasMaxLength(50);
             e.Property(x => x.WebhookEncrypted).HasMaxLength(4000);
+            e.Property(x => x.RunningOn).HasMaxLength(100);
             e.HasIndex(x => x.UserId);
             e.HasIndex(x => x.NextRunAt);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
@@ -283,6 +285,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.Property(x => x.Delivery).HasMaxLength(1000);
             e.HasIndex(x => new { x.TaskId, x.StartedAt });
+            e.HasOne<ScheduledTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<TaskEvent>(e =>
+        {
+            e.ToTable("task_events");
+            e.Property(x => x.ReplyKind).HasMaxLength(20);
+            e.Property(x => x.ReplyId).HasMaxLength(100);
+            e.HasIndex(x => new { x.TaskId, x.CreatedAt });
             e.HasOne<ScheduledTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Notification>(e =>

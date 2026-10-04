@@ -24,6 +24,8 @@ export interface RemoteModel {
   vision: boolean
   tools: boolean
   thinking: boolean
+  /** Requests it serves at once (its parallel slots); null: not said. */
+  parallel?: number | null
   /** The server lists it (false: it no longer has it, and it cannot answer). */
   listed?: boolean
 }
@@ -55,7 +57,7 @@ export function ServersSection({ onChanged }: { onChanged: () => void }) {
           <CardTitle className="text-base">Other GPU servers</CardTitle>
           <CardDescription>
             Another machine's OpenAI-compatible engine: the gateway serves the models you choose from it beside this machine's, to the chat, API keys and agents. A model named like one here is a
-            second copy of it, and requests are spread between them.
+            second copy of it: each request goes to the least busy copy, never past the requests a copy serves at once.
           </CardDescription>
         </div>
         <Button size="sm" onClick={() => setEditing('new')}>
@@ -174,7 +176,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
         ...now,
         ...r.models
           .filter((o) => !now.some((p) => p.remote === o.id))
-          .map((o) => ({ remote: o.id, name: o.id.split('/').pop()!.replace(/[^A-Za-z0-9._:-]/g, '-'), context: o.context, maxOutput: null, vision: false, tools: true, thinking: false, on: false })),
+          .map((o) => ({ remote: o.id, name: o.id.split('/').pop()!.replace(/[^A-Za-z0-9._:-]/g, '-'), context: o.context, maxOutput: null, vision: false, tools: true, thinking: false, parallel: null, on: false })),
       ]),
   })
   const save = useMutation({
@@ -186,7 +188,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
         ...(apiKey || !saved ? { apiKey } : {}),
         models: picks
           .filter((p) => p.on)
-          .map((p) => ({ remote: p.remote, name: p.name, context: p.context, maxOutput: p.maxOutput, vision: p.vision, tools: p.tools, thinking: p.thinking })),
+          .map((p) => ({ remote: p.remote, name: p.name, context: p.context, maxOutput: p.maxOutput, vision: p.vision, tools: p.tools, thinking: p.thinking, parallel: p.parallel ?? null })),
       }
       return saved ? api<{ warning: string | null }>(`/api/admin/servers/${saved.id}`, { method: 'PATCH', body }) : api<{ warning: string | null }>('/api/admin/servers', { body })
     },
@@ -244,7 +246,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
                 <span className="font-mono text-sm [overflow-wrap:anywhere]">{p.remote}</span>
               </Label>
               {p.on && (
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
                   <Field label="Name at the gateway">
                     <Input value={p.name} onChange={(e) => set(i, { name: e.target.value })} aria-label={`Name at the gateway for ${p.remote}`} />
                   </Field>
@@ -254,7 +256,10 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
                   <Field label="Longest answer">
                     <Input inputMode="numeric" value={p.maxOutput ?? ''} onChange={(e) => set(i, { maxOutput: e.target.value ? Number(e.target.value) : null })} aria-label={`Longest answer for ${p.remote}`} />
                   </Field>
-                  <div className="flex flex-wrap gap-4 sm:col-span-3">
+                  <Field label="At once" hint="Its parallel slots">
+                    <Input inputMode="numeric" value={p.parallel ?? ''} onChange={(e) => set(i, { parallel: e.target.value ? Number(e.target.value) : null })} aria-label={`Requests at once for ${p.remote}`} />
+                  </Field>
+                  <div className="flex flex-wrap gap-4 sm:col-span-4">
                     {(['tools', 'thinking', 'vision'] as const).map((k) => (
                       <Label key={k} className="flex items-center gap-2 font-normal">
                         <Switch checked={p[k]} onCheckedChange={(v) => set(i, { [k]: v })} aria-label={`${p.remote}: ${k}`} />

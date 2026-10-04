@@ -8,6 +8,8 @@ export interface GroupSummary {
   directory: string | null
   /** Made by the company's identity provider through SCIM: it decides the name and the members. */
   scim: boolean
+  /** Its members' place in the answers' line: higher goes first, 0 is everyone's. */
+  priority: number
   members: number
   createdAt: string
   retentionDays?: number | null

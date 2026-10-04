@@ -6,7 +6,7 @@ import { monthOf, type GroupDetail } from './groups-api'
 import type { Person } from './people-api'
 
 const group: GroupDetail = {
-  id: 'g1', name: 'Data science', description: null, directory: null, scim: false, createdAt: '',
+  id: 'g1', name: 'Data science', description: null, directory: null, scim: false, priority: 0, createdAt: '',
   members: [{ id: 'p1', userName: 'ann', displayName: 'Ann', email: 'ann@example.test', isDisabled: false, spend: 3.5 }],
   policies: { retentionDays: null, credit: 50, creditPerMember: false, costCentre: null, secretScanning: null, redactPii: null, moderation: null, blockedPatterns: null },
   spentThisMonth: 3.5,

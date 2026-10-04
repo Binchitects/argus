@@ -271,6 +271,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     public async Task SyncGatewayAsync(CancellationToken ct = default)
     {
         var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
+        // Each chat model on each server first, with what makes it this one and the requests it serves at once.
+        var deployments = new List<(string Name, JsonObject Params, JsonObject Info, object?[] Print, int? Slots)>();
         foreach (var m in await db.LocalModels.AsNoTracking().ToListAsync(ct))
         {
             // What its projector reads: pictures, sound (an omni model's), or both.
@@ -278,7 +280,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             var info = Info(m.Context, m.MaxOutput ?? DefaultMaxOutput(m.Context), projector?.Vision == true, m.Tools, m.Thinking, projector?.Audio == true);
             var litellm = new JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
             Prices(litellm, m.InputPerMtok, m.OutputPerMtok);
-            wanted[Fingerprint("local", m.Name, m.File, m.Context, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok)] = (m.Name, litellm, info);
+            deployments.Add((m.Name, litellm, info, ["local", m.Name, m.File, m.Context, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok], m.Parallel));
         }
         foreach (var server in await db.RemoteServers.AsNoTracking().ToListAsync(ct))
         {
@@ -295,8 +297,17 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                 }
                 Prices(litellm, m.InputPerMtok, m.OutputPerMtok);
                 var keyPrint = key is null ? "" : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16];
-                wanted[Fingerprint("remote", server.Id, server.BaseUrl, keyPrint, server.VerifyTls, m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking,
-                    m.InputPerMtok, m.OutputPerMtok)] = (m.Name, litellm, info);
+                deployments.Add((m.Name, litellm, info, ["remote", server.Id, server.BaseUrl, keyPrint, server.VerifyTls, m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking,
+                    m.InputPerMtok, m.OutputPerMtok], m.Parallel));
+            }
+        }
+        foreach (var pool in deployments.GroupBy(d => d.Name, StringComparer.Ordinal))
+        {
+            var size = pool.Count();
+            foreach (var d in pool)
+            {
+                // A model on one server is as it always was; on several, each copy carries its share of the pool.
+                wanted[Fingerprint(size == 1 ? d.Print : [.. d.Print, "pool", size, d.Slots])] = (d.Name, size == 1 ? d.Params : Pooled(d.Params, d.Info, size, d.Slots), d.Info);
             }
         }
         await MediaAsync(wanted, ct);
@@ -334,6 +345,22 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                 Add(name, "openai/" + id, MediaModels.AudioUrl, new JsonObject { ["mode"] = mode });
             }
         }
+    }
+
+    /// <summary>
+    /// One copy of a model served by several engines (this machine's and other GPU servers'): the gateway sends each
+    /// request to the least busy copy (router_settings in config/litellm.yaml), never more at once than a copy's
+    /// slots, and weighs the copies by their slots when it shuffles.
+    /// </summary>
+    public static JsonObject Pooled(JsonObject litellm, JsonObject info, int copies, int? slots)
+    {
+        if (slots is > 0 and var s)
+        {
+            litellm["max_parallel_requests"] = s;
+        }
+        litellm["weight"] = slots is > 0 ? slots : 1;
+        info["llm_app_pool"] = copies;
+        return litellm;
     }
 
     private static JsonObject Info(int? context, int? maxOutput, bool vision, bool tools, bool thinking, bool audio = false)

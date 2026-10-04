@@ -79,10 +79,14 @@ app.MapFallback(() => Results.NotFound());
 
 if (app.Configuration.GetValue("Database:MigrateOnStartup", true))
 {
-    await StartupDatabase.MigrateAsync(app.Services, app.Logger, app.Lifetime.ApplicationStopping);
-    // On a first start the settings table did not exist when the source first read it.
-    savedSettings.Provider.Reload();
-    await app.BootstrapIdentityAsync();
+    // Replicas starting together go through this one at a time.
+    await using (await StartupDatabase.OneAtATimeAsync(connectionString, app.Logger, app.Lifetime.ApplicationStopping))
+    {
+        await StartupDatabase.MigrateAsync(app.Services, app.Logger, app.Lifetime.ApplicationStopping);
+        // On a first start the settings table did not exist when the source first read it.
+        savedSettings.Provider.Reload();
+        await app.BootstrapIdentityAsync();
+    }
 }
 // What the restart-bound settings were at start, to tell whether a restart is due.
 app.Services.GetRequiredService<Llm.Api.Settings.SettingsAtStart>();

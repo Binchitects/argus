@@ -6,9 +6,11 @@ namespace Llm.Api.Chat;
 /// Fair use of a model that serves few people at once. A person has at most
 /// <see cref="ChatOptions.AnswersPerPerson"/> answers running, the whole chat at
 /// most <see cref="ChatOptions.AnswersAtOnce"/>; the rest wait in line. A free
-/// place goes to whoever has waited while having the fewest answers running,
-/// and among those to whoever was served longest ago: one person's many
-/// questions cannot keep the others waiting.
+/// place goes first to the highest priority waiting (their groups' priority,
+/// Admin → Groups), then, within a priority, to whoever has waited while having
+/// the fewest answers running, and among those to whoever was served longest
+/// ago: one person's many questions cannot keep the others waiting. With several
+/// replicas each keeps its own line, with its share of the places.
 /// </summary>
 public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvider clock)
 {
@@ -19,9 +21,10 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     private long _tick;
     private int _total;
 
-    private sealed class Waiter(Guid person, long order)
+    private sealed class Waiter(Guid person, int priority, long order)
     {
         public Guid Person { get; } = person;
+        public int Priority { get; } = priority;
         public long Order { get; } = order;
         public TaskCompletionSource<Place> Granted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
@@ -48,20 +51,33 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     /// <summary>What the engine's loaded models serve at once, their parallel slots together (the engine watcher keeps it).</summary>
     public int EngineSlots { get; set; }
 
-    /// <summary>As set; 0: as many as the engine serves at once; unknown, no limit.</summary>
-    private int AtOnce => options.CurrentValue.AnswersAtOnce > 0 ? options.CurrentValue.AnswersAtOnce
-        : Math.Max(0, options.CurrentValue.EngineSlots > 0 ? options.CurrentValue.EngineSlots : EngineSlots);
+    /// <summary>The app's replicas on the database (the answers' service keeps it): the places are shared out among them.</summary>
+    public int Replicas { get; set; } = 1;
+
+    /// <summary>As set; 0: as many as the engine serves at once; unknown, no limit. This replica's share, rounded up.</summary>
+    private int AtOnce
+    {
+        get
+        {
+            var all = options.CurrentValue.AnswersAtOnce > 0 ? options.CurrentValue.AnswersAtOnce
+                : Math.Max(0, options.CurrentValue.EngineSlots > 0 ? options.CurrentValue.EngineSlots : EngineSlots);
+            return all == 0 || Replicas <= 1 ? all : Math.Max(1, (all + Replicas - 1) / Replicas);
+        }
+    }
 
     /// <summary>
     /// Waits for a place. <paramref name="waiting"/> is told the line now and then
     /// while it waits (not at all when a place is free at once).
     /// </summary>
-    public async Task<Place> EnterAsync(Guid person, Func<Line, Task> waiting, CancellationToken ct)
+    public Task<Place> EnterAsync(Guid person, Func<Line, Task> waiting, CancellationToken ct) => EnterAsync(person, 0, waiting, ct);
+
+    /// <param name="priority">Their place in line: higher goes first (0 for most people).</param>
+    public async Task<Place> EnterAsync(Guid person, int priority, Func<Line, Task> waiting, CancellationToken ct)
     {
         Waiter me;
         lock (_lock)
         {
-            me = new Waiter(person, ++_tick);
+            me = new Waiter(person, priority, ++_tick);
             _waiting.Add(me);
             Dispatch();
         }
@@ -145,9 +161,13 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
         }
     }
 
-    /// <summary>Who goes first: fewer answers running, then served longer ago, then waiting longer.</summary>
+    /// <summary>Who goes first: a higher priority, then fewer answers running, then served longer ago, then waiting longer.</summary>
     private bool Before(Waiter a, Waiter b)
     {
+        if (a.Priority != b.Priority)
+        {
+            return a.Priority > b.Priority;
+        }
         var (ra, rb) = (_running.GetValueOrDefault(a.Person), _running.GetValueOrDefault(b.Person));
         if (ra != rb)
         {

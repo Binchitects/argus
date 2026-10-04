@@ -1,0 +1,204 @@
+{{- /* The chat models (llama.cpp in router mode), loaded and unloaded live, on GPUs: the app writes their list. */}}
+{{- if .Values.llamacpp.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llamacpp
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # One engine at a time on the GPU: the old one goes before the new one loads.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "llamacpp") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "llamacpp") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      {{- with .Values.llamacpp.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.llamacpp.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: llamacpp
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.llamacpp) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: [/bin/sh, /router.sh]
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            {{- include "arena.secretEnv" (list $ "ENGINE_KEY" "ENGINE_KEY") | nindent 12 }}
+            - { name: CUDA_DEVICE_ORDER, value: PCI_BUS_ID }
+          resources:
+            {{- with .Values.llamacpp.resources.requests }}
+            requests: {{- toYaml . | nindent 14 }}
+            {{- end }}
+            limits: { nvidia.com/gpu: {{ .Values.llamacpp.gpus }} }
+          volumeMounts:
+            - { name: config, mountPath: /router.sh, subPath: router.sh }
+            - { name: models, mountPath: /library, readOnly: true }
+            - { name: engine, mountPath: /presets, readOnly: true }
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - { name: config, configMap: { name: arena-config, defaultMode: 0555 } }
+        {{- include "arena.claim" (list "models" (include "arena.modelsClaim" .)) | nindent 8 }}
+        {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
+        - { name: shm, emptyDir: { medium: Memory, sizeLimit: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llamacpp
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "llamacpp") | nindent 4 }}
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+{{- end }}
+{{- /* Embeddings for Argus, on the CPU. The app fetches the file into the library's embed folder. */}}
+{{- if .Values.embed.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embed
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "embed") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "embed") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      containers:
+        - name: embed
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.llamacpp) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: [/bin/sh, -c]
+          args:
+            - |
+              until [ -f /models/embed/nomic-embed-text-v1.5.f16.gguf ]; do sleep 30; done
+              exec /app/llama-server -m /models/embed/nomic-embed-text-v1.5.f16.gguf --alias nomic-embed-text --embeddings --pooling mean \
+                -ngl 0 -c 2048 -b 2048 -ub 2048 -t 4 --parallel 2 --port 8080
+          ports: [{ name: http, containerPort: 8080 }]
+          resources: {{- toYaml .Values.embed.resources | nindent 12 }}
+          volumeMounts: [{ name: models, mountPath: /models, readOnly: true }]
+      volumes:
+        {{- include "arena.claim" (list "models" (include "arena.modelsClaim" .)) | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embed
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "embed") | nindent 4 }}
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+{{- end }}
+{{- /* Pictures and video (stable-diffusion.cpp): each runs while the app's control file says "on". */}}
+{{- $media := list
+  (dict "name" "imagegen" "on" .Values.imagegen "dir" "image/flux2-klein-4b" "files" "flux-2-klein-4b-Q4_0.gguf Qwen3-4B-Q4_K_M.gguf flux2-vae.safetensors"
+    "args" "--listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model flux-2-klein-4b-Q4_0.gguf --llm Qwen3-4B-Q4_K_M.gguf --vae flux2-vae.safetensors --max-vram 2 --diffusion-fa --cfg-scale 1.0 --steps 4")
+  (dict "name" "videogen" "on" .Values.videogen "dir" "video/wan2.2-ti2v-5b" "files" "Wan2.2-TI2V-5B-Q4_K_M.gguf umt5-xxl-encoder-Q4_K_M.gguf wan2.2_vae.safetensors"
+    "args" "--listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model Wan2.2-TI2V-5B-Q4_K_M.gguf --t5xxl umt5-xxl-encoder-Q4_K_M.gguf --vae wan2.2_vae.safetensors --max-vram 3 --diffusion-fa --vae-tiling --vae-on-cpu --cfg-scale 5.0 --flow-shift 5.0 --sampling-method euler") }}
+{{- range $media }}
+{{- if .on.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" $ | nindent 6 }}
+      securityContext: { runAsUser: 65534, runAsGroup: 65534, runAsNonRoot: true }
+      {{- with .on.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .on.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .name }}
+          image: {{ include "arena.image" (dict "root" $ "image" $.Values.images.sdcpp) }}
+          imagePullPolicy: {{ $.Values.images.pullPolicy }}
+          command: [/bin/sh, /sd-serve.sh]
+          args: {{- toJson (splitList " " .args) | nindent 12 }}
+          workingDir: /models/{{ .dir }}
+          ports: [{ name: http, containerPort: 1234 }]
+          env:
+            - { name: NAME, value: {{ .name }} }
+            - { name: FILES, value: {{ .files | quote }} }
+            - { name: CUDA_DEVICE_ORDER, value: PCI_BUS_ID }
+          resources: { limits: { nvidia.com/gpu: {{ .on.gpus }} } }
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }
+          volumeMounts:
+            - { name: config, mountPath: /sd-serve.sh, subPath: sd-serve.sh }
+            - { name: models, mountPath: /models, readOnly: true }
+            - { name: engine, mountPath: /control, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: config, configMap: { name: arena-config, defaultMode: 0555 } }
+        {{- include "arena.claim" (list "models" (include "arena.modelsClaim" $)) | nindent 8 }}
+        {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 4 }}
+  ports: [{ name: http, port: 1234, targetPort: http }]
+---
+{{- end }}
+{{- end }}
+{{- /* Speech to text and text to speech. It fetches its models itself. */}}
+{{- if .Values.audio.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audio
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "audio") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "audio") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      containers:
+        - name: audio
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.audio) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports: [{ name: http, containerPort: 8000 }]
+          # Plain HTTPS downloads: Hugging Face's Xet transfer stalls on flaky links.
+          env: [{ name: HF_HUB_DISABLE_XET, value: "1" }]
+          volumeMounts: [{ name: models, mountPath: /home/ubuntu/.cache/huggingface/hub }]
+      volumes:
+        {{- include "arena.claim" (list "models" "arena-audio") | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "audio") | nindent 4 }}
+  ports: [{ name: http, port: 8000, targetPort: http }]
+{{- end }}

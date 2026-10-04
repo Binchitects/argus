@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Coins, Database, ShieldCheck, Users, WalletCards } from 'lucide-react'
+import { Activity, Coins, Copy, Database, ShieldCheck, Users, WalletCards } from 'lucide-react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -28,6 +28,7 @@ export function OverviewPage() {
           <Stat icon={Users} label="People" value={d.people} hint={`${d.admins} admin${d.admins === 1 ? '' : 's'}`} />
           <Stat icon={Coins} label="Spend" value={money(d.spend)} hint="every key and chat" />
           <Stat icon={WalletCards} label="Over credit" value={d.overCredit.length} tone={d.overCredit.length ? 'warning' : undefined} hint={d.overCredit.length ? 'at or past their credit' : 'nobody'} />
+          {(d.replicas?.count ?? 1) > 1 && <Stat icon={Copy} label="App replicas" value={d.replicas!.count} hint={d.replicas!.leads ? 'this one leads' : 'another one leads'} />}
           {d.index.configured && (
             <Stat
               icon={Database}

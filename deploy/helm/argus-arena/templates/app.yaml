@@ -1,0 +1,125 @@
+{{- /* The .NET API: sign-in, chat, admin, dashboards. Several replicas on one database; one leads. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true }
+      # A replica asked to stop finishes its answers' saving and lets go of the lead.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: app
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.app) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: Auth__Domain, value: {{ .Values.domain | quote }} }
+            - { name: Auth__HttpsPort, value: "443" }
+            - { name: Auth__AdminEmail, value: {{ .Values.adminEmail | quote }} }
+            {{- include "arena.secretEnv" (list $ "Auth__AdminPassword" "ADMIN_PASSWORD") | nindent 12 }}
+            {{- include "arena.secretEnv" (list $ "Auth__DataKey" "APP_KEY") | nindent 12 }}
+            - { name: Database__Host, value: {{ include "arena.dbHost" . | quote }} }
+            - { name: Database__Port, value: {{ include "arena.dbPort" . | quote }} }
+            - { name: Database__Username, value: {{ include "arena.dbUser" . | quote }} }
+            - { name: Database__SslMode, value: {{ include "arena.dbSslMode" . | quote }} }
+            {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
+            - { name: Database__RootCertificate, value: /db-ca/ca.crt }
+            {{- end }}
+            {{- include "arena.secretEnv" (list $ "Database__Password" "DB_PASSWORD") | nindent 12 }}
+            {{- include "arena.secretEnv" (list $ "Gateway__MasterKey" "GATEWAY_KEY") | nindent 12 }}
+            {{- include "arena.secretEnv" (list $ "Engine__ApiKey" "ENGINE_KEY") | nindent 12 }}
+            - { name: Engine__Enabled, value: {{ .Values.llamacpp.enabled | quote }} }
+            - { name: Engine__FirstModel, value: {{ .Values.model | quote }} }
+            {{- include "arena.secretEnv" (list $ "Argus__AdminToken" "ARGUS_KEY") | nindent 12 }}
+            - { name: Argus__GitlabUrl, value: {{ .Values.gitlab.url | quote }} }
+            {{- include "arena.optionalSecretEnv" (list $ "HuggingFace__Token" "HF_TOKEN") | nindent 12 }}
+            # Which media servers run: said outright rather than looked up by name.
+            - { name: Modules__imagegen, value: {{ .Values.imagegen.enabled | quote }} }
+            - { name: Modules__videogen, value: {{ .Values.videogen.enabled | quote }} }
+            - { name: Modules__audio, value: {{ .Values.audio.enabled | quote }} }
+            {{- range $k, $v := .Values.app.env }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+          readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 60, periodSeconds: 20 }
+          resources: {{- toYaml .Values.app.resources | nindent 12 }}
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: models, mountPath: /library }
+            - { name: engine, mountPath: /engine-config }
+            - { name: directory, mountPath: /directory }
+            - { name: sandbox, mountPath: /sandbox }
+            {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
+            - { name: db-ca, mountPath: /db-ca, readOnly: true }
+            {{- end }}
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        {{- include "arena.claim" (list "models" (include "arena.modelsClaim" .)) | nindent 8 }}
+        {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
+        {{- include "arena.claim" (list "directory" "arena-directory") | nindent 8 }}
+        {{- include "arena.claim" (list "sandbox" "arena-sandbox") | nindent 8 }}
+        {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
+        - { name: db-ca, secret: { secretName: {{ .Values.externalDatabase.caSecret }} } }
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  labels: {{- include "arena.labels" . | nindent 4 }}
+  {{- if .Values.ingress.sticky }}
+  annotations:
+    # Traefik as the ingress controller: a sticky cookie keeps each browser on one replica.
+    traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.name: arena_replica
+    traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.httponly: "true"
+  {{- end }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 4 }}
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+{{- /* The React app. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "web") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "web") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      containers:
+        - name: web
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.web) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /healthz, port: http } }
+          resources: {{- toYaml .Values.web.resources | nindent 12 }}
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "web") | nindent 4 }}
+  ports: [{ name: http, port: 8080, targetPort: http }]

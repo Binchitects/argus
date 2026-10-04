@@ -8,8 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Api.Models;
 
+/// <param name="Parallel">Requests it serves at once (its parallel slots); with other servers of the same model, the gateway sends it no more.</param>
 public sealed record RemoteModelRequest(string? Remote, string? Name, int? Context, int? MaxOutput, bool? Vision, bool? Tools, bool? Thinking,
-    decimal? InputPerMtok, decimal? OutputPerMtok);
+    decimal? InputPerMtok, decimal? OutputPerMtok, int? Parallel = null);
 
 /// <summary>A server to add or change: a key of "" removes it, a missing one is kept.</summary>
 public sealed record RemoteServerRequest(string? Name, string? BaseUrl, string? ApiKey, bool? VerifyTls, RemoteModelRequest[]? Models);
@@ -43,7 +44,7 @@ public static class RemoteServerEndpoints
             status = new { st.Up, st.Error, checkedAt = st.At, offers = st.Models },
             models = s.Models.Select(m => new
             {
-                m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok,
+                m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok, m.Parallel,
                 // Listed by the server: a model it no longer has cannot answer.
                 listed = !st.Up || st.Models.Any(o => o.Id == m.Remote),
             }),
@@ -142,7 +143,7 @@ public static class RemoteServerEndpoints
         {
             return AuthEndpoints.Problem(400, "baseUrl", bad);
         }
-        var models = body.Models ?? [.. server.Models.Select(m => new RemoteModelRequest(m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok))];
+        var models = body.Models ?? [.. server.Models.Select(m => new RemoteModelRequest(m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok, m.Parallel))];
         if (models.Length == 0)
         {
             return AuthEndpoints.Problem(400, "models", "Choose at least one of its models.");
@@ -173,10 +174,14 @@ public static class RemoteServerEndpoints
             {
                 return AuthEndpoints.Problem(400, "models", $"{as_}: prices cannot be negative.");
             }
+            if (m.Parallel is < 1 or > 256)
+            {
+                return AuthEndpoints.Problem(400, "models", $"{as_}: it serves 1 to 256 requests at once (its parallel slots), or leave it empty.");
+            }
             chosen.Add(new RemoteModel
             {
                 Remote = remote, Name = as_, Context = m.Context, MaxOutput = m.MaxOutput, Vision = m.Vision ?? false, Tools = m.Tools ?? true,
-                Thinking = m.Thinking ?? false, InputPerMtok = m.InputPerMtok, OutputPerMtok = m.OutputPerMtok,
+                Thinking = m.Thinking ?? false, InputPerMtok = m.InputPerMtok, OutputPerMtok = m.OutputPerMtok, Parallel = m.Parallel,
             });
         }
         server.Name = name;

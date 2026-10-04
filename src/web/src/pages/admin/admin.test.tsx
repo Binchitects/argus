@@ -115,6 +115,19 @@ describe('admin pages', () => {
     expect(await screen.findByText('1 person is at or past their credit')).toBeInTheDocument()
     expect(screen.getByLabelText('Services up')).toHaveTextContent('0/1')
     expect(screen.getByText(/Down · refused/)).toBeInTheDocument()
+    // One replica: nothing said about replicas.
+    expect(screen.queryByLabelText('App replicas')).toBeNull()
+  })
+
+  it('the overview counts the app replicas when there are several', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/overview': () => ({
+        json: { people: 3, admins: 1, spend: 0, overCredit: [], warning: null, services: [], index: { configured: false, summary: null, error: null }, model: 'M', replicas: { count: 2, leads: false, id: 'app-2' } },
+      }),
+    })
+    renderApp('/admin')
+    expect(await screen.findByLabelText('App replicas')).toHaveTextContent('2')
+    expect(screen.getByText('another one leads')).toBeInTheDocument()
   })
 
   it('the audit export never writes a formula', () => {

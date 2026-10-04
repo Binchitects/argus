@@ -1,0 +1,19 @@
+# Several app replicas behind Traefik (docs/deployment.md, "Scale out"):
+#
+#   echo APP_REPLICAS=2 >> .env
+#   docker compose -f docker-compose.yml -f scale.yml up -d
+#
+# The replicas share the database: one leads and runs the once-only background
+# work, and Traefik keeps each browser on one replica (a sticky cookie), where
+# its answers run. With docker-compose.override.yml too, name it last.
+
+services:
+  app:
+    # The replicas are arena-app-1, arena-app-2, ...: one container name cannot be shared.
+    container_name: !reset null
+    deploy: { replicas: "${APP_REPLICAS:-2}" }
+
+  traefik:
+    # config/traefik/routes.yml lists the replicas and turns the sticky cookie on.
+    environment:
+      APP_REPLICAS: "${APP_REPLICAS:-2}"
