@@ -11,6 +11,7 @@ import { ApiKey } from '@/components/app/api-key'
 import { Connections } from '@/components/app/connections'
 import { MemoryManager } from '@/components/app/memory'
 import { PageHeader } from '@/components/app/page-header'
+import { PushDevices } from '@/components/app/push-devices'
 import { Alert } from '@/components/ui/alert'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -42,6 +43,7 @@ export function AccountPage() {
         </div>
         <div className="grid content-start gap-6">
           <Connections />
+          <PushDevices />
           {me.source === 'oidc' ? (
             <Card>
               <CardHeader>

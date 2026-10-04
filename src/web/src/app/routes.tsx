@@ -27,6 +27,8 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <HomePage /> },
           { path: 'account', ...lazy(() => import('@/pages/account').then((m) => ({ Component: m.AccountPage }))) },
+          // The browser extension hands a page or a selection over here (lib/handoff).
+          { path: 'ask', ...lazy(() => import('@/pages/ask').then((m) => ({ Component: m.AskPage }))) },
           { path: 'design', ...lazy(() => import('@/pages/design').then((m) => ({ Component: m.DesignPage }))) },
           // The chat uses the whole window below the top bar.
           { path: 'chat', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/chat-page').then((m) => ({ Component: m.ChatPage }))) },

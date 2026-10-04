@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ask Argus Arena</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="popup">
+    <h1>Ask Argus Arena</h1>
+    <p id="page" class="muted">Reading the page…</p>
+    <p id="setup" hidden>Set the app's address first: <a href="#" id="open-options">options</a>.</p>
+    <div id="actions" hidden>
+      <button id="ask-selection" type="button" hidden>Ask about the selection</button>
+      <button id="ask-page" type="button">Ask about this page</button>
+      <p class="muted">Opens a chat in the app (sign in there), with the page attached.</p>
+    </div>
+    <form id="quick" hidden>
+      <label for="question">Or ask here, with your API key</label>
+      <textarea id="question" rows="3" placeholder="Summarize it."></textarea>
+      <button type="submit">Ask here</button>
+      <div id="answer" class="answer" aria-live="polite"></div>
+    </form>
+    <script src="lib.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

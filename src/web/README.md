@@ -57,3 +57,19 @@ E2E_BASE_URL=https://llm.example.com E2E_PASSWORD=... npm run e2e
 - `E2E_NO_GATEWAY=1` is for a stack without a model gateway, as in CI.
 - CI (`frontend-e2e` in `.github/workflows/app.yml`) runs the real `web` and `app`
   images behind Traefik with the production path split.
+
+## Installable app
+
+- `public/sw.js` is the service worker: the app's shell when offline (pages
+  network-first, the fingerprinted `/assets/` kept once fetched), never `/api`;
+  and the bell's news pushed while no page is open. `src/lib/pwa.ts` registers
+  it (not under `npm run dev`), keeps the browser's offer to install, and
+  subscribes this device for pushes.
+- The manifest comes from the app (`/api/app/manifest.webmanifest`), so it has
+  the product's name from the Settings page.
+- The icons in `public/icons/` are `favicon.svg` and `icons/maskable.svg` (the
+  same, full-bleed, inside the maskable safe zone), drawn by headless Chrome:
+  `google-chrome --headless=new --default-background-color=00000000 --window-size=512,512 --screenshot=icon-512.png page.html`,
+  where the page shows the SVG at the window's size.
+- `/ask` takes a page or a selection from the browser extension
+  (`clients/browser-extension/`) in its fragment (`src/lib/handoff.ts`).

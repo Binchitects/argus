@@ -18,10 +18,12 @@ if (!builder.Environment.IsDevelopment())
 }
 
 var connectionString = DatabaseSettings.ConnectionString(builder.Configuration);
-builder.Services.AddDbContext<AppDbContext>(o =>
+builder.Services.AddDbContext<AppDbContext>((sp, o) =>
 {
     o.UseNpgsql(connectionString);
     o.UseOpenIddict<Guid>();
+    // The bell's news is pushed to people's devices too, whoever saves it.
+    o.AddInterceptors(sp.GetRequiredService<Llm.Api.Notifications.PushOnSave>());
 });
 builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>("database", tags: ["ready"]);
 builder.Services.AddProblemDetails();

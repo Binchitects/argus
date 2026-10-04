@@ -584,6 +584,24 @@ your desktop while the app's tab is hidden, and an answer that finishes while
 you look elsewhere. The browser asks once; the switch turns them off again.
 Alerts and credit are looked at every minute and every five minutes.
 
+**Push notifications** (Your account → Push notifications) bring the same news
+to a device with no page of the app open: a phone, or a desktop where the
+browser runs with no tab of the app. **Turn on for this device** (the browser asks
+once); the card lists your devices, marks this one, sends a test, and removes
+one. A push that arrives while a page of the app is in front is left to the
+bell. A click on it opens what it is about. On an iPhone or iPad, add the app
+to the home screen first, then turn them on there.
+
+**The app installs** like any other: **Install** in the account menu (or Your
+account) when the browser offers it, or the browser's own menu. It opens in its
+own window; how pushes are signed and sent, and the browser extension, are in
+[integrations.md](integrations.md).
+
+**Chats from elsewhere**: a question to the bot in Slack, Mattermost or Teams,
+or an email to the app, is answered as you in a chat of yours, titled with
+where it came from (`Slack · …`, `Email · …`); you can carry it on here
+([integrations.md](integrations.md)).
+
 ## Safeguards
 
 Under **Settings → Safeguards** an admin sets what keeps the chat from being

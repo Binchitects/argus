@@ -24,6 +24,9 @@ GitLab pipeline. See [docs/ci.md](../docs/ci.md).
 | [Continue](#continue) | `continue/config.example.yaml` | transcribed, **not executed here** |
 | [anything else](#anything-else) | `generic-mcp/http.json`, `generic-mcp/stdio.json` | the HTTP shape is verified by the two above; stdio is exercised by the test suite |
 
+Not an agent: `browser-extension/` asks Argus Arena about the page you are on
+(see [its README](browser-extension/README.md) and [docs/integrations.md](../docs/integrations.md)).
+
 Say what you ran. The two that say "executed" were driven end to end against a
 live stack: the harness called `find_symbol`, got `root/eal-core` back, and
 Argus logged the call against the right person (`user=dev_alpha, outcome=ok`).

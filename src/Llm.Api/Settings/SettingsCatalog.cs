@@ -22,6 +22,7 @@ public static class SettingsCatalog
     private const string Knowledge = "Company knowledge";
     private const string Retention = "Data retention";
     private const string Api = "API keys";
+    private const string BotsGroup = "Chat bots";
 
 
 
@@ -204,6 +205,44 @@ public static class SettingsCatalog
         new("Mail:User", Mail, "SMTP user", "For servers that need a sign-in; empty for a relay that does not.", SettingType.Text, SettingScope.Live),
         new("Mail:Password", Mail, "SMTP password", "From your mail team.", SettingType.Secret, SettingScope.Live),
         new("Mail:From", Mail, "Sender", "The address email comes from, e.g. Argus Arena <llm@example.com>.", SettingType.Text, SettingScope.Live),
+
+        // ---------------------------------------------------------------- chat bots and email in, live --
+        new("Bots:Instructions", BotsGroup, "What the bots are told", "Instructions for every chat a bot or an email starts, after the app's own. Each person is still answered as themselves: their model access, tools and credit.", SettingType.Text, SettingScope.Live)
+            { Default = Bots.BotOptions.DefaultInstructions, Max = 4000 },
+        new("Bots:Slack:SigningSecret", BotsGroup, "Slack: signing secret", "From the Slack app's Basic Information. Every event Slack sends is checked against it. With the bot token, it turns the Slack bot on: its Request URL (Event Subscriptions: app_mention, message.im) is shown below.", SettingType.Secret, SettingScope.Live),
+        new("Bots:Slack:BotToken", BotsGroup, "Slack: bot token", "xoxb-… from OAuth & Permissions, with the scopes app_mentions:read, chat:write, im:history, users:read and users:read.email (people are matched by their email).", SettingType.Secret, SettingScope.Live),
+        new("Bots:Slack:Channels", BotsGroup, "Slack: channels", "Channel ids it answers in (C0123…), comma separated. Empty: every channel it is invited to. Direct messages always.", SettingType.Text, SettingScope.Live)
+            { Max = 2000 },
+        new("Bots:Slack:Model", BotsGroup, "Slack: model", "The model its chats use. Empty: the one a new chat of the person would use.", SettingType.Text, SettingScope.Live)
+            { Max = 200 },
+        new("Bots:Slack:Tools", BotsGroup, "Slack: tools", "Tool ids (Admin → Tools), comma separated, of those the person may use. Empty: the tools on in new chats; none: no tools.", SettingType.Text, SettingScope.Live)
+            { Max = 1000 },
+        new("Bots:Mattermost:Url", BotsGroup, "Mattermost: server", "https://chat.example.com. With the bot token and a webhook or command token, it turns the Mattermost bot on.", SettingType.Url, SettingScope.Live)
+            { Pattern = @"https?://\S+", PatternHelp = "http(s)://…" },
+        new("Bots:Mattermost:BotToken", BotsGroup, "Mattermost: bot token", "A bot account's access token (Integrations → Bot accounts). It reads who asked (their email: the server must let it see addresses) and posts the answers; add the bot to the channels.", SettingType.Secret, SettingScope.Live),
+        new("Bots:Mattermost:Tokens", BotsGroup, "Mattermost: webhook and command tokens", "The tokens of the outgoing webhooks (a trigger word such as @argus) and slash commands (/ask) that call the address below, comma separated.", SettingType.Secret, SettingScope.Live),
+        new("Bots:Mattermost:Channels", BotsGroup, "Mattermost: channels", "Channel ids or names it answers in, comma separated. Empty: every channel its webhooks and commands reach.", SettingType.Text, SettingScope.Live)
+            { Max = 2000 },
+        new("Bots:Mattermost:Model", BotsGroup, "Mattermost: model", "Empty: the one a new chat of the person would use.", SettingType.Text, SettingScope.Live)
+            { Max = 200 },
+        new("Bots:Mattermost:Tools", BotsGroup, "Mattermost: tools", "Tool ids, comma separated. Empty: the tools on in new chats; none: no tools.", SettingType.Text, SettingScope.Live)
+            { Max = 1000 },
+        new("Bots:Teams:AppId", BotsGroup, "Teams: app ID", "The Azure Bot's Microsoft App ID. With its password, it turns the Teams bot on: its messaging endpoint is shown below. Every message's token is checked against the Bot Framework's keys.", SettingType.Text, SettingScope.Live)
+            { Max = 100 },
+        new("Bots:Teams:AppPassword", BotsGroup, "Teams: app password", "The bot's client secret: it signs in to Microsoft to post the answers and read who asked.", SettingType.Secret, SettingScope.Live),
+        new("Bots:Teams:TenantId", BotsGroup, "Teams: tenant", "For a single-tenant bot, its tenant's id. Empty: a multi-tenant bot.", SettingType.Text, SettingScope.Live)
+            { Max = 100 },
+        new("Bots:Teams:Channels", BotsGroup, "Teams: channels", "Channel or team ids it answers in (19:…@thread.tacv2), comma separated. Empty: every channel it is added to. Chats with the bot always.", SettingType.Text, SettingScope.Live)
+            { Max = 2000 },
+        new("Bots:Teams:Model", BotsGroup, "Teams: model", "Empty: the one a new chat of the person would use.", SettingType.Text, SettingScope.Live)
+            { Max = 200 },
+        new("Bots:Teams:Tools", BotsGroup, "Teams: tools", "Tool ids, comma separated. Empty: the tools on in new chats; none: no tools.", SettingType.Text, SettingScope.Live)
+            { Max = 1000 },
+        new("Bots:Email:Secret", BotsGroup, "Email in: shared secret", "Your mail gateway posts each email it receives to the address below with this secret (X-Mail-Secret, a bearer token, or the password of https://any:SECRET@…). The sender gets the answer by email (Settings → Email must be set). Senders without an account get nothing back.", SettingType.Secret, SettingScope.Live),
+        new("Bots:Email:Model", BotsGroup, "Email in: model", "Empty: the one a new chat of the person would use.", SettingType.Text, SettingScope.Live)
+            { Max = 200 },
+        new("Bots:Email:Tools", BotsGroup, "Email in: tools", "Tool ids, comma separated; none: no tools. A sender's address can be forged: add tools only if your mail gateway checks senders (SPF, DKIM, DMARC). Empty: the tools on in new chats.", SettingType.Text, SettingScope.Live)
+            { Default = "none", Max = 1000 },
 
         // ---------------------------------------------------------------- Argus --
 

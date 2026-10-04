@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Columns2, LifeBuoy, LogOut, Maximize2, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
+import { Columns2, Download, LifeBuoy, LogOut, Maximize2, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Avatar } from '@/components/ui/avatar'
 import {
@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { infoQuery, supportHref, type Me } from '@/lib/api'
+import { useInstall } from '@/lib/pwa'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
 import { useSignOut } from './use-sign-out'
@@ -27,6 +28,7 @@ export function UserMenu({ me }: { me: Me }) {
   const width = useWidth()
   const support = useQuery(infoQuery).data?.supportContact
   const supportLink = support ? supportHref(support) : null
+  const { canInstall, install } = useInstall()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="rounded-full outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`Account menu for ${me.displayName}`}>
@@ -80,6 +82,11 @@ export function UserMenu({ me }: { me: Me }) {
         {support && (
           <DropdownMenuItem onSelect={() => supportLink && window.open(supportLink, '_blank', 'noopener')} disabled={!supportLink}>
             <LifeBuoy /> {supportLink ? 'Get help' : `Help: ${support}`}
+          </DropdownMenuItem>
+        )}
+        {canInstall && (
+          <DropdownMenuItem onSelect={() => void install()}>
+            <Download /> Install the app
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />

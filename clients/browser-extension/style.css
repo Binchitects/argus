@@ -1,0 +1,70 @@
+:root {
+  color-scheme: light dark;
+  font: 14px/1.45 system-ui, sans-serif;
+  --accent: #1c86f0;
+  --muted: #6b7280;
+}
+body {
+  margin: 0;
+  padding: 14px;
+}
+body.popup {
+  width: 320px;
+}
+body.options {
+  max-width: 460px;
+}
+h1 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+label,
+legend {
+  display: block;
+  margin: 10px 0 4px;
+  font-weight: 600;
+}
+fieldset {
+  margin: 14px 0;
+  border: 1px solid #8884;
+  border-radius: 8px;
+}
+input,
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #8886;
+  border-radius: 6px;
+  font: inherit;
+}
+button {
+  display: block;
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+#page {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.answer {
+  margin-top: 10px;
+  white-space: pre-wrap;
+}

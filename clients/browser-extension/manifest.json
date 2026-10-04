@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Argus Arena",
+  "version": "4.1.0",
+  "description": "Ask your organisation's Argus Arena about the page you are on, or what you selected on it.",
+  "icons": { "128": "icon-128.png" },
+  "action": { "default_title": "Ask Argus Arena", "default_popup": "popup.html", "default_icon": { "128": "icon-128.png" } },
+  "background": { "service_worker": "background.js", "scripts": ["lib.js", "background.js"] },
+  "options_ui": { "page": "options.html", "open_in_tab": false },
+  "permissions": ["contextMenus", "activeTab", "scripting", "storage"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*"],
+  "browser_specific_settings": { "gecko": { "id": "argus-arena@extension.local", "strict_min_version": "128.0" } }
+}

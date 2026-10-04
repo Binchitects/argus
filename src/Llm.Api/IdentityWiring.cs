@@ -357,6 +357,8 @@ public static class IdentityWiring
         services.AddHostedService(sp => sp.GetRequiredService<Models.KeyAccessWatcher>());
         services.AddSingleton<Models.EngineWatcher>();
         services.AddHostedService(sp => sp.GetRequiredService<Models.EngineWatcher>());
+        Bots.BotEndpoints.AddBots(services, config);
+        Notifications.PushEndpoints.AddPush(services, config);
     }
 
     /// <summary>
@@ -400,8 +402,9 @@ public static class IdentityWiring
         app.Use(async (ctx, next) =>
         {
             var m = ctx.Request.Method;
-            // Events for tasks (/api/hooks) come from other systems, with no session: their secret is the guard.
+            // Events for tasks (/api/hooks), the chat bots' platforms and inbound mail come from other systems, with no session: their secrets are the guard.
             if (ctx.Request.Path.StartsWithSegments("/api") && !ctx.Request.Path.StartsWithSegments("/api/authz") && !ctx.Request.Path.StartsWithSegments("/api/hooks") &&
+                !ctx.Request.Path.StartsWithSegments("/api/bots") && !ctx.Request.Path.StartsWithSegments("/api/mail/inbound") &&
                 !(HttpMethods.IsGet(m) || HttpMethods.IsHead(m) || HttpMethods.IsOptions(m)) &&
                 !ctx.Request.Headers.ContainsKey("X-Requested-With"))
             {
@@ -448,6 +451,8 @@ public static class IdentityWiring
         Models.RemoteServerEndpoints.MapRemoteServers(app);
         app.MapGovernance();
         AnswerCacheEndpoints.MapAnswerCache(app);
+        Bots.BotEndpoints.MapBots(app);
+        Notifications.PushEndpoints.MapPush(app);
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

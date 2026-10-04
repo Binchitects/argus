@@ -46,6 +46,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AnswerFeedback> AnswerFeedback => Set<AnswerFeedback>();
     public DbSet<ArenaMatch> ArenaMatches => Set<ArenaMatch>();
     public DbSet<CachedAnswer> CachedAnswers => Set<CachedAnswer>();
+    public DbSet<BotThread> BotThreads => Set<BotThread>();
+    public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -311,6 +313,27 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(m => m.Model);
             e.Property(m => m.Model).HasMaxLength(200);
             e.Property(m => m.Groups).HasDefaultValueSql("'{}'::uuid[]");
+        });
+        builder.Entity<BotThread>(e =>
+        {
+            e.ToTable("bot_threads");
+            e.Property(x => x.Platform).HasMaxLength(20);
+            e.Property(x => x.Thread).HasMaxLength(500);
+            e.HasIndex(x => new { x.Platform, x.Thread, x.UserId }).IsUnique();
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<PushSubscription>(e =>
+        {
+            e.ToTable("push_subscriptions");
+            e.Property(x => x.Endpoint).HasMaxLength(2000);
+            e.Property(x => x.P256dh).HasMaxLength(200);
+            e.Property(x => x.Auth).HasMaxLength(100);
+            e.Property(x => x.Device).HasMaxLength(200);
+            e.Property(x => x.LastError).HasMaxLength(500);
+            e.HasIndex(x => x.Endpoint).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<CachedAnswer>(e =>
         {
