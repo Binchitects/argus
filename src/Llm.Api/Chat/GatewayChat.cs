@@ -87,11 +87,12 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
     }
 
     /// <summary>What was said in a sound, from the speech to text model at the gateway. The spend is the person's.</summary>
-    public async Task<string> TranscribeAsync(string model, byte[] sound, string fileName, string personEmail, CancellationToken ct)
+    /// <param name="contentType">An MP3 unless said otherwise (Talk sends what the browser recorded: WebM or MP4).</param>
+    public async Task<string> TranscribeAsync(string model, byte[] sound, string fileName, string personEmail, CancellationToken ct, string contentType = "audio/mpeg")
     {
         using var res = await WithKeyAsync(() => PostAsync("/v1/audio/transcriptions", () => new MultipartFormDataContent
         {
-            { new ByteArrayContent(sound) { Headers = { ContentType = new MediaTypeHeaderValue("audio/mpeg") } }, "file", fileName },
+            { new ByteArrayContent(sound) { Headers = { ContentType = new MediaTypeHeaderValue(contentType) } }, "file", fileName },
             { new StringContent(model), "model" },
             { new StringContent(personEmail), "user" },
         }, personEmail, "application/json", ct), ct);
@@ -101,9 +102,15 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
     /// <summary>A text spoken by a text to speech model at the gateway, as MP3 bytes. The spend is the person's.</summary>
     public async Task<byte[]> SpeakAsync(string model, string text, string voice, string personEmail, CancellationToken ct)
     {
-        var body = new JsonObject { ["model"] = model, ["input"] = text, ["voice"] = voice, ["response_format"] = "mp3", ["user"] = personEmail };
-        using var res = await WithKeyAsync(() => PostAsync("/v1/audio/speech", body, personEmail, "audio/mpeg", ct), ct);
+        using var res = await OpenSpeechAsync(model, text, voice, personEmail, ct);
         return await res.Content.ReadAsByteArrayAsync(ct);
+    }
+
+    /// <summary>The same, as it is made: the response's MP3 can be passed on while the speech server still writes it.</summary>
+    public Task<HttpResponseMessage> OpenSpeechAsync(string model, string text, string voice, string personEmail, CancellationToken ct)
+    {
+        var body = new JsonObject { ["model"] = model, ["input"] = text, ["voice"] = voice, ["response_format"] = "mp3", ["user"] = personEmail };
+        return WithKeyAsync(() => PostAsync("/v1/audio/speech", body, personEmail, "audio/mpeg", ct), ct);
     }
 
     /// <summary>The chat key removed at the gateway: a new one is made and the request tried once more.</summary>
