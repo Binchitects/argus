@@ -107,6 +107,8 @@ public static class AdminEndpoints
         createdAt = u.CreatedAt,
         spend = g?.Spend,
         budget = g?.Budget,
+        legalHoldSince = u.LegalHoldSince,
+        legalHoldReason = u.LegalHoldReason,
     };
 
     private static async Task<IResult> CreateAsync(CreatePersonRequest body, PeopleService people)

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Llm.Api.Access;
 using Llm.Api.Chat;
 using Llm.Api.Identity;
 using Llm.Api.Notifications;
@@ -15,24 +16,76 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Safeguards;
 
 /// <summary>Whether a message may go to the model; when not, why (for the person) and what kind of refusal it is.</summary>
-/// <param name="Kind">length, files, rate, research, blocked, flagged.</param>
+/// <param name="Kind">length, files, rate, research, blocked, flagged, secret.</param>
 public sealed record Verdict(bool Allowed, string? Reason = null, string Kind = "", int Status = 400)
 {
     public static readonly Verdict Ok = new(true);
+
+    /// <summary>When allowed: the text to take instead of the one sent (its secrets masked); null: as sent.</summary>
+    public string? Text { get; init; }
+}
+
+/// <summary>Which checks apply to a person: the company's settings, each overridden by their groups (the strictest of the groups that set it).</summary>
+/// <param name="SecretScanning">refuse, mask or off.</param>
+/// <param name="RedactPii">mask or off.</param>
+/// <param name="Moderation">check or off.</param>
+/// <param name="BlockedPatterns">Whether the blocked words apply.</param>
+public sealed record SafeguardPolicy(string SecretScanning, string RedactPii, string Moderation, bool BlockedPatterns);
+
+/// <summary>The answer to the gateway's question before an API request: NONE, BLOCKED (with why) or GUARDRAIL_INTERVENED (with the texts to send instead).</summary>
+public sealed record ApiVerdict(string Action, string? Reason = null, IReadOnlyList<string>? Texts = null)
+{
+    public static readonly ApiVerdict None = new("NONE");
 }
 
 /// <summary>
 /// Safeguards against abuse and harm, each part configured under Settings → Safeguards:
-/// limits on messages, files, pictures and deep research per person; words and patterns a
-/// message may not contain; the model reading a message first and refusing one that asks
-/// for harm; personal data masked before the model sees it; the web's content marked as
-/// data. A refused message is audited, the admins hear of it, and enough of them in a day
-/// suspend the account (when configured).
+/// limits on messages, files, pictures and deep research per person; secrets (keys, tokens,
+/// passwords) refused or masked on the way in; words and patterns a message may not contain;
+/// the model reading a message first and refusing one that asks for harm; personal data
+/// masked before the model sees it; the web's content marked as data. Groups can set which
+/// checks apply to their members (Admin → Groups). The same checks run on the API path, when
+/// the gateway asks (CheckApiAsync). A refused message is audited, the admins hear of it, and
+/// enough of them in a day suspend the account (when configured).
 /// </summary>
 public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<SafeguardOptions> options, GatewayChat gateway, Notifier notifier, Audit audit,
-    UserManager<AppUser> users, TimeProvider clock, ILogger<Safeguards> logger)
+    UserManager<AppUser> users, AccessService access, TimeProvider clock, ILogger<Safeguards> logger)
 {
     private SafeguardOptions O => options.CurrentValue;
+
+    /// <summary>The levels of each check, strictest first.</summary>
+    public static readonly string[] SecretLevels = ["refuse", "mask", "off"];
+    public static readonly string[] PiiLevels = ["mask", "off"];
+    public static readonly string[] ModerationLevels = ["check", "off"];
+
+    private readonly Dictionary<Guid, SafeguardPolicy> _policies = [];
+
+    /// <summary>The checks that apply to this person: the company's settings, each overridden by their groups (the strictest of those that set it).</summary>
+    public async Task<SafeguardPolicy> PolicyForAsync(AppUser user, CancellationToken ct = default)
+    {
+        if (_policies.TryGetValue(user.Id, out var known))
+        {
+            return known;
+        }
+        var member = await access.MembershipAsync(user, ct);
+        var groups = await db.Groups.AsNoTracking().Where(g => member.Groups.Contains(g.Id))
+            .Select(g => new { g.SecretScanning, g.RedactPii, g.Moderation, g.BlockedPatterns }).ToListAsync(ct);
+        var o = O;
+        return _policies[user.Id] = new SafeguardPolicy(
+            Strictest(groups.Select(g => g.SecretScanning), o.SecretScanning, SecretLevels),
+            Strictest(groups.Select(g => g.RedactPii), o.RedactPii, PiiLevels),
+            Strictest(groups.Select(g => g.Moderation), o.Moderation, ModerationLevels),
+            groups.Where(g => g.BlockedPatterns is not null).Select(g => g.BlockedPatterns!.Value).DefaultIfEmpty(true).Max());
+    }
+
+    /// <summary>The company's settings alone: for a key whose person the app does not know.</summary>
+    private SafeguardPolicy CompanyPolicy() => new(O.SecretScanning, O.RedactPii, O.Moderation, true);
+
+    private static string Strictest(IEnumerable<string?> chosen, string company, string[] levels)
+    {
+        var set = chosen.Where(c => c is not null && levels.Contains(c)).ToHashSet();
+        return set.Count == 0 ? company : levels.First(set.Contains);
+    }
 
     private static readonly Dictionary<string, string> Categories = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -75,15 +128,115 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
         {
             return new(false, $"At most {o.ResearchPerDay} deep research answers a day: send it as a plain message, or tomorrow.", "research", 429);
         }
-        if (Blocked(text, o.BlockedPatterns) is { } match)
+        var policy = await PolicyForAsync(user, ct);
+        // Secrets first: a refused one never reaches the model's check either.
+        var (refused, checkedText) = await SecretsAsync(user, policy, text, "message", "This message was not sent: it holds {0}. Remove it (a placeholder will do) and send it again.", ct);
+        if (refused is not null)
+        {
+            return refused;
+        }
+        if (policy.BlockedPatterns && Blocked(checkedText, o.BlockedPatterns) is { } match)
         {
             return await RefuseAsync(user, "blocked", $"matched \"{match}\"", ct);
         }
-        if (o.Moderation == "check" && await ModerateAsync(user, text, model, ct) is { } category)
+        if (policy.Moderation == "check" && await ModerateAsync(user, checkedText, model, ct) is { } category)
         {
             return await RefuseAsync(user, "flagged", $"the model judged it {category}", ct);
         }
-        return Verdict.Ok;
+        return checkedText == text ? Verdict.Ok : Verdict.Ok with { Text = checkedText };
+    }
+
+    /// <summary>An attached file's text: refused, or masked, when it holds a secret (as the person's policy says).</summary>
+    public async Task<Verdict> CheckFileAsync(AppUser user, string fileName, string text, CancellationToken ct)
+    {
+        if (!O.Enabled || text.Length == 0)
+        {
+            return Verdict.Ok;
+        }
+        var (refused, checkedText) = await SecretsAsync(user, await PolicyForAsync(user, ct), text, "file",
+            fileName.Replace("{", "(", StringComparison.Ordinal).Replace("}", ")", StringComparison.Ordinal) + " was not attached: it holds {0}. Remove it from the file and attach it again.", ct);
+        return refused ?? (checkedText == text ? Verdict.Ok : Verdict.Ok with { Text = checkedText });
+    }
+
+    /// <summary>
+    /// Secrets in what a person sends: refused, or masked, as their policy says. Each one found is
+    /// audited by its kind, never the secret. A refusal is not a strike: a pasted key is an accident.
+    /// </summary>
+    /// <param name="refusal">The sentence for the person, with {0} for the kinds found.</param>
+    private async Task<(Verdict? Refused, string Text)> SecretsAsync(AppUser? user, SafeguardPolicy policy, string text, string where, string refusal, CancellationToken ct)
+    {
+        if (policy.SecretScanning == "off" || Secrets.Find(text) is not { Count: > 0 } hits)
+        {
+            return (null, text);
+        }
+        var kinds = Secrets.Kinds(hits);
+        var name = user?.UserName ?? "(a key the app does not know)";
+        if (policy.SecretScanning == "mask")
+        {
+            await audit.WriteAsync("safeguard.secret_masked", name, detail: $"{where}: {kinds}", actor: user);
+            return (null, Secrets.Mask(text, hits));
+        }
+        await audit.WriteAsync("safeguard.refused", name, success: false, detail: $"secret in a {where}: {kinds}", actor: user);
+        LogRefused(logger, name, "secret", kinds);
+        return (new Verdict(false, string.Format(System.Globalization.CultureInfo.InvariantCulture, refusal, kinds), "secret"), text);
+    }
+
+    /// <summary>
+    /// The chat's checks for an API key's request, when the gateway asks before sending it (its
+    /// guardrail): secrets in any of its texts, and the blocked words and the model's check on
+    /// its last question; personal data masked when the policy says so. The person's own policy
+    /// applies, and the company's for a key the app does not know.
+    /// </summary>
+    /// <param name="user">The key's person; null for a key the app does not know.</param>
+    /// <param name="question">The last thing the person asked (the request's last user message).</param>
+    public async Task<ApiVerdict> CheckApiAsync(AppUser? user, IReadOnlyList<string> texts, string? question, string? model, CancellationToken ct)
+    {
+        var o = O;
+        if (!o.Enabled || !o.CheckApi)
+        {
+            return ApiVerdict.None;
+        }
+        var policy = user is null ? CompanyPolicy() : await PolicyForAsync(user, ct);
+        var sent = texts.ToList();
+        var changed = false;
+        if (policy.SecretScanning != "off")
+        {
+            var found = sent.Select(Secrets.Find).ToList();
+            if (found.Any(h => h.Count > 0))
+            {
+                var all = found.SelectMany(h => h).ToList();
+                var (refused, _) = await SecretsAsync(user, policy, string.Join("\n", sent), "request", "The request was refused: it holds {0}. Remove it and send it again.", ct);
+                if (refused is not null)
+                {
+                    return new ApiVerdict("BLOCKED", refused.Reason);
+                }
+                sent = [.. sent.Select((t, i) => Secrets.Mask(t, found[i]))];
+                changed = all.Count > 0;
+            }
+        }
+        if (question is { Length: > 0 } && user is not null)
+        {
+            if (policy.BlockedPatterns && Blocked(question, o.BlockedPatterns) is { } match)
+            {
+                return new ApiVerdict("BLOCKED", (await RefuseAsync(user, "blocked", $"matched \"{match}\" (API)", ct)).Reason);
+            }
+            if (policy.Moderation == "check" && await ModerateAsync(user, Secrets.Mask(question, Secrets.Find(question)), model, ct) is { } category)
+            {
+                return new ApiVerdict("BLOCKED", (await RefuseAsync(user, "flagged", $"the model judged it {category} (API)", ct)).Reason);
+            }
+        }
+        else if (question is { Length: > 0 } && policy.BlockedPatterns && Blocked(question, o.BlockedPatterns) is { } match)
+        {
+            await audit.WriteAsync("safeguard.refused", "(a key the app does not know)", success: false, detail: $"blocked: matched \"{match}\" (API)");
+            return new ApiVerdict("BLOCKED", o.RefusalMessage);
+        }
+        if (policy.RedactPii == "mask")
+        {
+            var masked = sent.Select(Pii.Mask).ToList();
+            changed |= !masked.SequenceEqual(sent);
+            sent = masked;
+        }
+        return changed ? new ApiVerdict("GUARDRAIL_INTERVENED", null, sent) : ApiVerdict.None;
     }
 
     /// <summary>Whether the person may have one more picture drawn today (and it is counted when they may).</summary>
@@ -212,8 +365,17 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
         return start >= 0 && end > start ? JsonNode.Parse(text[start..(end + 1)]) as JsonObject : null;
     }
 
-    /// <summary>A person's message as the model reads it: e-mail addresses, phone and card numbers, IBANs masked.</summary>
-    public string Mask(string text) => O.Enabled && O.RedactPii == "mask" ? Pii.Mask(text) : text;
+    /// <summary>How a person's messages read to the model: e-mail addresses, phone and card numbers and IBANs masked, when their policy says so.</summary>
+    public async Task<Func<string, string>> MaskerAsync(string email, CancellationToken ct)
+    {
+        if (!O.Enabled)
+        {
+            return t => t;
+        }
+        var user = await users.FindByEmailAsync(email);
+        var policy = user is null ? CompanyPolicy() : await PolicyForAsync(user, ct);
+        return policy.RedactPii == "mask" ? Pii.Mask : t => t;
+    }
 
     /// <summary>What a web tool brought, as the model reads it: marked as data, never instructions.</summary>
     public string Untrusted(string tool, string text) =>

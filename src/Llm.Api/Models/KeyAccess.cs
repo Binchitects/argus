@@ -49,7 +49,7 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
     }
 }
 
-/// <summary>Runs <see cref="KeyAccess.SyncAsync"/> when access or groups change, and every 10 minutes (the directory's groups change on their own).</summary>
+/// <summary>Runs <see cref="KeyAccess.SyncAsync"/> and <see cref="Gateway.GroupTeams.SyncAsync"/> when access or groups change, and every 10 minutes (the directory's groups change on their own).</summary>
 public sealed partial class KeyAccessWatcher : BackgroundService
 {
     private readonly SemaphoreSlim _wake = new(0);
@@ -104,6 +104,11 @@ public sealed partial class KeyAccessWatcher : BackgroundService
                 {
                     LogChanged(logger, changed);
                 }
+                // Groups' credit at the gateway (teams) follows the same changes: groups, members, keys.
+                if (await scope.ServiceProvider.GetRequiredService<Gateway.GroupTeams>().SyncAsync(stoppingToken) is > 0 and var teams)
+                {
+                    LogTeams(logger, teams);
+                }
             }
             catch (GatewayException ex)
             {
@@ -123,6 +128,9 @@ public sealed partial class KeyAccessWatcher : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "API keys: {Changed} keys now carry the models their people may use")]
     private static partial void LogChanged(ILogger logger, int changed);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Groups' credit: {Changed} teams, members or keys changed at the gateway")]
+    private static partial void LogTeams(ILogger logger, int changed);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "API keys: the sync failed; trying again later")]
     private static partial void LogError(ILogger logger, Exception ex);

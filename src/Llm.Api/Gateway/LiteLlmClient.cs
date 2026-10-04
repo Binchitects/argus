@@ -154,7 +154,8 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
                 k["blocked"]?.GetValueKind() == JsonValueKind.True,
                 DateTimeOffset.TryParse(Str(k, "created_at"), CultureInfo.InvariantCulture, out var at) ? at : null,
                 [.. (k["models"] as JsonArray ?? []).Select(m => m?.GetValue<string>() ?? "")],
-                k["max_parallel_requests"] is JsonValue p && p.TryGetValue<int>(out var parallel) ? parallel : null));
+                k["max_parallel_requests"] is JsonValue p && p.TryGetValue<int>(out var parallel) ? parallel : null,
+                Str(k, "team_id")));
         }
         return keys;
     }
@@ -189,6 +190,64 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
             await SendAsync(HttpMethod.Post, blocked ? "/key/block" : "/key/unblock", new JsonObject { ["key"] = token }, ct);
         }
     }
+
+    public async Task<IReadOnlyList<GatewayTeam>> TeamsAsync(CancellationToken ct = default)
+    {
+        var res = await SendAsync(HttpMethod.Get, "/team/list", null, ct);
+        var rows = res as JsonArray ?? (res as JsonObject)?["teams"] as JsonArray ?? [];
+        return [.. rows.OfType<JsonObject>().Where(t => Str(t, "team_id")?.StartsWith(TeamPrefix, StringComparison.Ordinal) == true).Select(Team)];
+    }
+
+    /// <summary>The ids of the teams the app makes for groups start with this.</summary>
+    public const string TeamPrefix = "group-";
+
+    private static GatewayTeam Team(JsonObject t) => new(Str(t, "team_id")!, Str(t, "team_alias") ?? "", Dec(t, "max_budget"),
+        t["metadata"] is JsonObject m ? Dec(m, "member_budget") : null,
+        [.. (t["members_with_roles"] as JsonArray ?? []).OfType<JsonObject>().Select(x => Str(x, "user_id")).OfType<string>()]);
+
+    public async Task SetTeamAsync(GatewayTeam team, string duration, CancellationToken ct = default)
+    {
+        var body = new JsonObject
+        {
+            ["team_id"] = team.Id,
+            ["team_alias"] = team.Alias,
+            ["max_budget"] = team.Budget,
+            ["budget_duration"] = duration,
+            // Each member's own ceiling within the team (LiteLLM keeps it per membership).
+            ["team_member_budget"] = team.MemberBudget,
+            ["team_member_budget_duration"] = team.MemberBudget is null ? null : duration,
+            ["metadata"] = new JsonObject { ["llm_app"] = "group", ["member_budget"] = team.MemberBudget },
+        };
+        var info = await SendAsync(HttpMethod.Get, $"/team/info?team_id={Uri.EscapeDataString(team.Id)}", null, ct, allowStatus: [400, 404]);
+        if (info?["team_info"] is not JsonObject existing)
+        {
+            body["members_with_roles"] = new JsonArray([.. team.Members.Select(e => (JsonNode)new JsonObject { ["role"] = "user", ["user_id"] = e })]);
+            await SendAsync(HttpMethod.Post, "/team/new", body, ct);
+            return;
+        }
+        await SendAsync(HttpMethod.Post, "/team/update", body, ct);
+        var now = Team(existing).Members.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var want = team.Members.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var joining = want.Where(e => !now.Contains(e)).ToList();
+        if (joining.Count > 0)
+        {
+            await SendAsync(HttpMethod.Post, "/team/member_add", new JsonObject
+            {
+                ["team_id"] = team.Id,
+                ["member"] = new JsonArray([.. joining.Select(e => (JsonNode)new JsonObject { ["role"] = "user", ["user_id"] = e })]),
+            }, ct);
+        }
+        foreach (var leaving in now.Where(e => !want.Contains(e)))
+        {
+            await SendAsync(HttpMethod.Post, "/team/member_delete", new JsonObject { ["team_id"] = team.Id, ["user_id"] = leaving }, ct, allowStatus: [400, 404]);
+        }
+    }
+
+    public async Task DeleteTeamAsync(string id, CancellationToken ct = default) =>
+        await SendAsync(HttpMethod.Post, "/team/delete", new JsonObject { ["team_ids"] = new JsonArray(JsonValue.Create(id)) }, ct, allowStatus: [400, 404]);
+
+    public async Task SetKeyTeamAsync(string token, string? teamId, CancellationToken ct = default) =>
+        await SendAsync(HttpMethod.Post, "/key/update", new JsonObject { ["key"] = token, ["team_id"] = teamId }, ct);
 
     public async Task<IReadOnlyDictionary<string, GatewayUser>> UsersAsync(CancellationToken ct = default)
     {

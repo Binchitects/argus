@@ -31,6 +31,22 @@ value it overrides, and **Back to the environment's value** removes the saved on
   stored AES-256-GCM encrypted under a key derived from `APP_KEY`. A database
   dump alone does not reveal it.
 
+## What a group can set for its members
+
+Some settings are the company's default, and a group can set its own (Admin →
+Groups → a group → Policies):
+
+| Setting | A group's own | When a person is in several groups |
+|---|---|---|
+| Data retention → **Keep chats for** | days | the shortest |
+| Safeguards → **Secrets in messages and files** | refuse, mask or off | the strictest (refuse, then mask) |
+| Safeguards → **Mask personal data** | mask or off | mask |
+| Safeguards → **The model checks each message** | check or off | check |
+| Safeguards → **Blocked words and patterns** | apply, or not for this group | apply |
+
+A group also has a credit a month and a cost centre, which have no company
+setting ([admin.md](admin.md#credit-for-groups)).
+
 ## What cannot be changed here, and why
 
 | Setting | Why not |

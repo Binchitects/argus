@@ -444,23 +444,15 @@ public static partial class ChatEndpoints
         return Results.Ok(new { currentLeafId = leaf });
     }
 
-    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db)
+    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Retention.Retention retention)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me) is null)
         {
             return Results.NotFound();
         }
-        // Its files go too, except those another of the person's chats (a fork) still uses.
-        var used = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id && m.AttachmentsJson != null).Select(m => m.AttachmentsJson).ToListAsync();
-        var elsewhere = await db.ChatMessages.AsNoTracking()
-            .Where(m => m.ConversationId != id && m.AttachmentsJson != null && db.Conversations.Any(x => x.Id == m.ConversationId && x.UserId == me.Id))
-            .Select(m => m.AttachmentsJson).ToListAsync();
-        var keep = elsewhere.SelectMany(ChatService.ParseIds).ToHashSet();
-        var files = used.SelectMany(ChatService.ParseIds).Where(a => !keep.Contains(a)).ToList();
-        db.Conversations.Remove(c);
-        await db.SaveChangesAsync();
-        await db.ChatAttachments.Where(a => a.UserId == me.Id && files.Contains(a.Id)).ExecuteDeleteAsync();
+        // Its files go too, except those another of the person's chats (a fork) or a project still uses; under legal hold it is only hidden.
+        await retention.DeleteAsync(me, [id]);
         return Results.NoContent();
     }
 
@@ -506,6 +498,8 @@ public static partial class ChatEndpoints
         {
             await safeguards.MarkResearchAsync(me.Id, http.RequestAborted);
         }
+        // Its secrets masked, when the person's policy masks them.
+        text = verdict.Text ?? text;
         await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Research: body.Research), async () =>
         {
             var next = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
@@ -796,7 +790,7 @@ public static partial class ChatEndpoints
     }
 
     private static async Task<IResult> UploadAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> monitor,
-        Media media)
+        Media media, Safeguards.Safeguards safeguards)
     {
         var options = monitor.CurrentValue;
         var me = await Me(p, users);
@@ -849,6 +843,16 @@ public static partial class ChatEndpoints
         try
         {
             var (text, truncated, converted) = Attachments.Extract(file.FileName, file.ContentType ?? "", ms.ToArray(), options.MaxAttachmentChars);
+            // Secrets in the file: refused, or masked (and then its original, which still holds them, is not kept).
+            var verdict = await safeguards.CheckFileAsync(me, Path.GetFileName(file.FileName), text, request.HttpContext.RequestAborted);
+            if (!verdict.Allowed)
+            {
+                return AuthEndpoints.Problem(verdict.Status, $"safeguard_{verdict.Kind}", verdict.Reason!);
+            }
+            if (verdict.Text is { } masked)
+            {
+                (text, converted) = (masked, false);
+            }
             var a = new ChatAttachment
             {
                 UserId = me.Id, FileName = Path.GetFileName(file.FileName), ContentType = file.ContentType ?? "application/octet-stream",

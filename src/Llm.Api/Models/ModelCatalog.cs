@@ -413,7 +413,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 }
 
 /// <summary>Who may use which model, and whether it can answer now.</summary>
-public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineState engine, ModelCatalog catalog, ModelHoursState hours, IOptions<EngineOptions> options)
+public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineState engine, ModelCatalog catalog, ModelHoursState hours, IOptions<EngineOptions> options,
+    Gateway.Credit credit)
 {
     /// <summary>The models on the engine. Their answers need them loaded.</summary>
     public async Task<HashSet<string>> OnEngineAsync(CancellationToken ct = default)
@@ -482,6 +483,7 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
                     ? $"{model} could not be loaded. Choose another model; an admin can see why under Admin → Models."
                     : $"{model} is not loaded right now, and the engine has no place for it beside the models kept loaded. An admin can load it under Admin → Models, or choose another model.";
         }
-        return null;
+        // One credit over the chat and API keys, and the groups' credit.
+        return await credit.RefusalAsync(user, ct);
     }
 }

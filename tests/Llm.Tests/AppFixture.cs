@@ -99,11 +99,34 @@ public sealed class AppFixture : IAsyncLifetime
         await insert.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// A request at the gateway at a time of the test's choosing: the chat's (booked to the end user)
+    /// or an API key's (booked to the key's person), as LiteLLM books them.
+    /// </summary>
+    public async Task SpendAsync(string email, decimal spend, DateTimeOffset at, bool apiKey = false)
+    {
+        await using var conn = new Npgsql.NpgsqlConnection(ConnectionStringFor("litellm_test" + _run));
+        await conn.OpenAsync();
+        await using var insert = new Npgsql.NpgsqlCommand("""
+            insert into "LiteLLM_SpendLogs" (request_id, call_type, api_key, spend, total_tokens, prompt_tokens, completion_tokens,
+              "startTime", "endTime", model, "user", metadata, end_user)
+            values (@id, 'acompletion', @key, @spend, 10, 9, 1, @at, @at, 'qwen', '', @metadata::jsonb, @endUser)
+            """, conn);
+        insert.Parameters.AddWithValue("id", Guid.NewGuid().ToString());
+        insert.Parameters.AddWithValue("key", apiKey ? "hash-key-" + email : "hash-chat");
+        insert.Parameters.AddWithValue("spend", (double)spend);
+        insert.Parameters.AddWithValue("at", DateTime.SpecifyKind(at.UtcDateTime, DateTimeKind.Unspecified));
+        insert.Parameters.AddWithValue("metadata", apiKey ? $$"""{"user_api_key_user_id":"{{email}}","user_api_key_alias":"app-key"}""" : """{"user_api_key_alias":"chat"}""");
+        insert.Parameters.AddWithValue("endUser", apiKey ? "" : email);
+        await insert.ExecuteNonQueryAsync();
+    }
+
     public string ConnectionStringFor(string database) =>
         new Npgsql.NpgsqlConnectionStringBuilder(Server) { Database = database }.ConnectionString;
 
     /// <summary>A separate app on its own database, for tests that need a fresh start (imports, LDAP).</summary>
-    public WebApplicationFactory<Program> Create(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings = null) =>
+    /// <param name="services">Test services of its own (a clock), after the fakes.</param>
+    public WebApplicationFactory<Program> Create(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings = null, Action<IServiceCollection>? services = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("ConnectionStrings:App", connectionString);
@@ -166,6 +189,7 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddHttpClient(Llm.Api.Schedules.Webhooks.Client).ConfigurePrimaryHttpMessageHandler(() => Webhook);
                 s.AddHttpClient<Llm.Api.Models.HuggingFace>().ConfigurePrimaryHttpMessageHandler(() => HuggingFace);
                 s.AddHttpClient(Llm.Api.Knowledge.Embedder.Client).ConfigurePrimaryHttpMessageHandler(() => Embedder);
+                services?.Invoke(s);
             });
         });
 

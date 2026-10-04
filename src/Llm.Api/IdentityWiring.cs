@@ -233,6 +233,7 @@ public static class IdentityWiring
         services.Configure<Quality.QualityOptions>(config.GetSection("Quality"));
         services.Configure<Safeguards.SafeguardOptions>(config.GetSection("Safeguards"));
         services.AddScoped<Safeguards.Safeguards>();
+        services.AddGovernance(config);
         services.PostConfigure<Chat.ChatOptions>(o =>
         {
             if (config["Gateway:Url"] is { Length: > 0 } url && config["Chat:GatewayUrl"] is null)
@@ -433,6 +434,7 @@ public static class IdentityWiring
         Models.HuggingFaceEndpoints.MapHuggingFace(app);
         Schedules.TaskEndpoints.MapTasks(app);
         Models.RemoteServerEndpoints.MapRemoteServers(app);
+        app.MapGovernance();
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

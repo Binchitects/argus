@@ -980,7 +980,7 @@ public sealed partial class ChatService(
             return weight;
         }
         text.Append(CultureInfo.InvariantCulture, $"\n\n<transcript of=\"{name}\"{(f.Seconds is { } s ? string.Create(CultureInfo.InvariantCulture, $" seconds=\"{s:0}\"") : "")}>\n")
-            .Append(said.Length == 0 ? "(no speech)" : safeguards.Mask(said)).Append("\n</transcript>");
+            .Append(said.Length == 0 ? "(no speech)" : (await safeguards.MaskerAsync(email, ct))(said)).Append("\n</transcript>");
         return weight;
     }
 
@@ -1027,6 +1027,7 @@ public sealed partial class ChatService(
         var vision = model?.Vision == true;
         var hears = model?.Audio == true;
         var imagesDropped = false;
+        var mask = await safeguards.MaskerAsync(email, ct);
 
         var turns = new List<(JsonObject Turn, long Weight, ChatMessage Source)>();
         foreach (var m in stored.Skip(from))
@@ -1034,7 +1035,7 @@ public sealed partial class ChatService(
             switch (m.Role)
             {
                 case "user":
-                    var text = new StringBuilder(safeguards.Mask(m.Content));
+                    var text = new StringBuilder(mask(m.Content));
                     var images = new List<ChatAttachment>();
                     var heard = new List<JsonObject>();
                     var mediaWeight = 0L;

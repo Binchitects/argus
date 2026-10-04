@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Llm.Core.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261004151918_Governance")]
+    partial class Governance
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -99,107 +102,6 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("group_members", (string)null);
                 });
 
-            modelBuilder.Entity("Llm.Core.Chat.AnswerFeedback", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Comment")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<Guid>("ConversationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("MessageId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Reason")
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<bool>("Shared")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("Up")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConversationId");
-
-                    b.HasIndex("UpdatedAt");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("MessageId", "UserId")
-                        .IsUnique();
-
-                    b.ToTable("answer_feedback", (string)null);
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.ArenaMatch", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("AnswerA")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("AnswerB")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("ConversationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ModelA")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("ModelB")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<Guid>("QuestionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Vote")
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
-
-                    b.Property<DateTimeOffset?>("VotedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConversationId");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("VotedAt");
-
-                    b.ToTable("arena_matches", (string)null);
-                });
-
             modelBuilder.Entity("Llm.Core.Chat.AttachmentPage", b =>
                 {
                     b.Property<Guid>("AttachmentId")
@@ -279,9 +181,6 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<int?>("AnswerMs")
-                        .HasColumnType("integer");
-
                     b.Property<string>("AttachmentsJson")
                         .HasColumnType("text");
 
@@ -357,20 +256,12 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<string>("TraceJson")
-                        .HasColumnType("text");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("CreatedAt");
 
                     b.HasIndex("ConversationId", "ParentId");
 
                     b.HasIndex("ConversationId", "Sequence")
                         .IsUnique();
-
-                    b.HasIndex(new[] { "CreatedAt" }, "IX_chat_messages_Answered")
-                        .HasFilter("\"AnswerMs\" IS NOT NULL");
 
                     b.ToTable("chat_messages", (string)null);
                 });
@@ -452,209 +343,6 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("conversations", (string)null);
                 });
 
-            modelBuilder.Entity("Llm.Core.Chat.KnowledgeChunk", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<Guid>("DocumentId")
-                        .HasColumnType("uuid");
-
-                    b.PrimitiveCollection<float[]>("Embedding")
-                        .IsRequired()
-                        .HasColumnType("real[]");
-
-                    b.Property<int>("EndLine")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Heading")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<int>("Line")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Ordinal")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Text")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DocumentId");
-
-                    b.ToTable("knowledge_chunks", (string)null);
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.KnowledgeDocument", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("AttachmentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<string>("Model")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.PrimitiveCollection<List<string>>("Readers")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text[]")
-                        .HasDefaultValueSql("'{}'::text[]");
-
-                    b.Property<Guid?>("SourceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("SyncedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("Url")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<string>("Version")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AttachmentId");
-
-                    b.HasIndex("Readers");
-
-                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Readers"), "gin");
-
-                    b.HasIndex("SourceId", "Key")
-                        .IsUnique();
-
-                    b.ToTable("knowledge_documents", (string)null);
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.KnowledgeReaders", b =>
-                {
-                    b.Property<Guid>("SourceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Key")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Activity")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTimeOffset>("FetchedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Name")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.PrimitiveCollection<List<string>>("People")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text[]")
-                        .HasDefaultValueSql("'{}'::text[]");
-
-                    b.Property<DateTimeOffset?>("ReadAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("SourceId", "Key");
-
-                    b.HasIndex("People");
-
-                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("People"), "gin");
-
-                    b.ToTable("knowledge_readers", (string)null);
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.KnowledgeSource", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Audience")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Error")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.PrimitiveCollection<List<Guid>>("Groups")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid[]")
-                        .HasDefaultValueSql("'{}'::uuid[]");
-
-                    b.Property<string>("Hosts")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<bool>("Issues")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("Location")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<int>("MaxPages")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<DateTimeOffset?>("SyncStartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("SyncedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("Wiki")
-                        .HasColumnType("boolean");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Name")
-                        .IsUnique();
-
-                    b.ToTable("knowledge_sources", (string)null);
-                });
-
             modelBuilder.Entity("Llm.Core.Chat.McpServer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -725,33 +413,6 @@ namespace Llm.Core.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("mcp_servers", (string)null);
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.Memory", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Text")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "UpdatedAt");
-
-                    b.ToTable("memories", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.Notification", b =>
@@ -923,57 +584,6 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("UserId", "Kind", "At");
 
                     b.ToTable("safeguard_marks", (string)null);
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.SavedPrompt", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.PrimitiveCollection<List<Guid>>("Groups")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid[]")
-                        .HasDefaultValueSql("'{}'::uuid[]");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<Guid?>("ServerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Sharing")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Text")
-                        .IsRequired()
-                        .HasMaxLength(20000)
-                        .HasColumnType("character varying(20000)");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ServerId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("prompts", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.ScheduledRun", b =>
@@ -1256,9 +866,6 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<DateTimeOffset?>("LockoutEnd")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("MemoryOff")
-                        .HasColumnType("boolean");
 
                     b.Property<string>("NormalizedEmail")
                         .HasMaxLength(256)
@@ -1960,35 +1567,6 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("Llm.Core.Chat.AnswerFeedback", b =>
-                {
-                    b.HasOne("Llm.Core.Chat.ChatMessage", null)
-                        .WithMany()
-                        .HasForeignKey("MessageId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Llm.Core.Identity.AppUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.ArenaMatch", b =>
-                {
-                    b.HasOne("Llm.Core.Chat.Conversation", null)
-                        .WithMany()
-                        .HasForeignKey("ConversationId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("Llm.Core.Identity.AppUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("Llm.Core.Chat.AttachmentPage", b =>
                 {
                     b.HasOne("Llm.Core.Chat.ChatAttachment", null)
@@ -2023,46 +1601,6 @@ namespace Llm.Core.Data.Migrations
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("Llm.Core.Identity.AppUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.KnowledgeChunk", b =>
-                {
-                    b.HasOne("Llm.Core.Chat.KnowledgeDocument", null)
-                        .WithMany()
-                        .HasForeignKey("DocumentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.KnowledgeDocument", b =>
-                {
-                    b.HasOne("Llm.Core.Chat.ChatAttachment", null)
-                        .WithMany()
-                        .HasForeignKey("AttachmentId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("Llm.Core.Chat.KnowledgeSource", null)
-                        .WithMany()
-                        .HasForeignKey("SourceId")
-                        .OnDelete(DeleteBehavior.Cascade);
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.KnowledgeReaders", b =>
-                {
-                    b.HasOne("Llm.Core.Chat.KnowledgeSource", null)
-                        .WithMany()
-                        .HasForeignKey("SourceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.Memory", b =>
-                {
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
@@ -2119,19 +1657,6 @@ namespace Llm.Core.Data.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("Llm.Core.Chat.SavedPrompt", b =>
-                {
-                    b.HasOne("Llm.Core.Chat.McpServer", null)
-                        .WithMany()
-                        .HasForeignKey("ServerId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("Llm.Core.Identity.AppUser", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.ScheduledRun", b =>

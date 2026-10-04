@@ -16,6 +16,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { api, errorMessage } from '@/lib/api'
+import { money } from '@/lib/format'
+import { ChargebackCard } from './chargeback'
 import { directoryGroupsQuery, groupsQuery, type GroupSummary } from './groups-api'
 
 const columns: ColumnDef<GroupSummary>[] = [
@@ -50,6 +52,24 @@ const columns: ColumnDef<GroupSummary>[] = [
     header: ({ column }) => <SortHeader column={column} title="Members" />,
     accessorFn: (g) => g.members,
     cell: ({ row: { original: g } }) => <span className="tabular-nums">{g.members}</span>,
+  },
+  {
+    id: 'credit',
+    header: 'Credit a month',
+    accessorFn: (g) => g.credit ?? '',
+    cell: ({ row: { original: g } }) =>
+      g.credit === null || g.credit === undefined ? null : (
+        <span className="tabular-nums">
+          {money(g.credit)} {g.creditPerMember ? 'each' : 'shared'}
+          {g.costCentre && <span className="ml-1.5 text-xs text-muted-foreground">{g.costCentre}</span>}
+        </span>
+      ),
+  },
+  {
+    id: 'retention',
+    header: 'Chats kept',
+    accessorFn: (g) => g.retentionDays ?? '',
+    cell: ({ row: { original: g } }) => (g.retentionDays ? <span className="tabular-nums">{g.retentionDays} days</span> : null),
   },
 ]
 
@@ -87,6 +107,9 @@ export function GroupsPage() {
           }
         />
       )}
+      <div className="mt-6">
+        <ChargebackCard />
+      </div>
       <NewGroupDialog open={adding} onOpenChange={setAdding} onMade={(id) => navigate(`/admin/groups/${id}`)} />
     </>
   )

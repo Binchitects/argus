@@ -17,6 +17,8 @@ import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
+import { money } from '@/lib/format'
+import { GroupPoliciesCard } from './group-policies'
 import { groupQuery, type GroupDetail, type GroupMember } from './groups-api'
 import { peopleQuery } from './people-api'
 
@@ -66,6 +68,16 @@ export function GroupPage() {
         </Link>
       ),
     },
+    ...(g.members.some((m) => m.spend !== undefined && m.spend !== null)
+      ? [
+          {
+            id: 'spend',
+            header: ({ column }) => <SortHeader column={column} title="This month" />,
+            accessorFn: (m) => m.spend ?? 0,
+            cell: ({ row: { original: m } }) => <span className="tabular-nums">{money(m.spend)}</span>,
+          } satisfies ColumnDef<GroupMember>,
+        ]
+      : []),
     { id: 'status', header: 'Status', accessorFn: (m) => (m.isDisabled ? 'Disabled' : 'Active'), cell: ({ row: { original: m } }) => (m.isDisabled ? <Badge variant="warning">Disabled</Badge> : null) },
     ...(app
       ? [
@@ -132,6 +144,9 @@ export function GroupPage() {
           <DataTable columns={columns} data={g.members} noun="members" getRowId={(m) => m.id} initialSorting={[{ id: 'person', desc: false }]} empty={app ? 'Nobody yet. Add people to give them what this group may use.' : 'Nobody here is in this directory group yet.'} />
         </CardContent>
       </Card>
+      <div className="mt-6">
+        <GroupPoliciesCard key={g.id} group={g} />
+      </div>
       <EditDialog group={g} open={editing} onOpenChange={setEditing} />
       {app && <AddPeopleDialog group={g} open={adding} onOpenChange={setAdding} />}
     </>

@@ -96,17 +96,18 @@ public sealed partial class AutoModel(AppDbContext db, GatewayChat gateway, Safe
     private async Task<(string Kind, string Reason)> SortAsync(AppUser user, ChatMessage question, GatewayModel small, CancellationToken ct)
     {
         var ask = new StringBuilder();
+        var mask = await safeguards.MaskerAsync(user.Email ?? "", ct);
         var earlier = await EarlierAsync(question, ct);
         if (earlier.Count > 0)
         {
             ask.Append("The conversation so far, for context:\n<earlier>\n");
             foreach (var m in earlier)
             {
-                ask.Append(m.Role == "user" ? "Person: " : "Assistant: ").Append(Cut(safeguards.Mask(m.Content), 400)).Append('\n');
+                ask.Append(m.Role == "user" ? "Person: " : "Assistant: ").Append(Cut(mask(m.Content), 400)).Append('\n');
             }
             ask.Append("</earlier>\n\n");
         }
-        ask.Append("The question to sort:\n<question>\n").Append(Cut(safeguards.Mask(question.Content), 4000)).Append("\n</question>");
+        ask.Append("The question to sort:\n<question>\n").Append(Cut(mask(question.Content), 4000)).Append("\n</question>");
         var request = new JsonObject
         {
             ["model"] = small.Name,

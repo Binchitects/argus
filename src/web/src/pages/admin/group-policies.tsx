@@ -1,0 +1,156 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { Segmented } from '@/components/app/segmented'
+import { Alert } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Field } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { toast } from '@/components/ui/toaster'
+import { api, errorMessage } from '@/lib/api'
+import { money } from '@/lib/format'
+import { noPolicies, type GroupDetail, type GroupPolicies } from './groups-api'
+import { parseCredit } from './people-api'
+
+/** Radix's Select takes no empty value: this one stands for "the company's setting". */
+const company = 'company'
+
+const choices = {
+  secretScanning: [
+    ['refuse', 'Refuse the message or file'],
+    ['mask', 'Mask each secret'],
+    ['off', 'Let them through'],
+  ],
+  redactPii: [
+    ['mask', 'Mask it'],
+    ['off', 'As written'],
+  ],
+  moderation: [
+    ['check', 'Check each message'],
+    ['off', 'No check'],
+  ],
+  blockedPatterns: [
+    ['on', 'Apply them'],
+    ['off', 'Not for this group'],
+  ],
+} as const
+
+type Choice = keyof typeof choices
+
+/** A group's retention, credit, cost centre and safeguards: one form, saved together. */
+export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
+  const queryClient = useQueryClient()
+  const p = group.policies ?? noPolicies
+  const [days, setDays] = useState(p.retentionDays === null ? '' : String(p.retentionDays))
+  const [credit, setCredit] = useState(p.credit === null ? '' : String(p.credit))
+  const [perMember, setPerMember] = useState(p.creditPerMember ? 'member' : 'shared')
+  const [costCentre, setCostCentre] = useState(p.costCentre ?? '')
+  const [checks, setChecks] = useState<Record<Choice, string>>({
+    secretScanning: p.secretScanning ?? company,
+    redactPii: p.redactPii ?? company,
+    moderation: p.moderation ?? company,
+    blockedPatterns: p.blockedPatterns === null ? company : p.blockedPatterns ? 'on' : 'off',
+  })
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (body: GroupPolicies) => api(`/api/admin/groups/${group.id}/policies`, { method: 'PUT', body }),
+    onSuccess: async () => {
+      toast.success('Policies saved', { description: 'Credit reaches the gateway within a minute.' })
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'groups'] })
+    },
+    onError: (e) => setError(errorMessage(e)),
+  })
+  const pick = (c: Choice) => (checks[c] === company ? null : checks[c])
+  const submit = () => {
+    setError(null)
+    const d = days.trim()
+    const retention = d === '' ? null : Number(d)
+    if (retention !== null && !(Number.isInteger(retention) && retention >= 1 && retention <= 36500)) return setError('Keep chats a whole number of days, 1 to 36,500, or empty.')
+    const c = parseCredit(credit)
+    if (c === 'invalid') return setError('Credit is a number of dollars, or empty for no group limit.')
+    save.mutate({
+      retentionDays: retention,
+      credit: c,
+      creditPerMember: c !== null && perMember === 'member',
+      costCentre: costCentre.trim() || null,
+      secretScanning: pick('secretScanning') as GroupPolicies['secretScanning'],
+      redactPii: pick('redactPii') as GroupPolicies['redactPii'],
+      moderation: pick('moderation') as GroupPolicies['moderation'],
+      blockedPatterns: checks.blockedPatterns === company ? null : checks.blockedPatterns === 'on',
+    })
+  }
+  const spent = group.spentThisMonth
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Policies</CardTitle>
+        <CardDescription>For the members: how long their chats are kept, what they may spend, and which safeguards apply. Empty or the company&apos;s setting: Admin → Settings decides.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-5">
+        {error && <Alert variant="destructive">{error}</Alert>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Keep chats for (days)" hint="Then they are deleted with their files. A person in several groups keeps the shortest. People on legal hold keep everything.">
+            <Input inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} placeholder="the company's setting" />
+          </Field>
+          <Field label="Cost centre" hint="Its spend is charged to it in the monthly chargeback report.">
+            <Input value={costCentre} onChange={(e) => setCostCentre(e.target.value)} maxLength={100} placeholder="none" />
+          </Field>
+          <Field label="Credit a month ($)" hint="Across the chat and API keys, from the first of the month (UTC). Empty: no group limit.">
+            <Input inputMode="decimal" value={credit} onChange={(e) => setCredit(e.target.value)} placeholder="no limit" />
+          </Field>
+          <div className="grid content-start gap-2">
+            <span className="text-sm font-medium">The credit is</span>
+            <Segmented
+              label="The credit is"
+              value={perMember}
+              onChange={setPerMember}
+              options={[
+                { value: 'shared', label: 'Shared by the members' },
+                { value: 'member', label: 'Each member’s' },
+              ]}
+            />
+            {spent !== undefined && spent !== null && (
+              <p className="text-xs text-muted-foreground">
+                Spent this month: {money(spent)}
+                {p.credit !== null && !p.creditPerMember ? ` of ${money(p.credit)}` : ''}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <ChoiceField label="Secrets in messages and files" choice="secretScanning" value={checks.secretScanning} onChange={(v) => setChecks({ ...checks, secretScanning: v })} />
+          <ChoiceField label="Personal data" choice="redactPii" value={checks.redactPii} onChange={(v) => setChecks({ ...checks, redactPii: v })} />
+          <ChoiceField label="The model checks each message" choice="moderation" value={checks.moderation} onChange={(v) => setChecks({ ...checks, moderation: v })} />
+          <ChoiceField label="Blocked words" choice="blockedPatterns" value={checks.blockedPatterns} onChange={(v) => setChecks({ ...checks, blockedPatterns: v })} />
+        </div>
+        <p className="text-xs text-muted-foreground">A person in several groups gets the strictest of the groups that set a safeguard. They apply in the chat and to API keys alike.</p>
+      </CardContent>
+      <CardFooter>
+        <Button onClick={submit} loading={save.isPending}>
+          Save policies
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
+
+function ChoiceField({ label, choice, value, onChange }: { label: string; choice: Choice; value: string; onChange: (v: string) => void }) {
+  return (
+    <Field label={label}>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={company}>The company&apos;s setting</SelectItem>
+          {choices[choice].map(([v, text]) => (
+            <SelectItem key={v} value={v}>
+              {text}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  )
+}

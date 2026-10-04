@@ -17,7 +17,12 @@ public sealed class FakeGateway : ILiteLlm
         public IReadOnlyList<string> Models { get; set; } = [];
         public int? MaxParallel { get; set; }
         public DateTimeOffset? Expires { get; set; }
+        /// <summary>The team (a group's credit) the key is in, if any.</summary>
+        public string? TeamId { get; set; }
     }
+
+    /// <summary>The teams the app made for groups, by id, with the duration their budget is per.</summary>
+    public ConcurrentDictionary<string, (GatewayTeam Team, string Duration)> Teams { get; } = new();
 
     public ConcurrentDictionary<string, decimal?> Budgets { get; } = new(StringComparer.OrdinalIgnoreCase);
     public ConcurrentDictionary<string, bool> Users { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -84,7 +89,7 @@ public sealed class FakeGateway : ILiteLlm
     public Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
     {
         Check();
-        IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel))];
+        IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel, k.TeamId))];
         return Task.FromResult(list);
     }
 
@@ -184,6 +189,41 @@ public sealed class FakeGateway : ILiteLlm
         }
         Users.TryRemove(email, out _);
         Budgets.TryRemove(email, out _);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<GatewayTeam>> TeamsAsync(CancellationToken ct = default)
+    {
+        Check();
+        return Task.FromResult<IReadOnlyList<GatewayTeam>>([.. Teams.Values.Select(t => t.Team)]);
+    }
+
+    public Task SetTeamAsync(GatewayTeam team, string duration, CancellationToken ct = default)
+    {
+        Check();
+        Teams[team.Id] = (team, duration);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>As LiteLLM does: the keys still in the team go with it.</summary>
+    public Task DeleteTeamAsync(string id, CancellationToken ct = default)
+    {
+        Check();
+        Teams.TryRemove(id, out _);
+        foreach (var k in Keys.Values.Where(k => k.TeamId == id).ToList())
+        {
+            Keys.TryRemove(k.Token, out _);
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task SetKeyTeamAsync(string token, string? teamId, CancellationToken ct = default)
+    {
+        Check();
+        if (Keys.TryGetValue(token, out var key))
+        {
+            key.TeamId = teamId;
+        }
         return Task.CompletedTask;
     }
 

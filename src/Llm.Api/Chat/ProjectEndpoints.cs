@@ -131,7 +131,8 @@ public static class ProjectEndpoints
     }
 
     /// <summary>Removes a project: its chats stay (out of any project), or go too with ?chats=delete.</summary>
-    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, string? chats = null, CancellationToken ct = default)
+    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Retention.Retention retention, string? chats = null,
+        CancellationToken ct = default)
     {
         var me = await Me(p, users);
         if (await db.Projects.SingleOrDefaultAsync(x => x.Id == id && x.UserId == me.Id, ct) is not { } project)
@@ -140,7 +141,8 @@ public static class ProjectEndpoints
         }
         if (chats == "delete")
         {
-            await db.Conversations.Where(c => c.ProjectId == id && c.UserId == me.Id).ExecuteDeleteAsync(ct);
+            // As a chat deleted on its own: its files go with it, and under legal hold it is only hidden.
+            await retention.DeleteAsync(me, await db.Conversations.Where(c => c.ProjectId == id && c.UserId == me.Id).Select(c => c.Id).ToListAsync(ct), ct);
         }
         db.Projects.Remove(project);
         await db.SaveChangesAsync(ct);

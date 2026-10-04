@@ -39,7 +39,7 @@ public sealed partial class ChatTitles(IServiceScopeFactory scopes, ILogger<Chat
             {
                 return;
             }
-            var asked = services.GetRequiredService<Safeguards.Safeguards>().Mask(question.Trim());
+            var asked = (await services.GetRequiredService<Safeguards.Safeguards>().MaskerAsync(user.Email ?? "", ct))(question.Trim());
             var request = new JsonObject
             {
                 ["model"] = small.Name,
