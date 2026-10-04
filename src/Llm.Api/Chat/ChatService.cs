@@ -1067,11 +1067,11 @@ public sealed partial class ChatService(
             system += "\n\n" + toolInstructions;
         }
         var toolNotes = system.Length - baseLength;
-        // A project's instructions, then the chat's own; then the project's files.
-        var project = conversation.ProjectId is { } pid ? await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == pid, ct) : null;
-        if (!string.IsNullOrWhiteSpace(project?.Instructions))
+        // An assistant's instructions, then the chat's own; then the assistant's files.
+        var assistant = conversation.AssistantId is { } aid ? await db.Assistants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == aid, ct) : null;
+        if (!string.IsNullOrWhiteSpace(assistant?.Instructions))
         {
-            system += $"\n\nThis conversation is in the person's project \"{project.Name}\". The project's instructions:\n" + project.Instructions.Trim();
+            system += $"\n\nThis conversation is with the assistant \"{assistant.Name}\". Its instructions:\n" + assistant.Instructions.Trim();
         }
         if (!string.IsNullOrWhiteSpace(conversation.SystemPrompt))
         {
@@ -1079,11 +1079,11 @@ public sealed partial class ChatService(
         }
         var person = system.Length - baseLength - toolNotes;
         var beforeFiles = system.Length;
-        if (project is not null)
+        if (assistant is not null)
         {
-            system += await ProjectFilesAsync(project, canReadFiles, ct);
+            system += await AssistantFilesAsync(assistant, canReadFiles, ct);
         }
-        var projectFiles = system.Length - beforeFiles;
+        var assistantFiles = system.Length - beforeFiles;
 
         // Rough, and on the safe side: ~3.5 characters a token for English and code.
         var context = model?.Context ?? 32768;
@@ -1107,7 +1107,7 @@ public sealed partial class ChatService(
         }
 
         return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped,
-            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, projectFiles));
+            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, assistantFiles));
     }
 
     /// <summary>

@@ -58,7 +58,7 @@ setups to paste.
   chat, once per tool and chat.
 - **Prompt cache.** The engine reads a prompt's unchanged start from its
   cache, so each request keeps its start unchanged: the date (to the day), the
-  tools' notes in a fixed order, your instructions, then the project's files;
+  tools' notes in a fixed order, your instructions, then the assistant's files;
   the tools stay in every round (on the last allowed round calling them is
   switched off, and the model is told); and with compaction off, the oldest
   messages are left out a quarter of the room at a time, not one by one. The
@@ -262,6 +262,65 @@ setups to paste.
 A question that never reached the server goes back into the box with its
 attachments, instead of being lost.
 
+## Assistants
+
+An assistant is a chat's starting point that a team can share (as custom GPTs,
+Gems and Claude's projects): instructions, files, a model, a thinking level,
+tools and a few conversation starters. **Workspace → Assistants** is the
+gallery: every assistant you may use, with search, who made it, how far it is
+shared, and how much it is used (chats started, people in the last 30 days).
+The chat list shows yours, those you edit and those you chat with.
+
+- **Starting a chat.** **Start a chat** (in the gallery or on its page) opens a
+  new chat with the assistant's name and starters; a starter is a first
+  question in one click. The chat starts with the assistant's model, thinking
+  and tools, as far as you may use them (a model or tool you may not use is
+  left to the defaults). You can change them in the chat as usual.
+- **What every answer reads.** Its instructions (after the app's, before the
+  chat's own) and its files (text inline up to a budget, the rest by
+  `read_file`; Python opens them too). A change applies to the next answer
+  of every chat with it.
+- **Moving a chat.** A chat's menu → **Move to assistant**, or **Without …** to
+  go on without it.
+- **Who may use it.** It is yours alone until you share it (its page →
+  **Sharing**): with **chosen groups** (groups you are in; an admin may choose
+  any), or with **everyone** (admins only). People you choose, and members of
+  groups you choose, may **edit** it (instructions, files, settings); only its
+  owner shares or removes it, and admins too once it is everyone's.
+- **Who sees it.** Nobody else, admins included: the gallery, its page, a chat
+  with it and its files are refused to anyone it is not shared with, as if it
+  did not exist. Chats with it stay each person's own; its page lists only
+  yours.
+- **Losing access.** Taken out of the group, a person no longer sees it. Their
+  chats with it say so and answer no more with it; **Go on without it** keeps
+  the chat without the assistant.
+- **Removing it.** Its chats stay, without it (yours can go too). Sharing an
+  assistant, and removing a shared one, are in the audit log.
+
+Projects became assistants: each project is a private assistant with the same
+instructions, files and chats.
+
+## Shared chats
+
+A chat's menu → **Share** makes a read-only link to it, for **everyone in the
+company** or **chosen groups** (groups you are in; an admin may choose any).
+It shows **the whole chat** (its branches, as it grows) or **the branch on
+screen** (up to its last message, as it is now). Making the link copies it.
+
+- **Opening it.** A link works only signed in, and only for the people it is
+  for; for anyone else it does not exist. It shows the messages and their files
+  (the Files panel too), with the branch arrows, and nothing to write with: no
+  box, no editing, no answering again, no tool approvals.
+- **Fork into my chats** copies it (or, from an answer's **Fork from here**, up
+  to that answer) into a chat of your own, with copies of its files, so the
+  fork stays whole whatever becomes of the original. The owner's own
+  instructions for the chat are not copied.
+- **Its owner** sees how many times it was opened and by how many people (their
+  own visits do not count), changes who may open it or what it shows (the
+  address stays), and **Revoke link** stops it at once, for everyone. Deleting
+  the chat revokes it too. One link a chat.
+- Sharing and revoking are in the audit log, with the chat's id, never its words.
+
 ## Sound and video
 
 - **Voice messages**: the microphone beside the paperclip records one; the
@@ -391,7 +450,10 @@ So that everyone gets their turn:
 ## Who sees what
 
 - A chat belongs to one person. Nobody else can read it, **admins included**:
-  every query is filtered by the signed-in person, attachments too.
+  every query is filtered by the signed-in person, attachments too. The
+  exceptions are the owner's to make: a shared chat's link (read-only, for the
+  company or chosen groups) and an assistant's files (for the people it is
+  shared with).
 - Deleting a person deletes their chats and attachments.
 - **Argus answers as the person asking.** The app calls Argus inside the
   network with `ARGUS_CHAT_CLIENT_TOKEN` and your email. Argus resolves the
@@ -460,6 +522,12 @@ fork must end on a question or a finished answer, never inside a tool round.
 lists the archived ones. Chats from before branches were each migrated to one
 branch.
 
+A chat's link is `GET`, `PUT` and `DELETE /api/chat/conversations/{id}/share`
+(`reach`: `Company` or `Groups`, with `groups`; `branch` with an optional
+`messageId`). `GET /api/shared/{link}` reads it and `POST /api/shared/{link}/fork`
+forks it. Assistants are under `/api/assistants` (`PUT .../sharing` for who may
+use and edit one); a new chat takes `assistantId`.
+
 ## When something goes wrong
 
 | The page says | Why | What to do |
@@ -498,8 +566,16 @@ branch.
   chosen answer, with settings and files; never inside a tool round; the owner
   only), a deleted chat's files (kept while a fork uses them), a chat's instructions and parameters, retries with another model,
   images to a model that can see and one that can't, SVG never served as an
-  image, and the migration of existing chats. Real Postgres, a fake model and
-  a fake Argus.
+  image, and the migration of existing chats. Assistants: a private one's
+  instructions and files in its chats and nobody else's, one shared with a group
+  used by its members and invisible to others (gallery, page, a new chat, its
+  file), a member who left the group told so and stopped, editors who change it
+  but neither share nor remove it, only admins making one everyone's, and a new
+  chat's model, thinking and tools. Shared chats: a link opening for a colleague
+  in the group and not for someone outside it or signed out, its files, the
+  owner's numbers, revoking stopping it, a fork with copies of the files and
+  without the owner's instructions, and a shared branch showing only that
+  branch. Real Postgres, a fake model and a fake Argus.
 - **UI (Vitest):**
   - the branch tree
   - the live-stream reducer
@@ -519,6 +595,13 @@ branch.
     own words, and the image viewer (arrows, keys, actual size)
   - the list's fork, archive, Archived view and unarchive; fork from an
     answer; the question rail; the archived notice
+  - the assistants gallery (use, search, yours), a new assistant, a chat started
+    from a starter, an assistant read-only for its users, its owner changing its
+    starters and sharing it with a group and an editor, and a chat whose
+    assistant was taken away going on without it
+  - a shared chat read-only with its files and forked, a link that does not
+    open, the owner's numbers and revoking, and sharing from the chat's menu
+    (chosen groups, the branch on screen, revoked)
 - **Browser (Playwright), desktop and phone, both themes, with axe, in CI
   too:** a chat with Argus's answers and two images, served by the browser
   itself, from the links to the image viewer.

@@ -1,3 +1,5 @@
+using Llm.Core.Access;
+
 namespace Llm.Core.Chat;
 
 public sealed class Conversation
@@ -33,8 +35,8 @@ public sealed class Conversation
     public Guid? ForkedFromId { get; set; }
     /// <summary>The scheduled task whose run this chat is, if any.</summary>
     public Guid? ScheduledTaskId { get; set; }
-    /// <summary>The project this chat belongs to, if any: its instructions and files go with every answer.</summary>
-    public Guid? ProjectId { get; set; }
+    /// <summary>The assistant this chat is with, if any: its instructions and files go with every answer.</summary>
+    public Guid? AssistantId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];
@@ -135,27 +137,83 @@ public sealed class AttachmentPage
 }
 
 /// <summary>
-/// A project (as in ChatGPT and Claude): chats kept together, with instructions and
-/// files that every answer in them reads. Its owner's only.
+/// An assistant (as custom GPTs, Gems and Claude's projects): instructions and files
+/// (its knowledge) that every answer of its chats reads, the model, thinking and tools a
+/// new chat with it starts with, and a few conversation starters. Its owner's alone until
+/// shared: with groups who use it, or company-wide (admins); chosen people and groups
+/// may edit it. Projects grew into assistants, and their rows are kept where they were.
 /// </summary>
-public sealed class Project
+public sealed class Assistant
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
+    /// <summary>Its owner: they share it and remove it.</summary>
     public Guid UserId { get; set; }
     public required string Name { get; set; }
     public string? Description { get; set; }
     /// <summary>Sent with every answer of its chats, after the app's system prompt and before a chat's own.</summary>
     public string? Instructions { get; set; }
+    /// <summary>The model a new chat with it uses (when the person may); null = the deployment's default.</summary>
+    public string? Model { get; set; }
+    /// <summary>The thinking level a new chat with it starts at; null = the deployment's default.</summary>
+    public string? Thinking { get; set; }
+    /// <summary>The tools a new chat with it has on (of those the person may use); null = the tools on in new chats.</summary>
+    public List<string>? Tools { get; set; }
+    /// <summary>Short prompts shown on a new chat with it, to start from.</summary>
+    public List<string> Starters { get; set; } = [];
+    /// <summary>Its icon and colour in lists (names the page knows: "bot", "code"…; "blue", "green"…).</summary>
+    public string Icon { get; set; } = "bot";
+    public string Color { get; set; } = "blue";
+    /// <summary>Who may use it besides its owner and editors.</summary>
+    public Reach Reach { get; set; }
+    /// <summary>The groups whose members may use it, when <see cref="Reach"/> is Groups.</summary>
+    public List<Guid> Groups { get; set; } = [];
+    /// <summary>People who may edit it (not share or remove it).</summary>
+    public List<Guid> EditorPeople { get; set; } = [];
+    /// <summary>Groups whose members may edit it.</summary>
+    public List<Guid> EditorGroups { get; set; } = [];
+    /// <summary>How many chats were started with it, by anyone (deleted ones too).</summary>
+    public int ChatsStarted { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-/// <summary>A file of a project (an uploaded attachment): every chat of the project has it.</summary>
-public sealed class ProjectFile
+/// <summary>A file of an assistant (an uploaded attachment): every chat with it has it.</summary>
+public sealed class AssistantFile
 {
-    public Guid ProjectId { get; set; }
+    public Guid AssistantId { get; set; }
     public Guid AttachmentId { get; set; }
     public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// A read-only link to a chat for people in the company or in chosen groups, never for
+/// anyone signed out: the whole chat as it is now, or one branch of it as it was when
+/// shared. Removing it (revoking) stops the link at once.
+/// </summary>
+public sealed class ChatShare
+{
+    /// <summary>The link's id: random, so it says nothing about when or what.</summary>
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ConversationId { get; set; }
+    /// <summary>The chat's owner, who shared it.</summary>
+    public Guid UserId { get; set; }
+    /// <summary>Null: the whole chat, with its branches, as it grows. Set: the branch that ends at this message.</summary>
+    public Guid? LeafId { get; set; }
+    /// <summary>Company (everyone who signs in) or Groups.</summary>
+    public Reach Reach { get; set; } = Reach.Company;
+    public List<Guid> Groups { get; set; } = [];
+    /// <summary>How many times others opened it.</summary>
+    public int Opens { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>Someone who opened a shared chat (its owner does not count), so the owner sees how many people did.</summary>
+public sealed class ChatShareView
+{
+    public Guid ShareId { get; set; }
+    public Guid UserId { get; set; }
+    public DateTimeOffset FirstAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset LastAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>Something a safeguard counts per person (a message refused, a picture drawn, a deep research), and when.</summary>

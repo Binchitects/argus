@@ -83,7 +83,8 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
-export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Message; siblings: Message[]; busy: boolean; onSwitch: (id: string) => void; onEdit: (m: Message, text: string) => void }) {
+/** A question; onEdit absent: read-only (a shared chat). */
+export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Message; siblings: Message[]; busy: boolean; onSwitch: (id: string) => void; onEdit?: (m: Message, text: string) => void }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [viewing, setViewing] = useState<number | null>(null)
   const images = m.attachments.filter((a) => a.kind === 'image')
@@ -125,7 +126,7 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
           className="grid w-full max-w-[85%] gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (editing.trim()) onEdit(m, editing.trim())
+            if (editing.trim()) onEdit?.(m, editing.trim())
             setEditing(null)
           }}
         >
@@ -144,11 +145,13 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
         <div className="flex items-center opacity-100 transition-opacity focus-within:opacity-100 sm:opacity-0 sm:group-hover/q:opacity-100 [@media(hover:none)]:opacity-100">
           <Branches siblings={siblings} current={m} onSwitch={onSwitch} label="Question" />
           <CopyButton text={m.content} label="Copy question" />
-          <Tooltip content="Edit: a new version, the old one stays">
-            <Button variant="ghost" size="icon-sm" className="size-7" disabled={busy} onClick={() => setEditing(m.content)} aria-label="Edit question">
-              <Pencil />
-            </Button>
-          </Tooltip>
+          {onEdit && (
+            <Tooltip content="Edit: a new version, the old one stays">
+              <Button variant="ghost" size="icon-sm" className="size-7" disabled={busy} onClick={() => setEditing(m.content)} aria-label="Edit question">
+                <Pencil />
+              </Button>
+            </Tooltip>
+          )}
         </div>
       )}
     </section>

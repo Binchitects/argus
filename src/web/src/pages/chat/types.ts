@@ -126,28 +126,96 @@ export interface ConversationSummary {
   archivedAt?: string | null
   /** An answer is being written (it goes on when the page closes): the page watches it again. */
   answering?: boolean
-  projectId?: string | null
+  assistantId?: string | null
 }
 
-/** A project: chats together, with instructions and files every answer in them reads. */
-export interface ProjectSummary {
+export type Reach = 'Private' | 'Groups' | 'Company'
+
+/** An assistant in the gallery: instructions, files and settings a team's chats start with. */
+export interface AssistantSummary {
   id: string
   name: string
   description: string | null
-  updatedAt: string
+  /** A name from assistant-icon.tsx ("bot", "code"…) and a colour ("blue"…). */
+  icon: string
+  color: string
+  /** Who may use it besides its owner and editors. */
+  reach: Reach
+  owner: string | null
+  /** The person's own. */
+  mine: boolean
+  canEdit: boolean
+  /** Chats started with it, by anyone. */
   chats: number
+  /** People who used it in the last 30 days. */
+  people: number
+  /** The person's own chats with it. */
+  myChats: number
   files: number
+  updatedAt: string
 }
 
-export interface Project {
+export interface Assistant extends Omit<AssistantSummary, 'owner' | 'chats' | 'people' | 'myChats' | 'files'> {
+  instructions: string | null
+  model: string | null
+  thinking: string | null
+  /** The tools a new chat with it has on; null: those on in new chats. */
+  tools: string[] | null
+  starters: string[]
+  owner: { id: string; name: string } | null
+  canShare: boolean
+  createdAt: string
+  files: (Attachment & { addedAt: string })[]
+  /** The person's own chats with it. */
+  chats: ConversationSummary[]
+  usage: { chats: number; people: number }
+  /** Who it is shared with: for those who may change it. */
+  sharing: { groups: Named[]; editorPeople: (Named & { userName: string })[]; editorGroups: Named[] } | null
+}
+
+export interface Named {
   id: string
   name: string
-  description: string | null
-  instructions: string | null
+}
+
+/** The assistant a chat is with, as the chat shows it. */
+export interface ChatAssistant {
+  id: string
+  name: string
+  icon: string
+  color: string
+  starters: string[]
+  /** The person lost access to it: the chat says so, and answers no more with it. */
+  noAccess: boolean
+}
+
+/** A chat's link, as its owner sees it. */
+export interface ChatShare {
+  id: string
+  reach: Reach
+  groups: Named[]
+  /** Only the branch that ends at leafId; otherwise the whole chat as it grows. */
+  branch: boolean
+  leafId: string | null
+  opens: number
+  people: number
   createdAt: string
+}
+
+/** A chat shared with the person, read-only. */
+export interface SharedChat {
+  id: string
+  title: string
+  owner: string
+  mine: boolean
+  branch: boolean
+  sharedAt: string
   updatedAt: string
-  files: (Attachment & { addedAt: string })[]
-  chats: ConversationSummary[]
+  currentLeafId: string | null
+  messages: Message[]
+  /** The owner's: the link and the chat, to manage it from here. */
+  link: ChatShare | null
+  conversationId: string | null
 }
 
 export interface Conversation extends ConversationSummary {
@@ -164,8 +232,8 @@ export interface Conversation extends ConversationSummary {
   archivedAt: string | null
   /** The chat this one was forked from, while it still exists. */
   forkedFrom: { id: string; title: string } | null
-  /** The project the chat is in, if any. */
-  project?: { id: string; name: string } | null
+  /** The assistant the chat is with, if any. */
+  assistant?: ChatAssistant | null
   createdAt: string
   messages: Message[]
 }
@@ -181,8 +249,8 @@ export interface ChatSettings {
   temperature?: number | null
   topP?: number | null
   maxTokens?: number | null
-  /** A new chat made in this project. */
-  projectId?: string | null
+  /** A new chat with this assistant. */
+  assistantId?: string | null
 }
 
 export type ChatEvent =

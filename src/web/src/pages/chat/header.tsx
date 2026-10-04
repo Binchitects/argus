@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FileDown, FoldVertical, FolderInput, FolderKanban, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router'
@@ -21,7 +21,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
-import { chatModel, projectsQuery } from './api'
+import { assistantsQuery, chatModel } from './api'
+import { AssistantIcon } from './assistant-icon'
 import type { ChatConfig, ChatSettings } from './types'
 import { useChatActions } from './chat-actions'
 
@@ -198,8 +199,9 @@ export function ChatHeader({
   chat,
   onCompact,
   onExport,
-  project,
+  assistant,
   onMove,
+  onShare,
 }: {
   config: ChatConfig
   settings: ChatSettings
@@ -214,9 +216,11 @@ export function ChatHeader({
   onCompact?: () => void
   /** Export the branch on screen, or its summary. */
   onExport?: (kind: ExportKind) => void
-  /** The project the chat is in (or a new chat will be in), and moving it to another. */
-  project?: { id: string; name: string } | null
-  onMove?: (projectId: string | null) => void
+  /** The assistant the chat is with (or a new chat will be with), and moving it to another. */
+  assistant?: HeaderAssistant | null
+  onMove?: (assistantId: string | null) => void
+  /** Share the chat: a read-only link. */
+  onShare?: () => void
 }) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
@@ -227,14 +231,14 @@ export function ChatHeader({
         <ModelPicker config={config} value={settings.model ?? null} onChange={(model) => onChange({ model: model ?? '' })} />
         <ThinkingPicker config={config} value={settings.thinking ?? null} onChange={(thinking) => onChange({ thinking: thinking ?? '' })} />
       </div>
-      {project && (
+      {assistant && (
         <Link
-          to={`/chat/projects/${project.id}`}
+          to={`/chat/assistants/${assistant.id}`}
           className="ms-2 hidden min-w-0 max-w-56 items-center gap-1.5 truncate rounded-md px-2 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring sm:flex"
-          aria-label={`Project: ${project.name}`}
+          aria-label={`Assistant: ${assistant.name}`}
         >
-          <FolderKanban className="size-3.5 shrink-0" aria-hidden="true" />
-          <bdi className="truncate">{project.name}</bdi>
+          <AssistantIcon icon={assistant.icon} color={assistant.color} size="sm" />
+          <bdi className="truncate">{assistant.name}</bdi>
         </Link>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-1">
@@ -244,7 +248,7 @@ export function ChatHeader({
             <FolderOpen /> <span className="tabular-nums">{filesCount}</span>
           </Button>
         </Tooltip>
-        {chat && <ChatMenu chat={chat} onCompact={onCompact} onExport={onExport} project={project} onMove={onMove} />}
+        {chat && <ChatMenu chat={chat} onCompact={onCompact} onExport={onExport} assistant={assistant} onMove={onMove} onShare={onShare} />}
       </span>
     </header>
   )
@@ -252,21 +256,31 @@ export function ChatHeader({
 
 export type ExportKind = 'md' | 'html' | 'pdf' | 'json' | 'summary'
 
+/** The assistant in a chat's header: its name and look. */
+export interface HeaderAssistant {
+  id: string
+  name: string
+  icon: string
+  color: string
+}
+
 function ChatMenu({
   chat,
   onCompact,
   onExport,
-  project,
+  assistant,
   onMove,
+  onShare,
 }: {
   chat: { id: string; title: string; archived: boolean }
   onCompact?: () => void
   onExport?: (kind: ExportKind) => void
-  project?: { id: string; name: string } | null
-  onMove?: (projectId: string | null) => void
+  assistant?: HeaderAssistant | null
+  onMove?: (assistantId: string | null) => void
+  onShare?: () => void
 }) {
   const { fork, archive, askDelete } = useChatActions(chat, true)
-  const projects = useQuery({ ...projectsQuery, enabled: !!onMove })
+  const assistants = useQuery({ ...assistantsQuery, enabled: !!onMove })
   return (
     <DropdownMenu>
       <Tooltip content="More">
@@ -283,22 +297,27 @@ function ChatMenu({
         <DropdownMenuItem disabled={!onCompact} onSelect={() => onCompact?.()}>
           <FoldVertical /> Compact
         </DropdownMenuItem>
+        {onShare && (
+          <DropdownMenuItem onSelect={() => onShare()}>
+            <Share2 /> Share
+          </DropdownMenuItem>
+        )}
         {onMove && (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <FolderInput /> Move to project
+              <Bot /> Move to assistant
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
-              {projects.data?.map((p) => (
-                <DropdownMenuItem key={p.id} disabled={p.id === project?.id} onSelect={() => onMove(p.id)}>
-                  <FolderKanban /> <bdi className="max-w-56 truncate">{p.name}</bdi>
+              {assistants.data?.map((a) => (
+                <DropdownMenuItem key={a.id} disabled={a.id === assistant?.id} onSelect={() => onMove(a.id)}>
+                  <AssistantIcon icon={a.icon} color={a.color} size="sm" /> <bdi className="max-w-56 truncate">{a.name}</bdi>
                 </DropdownMenuItem>
               ))}
-              {projects.data?.length === 0 && <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>}
-              {project && (
+              {assistants.data?.length === 0 && <DropdownMenuItem disabled>No assistants yet</DropdownMenuItem>}
+              {assistant && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => onMove(null)}>Out of {project.name}</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onMove(null)}>Without {assistant.name}</DropdownMenuItem>
                 </>
               )}
             </DropdownMenuSubContent>

@@ -15,14 +15,14 @@ public sealed partial class ChatService
         "Write in the language the person writes in, at most about 600 words. Write only the summary.";
 
     /// <summary>
-    /// A chat's files for its tools (read_file, Python): its project's first (in the order they
+    /// A chat's files for its tools (read_file, Python): its assistant's first (in the order they
     /// were added), then those its questions carried, oldest first.
     /// </summary>
     public static async Task<List<Guid>> FileIdsAsync(AppDbContext db, Guid conversationId, CancellationToken ct)
     {
-        var project = await db.Conversations.AsNoTracking().Where(c => c.Id == conversationId).Select(c => c.ProjectId).SingleOrDefaultAsync(ct);
-        var ids = project is { } pid
-            ? await db.ProjectFiles.AsNoTracking().Where(f => f.ProjectId == pid).OrderBy(f => f.AddedAt).Select(f => f.AttachmentId).ToListAsync(ct)
+        var assistant = await db.Conversations.AsNoTracking().Where(c => c.Id == conversationId).Select(c => c.AssistantId).SingleOrDefaultAsync(ct);
+        var ids = assistant is { } aid
+            ? await db.AssistantFiles.AsNoTracking().Where(f => f.AssistantId == aid).OrderBy(f => f.AddedAt).Select(f => f.AttachmentId).ToListAsync(ct)
             : [];
         var lists = await db.ChatMessages.AsNoTracking()
             .Where(m => m.ConversationId == conversationId && m.AttachmentsJson != null)
@@ -31,29 +31,29 @@ public sealed partial class ChatService
     }
 
     /// <summary>
-    /// A project's files as every answer of its chats reads them: text inline (cut to the
+    /// An assistant's files as every answer of its chats reads them: text inline (cut to the
     /// same size as an attachment, the rest by read_file), the others by name.
     /// </summary>
-    private async Task<string> ProjectFilesAsync(Project project, bool canReadFiles, CancellationToken ct)
+    private async Task<string> AssistantFilesAsync(Assistant assistant, bool canReadFiles, CancellationToken ct)
     {
-        var files = await db.ProjectFiles.AsNoTracking().Where(f => f.ProjectId == project.Id).OrderBy(f => f.AddedAt)
+        var files = await db.AssistantFiles.AsNoTracking().Where(f => f.AssistantId == assistant.Id).OrderBy(f => f.AddedAt)
             .Join(db.ChatAttachments, f => f.AttachmentId, a => a.Id, (f, a) => a).ToListAsync(ct);
         if (files.Count == 0)
         {
             return "";
         }
-        var text = new System.Text.StringBuilder("\n\nThe project's files (every conversation of the project has them):");
+        var text = new System.Text.StringBuilder("\n\nThe assistant's files (every conversation with it has them):");
         var room = chat.CurrentValue.InlineAttachmentChars * 3;
         foreach (var f in files)
         {
             if (f.Kind == "image" || f.Kind == "file" || f.Text.Length == 0 || room <= 0)
             {
-                text.Append("\n[project file: ").Append(f.FileName).Append(f.Kind == "image" ? " (a picture)" : canReadFiles ? " (read_file or run_python can open it)" : "").Append(']');
+                text.Append("\n[assistant file: ").Append(f.FileName).Append(f.Kind == "image" ? " (a picture)" : canReadFiles ? " (read_file or run_python can open it)" : "").Append(']');
                 continue;
             }
             var shown = Inline(f, Math.Min(chat.CurrentValue.InlineAttachmentChars, room), canReadFiles);
             room -= shown.Length;
-            text.Append("\n<project_file name=\"").Append(f.FileName.Replace("\"", "'", StringComparison.Ordinal)).Append("\">\n").Append(shown).Append("\n</project_file>");
+            text.Append("\n<assistant_file name=\"").Append(f.FileName.Replace("\"", "'", StringComparison.Ordinal)).Append("\">\n").Append(shown).Append("\n</assistant_file>");
         }
         return text.ToString();
     }

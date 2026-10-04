@@ -31,7 +31,9 @@ export const routes: RouteObject[] = [
           // The chat uses the whole window below the top bar.
           { path: 'chat', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/chat-page').then((m) => ({ Component: m.ChatPage }))) },
           { path: 'chat/:id', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/chat-page').then((m) => ({ Component: m.ChatPage }))) },
-          { path: 'chat/projects/:projectId', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/chat-page').then((m) => ({ Component: m.ChatPage }))) },
+          { path: 'chat/assistants/:assistantId', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/chat-page').then((m) => ({ Component: m.ChatPage }))) },
+          { path: 'shared/:shareId', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/shared-view').then((m) => ({ Component: m.SharedChatPage }))) },
+          { path: 'assistants', ...lazy(() => import('@/pages/assistants').then((m) => ({ Component: m.AssistantsPage }))) },
           { path: 'tasks', ...lazy(() => import('@/pages/tasks').then((m) => ({ Component: m.TasksPage }))) },
           { path: 'usage', ...lazy(() => import('@/pages/usage').then((m) => ({ Component: m.UsagePage }))) },
           { path: 'setup', ...lazy(() => import('@/pages/setup').then((m) => ({ Component: m.ConnectPage }))) },

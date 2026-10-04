@@ -407,7 +407,9 @@ public static class IdentityWiring
         Operations.OperationsEndpoints.MapOperations(app);
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
-        Chat.ProjectEndpoints.MapProjects(app);
+        Chat.AssistantEndpoints.MapAssistants(app);
+        Chat.ShareEndpoints.MapShares(app);
+        Access.SharingEndpoints.MapSharing(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Plugins.PluginEndpoints.MapPlugins(app);
         Models.ModelEndpoints.MapModels(app);

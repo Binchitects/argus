@@ -225,43 +225,48 @@ test.describe('context gauge', () => {
   })
 })
 
-test.describe('projects', () => {
-  test('a project is made with instructions and a file, a chat starts in it, and another moves in', async ({ page, isMobile }, info) => {
+test.describe('assistants', () => {
+  test('an assistant is made with instructions and a file, a chat starts with it, and another moves to it', async ({ page, isMobile }, info) => {
     const headers = { 'X-Requested-With': 'e2e' }
     const name = `Codec ${Date.now()}`
     const loose = (await (await page.request.post('/api/chat/conversations', { data: {}, headers })).json()).id
     try {
       await page.goto('/chat')
       const list = await chatList(page, isMobile)
-      await list.getByRole('button', { name: 'New project' }).click()
-      const dialog = page.getByRole('dialog', { name: 'New project' })
+      await list.getByRole('button', { name: 'New assistant' }).click()
+      const dialog = page.getByRole('dialog', { name: 'New assistant' })
       await dialog.getByLabel('Name').fill(name)
       await dialog.getByRole('button', { name: 'Create' }).click()
       await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
-      await page.getByLabel('Project instructions').fill('Answer as a codec engineer.')
+      await page.getByLabel('Assistant instructions').fill('Answer as a codec engineer.')
       await page.getByRole('region', { name: 'Instructions' }).getByRole('button', { name: 'Save' }).click()
       await expect(page.getByText('Instructions saved')).toBeVisible()
-      await page.getByLabel('Add files to the project').setInputFiles({ name: 'facts.txt', mimeType: 'text/plain', buffer: Buffer.from('The frame header is 12 bytes.\n') })
+      await page.getByLabel('Add files to the assistant').setInputFiles({ name: 'facts.txt', mimeType: 'text/plain', buffer: Buffer.from('The frame header is 12 bytes.\n') })
       await expect(page.getByRole('list', { name: 'Files' })).toContainText('facts.txt')
-      await expectAccessible(page, info, 'project')
-      await screenshot(page, info, `project${isMobile ? '-phone' : ''}`)
+      await expectAccessible(page, info, 'assistant')
+      await screenshot(page, info, `assistant${isMobile ? '-phone' : ''}`)
 
-      // A new chat from the project's page is in it.
-      await page.getByRole('button', { name: 'New chat in this project' }).click()
+      // A new chat from the assistant's page is with it.
+      await page.getByRole('button', { name: 'Start a chat' }).click()
       await expect(page).toHaveURL(/\/chat$/)
-      if (!isMobile) await expect(page.getByRole('link', { name: `Project: ${name}` })).toBeVisible()
+      if (!isMobile) await expect(page.getByRole('link', { name: `Assistant: ${name}` })).toBeVisible()
 
-      // Another chat moves in from its menu.
+      // Another chat moves to it from its menu.
       await page.goto(`/chat/${loose}`)
       await page.getByRole('button', { name: 'Chat actions' }).click()
-      await page.getByRole('menuitem', { name: 'Move to project' }).click()
+      await page.getByRole('menuitem', { name: 'Move to assistant' }).click()
       await page.getByRole('menuitem', { name }).click()
-      await expect(page.getByText('Moved to the project')).toBeVisible()
+      await expect(page.getByText('Moved to the assistant')).toBeVisible()
       const moved = await (await page.request.get(`/api/chat/conversations/${loose}`)).json()
-      expect(moved.project.name).toBe(name)
+      expect(moved.assistant.name).toBe(name)
+
+      // The gallery lists it.
+      await page.goto('/assistants')
+      await expect(page.getByRole('listitem', { name })).toBeVisible()
+      await expectAccessible(page, info, 'assistants')
     } finally {
-      const projects = (await (await page.request.get('/api/projects')).json()) as { id: string; name: string }[]
-      for (const p of projects.filter((p) => p.name === name)) await page.request.delete(`/api/projects/${p.id}`, { headers })
+      const assistants = (await (await page.request.get('/api/assistants')).json()) as { id: string; name: string }[]
+      for (const a of assistants.filter((a) => a.name === name)) await page.request.delete(`/api/assistants/${a.id}`, { headers })
       await page.request.delete(`/api/chat/conversations/${loose}`, { headers })
     }
   })

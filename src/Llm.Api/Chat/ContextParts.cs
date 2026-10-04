@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace Llm.Api.Chat;
 
 /// <summary>The system message's parts, by length: the app's own words, the tools' instructions, the person's, a compaction's summary.</summary>
-/// <param name="Files">A project's files in the system message.</param>
+/// <param name="Files">An assistant's files in the system message.</param>
 public sealed record SystemParts(int Base, int ToolNotes, int Person, int Summary, int Files = 0);
 
 /// <summary>
