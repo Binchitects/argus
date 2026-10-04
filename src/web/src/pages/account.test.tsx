@@ -25,6 +25,37 @@ describe('account', () => {
     expect(screen.getByRole('meter', { name: 'Credit used' })).toHaveAttribute('aria-valuenow', '10')
   })
 
+  it('the answer cache is each person’s choice for their key when an admin lets them choose', async () => {
+    let chosen = false
+    const calls = fakeApi(member, {
+      'GET /api/account/answer-cache': () => ({ json: { mode: 'opt-in', chosen, on: chosen, ttlHours: 24 } }),
+      'PUT /api/account/answer-cache': (body) => {
+        chosen = (body as { on: boolean }).on
+        return { json: { mode: 'opt-in', chosen, on: chosen, ttlHours: 24 } }
+      },
+    })
+    renderApp('/account')
+    const toggle = await screen.findByRole('switch', { name: 'Answer repeated requests from the cache' })
+    expect(toggle).not.toBeChecked()
+    expect(screen.getByText(/within 1 day, is answered from the cache/)).toBeInTheDocument()
+    await userEvent.click(toggle)
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/account/answer-cache')?.body).toEqual({ on: true }))
+    await waitFor(() => expect(toggle).toBeChecked())
+  })
+
+  it('the answer cache on for every key is said, and off says nothing', async () => {
+    fakeApi(member, { 'GET /api/account/answer-cache': () => ({ json: { mode: 'all', chosen: false, on: true, ttlHours: 6 } }) })
+    const { unmount } = renderApp('/account')
+    expect(await screen.findByText(/within 6 hours, is answered from the cache.*for every key/)).toBeInTheDocument()
+    expect(screen.queryByRole('switch', { name: 'Answer repeated requests from the cache' })).not.toBeInTheDocument()
+    unmount()
+
+    fakeApi(member, { 'GET /api/account/answer-cache': () => ({ json: { mode: 'off', chosen: false, on: false, ttlHours: 24 } }) })
+    renderApp('/account')
+    expect(await screen.findByText('Credit used')).toBeInTheDocument()
+    expect(screen.queryByText(/answered from the cache/)).not.toBeInTheDocument()
+  })
+
   it('answers can be chosen short, normal or thorough', async () => {
     let length = 'normal'
     const calls = fakeApi(member, {

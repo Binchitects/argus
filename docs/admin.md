@@ -188,6 +188,42 @@ The app writes `config/engine/models.ini` (the models added here),
 `config/engine/targets.json` (which model Prometheus scrapes). The engine and
 Prometheus read them; nothing else does.
 
+### The answer cache for API keys
+
+Pipelines and FAQ bots often ask the same thing again. **Settings → API keys →
+Answer cache** answers a repeated identical request from the app's database
+instead of the model:
+
+| value | what it does |
+|---|---|
+| `off` (the default) | every request goes to the model |
+| `opt-in` | each person turns it on for their key (Your account → API key → **Answer repeated requests from the cache**) |
+| `all` | every key |
+
+- **What counts as the same**: the same key, the same model and the same
+  request (messages, tools, temperature and every other field; whether it
+  streams and its `user` do not count), to `/v1/chat/completions` at
+  `gateway.DOMAIN`. Requests over 1 MB, and the Anthropic protocol, are never
+  cached. The chat never uses it.
+- **What a hit is**: the kept answer, whole or streamed as asked, with usage
+  at zero and the header `x-arena-cache: hit`. The gateway never sees it, so it
+  costs nothing and is not in the usage dashboards. A request asked of the
+  model while the cache applies says `x-arena-cache: miss`, and its answer is
+  kept if it is complete (errors and cut-off streams are not).
+- **How long**: **Keep cached answers for** (24 hours by default, up to 30
+  days). `Cache-Control: no-cache` on a request asks the model again (and keeps
+  the new answer); `no-store` leaves the cache out.
+- **A key the gateway would refuse** (unknown, blocked, expired, or not allowed
+  the model) gets nothing from the cache: its request goes to the gateway,
+  which refuses it. A person who turns the cache off for their key loses what
+  was kept for it at once.
+- **How it is reached**: Traefik sends `gateway.DOMAIN`'s chat completions to
+  the app while the app's health check (`GET /v1/answer-cache`) says the cache
+  is on; otherwise, and whenever the app is down, straight to LiteLLM as
+  before. A change applies within Traefik's check, 10 seconds. The app passes
+  everything it does not answer on to LiteLLM with the caller's own key, and
+  streams the answer back as it comes.
+
 ### What the admin area deliberately does not do
 
 **It does not recreate containers.** Admin → Models loads and unloads models
