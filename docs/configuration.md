@@ -43,6 +43,7 @@ each v3 option maps: [deployment.md](deployment.md#where-the-v3-env-options-went
 | file | what |
 |---|---|
 | `traefik/routes.yml` | Traefik's routes; `traefik/README.md` for a certificate of your own |
+| `traefik/certificate.yml` | written by `scripts/make-cert.sh`: the certificate Traefik serves, from `deploy/certs/` (not committed) |
 | `litellm.yaml` | the gateway: the default credit per person and period, retries. The models are registered by the app |
 | `argus.yaml` | Argus's paths; the GitLab comes from `.env` |
 | `prometheus/` | what is scraped, and the alert rules |

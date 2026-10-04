@@ -69,9 +69,22 @@ Traefik does TLS and nothing else does.
   their check turned off (`curl -k`, `NODE_TLS_REJECT_UNAUTHORIZED=0`).
 - **`ACME_EMAIL` in `.env`**: certificates from Let's Encrypt for the three
   names. They must resolve to this machine from the internet, with port 443 open.
-- **A certificate of your own** (a company CA's, a wildcard): the files and a
-  small `certificate.yml` beside `config/traefik/routes.yml`; Traefik picks it up
-  without a restart. `config/traefik/README.md` has the file.
+- **A certificate of your own**: `scripts/make-cert.sh` makes one with openssl,
+  signed by a CA of the deployment's own, for `DOMAIN`, `gateway.DOMAIN`,
+  `argus.DOMAIN` and `*.DOMAIN`, or installs a company's (`--cert FILE --key FILE
+  [--chain FILE]`). The files go to `certs/` (mounted into Traefik at `/certs`)
+  and the script writes `config/traefik/certificate.yml` naming them; Traefik
+  serves them at once. Then trust `certs/ca.crt` on the machines and in the
+  tools that use the stack:
+
+  ```bash
+  scripts/make-cert.sh
+  sudo cp certs/ca.crt /usr/local/share/ca-certificates/argus-arena.crt && sudo update-ca-certificates
+  curl --cacert certs/ca.crt https://DOMAIN/
+  ```
+
+  Run it again to renew: the same CA signs the new certificate, so nothing
+  needs trusting again. `config/traefik/README.md` has the details.
 
 ## Leaving a module out
 

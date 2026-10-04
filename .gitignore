@@ -30,6 +30,10 @@ data/
 *.db-shm
 .env
 config.local.yaml
+# Traefik's certificate and the file naming it (scripts/make-cert.sh): keys, never committed
+deploy/certs/*
+!deploy/certs/README.md
+deploy/config/traefik/certificate.yml
 # Unanchored `config.yaml` is not ignored: the stack bind-mounts two committed ones.
 
 # The test GitLab's seeded credentials and its data (throwaway, but still credentials)

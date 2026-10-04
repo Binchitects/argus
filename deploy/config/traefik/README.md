@@ -8,16 +8,24 @@ configuration besides the flags in `docker-compose.yml`.
 - **`ACME_EMAIL` in `.env`**: certificates from Let's Encrypt for `DOMAIN`,
   `gateway.DOMAIN` and `argus.DOMAIN`. The names must resolve to this machine
   from the internet, and port 443 must reach it.
-- **A certificate of your own** (a company CA's, a wildcard): put the files
-  here and a file beside `routes.yml` that names them, e.g. `certificate.yml`:
+- **A certificate of your own**: `scripts/make-cert.sh` (from `deploy/`). With
+  no options it makes, with openssl, a CA of this deployment's own and a
+  certificate it signs for `DOMAIN`, `gateway.DOMAIN`, `argus.DOMAIN` and
+  `*.DOMAIN` (825 days); run it again to renew with the same CA. With
+  `--cert FILE --key FILE [--chain FILE]` it installs a company's certificate
+  instead. Either way the files go to `deploy/certs/` (mounted at `/certs`) and
+  the script writes `certificate.yml` here, which Traefik picks up without a
+  restart:
 
   ```yaml
   tls:
     stores:
       default:
         defaultCertificate:
-          certFile: /etc/traefik/dynamic/tls.crt
-          keyFile: /etc/traefik/dynamic/tls.key
+          certFile: /certs/tls.crt
+          keyFile: /certs/tls.key
   ```
 
-  Traefik picks it up without a restart.
+  Trust `deploy/certs/ca.crt` where the stack is used (the script prints how,
+  for Linux, Windows, macOS, curl and Node). None of these files are committed.
+  With `ACME_EMAIL` set, Let's Encrypt's certificates are served instead.
