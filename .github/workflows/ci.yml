@@ -1,6 +1,6 @@
 name: CI
 
-# Every push and pull request: the API and Argus (.NET), both web apps, each
+# Every push and pull request: the API, Argus and Arena Code (.NET), both web apps, each
 # in a real browser, the deployment's tooling, and every env sample resolving
 # into a complete compose file.
 
@@ -37,6 +37,21 @@ jobs:
         run: |
           git config --global user.email ci@argus.invalid && git config --global user.name ci
           dotnet test tests/Argus.Tests -c Release
+
+  arena-code:
+    # The coding agent people download: against a fake gateway and fake MCP
+    # servers on real sockets, then published as one file and started.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: global.json }
+      - run: dotnet test tests/ArenaCode.Tests -c Release
+      - name: One self-contained file starts
+        run: |
+          tools/publish-arena-code.sh linux-x64
+          dist/arena-code/linux-x64/arena-code --version
+          dist/arena-code/linux-x64/arena-code --help
 
   web:
     runs-on: ubuntu-24.04
