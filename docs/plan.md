@@ -838,7 +838,7 @@ the rollback test (N6). *Done when:* each passes from a script.
   unpublished packs published; the live e2e suite one model test at a time in
   CI; Podman and the media paths in CI; a better Persian voice.
 
-### Order, if one thing at a time
+### Order, if one thing at a time (as planned after v4.0.0; superseded below)
 
 1. W1, T1, T7 (days each: the push webhook back on, the cache, concise answers).
 2. T2, T3 (the biggest token cuts; T3 also fixes deep research).
@@ -847,3 +847,89 @@ the rollback test (N6). *Done when:* each passes from a script.
 5. T4, T5, E6 (auto model, retrieval, arena mode).
 6. G1, G3, G2 (what procurement asks).
 7. P3, E4, E7, E8, G4 to G7.
+
+## Next (after v4.1.0)
+
+What v4.1.0 taught, and what follows from it:
+
+- **The GPU is the ceiling, not the code.** Flash-Next with its experts on the
+  CPU writes about 10 tokens a second and reads about 160. Every agentic
+  feature (deep research, triggers, sub-agents) waits on the model's writing.
+  The next speed gain is a second, small model doing the many small steps, not
+  more token cuts.
+- **Two things shipped on tests alone**: W2 (tasks run by GitLab events) was
+  not run against the test GitLab, and the sub-agent caps were not measured.
+- **Measuring needed scripts each time** (the research timings, the cache share,
+  where an answer's time went): admins need that view in the app (G5).
+- Still missing against the other enterprise chats: memory, shared assistants,
+  shared chats, a prompt library (E1, E2, E3, E5); company knowledge beyond code
+  (P3); company sign-in (G1).
+
+### v4.2: proven, and fast where it counts (about two weeks)
+
+1. **W2 live** *(S)*. The test GitLab: a merge request opened gets a review
+   comment (with Argus for context), a failing pipeline gets an explanation on
+   its merge request, an issue opened gets triage. *Done when:* all three land
+   in the test GitLab from real webhooks, each audited.
+2. **G5 Answer traces** *(S, moved up)*. Per answer, for admins: the prompt by
+   part, the cache share, each tool call and sub-agent with its time and
+   tokens, the engine's read and write speed, time in line. A sub-agent's
+   trace is part of its answer's. *Done when:* the slowest step of a deep
+   research answer is named on its trace, with no script.
+3. **T4a A model for small steps** *(M)*. A setting, **Model for sub-agents and
+   small steps** (summaries, titles, compaction, page condensing, triage), and
+   the engine holding two models at once. Qwen3-4B is already in the library
+   (no download): measure it on the GPU beside Flash-Next (one more expert
+   layer on the CPU) against the CPU alone, and keep the faster. *Done when:*
+   the live deep-research test finishes in under 6 minutes with its sources,
+   and a chat's title and compaction no longer wait on the big model.
+4. **W3 The API in CI** *(S)*. A GitLab CI template and a small `arena` CLI
+   (`arena ask`, `arena review`) calling the gateway with a project key.
+   *Done when:* the template reviews a merge request in the test GitLab's CI.
+5. **Small ones** *(S)*: the certificate's expiry on Admin → Overview and an
+   alert 30 days before; deep research's progress in words ("3 of 4 parts
+   done"); a plugin's OAuth refresh tested against the test GitLab.
+
+### v4.3: what people miss first (about three weeks)
+
+6. **E1 Memory** *(M)*, **E5 Prompt library and slash commands** *(S)*, **E3
+   Shared chats** *(S)*, **E2 Shared assistants** *(M)*, as described above.
+   E2 builds on projects; plugins add prompts (E5) through their manifest.
+7. **E6a Feedback** *(S)*: thumbs and a reason on every answer, a quality page
+   per model and assistant. (Arena mode is E6b, in v4.4.)
+
+### v4.4: knowledge and smarter routing (about four weeks)
+
+8. **P3 Company knowledge** *(L)*. Start with what the test GitLab can prove:
+   GitLab wikis and issues, then file shares and websites, then Confluence and
+   SharePoint (these need instances, or their vendors' sandboxes). Each person
+   gets only what they may read. *Done when:* a person without access to a
+   wiki gets nothing from it, and one with access gets the passage and its link.
+9. **T5 Retrieval instead of stuffing** *(M)*: project files and long
+   attachments through pgvector (the embedder already runs).
+10. **T4b Auto model** *(M)*: the small model of T4a answers the easy questions
+    itself and hands the rest on, with the reason shown; **E6b Arena mode**
+    *(M)* to check it on the company's own questions.
+
+### v4.5: governance (about three weeks)
+
+11. **G1 Company sign-in** *(M)*: OIDC first (Keycloak as the test IdP), then
+    SAML and SCIM. **G3 Budgets per team** *(S)*. **G2 Retention and legal
+    hold** *(M)*. **G4 Safeguards on the API path and secret scanning** *(M)*.
+
+### Later
+
+E4 Canvas, E7 Live voice, E8 Bots and the PWA, G6 Scale out, G7 Offline and
+recovery, T6 Answer cache, and N7 and N8 as above.
+
+### What needs a yes first
+
+Downloads are asked for first, with name, source and size:
+
+- G1: a Keycloak image (to test OIDC);
+- E8: a Mattermost image (to test a bot);
+- E7: a streaming speech model, if the speech server's own is not enough;
+- P3 beyond GitLab: a Confluence or SharePoint sandbox.
+
+T4a needs none: Qwen3-4B is in the library.
+
