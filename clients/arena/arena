@@ -1,0 +1,668 @@
+#!/usr/bin/env python3
+"""arena: Argus Arena's models from a terminal or a CI job.
+
+Python 3.8 or later and its standard library only: copy this one file anywhere.
+
+  arena ask "question"             answers as it is written; text piped in is added to the question
+  arena review [--dry-run]         reviews a GitLab merge request and posts it as one note
+  arena explain-failure [LOG ...]  explains a failure from job logs, or from the pipeline's failed jobs
+
+The gateway (every command):
+  ARENA_URL        the gateway, https://gateway.DOMAIN (with or without /v1)
+  ARENA_KEY        an API key: a person's, or one made for the pipeline
+  ARENA_MODEL      the model (default: the first chat model the key may use)
+  ARENA_CA_CERT    a CA to trust besides the system's: a file, or the PEM itself
+                   (SSL_CERT_FILE is honoured too, and CI_SERVER_TLS_CA_FILE)
+  ARENA_TIMEOUT    seconds to wait for the next part of an answer (600)
+  ARENA_MAX_CHARS  how much of a diff, of the logs or of piped text is sent (40000 characters)
+
+GitLab (review, and explain-failure in a pipeline), mostly set by GitLab CI:
+  CI_API_V4_URL, CI_PROJECT_ID, CI_MERGE_REQUEST_IID, CI_PIPELINE_ID, CI_JOB_ID
+  ARENA_GITLAB_TOKEN  a token with the api scope, at least Reporter in the project
+  ARENA_REVIEW_PROMPT or ARENA_REVIEW_PROMPT_FILE    the review's instructions
+  ARENA_EXPLAIN_PROMPT or ARENA_EXPLAIN_PROMPT_FILE  the explanation's instructions
+
+Exit codes:
+  0    done (also: nothing to review, no failed job)
+  1    an unexpected error
+  2    wrong arguments, or nothing to ask
+  3    configuration missing or unreadable
+  4    the gateway failed or refused: its address, certificate, key, model or credit
+  5    GitLab failed or refused: reading the merge request or the jobs, posting the note
+  130  interrupted
+"""
+
+import argparse
+import http.client
+import json
+import os
+import re
+import socket
+import ssl
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+UNEXPECTED, USAGE, CONFIG, GATEWAY, GITLAB, INTERRUPTED = 1, 2, 3, 4, 5, 130
+
+MAX_CHARS = 40000
+# A model that is not loaded is loaded when asked for, which can take minutes before the first word.
+TIMEOUT = 600
+MAX_JOBS = 5
+DESCRIPTION_CHARS = 4000
+BROKEN = (socket.timeout, TimeoutError, ConnectionError, ssl.SSLError, http.client.HTTPException)
+
+REVIEW_PROMPT = """You review a merge request. Report what would break or mislead: bugs, security problems, \
+missing error handling, and changes that do not do what the title and description say. For each, name the \
+file and the line, say why it matters, and give the fix. Leave out style preferences and praise. If nothing \
+needs changing, say so in one sentence. Answer in Markdown, as short as the findings allow."""
+
+EXPLAIN_PROMPT = """A CI pipeline failed. From the end of each failed job's log, say what failed and the most \
+likely cause, quoting the log line that shows it, then the fix: the command, file or setting to change. If the \
+log does not show the cause, say what to look at next. Answer in Markdown, briefly."""
+
+
+class Failure(Exception):
+    """Something that ends the run with an exit code and a message in words."""
+
+    def __init__(self, code, message, status=None):
+        super().__init__(message)
+        self.code, self.status = code, status
+
+
+def sentence(text):
+    text = str(text).strip()
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
+def tls_context(env):
+    """The system's CAs, and the deployment's or GitLab's own when one is named."""
+    context = ssl.create_default_context()
+    for name in ("SSL_CERT_FILE", "ARENA_CA_CERT", "CI_SERVER_TLS_CA_FILE"):
+        value = env.get(name, "").strip()
+        if not value:
+            continue
+        try:
+            if value.startswith("-----BEGIN"):
+                context.load_verify_locations(cadata=value)
+            else:
+                context.load_verify_locations(cafile=value)
+        except (OSError, ssl.SSLError, ValueError) as e:
+            raise Failure(CONFIG, "%s: the certificate cannot be read (%s)." % (name, e))
+    return context
+
+
+def positive(env, name, default):
+    value = env.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number <= 0:
+        raise Failure(CONFIG, "%s must be a whole number above 0, not %r." % (name, value))
+    return number
+
+
+def error_text(body):
+    """The reason in a refusal's body: the gateway's error.message, GitLab's message or error."""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return " ".join(body.split())[:300]
+    if isinstance(data, dict):
+        reason = data.get("error_description") or data.get("error") or data.get("message") or data
+        if isinstance(reason, dict):
+            reason = reason.get("message", reason)
+    else:
+        reason = data
+    text = reason if isinstance(reason, str) else json.dumps(reason)
+    return text[:500]
+
+
+class Http:
+    """Requests to one service, with its refusals turned into a Failure of that service's exit code."""
+
+    def __init__(self, name, code, base, headers, context, timeout):
+        self.name, self.code, self.base, self.headers = name, code, base, headers
+        self.context, self.timeout = context, timeout
+
+    @staticmethod
+    def address(name, value):
+        if not re.match(r"https?://[^/]", value):
+            raise Failure(CONFIG, "%s must be an address starting with https://, not %r." % (name, value))
+        return value
+
+    def open(self, method, path, body=None, query=None):
+        url = self.base + path + ("?" + urllib.parse.urlencode(query) if query else "")
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        request = urllib.request.Request(url, data=data, method=method, headers=dict(self.headers))
+        if data is not None:
+            request.add_header("Content-Type", "application/json")
+        try:
+            return urllib.request.urlopen(request, context=self.context, timeout=self.timeout)
+        except urllib.error.HTTPError as e:
+            try:
+                reason = error_text(e.read().decode("utf-8", "replace"))
+            except BROKEN:
+                reason = e.reason
+            finally:
+                e.close()
+            raise Failure(self.code, self.refused(e.code, path, sentence(reason)), e.code)
+        except urllib.error.URLError as e:
+            raise Failure(self.code, self.unreachable(e.reason))
+        except BROKEN as e:
+            raise Failure(self.code, self.unreachable(e))
+
+    def read(self, response):
+        """The whole body; a connection that breaks or stalls on the way ends the run."""
+        try:
+            return response.read().decode("utf-8", "replace")
+        except BROKEN as e:
+            raise Failure(self.code, self.stopped(e))
+
+    def fetch(self, method, path, body=None, query=None):
+        """A request's answer as JSON, with the response's headers."""
+        with self.open(method, path, body, query) as response:
+            text, headers = self.read(response), response.headers
+        if "html" in headers.get("Content-Type", ""):
+            raise Failure(self.code, self.web_page())
+        try:
+            return json.loads(text), headers
+        except ValueError:
+            raise Failure(self.code, "%s answered %s with something that is not JSON." % (self.name, path))
+
+    def json(self, method, path, body=None, query=None):
+        return self.fetch(method, path, body, query)[0]
+
+    def unreachable(self, reason):
+        if isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(reason):
+            return ("%s's certificate is not trusted (%s). Set ARENA_CA_CERT to the CA that signed it "
+                    "(a deployment's own: certs/ca.crt)." % (self.name, getattr(reason, "verify_message", None) or reason))
+        if isinstance(reason, (socket.timeout, TimeoutError)):
+            return "%s did not answer within %d seconds." % (self.name, self.timeout)
+        return "%s cannot be reached at %s: %s" % (self.name, self.base, sentence(reason))
+
+    def stopped(self, e):
+        if isinstance(e, (socket.timeout, TimeoutError)):
+            return "%s stopped answering for %d seconds." % (self.name, self.timeout)
+        return "%s's answer broke off: %s" % (self.name, sentence(e))
+
+    def refused(self, status, path, reason):
+        return "%s answered %d to %s: %s" % (self.name, status, path, reason)
+
+    def web_page(self):
+        return "%s answered with a web page, not the API." % self.name
+
+
+class Gateway(Http):
+    """The gateway's OpenAI-compatible API, with an API key."""
+
+    def __init__(self, env, context):
+        url, key = env.get("ARENA_URL", "").strip().rstrip("/"), env.get("ARENA_KEY", "").strip()
+        missing = [name for name, value in (("ARENA_URL", url), ("ARENA_KEY", key)) if not value]
+        if missing:
+            raise Failure(CONFIG, "Set %s: the gateway's address (https://gateway.DOMAIN) and an API key." % " and ".join(missing))
+        self.address("ARENA_URL", url)
+        if not url.endswith("/v1"):
+            url += "/v1"
+        headers = {"Authorization": "Bearer " + key, "User-Agent": "arena-cli", "Accept": "application/json, text/event-stream"}
+        super().__init__("The gateway", GATEWAY, url, headers, context, positive(env, "ARENA_TIMEOUT", TIMEOUT))
+
+    def refused(self, status, path, reason):
+        if status == 401:
+            return "The gateway refused the key (401): %s Check ARENA_KEY, and that it may use the model." % reason
+        if status == 404:
+            return "The gateway has nothing at %s (404): %s Is ARENA_URL the gateway's address, https://gateway.DOMAIN?" % (path, reason)
+        return super().refused(status, path, reason)
+
+    def web_page(self):
+        return ("ARENA_URL answered with a web page, not the API: use the gateway's address, "
+                "https://gateway.DOMAIN, not the app's.")
+
+    def model(self, wanted):
+        """The model asked for, or the first chat model this key may use."""
+        if wanted:
+            return wanted
+        names = [m.get("id") for m in self.json("GET", "/models").get("data", []) if isinstance(m, dict) and m.get("id")]
+        try:
+            modes = {row.get("model_name"): (row.get("model_info") or {}).get("mode") or "chat"
+                     for row in self.json("GET", "/model/info").get("data", []) if isinstance(row, dict)}
+        except Failure:
+            modes = {}  # not every gateway says what each model is for
+        chat = [n for n in names if modes.get(n, "chat") == "chat"]
+        if not chat:
+            raise Failure(GATEWAY, "This key may use no chat model. Ask an admin for access, or set ARENA_MODEL.")
+        return chat[0]
+
+    def chat(self, model, messages, out, err):
+        """Streams the answer to out as it comes, and returns it whole."""
+        body = {"model": model, "messages": messages, "stream": True}
+        parts = []
+        with self.open("POST", "/chat/completions", body) as response:
+            kind = response.headers.get("Content-Type", "")
+            if "html" in kind:
+                raise Failure(GATEWAY, self.web_page())
+            if "event-stream" not in kind:
+                # A gateway that answers in one piece despite stream: true.
+                data = parse(self.read(response))
+                text = (((data.get("choices") or [{}])[0].get("message") or {}).get("content")) or ""
+                out.write(text)
+                parts.append(text)
+            else:
+                try:
+                    self.stream(response, parts, out, err)
+                except BROKEN as e:
+                    raise Failure(GATEWAY, self.stopped(e))
+        text = "".join(parts)
+        if text and not text.endswith("\n"):
+            out.write("\n")
+        out.flush()
+        if not text.strip():
+            raise Failure(GATEWAY, "The model answered with nothing.")
+        return text
+
+    @staticmethod
+    def stream(response, parts, out, err):
+        """Server-sent events: each piece of the answer written as it comes."""
+        thinking = False
+        for raw in response:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if payload == "[DONE]":
+                break
+            for choice in parse(payload).get("choices") or []:
+                delta = choice.get("delta") or {}
+                if delta.get("reasoning_content") and not thinking and not parts:
+                    thinking = True
+                    err.write("(thinking)\n")
+                    err.flush()
+                if delta.get("content"):
+                    out.write(delta["content"])
+                    out.flush()
+                    parts.append(delta["content"])
+
+
+def parse(payload):
+    """One piece of the gateway's answer; an error in the stream ends the run with its words."""
+    try:
+        data = json.loads(payload)
+    except ValueError:
+        raise Failure(GATEWAY, "The gateway sent something that is not JSON: %s" % payload[:200])
+    if not isinstance(data, dict):
+        raise Failure(GATEWAY, "The gateway sent something unexpected: %s" % payload[:200])
+    if data.get("error"):
+        raise Failure(GATEWAY, "The gateway stopped the answer: %s" % sentence(error_text(json.dumps(data))))
+    return data
+
+
+class GitLab(Http):
+    """GitLab's API for one project, with ARENA_GITLAB_TOKEN."""
+
+    def __init__(self, env, context, project=None, need_token=True):
+        api = env.get("CI_API_V4_URL", "").strip().rstrip("/")
+        project = project or env.get("CI_PROJECT_ID", "").strip()
+        token = env.get("ARENA_GITLAB_TOKEN", "").strip()
+        missing = [n for n, v in (("CI_API_V4_URL", api), ("CI_PROJECT_ID", project)) if not v]
+        if need_token and not token:
+            missing.append("ARENA_GITLAB_TOKEN")
+        if missing:
+            raise Failure(CONFIG, "Set %s (GitLab CI sets the CI_ variables in a pipeline)." % ", ".join(missing))
+        self.address("CI_API_V4_URL", api)
+        headers = {"User-Agent": "arena-cli"}
+        if token:
+            headers["PRIVATE-TOKEN"] = token
+        self.project = urllib.parse.quote(project, safe="")
+        super().__init__("GitLab", GITLAB, api, headers, context, 60)
+
+    def refused(self, status, path, reason):
+        if status == 401:
+            return "GitLab refused ARENA_GITLAB_TOKEN (401): %s" % reason
+        if status == 403:
+            return ("GitLab says ARENA_GITLAB_TOKEN may not do this (403): %s It needs the api scope "
+                    "and at least Reporter in the project." % reason)
+        if status == 404:
+            return ("GitLab has nothing at %s (404): check the project, the merge request or the pipeline, "
+                    "and that the token can see them." % path)
+        return super().refused(status, path, reason)
+
+    def path(self, rest):
+        return "/projects/%s%s" % (self.project, rest)
+
+    def pages(self, rest, query=None):
+        """Every page of a list, following GitLab's X-Next-Page."""
+        page, rows = "1", []
+        for _ in range(100):
+            data, headers = self.fetch("GET", self.path(rest), query=dict(query or {}, per_page=100, page=page))
+            if not isinstance(data, list):
+                raise Failure(GITLAB, "GitLab answered %s with something that is not a list." % rest)
+            rows.extend(data)
+            page = headers.get("X-Next-Page", "")
+            if not page:
+                break
+        return rows
+
+    def text(self, rest):
+        with self.open("GET", self.path(rest)) as response:
+            return self.read(response)
+
+    def note(self, iid, body):
+        """Comments on a merge request; returns the note's ID."""
+        return self.json("POST", self.path("/merge_requests/%s/notes" % iid), {"body": body}).get("id")
+
+
+def fence(text):
+    """A Markdown code fence longer than any run of backticks in the text."""
+    longest = max((len(m) for m in re.findall(r"`{3,}", text)), default=2)
+    return "`" * (longest + 1)
+
+
+def file_diff(change):
+    old, new = change.get("old_path") or "", change.get("new_path") or ""
+    if change.get("new_file"):
+        head = "--- /dev/null\n+++ b/%s" % new
+    elif change.get("deleted_file"):
+        head = "--- a/%s\n+++ /dev/null" % old
+    else:
+        head = "--- a/%s\n+++ b/%s" % (old, new)
+    body = change.get("diff") or "(no diff shown: binary, too large for GitLab, or only the mode changed)\n"
+    return head + "\n" + body
+
+
+def fit_diff(changes, budget):
+    """Whole files while they fit (generated ones last), part of the next one, and the names of the rest."""
+    shown, left, room, cut = [], [], budget, None
+    for change in sorted(changes, key=lambda c: bool(c.get("generated_file"))):
+        text = file_diff(change)
+        if len(text) <= room:
+            shown.append(text)
+            room -= len(text)
+        else:
+            left.append((change.get("new_path") or change.get("old_path") or "?", text))
+    if left and (room >= 1000 or not shown):
+        cut, text = left.pop(0)
+        shown.append(text[:room] + "\n[cut to fit]\n")
+    return "\n".join(t.rstrip("\n") for t in shown), cut, [path for path, _ in left]
+
+
+def names(paths, most=20):
+    return ", ".join(paths[:most]) + (" and %d more" % (len(paths) - most) if len(paths) > most else "")
+
+
+ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+SECTION = re.compile(r"section_(?:start|end):\d+:[^\s\x1b]*")
+
+
+def clean_log(text):
+    """A job log without colours, GitLab's section markers, or what a progress bar drew over."""
+    lines = []
+    for line in text.split("\n"):
+        drawn = [part for part in ANSI.sub("", SECTION.sub("", line)).split("\r") if part.strip()]
+        lines.append(drawn[-1].rstrip() if drawn else "")
+    return "\n".join(lines).strip("\n")
+
+
+def tail(text, budget):
+    if len(text) <= budget:
+        return text
+    return "[the start of the log is cut to fit]\n" + text[-budget:].split("\n", 1)[-1]
+
+
+def job_title(job):
+    """A job by name and stage, with GitLab's reason for the failure when it gives one."""
+    reason = job.get("failure_reason")
+    return "%s (stage %s%s)" % (job.get("name"), job.get("stage"), ", " + reason.replace("_", " ") if reason else "")
+
+
+def strip_thinking(text):
+    return re.sub(r"<think>[\s\S]*?</think>\s*", "", text).strip()
+
+
+def instructions(args, env, name, default):
+    """--prompt, --prompt-file, ARENA_<name>_PROMPT_FILE, ARENA_<name>_PROMPT, or the default."""
+    if args.prompt:
+        return args.prompt
+    path = args.prompt_file or env.get("ARENA_%s_PROMPT_FILE" % name, "").strip()
+    if path:
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read().strip()
+        except OSError as e:
+            raise Failure(CONFIG, "The instructions in %s cannot be read: %s" % (path, sentence(e.strerror or e)))
+        if text:
+            return text
+    return env.get("ARENA_%s_PROMPT" % name, "").strip() or default
+
+
+def budget_of(args, env):
+    return args.max_chars or positive(env, "ARENA_MAX_CHARS", MAX_CHARS)
+
+
+def answer_of(gateway, model, prompt, question, out, err):
+    """The model's answer, streamed to out, without any thinking it wrote into the text."""
+    text = strip_thinking(gateway.chat(model, [{"role": "system", "content": prompt}, {"role": "user", "content": question}], out, err))
+    if not text:
+        raise Failure(GATEWAY, "The model answered with its thinking only.")
+    return text
+
+
+def ask(args, env, io):
+    stdin, out, err = io
+    question = " ".join(args.question).strip()
+    budget = budget_of(args, env)
+    if not stdin.isatty():
+        piped = stdin.read()
+        if piped.strip():
+            if len(piped) > budget:
+                piped = piped[:budget] + "\n[cut to fit: the first %d of %d characters]" % (budget, len(piped))
+            question = (question + "\n\n" + piped) if question else piped
+    if not question.strip():
+        raise Failure(USAGE, 'Ask something: arena ask "question", or pipe text in.')
+    gateway = Gateway(env, tls_context(env))
+    model = gateway.model(args.model or env.get("ARENA_MODEL", "").strip())
+    messages = ([{"role": "system", "content": args.system}] if args.system else []) + [{"role": "user", "content": question}]
+    gateway.chat(model, messages, out, err)
+    return 0
+
+
+def review(args, env, io):
+    _, out, err = io
+    iid = args.mr or env.get("CI_MERGE_REQUEST_IID", "").strip()
+    if not iid:
+        raise Failure(CONFIG, "No merge request: run it in a merge request pipeline (CI_MERGE_REQUEST_IID), or give --mr.")
+    context = tls_context(env)
+    gitlab = GitLab(env, context, args.project, need_token=not args.dry_run)
+    gateway = Gateway(env, context)
+    prompt = instructions(args, env, "REVIEW", REVIEW_PROMPT)
+    budget = budget_of(args, env)
+
+    mr = gitlab.json("GET", gitlab.path("/merge_requests/%s" % iid))
+    try:
+        changes = gitlab.pages("/merge_requests/%s/diffs" % iid)
+    except Failure as e:
+        if e.status != 404:
+            raise
+        # GitLab before 15.7 has only /changes.
+        changes = gitlab.json("GET", gitlab.path("/merge_requests/%s/changes" % iid)).get("changes") or []
+    if not changes:
+        err.write("Merge request !%s changes nothing: nothing to review.\n" % iid)
+        return 0
+
+    diff, cut, left = fit_diff(changes, budget)
+    shown = len(changes) - len(left) - (1 if cut else 0)
+    note = ""
+    if cut or left:
+        note = "\nThe changes were cut to fit: %d of %d files in full" % (shown, len(changes))
+        note += ("; %s in part" % cut) if cut else ""
+        note += ("; left out: %s" % names(left)) if left else ""
+        note += ". Review what is shown, and do not guess about the rest.\n"
+    marks = fence(diff)
+    description = (mr.get("description") or "").strip() or "(none)"
+    if len(description) > DESCRIPTION_CHARS:
+        description = description[:DESCRIPTION_CHARS] + "\n[cut to fit]"
+    question = "Merge request !%s: %s\n%s into %s, by %s\n\nIts description:\n%s\n\nIts changes:\n%sdiff\n%s\n%s\n%s" % (
+        iid, mr.get("title") or "", mr.get("source_branch") or "?", mr.get("target_branch") or "?",
+        (mr.get("author") or {}).get("username") or "?", description, marks, diff, marks, note)
+
+    model = gateway.model(args.model or env.get("ARENA_MODEL", "").strip())
+    err.write("Reviewing !%s (%d files) with %s.\n" % (iid, len(changes), model))
+    err.flush()
+    answer = answer_of(gateway, model, prompt, question, out, err)
+
+    # The merge request's head, whose changes were read (CI_COMMIT_SHA can be a merged-results commit).
+    sha = (mr.get("sha") or env.get("CI_COMMIT_SHA") or "")[:8]
+    footer = "Review by Argus Arena (%s)%s." % (model, " of " + sha if sha else "")
+    if cut or left:
+        footer += " It saw %d of %d changed files in full%s%s (ARENA_MAX_CHARS is %d)." % (
+            shown, len(changes), ", %s in part" % cut if cut else "", "; left out: " + names(left) if left else "", budget)
+    if args.dry_run:
+        err.write("Dry run: nothing posted. The note would end with: %s\n" % footer)
+        return 0
+    note_id = gitlab.note(iid, "%s\n\n---\n_%s_\n" % (answer, footer))
+    url = mr.get("web_url")
+    err.write("Posted the review on !%s%s.\n" % (iid, ": %s#note_%s" % (url, note_id) if url and note_id else ""))
+    return 0
+
+
+def explain_failure(args, env, io):
+    stdin, out, err = io
+    context = tls_context(env)
+    budget = budget_of(args, env)
+    logs, about, gitlab = [], "", None
+    for path in args.logs:
+        try:
+            if path == "-":
+                logs.append(("the log on stdin", stdin.read()))
+            else:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    logs.append((os.path.basename(path), f.read()))
+        except OSError as e:
+            raise Failure(CONFIG, "The log %s cannot be read: %s" % (path, sentence(e.strerror or e)))
+    pipeline = args.pipeline or env.get("CI_PIPELINE_ID", "").strip()
+    if not args.logs or args.post:
+        gitlab = GitLab(env, context, args.project)
+    if not args.logs:
+        if not pipeline:
+            raise Failure(CONFIG, "No log and no pipeline: give a log file, run it in a pipeline (CI_PIPELINE_ID), or give --pipeline.")
+        me = env.get("CI_JOB_ID", "").strip()
+        failed = [j for j in gitlab.pages("/pipelines/%s/jobs" % pipeline, {"scope[]": "failed"}) if str(j.get("id")) != me]
+        if not failed:
+            err.write("No job failed in pipeline #%s: nothing to explain.\n" % pipeline)
+            return 0
+        about = "Pipeline #%s of %s failed on %s. Failed jobs: %s." % (
+            pipeline, env.get("CI_PROJECT_PATH") or "the project", env.get("CI_COMMIT_REF_NAME") or "?",
+            ", ".join(job_title(j) for j in failed))
+        if len(failed) > MAX_JOBS:
+            about += " Only the first %d jobs' logs follow." % MAX_JOBS
+        for job in failed[:MAX_JOBS]:
+            try:
+                log = gitlab.text("/jobs/%s/trace" % job.get("id"))
+            except Failure as e:
+                if e.status != 404:
+                    raise
+                log = "(no log: the job failed before it ran)"
+            logs.append((job_title(job), log))
+    each = max(1000, budget // len(logs))
+    parts = []
+    for name, text in logs:
+        text = tail(clean_log(text), each) or "(empty)"
+        marks = fence(text)
+        parts.append("The end of %s:\n%s\n%s\n%s" % (name, marks, text, marks))
+    question = (about + "\n\n" if about else "") + "\n\n".join(parts)
+
+    gateway = Gateway(env, context)
+    model = gateway.model(args.model or env.get("ARENA_MODEL", "").strip())
+    answer = answer_of(gateway, model, instructions(args, env, "EXPLAIN", EXPLAIN_PROMPT), question, out, err)
+    if args.post:
+        iid = env.get("CI_MERGE_REQUEST_IID", "").strip()
+        branch = env.get("CI_COMMIT_BRANCH", "").strip()
+        if not iid and branch:
+            # A branch pipeline: the merge request open from this branch, if there is one.
+            mrs = gitlab.json("GET", gitlab.path("/merge_requests"), query={"state": "opened", "source_branch": branch})
+            iid = str(mrs[0].get("iid")) if isinstance(mrs, list) and mrs else ""
+        if not iid:
+            err.write("No merge request is open for this pipeline: the explanation is in this job's log only.\n")
+            return 0
+        footer = "Explanation by Argus Arena (%s)%s." % (model, " of pipeline #" + pipeline if pipeline else "")
+        gitlab.note(iid, "%s\n\n---\n_%s_\n" % (answer, footer))
+        err.write("Posted the explanation on !%s.\n" % iid)
+    return 0
+
+
+def parser():
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--model", help="the model (default: ARENA_MODEL, or the first chat model the key may use)")
+    common.add_argument("--max-chars", type=int, metavar="N",
+                        help="how much of the diff, the logs or piped text is sent (default: ARENA_MAX_CHARS, or %d)" % MAX_CHARS)
+    top = argparse.ArgumentParser(prog="arena", description="Argus Arena's models from a terminal or a CI job.",
+                                  epilog=__doc__.split("\n\n", 3)[3], formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = top.add_subparsers(dest="command", metavar="command")
+
+    a = commands.add_parser("ask", parents=[common], help="answers a question, as it is written",
+                            description="Answers a question as it is written. Text piped in is added to the question.")
+    a.add_argument("question", nargs="*", help="the question (and whatever is piped in)")
+    a.add_argument("--system", help="instructions for the model")
+    a.set_defaults(run=ask)
+
+    r = commands.add_parser("review", parents=[common], help="reviews a GitLab merge request and posts it as one note",
+                            description="Reviews a GitLab merge request (its title, description and changes) and posts the review as one note.")
+    r.add_argument("--dry-run", action="store_true", help="print the review, post nothing")
+    r.add_argument("--prompt", help="the review's instructions (default: ARENA_REVIEW_PROMPT, or a general review)")
+    r.add_argument("--prompt-file", metavar="FILE", help="the review's instructions, from a file (default: ARENA_REVIEW_PROMPT_FILE)")
+    r.add_argument("--project", help="the project's ID or path (default: CI_PROJECT_ID)")
+    r.add_argument("--mr", help="the merge request's IID (default: CI_MERGE_REQUEST_IID)")
+    r.set_defaults(run=review)
+
+    e = commands.add_parser("explain-failure", parents=[common], help="explains a failure from job logs, or the pipeline's failed jobs",
+                            description="Explains a failure from job log files (- reads stdin), or without them from the failed jobs of the pipeline.")
+    e.add_argument("logs", nargs="*", metavar="LOG", help="job log files; none: the pipeline's failed jobs, through the API")
+    e.add_argument("--post", action="store_true", help="also post the explanation on the pipeline's merge request, or the one open from its branch")
+    e.add_argument("--prompt", help="the instructions (default: ARENA_EXPLAIN_PROMPT, or a general explanation)")
+    e.add_argument("--prompt-file", metavar="FILE", help="the instructions, from a file (default: ARENA_EXPLAIN_PROMPT_FILE)")
+    e.add_argument("--project", help="the project's ID or path (default: CI_PROJECT_ID)")
+    e.add_argument("--pipeline", help="the pipeline's ID (default: CI_PIPELINE_ID)")
+    e.set_defaults(run=explain_failure)
+    return top
+
+
+def main(argv=None, env=None, stdin=None, stdout=None, stderr=None):
+    """Runs one command; returns the exit code."""
+    env = os.environ if env is None else env
+    stdin, stdout, stderr = stdin or sys.stdin, stdout or sys.stdout, stderr or sys.stderr
+    top = parser()
+    try:
+        args = top.parse_args(argv)
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else USAGE
+    if not getattr(args, "run", None):
+        top.print_help(stderr)
+        return USAGE
+    if args.max_chars is not None and args.max_chars <= 0:
+        stderr.write("arena: --max-chars must be above 0.\n")
+        return USAGE
+    try:
+        return args.run(args, env, (stdin, stdout, stderr))
+    except Failure as e:
+        stderr.write("arena: %s\n" % e)
+        return e.code
+    except KeyboardInterrupt:
+        stderr.write("arena: interrupted.\n")
+        return INTERRUPTED
+
+
+if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+    try:
+        code = main()
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # The reader went away (arena ask ... | head): not a failure.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        code = 0
+    sys.exit(code)

@@ -154,7 +154,8 @@ jobs:
           if-no-files-found: ignore
 
   deploy:
-    # The compose files resolving (the platform from .env.example, Argus alone per sample).
+    # The compose files resolving (the platform from .env.example, Argus alone per sample),
+    # the scripts parsing, and the arena CLI's tests (Python's own unittest, no packages).
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -169,3 +170,5 @@ jobs:
           done
       - name: Scripts parse
         run: for f in deploy/scripts/*.sh deploy/argus-standalone/scripts/*.sh tools/*.sh tools/test-gitlab/*.sh clients/claude-code/*.sh tools/dn; do bash -n "$f"; done
+      - name: The arena CLI and its GitLab CI template
+        run: python3 -m unittest discover clients/arena -v
