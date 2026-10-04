@@ -39,6 +39,69 @@ public sealed class MediaTests(AppFixture app)
         Assert.Equal((Llm.Api.Models.MediaModels.TextToSpeechPersian, "amir"), Voices.For("سلام، حال شما چطور است؟"));
     }
 
+    /// <summary>
+    /// services/sd-serve.sh's choice of where the video server decodes, run by /bin/sh with a fake
+    /// nvidia-smi that reports <paramref name="free"/> MB (or fails, as when the GPU cannot be read).
+    /// </summary>
+    private static async Task<(string Vae, string Where)> PlaceVaeAsync(string? needs, string free)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("The servers' scripts run under /bin/sh.");
+        }
+        var script = Path.GetFullPath(Path.Combine(AppFixture.DashboardsPath, "..", "..", "..", "..", "deploy", "services", "sd-serve.sh"));
+        var bin = Directory.CreateTempSubdirectory("fake-nvidia-");
+        try
+        {
+            var smi = Path.Combine(bin.FullName, "nvidia-smi");
+            // Only the question the script asks is answered; "fail" is a driver that cannot be reached.
+            await File.WriteAllTextAsync(smi, $$"""
+                #!/bin/sh
+                [ "$*" = "--query-gpu=memory.free --format=csv,noheader,nounits" ] || exit 9
+                [ "{{free}}" = fail ] && { echo "NVIDIA-SMI has failed" >&2; exit 9; }
+                printf '%s\n' {{free}}
+                """.Replace("\r", "", StringComparison.Ordinal));
+            File.SetUnixFileMode(smi, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            var run = new System.Diagnostics.ProcessStartInfo("/bin/sh", ["-c", ". \"$0\"; place_vae; printf '%s|%s' \"$vae\" \"$where\"", script])
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
+            };
+            run.Environment["PATH"] = $"{bin.FullName}:/usr/bin:/bin";
+            run.Environment["SD_SERVE_LIB"] = "1";
+            run.Environment["NAME"] = "videogen";
+            run.Environment.Remove("VAE_GPU_MB");
+            if (needs is not null)
+            {
+                run.Environment["VAE_GPU_MB"] = needs;
+            }
+            using var p = System.Diagnostics.Process.Start(run)!;
+            var output = await p.StandardOutput.ReadToEndAsync();
+            await p.WaitForExitAsync();
+            Assert.True(p.ExitCode == 0, await p.StandardError.ReadToEndAsync());
+            var parts = output.Split('|', 2);
+            return (parts[0], parts[1]);
+        }
+        finally
+        {
+            bin.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Video_decodes_on_the_GPU_when_it_has_room_and_on_the_CPU_when_the_chat_model_holds_it()
+    {
+        // The chat model holds most of the GPU: decoding there would not fit.
+        Assert.Equal(("--vae-on-cpu", " (decoding on the CPU: 2900 MB free of the 8192 it needs)"), await PlaceVaeAsync("8192", "2900"));
+        // Room (on the first GPU, the one the server uses): on the GPU.
+        Assert.Equal(("", " (decoding on the GPU: 12000 MB free)"), await PlaceVaeAsync("8192", "12000 24000"));
+        Assert.Equal(("", " (decoding on the GPU: 8192 MB free)"), await PlaceVaeAsync("8192", "8192"));
+        // The GPU cannot be read: the CPU, which always fits.
+        Assert.Equal(("--vae-on-cpu", " (decoding on the CPU: unknown MB free of the 8192 it needs)"), await PlaceVaeAsync("8192", "fail"));
+        Assert.Equal("--vae-on-cpu", (await PlaceVaeAsync("8192", "[N/A]")).Vae);
+        // The picture server sets no VAE_GPU_MB: its flags stay as they are.
+        Assert.Equal(("", ""), await PlaceVaeAsync(null, "100"));
+    }
+
     private async Task<(WebApplicationFactory<Program> App, TestBrowser Browser, FakeSandbox Sandbox)> NewAppAsync()
     {
         var gateway = new FakeGateway();
