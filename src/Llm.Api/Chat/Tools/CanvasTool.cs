@@ -14,7 +14,7 @@ namespace Llm.Api.Chat.Tools;
 public sealed class CanvasTool(Canvases canvases) : IChatTool
 {
     /// <summary>What one canvas_read returns at most; the rest from next_from_line.</summary>
-    public const int MaxReadChars = 20_000;
+    public const int MaxReadChars = 16_000;
 
     public const string Create = "canvas_create";
     public const string Read = "canvas_read";

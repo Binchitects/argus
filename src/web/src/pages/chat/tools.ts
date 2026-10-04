@@ -1,4 +1,4 @@
-import { AudioLines, Calculator, Clapperboard, Clock, FileText, Globe, Image as ImageIcon, MessageCircleQuestion, Network, Plug, SearchCode, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { AudioLines, Calculator, Clapperboard, Clock, FilePen, FileText, Globe, Image as ImageIcon, MessageCircleQuestion, Network, Plug, SearchCode, SquareTerminal, type LucideIcon } from 'lucide-react'
 import type { ChatTool } from './types'
 
 /** The icon for a tool's icon hint (the API's ChatTool.icon). */
@@ -11,6 +11,7 @@ export const toolIcon: Record<string, LucideIcon> = {
   clock: Clock,
   plug: Plug,
   'file-text': FileText,
+  'file-pen': FilePen,
   terminal: SquareTerminal,
   globe: Globe,
   'message-circle-question': MessageCircleQuestion,

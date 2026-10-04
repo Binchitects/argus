@@ -77,8 +77,8 @@ export interface Message {
   noAccess: boolean
   /** The chat was compacted here: the model reads this summary instead of the branch down to this message. */
   summary?: string | null
-  /** What a tool call shows beyond what the model read: sub-agents' work ({ agents: [...] }). */
-  details?: { agents?: AgentWork[] } | null
+  /** What a tool call shows beyond what the model read: sub-agents' work ({ agents: [...] }), the canvas it made or changed. */
+  details?: { agents?: AgentWork[]; canvas?: { id: string; title: string; version: number } } | null
   /** An answer: what filled the request it answered, in characters by kind (the context gauge scales it to its prompt tokens). */
   context?: ContextFill | null
   /** An answer whose thinking was cut short ("Answer now"). */

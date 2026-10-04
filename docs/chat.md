@@ -99,6 +99,8 @@ setups to paste.
     open or download, and a plotly chart saved as HTML opens running. Each run
     starts afresh, has one CPU and no network, and stops at its time limit (60 s
     unless changed).
+  - **Canvas**: documents and code beside the chat, which you and the model
+    both edit (see **Canvas** below).
   - **Reading files**: a long attachment goes into the question only up to a
     budget (30,000 characters), with a note saying how long it really is; the
     model reads on by lines, or searches it, when it needs more. Files a tool
@@ -256,11 +258,67 @@ setups to paste.
 - **Width.** Pages and the chat grow with the screen. **Width** in the account
   menu (or Your account → Appearance) picks Comfortable, Wide (the default) or
   Full width, remembered per browser.
-- **Phones.** The chat list and the Files panel open over the thread; the
-  header fits a narrow screen.
+- **Phones.** The chat list, the Files panel and the canvas open over the
+  thread; the header fits a narrow screen.
 
 A question that never reached the server goes back into the box with its
 attachments, instead of being lost.
+
+## Canvas
+
+Like ChatGPT's canvas and Claude's artifacts: a document (Markdown) or code (in
+a language) beside the chat, which you and the model both edit. A chat has as
+many as it needs (up to 50).
+
+- **Opening it.** **Canvas** in the chat's header (with how many the chat has)
+  opens the panel where the Files panel opens; one of the two shows at a time,
+  and it takes half the page until narrowed. A canvas the model makes or
+  changes opens by itself on a wide screen; its tool card has **Open** too.
+  **New document** and **New code** start one by hand.
+- **The model writes by changes.** The **Canvas** tool (on in new chats) has
+  four functions. `canvas_create` writes a new canvas. `canvas_read` reads one
+  as it is now (by lines for a long one), or lists them. `canvas_edit` replaces
+  exact text: each `find` must be in the canvas once, the edits apply in turn,
+  and all or none do. A `find` that is missing, or there more than once, is
+  refused with the reason (and the lines it is on), and nothing changes; the
+  model reads again and retries. `canvas_rewrite` replaces the whole text, only
+  to start over. So a change to one section leaves the rest as it was. The
+  model is told the chat's canvases (title, id, kind) and to read one before it
+  edits it, since you may have changed it.
+- **Editing.** A plain text box: code with line numbers beside it and no
+  wrapping; a document with **Edit** and **Preview** (the Markdown formatted, as
+  in answers). **Save** (or Ctrl+S) saves; unsaved text stays while you look at
+  another canvas.
+- **Versions.** Every save of yours and every change by the model is a version:
+  who made it, when, and a short summary (the model's own words, or "Changed
+  lines 4–9"). **Versions** lists them; choosing one shows what it changed, as
+  a line diff with the version before (removed lines red with −, added green
+  with +, a few unchanged lines around each change). **Restore this version**
+  makes its text the newest version; nothing is lost, the others stay.
+- **Both at once.** A save is made on the version you started from. If the
+  model changed the canvas meanwhile, the save is refused and the editor says
+  so: **Load its version** (your edits go) or **Keep mine** (yours become the
+  newest version; the model's stays in Versions). A model change while you
+  have nothing unsaved simply shows.
+- **Asking about a part.** Select text (in the editor, or in the preview) and a
+  bar shows its lines: **Ask about this** takes your question, **Make this
+  shorter** sends at once. The chat gets a message that quotes the selection
+  with the canvas's id and line range, and the model changes that part with
+  `canvas_edit`. Unsaved text is saved first, so the model reads what you see.
+  While an answer is being written, these wait until it is done.
+- **Export** (the download icon) exports the saved version:
+  - a document as **Markdown** (.md), **Word** (.docx) or **PDF**. The Word file
+    is built by the app itself (no library): headings, paragraphs, bullet and
+    numbered lists (nested), quotes, code blocks, tables, links, bold, italic and
+    code inside a line; a paragraph that starts in Persian or Arabic reads right
+    to left. The PDF is that Word file turned into a PDF by LibreOffice in the
+    sandbox. Without the sandbox, the browser makes it: the document opens as a
+    page of its own and its print dialog saves it (**Save as PDF**).
+  - code as its file: the title when it is a file name (`parser.py`), else the
+    title with its language's extension.
+- **Who sees it.** A canvas is its chat's: only the chat's owner can open, change
+  or export it, and it goes when the chat is deleted. A fork does not copy the
+  canvases.
 
 ## Sound and video
 
@@ -459,7 +517,12 @@ and a thinking level. `PUT .../leaf` switches branch. `POST .../fork` takes a
 `messageId` (default: the leaf) and copies the path to it into a new chat. The
 fork must end on a question or a finished answer, never inside a tool round.
 `PATCH` with `archived` archives a chat, and `GET /conversations?archived=true`
-lists the archived ones. Chats from before branches were each migrated to one
+lists the archived ones. A chat's canvases are under
+`/api/chat/conversations/{id}/canvases` (list, `POST` to make one) and
+`/api/chat/canvases/{id}` (read, `PUT` with `baseVersion` to save, `DELETE`),
+with `/versions`, `/versions/{n}`, `POST /versions/{n}/restore` and
+`/export?format=md|docx|pdf|file`; they are kept in `canvases` and
+`canvas_versions`. Chats from before branches were each migrated to one
 branch.
 
 ## When something goes wrong
@@ -502,6 +565,14 @@ branch.
   images to a model that can see and one that can't, SVG never served as an
   image, and the migration of existing chats. Real Postgres, a fake model and
   a fake Argus.
+  The canvas: the model writes one and a change to one section leaves the
+  rest untouched; a missing or repeated `find` refused with its reason and
+  nothing changed (all or none); reading by lines and listing; a rewrite as
+  a version; every version restored, a restore a version of its own; a save
+  over a newer version refused; the owner only, and gone with the chat; the
+  Word file a zip with its parts (styles, numbering, links, a table, a right to
+  left paragraph); a code canvas as its file; the PDF made in the sandbox, and
+  the reason when there is none.
 - **UI (Vitest):**
   - the branch tree
   - the live-stream reducer
@@ -521,6 +592,11 @@ branch.
     own words, and the image viewer (arrows, keys, actual size)
   - the list's fork, archive, Archived view and unarchive; fork from an
     answer; the question rail; the archived notice
+  - the canvas: the line diff, a selection's lines and its message; the panel
+    from the header, a save as a version, the versions' diff and a restore, a
+    selection sent to the chat quoted, a tool card opening its canvas, the
+    canvas opening by itself on a wide screen, a save over the model's newer
+    version, export, and a code canvas with line numbers
 - **Browser (Playwright), desktop and phone, both themes, with axe, in CI
   too:** a chat with Argus's answers and two images, served by the browser
   itself, from the links to the image viewer.
