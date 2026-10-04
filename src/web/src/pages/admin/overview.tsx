@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Coins, Database, Users, WalletCards } from 'lucide-react'
+import { Activity, Coins, Database, ShieldCheck, Users, WalletCards } from 'lucide-react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { api } from '@/lib/api'
 import { money } from '@/lib/format'
-import { indexExit, type IndexSummary, type Overview } from './ops-api'
+import { indexExit, type CertificateStatus, type IndexSummary, type Overview } from './ops-api'
 import { ServiceList } from './services'
 
 export function OverviewPage() {
@@ -37,6 +37,7 @@ export function OverviewPage() {
               hint={d.index.error ? 'Argus did not answer' : idx?.stale ? `${idx.stale} out of date` : idx?.repos ? 'repositories current' : 'nothing indexed yet'}
             />
           )}
+          {d.certificate && <CertificateStat cert={d.certificate} />}
         </StatGrid>
         {d.warning && <Alert variant="warning">{d.warning}</Alert>}
         {d.overCredit.length > 0 && (
@@ -54,6 +55,7 @@ export function OverviewPage() {
           </Alert>
         )}
         <IndexAlert configured={d.index.configured} idx={idx} error={d.index.error} />
+        {d.certificate && <CertificateAlert cert={d.certificate} />}
         <Card>
           <CardHeader>
             <CardTitle>Services</CardTitle>
@@ -65,6 +67,43 @@ export function OverviewPage() {
         </Card>
       </div>
     </>
+  )
+}
+
+const issuers: Record<CertificateStatus['issuer'], string> = { traefik: "Traefik's own", letsencrypt: "Let's Encrypt", own: 'Your own' }
+
+/** "in 12 days", "today", "3 days ago". */
+const inDays = (days: number) => (days > 1 ? `in ${days} days` : days === 1 ? 'tomorrow' : days === 0 ? 'today' : `${-days} day${days === -1 ? '' : 's'} ago`)
+
+/** The certificate Traefik serves: when it expires, or that it is Traefik's own default (browsers warn). */
+function CertificateStat({ cert }: { cert: CertificateStatus }) {
+  if (cert.issuer === 'traefik') return <Stat icon={ShieldCheck} label="Certificate" value="Traefik's own" tone="warning" hint="browsers warn" text />
+  return (
+    <Stat
+      icon={ShieldCheck}
+      label="Certificate"
+      value={cert.days < 0 ? 'Expired' : `${cert.days} day${cert.days === 1 ? '' : 's'}`}
+      tone={cert.days <= 7 ? 'destructive' : cert.days <= 30 ? 'warning' : undefined}
+      hint={`${cert.days < 0 ? 'expired' : 'until it expires'} · ${issuers[cert.issuer]}`}
+    />
+  )
+}
+
+/** What to do about a certificate that expires within 30 days, or Traefik's own being served. */
+function CertificateAlert({ cert }: { cert: CertificateStatus }) {
+  if (cert.issuer === 'traefik')
+    return (
+      <Alert variant="warning" title="The site uses Traefik's own certificate">
+        Browsers warn, and tools must skip the check. Run scripts/make-cert.sh (from deploy/) for a certificate of your own, or set ACME_EMAIL for Let's Encrypt.
+      </Alert>
+    )
+  if (cert.days > 30) return null
+  return (
+    <Alert variant={cert.days <= 7 ? 'destructive' : 'warning'} title={`The certificate for ${cert.name} ${cert.days < 0 ? 'has expired' : `expires ${inDays(cert.days)}`}`}>
+      {cert.issuer === 'letsencrypt'
+        ? "Traefik renews Let's Encrypt's certificates by itself: the names must resolve to this machine and port 443 must reach it. Traefik's log says why it did not."
+        : "Run scripts/make-cert.sh again (from deploy/): it renews the certificate with the same CA, or installs your company's new one. Traefik serves it at once."}
+    </Alert>
   )
 }
 

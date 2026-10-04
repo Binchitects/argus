@@ -216,7 +216,7 @@ public static class OperationsEndpoints
 
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
         IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
-        CancellationToken ct)
+        Dashboards.PromDatasource prom, TimeProvider clock, CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Count(u => !u.IsDisabled);
@@ -236,6 +236,7 @@ public static class OperationsEndpoints
         var over = mine.Where(x => x.g is { Budget: > 0 } g && g.Spend >= g.Budget).Select(x => x.p.UserName).ToList();
 
         var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value, dashboards.Value);
+        var certificate = Certificates.ReadAsync(prom, stack.Value, clock.GetUtcNow(), ct);
         JsonNode? index = null;
         string? indexError = null;
         if (argus.Enabled)
@@ -266,6 +267,7 @@ public static class OperationsEndpoints
             services = await probes,
             index = new { configured = argus.Enabled, summary = index, error = indexError },
             model = models.DefaultName,
+            certificate = await certificate,
         });
     }
 
