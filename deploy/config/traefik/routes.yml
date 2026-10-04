@@ -10,7 +10,7 @@ http:
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
     app:
-      rule: Host(`{{ $domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`) || Path(`/mcp`))
+      rule: Host(`{{ $domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`) || Path(`/mcp`) || PathPrefix(`/scim`))
       service: app
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}

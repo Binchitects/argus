@@ -19,6 +19,7 @@ import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { CompanySignInPanel } from './company-sign-in'
 import { bytesHint, initialValue, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
 
 const settingsQuery = {
@@ -192,6 +193,7 @@ export function SettingsPage() {
                   />
                 ))}
                 {g.title.startsWith('Company directory') && <DirectoryTest draft={draft} />}
+                {g.title === 'Company sign-in' && <CompanySignInPanel draft={draft} />}
               </CardContent>
             </Card>
           ))}

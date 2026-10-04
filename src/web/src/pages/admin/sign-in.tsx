@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, Settings } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { KeyValues } from '@/components/app/key-values'
 import { PageHeader } from '@/components/app/page-header'
@@ -9,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { api, errorMessage } from '@/lib/api'
+import { companyStatusQuery } from './company-api'
 
 interface SignIn {
   ldap: boolean
@@ -20,6 +22,7 @@ interface SignIn {
 
 export function SignInPage() {
   const settings = useQuery({ queryKey: ['admin', 'sign-in'], queryFn: ({ signal }) => api<SignIn>('/api/admin/sign-in', { signal }) })
+  const company = useQuery(companyStatusQuery)
   const queryClient = useQueryClient()
   const sync = useMutation({
     mutationFn: () => api<{ checked: number; disabled: number }>('/api/admin/ldap/sync', { body: {} }),
@@ -86,6 +89,41 @@ export function SignInPage() {
               </Button>
             )}
             {configure}
+          </CardFooter>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Company sign-in (OIDC) {company.data?.enabled ? <Badge variant="success">On</Badge> : <Badge variant="secondary">Off</Badge>}
+            </CardTitle>
+            <CardDescription>
+              {company.data?.enabled
+                ? `The sign-in page offers "Sign in with ${company.data.label}". People are made at their first sign-in, or matched by email; the identity provider does their two-factor sign-in.`
+                : 'Entra ID, Okta, Keycloak, Google or GitLab. Off: set it up under Settings; local accounts keep working next to it.'}
+            </CardDescription>
+          </CardHeader>
+          {company.data && (
+            <CardContent>
+              <KeyValues
+                items={[
+                  ...(company.data.enabled
+                    ? ([
+                        ['Identity provider', <code key="i" className="font-mono text-xs">{company.data.issuer}</code>],
+                        ['Admins are members of', company.data.adminGroup || 'nobody from the provider is an admin'],
+                        ['Who may sign in', company.data.requiredGroup ? `members of ${company.data.requiredGroup}` : 'everyone the provider lets through'],
+                      ] as [ReactNode, ReactNode][])
+                    : []),
+                  ['SCIM provisioning', company.data.scim.tokenMadeAt ? `on: ${company.data.scim.url}` : 'off'],
+                ]}
+              />
+            </CardContent>
+          )}
+          <CardFooter>
+            <Button variant="outline" asChild>
+              <Link to="/admin/settings#company-sign-in">
+                <Settings /> Configure
+              </Link>
+            </Button>
           </CardFooter>
         </Card>
       </div>

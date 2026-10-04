@@ -14,6 +14,10 @@ public sealed class Group
     public string? Description { get; set; }
     /// <summary>For a directory group: its common name or full DN. Null for an app group.</summary>
     public string? Directory { get; set; }
+    /// <summary>Made by the company's identity provider through SCIM: it decides the name and the members.</summary>
+    public bool Scim { get; set; }
+    /// <summary>For a SCIM group: the identity provider's own id for it (externalId), when it sends one.</summary>
+    public string? ExternalId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>Members' chats and their files are kept this many days, then deleted; null: the company's setting. The shortest of a person's groups applies.</summary>

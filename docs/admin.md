@@ -11,8 +11,8 @@ out) and a page each. The audit log has filters, paging and CSV export. The
 Settings page edits everything ([settings.md](settings.md)), and the Model page
 has **Switch to this model**.
 
-Sign-in, people, the company directory and 2FA are in
-[authentication.md](authentication.md), and the chat in [chat.md](chat.md). This
+Sign-in, people, the company directory, company sign-in (OIDC and SCIM) and 2FA
+are in [authentication.md](authentication.md), and the chat in [chat.md](chat.md). This
 page covers the rest.
 
 ## Admin
@@ -21,7 +21,7 @@ page covers the rest.
 |---|---|
 | **Overview** | Services up, people and admins, total spend, who is at or past their credit, the code index's health, and the certificate the site serves. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). The certificate (from Traefik's metrics in Prometheus) shows the days until it expires and who issued it (your own, or Let's Encrypt); within 30 days it says what to do, and it says so when Traefik serves its own default (browsers warn). |
 | **People** | Add, search, and per person: credit, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, legal hold, an export of their data, delete. **Export CSV** downloads everyone with spend and credit left. |
-| **Groups** | App groups (the people you add) and directory groups (whoever the company directory puts in them, by name or DN). Tools and models are given to groups. Per group: how long members' chats are kept, a credit a month (shared or each member's), a cost centre, and which safeguards apply. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports) and [Credit for groups](#credit-for-groups). |
+| **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. Per group: how long members' chats are kept, a credit a month (shared or each member's), a cost centre, and which safeguards apply. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports) and [Credit for groups](#credit-for-groups). |
 | **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), memory (the model remembers what each person asks it to; off for everyone under **Settings → Chat → Memory**, and nobody but the person sees their memories), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). The same choices decide what [Arena MCP](mcp.md) serves each person's own agent (`mcp.call` in the audit log). |
 | **Knowledge** | Company knowledge the chat searches: GitLab projects or groups (their wikis and issues, read by each project's members), folders mounted under `/knowledge`, and websites (read by the groups you choose). Per source: the last sync's state and errors, documents and passages, who may read it, **Sync now**, its documents, remove. Needs the embedder. See [knowledge.md](knowledge.md). |
 | **Models** | Every model at the gateway. The engine's models load and unload with one click (one at a time on one GPU); more are added from the model library on the host. Per model: who may use it, in the chat and with API keys. See [Models](#models) below. |
@@ -37,7 +37,7 @@ page covers the rest.
 | **Settings** | Every setting, grouped and searchable: applied at once, or by a restart the app does itself. See [settings.md](settings.md). |
 | **Audit log** | Every sign-in and every change to people or the index, with who, whom and from where. |
 | **Quality** | How people rate the answers, over a day, a week, a month or three: per model and per project, the answers written, the share rated, the share rated up, and why they were rated down. The latest down-rated answers by title, model, reason and the person's words, never their content: a chat opens (read only, down to the rated answer) only when its owner shared it with the down vote, and each opening is audited. Below, the arena's leaderboard from the votes cast in the range. See [Quality](#quality) below. |
-| **Sign-in** | Local accounts and the company directory; "Check the directory now". |
+| **Sign-in** | Local accounts, the company directory ("Check the directory now") and company sign-in: the identity provider, its admin and required groups, and whether SCIM is on. |
 
 Indexing, Packs and Explore talk to Argus through the app's server with
 `ARGUS_KEY`, which never reaches a browser. With Argus left out they say

@@ -9,6 +9,7 @@ public static class SettingsCatalog
     private const string Branding = "Branding";
     private const string SignIn = "Sign-in and sessions";
     private const string Directory = "Company directory (LDAP)";
+    private const string CompanySignIn = "Company sign-in";
     private const string Chat = "Chat";
     private const string Model = "Model";
     private const string Argus = "Argus (GitLab)";
@@ -63,6 +64,24 @@ public static class SettingsCatalog
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 1440, Optional = false },
         new("Ldap:IgnoreCertificateErrors", Directory, "Accept any certificate", "Testing only: anyone on the network path could read the service account's password.", SettingType.Boolean, SettingScope.Live)
             { Default = "false", Dangerous = true },
+
+        new("CompanySignIn:Issuer", CompanySignIn, "Identity provider", "Its issuer: the app reads .well-known/openid-configuration below it. Entra ID: https://login.microsoftonline.com/<tenant ID>/v2.0, Okta: https://<org>.okta.com, Keycloak: https://<host>/realms/<realm>, Google: https://accounts.google.com, GitLab: its address. Empty turns company sign-in off; local accounts keep working.", SettingType.Url, SettingScope.Live)
+            { Pattern = @"https?://\S+", PatternHelp = "https://..." },
+        new("CompanySignIn:ClientId", CompanySignIn, "Client ID", "The app's registration at the identity provider, with the redirect URI shown below.", SettingType.Text, SettingScope.Live)
+            { Max = 200 },
+        new("CompanySignIn:ClientSecret", CompanySignIn, "Client secret", "From the same registration. Empty for a public client (PKCE alone).", SettingType.Secret, SettingScope.Live),
+        new("CompanySignIn:Scopes", CompanySignIn, "Scopes", "Asked for at sign-in, separated by spaces; openid is always added. Add groups when the provider sends groups only for that scope (Okta, some Keycloak setups).", SettingType.Text, SettingScope.Live)
+            { Default = "openid profile email", Optional = false, Max = 400 },
+        new("CompanySignIn:UserNameClaim", CompanySignIn, "Username claim", "The claim with the username here, which must equal their GitLab username: preferred_username (Entra ID, Keycloak, Okta), nickname (GitLab), email (Google). An email-like value gives its part before the @.", SettingType.Text, SettingScope.Live)
+            { Default = "preferred_username", Optional = false, Max = 100 },
+        new("CompanySignIn:GroupsClaim", CompanySignIn, "Groups claim", "The claim with the person's groups, kept for access rules like a directory's: groups (Entra ID, Okta, GitLab, Keycloak with a group mapper). A dotted path reaches into an object (realm_access.roles). Empty: no groups.", SettingType.Text, SettingScope.Live)
+            { Default = "groups", Max = 100 },
+        new("CompanySignIn:AdminGroup", CompanySignIn, "Admin group", "Members are admins here, decided at each sign-in. One value of the groups claim, exactly (any case): /llm-admins for a Keycloak path, a GitLab group's path, an Entra ID group's object ID, or a SCIM group's name. Empty: nobody from the provider is an admin.", SettingType.Text, SettingScope.Live)
+            { Max = 300 },
+        new("CompanySignIn:RequiredGroup", CompanySignIn, "Required group", "Only members may sign in, compared like the admin group; someone who left it is disabled at their next sign-in. Empty: everyone the provider lets through.", SettingType.Text, SettingScope.Live)
+            { Max = 300 },
+        new("CompanySignIn:ButtonLabel", CompanySignIn, "Button label", "The sign-in page says \"Sign in with\" and this: Microsoft, Okta, GitLab, your company account.", SettingType.Text, SettingScope.Live)
+            { Default = "your company account", Optional = false, Max = 60 },
 
         new("Chat:MaxToolRounds", Chat, "Tool calls per answer", "How many rounds of tool use (Argus searches) one answer may take before it must answer.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "8", Min = 1, Max = 32, Optional = false },

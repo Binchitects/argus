@@ -48,7 +48,8 @@ export function GroupPage() {
   if (group.isPending) return <PageSkeleton />
   if (group.error) return <QueryError error={group.error} retry={() => group.refetch()} />
   const g = group.data
-  const app = g.directory === null
+  // App groups only: a directory or SCIM group's members are someone else's to change.
+  const app = g.directory === null && !g.scim
 
   const columns: ColumnDef<GroupMember>[] = [
     {
@@ -106,8 +107,8 @@ export function GroupPage() {
           <h1 className="text-2xl font-semibold tracking-tight">{g.name}</h1>
           {g.description && <p className="mt-1 text-muted-foreground">{g.description}</p>}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {app ? <Badge variant="secondary">App group</Badge> : <Badge variant="outline">Directory group</Badge>}
-            {!app && <span className="font-mono text-xs text-muted-foreground">{g.directory}</span>}
+            {app ? <Badge variant="secondary">App group</Badge> : <Badge variant="outline">{g.scim ? 'SCIM group' : 'Directory group'}</Badge>}
+            {g.directory && <span className="font-mono text-xs text-muted-foreground">{g.directory}</span>}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -131,7 +132,11 @@ export function GroupPage() {
           <div>
             <CardTitle>Members ({g.members.length})</CardTitle>
             <CardDescription>
-              {app ? 'The people you added.' : 'Whoever the directory puts in this group, as of their last sign-in or directory check.'}
+              {app
+                ? 'The people you added.'
+                : g.scim
+                  ? "Whoever the company's identity provider puts in this group (SCIM). Change it there."
+                  : 'Whoever the directory puts in this group, as of their last sign-in or directory check.'}
             </CardDescription>
           </div>
           {app && (
@@ -141,7 +146,7 @@ export function GroupPage() {
           )}
         </CardHeader>
         <CardContent>
-          <DataTable columns={columns} data={g.members} noun="members" getRowId={(m) => m.id} initialSorting={[{ id: 'person', desc: false }]} empty={app ? 'Nobody yet. Add people to give them what this group may use.' : 'Nobody here is in this directory group yet.'} />
+          <DataTable columns={columns} data={g.members} noun="members" getRowId={(m) => m.id} initialSorting={[{ id: 'person', desc: false }]} empty={app ? 'Nobody yet. Add people to give them what this group may use.' : g.scim ? 'The identity provider has put nobody in it yet.' : 'Nobody here is in this directory group yet.'} />
         </CardContent>
       </Card>
       <div className="mt-6">
@@ -172,7 +177,9 @@ function EditDialog({ group, open, onOpenChange }: { group: GroupDetail; open: b
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit {group.name}</DialogTitle>
-          <DialogDescription>{group.directory !== null ? 'A directory group stays one; its members follow the directory.' : 'Members are kept.'}</DialogDescription>
+          <DialogDescription>
+            {group.scim ? 'The identity provider decides its name and members; the description is yours.' : group.directory !== null ? 'A directory group stays one; its members follow the directory.' : 'Members are kept.'}
+          </DialogDescription>
         </DialogHeader>
         <form
           className="grid gap-4"
@@ -183,8 +190,8 @@ function EditDialog({ group, open, onOpenChange }: { group: GroupDetail; open: b
           }}
         >
           {error && <Alert variant="destructive">{error}</Alert>}
-          <Field label="Name">
-            <Input value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} />
+          <Field label="Name" hint={group.scim ? 'Renamed in the identity provider (SCIM).' : undefined}>
+            <Input value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} disabled={group.scim} />
           </Field>
           {group.directory !== null && (
             <Field label="Directory group" hint="Its name (cn) or full DN.">

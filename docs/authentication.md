@@ -3,7 +3,8 @@
 Everything reachable from outside authenticates against one identity provider:
 **the app** at `https://DOMAIN`. There is one list of people, one sign-in,
 one place to revoke access. People are local accounts, or come from the company
-directory (LDAP / Active Directory), or both.
+directory (LDAP / Active Directory) or the company's identity provider (OIDC,
+with SCIM provisioning), side by side.
 
 ---
 
@@ -30,8 +31,10 @@ and the gateway use them inside the stack's network, and they never leave it.
 ### 1. The app's own sign-in
 
 `https://DOMAIN/login`. Username (or email) and password, then a 6-digit
-code for people who turned on two-factor sign-in. The session cookie is scoped
-to the domain, so it covers every `*.DOMAIN` service at once.
+code for people who turned on two-factor sign-in; or **Sign in with ...**, the
+company's identity provider, when it is set up ([below](#company-sign-in-oidc)).
+The session cookie is scoped to the domain, so it covers every `*.DOMAIN`
+service at once.
 
 ### 2. OIDC: apps with their own sign-in screen
 
@@ -161,6 +164,115 @@ as a way in if the directory is down.
 
 ---
 
+## Company sign-in (OIDC)
+
+Off while no identity provider is set. Set it in **Admin → Settings → Company
+sign-in**; a change applies at once:
+
+| Setting | Example |
+|---|---|
+| Identity provider | its issuer: `https://login.microsoftonline.com/<tenant ID>/v2.0` (Entra ID), `https://example.okta.com`, `https://sso.example.com/realms/staff` (Keycloak), `https://accounts.google.com`, `https://gitlab.example.com` |
+| Client ID, Client secret | the app's registration at the provider; the secret is stored encrypted (empty for a public client) |
+| Scopes | `openid profile email`; add `groups` where the provider sends groups only for it |
+| Username claim | `preferred_username`; `nickname` for GitLab, `email` for Google |
+| Groups claim | `groups`; a dotted path such as `realm_access.roles` reaches into an object |
+| Admin group | `llm-admins`: members are admins here |
+| Required group | `llm-users`: only members may sign in (empty = anyone the provider lets through) |
+| Button label | `Okta`: the sign-in page says "Sign in with Okta" |
+
+Register the app at the provider as a web application, with the redirect URI the
+Settings page shows: `https://DOMAIN/api/auth/company/callback`. **Test the
+identity provider** reads its discovery document and keys before you save.
+
+The sign-in page then has a **Sign in with ...** button above the password
+form. The app sends the person to the provider (the authorization code flow
+with PKCE) and checks the identity token that comes back: its signature against
+the provider's published keys, the issuer, the audience (the client ID), its
+lifetime and the nonce of this sign-in. The state ties the answer to the
+browser that asked, so nobody can slip their own sign-in into someone else's.
+The provider does the password and the two-factor sign-in; the app asks for no
+second code.
+
+On the first sign-in the app creates the person, with an API key, or matches
+someone already here by email: a local or directory account of that email
+becomes the provider's, and its password no longer signs in. A local admin is
+never taken over: keep one as a way in when the provider is down. The provider
+is in charge of the name, email and role; the role is set at each sign-in from
+the admin group. A changed email gets a new API key (the gateway knows people
+by email).
+
+The username comes from the username claim and must equal the person's GitLab
+username (Argus). An email-like value (`alice@example.com`, as Entra ID sends
+it) gives the part before the @.
+
+The groups claim's values are kept like a directory's: a directory group in
+**Admin → Groups** named as one of them has those people as members. The admin
+and required groups are compared with them exactly, ignoring case: a Keycloak
+path (`/llm-admins`), a GitLab group's full path, an Entra ID group's object
+ID. A look-alike group elsewhere in the provider never counts. A SCIM group of
+that name counts too, so Entra ID can go by group names. When the identity
+token carries no groups (GitLab's), the userinfo endpoint's are used.
+
+Someone who left the required group is refused at their next sign-in and
+disabled: signed out everywhere, API keys blocked. They are enabled again at
+their first sign-in after they are back. Between sign-ins it is SCIM that tells
+the app at once.
+
+Refused, with the reason in the audit log: an account with no email, one whose
+email the provider says is not verified, a username or email someone else here
+has, a local admin's email, a disabled person.
+
+| Provider | Notes |
+|---|---|
+| Entra ID | An app registration (Web) with a client secret. The issuer names your tenant (not `common`). Groups come as object IDs, unless the token configuration emits names; SCIM groups carry the names. |
+| Okta | An OIDC web app. Add a groups claim to the ID token, or the `groups` scope. |
+| Keycloak | A confidential client with a "Group Membership" mapper (claim `groups`). With "Full group path" on, names start with `/`. |
+| Google | No groups. Username claim `email`. |
+| GitLab | **Admin → Applications**, scopes `openid profile email`. Username claim `nickname`; groups are full paths, from the userinfo endpoint. |
+
+---
+
+## SCIM provisioning
+
+With SCIM the identity provider makes, changes and deactivates people and groups
+here at once, without waiting for anyone to sign in. In **Admin → Settings →
+Company sign-in**, **Make a token** shows a bearer token once; the app keeps
+only its SHA-256. Give the provider the token and the address
+`https://DOMAIN/scim/v2`. A new token replaces the old one at once, and **Turn
+off** revokes it.
+
+| Endpoint | What it does |
+|---|---|
+| `/scim/v2/Users` | list, with filters on `userName`, `externalId`, `emails.value`, `id` and `active` (`eq`, joined by `and`), make, read, replace, change (PATCH), delete |
+| `/scim/v2/Groups` | the same for groups and their members (filters on `displayName`, `externalId`, `id`, `members.value`) |
+| `/scim/v2/ServiceProviderConfig`, `/Schemas`, `/ResourceTypes` | what the server supports: PATCH and filters; no bulk, sorting, ETags or password changes |
+
+- Deactivating someone (`active` false, or DELETE) disables them here at once:
+  signed out everywhere, API keys blocked at the gateway. `active` true enables
+  them again, when it was SCIM that disabled them; an admin's or a safeguard's
+  decision stands. Nobody is deleted through SCIM: an admin deletes them under
+  People, with their chats.
+- People SCIM makes have no password here: they sign in with the company
+  account, matched to it by email at their first sign-in.
+- SCIM sees everyone except local admins, who stay a way in that the provider
+  cannot change. A local or directory person SCIM changes becomes the provider's.
+- SCIM groups are app groups the provider decides: their name and members
+  cannot be changed in the app. Tools and models are given to them like to any
+  group. Groups made in the app are not seen by SCIM.
+- Every change is in **Admin → Audit log**, by `scim`.
+
+---
+
+## SAML
+
+Next. Checking a SAML assertion means checking an XML signature, which needs
+`System.Security.Cryptography.Xml`, a package outside .NET's shared framework
+that the app does not ship; checking XML signatures by hand invites signature
+wrapping attacks. Entra ID, Okta, Keycloak, Google and GitLab all speak OIDC:
+use company sign-in.
+
+---
+
 ## What protects the sign-in
 
 | Protection | Setting |
@@ -201,6 +313,7 @@ to bypass authentication from outside the Docker network.
 | People, roles, 2FA, audit log, OIDC clients and keys | the app's `llmapp` database on the shared Postgres |
 | OIDC client secrets | `.env` (`*_OIDC_CLIENT_SECRET`); the app registers the clients from them on every start |
 | Who is who for Argus (username → email, no passwords) | `config/directory/users.yml`, written by the app |
+| Company sign-in settings (the client secret encrypted), the SCIM token's SHA-256 | the `settings` table of `llmapp` |
 | Machine-client token helper | `scripts/get-token.sh` |
 
 The app runs as `LLM_UID:LLM_GID` (the owner of `deploy/config`), so the files it
@@ -241,6 +354,17 @@ database, and start it. Everyone signs in again.)
 whether it was a wrong password, a lock, a ban, a disabled account, or (for the
 directory) not being in the sign-in group. A locked person can wait 15 minutes
 or be given a new password.
+
+**Company sign-in answers "did not work".** **Admin → Audit log** has the
+reason: a signature that does not match the provider's keys, another issuer or
+client, a clock out of step, or the provider's own error. For "another issuer",
+the Identity provider setting must be the provider's issuer exactly (Entra ID:
+your tenant's, not `common`). A provider that answers "redirect URI mismatch"
+needs exactly the redirect URI the Settings page shows.
+
+**Company sign-in answers "cannot be used here".** The audit log says which: no
+email, an email the provider has not verified, a username or email someone else
+here has, or a local admin's email (local admins are never taken over).
 
 **Directory sign-ins answer "cannot be reached".** The app could not bind with
 the service account: wrong `LDAP_URL`, a firewall, a certificate the app does not

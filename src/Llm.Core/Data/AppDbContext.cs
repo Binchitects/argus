@@ -62,6 +62,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(u => u.DisplayName).HasMaxLength(200);
             e.Property(u => u.LdapDn).HasMaxLength(1000);
+            e.Property(u => u.OidcSubject).HasMaxLength(255);
+            e.Property(u => u.ScimExternalId).HasMaxLength(255);
+            e.HasIndex(u => u.OidcSubject);
             e.Property(u => u.AnswerLength).HasMaxLength(16);
             e.Property(u => u.LegalHoldReason).HasMaxLength(500);
             e.Property(u => u.DirectoryGroups).HasDefaultValueSql("'{}'::text[]");
@@ -144,6 +147,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(g => g.Name).HasMaxLength(100);
             e.Property(g => g.Description).HasMaxLength(500);
             e.Property(g => g.Directory).HasMaxLength(1000);
+            e.Property(g => g.ExternalId).HasMaxLength(255);
             e.HasIndex(g => g.Name).IsUnique();
             e.Property(g => g.CostCentre).HasMaxLength(100);
             e.Property(g => g.SecretScanning).HasMaxLength(10);

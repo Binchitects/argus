@@ -19,7 +19,7 @@ export interface Me {
   displayName: string
   email: string
   isAdmin: boolean
-  source: 'local' | 'ldap'
+  source: 'local' | 'ldap' | 'oidc'
   twoFactorEnabled: boolean
   signedInAt: number | null
 }

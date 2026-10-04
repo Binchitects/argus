@@ -50,7 +50,9 @@ public static class AccountEndpoints
         var user = (await users.GetUserAsync(p))!;
         if (user.Source != UserSource.Local)
         {
-            return AuthEndpoints.Problem(400, "ldap", "Your password is managed by the company directory. Change it there.");
+            return AuthEndpoints.Problem(400, UserSources.Name(user.Source), user.Source == UserSource.Ldap
+                ? "Your password is managed by the company directory. Change it there."
+                : "You sign in with your company account: its password is changed there.");
         }
         var result = await users.ChangePasswordAsync(user, body.Current ?? "", body.Next ?? "");
         if (!result.Succeeded)
@@ -70,6 +72,10 @@ public static class AccountEndpoints
         Microsoft.Extensions.Options.IOptions<AuthOptions> auth, CancellationToken ct)
     {
         var user = (await users.GetUserAsync(p))!;
+        if (user.Source == UserSource.Oidc)
+        {
+            return AuthEndpoints.Problem(400, "oidc", "You sign in with your company account: its two-factor sign-in is set up there.");
+        }
         if (user.TwoFactorEnabled)
         {
             return AuthEndpoints.Problem(409, "enabled", "Two-factor sign-in is already on. Turn it off first to set up a new device.");

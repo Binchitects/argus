@@ -36,9 +36,11 @@ const columns: ColumnDef<GroupSummary>[] = [
   {
     id: 'kind',
     header: 'Kind',
-    accessorFn: (g) => (g.directory ? 'Directory' : 'App'),
+    accessorFn: (g) => (g.directory ? 'Directory' : g.scim ? 'SCIM' : 'App'),
     cell: ({ row: { original: g } }) =>
-      g.directory ? (
+      g.scim ? (
+        <Badge variant="outline">SCIM</Badge>
+      ) : g.directory ? (
         <span className="flex flex-wrap items-center gap-1.5">
           <Badge variant="outline">Directory</Badge>
           <span className="font-mono text-xs text-muted-foreground">{g.directory}</span>

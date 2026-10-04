@@ -21,6 +21,13 @@ import { LegalHoldCard } from './legal-hold'
 import { CreditMeter, PersonBadges } from './person-badges'
 import { parseCredit, personQuery, type Person, type PersonDetail } from './people-api'
 
+const sourceLabel: Record<Person['source'], string> = { local: 'Local account', ldap: 'Company directory', oidc: 'Company sign-in' }
+const signsInWith: Record<Person['source'], string> = {
+  local: 'a password here',
+  ldap: 'the company directory (LDAP)',
+  oidc: "the company's identity provider (OIDC)",
+}
+
 export function PersonPage() {
   const { id = '' } = useParams()
   const me = useOutletContext<Me>()
@@ -31,7 +38,6 @@ export function PersonPage() {
   if (detail.error) return <QueryError error={detail.error} retry={() => detail.refetch()} />
   const { person: p, keys, warning, groups, directoryGroups } = detail.data
   const self = p.id === me.id
-  const ldap = p.source === 'ldap'
 
   return (
     <>
@@ -49,7 +55,7 @@ export function PersonPage() {
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Badge variant={p.isAdmin ? 'default' : 'secondary'}>{p.isAdmin ? 'Admin' : 'Member'}</Badge>
-            <Badge variant="outline">{ldap ? 'Company directory' : 'Local account'}</Badge>
+            <Badge variant="outline">{sourceLabel[p.source]}</Badge>
             <PersonBadges p={p} />
             {p.legalHoldSince && <Badge variant="warning">Legal hold</Badge>}
             {self && <Badge variant="outline">You</Badge>}
@@ -112,7 +118,7 @@ function Profile({ p }: { p: Person }) {
       <CardContent className="grid gap-4">
         <KeyValues
           items={[
-            ['Signs in with', p.source === 'ldap' ? 'the company directory (LDAP)' : 'a password here'],
+            ['Signs in with', signsInWith[p.source]],
             ['Last sign-in', p.lastSignInAt ? `${ago(p.lastSignInAt)} (${when(p.lastSignInAt)})` : 'never'],
             ['Added', when(p.createdAt)],
           ]}
@@ -161,7 +167,8 @@ function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s:
     },
     onError: (e) => toast.error(errorMessage(e)),
   })
-  const ldap = p.source === 'ldap'
+  // The directory or the company's identity provider decides their password and role.
+  const managed = p.source !== 'local'
   const ask = async (title: string, description: string, confirmText: string, run: () => void, destructive = true) => {
     if (await confirm({ title, description, confirm: confirmText, destructive })) run()
   }
@@ -169,10 +176,12 @@ function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s:
     <Card>
       <CardHeader>
         <CardTitle>Access</CardTitle>
-        <CardDescription>{ldap ? "The directory decides this person's password and role." : 'Role, sign-in and sessions.'}</CardDescription>
+        <CardDescription>
+          {p.source === 'ldap' ? "The directory decides this person's password and role." : p.source === 'oidc' ? "The company's identity provider decides this person's password, two-factor sign-in and role." : 'Role, sign-in and sessions.'}
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap gap-2">
-        {!ldap && !self && (
+        {!managed && !self && (
           <Button
             variant="outline"
             onClick={() =>
@@ -202,7 +211,7 @@ function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s:
             {p.disabled ? <UserCheck /> : <UserX />} {p.disabled ? 'Enable' : 'Disable'}
           </Button>
         )}
-        {!ldap && (
+        {!managed && (
           <Button
             variant="outline"
             onClick={() => ask(`Give ${p.displayName} a new password?`, 'The old one stops working at once. You will see the new one here, once.', 'Reset password', () => act.mutate({ path: '/password', done: 'Password reset' }))}
