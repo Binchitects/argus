@@ -95,6 +95,8 @@ public static class SettingsCatalog
             { Default = "3", Min = 1, Max = 8, Optional = false },
         new("Chat:ToolCallTimeout", Chat, "Longest tool call", "A call to Argus or an MCP server still running after this long is stopped, and the model told so. An MCP server can have its own limit (Admin → Tools). The chat shows how long a call has run, and the progress the server reports.", SettingType.Duration, SettingScope.Live)
             { Default = "01:00:00", Unit = "minutes", Min = 1, Max = 1440, Optional = false },
+        new("Quality:PublicLeaderboard", Chat, "Arena leaderboard for everyone", "Everyone sees the leaderboard of the company's models on its own questions, made from the votes of Compare in the chat. Off: admins only (Admin → Quality).", SettingType.Boolean, SettingScope.Live)
+            { Default = "true", Optional = false },
         new("Chat:DefaultModel", Model, "Model new chats use", "A chat model's name. Empty: the first kept loaded (Admin → Models).", SettingType.Text, SettingScope.Live)
             { Max = 100 },
         new("Chat:ThinkingPresets", Model, "Thinking levels offered", "level:Label pairs, comma-separated. The chat offers them per conversation.", SettingType.Text, SettingScope.Live)

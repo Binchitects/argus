@@ -35,6 +35,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
+    public DbSet<AnswerFeedback> AnswerFeedback => Set<AnswerFeedback>();
+    public DbSet<ArenaMatch> ArenaMatches => Set<ArenaMatch>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -121,6 +123,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(p => new { p.AttachmentId, p.Number });
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(p => p.AttachmentId).OnDelete(DeleteBehavior.Cascade);
         });
+        QualityModel.Configure(builder);
 
         builder.Entity<Group>(e =>
         {

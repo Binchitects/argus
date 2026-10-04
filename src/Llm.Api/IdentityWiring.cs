@@ -230,6 +230,7 @@ public static class IdentityWiring
         services.AddScoped<Operations.ArgusWebhook>();
 
         services.Configure<Chat.ChatOptions>(config.GetSection("Chat"));
+        services.Configure<Quality.QualityOptions>(config.GetSection("Quality"));
         services.Configure<Safeguards.SafeguardOptions>(config.GetSection("Safeguards"));
         services.AddScoped<Safeguards.Safeguards>();
         services.PostConfigure<Chat.ChatOptions>(o =>
@@ -408,6 +409,7 @@ public static class IdentityWiring
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
         Chat.ProjectEndpoints.MapProjects(app);
+        Quality.QualityEndpoints.MapQuality(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Plugins.PluginEndpoints.MapPlugins(app);
         Models.ModelEndpoints.MapModels(app);
