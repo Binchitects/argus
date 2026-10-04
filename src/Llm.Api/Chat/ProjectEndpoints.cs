@@ -16,7 +16,8 @@ public sealed record ProjectFileRequest(Guid AttachmentId);
 public static class ProjectEndpoints
 {
     public const int MaxProjects = 200;
-    public const int MaxFiles = 50;
+    /// <summary>With the embedder, answers read a big project's files by their passages (Knowledge/Retrieval.cs).</summary>
+    public const int MaxFiles = 200;
 
     public static void MapProjects(this IEndpointRouteBuilder app)
     {
@@ -146,7 +147,8 @@ public static class ProjectEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> AddFileAsync(Guid id, ProjectFileRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> AddFileAsync(Guid id, ProjectFileRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Knowledge.FileIndex index,
+        CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await db.Projects.SingleOrDefaultAsync(x => x.Id == id && x.UserId == me.Id, ct) is not { } project)
@@ -168,6 +170,8 @@ public static class ProjectEndpoints
         db.ProjectFiles.Add(new ProjectFile { ProjectId = id, AttachmentId = body.AttachmentId });
         project.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        // Embedded now, so a project too big to inline is read by its passages from its first question.
+        _ = index.QueueAsync(body.AttachmentId);
         return Results.NoContent();
     }
 

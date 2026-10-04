@@ -281,6 +281,7 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.WebPageCache>();
         services.AddScoped<Chat.Tools.WebTool>();
         services.AddScoped<Chat.Tools.ToolRegistry>();
+        Knowledge.KnowledgeWiring.AddKnowledge(services, config);
         services.AddSingleton<Chat.Tools.ToolApprovals>();
         services.AddScoped<Chat.ChatService>();
         services.AddScoped<Chat.SmallModel>();
@@ -424,6 +425,7 @@ public static class IdentityWiring
         Chat.Tools.ToolEndpoints.MapTools(app);
         Plugins.PluginEndpoints.MapPlugins(app);
         ArenaMcp.McpEndpoints.MapArenaMcp(app);
+        Knowledge.KnowledgeEndpoints.MapKnowledge(app);
         Models.ModelEndpoints.MapModels(app);
         Models.ModelHoursEndpoints.MapModelHours(app);
         Models.HuggingFaceEndpoints.MapHuggingFace(app);

@@ -18,6 +18,7 @@ public static class SettingsCatalog
     private const string Schedules = "Scheduled tasks";
     private const string Mail = "Email";
     private const string Safeguards = "Safeguards";
+    private const string Knowledge = "Company knowledge";
 
 
 
@@ -138,7 +139,7 @@ public static class SettingsCatalog
             { Default = "violence,self-harm,sexual-minors,weapons,malware,hate", Options = ["violence", "self-harm", "sexual-minors", "weapons", "malware", "hate", "fraud"] },
         new("Safeguards:RedactPii", Safeguards, "Mask personal data", "mask: e-mail addresses, phone and card numbers and IBANs in messages reach the model masked; the chat keeps them as written. off: as written.", SettingType.Choice, SettingScope.Live)
             { Default = "off", Options = ["off", "mask"], Optional = false },
-        new("Safeguards:UntrustedToolResults", Safeguards, "Mark the web's content as data", "What web search and pages bring is marked so the model never follows instructions hidden in it (prompt injection).", SettingType.Boolean, SettingScope.Live)
+        new("Safeguards:UntrustedToolResults", Safeguards, "Mark the web's content as data", "What web search and pages bring, and the passages company knowledge finds, is marked so the model never follows instructions hidden in it (prompt injection).", SettingType.Boolean, SettingScope.Live)
             { Default = "true", Optional = false },
         new("Safeguards:StrikesToSuspend", Safeguards, "Refusals that suspend an account", "Refused messages in a day after which the account is disabled (an admin turns it back on under People). 0: never.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "0", Min = 0, Max = 1000 },
@@ -156,6 +157,10 @@ public static class SettingsCatalog
         new("GitLab:BotToken", Schedules, "GitLab bot token", "A bot account's token (scope api, Reporter in the projects): reads what an event leaves out and writes the comments of tasks that reply in GitLab. Never Argus's read-only token; each comment is audited.", SettingType.Secret, SettingScope.Live),
         new("Schedules:WebhookHosts", Schedules, "Webhook hosts", "Hosts a task's answer may be posted to, comma separated; *.example.com for a domain and its subdomains. Add your Mattermost or chat server here. Empty: no webhooks.", SettingType.Text, SettingScope.Live)
             { Default = "hooks.slack.com, *.webhook.office.com, *.logic.azure.com, discord.com" },
+        new("Knowledge:SyncEvery", Knowledge, "Read sources again every", "How often each knowledge source (Admin → Knowledge) is read again. Only what changed is embedded again; a GitLab project with no new activity is not read at all. Members of GitLab projects are read every 15 minutes whatever this is.", SettingType.Duration, SettingScope.Live)
+            { Default = "01:00:00", Unit = "minutes", Min = 15, Max = 10080, Optional = false },
+        new("Knowledge:PassageChars", Knowledge, "Passages of long files per question", "With the embedder, a chat's long files and a project's files that do not fit go to the model as their passages that match each question, up to this many characters, instead of their first part.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "12000", Unit = "characters", Min = 2000, Max = 100000, Optional = false },
         new("Mail:Host", Mail, "SMTP server", "The mail server the app sends email through (scheduled tasks' answers). Empty: no email.", SettingType.Text, SettingScope.Live),
         new("Mail:Port", Mail, "SMTP port", "587 for STARTTLS, 25 for plain SMTP inside the network.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "587", Min = 1, Max = 65535, Optional = false },

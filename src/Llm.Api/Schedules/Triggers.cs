@@ -58,6 +58,25 @@ public sealed class GitLabBot(IHttpClientFactory http, IOptionsMonitor<GitLabOpt
         }
     }
 
+    /// <summary>A GET of the API with GitLab's status: 0 when the bot is not set up or GitLab cannot be reached (company knowledge tells "gone" from "unreachable").</summary>
+    public async Task<(int Status, string? Body)> ReadAsync(string path, CancellationToken ct)
+    {
+        if (!Ready)
+        {
+            return (0, null);
+        }
+        try
+        {
+            using var request = Request(HttpMethod.Get, path);
+            using var response = await http.CreateClient(Client).SendAsync(request, ct);
+            return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(ct));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return (0, null);
+        }
+    }
+
     /// <summary>Comments on a merge request, an issue or a commit; throws with GitLab's reason when it cannot.</summary>
     public async Task CommentAsync(GitLabTarget target, string body, CancellationToken ct)
     {

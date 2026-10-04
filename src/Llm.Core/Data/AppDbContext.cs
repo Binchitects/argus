@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Core.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options)
+public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     : IdentityDbContext<AppUser, AppRole, Guid>(options), IDataProtectionKeyContext
 {
     public DbSet<Setting> Settings => Set<Setting>();
@@ -37,6 +37,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
     public DbSet<Memory> Memories => Set<Memory>();
     public DbSet<SavedPrompt> Prompts => Set<SavedPrompt>();
+    public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
+    public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
+    public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
+    public DbSet<KnowledgeReaders> KnowledgeReaders => Set<KnowledgeReaders>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -281,6 +285,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne<AppUser>().WithMany().HasForeignKey(p => p.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<McpServer>().WithMany().HasForeignKey(p => p.ServerId).OnDelete(DeleteBehavior.Cascade);
         });
+        KnowledgeModel(builder);
 
         builder.Entity<AuditEvent>(e =>
         {

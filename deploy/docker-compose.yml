@@ -134,7 +134,7 @@ services:
     ulimits: { memlock: -1 }
     shm_size: 2gb
 
-  # Embeddings for Argus, on the CPU. The app fetches the file into MODELS_DIR/embed.
+  # Embeddings for Argus and the app's company knowledge, on the CPU. The app fetches the file into MODELS_DIR/embed.
   embed:
     <<: *service
     image: ghcr.io/ggml-org/llama.cpp:server-cuda

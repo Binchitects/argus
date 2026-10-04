@@ -68,6 +68,9 @@ each v3 option maps: [deployment.md](deployment.md#where-the-v3-env-options-went
 Models are not in a volume: they are in `MODELS_DIR`, where Admin → Models
 downloads them and every server reads them.
 
+Folders for company knowledge are mounted read-only under `/knowledge` in the
+app, in `docker-compose.override.yml` ([knowledge.md](knowledge.md#a-folder)).
+
 ## Leaving a module out, and Podman
 
 See [deployment.md](deployment.md): `docker-compose.override.yml` with

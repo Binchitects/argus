@@ -93,6 +93,12 @@ which Argus checks with the app (`app:8080/api/authz/key`); the chat →
 `argus:7700/mcp` with `ARGUS_KEY` and the person's email. Argus reads the
 GitLab it mirrors with a read-only token, and embeddings from `embed`.
 
+**Company knowledge.** The app reads the sources an admin added (GitLab with
+its bot's token, folders under `/knowledge`, websites through the web guard),
+embeds their passages with `embed`, and keeps them in its own Postgres
+database with each document's readers; the chat's `search_knowledge` searches
+only what the asker may read ([knowledge.md](knowledge.md)).
+
 **Metrics and logs.** Prometheus scrapes the engine's loaded models (the app
 writes their list), the exporters, Traefik and Argus; Promtail ships this
 project's container logs to Loki; the app queries both for its dashboards,
