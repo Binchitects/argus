@@ -21,6 +21,12 @@ Sections used:
   nothing), shows the address and the steps for GitLab, and lists the last
   deliveries. A push or a merged merge request updates that repository at once.
   Argus's GitLab token stays read-only: a Maintainer adds the webhook in GitLab
+- **Prompt cache by design**: the tools stay in every round of an answer (the
+  last round switches calling off instead of dropping them, which made the
+  engine read the whole chat again), old messages are left out in steps, and
+  every model's preset sets `cache-reuse`. The next turn of a long chat reads
+  over 99% of its prompt from the cache. LLM Overview shows the cache hit per
+  model
 
 ## v4.0.0 (2026-10-03)
 

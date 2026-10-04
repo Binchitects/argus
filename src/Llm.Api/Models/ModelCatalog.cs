@@ -201,6 +201,13 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             sb.Append(inv, $"presence-penalty = {presence:0.###}\n");
         }
         sb.Append("jinja = true\nmetrics = true\n");
+        // A prompt whose start matches what a slot holds reads that part from the cache; with
+        // cache-reuse, chunks further on that match too (after a cut in the middle) are shifted
+        // into place. The extra lines may set another size, or 0 for none.
+        if (!(m.ExtraPreset ?? "").Split('\n').Any(l => PresetLine().Match(l.Trim()) is { Success: true } k && k.Groups[1].Value == "cache-reuse"))
+        {
+            sb.Append("cache-reuse = 256\n");
+        }
         foreach (var raw in (m.ExtraPreset ?? "").Split('\n'))
         {
             var line = raw.Trim();

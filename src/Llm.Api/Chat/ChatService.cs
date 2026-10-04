@@ -213,10 +213,9 @@ public sealed partial class ChatService(
             {
                 request["chat_template_kwargs"] = kwargs;
             }
-            // No tools on the last allowed round: the model must answer with what it has.
-            if (tools.Count > 0 && round < (overrides.Research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds))
+            if (tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0)
             {
-                request["tools"] = tools.DeepClone();
+                Tools(request, tools, last: round >= (overrides.Research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds));
             }
 
             // What fills this request, for the context gauge (scaled to the prompt tokens the model reports).
@@ -459,6 +458,28 @@ public sealed partial class ChatService(
     private const int AgentRounds = 6;
     private const int AgentToolChars = 12_000;
 
+    /// <summary>
+    /// The tools, in every round: the engine reuses the cache of a prompt's unchanged start, and
+    /// the template writes the tools at the very start, so a round without them reads the whole
+    /// conversation again. On the last allowed round they stay, calling them is switched off, and
+    /// the newest tool result says so (a model that still sees its tools may write a call as text).
+    /// </summary>
+    public static void Tools(JsonObject request, JsonArray tools, bool last)
+    {
+        request["tools"] = tools.DeepClone();
+        if (!last)
+        {
+            return;
+        }
+        request["tool_choice"] = "none";
+        if (request["messages"] is JsonArray { Count: > 0 } messages && messages[^1] is JsonObject { } newest && newest["role"]?.GetValue<string>() == "tool")
+        {
+            newest["content"] = newest["content"]?.GetValue<string>() + "\n\n" + LastRoundNote;
+        }
+    }
+
+    public const string LastRoundNote = "(No more tool calls are possible in this answer: answer now with what you have, and say what is still open.)";
+
     private static string Cut(string text, int max) => text.Length <= max ? text : text[..max] + "\n[cut to fit]";
 
     /// <summary>
@@ -562,10 +583,9 @@ public sealed partial class ChatService(
             {
                 request["chat_template_kwargs"] = kwargs;
             }
-            // No tools on the last allowed round: it must answer with what it has.
-            if (tools.Count > 0 && round < Math.Min(chat.CurrentValue.MaxToolRounds, AgentRounds))
+            if (tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0)
             {
-                request["tools"] = tools.DeepClone();
+                Tools(request, tools, last: round >= Math.Min(chat.CurrentValue.MaxToolRounds, AgentRounds));
             }
             text.Clear();
             var pending = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
@@ -911,18 +931,7 @@ public sealed partial class ChatService(
             system += "\n\nThe earlier part of this conversation was compacted: its messages are not shown, this summary stands for them.\n<summary>\n" + summary + "\n</summary>";
             budgetChars -= summary.Length + 150;
         }
-        var dropped = 0;
-        while (turns.Count > 1 && turns.Sum(t => t.Weight) > budgetChars)
-        {
-            turns.RemoveAt(0);
-            dropped++;
-            // Never start on a tool answer or a tool request whose answers were cut.
-            while (turns.Count > 1 && turns[0].Turn["role"]!.GetValue<string>() != "user")
-            {
-                turns.RemoveAt(0);
-                dropped++;
-            }
-        }
+        var dropped = TrimOldest(turns, budgetChars);
         if (dropped > 0)
         {
             LogTrimmed(logger, conversation.Id, dropped);
@@ -930,6 +939,32 @@ public sealed partial class ChatService(
 
         return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped,
             new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, projectFiles));
+    }
+
+    /// <summary>
+    /// Over the room, the oldest turns go in steps of a quarter of it, not one by one: the start
+    /// stays the same for the next turns (the engine's cache holds it) until the next step. Never
+    /// starts on a tool answer or a tool request whose answers were cut. How many turns went.
+    /// </summary>
+    public static int TrimOldest(List<(JsonObject Turn, long Weight, ChatMessage Source)> turns, long budgetChars)
+    {
+        var dropped = 0;
+        var over = turns.Sum(t => t.Weight) - budgetChars;
+        var step = Math.Max(1, budgetChars / 4);
+        var drop = over > 0 ? (over + step - 1) / step * step : 0;
+        while (turns.Count > 1 && drop > 0)
+        {
+            drop -= turns[0].Weight;
+            turns.RemoveAt(0);
+            dropped++;
+            while (turns.Count > 1 && turns[0].Turn["role"]!.GetValue<string>() != "user")
+            {
+                drop -= turns[0].Weight;
+                turns.RemoveAt(0);
+                dropped++;
+            }
+        }
+        return dropped;
     }
 
     public static IEnumerable<Guid> ParseIds(string? json) =>

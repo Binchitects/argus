@@ -42,6 +42,14 @@ setups to paste.
   the older messages, and the next answers read the summary instead. **Compact
   now** in the gauge (or the chat's menu, or sending `/compact`) does it at
   once. Nothing is deleted: the messages stay on screen above a mark.
+- **Prompt cache.** The engine reads a prompt's unchanged start from its
+  cache, so each request keeps its start unchanged: the date (to the day), the
+  tools' notes in a fixed order, your instructions, then the project's files;
+  the tools stay in every round (on the last allowed round calling them is
+  switched off, and the model is told); and with compaction off, the oldest
+  messages are left out a quarter of the room at a time, not one by one. The
+  next turn of a long chat reads more than 99% of its prompt from the cache.
+  The share per model is on Admin → Dashboards → LLM Overview.
 - **Branches.**
   - **Editing** a question sends the new text as a sibling of the old one:
     both questions and their answers are kept.
