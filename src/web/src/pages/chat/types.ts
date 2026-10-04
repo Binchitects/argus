@@ -26,6 +26,8 @@ export interface ChatTool {
 export interface ChatConfig {
   model: string | null
   models: ChatModel[]
+  /** Auto, offered while a model for small steps is set that the person may use: that model, and whether chats that chose none are on Auto. */
+  auto?: { model: string; byDefault: boolean } | null
   presets: { level: string; label: string }[]
   defaultThinking: string | null
   argus: boolean
@@ -77,8 +79,8 @@ export interface Message {
   noAccess: boolean
   /** The chat was compacted here: the model reads this summary instead of the branch down to this message. */
   summary?: string | null
-  /** What a tool call shows beyond what the model read: sub-agents' work ({ agents: [...] }). */
-  details?: { agents?: AgentWork[] } | null
+  /** What a message shows beyond what the model read: a tool call's sub-agents' work ({ agents: [...] }), an Auto answer's route. */
+  details?: { agents?: AgentWork[]; route?: AutoRoute } | null
   /** An answer: what filled the request it answered, in characters by kind (the context gauge scales it to its prompt tokens). */
   context?: ContextFill | null
   /** An answer whose thinking was cut short ("Answer now"). */
@@ -111,6 +113,19 @@ export interface AgentWork {
   /** The model it ran on, and the tokens it used (once done): the answer's cost counts them. */
   model?: string | null
   usage?: TokenUsage | null
+}
+
+/** Who answered on Auto, and why: the small model itself, or the chat's main model with a thinking level. */
+export interface AutoRoute {
+  /** chat, lookup, code, reasoning, research (the small model's word); files, deep, thinking, unknown, unavailable (not asked, or no word). */
+  kind: string
+  reason: string
+  /** The model that answered. */
+  model: string
+  /** The chat's main model: "Ask the big model" answers again with it. */
+  main: string
+  thinking: string | null
+  small: boolean
 }
 
 export interface TokenUsage {
@@ -187,8 +202,11 @@ export interface ChatSettings {
 
 export type ChatEvent =
   | { type: 'question'; id: string; parentId: string | null }
-  | { type: 'title'; title: string }
+  /** The chat's title: the first line, then (with a model for small steps) the one it wrote. */
+  | { type: 'title'; title: string; model?: string }
   | { type: 'assistant'; id: string; parentId: string; model: string }
+  /** Auto: who answers (message `id`), and why. */
+  | { type: 'route'; id: string; route: AutoRoute }
   | { type: 'reasoning'; text: string }
   | { type: 'thought'; ms: number; cutShort?: boolean }
   | { type: 'content'; text: string }
@@ -224,7 +242,7 @@ export type ChatEvent =
   /** The older messages are being summarized (compaction), before an answer or because the person asked. */
   | { type: 'compacting' }
   /** Compacted at message `id`: `covered` messages became `summary`. */
-  | { type: 'compacted'; id: string; summary: string; auto: boolean; covered: number }
+  | { type: 'compacted'; id: string; summary: string; auto: boolean; covered: number; model?: string }
   /** Stopped (by the person, from any tab): what was written is kept. */
   | { type: 'stopped'; id: string | null }
   | { type: 'done'; id: string }

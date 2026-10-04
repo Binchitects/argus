@@ -52,7 +52,7 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
-        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, CancellationToken ct)
+        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, CancellationToken ct)
     {
         var e = engine.Value;
         var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
@@ -124,6 +124,8 @@ public static class ModelEndpoints
                 gpus = hw?.Devices?.Select(g => new { g.Index, g.Name, g.Total }) ?? [],
                 plan = e.Enabled ? Plan(kept, local, e, library, hw) : null,
             },
+            // The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well.
+            small = small.Name is { } name ? new { name, warning = await small.WarningAsync(ct) } : null,
             models = rows,
         });
     }

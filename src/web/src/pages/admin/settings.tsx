@@ -276,6 +276,7 @@ function SettingRow({ s, value, error, onChange }: { s: SettingView; value: stri
             {error}
           </p>
         )}
+        {s.warning && <Alert variant="warning">{s.warning}</Alert>}
         <Provenance s={s} />
         {s.source === 'saved' && (
           <div>

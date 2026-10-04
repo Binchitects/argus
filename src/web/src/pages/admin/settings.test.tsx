@@ -166,4 +166,20 @@ describe('settings', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Restart the app now' }))
     await waitFor(() => expect(screen.queryByText('Some changes apply when the app restarts')).not.toBeInTheDocument(), { timeout: 6000 })
   }, 10_000)
+
+  it('says under a setting what is wrong with it for the rest of the deployment', async () => {
+    const d = data()
+    const model = d.groups.find((g) => g.title === 'Model')!
+    model.settings.push(
+      s({
+        key: 'Chat:SmallModel', group: 'Model', label: 'Model for sub-agents and small steps', type: 'text', optional: true, value: 'Small-Model', default: null, source: 'saved',
+        warning: 'Small-Model is not kept loaded: each small step waits for it to load, and pushes another model out.',
+      }),
+    )
+    fakeApi(admin, { 'GET /api/admin/config': () => ({ json: d }) })
+    renderApp('/admin/settings#model')
+    expect(await screen.findByLabelText('Model for sub-agents and small steps')).toHaveValue('Small-Model')
+    expect(screen.getByText(/Small-Model is not kept loaded/)).toBeInTheDocument()
+    expect(screen.getAllByText(/is not kept loaded/)).toHaveLength(1)
+  })
 })

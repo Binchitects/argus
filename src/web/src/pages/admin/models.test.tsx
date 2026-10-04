@@ -294,4 +294,19 @@ describe('admin models', () => {
     expect(screen.queryByRole('button', { name: 'Add a model' })).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Who may use it' })).toBeInTheDocument()
   })
+
+  it('the model for small steps is marked, and what keeps it from its work is said', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({
+        json: { ...view(), small: { name: 'Small-Model', warning: 'Small-Model is not kept loaded: each small step waits for it to load, and pushes another model out.' } },
+      }),
+    })
+    renderApp('/admin/models')
+    const small = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
+    expect(within(small).getByText('Small steps')).toBeInTheDocument()
+    const big = screen.getByRole('heading', { name: /Big-Model/ }).closest('section')!
+    expect(within(big).queryByText('Small steps')).not.toBeInTheDocument()
+    expect(screen.getByText('The model for small steps')).toBeInTheDocument()
+    expect(screen.getByText(/each small step waits for it to load/)).toBeInTheDocument()
+  })
 })

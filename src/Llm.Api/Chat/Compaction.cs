@@ -51,7 +51,8 @@ public sealed partial class ChatService
     public async Task CompactAsync(AppUser user, Conversation conversation, Guid leafId, Func<object, Task> emit, CancellationToken ct)
     {
         var email = user.Email!.ToLowerInvariant();
-        var (model, modelName, refusal) = await ModelForAsync(user, conversation, null, ct);
+        // The model for small steps writes it when there is one; else the chat's model.
+        var (model, modelName, refusal) = await small.ForAsync(user, ct) is { } helper ? (helper, helper.Name, null) : await ModelForAsync(user, conversation, null, ct);
         if (refusal is not null)
         {
             await emit(new { type = "error", message = refusal });
@@ -80,7 +81,7 @@ public sealed partial class ChatService
         var target = path[^1];
         await db.ChatMessages.Where(m => m.Id == target.Id).ExecuteUpdateAsync(s => s.SetProperty(m => m.Summary, summary), CancellationToken.None);
         LogCompacted(logger, conversation.Id, path.Count - from, summary.Length, false);
-        await emit(new { type = "compacted", id = target.Id, summary, auto = false, covered = path.Count - from });
+        await emit(new { type = "compacted", id = target.Id, summary, auto = false, covered = path.Count - from, model = modelName });
         await emit(new { type = "done", id = target.Id });
     }
 
@@ -135,7 +136,7 @@ public sealed partial class ChatService
         target.Summary = summary;
         await db.ChatMessages.Where(m => m.Id == target.Id).ExecuteUpdateAsync(s => s.SetProperty(m => m.Summary, summary), CancellationToken.None);
         LogCompacted(logger, target.ConversationId, at - from, summary.Length, true);
-        await emit(new { type = "compacted", id = target.Id, summary, auto = true, covered = at - from });
+        await emit(new { type = "compacted", id = target.Id, summary, auto = true, covered = at - from, model = modelName });
         return (summary, cut);
     }
 

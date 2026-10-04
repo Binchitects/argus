@@ -61,6 +61,19 @@ loaded, and how full each GPU would be with them.
   When every place is kept, no other model loads on request, and the chat says
   so. A change of the kept list that flips this restarts llama-server (the kept
   models load again, one after another).
+- **The model for small steps** (Settings → Model → **Model for sub-agents
+  and small steps**) does the many short steps around an answer: sub-agents,
+  chat titles, compaction summaries, the safeguards' check, and Auto in the
+  chat's model menu. It is only fast when the engine holds it beside the big
+  model: set **Models loaded at once** to 2 or more, and **Keep loaded** both.
+  Its card reads **Small steps**. The page, and the setting itself, warn while
+  it is not at the gateway, not kept loaded (each step would wait for it and
+  push another model out), or the engine holds one model at once (the two
+  would take turns, loading again for every step). On the GPU beside the big
+  model it takes some of the big one's memory (for a mixture of experts, more
+  experts in RAM); a model on another GPU server costs this engine nothing.
+  Who may use it is set on its card as for any model: Auto is offered only to
+  them, and for the others each step uses the answer's own model.
 - **Working hours** change the kept models by day and hour: a small fast model
   in busy hours, the big one at night. Each has days, a time from and until
   (until before from runs past midnight; the same is all day), the models kept

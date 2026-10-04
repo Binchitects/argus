@@ -18,6 +18,7 @@ import { answerUsage, seconds } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
 import { useNow } from './use-now'
 import { QuestionCard } from './questions'
+import { RouteNote } from './route-note'
 import type { AgentWork, ChatConfig, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
@@ -217,6 +218,12 @@ export function AnswerTurn({
   const took = assistants.reduce((a, m) => a + (m.durationMs ?? 0), 0) + answer.filter((m) => m.role === 'tool').reduce((a, m) => a + (m.durationMs ?? 0), 0)
   const usage = answerUsage(answer, config)
   const waiting = live && assistants.every((a) => !a.content && !a.reasoning && !a.toolCalls?.length)
+  // Auto: who answered and why, kept with the answer's first message.
+  const route = first?.details?.route
+  // Which model did which part: the sub-agents' models, when not the answer's.
+  const agentModels = [...new Set(answer.flatMap((m) => (m.role === 'tool' ? (m.details?.agents ?? []) : [])).map((a) => a.model))].filter(
+    (x): x is string => !!x && x !== last?.model,
+  )
 
   let footer: ReactNode = null
   if (!live && first) {
@@ -282,6 +289,7 @@ export function AnswerTurn({
         )}
         <span className="ml-1 flex flex-wrap items-center gap-x-2 tabular-nums">
           {last?.model && <span>{last.model}</span>}
+          {agentModels.length > 0 && <span>· sub-agents: {agentModels.join(', ')}</span>}
           {took > 0 && <span>· {seconds(took)}</span>}
           {usage.prompt + usage.completion > 0 && (
             <span
@@ -352,6 +360,14 @@ export function AnswerTurn({
           </div>
         )
       })}
+      {route && (
+        <RouteNote
+          route={route}
+          config={config}
+          busy={busy}
+          onAskBig={!live && onRegenerate && question ? () => onRegenerate(question, { model: route.main }) : undefined}
+        />
+      )}
       {footer}
     </section>
   )

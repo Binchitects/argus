@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FileDown, FoldVertical, FolderInput, FolderKanban, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Brain, Check, ChevronDown, Eye, FileDown, FoldVertical, FolderInput, FolderKanban, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, SlidersHorizontal, Sparkles, Trash2, Wrench } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router'
@@ -21,7 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
-import { chatModel, projectsQuery } from './api'
+import { AUTO, chatModel, onAuto, projectsQuery } from './api'
 import type { ChatConfig, ChatSettings } from './types'
 import { useChatActions } from './chat-actions'
 
@@ -29,20 +29,37 @@ const DEFAULT = '__default__'
 
 export function ModelPicker({ config, value, onChange }: { config: ChatConfig; value: string | null; onChange: (model: string | null) => void }) {
   const current = chatModel(config, value)
+  // Auto: the small model answers easy questions, and hands the rest to the main model (the default).
+  const auto = onAuto(config, value)
+  const shown = auto ? 'Auto' : current?.name
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="h-8 min-w-0 max-w-64 shrink gap-1.5 px-2 font-semibold" aria-label={`Model: ${current?.name ?? 'none'}`}>
-          <span className="truncate">{current?.name ?? 'No model'}</span>
-          {current && !current.loaded && (current.onRequest ? <Badge variant="secondary">Loads when asked</Badge> : <Badge variant="warning">Not loaded</Badge>)}
+        <Button variant="ghost" className="h-8 min-w-0 max-w-64 shrink gap-1.5 px-2 font-semibold" aria-label={`Model: ${shown ?? 'none'}`}>
+          {auto && <Sparkles className="text-primary-ink" aria-hidden="true" />}
+          <span className="truncate">{shown ?? 'No model'}</span>
+          {!auto && current && !current.loaded && (current.onRequest ? <Badge variant="secondary">Loads when asked</Badge> : <Badge variant="warning">Not loaded</Badge>)}
           <ChevronDown className="opacity-60" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-80">
         <DropdownMenuLabel>Model</DropdownMenuLabel>
+        {config.auto && (
+          <DropdownMenuItem onSelect={() => onChange(config.auto!.byDefault ? null : AUTO)} className="items-start">
+            <span className="mt-0.5 w-4">{auto && <Check />}</span>
+            <span className="grid gap-1">
+              <span className="flex items-center gap-1.5 font-medium text-foreground">
+                <Sparkles className="size-3.5 text-primary-ink" aria-hidden="true" /> Auto
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {config.auto.model} answers easy questions itself, and hands the rest to {chatModel(config, null)?.name ?? 'the main model'}, thinking as hard as each needs.
+              </span>
+            </span>
+          </DropdownMenuItem>
+        )}
         {config.models.map((m) => (
-          <DropdownMenuItem key={m.name} disabled={!m.loaded && !m.onRequest} onSelect={() => onChange(m.name === config.model ? null : m.name)} className="items-start">
-            <span className="mt-0.5 w-4">{m.name === current?.name && <Check />}</span>
+          <DropdownMenuItem key={m.name} disabled={!m.loaded && !m.onRequest} onSelect={() => onChange(m.name === config.model && !config.auto?.byDefault ? null : m.name)} className="items-start">
+            <span className="mt-0.5 w-4">{!auto && m.name === current?.name && <Check />}</span>
             <span className="grid gap-1">
               <span className="font-medium text-foreground">{m.name}</span>
               <span className="flex flex-wrap gap-1">

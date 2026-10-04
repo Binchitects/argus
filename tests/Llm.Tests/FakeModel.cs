@@ -16,8 +16,10 @@ namespace Llm.Tests;
 ///   [steady]    streams 60 small pieces, 25 ms apart (for leaving the page mid-answer)
 ///   [ponder]    thinks in 400 small pieces, 25 ms apart, then answers; with thinking off, answers "Quick answer." at once
 /// Asked to compact a chat (the summarizer's system prompt), it answers
-/// "Summary of N characters." (N: the length of what it was given).
-///   [budget]    refuses as LiteLLM does when credit is used up
+/// "Summary of N characters." (N: the length of what it was given). Asked to sort a question
+/// for Auto, it answers the kind a [kind:X] marker names (lookup without one; [kind:?] is not
+/// JSON); asked for a chat's title, "Title: "Named &lt;the first three words&gt;".".
+///   [budget]   refuses as LiteLLM does when credit is used up
 ///   [harm]      flagged (as weapons) by the safeguards' check
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
 /// Its /v1/images/generations answers with a small PNG.
@@ -112,6 +114,23 @@ public sealed class FakeModel : HttpMessageHandler
         {
             var flagged = lastUser.Contains("[harm]", StringComparison.Ordinal);
             chunks = [Delta(new JsonObject { ["content"] = flagged ? "{\"flagged\": true, \"category\": \"weapons\"}" : "{\"flagged\": false, \"category\": null}" }), Finish("stop"), Usage(50, 0, 10)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        // Auto's sorting: the kind a "[kind:X]" marker says (the last one), "lookup" without one; "[kind:?]" is not JSON at all.
+        if (messages[0]!["content"]?.GetValue<string>().StartsWith("You sort the questions people send", StringComparison.Ordinal) == true)
+        {
+            var marks = System.Text.RegularExpressions.Regex.Matches(lastUser, @"\[kind:([a-z?]+)\]");
+            var kind = marks.Count > 0 ? marks[^1].Groups[1].Value : "lookup";
+            var said = kind == "?" ? "I would say it is hard to tell." : $"{{\"kind\": \"{kind}\", \"reason\": \"looks like {kind}\"}}";
+            chunks = [Delta(new JsonObject { ["content"] = said }), Finish("stop"), Usage(80, 0, 12)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        // A chat's title: "Title: <the message's first three words>."
+        if (messages[0]!["content"]?.GetValue<string>().StartsWith("You name conversations", StringComparison.Ordinal) == true)
+        {
+            var words = lastUser.Replace("<message>", "", StringComparison.Ordinal).Replace("</message>", "", StringComparison.Ordinal)
+                .Split((char[])[' ', '\n'], StringSplitOptions.RemoveEmptyEntries).Take(3);
+            chunks = [Delta(new JsonObject { ["content"] = $"Title: \"Named {string.Join(' ', words)}\"." }), Finish("stop"), Usage(40, 0, 6)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
         if (messages[0]!["content"]?.GetValue<string>().StartsWith("You compact a conversation", StringComparison.Ordinal) == true)
