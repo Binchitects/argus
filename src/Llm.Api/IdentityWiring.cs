@@ -399,6 +399,7 @@ public static class IdentityWiring
         app.MapAdmin();
         Access.GroupEndpoints.MapGroups(app);
         app.MapForwardAuth();
+        app.MapKeyCheck();
         app.MapOidc();
         Dashboards.DashboardEndpoints.MapDashboards(app);
         Dashboards.UsageEndpoints.MapUsage(app);

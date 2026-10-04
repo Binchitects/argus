@@ -64,10 +64,11 @@ public static class AuditLog
         }
     }
 
-    public static void ToolCall(string tool, string? user, long? userId, JsonObject args, int? reposVisible, double durationMs, Exception? error)
+    /// <param name="via">How the person was identified (api_key, gitlab_token, chat, argus_key); left out when unknown (stdio).</param>
+    public static void ToolCall(string tool, string? user, long? userId, JsonObject args, int? reposVisible, double durationMs, Exception? error, string? via = null)
     {
         var outcome = error is null ? "ok" : error.GetType().Name == "AccessNotice" ? "no_access" : "error";
-        Emit(new JsonObject
+        var fields = new JsonObject
         {
             ["event"] = "tool_call",
             ["tool"] = tool,
@@ -78,7 +79,9 @@ public static class AuditLog
             ["duration_ms"] = Math.Round(durationMs, 1, MidpointRounding.ToEven),
             ["repos_visible"] = reposVisible,
             ["args"] = Clip(args),
-        });
+        };
+        if (via is not null) fields["via"] = via;
+        Emit(fields);
     }
 
     /// <summary>An admin's change to what is indexed (a repository in or out, its branches, the policy for new ones, a refresh).</summary>
@@ -89,8 +92,12 @@ public static class AuditLog
         Emit(line);
     }
 
-    public static void Denied(string reason, string path, string? detail = null) =>
-        Emit(new JsonObject { ["event"] = "denied", ["reason"] = reason, ["path"] = path, ["detail"] = detail });
+    public static void Denied(string reason, string path, string? detail = null, string? via = null)
+    {
+        var fields = new JsonObject { ["event"] = "denied", ["reason"] = reason, ["path"] = path, ["detail"] = detail };
+        if (via is not null) fields["via"] = via;
+        Emit(fields);
+    }
 
     public static void IndexStart(IReadOnlyList<string> branches, bool allowPartial, int repos) =>
         Emit(new JsonObject

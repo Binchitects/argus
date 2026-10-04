@@ -162,6 +162,8 @@ services:
     environment:
       ARGUS_ADMIN_TOKEN: ${ARGUS_KEY}
       ARGUS_CHAT_CLIENT_TOKEN: ${ARGUS_KEY}
+      # Coding agents connect with the person's API key (sk-...); the app says whose it is. GitLab tokens are refused.
+      ARGUS_KEY_CHECK_URL: http://app:8080/api/authz/key
       ARGUS_GITLAB_URL: ${GITLAB_URL:-}
       ARGUS_GITLAB_TOKEN: ${GITLAB_TOKEN:-}
       # Only where no token can be made for the account: Argus signs in with these once and makes its own token.

@@ -15,7 +15,11 @@ namespace Argus.Access;
 public class AclDenied(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>Who is asking, and which index repo ids they may read.</summary>
-public sealed record Identity(long UserId, string Username, IReadOnlyList<long> AllowedRepoIds);
+public sealed record Identity(long UserId, string Username, IReadOnlyList<long> AllowedRepoIds)
+{
+    /// <summary>How the person was identified, for the audit lines: api_key, gitlab_token, chat, argus_key.</summary>
+    public string? Via { get; init; }
+}
 
 /// <summary>
 /// A developer's GitLab token resolved to the repositories they may read

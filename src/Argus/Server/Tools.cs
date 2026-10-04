@@ -106,7 +106,7 @@ public sealed class Tools
         finally
         {
             RecordAudit(identity, tool, args);
-            AuditLog.ToolCall(tool, identity.Username, identity.UserId, args, identity.AllowedRepoIds.Count, sw.Elapsed.TotalMilliseconds, error);
+            AuditLog.ToolCall(tool, identity.Username, identity.UserId, args, identity.AllowedRepoIds.Count, sw.Elapsed.TotalMilliseconds, error, identity.Via);
         }
     }
 

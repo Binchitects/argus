@@ -149,6 +149,7 @@ public static partial class ArgusServer
         var jobs = new Jobs(cfg);
         var gateway = Gateway.FromEnvironment();
         var directory = new Lazy<MemberDirectory>(() => new MemberDirectory(cfg.GitLab));
+        var keys = ArenaKeys.FromEnvironment(ChatTokenEnv);
         Identity IdentityFor(AppUser user)
         {
             using var conn = Db.Connect(cfg.Index.DbPath);
@@ -184,7 +185,7 @@ public static partial class ArgusServer
 
         if (AppEnabled()) PlatformApi.MapWeb(app, WebRoot());
         app.Use(PlatformApi.Errors);
-        app.Use(async (ctx, next) => await Authenticate(ctx, next, cfg, directory, appDbPath));
+        app.Use(async (ctx, next) => await Authenticate(ctx, next, cfg, directory, appDbPath, keys));
         app.Use(async (ctx, next) =>
         {
             if (ctx.Request.Path.StartsWithSegments("/mcp") && !TransportSecurity(ctx, hosts, origins, out var status, out var message))
@@ -255,7 +256,7 @@ public static partial class ArgusServer
         await ctx.Response.WriteAsync(new JsonObject { ["error"] = message }.ToJsonString(JsonOut));
     }
 
-    static void AuditDenied(ArgusConfig cfg, string reason, string path, string? detail = null)
+    static void AuditDenied(ArgusConfig cfg, string reason, string path, string? detail = null, string? via = null)
     {
         try
         {
@@ -266,14 +267,15 @@ public static partial class ArgusServer
         {
             Console.Error.WriteLine($"failed to record audit row for a denied request: {exc.Message}");
         }
-        AuditLog.Denied(reason, path, detail);
+        AuditLog.Denied(reason, path, detail, via);
     }
 
     /// <summary><c>ARGUS_WEB_ROOT</c>, or the <c>wwwroot</c> published beside the binary.</summary>
     static string WebRoot() =>
         Environment.GetEnvironmentVariable("ARGUS_WEB_ROOT") is { Length: > 0 } w ? w : Path.Combine(AppContext.BaseDirectory, "wwwroot");
 
-    static async Task Authenticate(HttpContext ctx, Func<Task> next, ArgusConfig cfg, Lazy<MemberDirectory> directory, string appDbPath)
+    /// <param name="keys">In the platform (ARGUS_KEY_CHECK_URL): Arena API keys checked with the app, and no GitLab tokens.</param>
+    static async Task Authenticate(HttpContext ctx, Func<Task> next, ArgusConfig cfg, Lazy<MemberDirectory> directory, string appDbPath, ArenaKeys? keys)
     {
         var path = ctx.Request.Path.Value ?? "";
         PlatformApi.Identify(ctx, appDbPath);
@@ -311,10 +313,12 @@ public static partial class ArgusServer
         }
 
         Identity identity;
+        string? via = null;
         try
         {
             if (user is not null && ctx.Items[PlatformApi.ViaItem] as string == "key")
             {
+                via = "argus_key";
                 identity = await Task.Run(() =>
                 {
                     using var conn = Db.Connect(cfg.Index.DbPath);
@@ -341,6 +345,7 @@ public static partial class ArgusServer
                     var email = PyStr.Strip(ctx.Request.Headers[ChatEmailHeader].ToString());
                     if (email.Length == 0)
                         throw new AclDenied("The chat client did not say who is asking, so access is denied.");
+                    via = "chat";
                     identity = await Task.Run(() =>
                     {
                         using var conn = Db.Connect(cfg.Index.DbPath);
@@ -348,8 +353,21 @@ public static partial class ArgusServer
                             People.UsernameForEmail(Environment.GetEnvironmentVariable(UsersFileEnv), email));
                     });
                 }
+                else if (keys is not null)
+                {
+                    // In the platform a coding agent brings the person's Arena API key, never a GitLab token.
+                    via = "api_key";
+                    if (!token.StartsWith(ArenaKeys.Prefix, StringComparison.Ordinal)) throw new AclDenied(ArenaKeys.ConnectWithKey);
+                    var person = await keys.CheckAsync(token, ctx.RequestAborted);
+                    identity = await Task.Run(() =>
+                    {
+                        using var conn = Db.Connect(cfg.Index.DbPath);
+                        return People.ResolvePerson(conn, directory.Value, person.Email, person.Username);
+                    });
+                }
                 else
                 {
+                    via = "gitlab_token";
                     identity = await Task.Run(() =>
                     {
                         using var conn = Db.Connect(cfg.Index.DbPath);
@@ -360,10 +378,11 @@ public static partial class ArgusServer
         }
         catch (AclDenied exc)
         {
-            AuditDenied(cfg, "token_rejected", path, exc.Message);
+            AuditDenied(cfg, "token_rejected", path, exc.Message, via);
             await Unauthorized(ctx, exc.Message);
             return;
         }
+        identity = identity with { Via = via };
         ctx.Items["argus.identity"] = identity;
         ctx.User = new ArgusPrincipal(identity);
         await next();

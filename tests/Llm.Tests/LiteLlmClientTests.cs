@@ -14,6 +14,9 @@ public sealed class LiteLlmClientTests
         /// <summary>What /end_user/info answers: null = 404 (no such end user).</summary>
         public string? EndUser { get; set; } = """{"user_id":"p@example.test","budget_id":"b-1"}""";
 
+        /// <summary>What /key/info answers: null = 404 (no such key).</summary>
+        public string? KeyInfo { get; set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var body = request.Content is null ? default : JsonDocument.Parse(await request.Content.ReadAsStringAsync(ct)).RootElement;
@@ -22,10 +25,15 @@ public sealed class LiteLlmClientTests
             {
                 return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("""{"error":{"message":"does not exist"}}""") };
             }
+            if (request.RequestUri.AbsolutePath == "/key/info" && KeyInfo is null)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("""{"error":{"message":"Key not found in database"}}""") };
+            }
             var answer = request.RequestUri.AbsolutePath switch
             {
                 "/key/generate" => """{"key":"sk-new"}""",
                 "/end_user/info" => EndUser!,
+                "/key/info" => KeyInfo!,
                 "/budget/new" => """{"budget_id":"b-new"}""",
                 _ => "{}",
             };
@@ -100,6 +108,21 @@ public sealed class LiteLlmClientTests
         var (client, recorder) = Create();
         Assert.Equal("sk-new", await client.GenerateKeyAsync("p@example.test", "app-p"));
         Assert.Equal("app-p", recorder.Calls.Single().Body.GetProperty("key_alias").GetString());
+    }
+
+    [Fact]
+    public async Task A_key_is_looked_up_by_its_hash_and_never_sent_itself()
+    {
+        var (client, recorder) = Create();
+        recorder.KeyInfo = """{"key":"x","info":{"user_id":"p@example.test","blocked":true,"expires":"2026-11-04T10:00:00"}}""";
+        var info = await client.KeyInfoAsync("sk-secret-key");
+        Assert.Equal(new GatewayKeyInfo("p@example.test", true, new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero)), info);
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("sk-secret-key"u8.ToArray()));
+        Assert.Equal($"/key/info?key={hash}", recorder.Calls.Single().Path);
+        Assert.DoesNotContain("sk-secret-key", recorder.Calls.Single().Path, StringComparison.Ordinal);
+
+        recorder.KeyInfo = null;
+        Assert.Null(await client.KeyInfoAsync("sk-unknown"));
     }
 
     private sealed class Hangs : HttpMessageHandler

@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -155,6 +157,20 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
                 k["max_parallel_requests"] is JsonValue p && p.TryGetValue<int>(out var parallel) ? parallel : null));
         }
         return keys;
+    }
+
+    public async Task<GatewayKeyInfo?> KeyInfoAsync(string key, CancellationToken ct = default)
+    {
+        // The gateway keeps a key as its SHA-256 (hex) and looks it up by that too:
+        // the key itself never goes into a URL, so never into an access log.
+        var token = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
+        var res = await SendAsync(HttpMethod.Get, $"/key/info?key={token}", null, ct, allowStatus: [400, 404]);
+        if (res?["info"] is not JsonObject info)
+        {
+            return null;
+        }
+        return new GatewayKeyInfo(Str(info, "user_id"), info["blocked"]?.GetValueKind() == JsonValueKind.True,
+            DateTimeOffset.TryParse(Str(info, "expires"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? at : null);
     }
 
     public async Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default)
