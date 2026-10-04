@@ -68,15 +68,16 @@ public sealed class Webhooks(IHttpClientFactory http, IOptionsMonitor<ScheduleOp
     public const string Client = "webhook";
 
     /// <summary>Why this URL may not be used, or null.</summary>
-    public string? Refusal(string url)
+    public string? Refusal(string url) => Refusal(url, options.CurrentValue.WebhookHosts);
+
+    /// <summary>Why this URL may not be used with these hosts allowed (Schedules:WebhookHosts), or null.</summary>
+    public static string? Refusal(string url, string? hosts)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.Scheme != Uri.UriSchemeHttps)
         {
             return "A webhook is an https:// URL, as Slack, Teams or Mattermost give it.";
         }
-        return WebGuard.Allowed(u.Host, options.CurrentValue.WebhookHosts)
-            ? null
-            : $"{u.Host} is not a webhook host an admin allowed ({options.CurrentValue.WebhookHosts}).";
+        return WebGuard.Allowed(u.Host, hosts) ? null : $"{u.Host} is not a webhook host an admin allowed ({hosts}).";
     }
 
     public async Task PostAsync(string url, string text, JsonObject details, CancellationToken ct)

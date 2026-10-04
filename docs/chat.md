@@ -3,13 +3,9 @@
 The chat is at `https://DOMAIN/chat`, for everyone who can sign in. To use
 the models from your own tools (Claude Code, Qwen Code, an editor, a script),
 see **Connect your tools** (`/setup`): your API key, the gateway's address and
-<<<<<<< HEAD
-setups to paste. For a GitLab pipeline, see [ci.md](ci.md). Your agent can use your chat tools too, with the same key:
-[Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
-=======
 setups to paste, and [Arena Code](arena-code.md), our own coding agent, to
-download.
->>>>>>> worktree-agent-a492ef21b314b1ec1
+download. For a GitLab pipeline, see [ci.md](ci.md). Your agent can use your
+chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 
 ## What it does
 
@@ -61,6 +57,14 @@ download.
     also use another model or thinking level, for that answer only.
   - **Shorter** and **Longer** (in the same menu) answer again at about half
     or twice the words of the answer on screen.
+  - **Queue.** A message sent while an answer runs waits its turn on the
+    server, shown above the box as queued. It survives a reload, another tab
+    and closing the page, and becomes the next question when the answer before
+    it ends (however it ended), on the branch on screen. **Cancel** takes one
+    out of line; **Send now** stops the answer (keeping what it has) and sends
+    it at once. Up to 10 wait per chat. Each is checked as a sent message is
+    (the safeguards), when it is queued. Messages still waiting when the app
+    restarts go once it is back.
 - **Deep research.** **Deep research** in the composer, for the next message:
   the web and sub-agents are on for that answer, and the model plans the
   research questions, gives each to a sub-agent, fills gaps, and writes a
@@ -270,9 +274,11 @@ download.
   tool or a sub-agent show as soon as they exist. **Download all** (the
   archive icon) saves every file listed as one zip.
   - **Documents** (PDF, Word, PowerPoint, Excel, OpenDocument) show as their
-    pages, drawn on first look in the sandbox (LibreOffice to PDF, then each
-    page a picture) and kept: the first 20 pages, the rest in the download.
-    **Text** beside **Pages** shows what the model read.
+    pages, drawn in the sandbox (LibreOffice to PDF, then each page a
+    picture) and kept: the first 20 on first look, and the next 20 as you
+    scroll to the end (or with **Show pages 21 to 40**), to the last page.
+    Each page is drawn once. **Text** beside **Pages** shows what the model
+    read.
   - **Zoom**: pages zoom in the panel; a picture or a page opens full size
     with zoom in and out (the buttons, `+` `-` `0`, Ctrl and the wheel).
 - **Previews.** Like Claude's artifacts and ChatGPT's canvas: code the model
@@ -664,6 +670,13 @@ own window; how pushes are signed and sent, and the browser extension, are in
 or an email to the app, is answered as you in a chat of yours, titled with
 where it came from (`Slack · …`, `Email · …`); you can carry it on here
 ([integrations.md](integrations.md)).
+
+**By email and webhook.** The credit news (yours) and the alerts and used-up
+credit (the admins') also go by email, once each, when email is set up
+(**Settings → Email**; **Settings → Notifications → Email the credit and
+alert news** turns it off). The admins' news is also posted to the **Alerts
+webhook** when an admin sets one (Slack, Teams, Mattermost); its host must be
+one of the webhook hosts, as a task's.
 
 ## Safeguards
 

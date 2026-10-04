@@ -141,6 +141,9 @@ All of them are under **Admin → Models**, with the same controls:
   and the chat's tools), kept loaded or loaded when asked for (and unloaded
   after ten minutes unused), loaded and unloaded by hand. The picture and video
   servers run while the app's control file says so (`services/sd-serve.sh`).
+  The video server decodes on the GPU when it has 8 GB free as it loads
+  (`VAE_GPU_MB`), and on the CPU, slower, while the chat model holds the GPU;
+  its log says which (`docker compose logs videogen`).
 - **Models on other GPU servers**, behind the same gateway.
 
 Who may use each model is set on its card; a person's API key carries the

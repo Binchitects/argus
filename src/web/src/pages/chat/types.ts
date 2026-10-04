@@ -289,6 +289,17 @@ export interface Conversation extends ConversationSummary {
   messages: Message[]
   /** The chat's comparisons of two models. */
   arenas?: ArenaMatch[]
+  /** Messages sent while it answered, waiting on the server for their turn, first in line first. */
+  queued?: QueuedMessage[]
+}
+
+/** A message waiting for the answer before it to end (kept on the server: a reload still shows it). */
+export interface QueuedMessage {
+  id: string
+  content: string
+  attachments: Attachment[]
+  research: boolean
+  createdAt: string
 }
 
 /** A chat's own settings, as sent to create or change it. */

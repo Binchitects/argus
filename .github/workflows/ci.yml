@@ -169,8 +169,9 @@ jobs:
           if-no-files-found: ignore
 
   deploy:
-    # The compose files resolving (the platform from .env.example, Argus alone per sample),
-    # the scripts parsing, and the arena CLI's tests (Python's own unittest, no packages).
+    # The compose files resolving (the platform from .env.example, with Docker and
+    # with Podman's overrides; Argus alone per sample), the scripts parsing, and the
+    # arena CLI's tests (Python's own unittest, no packages).
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -178,13 +179,23 @@ jobs:
         run: |
           sed -e 's/^\(ADMIN_PASSWORD\|DB_PASSWORD\|APP_KEY\|ENGINE_KEY\|ARGUS_KEY\)=$/\1=ci/' -e 's/^GATEWAY_KEY=$/GATEWAY_KEY=sk-ci/' deploy/.env.example > deploy/.env
           (cd deploy && docker compose config --quiet && docker compose -f docker-compose.yml -f podman.yml config --quiet) && echo "deploy resolves (Docker and Podman)"
+          # Podman's own compose command too, when the runner has it (it hands the files to a compose provider).
+          if command -v podman >/dev/null && podman compose version >/dev/null 2>&1; then
+            (cd deploy && podman compose -f docker-compose.yml -f podman.yml config >/dev/null) && echo "deploy resolves (podman compose)"
+          else
+            echo "podman compose is not on this runner: checked with docker compose and podman.yml above"
+          fi
           fill() { awk '/^# SECRETS/{s=1} /^# APP/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' "$1" > "$2"; }
           for sample in deploy/argus-standalone/env-samples/*.env; do
             fill "$sample" deploy/argus-standalone/.env
             (cd deploy/argus-standalone && docker compose config --quiet) && echo "$sample resolves"
           done
       - name: Scripts parse
-        run: for f in deploy/scripts/*.sh deploy/argus-standalone/scripts/*.sh tools/*.sh tools/test-gitlab/*.sh clients/claude-code/*.sh tools/dn; do bash -n "$f"; done
+        run: |
+          for f in deploy/scripts/*.sh deploy/argus-standalone/scripts/*.sh deploy/services/*.sh deploy/services/*/*.sh deploy/services/sandbox/soffice \
+            tools/*.sh tools/test-gitlab/*.sh clients/claude-code/*.sh tools/dn; do bash -n "$f"; done
+          # The services' scripts (the picture and video servers', the engine's) run under the images' /bin/sh, not bash.
+          for f in deploy/services/*.sh deploy/services/*/*.sh deploy/services/sandbox/soffice; do sh -n "$f"; done
       - name: The arena CLI and its GitLab CI template
         run: python3 -m unittest discover clients/arena -v
       # The air-gap bundle, the restore and rollback tests and their guards, with

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
 
 namespace Llm.Tests;
@@ -8,7 +9,7 @@ namespace Llm.Tests;
 ///   stdout lists the files it was given and echoes its first line;
 ///   "# chart" writes a picture, "# csv" a CSV, "# binary" a file that is neither;
 ///   "# fail" exits 1 with a traceback; "# slow" runs until it is stopped;
-///   "# pages" draws a document's first two pages of three (page-01.jpg, page-02.jpg);
+///   "# pages" draws the pages it asks for ("first, last = 1, 20") of a document of <see cref="DocumentPages"/> pages (page-01.jpg...);
 ///   the media script (it runs ffprobe) makes sound.mp3, and for a video two frames, 4 seconds long;
 ///   "# canvas pdf" turns canvas.docx into canvas.pdf (a PDF header, then the Word file's size).
 /// </summary>
@@ -20,6 +21,9 @@ public sealed class FakeSandbox : IAsyncDisposable
 
     public string Dir { get; } = Directory.CreateTempSubdirectory("llm-sandbox-").FullName;
     public List<JsonObject> Jobs { get; } = [];
+
+    /// <summary>How many pages a document drawn by "# pages" has.</summary>
+    public int DocumentPages { get; set; } = 3;
 
     public FakeSandbox(bool alive = true)
     {
@@ -85,8 +89,12 @@ public sealed class FakeSandbox : IAsyncDisposable
         var pages = code.Contains("# pages", StringComparison.Ordinal);
         if (pages)
         {
-            await File.WriteAllBytesAsync(Path.Combine(draft, "files", "page-01.jpg"), [0xFF, 0xD8, 0xFF, 1]);
-            await File.WriteAllBytesAsync(Path.Combine(draft, "files", "page-02.jpg"), [0xFF, 0xD8, 0xFF, 2]);
+            var range = System.Text.RegularExpressions.Regex.Match(code, @"first, last = (\d+), (\d+)");
+            var (first, last) = (int.Parse(range.Groups[1].Value, CultureInfo.InvariantCulture), int.Parse(range.Groups[2].Value, CultureInfo.InvariantCulture));
+            for (var n = first; n <= Math.Min(last, DocumentPages); n++)
+            {
+                await File.WriteAllBytesAsync(Path.Combine(draft, "files", $"page-{n:D2}.jpg"), [0xFF, 0xD8, 0xFF, (byte)n]);
+            }
         }
         var media = code.Contains("ffprobe", StringComparison.Ordinal);
         if (media)
@@ -106,7 +114,7 @@ public sealed class FakeSandbox : IAsyncDisposable
         await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), new JsonObject
         {
             ["exit_code"] = fail ? 1 : cancelled ? -9 : 0, ["timed_out"] = false, ["cancelled"] = cancelled,
-            ["stdout"] = $"given: {string.Join(",", given)}\nfirst line: {code.Split('\n')[0]}\n" + (pages ? "{\"total\": 3, \"error\": null}\n" : "")
+            ["stdout"] = $"given: {string.Join(",", given)}\nfirst line: {code.Split('\n')[0]}\n" + (pages ? $"{{\"total\": {DocumentPages}, \"error\": null}}\n" : "")
                 + (media ? "{\"seconds\": 4.0, \"sound\": true, \"frames\": 2}\n" : ""), ["stdout_cut"] = false,
             ["stderr"] = fail ? "Traceback (most recent call last):\n  File \"main.py\", line 1\nValueError: bad\n" : "", ["stderr_cut"] = false,
             ["killed"] = null, ["error"] = null, ["skipped_files"] = new JsonArray(), ["duration_ms"] = 12,

@@ -11,15 +11,12 @@ import { ContextGauge } from './context-gauge'
 import { VoiceButton } from './media'
 import { PromptFields, SlashMenu } from './slash'
 import type { Attachment, ChatModel } from './types'
-import type { TalkTurn } from './use-talk'
 
-/** A message written while an answer runs: sent when it ends, or at once with Send now. */
+/** A message written while an answer runs, waiting on the server: sent when the answer ends, or at once with Send now. */
 export interface Queued {
   key: string
   text: string
   attachments: Attachment[]
-  /** Said in Talk: its answer is read aloud. */
-  turn?: TalkTurn
 }
 import type { Uploads } from './uploads'
 
@@ -63,9 +60,9 @@ export function Composer({
   context?: ContextView
   /** Summarize the chat's older messages (also: send /compact). */
   onCompact?: () => void
-  /** While an answer runs: messages waiting to be sent, and how to add, hurry or drop one. */
+  /** While an answer runs: messages waiting to be sent, and how to add (false: it was not taken), hurry or drop one. */
   queued?: Queued[]
-  onQueue?: (text: string) => void
+  onQueue?: (text: string) => Promise<boolean>
   onSendNow?: (key: string) => void
   onUnqueue?: (key: string) => void
   /** Deep research for the next message: sub-agents search the web, and the answer is a sourced report. */
@@ -144,8 +141,7 @@ export function Composer({
     setText('')
     unchoose()
     // An answer is running: this one waits its turn (or goes at once with Send now).
-    if (streaming && onQueue) onQueue(t)
-    else if (!(await onSend(t))) {
+    if (!(await (streaming && onQueue ? onQueue(t) : onSend(t)))) {
       setText((now) => now || before.text)
       if (before.chosen) {
         setChosen(before.chosen)
@@ -213,6 +209,7 @@ export function Composer({
             {queued.map((q) => (
               <li key={q.key} className="flex min-w-0 items-center gap-2 rounded-lg border border-dashed bg-muted/40 py-1 ps-2.5 pe-1 text-sm">
                 <Clock3 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="sr-only">Queued:</span>
                 <span dir="auto" className="min-w-0 flex-1 truncate">
                   {q.text || `${q.attachments.length} file${q.attachments.length === 1 ? '' : 's'}`}
                   {q.text && q.attachments.length > 0 && <span className="text-muted-foreground"> · {q.attachments.length} file{q.attachments.length === 1 ? '' : 's'}</span>}
@@ -220,13 +217,13 @@ export function Composer({
                 <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSendNow?.(q.key)}>
                   Send now
                 </Button>
-                <Button type="button" variant="ghost" size="icon-sm" className="size-7" onClick={() => onUnqueue?.(q.key)} aria-label={`Remove queued message: ${q.text || 'files'}`}>
-                  <X />
+                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onUnqueue?.(q.key)} aria-label={`Cancel queued message: ${q.text || 'files'}`}>
+                  Cancel
                 </Button>
               </li>
             ))}
           </ul>
-          <p className="text-xs text-muted-foreground">Sent in turn when the answer ends; Send now stops the answer and sends it at once.</p>
+          <p className="text-xs text-muted-foreground">Sent in turn when the answer ends, even if you close the page; Send now stops the answer and sends it at once.</p>
         </div>
       )}
       {uploads.uploads.length > 0 && (

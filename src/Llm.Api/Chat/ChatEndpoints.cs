@@ -294,7 +294,8 @@ public static partial class ChatEndpoints
         var tools = OnFor(c, await registry.ForAsync(await access.MembershipAsync(me, ct), ct));
         // The person's thumbs, and the arena's answers without their models until voted on.
         var quality = await Quality.ChatQuality.ForAsync(db, me.Id, id, messages, ct);
-        return Results.Ok(Shape(c, tools, forkedFrom, await MessagesAsync(db, messages, ct, quality), jobs.IsAnswering(id), assistant, quality.Arenas));
+        return Results.Ok(Shape(c, tools, forkedFrom, await MessagesAsync(db, messages, ct, quality), jobs.IsAnswering(id), assistant, quality.Arenas,
+            await QueuedMessages.ListAsync(db, id, ct)));
     }
 
     /// <summary>
@@ -323,12 +324,13 @@ public static partial class ChatEndpoints
 
     /// <param name="answering">An answer is being written: the page watches it (GET …/stream).</param>
     /// <param name="arenas">The chat's comparisons of two models (arena mode).</param>
+    /// <param name="queued">Messages waiting for the answer to end (QueuedMessages).</param>
     private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? assistant = null,
-        object? arenas = null) =>
+        object? arenas = null, IEnumerable<object>? queued = null) =>
         new
         {
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
-            c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, arenas = arenas ?? Array.Empty<object>(),
+            c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
@@ -909,8 +911,12 @@ public static partial class ChatEndpoints
             : Results.Text(a.Text, "text/plain; charset=utf-8");
     }
 
-    /// <summary>A document's pages as pictures (drawn on first look, in the sandbox): how many it has, and how many are drawn.</summary>
-    private static async Task<IResult> PagesAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, DocumentPages pages, CancellationToken ct)
+    /// <summary>
+    /// A document's pages as pictures (drawn in the sandbox as they are first asked for): how many it has, and how
+    /// many are drawn, at least <paramref name="upTo"/> when it has them (the next twenty at most per request).
+    /// </summary>
+    private static async Task<IResult> PagesAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, DocumentPages pages, CancellationToken ct,
+        int upTo = DocumentPages.Batch)
     {
         var me = await Me(p, users);
         var a = await db.ChatAttachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -924,7 +930,7 @@ public static partial class ChatEndpoints
         }
         try
         {
-            var (total, drawn) = await pages.PagesAsync(a, ct);
+            var (total, drawn) = await pages.PagesAsync(a, upTo, ct);
             return Results.Ok(new { total, drawn, pages = Enumerable.Range(1, drawn).Select(n => $"/api/chat/attachments/{id}/pages/{n}") });
         }
         catch (DocumentPagesException ex)

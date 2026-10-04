@@ -223,6 +223,8 @@ public static class IdentityWiring
         services.AddSingleton<Dashboards.SqlDatasource>();
         services.AddScoped<Gateway.Ledger>();
         services.AddScoped<Notifications.Notifier>();
+        services.Configure<Notifications.NotificationOptions>(config.GetSection("Notifications"));
+        services.AddScoped<Notifications.NewsDelivery>();
         services.AddScoped<Chat.DocumentPages>();
         services.AddSingleton<Notifications.NewsWatch>();
         services.AddHostedService(sp => sp.GetRequiredService<Notifications.NewsWatch>());
@@ -308,6 +310,7 @@ public static class IdentityWiring
         // Answers outlive the page that asked: they run here, and a page re-attaches.
         services.AddSingleton<Chat.AnswerJobs>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.AnswerJobs>());
+        services.AddSingleton<Chat.QueuedMessages>();
 
         // The engine's models (llama.cpp's router): Admin -> Models, and who may use which model.
         services.Configure<Models.EngineOptions>(config.GetSection("Engine"));
@@ -443,6 +446,7 @@ public static class IdentityWiring
         Chat.PromptEndpoints.MapPrompts(app);
         Quality.QualityEndpoints.MapQuality(app);
         Chat.CanvasEndpoints.MapCanvases(app);
+        Chat.QueuedMessages.MapQueue(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Plugins.PluginEndpoints.MapPlugins(app);
         ArenaMcp.McpEndpoints.MapArenaMcp(app);

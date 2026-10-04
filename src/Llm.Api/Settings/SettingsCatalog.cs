@@ -18,6 +18,7 @@ public static class SettingsCatalog
     private const string ArenaMcp = "Arena MCP";
     private const string Schedules = "Scheduled tasks";
     private const string Mail = "Email";
+    private const string NotificationsGroup = "Notifications";
     private const string Safeguards = "Safeguards";
     private const string Knowledge = "Company knowledge";
     private const string Retention = "Data retention";
@@ -205,6 +206,10 @@ public static class SettingsCatalog
         new("Mail:User", Mail, "SMTP user", "For servers that need a sign-in; empty for a relay that does not.", SettingType.Text, SettingScope.Live),
         new("Mail:Password", Mail, "SMTP password", "From your mail team.", SettingType.Secret, SettingScope.Live),
         new("Mail:From", Mail, "Sender", "The address email comes from, e.g. Argus Arena <llm@example.com>.", SettingType.Text, SettingScope.Live),
+        new("Notifications:Email", NotificationsGroup, "Email the credit and alert news", "Besides the bell: a person at 80% of their credit and with it used up, and the admins of alerts that start firing and of credit used up, by email (once each). Needs email set up (Email).", SettingType.Boolean, SettingScope.Live)
+            { Default = "true", Optional = false },
+        new("Notifications:AlertsWebhook", NotificationsGroup, "Alerts webhook", "The admins' news (alerts that start firing, people who used up their credit) is posted here too, once each: a Slack, Teams or Mattermost incoming webhook. Its host must be one of the webhook hosts (Scheduled tasks). Empty: none.", SettingType.Secret, SettingScope.Live)
+            { Pattern = @"https://\S+", PatternHelp = "an https:// webhook URL" },
 
         // ---------------------------------------------------------------- chat bots and email in, live --
         new("Bots:Instructions", BotsGroup, "What the bots are told", "Instructions for every chat a bot or an email starts, after the app's own. Each person is still answered as themselves: their model access, tools and credit.", SettingType.Text, SettingScope.Live)

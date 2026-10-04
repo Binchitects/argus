@@ -218,13 +218,16 @@ services:
       CUDA_DEVICE_ORDER: PCI_BUS_ID
       NAME: videogen
       FILES: Wan2.2-TI2V-5B-Q4_K_M.gguf umt5-xxl-encoder-Q4_K_M.gguf wan2.2_vae.safetensors
+      # Decode on the GPU when it has this much free (MB) as the server loads: its 3 GB
+      # (--max-vram) and the decode's, with room to spare. Less, and it decodes on the CPU.
+      VAE_GPU_MB: "8192"
     volumes: ["${MODELS_DIR:-./models}:/models", "engine:/control:ro", "./services/sd-serve.sh:/sd-serve.sh:ro"]
     working_dir: /models/video/wan2.2-ti2v-5b
     entrypoint: [/bin/sh, /sd-serve.sh]
     command: >
       --listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model Wan2.2-TI2V-5B-Q4_K_M.gguf
       --t5xxl umt5-xxl-encoder-Q4_K_M.gguf --vae wan2.2_vae.safetensors --max-vram 3 --diffusion-fa
-      --vae-tiling --vae-on-cpu --cfg-scale 5.0 --flow-shift 5.0 --sampling-method euler
+      --vae-tiling --cfg-scale 5.0 --flow-shift 5.0 --sampling-method euler
 
   # Speech to text and text to speech. It fetches its models itself.
   audio:
