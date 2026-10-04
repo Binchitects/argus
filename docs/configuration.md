@@ -26,6 +26,9 @@ Three places, each with one job:
 | `HF_TOKEN` | optional: gated Hugging Face models |
 | `ACME_EMAIL` | optional: certificates from Let's Encrypt |
 | `GITLAB_URL`, `GITLAB_TOKEN` | optional: the GitLab Argus indexes, and a read-only token |
+| `GITLAB_USERNAME`, `GITLAB_PASSWORD` | optional, only where no token can be made for the account: Argus signs in once and makes its own read-only token ([details](argus/README.md#when-no-token-can-be-issued-for-the-account)). A username wins over a token |
+| `GITLAB_VERIFY_TLS` | optional, testing only: `false` accepts any certificate from GitLab. For a private CA, see [deployment.md](deployment.md#gitlab-and-argus) |
+| `BACKUP_DIR`, `BACKUP_COPY_DIR`, `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`, `BACKUP_TIME` | optional, for `scripts/backup.sh`: where backups go (`./backups`), a verified second copy on another disk, how many to keep (14), whether Loki and Prometheus data go too (1), when the daily timer runs (03:30) |
 | `HTTP_PORT`, `HTTPS_PORT` | optional: other ports than 80 and 443 (rootless Podman) |
 | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | optional: power caps, kept applied |
 

@@ -162,6 +162,10 @@ services:
       ARGUS_CHAT_CLIENT_TOKEN: ${ARGUS_KEY}
       ARGUS_GITLAB_URL: ${GITLAB_URL:-}
       ARGUS_GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      # Only where no token can be made for the account: Argus signs in with these once and makes its own token.
+      ARGUS_GITLAB_USERNAME: ${GITLAB_USERNAME:-}
+      ARGUS_GITLAB_PASSWORD: ${GITLAB_PASSWORD:-}
+      ARGUS_GITLAB_VERIFY: ${GITLAB_VERIFY_TLS:-true}
       ARGUS_USERS_FILE: /directory/users.yml
       ARGUS_EMBED_URL: http://embed:8080
       ARGUS_PACK_LIBRARY: /pack-library

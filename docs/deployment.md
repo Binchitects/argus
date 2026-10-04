@@ -138,8 +138,19 @@ shows, for push and merge request events. Adding it is a one-time step for a
 GitLab Maintainer or Owner; Argus's token stays read-only. Details:
 [Indexing on push and merge](argus/README.md#indexing-on-push-and-merge).
 
+No token can be made for the account (a locked-down GitLab)? Set
+`GITLAB_USERNAME` and `GITLAB_PASSWORD` instead: Argus signs in once and makes
+its own read-only token ([details](argus/README.md#when-no-token-can-be-issued-for-the-account)).
+
 A GitLab on a private CA: the CA must be trusted inside the Argus container
-(mount it and set `ARGUS_GITLAB_CA_CERT` in `docker-compose.override.yml`).
+(mount it and set `ARGUS_GITLAB_CA_CERT` in `docker-compose.override.yml`):
+
+```yaml
+services:
+  argus:
+    volumes: ["./config/argus/tls:/tls:ro"]
+    environment: { ARGUS_GITLAB_CA_CERT: /tls/company-ca.pem }
+```
 
 ## Upgrading from v3
 
@@ -162,12 +173,38 @@ v4 is a new layout: the project is `arena`, the volumes are named for it, and
    with the dropped salt key, are removed from the gateway; the app registers
    them again.
 
+### Where the v3 `.env` options went
+
+v3's `.env` had over a hundred options. v4 keeps in `.env` only what the stack
+needs to start; the rest moved to the app (applied without a restart, audited),
+became fixed, or went away:
+
+| v3 | v4 |
+|---|---|
+| `LLM_DOMAIN`, `LLM_MODELS_DIR`, `LLM_PG_PASSWORD`, `APP_DATA_KEY`, `LLAMACPP_API_KEY`, `ARGUS_ADMIN_TOKEN` and `ARGUS_CHAT_CLIENT_TOKEN`, `LITELLM_MASTER_KEY`, `TRAEFIK_HTTP_PORT`, `TRAEFIK_HTTPS_PORT` | renamed: `DOMAIN`, `MODELS_DIR`, `DB_PASSWORD`, `APP_KEY`, `ENGINE_KEY`, `ARGUS_KEY` (one), `GATEWAY_KEY`, `HTTP_PORT`, `HTTPS_PORT` |
+| `ARGUS_GITLAB_URL`, `ARGUS_GITLAB_TOKEN`, `ARGUS_GITLAB_USERNAME`, `ARGUS_GITLAB_PASSWORD`, `ARGUS_GITLAB_VERIFY` | `GITLAB_URL`, `GITLAB_TOKEN`, `GITLAB_USERNAME`, `GITLAB_PASSWORD`, `GITLAB_VERIFY_TLS` (`ARGUS_GITLAB_AUTH` is inferred: a username means password mode) |
+| `ARGUS_GITLAB_CA_CERT` | `docker-compose.override.yml` ([above](#gitlab-and-argus)) |
+| `LDAP_*` (server, bind account and password, bases, admin and required groups, StartTLS, sync interval) | Admin → Settings → Company directory (LDAP); the password is stored encrypted |
+| `LLAMACPP_HF_REPO`, `LLAMACPP_HF_FILES`, `LLAMACPP_MODEL_FILE` | `MODEL` (the first model), then Admin → Models → Add, or Hugging Face search |
+| `MODEL_NAME`, `MODEL_CONTEXT`, `MODEL_MAX_OUTPUT`, `LLAMACPP_PARALLEL`, `LLAMACPP_KV_TYPE`, `LLAMACPP_N_GPU_LAYERS`, `LLAMACPP_N_CPU_MOE`, `LLAMACPP_THREADS`, `LLAMACPP_MTP_*`, `LLAMACPP_EXTRA_ARGS`, `LLAMACPP_MLOCK`, `PRICE_*_PER_MTOK` | each model's own form in Admin → Models (any other llama.cpp option in its extra lines) |
+| `LLAMACPP_MODELS_MAX`, `LLAMACPP_PRELOAD` | Settings → Models loaded at once; Keep loaded on each model |
+| `MODEL_ENABLE_THINKING`, `MODEL_REASONING_EFFORT`, `THINKING_PRESETS` | Settings → Chat: default thinking, thinking levels offered |
+| `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | `config/litellm.yaml` (`max_internal_user_budget`, `internal_user_budget_duration`); each person's credit in Admin → People |
+| `BACKUP_*` | unchanged, still read by `scripts/backup.sh` from `.env` |
+| `COMPOSE_PROFILES` | every module runs; leave one out in `docker-compose.override.yml` |
+| `IMAGEGEN_*` | the picture model is fixed (FLUX.2 klein 4B), fetched by the app; turned on or off, loaded or kept in Admin → Models |
+| `PROMETHEUS_RETENTION_TIME`, `_SIZE`, `*_CPUS`, `*_MEM_LIMIT`, `SANDBOX_*`, `LITELLM_WORKERS`, `EMBED_CPUS` | fixed in `docker-compose.yml` (30 days or 20 GB of metrics; the sandbox's limits); change one in `docker-compose.override.yml`. The longest Python run is Settings → Python and web |
+| `LITELLM_SALT_KEY`, `SEARXNG_SECRET`, `ENGINE_API_BASE`, `LLAMACPP_ENGINE_URL` and `_SHA256`, `ARGUS_VERSION`, `LLM_UID`, `LLM_GID`, `LLM_CONFIG_DIR`, `LLM_SERVICES_DIR`, `LLM_ENV_SAMPLES_DIR`, `COMPOSE_PROJECT_NAME`, `BIND_ADDRESS`, `DOCKER_SOCKET`, `HOST_*`, `LLAMACPP_RAM_RESERVE_GB`, `HOST_SWAPPINESS` | gone: the stack makes or knows them itself (the search secret is new at each start; no web app gets the Docker socket) |
+
 ## Backups
 
 `scripts/backup.sh` backs up the database (a consistent dump), every named
 volume and the configuration into `backups/`; `--install-timer` runs it daily,
 `--restore --from DIR` puts it back. Models are not backed up: they are in
-`MODELS_DIR` and can be fetched again.
+`MODELS_DIR` and can be fetched again. `BACKUP_DIR`, `BACKUP_COPY_DIR` (a
+verified second copy on another disk), `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`
+and `BACKUP_TIME` in `.env` change where, how many and when
+([configuration.md](configuration.md#env)).
 
 ## Testing a deployment
 

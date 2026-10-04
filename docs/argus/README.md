@@ -126,17 +126,21 @@ token creation from an account or a group, and a locked-down GitLab may only
 offer the sign-in form. For that case Argus can sign in with a username and a
 password.
 
+In the platform's `deploy/.env` (they reach Argus as `ARGUS_GITLAB_USERNAME`
+and `ARGUS_GITLAB_PASSWORD`; a standalone Argus takes those names directly):
+
 ```dotenv
-ARGUS_GITLAB_USERNAME=svc-argus
-ARGUS_GITLAB_PASSWORD=...
+GITLAB_URL=https://gitlab.example.com
+GITLAB_USERNAME=svc-argus
+GITLAB_PASSWORD=...
 ```
 
-Set `ARGUS_GITLAB_AUTH=password` as well to be explicit. It is *inferred*
-whenever a username is present, and — worth knowing before it bites — **a
-username wins over a token**. A username left in `.env` from an earlier
-experiment keeps password mode on even after `ARGUS_GITLAB_TOKEN` is filled in,
-so a stale username silently outranks a working token. Naming the mode removes
-the ambiguity.
+Password mode is *inferred* whenever a username is present, and — worth
+knowing before it bites — **a username wins over a token**. A username left in
+`.env` from an earlier experiment keeps password mode on even after
+`GITLAB_TOKEN` is filled in, so a stale username silently outranks a working
+token: empty `GITLAB_USERNAME` when you move to a token. (A standalone Argus
+can name the mode with `ARGUS_GITLAB_AUTH=token` or `password`.)
 
 Argus then does what a browser does: fetch GitLab's sign-in form, post the
 username and password to `/users/sign_in` with the form's CSRF token, check the
