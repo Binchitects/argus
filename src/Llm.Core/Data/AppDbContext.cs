@@ -82,6 +82,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.Model).HasMaxLength(200);
             e.HasIndex(m => new { m.ConversationId, m.Sequence }).IsUnique();
             e.HasIndex(m => new { m.ConversationId, m.ParentId });
+            // Admin → Traces: the slowest answers of a time range.
+            e.HasIndex(m => m.CreatedAt).HasFilter("\"AnswerMs\" IS NOT NULL");
         });
         builder.Entity<ChatAttachment>(e =>
         {

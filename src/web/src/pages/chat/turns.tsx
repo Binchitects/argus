@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileText, FoldVertical, GitFork, Pencil, RefreshCw, Square } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileText, FoldVertical, GitFork, Pencil, RefreshCw, Square, Telescope, Timer } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,7 @@ import { NoticeLine, Thinking, ToolCard } from './parts'
 import { useNow } from './use-now'
 import { QuestionCard } from './questions'
 import { RouteNote } from './route-note'
+import { researchStep } from './research'
 import type { AgentWork, ChatConfig, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
@@ -177,6 +178,8 @@ export function AnswerTurn({
   agents,
   onAnswer,
   onHurry,
+  research,
+  onTrace,
   busy,
 }: {
   answer: Message[]
@@ -208,6 +211,10 @@ export function AnswerTurn({
   onAnswer?: (text: string) => Promise<boolean>
   /** "Answer now" while the model thinks: it stops thinking and answers. */
   onHurry?: () => void
+  /** The answer is deep research: while it is written, a line says which step it is on. */
+  research?: boolean
+  /** For admins: the answer's trace (where its time went), by the id of one of its messages. */
+  onTrace?: (answerId: string) => void
   busy: boolean
 }) {
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
@@ -284,6 +291,13 @@ export function AnswerTurn({
           <Tooltip content="Fork into a new chat from here">
             <Button variant="ghost" size="icon-sm" className="size-7" disabled={busy} onClick={() => onFork(last.id)} aria-label="Fork from here">
               <GitFork />
+            </Button>
+          </Tooltip>
+        )}
+        {onTrace && last && !last.id.startsWith('local-') && (
+          <Tooltip content="Trace: where the answer's time went">
+            <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => onTrace(last.id)} aria-label="Answer trace">
+              <Timer />
             </Button>
           </Tooltip>
         )}
@@ -367,6 +381,12 @@ export function AnswerTurn({
           busy={busy}
           onAskBig={!live && onRegenerate && question ? () => onRegenerate(question, { model: route.main }) : undefined}
         />
+      )}
+      {live && research && !waiting && (
+        <output className="mt-2 flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+          <Telescope className="size-4 shrink-0 animate-pulse text-primary-ink" aria-hidden="true" />
+          <span className="text-shimmer">Deep research: {researchStep(answer, agents)}…</span>
+        </output>
       )}
       {footer}
     </section>

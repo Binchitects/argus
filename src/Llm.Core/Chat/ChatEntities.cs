@@ -86,6 +86,10 @@ public sealed class ChatMessage
     /// <summary>Assistant: how long the model thought before answering. Tool: how long the tool took.</summary>
     public int? ThinkingMs { get; set; }
     public int? DurationMs { get; set; }
+    /// <summary>Assistant: how its round went, for the answer's trace (admins): the wait for the first token, the engine's read and write speeds; the first round also the time in line and getting ready. Times and numbers only, as JSON.</summary>
+    public string? TraceJson { get; set; }
+    /// <summary>Assistant, on an answer's last round: the whole answer's time, from the question to its end, the wait in line included.</summary>
+    public int? AnswerMs { get; set; }
     public MessageStatus Status { get; set; }
     public string? Error { get; set; }
     /// <summary>

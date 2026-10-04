@@ -22,6 +22,7 @@ namespace Llm.Tests;
 ///   [budget]   refuses as LiteLLM does when credit is used up
 ///   [harm]      flagged (as weapons) by the safeguards' check
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
+///   [timed]     its last chunk carries llama.cpp's timings: 60 prompt tokens read in 300 ms, 12 written in 1,200 ms
 /// Its /v1/images/generations answers with a small PNG.
 /// </summary>
 public sealed class FakeModel : HttpMessageHandler
@@ -189,7 +190,7 @@ public sealed class FakeModel : HttpMessageHandler
                 Finish("stop"),
             ];
         }
-        chunks = chunks.Append(Usage(100, 40, 12));
+        chunks = chunks.Append(Usage(100, 40, 12, timed: lastUser.Contains("[timed]", StringComparison.Ordinal)));
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
     }
 
@@ -199,12 +200,22 @@ public sealed class FakeModel : HttpMessageHandler
     private static string Finish(string reason) =>
         new JsonObject { ["choices"] = new JsonArray(new JsonObject { ["index"] = 0, ["delta"] = new JsonObject(), ["finish_reason"] = reason }) }.ToJsonString();
 
-    private static string Usage(int prompt, int cached, int completion) =>
-        new JsonObject
+    private static string Usage(int prompt, int cached, int completion, bool timed = false)
+    {
+        var chunk = new JsonObject
         {
             ["choices"] = new JsonArray(new JsonObject { ["index"] = 0, ["delta"] = new JsonObject() }),
             ["usage"] = new JsonObject { ["prompt_tokens"] = prompt, ["completion_tokens"] = completion, ["prompt_tokens_details"] = new JsonObject { ["cached_tokens"] = cached } },
-        }.ToJsonString();
+        };
+        if (timed)
+        {
+            chunk["timings"] = new JsonObject
+            {
+                ["prompt_n"] = 60, ["prompt_ms"] = 300.0, ["prompt_per_second"] = 200.0, ["predicted_n"] = 12, ["predicted_ms"] = 1200.0, ["predicted_per_second"] = 10.0,
+            };
+        }
+        return chunk.ToJsonString();
+    }
 
     /// <summary>Written as it goes, with a pause between pieces, and stopping when the reader leaves.</summary>
     private sealed class SseContent(IEnumerable<string> chunks, TimeSpan delay) : HttpContent

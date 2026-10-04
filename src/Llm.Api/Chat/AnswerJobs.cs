@@ -47,6 +47,9 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         /// <summary>"Answer now": the person asked it to stop thinking.</summary>
         public Hurry Hurry { get; } = new();
 
+        /// <summary>How long it waited in line for a place (AnswerGate), for its trace.</summary>
+        internal int QueuedMs { get; set; }
+
         /// <summary>Its end goes to the person's bell when no page watched it (off for a scheduled task's, which says so itself, and a compaction).</summary>
         public bool Notify { get; set; } = true;
 
@@ -233,7 +236,7 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
                 : Task.CompletedTask;
             try
             {
-                await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question, overrides with { Hurry = job.Hurry }, job.EmitAsync, ct);
+                await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question, overrides with { Hurry = job.Hurry, QueuedMs = job.QueuedMs }, job.EmitAsync, ct);
             }
             finally
             {
@@ -270,9 +273,11 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
 
             // Fair use: a place of the few the model serves at once, in turn (AnswerGate).
             AnswerGate.Place place;
+            var waited = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 place = await gate.EnterAsync(job.Person, line => job.EmitAsync(new { type = "queued", ahead = line.Ahead }), ct);
+                job.QueuedMs = (int)waited.ElapsedMilliseconds;
             }
             catch (TimeoutException ex)
             {

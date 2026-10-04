@@ -61,15 +61,33 @@ groups:
             Old blocks are about to be dropped early. Raise
             PROMETHEUS_RETENTION_SIZE or lengthen the scrape interval.
 
+      # The newest certificate for each name (a renewed one replaces the old in
+      # what Traefik serves). Traefik's own default certificate is left out: it
+      # is made anew at each start, and Admin -> Overview says when it is served.
+      # Let's Encrypt's are renewed by Traefik 30 days before they expire, once a
+      # day: still under 30 days after a day means its renewal is failing.
       - alert: CertificateExpiresSoon
-        # The newest certificate for each name: a renewed one replaces the old in what Traefik serves.
-        expr: max by (cn) (traefik_tls_certs_not_after) - time() < 21 * 86400
-        for: 1h
+        expr: max by (cn) (traefik_tls_certs_not_after{cn!="TRAEFIK DEFAULT CERT"}) - time() < 30 * 86400
+        for: 1d
         labels:
           severity: warning
         annotations:
-          summary: "The certificate for {{ $labels.cn }} expires within 21 days"
+          summary: "The certificate for {{ $labels.cn }} expires within 30 days"
           description: >-
-            tls-init renews it on any `docker compose up -d` (within 30 days of
-            expiry, from the stack's own CA). With your own certificate in
-            config/tls, replace the files there, then run that.
+            Admin -> Overview shows the day. A certificate of your own: run
+            scripts/make-cert.sh again (it renews with the same CA), or replace
+            a company's in deploy/certs with the same script. Let's Encrypt's:
+            the names must resolve to this machine and port 443 must reach it;
+            Traefik's log says why the renewal failed.
+
+      - alert: CertificateExpiresVerySoon
+        expr: max by (cn) (traefik_tls_certs_not_after{cn!="TRAEFIK DEFAULT CERT"}) - time() < 7 * 86400
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "The certificate for {{ $labels.cn }} expires within 7 days"
+          description: >-
+            After that, browsers and every tool that calls the API refuse the
+            connection. Renew it now: scripts/make-cert.sh for a certificate of
+            your own; for Let's Encrypt, fix what Traefik's log says.

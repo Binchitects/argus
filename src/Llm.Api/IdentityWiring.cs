@@ -412,6 +412,7 @@ public static class IdentityWiring
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
         Chat.ProjectEndpoints.MapProjects(app);
+        Chat.TraceEndpoints.MapTraces(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Plugins.PluginEndpoints.MapPlugins(app);
         Models.ModelEndpoints.MapModels(app);

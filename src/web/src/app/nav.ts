@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Blocks, Boxes, CalendarClock, Database, Home, KeyRound, LayoutDashboard, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, Telescope, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, BarChart3, Blocks, Boxes, CalendarClock, Database, Home, KeyRound, LayoutDashboard, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, Telescope, Timer, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -57,6 +57,7 @@ export const navigation: NavSection[] = [
       { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['gpu', 'performance', 'metrics', 'charts'] },
       { title: 'Logs', path: '/admin/logs', icon: Logs, keywords: ['loki', 'errors', 'containers', 'tail'] },
       { title: 'Alerts', path: '/admin/alerts', icon: Siren, keywords: ['alertmanager', 'firing', 'rules', 'incidents'] },
+      { title: 'Traces', path: '/admin/traces', icon: Timer, keywords: ['slow', 'answers', 'latency', 'timeline', 'sub-agents', 'speed', 'tokens'] },
     ],
   },
 ]

@@ -129,3 +129,31 @@ describe('admin pages', () => {
     ])
   })
 })
+
+describe('the certificate on the overview', () => {
+  const overview = (certificate: object | null) => () => ({
+    json: { people: 3, admins: 1, spend: 2, overCredit: [], warning: null, services: [], index: { configured: false, summary: null, error: null }, model: 'M', certificate },
+  })
+
+  it('says how many days are left, and what to do within 30', async () => {
+    fakeApi(admin, { 'GET /api/admin/overview': overview({ name: 'llm.example.com', expiresAt: '2026-10-16T00:00:00Z', days: 12, issuer: 'own' }) })
+    renderApp('/admin')
+    expect(await screen.findByLabelText('Certificate')).toHaveTextContent('12 days')
+    expect(screen.getByText('The certificate for llm.example.com expires in 12 days')).toBeInTheDocument()
+    expect(screen.getByText(/Run scripts\/make-cert.sh again/)).toBeInTheDocument()
+  })
+
+  it("says when it is Traefik's own, and nothing to do for a far one from Let's Encrypt", async () => {
+    fakeApi(admin, { 'GET /api/admin/overview': overview({ name: 'TRAEFIK DEFAULT CERT', expiresAt: '2027-10-01T00:00:00Z', days: 360, issuer: 'traefik' }) })
+    const first = renderApp('/admin')
+    expect(await screen.findByLabelText('Certificate')).toHaveTextContent("Traefik's own")
+    expect(screen.getByText("The site uses Traefik's own certificate")).toBeInTheDocument()
+    first.unmount()
+
+    fakeApi(admin, { 'GET /api/admin/overview': overview({ name: 'llm.example.com', expiresAt: '2026-12-01T00:00:00Z', days: 58, issuer: 'letsencrypt' }) })
+    renderApp('/admin')
+    expect(await screen.findByLabelText('Certificate')).toHaveTextContent('58 days')
+    expect(screen.getByText(/Let's Encrypt/)).toBeInTheDocument()
+    expect(screen.queryByText(/The certificate for/)).not.toBeInTheDocument()
+  })
+})

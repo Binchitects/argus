@@ -55,6 +55,20 @@ setups to paste. For a GitLab pipeline, see [ci.md](ci.md).
     also use another model or thinking level, for that answer only.
   - **Shorter** and **Longer** (in the same menu) answer again at about half
     or twice the words of the answer on screen.
+- **Deep research.** **Deep research** in the composer, for the next message:
+  the web and sub-agents are on for that answer, and the model plans the
+  research questions, gives each to a sub-agent, fills gaps, and writes a
+  report with numbered sources. While it works, a line under the answer says
+  which step it is on: planning the research, researching 4 parts (2 of 4
+  parts done), filling gaps, writing the report.
+- **Answer trace** (admins). The timer under an answer opens where its time
+  went: the wait in line, getting ready (the chat's tools started, the chat
+  read), each round of the model (tokens in, the share from the cache, tokens
+  out, the first token's wait, the engine's read and write speeds), each tool
+  call, and each sub-agent with its own time, tokens, speeds and tool calls.
+  The slowest step is named, with why ("mostly the model: 2,900 tokens written
+  at 5.6 a second"). Times, tokens and sizes only, never words; Admin → Traces
+  lists the slowest answers across people.
 - **Answer length.** Your account → Answers: **Short** (the answer first, a few
   sentences or a short list, no preamble), **Normal** (the model judges) or
   **Thorough** (reasons, cases, examples). Said to the model on every
@@ -148,7 +162,8 @@ setups to paste. For a GitLab pipeline, see [ci.md](ci.md).
     more than the engine serves at once (one more would push another's cache
     out), inside the answer's place in line; their results, in order,
     come back to the model, which puts them together. The card shows how many
-    are done and what each is doing, then each part's result.
+    parts are done ("2 of 4 parts done") and what each is doing, then each
+    part's result.
   - **MCP servers** an admin added: their tools, by name.
   - **APIs** an admin added by their OpenAPI document: each operation is a
     function (`pets__list_pets`); a call that changes something (anything but
@@ -490,6 +505,13 @@ the leaf) and copies the path to it into a new chat. The fork must end on a
 question or a finished answer, never inside a tool round. `PATCH` with
 `archived` archives a chat, and `GET /conversations?archived=true` lists the
 archived ones. Chats from before branches were each migrated to one branch.
+
+Each round of an answer keeps its trace beside its tokens: the first token's
+wait and the engine's read and write speeds, and on the first round the wait
+in line and getting ready; the answer's last round keeps the whole answer's
+time. A sub-agent's time, tokens, speeds and each tool call's time are kept with
+its delegate call. `GET /api/admin/traces/{messageId}` (admins) puts an answer
+together from them; `GET /api/admin/traces?from=&to=` lists the slowest.
 
 ## When something goes wrong
 

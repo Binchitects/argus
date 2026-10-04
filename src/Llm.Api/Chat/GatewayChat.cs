@@ -12,6 +12,8 @@ public sealed record ContentDelta(string Text) : StreamEvent;
 public sealed record ToolCallDelta(int Index, string? Id, string? Name, string? Arguments) : StreamEvent;
 public sealed record Finished(string? Reason) : StreamEvent;
 public sealed record UsageReport(int Prompt, int Cached, int Completion) : StreamEvent;
+/// <summary>The engine's own timings, when the stream carries them (llama.cpp's last chunk): the prompt tokens it read and how long that took, the tokens it wrote and how long.</summary>
+public sealed record EngineTimings(double? ReadTokens, double? ReadMs, double? WrittenTokens, double? WriteMs) : StreamEvent;
 
 public sealed class ChatGatewayException(string message, int? status = null) : Exception(message)
 {
@@ -208,6 +210,10 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
                         u["prompt_tokens_details"]?["cached_tokens"]?.GetValue<int>() ?? 0,
                         u["completion_tokens"]?.GetValue<int>() ?? 0);
                 }
+                if (chunk?["timings"] is JsonObject tm)
+                {
+                    yield return new EngineTimings(Number(tm["prompt_n"]), Number(tm["prompt_ms"]), Number(tm["predicted_n"]), Number(tm["predicted_ms"]));
+                }
                 if (chunk?["choices"] is not JsonArray { Count: > 0 } choices || choices[0] is not JsonObject choice)
                 {
                     continue;
@@ -241,6 +247,9 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
 
     private static string? Text(JsonObject? o, string name) =>
         o?[name] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    private static double? Number(JsonNode? n) =>
+        n is JsonValue v && v.TryGetValue<double>(out var d) && double.IsFinite(d) ? d : null;
 
     /// <summary>What LiteLLM says, as a sentence for the person. Credit is the common one.</summary>
     public static string Explain(string body, int status)

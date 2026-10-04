@@ -628,6 +628,8 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Contains("delegate", FunctionsSentFor(email));
         Assert.Contains("calculate", FunctionsSentFor(email));
         Assert.Contains(events, e => e.GetProperty("type").GetString() == "notice" && e.GetProperty("kind").GetString() == "research_no_web");
+        // The page is told, so its status line says which step the research is on.
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "research");
         var system = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
         Assert.Contains("Deep research: the person asked for a thorough, sourced report", system, StringComparison.Ordinal);
         var sent = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();

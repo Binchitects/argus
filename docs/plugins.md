@@ -40,7 +40,10 @@ Connections**.
 
 - **OAuth** (`oauth2`): **Connect** sends them to sign in at the service,
   which sends them back with a code; the app trades it for tokens, keeps them
-  encrypted, and refreshes them when they expire. The admin registers the app
+  encrypted, and refreshes them at the plugin's token address when they
+  expire. When the service no longer takes the refresh token (revoked, or
+  expired itself), the chat says the sign-in has expired and to connect again
+  in **Your account → Connections**. The admin registers the app
   at the service once (for GitLab: Admin → Applications, redirect URI
   `https://DOMAIN/api/account/connections/callback`) and puts its ID and
   secret in the plugin's settings.

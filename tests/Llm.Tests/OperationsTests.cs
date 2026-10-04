@@ -1,6 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Llm.Api.Dashboards;
+using Llm.Api.Operations;
+using Microsoft.Extensions.Options;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace Llm.Tests;
 
@@ -30,6 +35,104 @@ public sealed class OperationsTests(AppFixture app)
         Assert.Equal(1, o.GetProperty("index").GetProperty("summary").GetProperty("repos").GetInt32());
         Assert.Equal("Qwen3.8-Flash-Next", o.GetProperty("model").GetString());
         Assert.NotNull(made.GetProperty("id").GetString());
+    }
+
+    /// <summary>Prometheus's answer to traefik_tls_certs_not_after: each certificate's name and when it expires.</summary>
+    private static string Certs(params (string Cn, DateTimeOffset At)[] certs) =>
+        JsonSerializer.Serialize(new
+        {
+            status = "success",
+            data = new
+            {
+                resultType = "vector",
+                result = certs.Select(c => new { metric = new { cn = c.Cn }, value = new object[] { 1_790_000_000, c.At.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture) } }),
+            },
+        });
+
+    [Fact]
+    public async Task Overview_says_when_the_certificate_expires_and_whether_it_is_traefiks_own()
+    {
+        var admin = await Admin();
+        var now = DateTimeOffset.UtcNow;
+        var served = Certs(("llm.test", now.AddDays(10).AddHours(2)), ("TRAEFIK DEFAULT CERT", now.AddDays(300)));
+        app.Observe.Answers["/api/v1/query"] = q => q["query"]!.Contains("traefik_tls_certs_not_after", StringComparison.Ordinal) ? served : Certs();
+        try
+        {
+            // The one that expires first, Traefik's own left out while another is served; one of your own (no Let's Encrypt here).
+            var cert = (await admin.JsonAsync(await admin.GetAsync("/api/admin/overview"))).GetProperty("certificate");
+            Assert.Equal("llm.test", cert.GetProperty("name").GetString());
+            Assert.Equal(10, cert.GetProperty("days").GetInt32());
+            Assert.Equal("own", cert.GetProperty("issuer").GetString());
+            Assert.Contains(app.Observe.To("/api/v1/query"), q => q.Args["query"] == "max by (cn) (traefik_tls_certs_not_after)");
+
+            // Only Traefik's own: Overview says so.
+            served = Certs(("TRAEFIK DEFAULT CERT", now.AddDays(300)));
+            cert = (await admin.JsonAsync(await admin.GetAsync("/api/admin/overview"))).GetProperty("certificate");
+            Assert.Equal("traefik", cert.GetProperty("issuer").GetString());
+
+            // Prometheus knows none: nothing is said.
+            served = Certs();
+            Assert.Equal(JsonValueKind.Null, (await admin.JsonAsync(await admin.GetAsync("/api/admin/overview"))).GetProperty("certificate").ValueKind);
+        }
+        finally
+        {
+            app.Observe.Answers.TryRemove("/api/v1/query", out _);
+        }
+    }
+
+    [Fact]
+    public async Task With_lets_encrypt_the_certificate_is_said_to_be_its_and_prometheus_down_says_nothing()
+    {
+        using var http = new HttpClient(app.Observe, disposeHandler: false);
+        var prom = new PromDatasource(http, Options.Create(new StackOptions { PrometheusUrl = "http://prometheus.test" }));
+        var now = DateTimeOffset.UtcNow;
+        app.Observe.Answers["/api/v1/query"] = _ => Certs(("llm.test", now.AddDays(80)), ("gateway.llm.test", now.AddDays(5).AddHours(1)));
+        try
+        {
+            var cert = await Certificates.ReadAsync(prom, new StackOptions { Acme = "letsencrypt" }, now, CancellationToken.None);
+            Assert.Equal(new CertificateStatus("gateway.llm.test", DateTimeOffset.FromUnixTimeSeconds(now.AddDays(5).AddHours(1).ToUnixTimeSeconds()), 5, "letsencrypt"), cert);
+            app.Observe.Down["/api/v1/query"] = true;
+            Assert.Null(await Certificates.ReadAsync(prom, new StackOptions(), now, CancellationToken.None));
+        }
+        finally
+        {
+            app.Observe.Answers.TryRemove("/api/v1/query", out _);
+            app.Observe.Down.TryRemove("/api/v1/query", out _);
+        }
+    }
+
+    private sealed class RuleFile
+    {
+        public List<RuleGroup> Groups { get; set; } = [];
+    }
+
+    private sealed class RuleGroup
+    {
+        public List<Rule> Rules { get; set; } = [];
+    }
+
+    private sealed class Rule
+    {
+        public string? Alert { get; set; }
+        public string? Expr { get; set; }
+        public string? For { get; set; }
+        public Dictionary<string, string> Labels { get; set; } = [];
+    }
+
+    [Fact]
+    public void The_certificate_alerts_warn_thirty_days_before_and_are_critical_seven_days_before()
+    {
+        var path = Path.Combine(AppFixture.DashboardsPath, "..", "..", "..", "..", "deploy", "config", "prometheus", "rules", "stack.yml");
+        var file = new DeserializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).IgnoreUnmatchedProperties().Build()
+            .Deserialize<RuleFile>(File.ReadAllText(path));
+        var rules = file.Groups.SelectMany(g => g.Rules).Where(r => r.Alert is not null).ToDictionary(r => r.Alert!);
+        var soon = rules["CertificateExpiresSoon"];
+        Assert.Equal("warning", soon.Labels["severity"]);
+        Assert.Contains("traefik_tls_certs_not_after{cn!=\"TRAEFIK DEFAULT CERT\"}", soon.Expr, StringComparison.Ordinal);
+        Assert.EndsWith("< 30 * 86400", soon.Expr!.Trim(), StringComparison.Ordinal);
+        var verySoon = rules["CertificateExpiresVerySoon"];
+        Assert.Equal("critical", verySoon.Labels["severity"]);
+        Assert.EndsWith("< 7 * 86400", verySoon.Expr!.Trim(), StringComparison.Ordinal);
     }
 
     [Fact]

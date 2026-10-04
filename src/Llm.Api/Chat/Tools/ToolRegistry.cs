@@ -48,7 +48,7 @@ public sealed partial class McpServerTool(McpServer server, HttpClient http, str
 
     /// <summary>
     /// The headers for one person's calls: the server's, and for a plugin that signs in per person,
-    /// theirs. Throws when they have not connected their account yet (the chat says so, and where).
+    /// theirs. Throws when they have not connected their account yet, or its sign-in lapsed (the chat says so, and where).
     /// </summary>
     public static async Task<IReadOnlyDictionary<string, string>> PersonHeadersAsync(McpServer server, string? dataKey, Plugins.PersonCredentials? people, ToolContext context,
         CancellationToken ct)
@@ -58,8 +58,13 @@ public sealed partial class McpServerTool(McpServer server, HttpClient http, str
         {
             return headers;
         }
-        var token = await people.TokenAsync(server, context.User.Id, ct)
-            ?? throw new McpException($"connect your {server.Name} account first, in Your account → Connections");
+        var (token, lapsed) = await people.TokenAsync(server, context.User.Id, ct);
+        if (token is null)
+        {
+            throw new McpException(lapsed
+                ? $"your {server.Name} sign-in has expired and could not be renewed: connect again, in Your account → Connections"
+                : $"connect your {server.Name} account first, in Your account → Connections");
+        }
         var manifest = Plugins.PluginManifest.Parse(server.Manifest!);
         headers[manifest.Header] = Plugins.PluginManifest.Fill(manifest.Value, new Dictionary<string, string> { ["token"] = token });
         return headers;

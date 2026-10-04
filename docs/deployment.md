@@ -90,6 +90,11 @@ Traefik does TLS and nothing else does.
   Run it again to renew: the same CA signs the new certificate, so nothing
   needs trusting again. `config/traefik/README.md` has the details.
 
+Admin → Overview shows how many days the certificate has left and who issued
+it (from Traefik's metrics). The alert **CertificateExpiresSoon** warns 30 days
+before it expires (for a day: Traefik renews Let's Encrypt's within that time
+by itself), and **CertificateExpiresVerySoon** is critical 7 days before.
+
 ## Leaving a module out
 
 Every module runs. To leave one out, name it in `docker-compose.override.yml`

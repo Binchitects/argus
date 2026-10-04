@@ -19,7 +19,9 @@ namespace Llm.Api.Chat;
 /// <param name="Research">Deep research: the web and sub-agents on for this answer, a plan, and a sourced report.</param>
 /// <param name="Again">Said with the question for this answer only: answer again shorter or longer (AnswerLengths.Again).</param>
 /// <param name="Titled">The chat's first question: the model for small steps writes its title beside the answer (ChatTitles).</param>
-public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false, string? Again = null, bool Titled = false);
+/// <param name="QueuedMs">How long the answer waited in line (AnswerGate) before it started, for its trace.</param>
+public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false, string? Again = null, bool Titled = false,
+    int? QueuedMs = null);
 
 /// <summary>
 /// "Answer now" (as in ChatGPT and Gemini): the person asked the answer to stop thinking.
@@ -88,8 +90,12 @@ public sealed partial class ChatService(
         "In Mermaid, quote any label with punctuation (A[\"parse(input)\"]) and give each diagram an accTitle line; " +
         "a pie shows its values with \"pie showData\" (there is no donut), and a state diagram's choice is \"state Name <<choice>>\".";
 
+    /// <summary>The answer's clock, for its trace (one answer per scope).</summary>
+    private AnswerClock? _answerClock;
+
     public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {
+        _answerClock = new AnswerClock(overrides.QueuedMs ?? 0);
         var email = user.Email!.ToLowerInvariant();
         // The model for sub-agents and small steps, when one is set and this person may use it now.
         var helper = await small.ForAsync(user, ct);
@@ -172,6 +178,8 @@ public sealed partial class ChatService(
         if (overrides.Research)
         {
             instructions.Add(("research", ResearchNote));
+            // The page says which step deep research is on.
+            await emit(new { type = "research" });
         }
         // Past the budget, the tools go on demand: those the chat loaded whole, a line for each other.
         var demand = new OnDemandTools(tools, runs, instructions, conversation.LoadedTools, chat.CurrentValue.ToolTextChars);
@@ -251,6 +259,7 @@ public sealed partial class ChatService(
             var reasoning = new StringBuilder();
             var calls = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
             var clock = Stopwatch.StartNew();
+            var timing = _answerClock.Round(msg);
             TimeSpan? thoughtFrom = null;
             void EndThinking()
             {
@@ -266,6 +275,7 @@ public sealed partial class ChatService(
                 msg.Reasoning = reasoning.Length > 0 ? reasoning.ToString() : null;
                 msg.Status = status;
                 msg.DurationMs = (int)clock.Elapsed.TotalMilliseconds;
+                msg.TraceJson = _answerClock.Trace(timing, msg);
             }
             try
             {
@@ -274,6 +284,7 @@ public sealed partial class ChatService(
                 var cut = false;
                 await foreach (var e in gateway.StreamAsync(request, email, ct))
                 {
+                    timing.Saw(e);
                     switch (e)
                     {
                         // Answer now: still thinking (no word, no tool call yet), it stops here.
@@ -695,6 +706,7 @@ public sealed partial class ChatService(
                 {
                     ["title"] = part.Title, ["instructions"] = part.Instructions, ["text"] = run.Text, ["reasoning"] = Cut(run.Reasoning, AgentShownChars * 5),
                     ["steps"] = new JsonArray([.. run.Steps]), ["error"] = run.Error, ["ms"] = ms, ["model"] = kit.Model, ["usage"] = usage.DeepClone(),
+                    ["speed"] = run.Timing.ToJson(),
                 };
                 return (result, shown, run.Files);
             }
@@ -716,8 +728,8 @@ public sealed partial class ChatService(
     /// <summary>A step of a sub-agent's work, for the page: its thinking or words as they come, a tool call, a tool's result.</summary>
     private sealed record AgentStep(string Event, string? Text = null, JsonObject? Call = null, bool? IsError = null, JsonArray? Files = null);
 
-    /// <summary>What a sub-agent did: its last words, its thinking, its tool calls (each with its result), and why it stopped short, if so; what it made, and the tokens it used.</summary>
-    private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error, List<ChatAttachment> Files, UsageReport Usage);
+    /// <summary>What a sub-agent did: its last words, its thinking, its tool calls (each with its result), and why it stopped short, if so; what it made, the tokens it used, and the model's time.</summary>
+    private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error, List<ChatAttachment> Files, UsageReport Usage, TimingTotal Timing);
 
     /// <summary>One sub-agent: its own little answer loop, kept out of the chat (only its result goes to the model).</summary>
     private async Task<AgentRun> AgentAsync(AgentTask part, AgentKit kit, Dictionary<string, IToolRun> own, OnDemandTools demand, Func<string, Task> say,
@@ -735,8 +747,9 @@ public sealed partial class ChatService(
         var made = new List<ChatAttachment>();
         var reasoning = new StringBuilder();
         var text = new StringBuilder();
-        // Every round's tokens: the answer's cost counts its sub-agents' too.
+        // Every round's tokens: the answer's cost counts its sub-agents' too. And its time, for the answer's trace.
         var used = new UsageReport(0, 0, 0);
+        var timed = new TimingTotal();
         for (var round = 0; ; round++)
         {
             var request = new JsonObject
@@ -759,10 +772,13 @@ public sealed partial class ChatService(
             }
             text.Clear();
             var pending = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
+            var timing = new ModelTiming();
+            UsageReport? roundUsage = null;
             try
             {
                 await foreach (var e in gateway.StreamAsync(request, kit.Email, ct))
                 {
+                    timing.Saw(e);
                     switch (e)
                     {
                         case ReasoningDelta r:
@@ -779,17 +795,19 @@ public sealed partial class ChatService(
                             break;
                         case UsageReport u:
                             used = new UsageReport(used.Prompt + u.Prompt, used.Cached + u.Cached, used.Completion + u.Completion);
+                            roundUsage = u;
                             break;
                     }
                 }
             }
             catch (ChatGatewayException ex)
             {
-                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message, made, used);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message, made, used, timed);
             }
+            timed.Add(timing, roundUsage?.Prompt, roundUsage?.Cached, roundUsage?.Completion);
             if (pending.Count == 0)
             {
-                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null, made, used);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null, made, used, timed);
             }
             var toolCalls = new JsonArray([.. pending.Select(kv => (JsonNode)new JsonObject
             {
@@ -810,6 +828,7 @@ public sealed partial class ChatService(
                 string result;
                 var isError = false;
                 JsonArray? files = null;
+                var took = Stopwatch.StartNew();
                 try
                 {
                     if (demand.Active && name == OnDemandTools.Function)
@@ -853,7 +872,10 @@ public sealed partial class ChatService(
                 }
                 var shown = Cut(result, AgentShownChars);
                 await step(new AgentStep("tool_result", shown, new JsonObject { ["id"] = id }, isError, files));
-                steps.Add(new JsonObject { ["id"] = id, ["name"] = name, ["arguments"] = raw, ["result"] = shown, ["isError"] = isError, ["files"] = files?.DeepClone() });
+                steps.Add(new JsonObject
+                {
+                    ["id"] = id, ["name"] = name, ["arguments"] = raw, ["result"] = shown, ["isError"] = isError, ["files"] = files?.DeepClone(), ["ms"] = (int)took.ElapsedMilliseconds,
+                });
                 messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = safeguards.Untrusted(name, Cut(result, AgentToolChars)) });
             }
             if (demand.Loaded.Count != loadedBefore)
@@ -885,6 +907,7 @@ public sealed partial class ChatService(
 
     private async Task FinishAsync(Conversation conversation, CancellationToken ct)
     {
+        _answerClock?.End();
         conversation.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
     }

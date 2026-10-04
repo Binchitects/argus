@@ -82,6 +82,8 @@ services:
       Argus__AdminToken: ${ARGUS_KEY:?set ARGUS_KEY in .env}
       Argus__GitlabUrl: ${GITLAB_URL:-}
       HuggingFace__Token: ${HF_TOKEN:-}
+      # Who issued the certificate Traefik serves, for Admin -> Overview.
+      Stack__Acme: ${ACME_EMAIL:+letsencrypt}
     volumes:
       - ${MODELS_DIR:-./models}:/library
       - engine:/engine-config

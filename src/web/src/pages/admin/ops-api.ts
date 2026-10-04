@@ -28,6 +28,15 @@ export interface IndexSummary {
   error?: string
 }
 
+/** The certificate Traefik serves, from its metrics. */
+export interface CertificateStatus {
+  name: string
+  expiresAt: string
+  days: number
+  /** traefik: its own default (browsers warn); letsencrypt: renewed by Traefik; own: yours (scripts/make-cert.sh, or a company's). */
+  issuer: 'traefik' | 'letsencrypt' | 'own'
+}
+
 export interface Overview {
   people: number
   admins: number
@@ -37,4 +46,6 @@ export interface Overview {
   services: Probe[]
   index: { configured: boolean; summary: IndexSummary | null; error: string | null }
   model: string | null
+  /** Null when Prometheus does not know it. */
+  certificate?: CertificateStatus | null
 }
