@@ -1,6 +1,6 @@
 # DeepSeek Harness -> Argus, tested 2026-09-16 against v2.1.2.
 #
-#   ARGUS_TOKEN=<gitlab-pat> \
+#   LLM_SERVICE_API_KEY=<your API key> \
 #   NODE_EXTRA_CA_CERTS=<checkout>/deploy/config/traefik/certs/ca.crt \
 #     dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
 #     "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
@@ -11,9 +11,10 @@
 # override of a server that does not exist yet, and dsh rejects it with
 # "id is required for non-insert patches".
 #
-# The token comes from the environment rather than sitting in this file, so
-# the patch can live in a repository. `!!js` is required: without it the
-# backticks arrive as literal text and Argus answers 401.
+# The key (your Arena API key, Your account -> API key; Argus takes no GitLab
+# token) comes from the environment rather than sitting in this file, so the
+# patch can live in a repository. `!!js` is required: without it the backticks
+# arrive as literal text and Argus answers 401.
 
 - insert:
   - name: '@deepseek-ai/dsh-mcp-client'
@@ -22,4 +23,4 @@
       transport: streamable-http
       url: https://argus.llm.localhost/mcp
       headers:
-        Authorization: !!js '`Bearer ${process.env.ARGUS_TOKEN}`'
+        Authorization: !!js '`Bearer ${process.env.LLM_SERVICE_API_KEY}`'

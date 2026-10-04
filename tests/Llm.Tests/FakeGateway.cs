@@ -16,6 +16,7 @@ public sealed class FakeGateway : ILiteLlm
         /// <summary>The models the key may call; empty: every model.</summary>
         public IReadOnlyList<string> Models { get; set; } = [];
         public int? MaxParallel { get; set; }
+        public DateTimeOffset? Expires { get; set; }
     }
 
     public ConcurrentDictionary<string, decimal?> Budgets { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -85,6 +86,17 @@ public sealed class FakeGateway : ILiteLlm
         Check();
         IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel))];
         return Task.FromResult(list);
+    }
+
+    /// <summary>The keys looked up by the key itself (each one asked about), so tests can see what was cached.</summary>
+    public ConcurrentQueue<string> KeyLookups { get; } = new();
+
+    public Task<GatewayKeyInfo?> KeyInfoAsync(string key, CancellationToken ct = default)
+    {
+        Check();
+        KeyLookups.Enqueue(key);
+        var found = Keys.Values.FirstOrDefault(k => k.Secret == key);
+        return Task.FromResult(found is null ? null : new GatewayKeyInfo(found.Email, found.Blocked, found.Expires));
     }
 
     public Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default)

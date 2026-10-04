@@ -16,7 +16,7 @@ property an operator would otherwise discover through a confused agent:
 Exit code is 0 only when every REQUIRED check passes, so this drops into CI
 or a post-deploy gate without parsing output.
 
-    python tools/smoke_test.py --url http://127.0.0.1:8099/mcp --token <PAT>
+    python tools/smoke_test.py --url http://127.0.0.1:8099/mcp --token <API key or PAT>
 
 `--json` prints a machine-readable report for a dashboard.
 """
@@ -213,7 +213,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8099/mcp")
     parser.add_argument("--token", required=True,
-                        help="A developer GitLab PAT the deployment accepts")
+                        help="Your API key (sk-...) for the platform's Argus, or a GitLab PAT for a standalone one")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 

@@ -1,13 +1,22 @@
 # Continue -> Argus.  NOT EXECUTED on this machine; transcribed from Continue's
 # documented MCP configuration. Merge into ~/.continue/config.yaml.
 #
-# stdio form: Argus runs as a child process and resolves ARGUS_TOKEN once, at
-# startup. For the HTTP form see clients/generic-mcp/http.json -- Continue takes
-# the same url/headers shape as every other URL-based client.
+# HTTP form: the platform's Argus, with your Arena API key (Your account ->
+# API key, sk-...). Argus answers as your GitLab account; it takes no GitLab token.
 
 mcpServers:
   - name: argus
-    command: argus
-    args: ["serve", "--config", "/etc/argus/config.yaml", "--stdio"]
-    env:
-      ARGUS_TOKEN: <gitlab-pat>
+    type: streamable-http
+    url: https://argus.llm.localhost/mcp
+    requestOptions:
+      headers:
+        Authorization: Bearer <your API key>
+
+# stdio form, for a local Argus instead: it runs as a child process and
+# resolves your own GitLab token in ARGUS_TOKEN once, at startup.
+#
+#  - name: argus
+#    command: argus
+#    args: ["serve", "--config", "/etc/argus/config.yaml", "--stdio"]
+#    env:
+#      ARGUS_TOKEN: <gitlab-pat>

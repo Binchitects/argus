@@ -3,7 +3,7 @@
     "argus": {
       "url": "https://argus.llm.localhost/mcp",
       "headers": {
-        "Authorization": "Bearer <gitlab-pat>"
+        "Authorization": "Bearer <your API key>"
       }
     }
   }

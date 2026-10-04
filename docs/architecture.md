@@ -64,8 +64,9 @@ One issuer, the app.
 - **A person's tools** use their API key at the gateway (`sk-...`), which LiteLLM
   checks itself: the spend is theirs, within their credit and the models
   they may use.
-- **Coding agents at Argus** bring their own GitLab token; Argus answers within
-  that account's GitLab membership.
+- **Coding agents at Argus** bring the person's API key (`sk-...`); Argus asks
+  the app whose it is (with `ARGUS_KEY`, inside the network) and answers within
+  that person's GitLab membership. Argus takes no GitLab token in the platform.
 - **Inside the stack**: the app speaks to the gateway with its master key and
   to Argus with `ARGUS_KEY` (naming the person, whose GitLab membership
   applies); the gateway and Prometheus reach the engine with `ENGINE_KEY`.
@@ -86,8 +87,9 @@ gateway's speech to text, made once. Frames go as pictures to a model that sees.
 key → LiteLLM → llama.cpp, another GPU server, the picture server or the speech
 server.
 
-**Argus.** A developer's agent → `argus.DOMAIN/mcp` with a GitLab token; the
-chat → `argus:7700/mcp` with `ARGUS_KEY` and the person's email. Argus reads the
+**Argus.** A developer's agent → `argus.DOMAIN/mcp` with the person's API key,
+which Argus checks with the app (`app:8080/api/authz/key`); the chat →
+`argus:7700/mcp` with `ARGUS_KEY` and the person's email. Argus reads the
 GitLab it mirrors with a read-only token, and embeddings from `embed`.
 
 **Metrics and logs.** Prometheus scrapes the engine's loaded models (the app

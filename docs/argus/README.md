@@ -97,21 +97,39 @@ See [clients/README.md](../../clients/README.md#forcing-verify-after).
 
 ## Authentication
 
-**Argus does not use the app's sign-in.** Every caller presents their own GitLab
-personal access token as a bearer token, and Argus uses that token to decide
-which repositories they may see. Replacing it with an SSO session would erase
-the per-caller identity that the ACL depends on, so the Traefik route applies
-`default-chain@file` and passes the `Authorization` header through untouched —
-the same reasoning as the LiteLLM gateway route.
+**Argus does not use the app's sign-in session.** A coding agent presents the
+person's **API key** (the app's **Your account → API key**, `sk-...`, the same
+key as for the gateway) as a bearer token. Argus asks the app whose key it is
+(`ARGUS_KEY_CHECK_URL`, `http://app:8080/api/authz/key`, inside the network
+with `ARGUS_KEY`) and gets the person's email and username. Their username is
+their GitLab username, so Argus then answers exactly as for the chat: within
+that person's GitLab membership, read with the service token. Nobody hands out
+a GitLab token for Argus. The Traefik route applies `default-chain@file` and
+passes the `Authorization` header through untouched, the same reasoning as the
+LiteLLM gateway route.
 
 ```
-anonymous                    ->  401
-valid GitLab PAT             ->  only that user's repositories
-ARGUS_GITLAB_TOKEN (service) ->  everything the service account can read
+anonymous                       ->  401
+a person's API key (sk-...)     ->  only that person's repositories
+a GitLab token                  ->  401: "Connect with your Arena API key ..."
+ARGUS_KEY + the person's email  ->  the chat, from inside the network only
 ```
+
+The app answers only Argus: the right credential, and not through the proxy.
+It refuses a key that is unknown, blocked or expired, or whose person is
+disabled. Argus keeps the answer by the key's SHA-256 (never the key): five
+minutes when good, thirty seconds when refused. A blocked, expired or replaced
+key stops working within about six minutes (Argus's five and the app's one), a
+disabled person within five. When the app cannot be asked, Argus says so and
+keeps nothing.
+
+A **standalone Argus** (no `ARGUS_KEY_CHECK_URL`) keeps the old way: each
+caller presents their own GitLab personal access token, and that token decides
+which repositories they may see.
 
 `ARGUS_GITLAB_TOKEN` in `.env` is the **privileged service token**. It is used
-for indexing, never handed to a developer, and never leaves the host.
+for indexing and for reading each person's membership, never handed to a
+developer, and never leaves the host.
 
 Documentation packs are public reference material and are readable by any
 authenticated caller regardless of repository access.
@@ -294,7 +312,7 @@ come back as SSE `data:` lines, not plain JSON.
 
 ```bash
 curl -sk -D - -X POST https://argus.llm.localhost/mcp \
-  -H "Authorization: Bearer $ARGUS_GITLAB_TOKEN" \
+  -H "Authorization: Bearer $LLM_SERVICE_API_KEY" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}'
@@ -317,13 +335,17 @@ Argus's sidecar database, and **also printed as one JSON line on stdout**
 (`argus/auditlog.py`):
 
 ```json
-{"ts": "2026-09-14T06:48:04Z", "event": "tool_call", "tool": "get_file", "user": "dev_alpha", "user_id": 2, "outcome": "ok", "error": null, "duration_ms": 16.6, "repos_visible": 1, "args": {"repo_id": 3, "path": "src/decoder.c"}}
+{"ts": "2026-09-14T06:48:04Z", "event": "tool_call", "tool": "get_file", "user": "dev_alpha", "user_id": 2, "outcome": "ok", "error": null, "duration_ms": 16.6, "repos_visible": 1, "args": {"repo_id": 3, "path": "src/decoder.c"}, "via": "api_key"}
 {"ts": "2026-09-14T06:44:54Z", "event": "denied", "reason": "missing_token", "path": "/mcp"}
 ```
 
 `outcome` is `ok`, `no_access` (only repositories the person cannot read
-matched; Argus named the maintainers instead) or `error`. `denied` means no
-bearer token, or a GitLab token GitLab rejected; no tool ran.
+matched; Argus named the maintainers instead) or `error`. `via` says how the
+person was identified: `api_key` (a coding agent with their API key), `chat`
+(the platform's chat), `gitlab_token` (a standalone Argus) or `argus_key` (a
+standalone Argus's own `ak_` key). `denied` means no bearer token, a key the app
+refused, a GitLab token where only API keys are taken, or a GitLab token GitLab
+rejected; no tool ran.
 
 Promtail ships these lines to Loki — on every deployment — with `event`,
 `outcome` and `tool` as labels. The app's **Argus** dashboard (Observe → Dashboards) shows calls
@@ -594,7 +616,8 @@ from the command line.
 
 | Symptom | Cause |
 |---|---|
-| `401` on every MCP call | No bearer token, or the GitLab PAT is expired |
+| `401` on every MCP call | No bearer token; an API key the app refused (unknown, blocked, expired, or a disabled person); a GitLab token sent to the platform's Argus (it takes the API key); or, standalone, an expired GitLab PAT |
+| `401` "Cannot check your API key right now" | Argus cannot reach the app at `ARGUS_KEY_CHECK_URL`, or `ARGUS_CHAT_CLIENT_TOKEN` is not the app's `ARGUS_KEY` (Argus's log names the answer) |
 | Host-validation error | Proxy hostname missing from `--allowed-host` |
 | Container unhealthy for ~90 s at boot | Normal — the first request opens every pack |
 | Empty `repo_map`, no symbols | Index is empty; run the indexer (Admin → Indexing) |

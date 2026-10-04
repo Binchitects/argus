@@ -25,7 +25,7 @@ and the gateway use them inside the stack's network, and they never leave it.
 
 ---
 
-## Four enforcement paths
+## Five enforcement paths
 
 ### 1. The app's own sign-in
 
@@ -58,6 +58,15 @@ gets no credential injection. LiteLLM checks each person's own key, which is
 what ties spend to the person; injecting the master key would put every
 request under one identity. It is still reachable only through Traefik over TLS.
 
+### 5. Argus takes the same API key
+
+`argus.DOMAIN/mcp` is not behind forwardAuth either. A coding agent sends the
+person's API key; Argus asks the app whose it is (`POST /api/authz/key`, inside
+the network with `ARGUS_KEY`; refused through the proxy) and answers as that
+person's GitLab account. The app refuses a key that is unknown, blocked or
+expired, or whose person is disabled. It never logs the key. GitLab tokens are
+not accepted: nobody hands one out for Argus.
+
 ---
 
 ## Using it
@@ -68,11 +77,12 @@ Open `https://DOMAIN`. The first admin is `admin`, with the password in
 `ADMIN_PASSWORD` (used once, on the very first start; change it under **Your
 account** afterwards).
 
-Your account page has your API key (make a new one there; the old one stops at
-once), your spend and credit, two-factor sign-in (scan a QR code; you get ten
-one-time recovery codes), and your password. Changing your password or turning
-two-factor sign-in on or off signs you out on every other device; this one
-stays signed in. Opening two-factor setup and cancelling changes nothing.
+Your account page has your API key, for your tools and for coding agents at
+Argus (make a new one there; the old one stops at once, at Argus within six
+minutes), your spend and credit, two-factor sign-in (scan a QR code; you get
+ten one-time recovery codes), and your password. Changing your password or
+turning two-factor sign-in on or off signs you out on every other device; this
+one stays signed in. Opening two-factor setup and cancelling changes nothing.
 
 ### As a machine client of the engine API
 
@@ -105,7 +115,8 @@ Every sign-in and every change is in **Admin → Audit log**, with who, whom and
 from which address.
 
 The username must equal the person's GitLab username: Argus uses it to answer
-with their own repository access.
+with their own repository access, in the chat and for coding agents with their
+API key.
 
 ---
 
