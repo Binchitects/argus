@@ -149,11 +149,23 @@ public sealed class ToolRegistry(
 
 /// <summary>
 /// Calls waiting for the person to allow them ("ask before running"): the answer
-/// waits here until the page says yes or no, or until it gives up.
+/// waits here until the page says yes or no, or until it gives up. With several
+/// replicas, a yes or no posted to another replica is passed to the one waiting.
 /// </summary>
 public sealed class ToolApprovals
 {
+    private const string Topic = "tool:decision";
     private readonly ConcurrentDictionary<(Guid Conversation, string Call), TaskCompletionSource<bool>> _waiting = new();
+    private readonly Operations.Replicas replicas;
+
+    /// <summary>A yes or no, as passed between replicas.</summary>
+    private sealed record Decision(Guid Conversation, string Call, bool Allow);
+
+    public ToolApprovals(Operations.Replicas replicas)
+    {
+        this.replicas = replicas;
+        replicas.On(Topic, payload => System.Text.Json.JsonSerializer.Deserialize<Decision>(payload) is { } d && Decide(d.Conversation, d.Call, d.Allow));
+    }
 
     public async Task<bool> WaitAsync(Guid conversation, string call, TimeSpan patience, CancellationToken ct)
     {
@@ -173,7 +185,11 @@ public sealed class ToolApprovals
         }
     }
 
-    /// <returns>False when no call with that id is waiting.</returns>
+    /// <returns>False when no call with that id is waiting (here).</returns>
     public bool Decide(Guid conversation, string call, bool allow) =>
         _waiting.TryGetValue((conversation, call), out var decision) && decision.TrySetResult(allow);
+
+    /// <returns>False when no call with that id is waiting on any replica.</returns>
+    public async Task<bool> DecideAnywhereAsync(Guid conversation, string call, bool allow, CancellationToken ct) =>
+        Decide(conversation, call, allow) || await replicas.AskAsync(Topic, System.Text.Json.JsonSerializer.Serialize(new Decision(conversation, call, allow)), ct);
 }

@@ -14,14 +14,65 @@ namespace Llm.Api.Models;
 /// loaded and unloaded by hand, and who may use them (the models' access rules). The picture and video
 /// servers run while their control file says "on" (services/sd-serve.sh reads it); the speech server
 /// loads and unloads its models through its own API. One not kept loaded loads when asked for, and
-/// unloads after ten minutes unused.
+/// unloads after ten minutes unused. With several replicas, the one that leads writes the control
+/// files and loads the speech models; a model asked for on another is told to it.
 /// </summary>
-public sealed partial class MediaControl(IServiceScopeFactory scopes, Modules modules, IHttpClientFactory http, IOptions<EngineOptions> engine,
-    TimeProvider clock, ILogger<MediaControl> logger) : BackgroundService
+public sealed partial class MediaControl : BackgroundService
 {
     public const string Client = "media";
     private const string SettingPrefix = "media.";
+    private const string AskedTopic = "media:asked";
+    private const string ForgetTopic = "media:forget";
+    private const string WakeTopic = "media:wake";
     private static readonly TimeSpan Idle = TimeSpan.FromMinutes(10);
+    private readonly IServiceScopeFactory scopes;
+    private readonly Modules modules;
+    private readonly IHttpClientFactory http;
+    private readonly IOptions<EngineOptions> engine;
+    private readonly TimeProvider clock;
+    private readonly Replicas replicas;
+    private readonly ILogger<MediaControl> logger;
+
+    public MediaControl(IServiceScopeFactory scopes, Modules modules, IHttpClientFactory http, IOptions<EngineOptions> engine, TimeProvider clock, Replicas replicas,
+        ILogger<MediaControl> logger)
+    {
+        (this.scopes, this.modules, this.http, this.engine, this.clock, this.replicas, this.logger) = (scopes, modules, http, engine, clock, replicas, logger);
+        replicas.On(AskedTopic, name =>
+        {
+            if (Find(name) is not null)
+            {
+                _asked[name] = clock.GetUtcNow();
+                WakeHere();
+            }
+            return true;
+        });
+        replicas.On(ForgetTopic, name =>
+        {
+            _asked.TryRemove(name, out _);
+            WakeHere();
+            return true;
+        });
+        replicas.On(WakeTopic, _ =>
+        {
+            WakeHere();
+            return true;
+        });
+    }
+
+    /// <summary>Asked for now (loaded, or used): here, and on the replica that leads.</summary>
+    private void Asked(string name)
+    {
+        _asked[name] = clock.GetUtcNow();
+        replicas.Tell(AskedTopic, name);
+    }
+
+    private void WakeHere()
+    {
+        if (_wake.CurrentCount == 0)
+        {
+            _wake.Release();
+        }
+    }
 
     /// <summary>A media model: what it does, the server it runs on, and its id there (the speech server's).</summary>
     public sealed record Model(string Name, string Mode, string Server, string? Id, bool KeptByDefault);
@@ -69,21 +120,23 @@ public sealed partial class MediaControl(IServiceScopeFactory scopes, Modules mo
             db.Settings.Add(new Setting { Key = key, Value = value });
         }
         await db.SaveChangesAsync(ct);
-        _wake.Release();
+        WakeHere();
+        replicas.Tell(WakeTopic);
     }
 
     /// <summary>Loads it now; one not kept loaded unloads again after ten minutes unused.</summary>
     public void Load(string name)
     {
-        _asked[name] = clock.GetUtcNow();
+        Asked(name);
         _now[name] = "loading";
-        _wake.Release();
+        WakeHere();
     }
 
     /// <summary>Unloads it now (and stops keeping it loaded, as with the engine's models).</summary>
     public async Task UnloadAsync(string name, CancellationToken ct)
     {
         _asked.TryRemove(name, out _);
+        replicas.Tell(ForgetTopic, name);
         if ((await StateAsync(name, ct)).Kept)
         {
             await SetAsync(name, kept: false, ct: ct);
@@ -92,7 +145,7 @@ public sealed partial class MediaControl(IServiceScopeFactory scopes, Modules mo
         {
             using var _ = await http.CreateClient(Client).DeleteAsync($"{MediaModels.AudioUrl}/api/ps/{id}", ct);
         }
-        _wake.Release();
+        WakeHere();
     }
 
     /// <summary>Used now: it stays loaded another ten minutes.</summary>
@@ -100,7 +153,7 @@ public sealed partial class MediaControl(IServiceScopeFactory scopes, Modules mo
     {
         if (_asked.ContainsKey(name))
         {
-            _asked[name] = clock.GetUtcNow();
+            Asked(name);
         }
     }
 
@@ -120,7 +173,7 @@ public sealed partial class MediaControl(IServiceScopeFactory scopes, Modules mo
         {
             return null;
         }
-        _asked[name] = clock.GetUtcNow();
+        Asked(name);
         if (model.Id is not null || await UpAsync(model, ct))
         {
             return null;
@@ -166,9 +219,10 @@ public sealed partial class MediaControl(IServiceScopeFactory scopes, Modules mo
         }
     }
 
-    /// <summary>Each model as it should be: the control files written, kept speech models loaded, and what each is doing now.</summary>
+    /// <summary>Each model as it should be: the control files written, kept speech models loaded (by the replica that leads), and what each is doing now.</summary>
     private async Task TickAsync(CancellationToken ct)
     {
+        var lead = replicas.IsLeader;
         var states = await StatesAsync(ct);
         var now = clock.GetUtcNow();
         foreach (var (name, at) in _asked)
@@ -191,7 +245,10 @@ public sealed partial class MediaControl(IServiceScopeFactory scopes, Modules mo
             }
             if (m.Id is null)
             {
-                Write(m.Server, want ? "on\n" : "off\n");
+                if (lead)
+                {
+                    Write(m.Server, want ? "on\n" : "off\n");
+                }
                 var files = MediaModels.Servers.First(x => x.Server == m.Server).Files;
                 var ready = files.All(f => File.Exists(Path.Combine(engine.Value.LibraryDir, f.Dir, f.Name)));
                 _now[m.Name] = !ready ? "waiting" : await UpAsync(m, ct) ? "loaded" : want ? "loading" : "unloaded";
@@ -199,12 +256,13 @@ public sealed partial class MediaControl(IServiceScopeFactory scopes, Modules mo
             }
             speechLoaded ??= await SpeechLoadedAsync(ct);
             var loaded = speechLoaded.Contains(m.Id);
-            if (want && !loaded)
+            // The replica that leads loads and unloads; the others only read what the speech server has.
+            if (lead && want && !loaded)
             {
                 using var res = await http.CreateClient(Client).PostAsync($"{MediaModels.AudioUrl}/api/ps/{m.Id}", null, ct);
                 loaded = res.IsSuccessStatusCode;
             }
-            else if (!s.Enabled && loaded)
+            else if (lead && !s.Enabled && loaded)
             {
                 using var _ = await http.CreateClient(Client).DeleteAsync($"{MediaModels.AudioUrl}/api/ps/{m.Id}", ct);
                 loaded = false;

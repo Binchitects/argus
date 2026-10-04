@@ -46,8 +46,12 @@ public sealed partial class SettingsService(
     DatabaseConfigurationProvider provider,
     IOptions<AuthOptions> auth,
     SettingsAtStart atStart,
-    Audit audit)
+    Audit audit,
+    Operations.Replicas replicas)
 {
+    /// <summary>The other replicas read the settings again when one saves them.</summary>
+    public const string ReloadTopic = "settings:reload";
+
     private const string Row = DatabaseConfigurationProvider.RowPrefix;
 
     public async Task<object> ViewAsync(CancellationToken ct = default)
@@ -156,6 +160,7 @@ public sealed partial class SettingsService(
         }
         await db.SaveChangesAsync(ct);
         provider.Reload();
+        replicas.Tell(ReloadTopic);
 
         foreach (var (def, value, reset) in normalised)
         {

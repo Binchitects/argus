@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Llm.Api.Dashboards;
 using Llm.Api.Gateway;
+using Llm.Api.Operations;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,7 +16,7 @@ namespace Llm.Api.Notifications;
 /// budget (a raised budget says it again when reached).
 /// </summary>
 /// <remarks>Notifications:Watch=false turns the looking off (tests, which call the checks themselves).</remarks>
-public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguration config, TimeProvider clock, ILogger<NewsWatch> logger) : BackgroundService
+public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguration config, TimeProvider clock, Replicas replicas, ILogger<NewsWatch> logger) : BackgroundService
 {
     public static readonly TimeSpan AlertsEvery = TimeSpan.FromMinutes(1);
     public static readonly TimeSpan CreditEvery = TimeSpan.FromMinutes(5);
@@ -34,6 +35,11 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
             using var timer = new PeriodicTimer(AlertsEvery, clock);
             do
             {
+                // With several replicas, the one that leads looks.
+                if (!replicas.IsLeader)
+                {
+                    continue;
+                }
                 await CheckAlertsAsync(stoppingToken);
                 if (clock.GetUtcNow() - credit >= CreditEvery)
                 {

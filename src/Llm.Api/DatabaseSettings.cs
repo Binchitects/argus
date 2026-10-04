@@ -27,6 +27,19 @@ public static class DatabaseSettings
             // this the driver probes for Kerberos first, and the runtime image has
             // no libgssapi -- an alarming but harmless error on every start.
             GssEncryptionMode = GssEncryptionMode.Disable,
+            // An external server (a managed Postgres) usually wants TLS: Database:SslMode.
+            SslMode = SslModeOf(db["SslMode"]),
+            RootCertificate = db["RootCertificate"] is { Length: > 0 } ca ? ca : null,
         }.ConnectionString;
     }
+
+    /// <summary>
+    /// disable, prefer (the default), require, verify-ca or verify-full, as libpq and the gateway
+    /// spell them (or Npgsql's own names): require encrypts without checking the certificate,
+    /// verify-full checks it and the host name against Database:RootCertificate (or the system's roots).
+    /// </summary>
+    public static SslMode SslModeOf(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? SslMode.Prefer
+        : Enum.TryParse<SslMode>(value.Replace("-", "", StringComparison.Ordinal).Trim(), ignoreCase: true, out var mode) ? mode
+        : throw new InvalidOperationException($"Database:SslMode \"{value}\" is not one of disable, prefer, require, verify-ca, verify-full.");
 }

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json.Nodes;
 using Llm.Api.Chat;
 using Llm.Api.Identity;
+using Llm.Api.Operations;
 using Llm.Api.Settings;
 using Llm.Core.Chat;
 using Llm.Core.Data;
@@ -174,65 +175,168 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
 /// <summary>
 /// Runs scheduled tasks when they are due (checked every 20 seconds), each in the
 /// background, one run of a task at a time. A task that was due while the app was down
-/// runs once when it is back, then keeps its schedule.
+/// runs once when it is back, then keeps its schedule. With several replicas on one
+/// database, the one that leads watches the clock, and every run is claimed in the
+/// database first (<see cref="ScheduledTask.RunningOn"/>): a task never runs twice at
+/// once, whichever replica an event or a "Run now" reached. Events that come while a
+/// run goes wait in the database (<see cref="TaskEvent"/>), and the replica free next
+/// takes them in order.
 /// </summary>
-public sealed partial class Scheduler(IServiceScopeFactory scopes, TimeProvider clock, IOptionsMonitor<ScheduleOptions> options, ILogger<Scheduler> logger)
+public sealed partial class Scheduler(IServiceScopeFactory scopes, Replicas replicas, TimeProvider clock, IOptionsMonitor<ScheduleOptions> options, ILogger<Scheduler> logger)
     : BackgroundService
 {
+    // The runs going on this replica: their claims are renewed, and shutting down waits for them.
     private readonly ConcurrentDictionary<Guid, Task> _running = new();
-    // Events that came while their task was answering: each runs after the one before, in order.
-    private readonly ConcurrentDictionary<Guid, ConcurrentQueue<TriggerEvent>> _waiting = new();
     private CancellationToken _stopping;
 
     /// <summary>Events one task keeps waiting while it answers; past them the oldest goes.</summary>
     public const int MaxWaiting = 20;
 
-    public bool IsRunning(Guid task) => _running.ContainsKey(task);
+    /// <summary>A claim not renewed for this long is let go: the replica that held it stopped mid-run.</summary>
+    public static readonly TimeSpan ClaimLapses = TimeSpan.FromMinutes(2);
+
+    /// <summary>Whether a run of it is going, on any replica.</summary>
+    public static bool IsRunning(ScheduledTask task, DateTimeOffset now) => task.RunningOn is not null && task.RunningSeenAt > now - ClaimLapses;
 
     /// <summary>Events waiting for a task's run to end.</summary>
-    public int Waiting(Guid task) => _waiting.TryGetValue(task, out var q) ? q.Count : 0;
+    public async Task<int> WaitingAsync(Guid task, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<AppDbContext>().TaskEvents.CountAsync(e => e.TaskId == task, ct);
+    }
 
     /// <summary>
-    /// An event for a task: run now, or, while a run of it is going, queued to run after it
-    /// (a busy repository's events must not be lost). False when it had to wait.
+    /// An event for a task: run now, or, while a run of it is going (here or on another replica), kept
+    /// to run after it (a busy repository's events must not be lost). False when it has to wait.
     /// </summary>
-    public bool StartOrQueue(Guid task, TriggerEvent trigger)
+    public async Task<bool> StartOrQueueAsync(Guid task, TriggerEvent trigger, CancellationToken ct)
     {
-        if (Start(task, manual: false, trigger))
+        if (await StartAsync(task, manual: false, trigger, ct))
         {
             return true;
         }
-        var queue = _waiting.GetOrAdd(task, _ => new ConcurrentQueue<TriggerEvent>());
-        queue.Enqueue(trigger);
-        while (queue.Count > MaxWaiting && queue.TryDequeue(out _))
+        await using (var scope = scopes.CreateAsyncScope())
         {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.TaskEvents.Add(new TaskEvent
+            {
+                TaskId = task, Text = trigger.Text, ReplyProject = trigger.Reply?.Project, ReplyKind = trigger.Reply?.Kind, ReplyId = trigger.Reply?.Id, CreatedAt = clock.GetUtcNow(),
+            });
+            await db.SaveChangesAsync(ct);
+            var past = await db.TaskEvents.Where(e => e.TaskId == task).OrderByDescending(e => e.CreatedAt).ThenByDescending(e => e.Id).Skip(MaxWaiting).Select(e => e.Id).ToListAsync(ct);
+            if (past.Count > 0)
+            {
+                await db.TaskEvents.Where(e => past.Contains(e.Id)).ExecuteDeleteAsync(ct);
+            }
         }
-        // The run may have ended meanwhile: then nobody would take the queue.
-        if (!IsRunning(task))
-        {
-            Next(task);
-        }
+        // The run may have ended meanwhile (it looked for events before this one was in): then nobody would take it.
+        await NextAsync(task, ct);
         return false;
     }
 
-    private void Next(Guid task)
+    /// <summary>Runs the task now, in the background; false when a run of it is still going (on any replica).</summary>
+    public async Task<bool> StartAsync(Guid task, bool manual, TriggerEvent? trigger = null, CancellationToken ct = default)
     {
-        if (_waiting.TryGetValue(task, out var queue) && queue.TryDequeue(out var next) && !Start(task, manual: false, next))
+        if (await TakeAsync(task, ct) is not { } gate)
         {
-            // Started meanwhile by another: back to the front is not possible, so back of the line.
-            queue.Enqueue(next);
+            return false;
         }
+        Run(task, gate, manual, trigger);
+        return true;
     }
 
-    /// <summary>Runs the task now, in the background; false when a run of it is still going.</summary>
-    public bool Start(Guid task, bool manual, TriggerEvent? trigger = null)
+    /// <summary>
+    /// The task for a run here: its place among this replica's runs, then its claim in the database
+    /// (false when a run of it goes elsewhere; a lapsed claim, or one this replica left behind, is taken over).
+    /// </summary>
+    private async Task<TaskCompletionSource?> TakeAsync(Guid task, CancellationToken ct)
     {
         var gate = new TaskCompletionSource();
         if (!_running.TryAdd(task, gate.Task))
         {
-            return false;
+            return null;
         }
-        // The entry is the gate, done when the run is: a run that ends at once cannot leave a stale entry behind.
+        try
+        {
+            var now = clock.GetUtcNow();
+            var lapsed = now - ClaimLapses;
+            await using var scope = scopes.CreateAsyncScope();
+            var claimed = await scope.ServiceProvider.GetRequiredService<AppDbContext>().ScheduledTasks
+                .Where(t => t.Id == task && (t.RunningOn == null || t.RunningOn == replicas.Id || t.RunningSeenAt == null || t.RunningSeenAt < lapsed))
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.RunningOn, replicas.Id).SetProperty(t => t.RunningSeenAt, now), ct) == 1;
+            if (claimed)
+            {
+                return gate;
+            }
+        }
+        catch
+        {
+            Untake(task, gate);
+            throw;
+        }
+        Untake(task, gate);
+        return null;
+    }
+
+    private void Untake(Guid task, TaskCompletionSource gate)
+    {
+        _running.TryRemove(new KeyValuePair<Guid, Task>(task, gate.Task));
+        gate.TrySetResult();
+    }
+
+    /// <summary>The oldest event waiting for the task, run now when the task is free: claimed first, so only one replica takes it.</summary>
+    private async Task NextAsync(Guid task, CancellationToken ct)
+    {
+        if (await TakeAsync(task, ct) is not { } gate)
+        {
+            return;
+        }
+        TriggerEvent? next = null;
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            // Under the claim nobody else takes this task's events; one may still be dropped as too old meanwhile.
+            while (next is null && await db.TaskEvents.AsNoTracking().Where(e => e.TaskId == task).OrderBy(e => e.CreatedAt).ThenBy(e => e.Id).FirstOrDefaultAsync(ct) is { } e)
+            {
+                if (await db.TaskEvents.Where(x => x.Id == e.Id).ExecuteDeleteAsync(ct) == 1)
+                {
+                    next = new TriggerEvent(e.Text, e.ReplyProject is { } project && e.ReplyKind is { } kind && e.ReplyId is { } id ? new GitLabTarget(project, kind, id) : null);
+                }
+            }
+        }
+        finally
+        {
+            if (next is null)
+            {
+                // Given back in the database first: a run taken here meanwhile keeps its claim.
+                await LetGoAsync(task);
+                Untake(task, gate);
+            }
+        }
+        if (next is not null)
+        {
+            Run(task, gate, manual: false, next);
+        }
+    }
+
+    /// <summary>Gives the task back when its run ends; never throws (a claim left behind lapses).</summary>
+    private async Task LetGoAsync(Guid task)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().ScheduledTasks.Where(t => t.Id == task && t.RunningOn == replicas.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.RunningOn, (string?)null).SetProperty(t => t.RunningSeenAt, (DateTimeOffset?)null), CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is Npgsql.NpgsqlException or InvalidOperationException)
+        {
+            LogFailed(logger, task, ex);
+        }
+    }
+
+    /// <param name="gate">Its place among this replica's runs (<see cref="TakeAsync"/>), done when the run is.</param>
+    private void Run(Guid task, TaskCompletionSource gate, bool manual, TriggerEvent? trigger) =>
         _ = Task.Run(async () =>
         {
             try
@@ -250,15 +354,30 @@ public sealed partial class Scheduler(IServiceScopeFactory scopes, TimeProvider 
             }
             finally
             {
-                _running.TryRemove(task, out _);
-                gate.TrySetResult();
+                // Given back first, then the events looked for: one that comes in between is taken by whoever claims next.
+                await LetGoAsync(task);
+                Untake(task, gate);
                 if (!_stopping.IsCancellationRequested)
                 {
-                    Next(task);
+                    await NextAfterAsync(task);
                 }
             }
         });
-        return true;
+
+    private async Task NextAfterAsync(Guid task)
+    {
+        try
+        {
+            await NextAsync(task, _stopping);
+        }
+        catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex) when (ex is Npgsql.NpgsqlException or InvalidOperationException or DbUpdateException)
+        {
+            // The leader's round takes the waiting events up again.
+            LogFailed(logger, task, ex);
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -270,9 +389,11 @@ public sealed partial class Scheduler(IServiceScopeFactory scopes, TimeProvider 
             {
                 // A pause first: the app starts up without a query of its own, and a task due meanwhile waits 20 seconds.
                 await Task.Delay(TimeSpan.FromSeconds(20), clock, stoppingToken);
-                if (options.CurrentValue.Enabled)
+                await RenewAsync(stoppingToken);
+                if (options.CurrentValue.Enabled && replicas.IsLeader)
                 {
                     await RunDueAsync(stoppingToken);
+                    await WaitingEventsAsync(stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -288,27 +409,58 @@ public sealed partial class Scheduler(IServiceScopeFactory scopes, TimeProvider 
         await Task.WhenAll(_running.Values).WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
-    /// <summary>Each task that is due gets its next time first (so it is not run twice), then runs.</summary>
+    /// <summary>This replica still runs these: their claims do not lapse.</summary>
+    private async Task RenewAsync(CancellationToken ct)
+    {
+        var mine = _running.Keys.ToList();
+        if (mine.Count == 0)
+        {
+            return;
+        }
+        var now = clock.GetUtcNow();
+        await using var scope = scopes.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<AppDbContext>().ScheduledTasks.Where(t => mine.Contains(t.Id) && t.RunningOn == replicas.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.RunningSeenAt, now), ct);
+    }
+
+    /// <summary>Events left waiting by a replica that stopped mid-run (its claim lapsed): taken up again.</summary>
+    private async Task WaitingEventsAsync(CancellationToken ct)
+    {
+        List<Guid> tasks;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            tasks = await scope.ServiceProvider.GetRequiredService<AppDbContext>().TaskEvents.Select(e => e.TaskId).Distinct().ToListAsync(ct);
+        }
+        foreach (var task in tasks)
+        {
+            await NextAsync(task, ct);
+        }
+    }
+
+    /// <summary>
+    /// Each task that is due gets its next time first, only if no other replica moved it meanwhile (so it
+    /// is not run twice), then runs; one still running from before skips this time.
+    /// </summary>
     public async Task RunDueAsync(CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var now = clock.GetUtcNow();
-        var due = await db.ScheduledTasks.Where(t => t.Enabled && t.NextRunAt != null && t.NextRunAt <= now).ToListAsync(ct);
+        var due = await db.ScheduledTasks.AsNoTracking().Where(t => t.Enabled && t.NextRunAt != null && t.NextRunAt <= now).ToListAsync(ct);
         foreach (var task in due)
         {
-            task.NextRunAt = Next(task, now);
-            task.LastRunAt = now;
-        }
-        await db.SaveChangesAsync(ct);
-        foreach (var task in due.Where(t => !IsRunning(t.Id)))
-        {
-            Start(task.Id, manual: false);
+            var was = task.NextRunAt;
+            var next = Next(task, now);
+            var taken = await db.ScheduledTasks.Where(t => t.Id == task.Id && t.NextRunAt == was)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.NextRunAt, next).SetProperty(t => t.LastRunAt, now), ct);
+            if (taken == 1)
+            {
+                await StartAsync(task.Id, manual: false, ct: ct);
+            }
         }
     }
 
-    /// <summary>When a task runs next after <paramref name="after"/>; null: never (its schedule names no real day).</summary>
-    /// <summary>When its schedule runs it next; never for a task that events run.</summary>
+    /// <summary>When its schedule runs it next after <paramref name="after"/>; never for a task that events run (or a schedule that names no real day).</summary>
     public static DateTimeOffset? Next(ScheduledTask task, DateTimeOffset after) => task.Trigger != Triggers.Schedule ? null :
         Cron.Parse(task.Cron).Cron?.Next(after, Models.Hours.Zone(task.TimeZone).Zone);
 

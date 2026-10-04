@@ -33,6 +33,10 @@ public static class IdentityWiring
         services.Configure<LiteLlmOptions>(config.GetSection("Gateway"));
         services.AddHttpContextAccessor();
         services.TryAddSingleton(TimeProvider.System);
+        // First of the background services: a lone replica leads before the others start.
+        services.Configure<Operations.ReplicaOptions>(config.GetSection("Replicas"));
+        services.AddSingleton<Operations.Replicas>();
+        services.AddHostedService(sp => sp.GetRequiredService<Operations.Replicas>());
 
         var dataProtection = services.AddDataProtection().PersistKeysToDbContext<AppDbContext>().SetApplicationName("llm-app");
         if (!string.IsNullOrEmpty(auth.DataKey))

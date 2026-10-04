@@ -234,11 +234,13 @@ describe('admin models', () => {
     expect(within(dialog).getByLabelText('Context for org/Big-Remote')).toHaveValue('65536')
     await userEvent.clear(within(dialog).getByLabelText('Name at the gateway for org/Big-Remote'))
     await userEvent.type(within(dialog).getByLabelText('Name at the gateway for org/Big-Remote'), 'big')
+    // How many requests it serves at once: a pool of servers of one model gives none more.
+    await userEvent.type(within(dialog).getByLabelText('Requests at once for org/Big-Remote'), '4')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add server' }))
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/servers')?.body).toEqual({
         name: 'GPU box', baseUrl: 'http://10.0.0.5:8000/v1', verifyTls: true, apiKey: 'secret',
-        models: [{ remote: 'org/Big-Remote', name: 'big', context: 65536, maxOutput: null, vision: false, tools: true, thinking: false }],
+        models: [{ remote: 'org/Big-Remote', name: 'big', context: 65536, maxOutput: null, vision: false, tools: true, thinking: false, parallel: 4 }],
       }),
     )
   })

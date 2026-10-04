@@ -26,7 +26,14 @@ public static partial class DatabaseBootstrap
                 LogCreatingDatabase(logger, name);
                 // Identifiers cannot be parameters; the name is quoted and comes from our own config.
                 await using var create = new NpgsqlCommand($"create database \"{name.Replace("\"", "\"\"")}\"", conn);
-                await create.ExecuteNonQueryAsync(ct);
+                try
+                {
+                    await create.ExecuteNonQueryAsync(ct);
+                }
+                catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.DuplicateDatabase)
+                {
+                    // Another replica, starting at the same moment, made it first.
+                }
             }
         }
         await db.Database.MigrateAsync(ct);

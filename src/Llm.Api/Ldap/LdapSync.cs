@@ -1,4 +1,5 @@
 using Llm.Api.Identity;
+using Llm.Api.Operations;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -10,8 +11,9 @@ namespace Llm.Api.Ldap;
 /// Keeps directory people current between sign-ins. Someone removed from the
 /// directory, or from the sign-in group, is disabled: their sessions end and
 /// their API keys are blocked. They come back if the directory lets them again.
+/// With several replicas, the one that leads checks.
 /// </summary>
-public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonitor<LdapOptions> options, ILogger<LdapSync> logger) : BackgroundService
+public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonitor<LdapOptions> options, Replicas replicas, ILogger<LdapSync> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -21,7 +23,8 @@ public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonito
         while (!stoppingToken.IsCancellationRequested)
         {
             var o = options.CurrentValue;
-            if (o.Enabled)
+            var lead = replicas.IsLeader;
+            if (o.Enabled && lead)
             {
                 if (o.IgnoreCertificateErrors && !warnedInsecure)
                 {
@@ -47,7 +50,7 @@ public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonito
             using var subscription = options.OnChange((_, _) => changed.Cancel());
             try
             {
-                var wait = o.Enabled ? (o.SyncInterval < TimeSpan.FromMinutes(1) ? TimeSpan.FromMinutes(1) : o.SyncInterval) : Timeout.InfiniteTimeSpan;
+                var wait = !o.Enabled ? Timeout.InfiniteTimeSpan : !lead || o.SyncInterval < TimeSpan.FromMinutes(1) ? TimeSpan.FromMinutes(1) : o.SyncInterval;
                 await Task.Delay(wait, changed.Token);
             }
             catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)

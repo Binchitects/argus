@@ -14,9 +14,10 @@ namespace Llm.Api.Models;
 /// servers' files into the library (they wait for them), the speech server told to fetch its models,
 /// and the first chat model (MODEL in .env) fetched, added and kept loaded. At start, then every ten
 /// minutes: a module turned on later is provisioned then. Nothing already there is fetched again.
+/// With several replicas, the one that leads does it.
 /// </summary>
 public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules modules, ModelDownloads downloads, IOptions<EngineOptions> engine,
-    IHttpClientFactory http, ILogger<Provisioning> logger) : BackgroundService
+    IHttpClientFactory http, Replicas replicas, ILogger<Provisioning> logger) : BackgroundService
 {
     public const string Client = "provisioning";
     private const string By = "setup";
@@ -26,9 +27,13 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
     {
         while (!stoppingToken.IsCancellationRequested)
         {
+            var lead = replicas.IsLeader;
             try
             {
-                await RunAsync(stoppingToken);
+                if (lead)
+                {
+                    await RunAsync(stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -41,7 +46,8 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
             }
             try
             {
-                await Task.Delay(TimeSpan.FromMinutes(10), stoppingToken);
+                // A replica that does not lead looks again soon: it may lead by then.
+                await Task.Delay(lead ? TimeSpan.FromMinutes(10) : TimeSpan.FromSeconds(30), stoppingToken);
             }
             catch (OperationCanceledException)
             {

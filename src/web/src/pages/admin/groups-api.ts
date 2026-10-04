@@ -6,6 +6,8 @@ export interface GroupSummary {
   description: string | null
   /** A directory group's name or DN; null for an app group. */
   directory: string | null
+  /** Its members' place in the answers' line: higher goes first, 0 is everyone's. */
+  priority: number
   members: number
   createdAt: string
 }

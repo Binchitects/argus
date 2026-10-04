@@ -37,4 +37,6 @@ export interface Overview {
   services: Probe[]
   index: { configured: boolean; summary: IndexSummary | null; error: string | null }
   model: string | null
+  /** The app's replicas on the database; leads: the one that answered runs the once-only background work. */
+  replicas?: { count: number; leads: boolean; id: string }
 }

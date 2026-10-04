@@ -74,4 +74,37 @@ describe('groups', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Remove Ann from Data science' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/groups/g1/members/p1')).toBe(true))
   })
+
+  it('a group is given a priority in the answers line, shown on the list and the group', async () => {
+    let priority = 0
+    const calls = fakeApi(admin, {
+      'GET /api/admin/groups': () => ({
+        json: [
+          { id: 'g1', name: 'On call', description: null, directory: null, priority: 3, members: 2, createdAt: '' },
+          { id: 'g2', name: 'Everyone else', description: null, directory: null, priority: 0, members: 9, createdAt: '' },
+        ],
+      }),
+      'GET /api/admin/groups/g2': () => ({ json: { id: 'g2', name: 'Everyone else', description: null, directory: null, priority, createdAt: '', members: [] } }),
+      'PATCH /api/admin/groups/g2': (body) => {
+        priority = (body as { priority: number }).priority
+        return { status: 204 }
+      },
+    })
+    const { router } = renderApp('/admin/groups')
+    expect(within((await screen.findByText('On call')).closest('tr')!).getByText('Priority +3')).toBeInTheDocument()
+    // Everyone's priority is not worth a badge.
+    expect(within(screen.getByText('Everyone else').closest('tr')!).queryByText(/Priority/)).toBeNull()
+
+    await userEvent.click(screen.getByText('Everyone else'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/groups/g2'))
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Everyone else' })
+    const field = within(dialog).getByLabelText("Priority in the answers' line")
+    expect(field).toHaveValue(0)
+    await userEvent.clear(field)
+    await userEvent.type(field, '-2')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ name: 'Everyone else', description: '', priority: -2 }))
+    expect(await screen.findByText('Priority -2')).toBeInTheDocument()
+  })
 })

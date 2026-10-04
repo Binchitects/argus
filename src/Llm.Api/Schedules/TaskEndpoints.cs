@@ -52,7 +52,7 @@ public static class TaskEndpoints
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
-    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Scheduler scheduler, Mailer mailer,
+    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Mailer mailer,
         TimeProvider clock, IOptionsMonitor<ScheduleOptions> options, IOptions<AuthOptions> auth, GitLabBot bot, CancellationToken ct)
     {
         var me = await Me(p, users);
@@ -65,7 +65,7 @@ public static class TaskEndpoints
         {
             enabled = o.Enabled, perPerson = o.PerPerson, minIntervalMinutes = (int)o.MinInterval.TotalMinutes, webhookHosts = o.WebhookHosts,
             email = mailer.Configured ? me.Email : null,
-            tasks = tasks.Select(t => View(t, lastRuns.GetValueOrDefault(t.Id), scheduler.IsRunning(t.Id), clock.GetUtcNow(), auth.Value.Origin)),
+            tasks = tasks.Select(t => View(t, lastRuns.GetValueOrDefault(t.Id), Scheduler.IsRunning(t, clock.GetUtcNow()), clock.GetUtcNow(), auth.Value.Origin)),
             gitlabBot = bot.Ready,
         });
     }
@@ -117,7 +117,7 @@ public static class TaskEndpoints
     }
 
     private static async Task<IResult> UpdateAsync(Guid id, TaskRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, TaskContext context,
-        Scheduler scheduler, Audit audit, CancellationToken ct)
+        Audit audit, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await db.ScheduledTasks.SingleOrDefaultAsync(t => t.Id == id && t.UserId == me.Id, ct) is not { } task)
@@ -131,7 +131,7 @@ public static class TaskEndpoints
         var secret = task.Trigger != Triggers.Schedule && task.TriggerSecretHash is null ? NewSecret(task) : null;
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("task.update", task.Name, detail: $"{(task.Enabled ? "" : "off, ")}{(task.Trigger == Triggers.Schedule ? $"{task.Cron} ({task.TimeZone})" : $"on {task.Trigger} events")}");
-        return Results.Ok(View(task, null, scheduler.IsRunning(task.Id), context.Clock.GetUtcNow(), context.Auth.Value.Origin, secret));
+        return Results.Ok(View(task, null, Scheduler.IsRunning(task, context.Clock.GetUtcNow()), context.Clock.GetUtcNow(), context.Auth.Value.Origin, secret));
     }
 
     private static async Task<IResult> RemoveAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Audit audit, CancellationToken ct)
@@ -156,7 +156,7 @@ public static class TaskEndpoints
         {
             return Results.NotFound();
         }
-        if (!scheduler.Start(task.Id, manual: true))
+        if (!await scheduler.StartAsync(task.Id, manual: true, ct: ct))
         {
             return AuthEndpoints.Problem(409, "running", "It is running now; wait for this run to end.");
         }
@@ -234,9 +234,9 @@ public static class TaskEndpoints
         {
             return Results.Ok(new { status = "ignored", reason = "not an event this task takes" });
         }
-        return scheduler.StartOrQueue(task.Id, trigger)
+        return await scheduler.StartOrQueueAsync(task.Id, trigger, ct)
             ? Results.Accepted(value: new { status = "started" })
-            : Results.Accepted(value: new { status = "queued", waiting = scheduler.Waiting(task.Id) });
+            : Results.Accepted(value: new { status = "queued", waiting = await scheduler.WaitingAsync(task.Id, ct) });
     }
 
     private static async Task<IResult?> ApplyAsync(ScheduledTask task, TaskRequest body, AppUser me, TaskContext x, bool creating, CancellationToken ct)

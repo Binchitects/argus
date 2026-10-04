@@ -3,7 +3,10 @@
 model_list: []
 
 router_settings:
-  routing_strategy: simple-shuffle
+  # A model on several GPU servers (Admin -> Models -> Other GPU servers) is a pool:
+  # each request goes to the copy with the fewest requests going, never past a
+  # copy's slots (the app sends max_parallel_requests with each copy).
+  routing_strategy: least-busy
   num_retries: 2
   timeout: 600
 

@@ -14,6 +14,8 @@ public sealed class Group
     public string? Description { get; set; }
     /// <summary>For a directory group: its common name or full DN. Null for an app group.</summary>
     public string? Directory { get; set; }
+    /// <summary>Its members' place in the answers' line: higher goes first; 0 is everyone's. A person in several groups takes the highest.</summary>
+    public int Priority { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

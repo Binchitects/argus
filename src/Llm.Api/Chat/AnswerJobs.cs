@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Llm.Api.Operations;
 using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
@@ -16,13 +17,28 @@ namespace Llm.Api.Chat;
 /// reloading it or losing the connection does not stop one. Each answer keeps its
 /// events so far, so a page that comes back (or a second tab) is shown the answer
 /// from its start and then live. Stopping is its own request. One answer at a time
-/// per chat; shutting down stops them all, and each keeps what it had.
+/// per chat; shutting down stops them all, and each keeps what it had. With several
+/// replicas an answer runs on the one that was asked (Traefik keeps a person on one);
+/// a stop or "answer now" posted to another is passed to it.
 /// </summary>
-public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate gate, ILogger<AnswerJobs> logger) : IHostedService
+public sealed partial class AnswerJobs : IHostedService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private const string StopTopic = "answer:stop";
+    private const string HurryTopic = "answer:hurry";
 
     private readonly ConcurrentDictionary<Guid, Job> _jobs = new();
+    private readonly IServiceScopeFactory scopes;
+    private readonly AnswerGate gate;
+    private readonly Replicas replicas;
+    private readonly ILogger<AnswerJobs> logger;
+
+    public AnswerJobs(IServiceScopeFactory scopes, AnswerGate gate, Replicas replicas, ILogger<AnswerJobs> logger)
+    {
+        (this.scopes, this.gate, this.replicas, this.logger) = (scopes, gate, replicas, logger);
+        replicas.On(StopTopic, id => Guid.TryParse(id, out var c) && Stop(c));
+        replicas.On(HurryTopic, id => Guid.TryParse(id, out var c) && HurryHere(c));
+    }
 
     /// <summary>One answer being written: its events so far and the pages watching it.</summary>
     public sealed class Job
@@ -205,7 +221,7 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
 
     public bool IsAnswering(Guid conversation) => _jobs.ContainsKey(conversation);
 
-    /// <summary>Stops the chat's answer; it keeps what it has. False when it is not answering.</summary>
+    /// <summary>Stops the chat's answer; it keeps what it has. False when it is not answering (here).</summary>
     public bool Stop(Guid conversation)
     {
         if (!_jobs.TryGetValue(conversation, out var job))
@@ -215,6 +231,25 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
         job.Stopping.Cancel();
         return true;
     }
+
+    /// <summary>Stops the chat's answer on whichever replica writes it; false when none does.</summary>
+    public async Task<bool> StopAnywhereAsync(Guid conversation, CancellationToken ct) =>
+        Stop(conversation) || await replicas.AskAsync(StopTopic, conversation.ToString(), ct);
+
+    /// <summary>"Answer now" for the chat's answer, here; false when it is not answering here.</summary>
+    private bool HurryHere(Guid conversation)
+    {
+        if (Find(conversation) is not { } job)
+        {
+            return false;
+        }
+        job.Hurry.Ask();
+        return true;
+    }
+
+    /// <summary>"Answer now" for the chat's answer on whichever replica writes it; false when none does.</summary>
+    public async Task<bool> HurryAnywhereAsync(Guid conversation, CancellationToken ct) =>
+        HurryHere(conversation) || await replicas.AskAsync(HurryTopic, conversation.ToString(), ct);
 
     /// <summary>Answers <paramref name="questionId"/> in the background, with services of its own (the request that asked may end first).</summary>
     public void Start(Job job, Guid questionId, AnswerOverrides overrides) =>
@@ -257,11 +292,13 @@ public sealed partial class AnswerJobs(IServiceScopeFactory scopes, AnswerGate g
                 return;
             }
 
-            // Fair use: a place of the few the model serves at once, in turn (AnswerGate).
+            // Fair use: a place of the few the model serves at once, in turn (AnswerGate), first for the higher priority.
+            var priority = await services.GetRequiredService<Access.AccessService>().PriorityAsync(user, ct);
+            gate.Replicas = replicas.Count;
             AnswerGate.Place place;
             try
             {
-                place = await gate.EnterAsync(job.Person, line => job.EmitAsync(new { type = "queued", ahead = line.Ahead }), ct);
+                place = await gate.EnterAsync(job.Person, priority, line => job.EmitAsync(new { type = "queued", ahead = line.Ahead }), ct);
             }
             catch (TimeoutException ex)
             {

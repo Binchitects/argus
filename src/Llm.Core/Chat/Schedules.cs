@@ -39,8 +39,30 @@ public sealed class ScheduledTask
     public bool Enabled { get; set; } = true;
     public DateTimeOffset? NextRunAt { get; set; }
     public DateTimeOffset? LastRunAt { get; set; }
+    /// <summary>The replica running it now (several may share the database); null: no run is going.</summary>
+    public string? RunningOn { get; set; }
+    /// <summary>When that replica last said it still runs it: a claim it stops renewing (its replica died) lapses.</summary>
+    public DateTimeOffset? RunningSeenAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// An event that came for a task while a run of it was going: it runs after that one, in
+/// order. Kept in the database, so whichever replica the event reached, the one free next
+/// takes it, and only one does.
+/// </summary>
+public sealed class TaskEvent
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid TaskId { get; set; }
+    /// <summary>The event in words, said after the task's question.</summary>
+    public required string Text { get; set; }
+    /// <summary>Where in GitLab to answer (a project, merge_requests, issues or commits, and an id); null: nowhere.</summary>
+    public long? ReplyProject { get; set; }
+    public string? ReplyKind { get; set; }
+    public string? ReplyId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>One run of a scheduled task: when, how it went, its chat, and what was delivered.</summary>

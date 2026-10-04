@@ -17,9 +17,10 @@ public sealed class ArgusIndexOptions
 /// Starts an Argus index pass on the schedule admins set under Indexing (checked every
 /// 30 seconds). A pass already running when one is due is left to finish: the next time
 /// comes round. Each pass is incremental (only what changed since the last commit indexed).
+/// With several replicas, only the one that leads starts it.
 /// </summary>
 public sealed partial class ArgusIndexSchedule(IServiceScopeFactory scopes, IOptionsMonitor<ArgusIndexOptions> options, TimeProvider clock,
-    ILogger<ArgusIndexSchedule> logger) : BackgroundService
+    Replicas replicas, ILogger<ArgusIndexSchedule> logger) : BackgroundService
 {
     /// <summary>The shortest gap between two scheduled passes.</summary>
     public static readonly TimeSpan MinInterval = TimeSpan.FromMinutes(5);
@@ -64,6 +65,10 @@ public sealed partial class ArgusIndexSchedule(IServiceScopeFactory scopes, IOpt
                     continue;
                 }
                 next = cron.Next(now, zone);
+                if (!replicas.IsLeader)
+                {
+                    continue;
+                }
                 await using var scope = scopes.CreateAsyncScope();
                 var argus = scope.ServiceProvider.GetRequiredService<ArgusAdmin>();
                 if (!argus.Enabled)

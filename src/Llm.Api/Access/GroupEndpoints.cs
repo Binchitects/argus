@@ -8,13 +8,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Api.Access;
 
-public sealed record GroupRequest(string? Name = null, string? Description = null, string? Directory = null);
+/// <param name="Priority">Its members' place in the answers' line, <see cref="GroupEndpoints.MinPriority"/> to <see cref="GroupEndpoints.MaxPriority"/>; null: unchanged (0 for a new group).</param>
+public sealed record GroupRequest(string? Name = null, string? Description = null, string? Directory = null, int? Priority = null);
 
 public sealed record MembersRequest(Guid[] UserIds);
 
 /// <summary>Groups for access rules: app groups whose members are chosen here, and directory groups.</summary>
 public static class GroupEndpoints
 {
+    public const int MinPriority = -10;
+    public const int MaxPriority = 10;
+
     public static void MapGroups(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/admin/groups").RequireAuthorization(AdminEndpoints.Policy);
@@ -37,7 +41,7 @@ public static class GroupEndpoints
             : [];
         return Results.Ok(groups.Select(x => new
         {
-            x.Id, x.Name, x.Description, x.Directory, x.CreatedAt,
+            x.Id, x.Name, x.Description, x.Directory, x.Priority, x.CreatedAt,
             members = x.Directory is { } d ? directoryPeople.Count(m => AccessService.InDirectoryGroup(m, d)) : counts.GetValueOrDefault(x.Id),
         }));
     }
@@ -70,7 +74,7 @@ public static class GroupEndpoints
         }
         return Results.Ok(new
         {
-            group.Id, group.Name, group.Description, group.Directory, group.CreatedAt,
+            group.Id, group.Name, group.Description, group.Directory, group.Priority, group.CreatedAt,
             members = people.OrderBy(u => u.DisplayName, StringComparer.OrdinalIgnoreCase)
                 .Select(u => new { u.Id, u.UserName, u.DisplayName, u.Email, u.IsDisabled }),
         });
@@ -83,10 +87,15 @@ public static class GroupEndpoints
         {
             return problem;
         }
-        var group = new Group { Name = name, Description = Clean(body.Description), Directory = Clean(body.Directory) };
+        if (PriorityProblem(body.Priority) is { } bad)
+        {
+            return bad;
+        }
+        var group = new Group { Name = name, Description = Clean(body.Description), Directory = Clean(body.Directory), Priority = body.Priority ?? 0 };
         db.Groups.Add(group);
         await db.SaveChangesAsync();
-        await audit.WriteAsync("group.create", group.Name, detail: group.Directory is { } d ? $"directory group {d}" : "app group");
+        await audit.WriteAsync("group.create", group.Name,
+            detail: (group.Directory is { } d ? $"directory group {d}" : "app group") + (group.Priority != 0 ? $", priority {group.Priority}" : ""));
         return Results.Created($"/api/admin/groups/{group.Id}", new { group.Id, group.Name });
     }
 
@@ -106,17 +115,27 @@ public static class GroupEndpoints
         {
             return problem;
         }
+        if (PriorityProblem(body.Priority) is { } bad)
+        {
+            return bad;
+        }
+        var priorityWas = group.Priority;
         group.Name = name;
         group.Directory = directory;
+        group.Priority = body.Priority ?? group.Priority;
         if (body.Description is not null)
         {
             group.Description = Clean(body.Description);
         }
         await db.SaveChangesAsync();
-        await audit.WriteAsync("group.update", group.Name);
+        await audit.WriteAsync("group.update", group.Name, detail: group.Priority != priorityWas ? $"priority {priorityWas} → {group.Priority}" : null);
         keys.Wake();
         return Results.NoContent();
     }
+
+    private static IResult? PriorityProblem(int? priority) => priority is < MinPriority or > MaxPriority
+        ? AuthEndpoints.Problem(400, "priority", $"A priority is {MinPriority} to {MaxPriority}: higher goes first in the answers' line, 0 is everyone's.")
+        : null;
 
     private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys)
     {
