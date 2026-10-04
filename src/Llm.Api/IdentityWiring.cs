@@ -287,6 +287,10 @@ public static class IdentityWiring
         services.AddScoped<Chat.AutoModel>();
         services.AddSingleton<Chat.ChatTitles>();
         services.AddScoped<Settings.ISettingWarning>(sp => sp.GetRequiredService<Chat.SmallModel>());
+        // What a person asked the chat to remember, and the prompt library.
+        services.Configure<Chat.MemoryOptions>(config.GetSection("Memory"));
+        services.AddScoped<Chat.Memories>();
+        services.AddScoped<Chat.Tools.MemoryTool>();
         // Answers outlive the page that asked: they run here, and a page re-attaches.
         services.AddSingleton<Chat.AnswerJobs>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.AnswerJobs>());
@@ -414,6 +418,8 @@ public static class IdentityWiring
         Chat.ChatEndpoints.MapChat(app);
         Chat.ProjectEndpoints.MapProjects(app);
         Chat.TraceEndpoints.MapTraces(app);
+        Chat.MemoryEndpoints.MapMemories(app);
+        Chat.PromptEndpoints.MapPrompts(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
         Plugins.PluginEndpoints.MapPlugins(app);
         Models.ModelEndpoints.MapModels(app);

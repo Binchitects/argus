@@ -35,6 +35,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
+    public DbSet<Memory> Memories => Set<Memory>();
+    public DbSet<SavedPrompt> Prompts => Set<SavedPrompt>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -258,6 +260,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(m => m.Model);
             e.Property(m => m.Model).HasMaxLength(200);
             e.Property(m => m.Groups).HasDefaultValueSql("'{}'::uuid[]");
+        });
+
+        builder.Entity<Memory>(e =>
+        {
+            e.ToTable("memories");
+            e.Property(m => m.Text).HasMaxLength(500);
+            e.HasIndex(m => new { m.UserId, m.UpdatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<SavedPrompt>(e =>
+        {
+            e.ToTable("prompts");
+            e.Property(p => p.Name).HasMaxLength(40);
+            e.Property(p => p.Title).HasMaxLength(100);
+            e.Property(p => p.Text).HasMaxLength(20_000);
+            e.Property(p => p.Groups).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasIndex(p => p.UserId);
+            e.HasIndex(p => p.ServerId);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(p => p.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<McpServer>().WithMany().HasForeignKey(p => p.ServerId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<AuditEvent>(e =>

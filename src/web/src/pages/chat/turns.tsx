@@ -20,6 +20,7 @@ import { useNow } from './use-now'
 import { QuestionCard } from './questions'
 import { RouteNote } from './route-note'
 import { researchStep } from './research'
+import { MemoryCard } from './memory'
 import type { AgentWork, ChatConfig, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
@@ -357,6 +358,8 @@ export function AnswerTurn({
             {a.toolCalls?.map((t) =>
               t.function.name === 'ask_user' && results.get(t.id)?.status !== 'failed' ? (
                 <QuestionCard key={t.id} raw={t.function.arguments} onAnswer={!live && results.has(t.id) ? onAnswer : undefined} />
+              ) : t.function.name === 'remember' && results.get(t.id)?.details?.memory ? (
+                <MemoryCard key={t.id} result={results.get(t.id)!} />
               ) : (
                 <ToolCard key={t.id} call={t} result={results.get(t.id)} live={live} waiting={approvals?.includes(t.id)} onDecide={onDecide ? (allow) => onDecide(t.id, allow) : undefined} onOpenFile={onOpenFile} onPreview={onPreview} progress={calls?.[t.id]} agents={agents?.[t.id]} />
               ),

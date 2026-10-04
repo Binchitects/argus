@@ -73,6 +73,14 @@ setups to paste. For a GitLab pipeline, see [ci.md](ci.md).
   sentences or a short list, no preamble), **Normal** (the model judges) or
   **Thorough** (reasons, cases, examples). Said to the model on every
   question, in every chat.
+- **Memory.** "Remember that I deploy with Podman" is kept, and every later
+  answer, in any chat, knows it; what the model offers to remember on its own
+  waits for your yes. Your account → Memory (or the brain in a chat's header)
+  lists, edits and deletes them ([below](#memory)).
+- **Prompts.** `/` at the start of a message finds a prompt of the library
+  (Workspace → Prompts): yours, your groups', the company's or a plugin's.
+  Chosen, it asks for its blanks and sends it filled in
+  ([below](#prompts-and-slash-commands)).
 - **Context.** The gauge beside Send shows how full the model's context is,
   from the last answer's prompt as the model counted it (and what it
   answered). Opened, it shows what fills it: the system prompt and the tools'
@@ -94,7 +102,8 @@ setups to paste. For a GitLab pipeline, see [ci.md](ci.md).
   chat, once per tool and chat.
 - **Prompt cache.** The engine reads a prompt's unchanged start from its
   cache, so each request keeps its start unchanged: the date (to the day), the
-  tools' notes in a fixed order, your instructions, then the project's files;
+  tools' notes in a fixed order, what you asked it to remember, your
+  instructions, then the project's files;
   the tools stay in every round (on the last allowed round calling them is
   switched off, and the model is told); and with compaction off, the oldest
   messages are left out a quarter of the room at a time, not one by one. The
@@ -164,6 +173,8 @@ setups to paste. For a GitLab pipeline, see [ci.md](ci.md).
     come back to the model, which puts them together. The card shows how many
     parts are done ("2 of 4 parts done") and what each is doing, then each
     part's result.
+  - **Memory**: the model remembers what you ask it to across your chats, and
+    offers to remember what would help later ([below](#memory)).
   - **MCP servers** an admin added: their tools, by name.
   - **APIs** an admin added by their OpenAPI document: each operation is a
     function (`pets__list_pets`); a call that changes something (anything but
@@ -318,6 +329,57 @@ attachments, instead of being lost.
 - The speech models are at the gateway too: `/v1/audio/transcriptions` and
   `/v1/audio/speech` with a person's key.
 
+## Memory
+
+What you tell the chat about yourself, kept for every later answer, in every
+chat, as ChatGPT and Claude do.
+
+- **Asked for.** "Remember that I deploy with Podman": the model calls
+  `remember`, and the memory is kept at once. Its card in the answer says
+  **Remembered**, with **Undo**. In a scheduled task's chat it is only
+  offered: a task's question may carry an issue's or a webhook's words.
+- **Offered.** When you mention something lasting (your team, your tools, how
+  you like answers) without asking, the model may offer to remember it: the
+  card asks **Remember this?** with **Remember**, **No thanks** and **Edit**
+  (to change the words first). Nothing is kept until you say so, and nothing
+  waits: the answer goes on, and you can decide later.
+- **Used.** Each answer gets your memories in a short block of its system
+  prompt, the newest first, as many as fit in about 400 tokens (1,500
+  characters). The block comes after the app's fixed notes and the tools', so
+  a new memory leaves the cached start of the prompt as it was.
+- **Yours to change.** Your account → **Memory**, or the brain in a chat's
+  header: add one, edit or delete one, **Forget everything**, or turn **Use
+  memory** off (answers then neither read nor offer memories; yours stay). Up
+  to 100 memories of 300 characters each. A memory said again comes first
+  again rather than twice.
+- **Nobody else sees them**, admins included: no admin page, audit entry or
+  log shows one. Sub-agents do not get the `remember` tool. Deleting a person
+  deletes their memories.
+- **For the company:** **Settings → Chat → Memory** turns it off for everyone
+  (people's memories stay, to see and delete). The **Memory** tool is also
+  in Admin → Tools, like any tool (who may use it, on in new chats).
+
+## Prompts and slash commands
+
+**Prompts** (Workspace → Prompts, `/prompts`) keep what you ask often, with
+blanks filled in each time: "Review {{file}} for {{focus}}".
+
+- **In the chat**, `/` at the start of the message opens the list: type to
+  find by slash name or title, arrows to move, **Enter** or **Tab** to use
+  one, **Esc** to close it. `/compact` is there too. A chosen prompt's text
+  comes into the box with a field for each `{{blank}}` (Enter moves to the
+  next; on the last it sends). Sending fills them in; it waits until every
+  blank has something. A prompt without blanks just comes into the box.
+- **Yours**, **shared with your groups** (their members use it; only you
+  change it), or **for everyone** (made and changed by admins; audited as
+  `prompt.*`). Each has a slash name (lowercase letters, digits, `-` and `_`),
+  a title and its text. Your own slash names are unique, and so are the
+  company's; the same name from two places shows both, yours first.
+- **Plugins bring their own** ([plugins.md](plugins.md#prompts)), for
+  whoever may use the plugin's tool, and take them away when removed:
+  `gitlab-issues` brings `/triage`.
+- Up to 200 prompts per person, 20,000 characters each.
+
 ## Scheduled tasks
 
 **Scheduled tasks** (in the sidebar, `/tasks`) ask a question on a schedule, as
@@ -460,6 +522,11 @@ So that everyone gets their turn:
   data to the model, not instructions.
 - **MCP servers** get the person's email only if the admin set a header for
   it. A server's key is stored encrypted under `APP_KEY` and never shown.
+- **Memories are the person's own**: only their answers read them, and only
+  they see, change or delete them, admins included.
+- **Prompts** are their owner's, unless shared with groups (members use
+  them) or made for everyone by an admin; a plugin's are for whoever may use
+  its tool.
 
 ## Cost and credit
 
@@ -486,6 +553,7 @@ The chat's limits are under Admin → Settings → Chat ([settings.md](settings.
 | Largest attachment | 20 MB | per file (up to 100 MB) |
 | Text kept per attachment | 200,000 characters | longer files are cut and marked |
 | Longest single answer | 15 minutes | an answer still running after this is stopped |
+| Memory | on | answers read people's memories, and the model offers new ones; off for everyone when unticked |
 
 The thinking levels (`THINKING_PRESETS`) and **Model for sub-agents and small
 steps** are under Settings → Model.
@@ -560,6 +628,14 @@ together from them; `GET /api/admin/traces?from=&to=` lists the slowest.
   by difficulty, the route kept, **Ask the big model**, deep research unasked,
   Auto as the default, and who may use the small model). Real Postgres, a fake
   model and a fake Argus.
+  Also memory: "remember I deploy with Podman" in the next chat's system
+  prompt (after the fixed notes) and gone once deleted; an offer kept only
+  when accepted (in the person's words), taken back, declined, and nobody
+  else able to answer it; a task's chat only offering; the person's switch
+  and the company's; the block's budget. And the prompt library: a person's own, shared with their groups
+  (only the owner changes it), the company's (admins only, audited), the
+  checks on names and groups, and a plugin's `/triage` installed with it, for
+  whoever may use its tool, and removed with it.
 - **UI (Vitest):**
   - the branch tree
   - the live-stream reducer
@@ -582,6 +658,13 @@ together from them; `GET /api/admin/traces?from=&to=` lists the slowest.
   - Auto in the model menu, its note under an answer (the small model's, or
     handed on with a thinking level), **Ask the big model**, no Auto without
     a small model, and the sub-agents' model under an answer
+  - `/review` chosen from the `/` menu, its blanks asked for, not sent while
+    one is empty, then sent filled in; the menu found by title, closed with
+    Esc; a prompt without blanks; the Prompts page (sections, a new prompt
+    shared with a group, an admin's for everyone, edit and delete)
+  - memory: an offer kept in the person's words and undone; the chat's Memory
+    button listing and deleting; Your account → Memory (add, edit, delete,
+    off)
 - **Browser (Playwright), desktop and phone, both themes, with axe, in CI
   too:** a chat with Argus's answers and two images, served by the browser
   itself, from the links to the image viewer.

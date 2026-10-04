@@ -23,6 +23,7 @@ namespace Llm.Tests;
 ///   [harm]      flagged (as weapons) by the safeguards' check
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
 ///   [timed]     its last chunk carries llama.cpp's timings: 60 prompt tokens read in 300 ms, 12 written in 1,200 ms
+///   [offer {json}]  asks for remember with those arguments (the word itself in a message reads as the person asking to remember)
 /// Its /v1/images/generations answers with a small PNG.
 /// </summary>
 public sealed class FakeModel : HttpMessageHandler
@@ -139,12 +140,13 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = $"Summary of {lastUser.Length} characters." }), Finish("stop"), Usage(lastUser.Length / 4, 0, 8)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
-        var call = System.Text.RegularExpressions.Regex.Match(lastUser, @"\[call (\S+) (\{.*\})\]", System.Text.RegularExpressions.RegexOptions.Singleline);
+        var call = System.Text.RegularExpressions.Regex.Match(lastUser, @"\[call (\S+) (\{.*\})\]|\[(offer) (\{.*\})\]", System.Text.RegularExpressions.RegexOptions.Singleline);
         if (call.Success && !toolAnswered)
         {
+            var (name, arguments) = call.Groups[1].Success ? (call.Groups[1].Value, call.Groups[2].Value) : ("remember", call.Groups[4].Value);
             chunks =
             [
-                Delta(new JsonObject { ["tool_calls"] = new JsonArray(new JsonObject { ["index"] = 0, ["id"] = "call_1", ["type"] = "function", ["function"] = new JsonObject { ["name"] = call.Groups[1].Value, ["arguments"] = call.Groups[2].Value } }) }),
+                Delta(new JsonObject { ["tool_calls"] = new JsonArray(new JsonObject { ["index"] = 0, ["id"] = "call_1", ["type"] = "function", ["function"] = new JsonObject { ["name"] = name, ["arguments"] = arguments } }) }),
                 Finish("tool_calls"),
             ];
         }

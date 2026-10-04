@@ -7,4 +7,4 @@ files it names; no plugin code runs in the app. See
 
 | plugin | what it does | sign-in |
 |---|---|---|
-| `gitlab-issues` | finds projects, reads, creates and comments on GitLab issues | each person's own GitLab account (OAuth) |
+| `gitlab-issues` | finds projects, reads, creates and comments on GitLab issues; `/triage` in the prompt library | each person's own GitLab account (OAuth) |

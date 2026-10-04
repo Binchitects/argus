@@ -106,6 +106,7 @@ public static class PluginEndpoints
         {
             m.Name, m.Version, m.Title, m.Description, m.PersonAuth, m.Help, m.Writes, operations, mcp = m.Mcp,
             settings = m.Settings.Select(x => new { x.Key, x.Title, x.Type, x.Required, x.Help }),
+            prompts = (package.Prompts ?? []).Select(x => new { x.Name, x.Title }),
         });
     }
 
@@ -132,6 +133,7 @@ public static class PluginEndpoints
         }
         db.McpServers.Add(server);
         await db.SaveChangesAsync(ct);
+        await Chat.PromptLibrary.SyncAsync(db, server, package, ct);
         await audit.WriteAsync("plugin.install", package.Manifest.Name, detail: $"{package.Manifest.Version}, {server.Url}");
         return Results.Created($"/api/admin/plugins/{server.Id}", new { server.Id, toolId = McpServerTool.Prefix + server.Id });
     }
@@ -167,6 +169,7 @@ public static class PluginEndpoints
                 return AuthEndpoints.Problem(400, "settings", $"The new version needs its settings: {problem}");
             }
             await db.SaveChangesAsync(ct);
+            await Chat.PromptLibrary.SyncAsync(db, server, package, ct);
             await audit.WriteAsync("plugin.update", server.Plugin, detail: $"{was} → {server.PluginVersion}");
             return Results.Ok(new { version = server.PluginVersion });
         }

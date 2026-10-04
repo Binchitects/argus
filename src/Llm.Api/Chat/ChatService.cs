@@ -59,6 +59,7 @@ public sealed partial class ChatService(
     Media media,
     AnswerGate gate,
     Identity.Audit audit,
+    Memories memories,
     IOptionsMonitor<ChatOptions> chat,
     IServiceScopeFactory scopes,
     ILogger<ChatService> logger)
@@ -189,7 +190,7 @@ public sealed partial class ChatService(
         }
         kit = kit with { Demand = demand };
         var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
-            AnswerLengths.Note(user.AnswerLength), emit, ct);
+            AnswerLengths.Note(user.AnswerLength), await memories.NoteAsync(user, ct), emit, ct);
         // Said on the person's turn (models follow it more closely there), at the prompt's end (the
         // cache keeps the rest); the question kept stays as written.
         if (overrides.Research)
@@ -666,11 +667,11 @@ public sealed partial class ChatService(
     {
         var callId = kit.Progress.CallId;
         var usable = kit.Tools.OfType<JsonObject>()
-            .Where(f => f["function"]?["name"]?.GetValue<string>() is { } n && n is not AgentsTool.Function and not AskTool.Function
+            .Where(f => f["function"]?["name"]?.GetValue<string>() is { } n && n is not AgentsTool.Function and not AskTool.Function and not MemoryTool.Function
                 && kit.Runs.TryGetValue(n, out var r) && !r.Choice.Setting.AskFirst && !r.Run.AsksFirst(n))
             .Select(f => (JsonNode)f.DeepClone())
             .ToList();
-        var notes = kit.Instructions.Where(i => i.Tool is not "agents" and not "ask").ToList();
+        var notes = kit.Instructions.Where(i => i.Tool is not "agents" and not "ask" and not "memory").ToList();
         var toolIds = usable.Select(f => kit.Runs[f["function"]!["name"]!.GetValue<string>()].Choice.Tool.Id).ToHashSet(StringComparer.Ordinal);
         // No more at once than the engine has places: one more would push another's cache out, and it would read its whole context again.
         var atOnce = Math.Max(1, gate.EngineSlots > 0 ? Math.Min(chat.CurrentValue.AgentsAtOnce, gate.EngineSlots) : chat.CurrentValue.AgentsAtOnce);
@@ -1010,7 +1011,7 @@ public sealed partial class ChatService(
     /// and as their names to one that cannot.
     /// </summary>
     private async Task<(JsonArray Messages, bool ImagesDropped, SystemParts System)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string modelName,
-        GatewayModel? summarizer, string email, string? toolInstructions, bool canReadFiles, string? lengthNote, Func<object, Task> emit, CancellationToken ct)
+        GatewayModel? summarizer, string email, string? toolInstructions, bool canReadFiles, string? lengthNote, string? memory, Func<object, Task> emit, CancellationToken ct)
     {
         var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
         all[question.Id] = question;
@@ -1110,6 +1111,11 @@ public sealed partial class ChatService(
             system += "\n\n" + toolInstructions;
         }
         var toolNotes = system.Length - baseLength;
+        // What the person asked to be remembered: after the fixed notes, so a new memory leaves their cache as it was.
+        if (memory is not null)
+        {
+            system += "\n\n" + memory;
+        }
         // A project's instructions, then the chat's own; then the project's files.
         var project = conversation.ProjectId is { } pid ? await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == pid, ct) : null;
         if (!string.IsNullOrWhiteSpace(project?.Instructions))

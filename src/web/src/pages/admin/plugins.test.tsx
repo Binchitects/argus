@@ -17,6 +17,7 @@ describe('admin plugins', () => {
       'POST /api/admin/plugins/preview': () => ({
         json: {
           name: 'gitlab-issues', version: '1.0.0', title: 'GitLab issues', description: 'Issues, as you.', personAuth: 'oauth2', help: 'Sign in to GitLab.', writes: ['create_issue', 'add_note'], operations: 7, mcp: null,
+          prompts: [{ name: 'triage', title: 'Triage a GitLab issue' }],
           settings: [
             { key: 'gitlab_url', title: 'GitLab address', type: 'url', required: true, help: null },
             { key: 'client_secret', title: 'Application secret', type: 'secret', required: true, help: null },
@@ -35,6 +36,7 @@ describe('admin plugins', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Install GitLab issues 1.0.0' })
     expect(within(dialog).getByText('7 operations of its API.')).toBeInTheDocument()
     expect(within(dialog).getByText('Asks the person first before: create_issue, add_note.')).toBeInTheDocument()
+    expect(within(dialog).getByText('Adds prompts for whoever may use it: /triage (Triage a GitLab issue).')).toBeInTheDocument()
     await userEvent.type(within(dialog).getByLabelText('GitLab address'), 'https://gitlab.example.test')
     await userEvent.type(within(dialog).getByLabelText('Application secret'), 's3cret')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Install' }))

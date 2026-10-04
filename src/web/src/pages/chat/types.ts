@@ -79,12 +79,20 @@ export interface Message {
   noAccess: boolean
   /** The chat was compacted here: the model reads this summary instead of the branch down to this message. */
   summary?: string | null
-  /** What a message shows beyond what the model read: a tool call's sub-agents' work ({ agents: [...] }), an Auto answer's route. */
-  details?: { agents?: AgentWork[]; route?: AutoRoute } | null
+  /** What a message shows beyond what the model read: a tool call's sub-agents' work ({ agents: [...] }), an Auto answer's route, a memory to keep ({ memory }). */
+  details?: { agents?: AgentWork[]; route?: AutoRoute; memory?: MemoryOffer } | null
   /** An answer: what filled the request it answered, in characters by kind (the context gauge scales it to its prompt tokens). */
   context?: ContextFill | null
   /** An answer whose thinking was cut short ("Answer now"). */
   cutShort?: boolean
+}
+
+/** What a remember call shows: the memory, its id once kept, and where it stands. */
+export interface MemoryOffer {
+  id: string | null
+  text: string
+  /** offered: waiting for the person; kept; declined: offered, and they said no; forgotten: kept, then taken back. */
+  state: 'offered' | 'kept' | 'declined' | 'forgotten'
 }
 
 export interface ContextFill {
