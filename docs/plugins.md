@@ -2,9 +2,10 @@
 
 Ready-made tools for the chat. A plugin is a folder with a `plugin.yaml` and
 the files it names: an API (its OpenAPI document) or an MCP server, how its
-calls sign in, which calls change something, and the settings an admin fills
-in. **No plugin code runs in the app**: its tools are a remote MCP server, or
-an API the app calls with each operation's arguments.
+calls sign in, which calls change something, the settings an admin fills in,
+and prompts it adds to the library. **No plugin code runs in the app**: its
+tools are a remote MCP server, or an API the app calls with each operation's
+arguments.
 
 Installed, a plugin is a tool like any other in **Admin → Tools**: on or off,
 for everyone or some groups, on in new chats, asking before each call. Its
@@ -19,13 +20,15 @@ own writes always ask first.
 - a catalog's, when **Settings → Plugins → Plugin catalog** names one (below).
 
 **Install** first says what the plugin does (its operations or its MCP
-server, how people sign in, what asks first), then asks for its settings. A
+server, how people sign in, what asks first, the prompts it adds), then asks
+for its settings. A
 secret setting is stored encrypted (under `APP_KEY`) and never shown again.
 **Upload a zip** and **From an address** (with its SHA-256, so only that exact
 file installs) take a plugin from outside the catalog.
 
-**Update** appears when the catalog has another version; the settings stay.
-**Remove** takes its tool out of every chat and forgets everyone's connected
+**Update** appears when the catalog has another version; the settings stay,
+and its prompts become the new version's. **Remove** takes its tool out of
+every chat, its prompts out of the library, and forgets everyone's connected
 accounts for it.
 
 Every install, update, settings change, connection and call is in the audit
@@ -50,7 +53,7 @@ Connections**.
 
 ```yaml
 name: gitlab-issues            # lowercase, digits, dashes
-version: 1.0.0
+version: 1.1.0
 title: GitLab issues
 description: Finds projects, reads issues, creates them and comments on them in GitLab.
 tools:
@@ -66,6 +69,7 @@ auth:
     scopes: [api]
   help: Sign in to GitLab and allow the chat to work with issues as you.
 writes: [create_issue, add_note]   # functions (their own names) that ask first
+prompts: [prompts/triage.md]       # files in the plugin, each a prompt for the library
 settings:
   - { key: gitlab_url, title: GitLab address, type: url, required: true }
   - { key: client_id, title: Application ID, type: text, required: true }
@@ -74,6 +78,25 @@ settings:
 
 With `per_person: none`, a `token` setting (a secret) is the one key for
 everyone, sent as `header: value`.
+
+## Prompts
+
+`prompts:` lists Markdown files in the plugin. Each is a prompt of the library
+(**Workspace → Prompts**, and `/` in the chat): a front matter with its slash
+name and title, then its text, with `{{variables}}` the chat asks for before
+sending.
+
+```markdown
+---
+name: triage
+title: Triage a GitLab issue
+---
+Triage issue #{{issue}} in the GitLab project {{project}}. Read it and its comments, then say …
+```
+
+A plugin's prompts are for whoever may use its tool (Admin → Tools), and
+nobody changes them: they come with an install or an update, and go with the
+plugin. `gitlab-issues` brings `/triage`.
 
 ## An API by its OpenAPI document
 

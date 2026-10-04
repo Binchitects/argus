@@ -75,6 +75,8 @@ public static class SettingsCatalog
             { Default = "1000000", Min = 1000, Max = 5000000, Optional = false },
         new("Chat:InlineAttachmentChars", Chat, "Text of an attachment in the question", "What of each attachment goes into the question itself. The model reads the rest in parts (the Reading files tool), so a long file does not fill the context.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "30000", Min = 2000, Max = 1000000, Optional = false },
+        new("Memory:Enabled", Chat, "Memory", "Answers read what each person asked the chat to remember, and the model offers to remember what would help later (kept only when the person accepts). Each person sees, edits and deletes their own in Your account → Memory, and can turn it off there; nobody else sees them, admins included. Off: no answer reads or offers memories.", SettingType.Boolean, SettingScope.Live)
+            { Default = "true", Optional = false },
         new("Web:AllowedSites", Tools, "Sites the chat may open", "Host names, comma separated: docs.python.org, *.microsoft.com (a domain and its subdomains), or * for any public site. Empty: the Web tool stays off. Addresses inside your network are never opened.", SettingType.Text, SettingScope.Live)
             { Default = "" },
         new("Plugins:CatalogUrl", PluginsGroup, "Plugin catalog", "An index.json that lists plugins to install (each zip's address and SHA-256), besides those that come with the app. Empty: only those.", SettingType.Url, SettingScope.Live),

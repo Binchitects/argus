@@ -1,5 +1,5 @@
 name: gitlab-issues
-version: 1.0.0
+version: 1.1.0
 title: GitLab issues
 description: Finds projects, reads issues, creates them and comments on them in GitLab, as the person asking.
 tools:
@@ -15,6 +15,7 @@ auth:
     scopes: [api]
   help: Sign in to GitLab and allow the chat to work with issues as you.
 writes: [create_issue, add_note]
+prompts: [prompts/triage.md]
 settings:
   - key: gitlab_url
     title: GitLab address

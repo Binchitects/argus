@@ -15,13 +15,14 @@ public sealed record PluginOAuth(string Authorize, string Token, string[] Scopes
 /// A plugin's manifest (plugin.yaml): what it is, where its tools are (an OpenAPI document in
 /// the plugin, or an MCP server), how calls authenticate (one key for everyone, or each person's
 /// own API key or OAuth account), which functions change something (they ask first), and the
-/// settings an admin fills in. No plugin code runs in the app.
+/// settings an admin fills in, and the prompts it adds to the library (Markdown files in the
+/// plugin). No plugin code runs in the app.
 /// </summary>
 public sealed partial record PluginManifest(
     string Name, string Version, string Title, string Description,
     string? OpenApi, string? Mcp, string Url,
     string? PersonAuth, string Header, string Value, PluginOAuth? OAuth, string? Help,
-    string[] Writes, PluginSetting[] Settings)
+    string[] Writes, PluginSetting[] Settings, string[] Prompts)
 {
     public const string FileName = "plugin.yaml";
 
@@ -81,10 +82,15 @@ public sealed partial record PluginManifest(
         {
             throw new ManifestException($"The setting {twice.Key} is there twice.");
         }
+        string[] prompts = [.. (doc["prompts"] as JsonArray ?? []).Select(Str).OfType<string>()];
+        if (prompts.FirstOrDefault(f => f.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(f)) is { } outside)
+        {
+            throw new ManifestException($"The prompt {outside} must be a file inside the plugin.");
+        }
         return new PluginManifest(name, Str(doc["version"]) ?? "0", Str(doc["title"]) ?? name, Str(doc["description"]) ?? "",
             openapi, mcp, Str(tools["url"]) ?? mcp ?? "",
             person, Str(auth["header"]) ?? "Authorization", Str(auth["value"]) ?? "Bearer {token}", oauth, Str(auth["help"]),
-            [.. (doc["writes"] as JsonArray ?? []).Select(Str).OfType<string>()], settings);
+            [.. (doc["writes"] as JsonArray ?? []).Select(Str).OfType<string>()], settings, prompts);
     }
 
     /// <summary>"{gitlab_url}/api/v4" with the settings' values put in.</summary>

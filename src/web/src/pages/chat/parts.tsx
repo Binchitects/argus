@@ -71,6 +71,7 @@ export function Thinking({ text, live, ms, since, onHurry, hurried }: { text: st
 
 const toolIcons: [RegExp, LucideIcon][] = [
   [/^delegate$/, Network],
+  [/^remember$/, Brain],
   [/python|run_code/, SquareTerminal],
   [/web|url|fetch/, Globe],
   [/image|picture|draw/, ImageIcon],

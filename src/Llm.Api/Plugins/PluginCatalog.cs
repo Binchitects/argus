@@ -17,8 +17,8 @@ public sealed class PluginOptions
     public string? CatalogKey { get; set; }
 }
 
-/// <summary>A plugin's files: its manifest (and its text), and its OpenAPI document when its tools are one.</summary>
-public sealed record PluginPackage(PluginManifest Manifest, string ManifestText, string? Spec);
+/// <summary>A plugin's files: its manifest (and its text), its OpenAPI document when its tools are one, and the prompts it adds.</summary>
+public sealed record PluginPackage(PluginManifest Manifest, string ManifestText, string? Spec, IReadOnlyList<Chat.PluginPrompt>? Prompts = null);
 
 /// <summary>A plugin a catalog offers: what it is, and where its zip is (with its SHA-256), or the folder it is in.</summary>
 public sealed record CatalogEntry(string Name, string Version, string Title, string Description, string Source, string? Url, string? Sha256, string? PersonAuth);
@@ -130,7 +130,12 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
         {
             spec = file(name) ?? throw new PluginException($"The plugin has no {name}, which its manifest names.");
         }
-        return new PluginPackage(manifest, text, spec);
+        var prompts = manifest.Prompts.Select(f => Chat.PromptLibrary.FromFile(f, file(f) ?? throw new PluginException($"The plugin has no {f}, which its manifest names."))).ToList();
+        if (prompts.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1) is { } twice)
+        {
+            throw new PluginException($"The prompt /{twice.Key} is in the plugin twice.");
+        }
+        return new PluginPackage(manifest, text, spec, prompts);
     }
 
     private async Task<List<CatalogEntry>> RemoteAsync(string url, CancellationToken ct)

@@ -9,6 +9,7 @@ import { useOutletContext } from 'react-router'
 import { z } from 'zod'
 import { ApiKey } from '@/components/app/api-key'
 import { Connections } from '@/components/app/connections'
+import { MemoryManager } from '@/components/app/memory'
 import { PageHeader } from '@/components/app/page-header'
 import { Alert } from '@/components/ui/alert'
 import { Avatar } from '@/components/ui/avatar'
@@ -28,12 +29,13 @@ export function AccountPage() {
   const me = useOutletContext<Me>()
   return (
     <>
-      <PageHeader title="Your account" description="Your profile, API key, answers, sign-in security and appearance." />
+      <PageHeader title="Your account" description="Your profile, API key, answers, memory, sign-in security and appearance." />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="grid content-start gap-6">
           <Profile me={me} />
           <ApiKey />
           <Answers />
+          <Memory />
           <Appearance />
         </div>
         <div className="grid content-start gap-6">
@@ -307,6 +309,21 @@ function Answers() {
         ) : (
           <Skeleton className="h-20" />
         )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** What the chat remembers about the person, in every chat; only they see it. */
+function Memory() {
+  return (
+    <Card id="memory">
+      <CardHeader>
+        <CardTitle>Memory</CardTitle>
+        <CardDescription>What the chat remembers about you, for every answer. Nobody else sees it, admins included.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <MemoryManager />
       </CardContent>
     </Card>
   )

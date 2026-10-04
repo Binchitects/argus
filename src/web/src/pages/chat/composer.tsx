@@ -1,12 +1,15 @@
+import { useQuery } from '@tanstack/react-query'
 import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, Telescope, X } from 'lucide-react'
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
+import { fillPrompt, promptsQuery, slashItems, slashQuery, variablesOf, type PromptItem, type SlashItem } from '@/lib/prompts'
 import { cn } from '@/lib/utils'
 import type { ContextView } from './context'
 import { ContextGauge } from './context-gauge'
 import { VoiceButton } from './media'
+import { PromptFields, SlashMenu } from './slash'
 import type { Attachment, ChatModel } from './types'
 
 /** A message written while an answer runs: sent when it ends, or at once with Send now. */
@@ -20,7 +23,9 @@ import type { Uploads } from './uploads'
 /**
  * Where the question is written. Enter sends, Shift+Enter adds a line; files come
  * by the button, by pasting, or by dropping them on the page. A question that did
- * not reach the server comes back here rather than being lost.
+ * not reach the server comes back here rather than being lost. "/" at the start
+ * finds a prompt of the library: chosen, its text comes into the box with a field
+ * for each of its blanks, and sending fills them in.
  */
 export function Composer({
   streaming,
@@ -66,6 +71,21 @@ export function Composer({
   const area = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
 
+  // The / menu: the library is fetched once a message starts with "/".
+  const menuId = useId()
+  const query = slashQuery(text)
+  const library = useQuery({ ...promptsQuery, enabled: query !== null, staleTime: 60_000 })
+  const [active, setActive] = useState(0)
+  const [closedAt, setClosedAt] = useState<string | null>(null)
+  const items = query === null ? [] : slashItems(query, library.data?.prompts ?? [], !!onCompact)
+  const menuOpen = items.length > 0 && closedAt !== text
+  // The prompt chosen from the library, while its blanks are being filled in.
+  const [chosen, setChosen] = useState<PromptItem | null>(null)
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [missing, setMissing] = useState<string[]>([])
+  const fields = useRef<Record<string, HTMLTextAreaElement | null>>({})
+  const blanks = chosen ? variablesOf(text) : []
+
   useEffect(() => {
     const el = area.current
     if (!el) return
@@ -73,18 +93,76 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 280)}px`
   }, [text])
 
+  const unchoose = () => {
+    setChosen(null)
+    setValues({})
+    setMissing([])
+  }
+  const pick = (item: SlashItem) => {
+    setActive(0)
+    if (item.command === 'compact') {
+      setText('')
+      onCompact?.()
+      return
+    }
+    const p = item.prompt!
+    setText(p.text)
+    const vars = variablesOf(p.text)
+    if (vars.length === 0) {
+      unchoose()
+      requestAnimationFrame(() => area.current?.focus())
+      return
+    }
+    setChosen(p)
+    setValues({})
+    setMissing([])
+    requestAnimationFrame(() => fields.current[vars[0]!]?.focus())
+  }
+
   const hasContent = text.trim().length > 0 || uploads.attachments.length > 0
   const canSend = (!streaming || !!onQueue) && !uploads.busy && hasContent
   const submit = async () => {
     if (!canSend) return
-    const t = text.trim()
+    // A prompt from the library goes with its blanks filled in: all of them.
+    const empty = blanks.filter((b) => !values[b]?.trim())
+    if (empty.length > 0) {
+      setMissing(empty)
+      fields.current[empty[0]!]?.focus()
+      return
+    }
+    const t = (chosen ? fillPrompt(text, values) : text).trim()
+    const before = { text, chosen, values }
     setText('')
+    unchoose()
     // An answer is running: this one waits its turn (or goes at once with Send now).
     if (streaming && onQueue) onQueue(t)
-    else if (!(await onSend(t))) setText((now) => now || t)
+    else if (!(await onSend(t))) {
+      setText((now) => now || before.text)
+      if (before.chosen) {
+        setChosen(before.chosen)
+        setValues(before.values)
+      }
+    }
     area.current?.focus()
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (menuOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setActive((i) => (i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length)
+        return
+      }
+      if ((e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) || e.key === 'Tab') {
+        e.preventDefault()
+        pick(items[Math.min(active, items.length - 1)]!)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setClosedAt(text)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       void submit()
@@ -94,12 +172,32 @@ export function Composer({
 
   return (
     <form
-      className={cn('rounded-2xl border bg-card shadow-sm transition-shadow focus-within:border-primary/50 focus-within:shadow-md', big && 'shadow-md')}
+      className={cn('relative rounded-2xl border bg-card shadow-sm transition-shadow focus-within:border-primary/50 focus-within:shadow-md', big && 'shadow-md')}
       onSubmit={(e) => {
         e.preventDefault()
         void submit()
       }}
     >
+      {menuOpen && <SlashMenu id={menuId} items={items} active={Math.min(active, items.length - 1)} onPick={pick} onActive={setActive} />}
+      {chosen && blanks.length > 0 && (
+        <PromptFields
+          prompt={chosen}
+          variables={blanks}
+          values={values}
+          missing={missing}
+          refs={fields}
+          onChange={(name, value) => {
+            setValues((v) => ({ ...v, [name]: value }))
+            setMissing((m) => m.filter((x) => x !== name))
+          }}
+          onClear={() => {
+            unchoose()
+            setText('')
+            area.current?.focus()
+          }}
+          onLast={() => void submit()}
+        />
+      )}
       {queued && queued.length > 0 && (
         <div className="grid gap-1 px-3 pt-3">
           <ul className="grid gap-1" aria-label="Queued messages">
@@ -167,15 +265,22 @@ export function Composer({
         dir="auto"
         rows={big ? 3 : 1}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value)
+          setActive(0)
+          if (!e.target.value) unchoose()
+        }}
         onKeyDown={onKey}
+        aria-autocomplete="list"
+        aria-controls={menuOpen ? menuId : undefined}
+        aria-activedescendant={menuOpen ? `${menuId}-${Math.min(active, items.length - 1)}` : undefined}
         onPaste={(e) => {
           if (e.clipboardData.files.length) {
             e.preventDefault()
             uploads.add(e.clipboardData.files)
           }
         }}
-        placeholder={streaming && onQueue ? 'Queue a message…' : research ? 'What should be researched?' : 'Message'}
+        placeholder={streaming && onQueue ? 'Queue a message…' : research ? 'What should be researched?' : 'Message, or / for a prompt'}
         aria-label="Message"
         // oxlint-disable-next-line jsx-a11y/no-autofocus -- the chat's whole purpose is this box
         autoFocus={autoFocus}

@@ -24,6 +24,7 @@ import { formatValue } from '@/lib/format'
 import { chatModel, projectsQuery } from './api'
 import type { ChatConfig, ChatSettings } from './types'
 import { useChatActions } from './chat-actions'
+import { MemoryButton } from './memory'
 
 const DEFAULT = '__default__'
 
@@ -238,6 +239,7 @@ export function ChatHeader({
         </Link>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-1">
+        <MemoryButton />
         <ChatSettingsPopover config={config} settings={settings} onChange={onChange} />
         <Tooltip content={filesOpen ? 'Hide files' : 'Files in this chat'}>
           <Button variant={filesOpen ? 'secondary' : 'ghost'} size="sm" className="h-8 gap-1.5" onClick={onToggleFiles} aria-pressed={filesOpen} aria-label={`Files (${filesCount})`}>

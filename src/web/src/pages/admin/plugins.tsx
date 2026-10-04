@@ -43,6 +43,8 @@ interface Preview {
   operations: number | null
   mcp: string | null
   settings: SettingView[]
+  /** The prompts it adds to the library (Workspace → Prompts). */
+  prompts?: { name: string; title: string }[]
 }
 
 /** Where a plugin comes from: its name in a catalog, its zip's address (and SHA-256), or the zip itself. */
@@ -275,6 +277,7 @@ function InstallDialog({ source, onClose, onDone }: { source: Source | null; onC
               <li>{p.mcp ? `Tools from the MCP server at ${p.mcp}.` : `${p.operations ?? 0} operations of its API.`}</li>
               <li>{p.personAuth ? `${signIn[p.personAuth]}: each person connects their own account in Your account → Connections. ${p.help ?? ''}` : 'One sign-in for everyone, from the settings.'}</li>
               {p.writes.length > 0 && <li>Asks the person first before: {p.writes.join(', ')}.</li>}
+              {!!p.prompts?.length && <li>Adds prompts for whoever may use it: {p.prompts.map((x) => `/${x.name} (${x.title})`).join(', ')}.</li>}
             </ul>
             <SettingsFields settings={p.settings} values={values} onChange={(k, v) => setValues({ ...values, [k]: v })} />
             <DialogFooter>
