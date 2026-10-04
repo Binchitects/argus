@@ -216,6 +216,44 @@ public sealed class ChatBranchTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_person_chooses_short_answers_and_one_answer_comes_again_shorter_or_longer()
+    {
+        var (b, email) = await PersonAsync(app.Factory);
+        Assert.Equal("normal", (await b.JsonAsync(await b.GetAsync("/api/account/preferences"))).GetProperty("answerLength").GetString());
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { answerLength = "epic" }));
+        var saved = await b.JsonAsync(await b.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { answerLength = "short" }));
+        Assert.Equal("short", saved.GetProperty("answerLength").GetString());
+
+        var id = await NewChatAsync(b, new { useArgus = false });
+        await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "hi" });
+        var system = LastRequest(email).Body.GetProperty("messages")[0].GetProperty("content").GetString()!;
+        Assert.Contains(Llm.Api.Chat.AnswerLengths.Note("short")!, system, StringComparison.Ordinal);
+
+        // Shorter than the answer on screen: measured in its words, said with the question this once.
+        var chat = Messages(await ChatAsync(b, id));
+        var question = chat.Last(m => m.GetProperty("role").GetString() == "user");
+        var answer = chat.Last(m => m.GetProperty("role").GetString() == "assistant");
+        var words = Llm.Api.Chat.AnswerLengths.Words(answer.GetProperty("content").GetString()!);
+        await PostStreamAsync(b, $"/api/chat/conversations/{id}/regenerate",
+            new { messageId = question.GetProperty("id").GetGuid(), length = "shorter", answerId = answer.GetProperty("id").GetGuid() });
+        var asked = LastRequest(email).Body.GetProperty("messages").EnumerateArray().Last().GetProperty("content").GetString()!;
+        Assert.Equal("hi\n\n" + Llm.Api.Chat.AnswerLengths.Again("shorter", words), asked);
+        // The question kept is as written; the next turn has no such note.
+        Assert.Equal("hi", Messages(await ChatAsync(b, id)).First(m => m.GetProperty("role").GetString() == "user").GetProperty("content").GetString());
+        await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "next" });
+        Assert.DoesNotContain(LastRequest(email).Body.GetProperty("messages").EnumerateArray(),
+            m => m.GetProperty("role").GetString() == "user" && m.GetProperty("content").ToString().Contains("Answer again", StringComparison.Ordinal));
+
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{id}/regenerate", new { length = "longer" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{id}/regenerate", new { length = "much", answerId = answer.GetProperty("id").GetGuid() }));
+
+        // Normal again: no line in the system prompt.
+        await b.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { answerLength = "normal" });
+        await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "again" });
+        Assert.DoesNotContain("prefers", LastRequest(email).Body.GetProperty("messages")[0].GetProperty("content").GetString()!, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Chats_from_before_branches_become_one_branch_each()
     {
         var cs = app.ConnectionStringFor("branches_" + Guid.NewGuid().ToString("N")[..8]);

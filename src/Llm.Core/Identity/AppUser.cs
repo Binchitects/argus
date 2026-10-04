@@ -25,6 +25,8 @@ public sealed class AppUser : IdentityUser<Guid>
     public DateTimeOffset? LastSignInAt { get; set; }
     /// <summary>For directory people: the groups the directory lists (DNs), as of the last sign-in or sync.</summary>
     public List<string> DirectoryGroups { get; set; } = [];
+    /// <summary>How long answers should be: "short", "thorough", or null for the model's own judgement.</summary>
+    public string? AnswerLength { get; set; }
 }
 
 public sealed class AppRole : IdentityRole<Guid>

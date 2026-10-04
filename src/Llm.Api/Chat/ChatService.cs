@@ -17,7 +17,8 @@ namespace Llm.Api.Chat;
 /// <summary>For one answer only: another model or thinking level than the chat's (retry with…).</summary>
 /// <param name="Hurry">"Answer now", when the person asks for it while the model thinks.</param>
 /// <param name="Research">Deep research: the web and sub-agents on for this answer, a plan, and a sourced report.</param>
-public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false);
+/// <param name="Again">Said with the question for this answer only: answer again shorter or longer (AnswerLengths.Again).</param>
+public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false, string? Again = null);
 
 /// <summary>
 /// "Answer now" (as in ChatGPT and Gemini): the person asked the answer to stop thinking.
@@ -158,20 +159,17 @@ public sealed partial class ChatService(
             instructions.Add(("research", ResearchNote));
         }
         var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, email, string.Join("\n\n", instructions.Select(i => i.Text)), runs.ContainsKey("read_file"),
-            emit, ct);
-        if (overrides.Research && messages.OfType<JsonObject>().LastOrDefault(m => m["role"]?.GetValue<string>() == "user") is { } asked)
+            AnswerLengths.Note(user.AnswerLength), emit, ct);
+        // Said on the person's turn (models follow it more closely there), at the prompt's end (the
+        // cache keeps the rest); the question kept stays as written.
+        if (overrides.Research)
         {
-            // Said again on the person's turn (models follow it more closely there); the question kept stays as written.
-            const string reminder = "\n\n(Deep research: plan the research questions, call delegate once with one part per question, " +
-                "then write the report with numbered citations and a Sources list of the pages opened.)";
-            if (asked["content"] is JsonArray parts && parts.OfType<JsonObject>().FirstOrDefault(x => x["type"]?.GetValue<string>() == "text") is { } textPart)
-            {
-                textPart["text"] = textPart["text"]!.GetValue<string>() + reminder;
-            }
-            else if (asked["content"] is JsonValue)
-            {
-                asked["content"] = asked["content"]!.GetValue<string>() + reminder;
-            }
+            ToQuestion(messages, "\n\n(Deep research: plan the research questions, call delegate once with one part per question, " +
+                "then write the report with numbered citations and a Sources list of the pages opened.)");
+        }
+        if (overrides.Again is { Length: > 0 } again)
+        {
+            ToQuestion(messages, "\n\n" + again);
         }
         if (imagesDropped)
         {
@@ -457,6 +455,23 @@ public sealed partial class ChatService(
     /// </summary>
     private const int AgentRounds = 6;
     private const int AgentToolChars = 12_000;
+
+    /// <summary>Text added to the newest question, in the request only.</summary>
+    private static void ToQuestion(JsonArray messages, string text)
+    {
+        if (messages.OfType<JsonObject>().LastOrDefault(m => m["role"]?.GetValue<string>() == "user") is not { } asked)
+        {
+            return;
+        }
+        if (asked["content"] is JsonArray parts && parts.OfType<JsonObject>().FirstOrDefault(x => x["type"]?.GetValue<string>() == "text") is { } textPart)
+        {
+            textPart["text"] = textPart["text"]!.GetValue<string>() + text;
+        }
+        else if (asked["content"] is JsonValue)
+        {
+            asked["content"] = asked["content"]!.GetValue<string>() + text;
+        }
+    }
 
     /// <summary>
     /// The tools, in every round: the engine reuses the cache of a prompt's unchanged start, and
@@ -799,7 +814,7 @@ public sealed partial class ChatService(
     /// and as their names to one that cannot.
     /// </summary>
     private async Task<(JsonArray Messages, bool ImagesDropped, SystemParts System)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string modelName,
-        string email, string? toolInstructions, bool canReadFiles, Func<object, Task> emit, CancellationToken ct)
+        string email, string? toolInstructions, bool canReadFiles, string? lengthNote, Func<object, Task> emit, CancellationToken ct)
     {
         var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
         all[question.Id] = question;
@@ -891,7 +906,8 @@ public sealed partial class ChatService(
             }
         }
 
-        var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC)." + "\n\n" + PreviewNote;
+        var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC)." + "\n\n" + PreviewNote +
+            (lengthNote is null ? "" : "\n\n" + lengthNote);
         var baseLength = system.Length;
         if (!string.IsNullOrWhiteSpace(toolInstructions))
         {

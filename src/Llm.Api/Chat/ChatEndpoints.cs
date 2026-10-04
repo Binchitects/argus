@@ -45,7 +45,8 @@ public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid
 public sealed record CompactRequest(Guid? MessageId = null);
 
 /// <summary>Answer a question again (default: the last one on the branch), optionally with another model or thinking level.</summary>
-public sealed record Regenerate(Guid? MessageId = null, string? Model = null, string? Thinking = null);
+/// <param name="Length">"shorter" or "longer" than the answer <paramref name="AnswerId"/> (its last message), for this answer only.</param>
+public sealed record Regenerate(Guid? MessageId = null, string? Model = null, string? Thinking = null, string? Length = null, Guid? AnswerId = null);
 
 public sealed record LeafChange(Guid MessageId);
 
@@ -531,7 +532,26 @@ public static partial class ChatEndpoints
             await Problem(http, 400, "model", $"The gateway does not serve {model}.");
             return;
         }
-        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(body.Model, body.Thinking), async () =>
+        string? again = null;
+        if (body.Length is { Length: > 0 } length)
+        {
+            if (length is not ("shorter" or "longer") || body.AnswerId is not { } answerId)
+            {
+                await Problem(http, 400, "length", "Length is shorter or longer, with the answer it is measured against.");
+                return;
+            }
+            // The answer as the person read it: its words in every round, from the question down to its last message.
+            var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == c.Id).ToDictionaryAsync(m => m.Id);
+            var path = ChatService.PathTo(all, answerId);
+            var from = path.FindLastIndex(m => m.Role == "user");
+            if (!all.ContainsKey(answerId) || from < 0)
+            {
+                await Problem(http, 400, "length", "There is no such answer in this chat.");
+                return;
+            }
+            again = AnswerLengths.Again(length, path.Skip(from + 1).Where(m => m.Role == "assistant").Sum(m => AnswerLengths.Words(m.Content)));
+        }
+        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(body.Model, body.Thinking, Again: again), async () =>
         {
             var all = await db.ChatMessages.Where(m => m.ConversationId == c.Id).ToDictionaryAsync(m => m.Id);
             var question = body.MessageId is { } asked

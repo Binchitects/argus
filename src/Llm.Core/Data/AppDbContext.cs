@@ -53,6 +53,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(u => u.DisplayName).HasMaxLength(200);
             e.Property(u => u.LdapDn).HasMaxLength(1000);
+            e.Property(u => u.AnswerLength).HasMaxLength(16);
             e.Property(u => u.DirectoryGroups).HasDefaultValueSql("'{}'::text[]");
             e.HasIndex(u => u.NormalizedEmail).IsUnique();
         });

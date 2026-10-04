@@ -25,6 +25,23 @@ describe('account', () => {
     expect(screen.getByRole('meter', { name: 'Credit used' })).toHaveAttribute('aria-valuenow', '10')
   })
 
+  it('answers can be chosen short, normal or thorough', async () => {
+    let length = 'normal'
+    const calls = fakeApi(member, {
+      'GET /api/account/preferences': () => ({ json: { answerLength: length } }),
+      'PUT /api/account/preferences': (body) => {
+        length = (body as { answerLength: string }).answerLength
+        return { json: { answerLength: length } }
+      },
+    })
+    renderApp('/account')
+    const group = await screen.findByRole('radiogroup', { name: 'Answer length' })
+    expect(within(group).getByRole('radio', { name: 'Normal' })).toBeChecked()
+    await userEvent.click(within(group).getByRole('radio', { name: 'Short' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/account/preferences')?.body).toEqual({ answerLength: 'short' }))
+    await waitFor(() => expect(within(group).getByRole('radio', { name: 'Short' })).toBeChecked())
+  })
+
   it('the new passwords must match, and a change is sent once they do', async () => {
     const calls = fakeApi(member, { 'POST /api/account/password': () => ({ status: 204 }) })
     renderApp('/account')

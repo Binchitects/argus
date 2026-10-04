@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Columns2, Maximize2, Monitor, Moon, RectangleHorizontal, ShieldCheck, ShieldOff, Sun } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlignJustify, Columns2, Maximize2, Minus, Monitor, Moon, RectangleHorizontal, ShieldCheck, ShieldOff, Sun, Text } from 'lucide-react'
 import QRCode from 'qrcode'
 import { RadioGroup } from 'radix-ui'
 import { useEffect, useState } from 'react'
@@ -27,11 +27,12 @@ export function AccountPage() {
   const me = useOutletContext<Me>()
   return (
     <>
-      <PageHeader title="Your account" description="Your profile, API key, sign-in security and appearance." />
+      <PageHeader title="Your account" description="Your profile, API key, answers, sign-in security and appearance." />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="grid content-start gap-6">
           <Profile me={me} />
           <ApiKey />
+          <Answers />
           <Appearance />
         </div>
         <div className="grid content-start gap-6">
@@ -262,6 +263,52 @@ const widths: { value: WidthPreference; label: string; icon: typeof Sun }[] = [
 
 const choice =
   'flex flex-col items-center gap-2 rounded-lg border p-3 text-sm font-medium transition-colors outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring data-[state=checked]:border-primary data-[state=checked]:bg-primary/5 data-[state=checked]:text-primary-ink'
+
+type AnswerLength = 'short' | 'normal' | 'thorough'
+
+const lengths: { value: AnswerLength; label: string; icon: typeof Sun }[] = [
+  { value: 'short', label: 'Short', icon: Minus },
+  { value: 'normal', label: 'Normal', icon: Text },
+  { value: 'thorough', label: 'Thorough', icon: AlignJustify },
+]
+
+/** How long answers should be: said to the model on every question. */
+function Answers() {
+  const queryClient = useQueryClient()
+  const prefs = useQuery({ queryKey: ['account', 'preferences'], queryFn: () => api<{ answerLength: AnswerLength }>('/api/account/preferences') })
+  const save = useMutation({
+    mutationFn: (answerLength: AnswerLength) => api<{ answerLength: AnswerLength }>('/api/account/preferences', { method: 'PUT', body: { answerLength } }),
+    onSuccess: (v) => {
+      queryClient.setQueryData(['account', 'preferences'], v)
+      toast.success('Saved', { description: { short: 'Answers come short: the answer first, no preamble.', normal: 'The model judges how long.', thorough: 'Answers explain, cover the cases and give examples.' }[v.answerLength] })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Answers</CardTitle>
+        <CardDescription>How long answers are, in every chat. Shorter and Longer under an answer change one answer.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {prefs.data ? (
+          <RadioGroup.Root value={prefs.data.answerLength} onValueChange={(v) => save.mutate(v as AnswerLength)} aria-label="Answer length" className="grid grid-cols-3 gap-2">
+            {lengths.map((t) => (
+              <RadioGroup.Item key={t.value} value={t.value} className={choice} disabled={save.isPending}>
+                <t.icon className="size-5" aria-hidden="true" />
+                {t.label}
+              </RadioGroup.Item>
+            ))}
+          </RadioGroup.Root>
+        ) : prefs.error ? (
+          <Alert variant="destructive">{errorMessage(prefs.error)}</Alert>
+        ) : (
+          <Skeleton className="h-20" />
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 function Appearance() {
   const { preference, setPreference } = useTheme()

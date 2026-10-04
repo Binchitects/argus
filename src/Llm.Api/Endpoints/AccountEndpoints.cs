@@ -23,6 +23,22 @@ public static class AccountEndpoints
         me.MapPost("/2fa/setup", SetupTwoFactorAsync);
         me.MapPost("/2fa/enable", EnableTwoFactorAsync);
         me.MapPost("/2fa/disable", DisableTwoFactorAsync);
+        me.MapGet("/preferences", async (ClaimsPrincipal p, UserManager<AppUser> users) =>
+            Results.Ok(new { answerLength = (await users.GetUserAsync(p))!.AnswerLength ?? Chat.AnswerLengths.Normal }));
+        me.MapPut("/preferences", async (Preferences body, ClaimsPrincipal p, UserManager<AppUser> users) =>
+        {
+            if (body.AnswerLength is { } length && !Chat.AnswerLengths.All.Contains(length))
+            {
+                return AuthEndpoints.Problem(400, "answer_length", "The answer length is short, normal or thorough.");
+            }
+            var user = (await users.GetUserAsync(p))!;
+            if (body.AnswerLength is not null)
+            {
+                user.AnswerLength = body.AnswerLength == Chat.AnswerLengths.Normal ? null : body.AnswerLength;
+                await users.UpdateAsync(user);
+            }
+            return Results.Ok(new { answerLength = user.AnswerLength ?? Chat.AnswerLengths.Normal });
+        });
         me.MapGet("/keys", KeysAsync);
         me.MapPost("/keys/rotate", async (ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people) =>
             Results.Ok(await people.RotateKeyAsync((await users.GetUserAsync(p))!)));
@@ -129,3 +145,6 @@ public static class AccountEndpoints
         return sb.ToString().TrimEnd().ToLowerInvariant();
     }
 }
+
+/// <summary>A person's own choices for their answers. Only what is sent changes.</summary>
+public sealed record Preferences(string? AnswerLength = null);

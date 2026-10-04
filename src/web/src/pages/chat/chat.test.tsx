@@ -667,6 +667,14 @@ describe('chat', () => {
     await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/regenerate')?.body).toEqual({ messageId: 'q1', thinking: 'off' }))
   })
 
+  it('an answer comes again shorter or longer than the one on screen', async () => {
+    const calls = backend({ start: conversation({ messages: answered, currentLeafId: 'a1' }), events: [{ type: 'done', id: 'x' }], saved: answered })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Answer again' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Shorter' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/regenerate')?.body).toEqual({ messageId: 'q1', length: 'shorter', answerId: 'a1' }))
+  })
+
   it('an image is previewed, and a model that cannot see says so', async () => {
     backend({})
     renderApp('/chat')

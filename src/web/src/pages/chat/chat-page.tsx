@@ -503,7 +503,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     void run(id, 'messages', { content: text, attachments: m.attachments.map((a) => a.id), parentId: m.parentId ?? undefined, root: m.parentId === null }, withQuestion(view, localId, m.parentId, text, m.attachments), localId)
   }
 
-  const regenerate = (question: Message, overrides?: { model?: string; thinking?: string }) => {
+  const regenerate = (question: Message, overrides?: { model?: string; thinking?: string; length?: 'shorter' | 'longer'; answerId?: string }) => {
     if (!id) return
     void run(id, 'regenerate', { messageId: question.id, ...overrides }, { ...view, leaf: question.id, notices: [] }, null)
   }

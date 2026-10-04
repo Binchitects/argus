@@ -27,6 +27,9 @@ Sections used:
   every model's preset sets `cache-reuse`. The next turn of a long chat reads
   over 99% of its prompt from the cache. LLM Overview shows the cache hit per
   model
+- **Answer length**: Your account → Answers picks Short, Normal or Thorough for
+  every chat; **Shorter** and **Longer** under an answer answer again at about
+  half or twice its words
 
 ## v4.0.0 (2026-10-03)
 

@@ -31,6 +31,12 @@ setups to paste.
   - **Stop** keeps what was written, marked *Stopped*.
   - **Answer again** writes a new answer beside the old one; both stay. It can
     also use another model or thinking level, for that answer only.
+  - **Shorter** and **Longer** (in the same menu) answer again at about half
+    or twice the words of the answer on screen.
+- **Answer length.** Your account → Answers: **Short** (the answer first, a few
+  sentences or a short list, no preamble), **Normal** (the model judges) or
+  **Thorough** (reasons, cases, examples). Said to the model on every
+  question, in every chat.
 - **Context.** The gauge beside Send shows how full the model's context is,
   from the last answer's prompt as the model counted it (and what it
   answered). Opened, it shows what fills it: the system prompt and the tools'

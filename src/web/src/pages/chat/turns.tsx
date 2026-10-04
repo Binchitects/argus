@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, FileText, FoldVertical, GitFork, Pencil, RefreshCw, Square } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileText, FoldVertical, GitFork, Pencil, RefreshCw, Square } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -190,7 +190,7 @@ export function AnswerTurn({
   config: ChatConfig
   question?: Message
   onSwitch: (id: string) => void
-  onRegenerate?: (question: Message, overrides?: { model?: string; thinking?: string }) => void
+  onRegenerate?: (question: Message, overrides?: { model?: string; thinking?: string; length?: 'shorter' | 'longer'; answerId?: string }) => void
   onOpenFile: (name: string) => void
   /** Show a code block that can run (a page, a picture, a diagram, a component) in the Files panel. */
   onPreview?: (code: string) => void
@@ -238,6 +238,16 @@ export function AnswerTurn({
               <DropdownMenuItem onSelect={() => onRegenerate(question)}>
                 <RefreshCw /> Answer again
               </DropdownMenuItem>
+              {last && text && (
+                <>
+                  <DropdownMenuItem onSelect={() => onRegenerate(question, { length: 'shorter', answerId: last.id })}>
+                    <ChevronsDownUp /> Shorter
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onRegenerate(question, { length: 'longer', answerId: last.id })}>
+                    <ChevronsUpDown /> Longer
+                  </DropdownMenuItem>
+                </>
+              )}
               {config.models.filter((mo) => mo.loaded).length > 1 && (
                 <>
                   <DropdownMenuSeparator />
