@@ -129,7 +129,7 @@ public sealed class ArenaMcpTests(AppFixture app)
         Assert.Equal(JsonValueKind.Object, ping.GetProperty("result").ValueKind);
         Assert.Equal(-32601, (await RpcAsync(agent, "sampling/createMessage")).Answer.GetProperty("error").GetProperty("code").GetInt32());
         Assert.Equal(-32602, (await RpcAsync(agent, "tools/call", new { name = "launch_rockets", arguments = new { } })).Answer.GetProperty("error").GetProperty("code").GetInt32());
-        Assert.Empty((await RpcAsync(agent, "prompts/list")).Answer.GetProperty("result").GetProperty("prompts").EnumerateArray());
+        Assert.Equal(JsonValueKind.Array, (await RpcAsync(agent, "prompts/list")).Answer.GetProperty("result").GetProperty("prompts").ValueKind);
         await StatusAssert.Is(HttpStatusCode.Accepted, await agent.PostAsync(Endpoint, JsonContent.Create(new { jsonrpc = "2.0", method = "notifications/initialized" })));
         // A batch, as 2025-03-26 allows: the requests answered together, the notification not.
         var batch = await agent.PostAsync(Endpoint, JsonContent.Create(new object[]
@@ -208,6 +208,36 @@ public sealed class ArenaMcpTests(AppFixture app)
         var info = await b.JsonAsync(await b.GetAsync("/api/account/mcp"));
         Assert.False(info.GetProperty("enabled").GetBoolean());
         Assert.Empty(info.GetProperty("tools").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task The_persons_prompts_and_the_companys_are_served_filled_in_and_nobody_elses()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (b, _, _, key) = await PersonAsync(f);
+        var (_, _, _, otherKey) = await PersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Created, await b.PostAsync("/api/prompts", new { name = "review", title = "Review code", text = "Review {{file}} for {{ focus }}." }));
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/prompts", new { name = "standup", title = "Stand-up notes", text = "Write my stand-up.", sharing = "Company" }));
+        // The company's /review too: the person's own comes first, once.
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/prompts", new { name = "review", title = "The company's review", text = "Review it.", sharing = "Company" }));
+
+        var agent = Agent(f, key);
+        var listed = (await RpcAsync(agent, "prompts/list")).Answer.GetProperty("result").GetProperty("prompts").EnumerateArray().ToList();
+        Assert.Equal(["review", "standup"], listed.Select(p => p.GetProperty("name").GetString()));
+        var review = listed[0];
+        Assert.Equal("Review code", review.GetProperty("title").GetString());
+        Assert.Equal(["file", "focus"], review.GetProperty("arguments").EnumerateArray().Select(a => a.GetProperty("name").GetString()));
+
+        var got = (await RpcAsync(agent, "prompts/get", new { name = "review", arguments = new { file = "Parser.cs", focus = "error handling" } })).Answer.GetProperty("result");
+        var message = Assert.Single(got.GetProperty("messages").EnumerateArray());
+        Assert.Equal("user", message.GetProperty("role").GetString());
+        Assert.Equal("Review Parser.cs for error handling.", message.GetProperty("content").GetProperty("text").GetString());
+
+        // Someone else gets the company's /review, never the person's own.
+        var theirs = (await RpcAsync(Agent(f, otherKey), "prompts/get", new { name = "review", arguments = new { } })).Answer.GetProperty("result");
+        Assert.Equal("Review it.", theirs.GetProperty("messages")[0].GetProperty("content").GetProperty("text").GetString());
+        Assert.True((await RpcAsync(Agent(f, otherKey), "prompts/get", new { name = "nothing" })).Answer.TryGetProperty("error", out _));
     }
 
     [Fact]

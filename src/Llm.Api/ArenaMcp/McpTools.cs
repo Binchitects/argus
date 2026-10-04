@@ -308,15 +308,42 @@ public sealed partial class McpTools(
 }
 
 /// <summary>
-/// The prompts Arena MCP serves (prompts/list, prompts/get): none yet. The prompt library (E5)
-/// plugs in here: each of the person's prompts and the shared ones as an MCP prompt, with its
-/// arguments, filled in by GetAsync.
+/// The prompts Arena MCP serves (prompts/list, prompts/get): the prompt library as the person
+/// sees it in the chat's / menu (theirs, their groups', the company's, their plugins'), each
+/// with its {{variables}} as arguments. One name from two places is theirs first, as in the menu.
 /// </summary>
-public sealed class McpPrompts
+public sealed class McpPrompts(AppDbContext db, AccessService access)
 {
     /// <summary>MCP prompts: name, title, description, arguments.</summary>
-    public Task<JsonArray> ListAsync(AppUser user, CancellationToken ct) => Task.FromResult(new JsonArray());
+    public async Task<JsonArray> ListAsync(AppUser user, CancellationToken ct) =>
+        [.. (await UsableAsync(user, ct)).Select(p => (JsonNode)new JsonObject
+        {
+            ["name"] = p.Name,
+            ["title"] = p.Title,
+            ["description"] = p.Title,
+            ["arguments"] = new JsonArray([.. PromptLibrary.Variables(p.Text).Select(v => (JsonNode)new JsonObject { ["name"] = v, ["required"] = true })]),
+        })];
 
     /// <returns>The prompt's description and messages, filled in with the arguments; null when there is no such prompt.</returns>
-    public Task<JsonObject?> GetAsync(AppUser user, string name, JsonObject arguments, CancellationToken ct) => Task.FromResult<JsonObject?>(null);
+    public async Task<JsonObject?> GetAsync(AppUser user, string name, JsonObject arguments, CancellationToken ct)
+    {
+        if ((await UsableAsync(user, ct)).FirstOrDefault(p => p.Name == name) is not { } prompt)
+        {
+            return null;
+        }
+        var values = arguments.Where(a => a.Value is JsonValue).ToDictionary(a => a.Key, a => a.Value!.ToString(), StringComparer.Ordinal);
+        return new JsonObject
+        {
+            ["description"] = prompt.Title,
+            ["messages"] = new JsonArray(new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = new JsonObject { ["type"] = "text", ["text"] = PromptLibrary.Fill(prompt.Text, values) },
+            }),
+        };
+    }
+
+    /// <summary>Each slash name once: the first, as the library ranks them.</summary>
+    private async Task<List<SavedPrompt>> UsableAsync(AppUser user, CancellationToken ct) =>
+        [.. (await PromptEndpoints.UsableAsync(user, access, db, ct)).DistinctBy(p => p.Name, StringComparer.Ordinal)];
 }

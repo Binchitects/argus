@@ -24,6 +24,10 @@ public static partial class PromptLibrary
     public static List<string> Variables(string text) =>
         [.. Variable().Matches(text).Select(m => m.Groups[1].Value).Distinct(StringComparer.Ordinal)];
 
+    /// <summary>The text with its variables filled in from <paramref name="values"/>; a variable not given is left empty.</summary>
+    public static string Fill(string text, IReadOnlyDictionary<string, string> values) =>
+        Variable().Replace(text, m => values.GetValueOrDefault(m.Groups[1].Value, ""));
+
     /// <summary>Why a slash name will not do, or null.</summary>
     public static string? NameProblem(string name) => SlashName().IsMatch(name)
         ? null

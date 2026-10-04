@@ -55,6 +55,15 @@ public static class PromptEndpoints
         return new Viewer(me, await access.MembershipAsync(me, ct), tools);
     }
 
+    /// <summary>The prompts a person may use, theirs first, then their groups', the company's and the plugins'; by slash name within each.</summary>
+    internal static async Task<List<SavedPrompt>> UsableAsync(AppUser me, AccessService access, AppDbContext db, CancellationToken ct)
+    {
+        var tools = await db.ToolSettings.AsNoTracking().Where(s => s.ToolId.StartsWith(McpServerTool.Prefix)).ToDictionaryAsync(s => s.ToolId, ct);
+        var who = new Viewer(me, await access.MembershipAsync(me, ct), tools);
+        return [.. (await db.Prompts.AsNoTracking().Where(x => x.UserId == me.Id || x.UserId == null || x.Sharing == PromptSharing.Groups).ToListAsync(ct))
+            .Where(who.Sees).OrderBy(x => Rank(x, me.Id)).ThenBy(x => x.Name, StringComparer.Ordinal)];
+    }
+
     private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, CancellationToken ct)
     {
         var who = await ViewerAsync(p, users, access, db, ct);
