@@ -22,6 +22,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<SafeguardMark> SafeguardMarks => Set<SafeguardMark>();
     public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
+    public DbSet<Canvas> Canvases => Set<Canvas>();
+    public DbSet<CanvasVersion> CanvasVersions => Set<CanvasVersion>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
@@ -121,6 +123,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(p => new { p.AttachmentId, p.Number });
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(p => p.AttachmentId).OnDelete(DeleteBehavior.Cascade);
         });
+        CanvasTables.Configure(builder);
 
         builder.Entity<Group>(e =>
         {
