@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Blocks, Boxes, CalendarClock, Database, Home, KeyRound, LayoutDashboard, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, Telescope, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, BarChart3, Blocks, Boxes, CalendarClock, Database, Home, KeyRound, LayoutDashboard, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, Siren, Telescope, ThumbsUp, Trophy, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -22,6 +22,7 @@ export const navigation: NavSection[] = [
       { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'] },
       { title: 'Scheduled tasks', path: '/tasks', icon: CalendarClock, keywords: ['schedule', 'cron', 'daily', 'weekly', 'report', 'digest', 'webhook', 'email', 'notification'] },
       { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'] },
+      { title: 'Leaderboard', path: '/leaderboard', icon: Trophy, keywords: ['arena', 'compare', 'models', 'elo', 'vote', 'ranking'] },
       { title: 'Connect your tools', path: '/setup', icon: Plug, keywords: ['api key', 'token', 'claude code', 'qwen code', 'opencode', 'continue', 'mcp', 'harness', 'sdk', 'certificate'] },
     ],
   },
@@ -38,6 +39,7 @@ export const navigation: NavSection[] = [
       { title: 'Plugins', path: '/admin/plugins', icon: Blocks, keywords: ['catalog', 'install', 'jira', 'gitlab issues', 'oauth', 'integrations'] },
       { title: 'Settings', path: '/admin/settings', icon: Settings, keywords: ['configuration', 'config', 'env'] },
       { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'] },
+      { title: 'Quality', path: '/admin/quality', icon: ThumbsUp, keywords: ['feedback', 'thumbs', 'ratings', 'arena', 'leaderboard', 'answers'] },
     ],
   },
   {

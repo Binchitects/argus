@@ -18,6 +18,7 @@ import { answerUsage, seconds } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
 import { useNow } from './use-now'
 import { QuestionCard } from './questions'
+import { FeedbackButtons } from './feedback'
 import type { AgentWork, ChatConfig, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
@@ -177,6 +178,7 @@ export function AnswerTurn({
   onAnswer,
   onHurry,
   busy,
+  feedbackIn,
 }: {
   answer: Message[]
   siblings: Message[]
@@ -208,6 +210,8 @@ export function AnswerTurn({
   /** "Answer now" while the model thinks: it stops thinking and answers. */
   onHurry?: () => void
   busy: boolean
+  /** The chat's id: the answer can be rated (thumbs up or down) there. */
+  feedbackIn?: string
 }) {
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
@@ -224,6 +228,7 @@ export function AnswerTurn({
       <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
         <Branches siblings={siblings} current={first} onSwitch={onSwitch} label="Answer" />
         <CopyButton text={text} label="Copy answer" />
+        {feedbackIn && last && !last.id.startsWith('local-') && <FeedbackButtons key={last.id} chatId={feedbackIn} message={last} />}
         {text && <ReadAloud text={text} />}
         {onRegenerate && question && (
           <DropdownMenu>

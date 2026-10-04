@@ -39,6 +39,7 @@ export function Composer({
   onUnqueue,
   research,
   onResearch,
+  compare,
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
@@ -61,6 +62,8 @@ export function Composer({
   /** Deep research for the next message: sub-agents search the web, and the answer is a sourced report. */
   research?: boolean
   onResearch?: (on: boolean) => void
+  /** Compare (arena mode): the next question to two models, beside Deep research. */
+  compare?: ReactNode
 }) {
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
@@ -205,6 +208,7 @@ export function Composer({
             </Button>
           </Tooltip>
         )}
+        {compare}
         <span className="hidden text-xs text-muted-foreground xl:inline">Enter to send · Shift+Enter for a new line</span>
         <span className="ml-auto" />
         {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} />}

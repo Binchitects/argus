@@ -83,7 +83,35 @@ export interface Message {
   context?: ContextFill | null
   /** An answer whose thinking was cut short ("Answer now"). */
   cutShort?: boolean
+  /** The person's thumbs on this answer (its last message), if they rated it. */
+  feedback?: Feedback | null
 }
+
+/** Why an answer was bad. */
+export type FeedbackReason = 'wrong' | 'incomplete' | 'too_long' | 'unsafe' | 'ignored_instructions' | 'other'
+
+/** Thumbs up or down on an answer; a down vote may say why, and share the chat with the admins. */
+export interface Feedback {
+  up: boolean
+  reason: FeedbackReason | null
+  comment: string | null
+  shared: boolean
+}
+
+/** A comparison (arena mode): one question answered by two models, blind until the person votes. */
+export interface ArenaMatch {
+  id: string
+  questionId: string
+  /** Each answer's first message, once it started. */
+  a: string | null
+  b: string | null
+  vote: ArenaVote | null
+  /** The names, once voted. */
+  models: { a: string; b: string } | null
+}
+
+/** a or b was better, a tie, or both were bad. */
+export type ArenaVote = 'a' | 'b' | 'tie' | 'bad'
 
 export interface ContextFill {
   system: number
@@ -168,6 +196,8 @@ export interface Conversation extends ConversationSummary {
   project?: { id: string; name: string } | null
   createdAt: string
   messages: Message[]
+  /** The chat's comparisons of two models. */
+  arenas?: ArenaMatch[]
 }
 
 /** A chat's own settings, as sent to create or change it. */
@@ -188,7 +218,10 @@ export interface ChatSettings {
 export type ChatEvent =
   | { type: 'question'; id: string; parentId: string | null }
   | { type: 'title'; title: string }
-  | { type: 'assistant'; id: string; parentId: string; model: string }
+  /** `side`: which answer of a comparison (its model is then "Model A" or "Model B"). */
+  | { type: 'assistant'; id: string; parentId: string; model: string; side?: 'a' | 'b' }
+  /** A comparison's answer starts: `step` of `of`, one after the other. */
+  | { type: 'arena'; id: string; questionId: string; side: 'a' | 'b'; step: number; of: number }
   | { type: 'reasoning'; text: string }
   | { type: 'thought'; ms: number; cutShort?: boolean }
   | { type: 'content'; text: string }

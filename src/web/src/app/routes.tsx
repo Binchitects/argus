@@ -34,6 +34,7 @@ export const routes: RouteObject[] = [
           { path: 'chat/projects/:projectId', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/chat-page').then((m) => ({ Component: m.ChatPage }))) },
           { path: 'tasks', ...lazy(() => import('@/pages/tasks').then((m) => ({ Component: m.TasksPage }))) },
           { path: 'usage', ...lazy(() => import('@/pages/usage').then((m) => ({ Component: m.UsagePage }))) },
+          { path: 'leaderboard', ...lazy(() => import('@/pages/leaderboard').then((m) => ({ Component: m.LeaderboardPage }))) },
           { path: 'setup', ...lazy(() => import('@/pages/setup').then((m) => ({ Component: m.ConnectPage }))) },
           {
             path: 'admin',
@@ -50,6 +51,7 @@ export const routes: RouteObject[] = [
               { path: 'models', ...lazy(() => import('@/pages/admin/models').then((m) => ({ Component: m.ModelsPage }))) },
               { path: 'settings', ...lazy(() => import('@/pages/admin/settings').then((m) => ({ Component: m.SettingsPage }))) },
               { path: 'audit', ...lazy(() => import('@/pages/admin/audit').then((m) => ({ Component: m.AuditPage }))) },
+              { path: 'quality', ...lazy(() => import('@/pages/admin/quality').then((m) => ({ Component: m.QualityPage }))) },
               { path: 'indexing', ...lazy(() => import('@/pages/admin/argus').then((m) => ({ Component: m.IndexingPage }))) },
               { path: 'packs', ...lazy(() => import('@/pages/admin/argus-packs').then((m) => ({ Component: m.PacksPage }))) },
               { path: 'explore', ...lazy(() => import('@/pages/admin/argus-explore').then((m) => ({ Component: m.ExplorePage }))) },
