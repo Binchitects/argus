@@ -1,0 +1,116 @@
+# Argus Arena in your own pipeline: a review of each merge request, posted as
+# one comment, and an explanation when a pipeline fails. Both jobs call the
+# gateway with the arena CLI (clients/arena/arena: Python 3, no packages).
+# Setup and examples: docs/ci.md.
+#
+# Include it from the Argus Arena repository in your GitLab, and say where the
+# jobs get the CLI:
+#
+#   include:
+#     - project: platform/argus-arena          # where that repository is
+#       ref: main                              # or the release tag you run
+#       file: clients/gitlab-ci/arena-review.yml
+#   variables:
+#     ARENA_CLI: ci/arena                      # a copy of clients/arena/arena in your repository
+#
+# or by its address: include: remote: https://.../clients/gitlab-ci/arena-review.yml
+#
+# The CLI comes from ARENA_CLI when it is set (a path in your repository or the
+# image, or an https address); otherwise from the image, with arena on its
+# PATH; otherwise from ARENA_PROJECT (and ARENA_REF, main): the Argus Arena
+# repository in this GitLab, read with ARENA_GITLAB_TOKEN, which must be able
+# to read it (a project access token is a member of its own project only).
+#
+# CI/CD variables (Settings > CI/CD > Variables), the two secrets masked:
+#   ARENA_URL           https://gateway.DOMAIN
+#   ARENA_KEY           an API key
+#   ARENA_GITLAB_TOKEN  a project access token: role Reporter, scope api
+# Optional:
+#   ARENA_MODEL         the model (default: the first chat model the key may use)
+#   ARENA_CA_CERT       a private CA, as a File variable (certs/ca.crt of the deployment)
+#   ARENA_REVIEW_PROMPT or ARENA_REVIEW_PROMPT_FILE (a file in your repository)
+#   ARENA_MAX_CHARS     how much of the diff or the logs is sent (40000 characters)
+#   ARENA_EXPLAIN_POST  "true": the explanation is posted on the merge request too
+#
+# Any image with python3 works. For a mirror or your own image, override it once
+# in your .gitlab-ci.yml:  .arena: { image: registry.example.com/python:3.13-slim }
+# The review runs in the test stage; a pipeline without one sets its own:
+# arena-review: { stage: check }
+
+.arena:
+  image: python:3.13-slim
+  variables:
+    GIT_DEPTH: "1"
+  before_script:
+    - |
+      # The CLI: the image's, a file named by ARENA_CLI, or fetched from
+      # ARENA_CLI (an address) or from ARENA_PROJECT in this GitLab.
+      if [ -z "$ARENA_CLI" ] && command -v arena >/dev/null 2>&1; then
+        ARENA="arena"
+      elif [ -n "$ARENA_CLI" ] && [ -f "$ARENA_CLI" ]; then
+        ARENA="python3 $ARENA_CLI"
+      else
+        ARENA_FILE="$(mktemp)"
+        python3 - "$ARENA_FILE" <<'PY' || exit 1
+      import os, ssl, sys, urllib.parse, urllib.request
+      env = os.environ
+      source = env.get("ARENA_CLI", "").strip()
+      if not source:
+          project = env.get("ARENA_PROJECT", "").strip()
+          if not project:
+              sys.exit("arena: set ARENA_PROJECT (the Argus Arena repository in this GitLab) or ARENA_CLI; see docs/ci.md")
+          source = "%s/projects/%s/repository/files/clients%%2Farena%%2Farena/raw?ref=%s" % (
+              env["CI_API_V4_URL"], urllib.parse.quote(project, safe=""), urllib.parse.quote(env.get("ARENA_REF") or "main", safe=""))
+      elif not source.startswith(("https://", "http://")):
+          sys.exit("arena: ARENA_CLI is neither a file here nor an address: %s" % source)
+      context = ssl.create_default_context()
+      for name in ("CI_SERVER_TLS_CA_FILE", "ARENA_CA_CERT"):
+          value = env.get(name, "").strip()
+          if value.startswith("-----BEGIN"):
+              context.load_verify_locations(cadata=value)
+          elif value:
+              context.load_verify_locations(cafile=value)
+      request = urllib.request.Request(source)
+      # The GitLab token goes to this GitLab only.
+      if env.get("ARENA_GITLAB_TOKEN") and env.get("CI_SERVER_URL") and source.startswith(env["CI_SERVER_URL"] + "/"):
+          request.add_header("PRIVATE-TOKEN", env["ARENA_GITLAB_TOKEN"])
+      try:
+          with urllib.request.urlopen(request, context=context, timeout=60) as response:
+              data = response.read()
+      except Exception as e:
+          sys.exit("arena: the CLI cannot be fetched from %s: %s" % (source.split("?")[0], e))
+      with open(sys.argv[1], "wb") as f:
+          f.write(data)
+      PY
+        ARENA="python3 $ARENA_FILE"
+      fi
+
+# A review of the merge request's changes, as one comment on it. It never
+# blocks a merge: when the gateway is down, the job fails on its own.
+arena-review:
+  extends: .arena
+  stage: test
+  needs: []
+  interruptible: true
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - $ARENA review
+
+# When a job failed: what failed and why, from the failed jobs' logs, in this
+# job's log (and on the merge request with ARENA_EXPLAIN_POST: "true").
+arena-explain:
+  extends: .arena
+  stage: .post
+  interruptible: true
+  allow_failure: true
+  rules:
+    - when: on_failure
+  script:
+    - |
+      if [ "$ARENA_EXPLAIN_POST" = "true" ]; then
+        $ARENA explain-failure --post
+      else
+        $ARENA explain-failure
+      fi

@@ -4,6 +4,11 @@ One directory per client, each holding the smallest file that makes that client
 work. Argus speaks standard MCP, so most of this is your client's own syntax
 around the same two facts: **the URL** and **your GitLab token**.
 
+Also here, for the gateway rather than Argus: `arena/`, a command-line client
+(`arena ask`, `arena review`, `arena explain-failure`), and `gitlab-ci/`, a
+template that reviews merge requests and explains failed pipelines in your own
+GitLab pipeline. See [docs/ci.md](../docs/ci.md).
+
 | client | file | status |
 |---|---|---|
 | [DeepSeek Harness](#deepseek-harness) | `deepseek-harness/argus-mcp.patch.yml` | **executed**, v2.1.2 |

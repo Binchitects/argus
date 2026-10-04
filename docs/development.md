@@ -23,7 +23,7 @@ deploy/                 the platform: docker-compose (and podman.yml), .env.exam
   services/             what compose builds or mounts: sandbox, identity proxy, engine router...
   argus-standalone/     Argus alone: its own compose, config and scripts
 tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, the test GitLab, Hermes add-ons
-clients/                editor and agent configurations (MCP)
+clients/                editor and agent configurations (MCP); the arena CLI and its GitLab CI template
 evals/                  evaluation harnesses and their results
 docs/                   this documentation; docs/plan.md is the plan and its phases
 ```
@@ -111,6 +111,16 @@ cd src/argus-web && npm run build && npx playwright test
 
 `ARGUS_BIN` and `ARGUS_WEB_ROOT` point it at another build; screenshots land in
 `src/argus-web/e2e/.work/screens/`.
+
+## The arena CLI
+
+`clients/arena/arena` and the GitLab CI template ([ci.md](ci.md)) are tested
+with Python's own unittest, against a fake gateway and GitLab on a local
+socket (the template's tests need PyYAML, and skip without it):
+
+```bash
+python3 -m unittest discover clients/arena
+```
 
 ## The deployment's own tests
 

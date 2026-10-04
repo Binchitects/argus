@@ -100,7 +100,7 @@ observability): [deploy/argus-standalone/](deploy/argus-standalone/README.md).
 | [`tests/`](tests/) | `Llm.Tests` and `Argus.Tests` (xUnit), `deploy` (the deployment tooling) |
 | [`deploy/`](deploy/) | the platform's deployment: compose (and Podman's override), config, scripts; `argus-standalone/` |
 | [`tools/`](tools/) | development and operations tools: `dn`, the test GitLab, pack builds |
-| [`clients/`](clients/) | MCP configurations for Claude Code, Qwen Code, Continue, DeepSeek Harness and others (the app's **Connect your tools** page has each tool's full setup) |
+| [`clients/`](clients/) | MCP configurations for Claude Code, Qwen Code, Continue, DeepSeek Harness and others (the app's **Connect your tools** page has each tool's full setup); the `arena` CLI and a GitLab CI template that reviews merge requests ([docs/ci.md](docs/ci.md)) |
 | [`docs/`](docs/README.md) | the documentation |
 | [`evals/`](evals/) | the evaluation question sets and results |
 

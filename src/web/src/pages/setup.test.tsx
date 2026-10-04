@@ -83,4 +83,25 @@ describe('connect your tools', () => {
     expect(within(aider).getByText(/aider --model openai\/Big-Model/)).toBeInTheDocument()
     expect(within(aider).getByText(/Aider has no MCP/)).toBeInTheDocument()
   })
+
+  it('GitLab CI: the variables to set, the template to include, and the CLI in a terminal', async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config() }),
+    })
+    renderApp('/setup')
+    const root = `${window.location.protocol}//gateway.${window.location.host}`
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Your tool' }))
+    expect(screen.getByText('Pipelines')).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('option', { name: 'GitLab CI' }))
+    const ci = screen.getByRole('region', { name: 'Setting up GitLab CI' })
+    // The gateway's address for ARENA_URL, without /v1 (the CLI adds it).
+    expect(within(ci).getByText('ARENA_URL', { selector: 'p' })).toBeInTheDocument()
+    expect(within(ci).getByText(root)).toBeInTheDocument()
+    expect(within(ci).getByText(/ARENA_GITLAB_TOKEN \(a project access token, role Reporter, scope api/)).toBeInTheDocument()
+    const include = within(ci).getByText(/include:/)
+    expect(include).toHaveTextContent('file: clients/gitlab-ci/arena-review.yml')
+    expect(include).toHaveTextContent('ARENA_CLI: ci/arena')
+    expect(include).toHaveTextContent('ARENA_MODEL: Big-Model')
+    expect(within(ci).getByText(/export ARENA_URL=/)).toHaveTextContent(`ARENA_URL=${root} export ARENA_KEY="$LLM_SERVICE_API_KEY"`)
+  })
 })

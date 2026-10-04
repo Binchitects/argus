@@ -61,6 +61,10 @@ The addresses, all on port 443:
 `*.localhost` resolves to this machine in browsers; for other tools,
 `deploy/scripts/setup-hosts.sh` adds the names to `/etc/hosts`.
 
+People connect their tools from **Connect your tools** in the app. A team's
+GitLab pipeline uses the gateway too: a review of each merge request and an
+explanation of each failed pipeline, with the `arena` CLI ([ci.md](ci.md)).
+
 ## Certificates
 
 Traefik does TLS and nothing else does.
