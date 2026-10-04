@@ -456,6 +456,7 @@ public static class IdentityWiring
         AnswerCacheEndpoints.MapAnswerCache(app);
         Bots.BotEndpoints.MapBots(app);
         Notifications.PushEndpoints.MapPush(app);
+        Downloads.DownloadEndpoints.MapDownloads(app);
     }
 
     public static async Task BootstrapIdentityAsync(this WebApplication app)

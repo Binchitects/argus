@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
+import { Download } from 'lucide-react'
 import { useState } from 'react'
 import { ApiKey } from '@/components/app/api-key'
 import { CodeBlock } from '@/components/app/code-block'
 import { PageHeader } from '@/components/app/page-header'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field } from '@/components/ui/field'
 import { Label } from '@/components/ui/label'
@@ -13,7 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { api, errorMessage } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
-import { arenaMcp, KEY, tools, type Context, type Step, type Tool } from './setup-tools'
+import { arenaMcp, KEY, tools, type ArenaCodeBuild, type Context, type Step, type Tool } from './setup-tools'
 
 interface ChatConfig {
   model: string | null
@@ -38,6 +40,10 @@ const tokens = (n: number | null) => (n ? n.toLocaleString('en-US') : '—')
 export function ConnectPage() {
   const config = useQuery({ queryKey: ['chat', 'config'], queryFn: ({ signal }) => api<ChatConfig>('/api/chat/config', { signal }) })
   const mcp = useQuery({ queryKey: ['account', 'mcp'], queryFn: ({ signal }) => api<McpInfo>('/api/account/mcp', { signal }) })
+  const arenaCode = useQuery({
+    queryKey: ['downloads', 'arena-code'],
+    queryFn: ({ signal }) => api<{ version: string; builds: ArenaCodeBuild[] }>('/api/downloads/arena-code', { signal }),
+  })
   const [chosen, setChosen] = useState<string | null>(null)
   const [toolId, setToolId] = useState(remembered)
   // A key made on this page, filled into the Argus setups only when the person asks (it is hidden elsewhere).
@@ -49,7 +55,10 @@ export function ConnectPage() {
   const current = models.find((m) => m.name === model)
   const argusUrl = `${serviceUrl('argus')}mcp`
   const tool = tools.find((t) => t.id === toolId) ?? tools[0]!
-  const context: Context = { root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, argusUrl, apiKey: fill && newKey ? newKey : undefined }
+  const context: Context = {
+    root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, argusUrl,
+    apiKey: fill && newKey ? newKey : undefined, origin: window.location.origin, arenaCode: arenaCode.data ?? null,
+  }
   const choose = (id: string) => {
     setToolId(id)
     try {
@@ -268,6 +277,18 @@ function StepList({ steps, tool, start }: { steps: Step[]; tool: string; start: 
             {start + i}
           </span>
           <p className="text-sm">{s.text}</p>
+          {s.links && (
+            <div className="col-start-2 flex flex-wrap gap-2">
+              {s.links.map((l) => (
+                <Button key={l.href} variant="outline" size="sm" asChild>
+                  <a href={l.href} download aria-label={`Download for ${l.label}${l.detail ? `, ${l.detail}` : ''}`}>
+                    <Download /> {l.label}
+                    {l.detail && <span className="text-muted-foreground">{l.detail}</span>}
+                  </a>
+                </Button>
+              ))}
+            </div>
+          )}
           {s.code && (
             <div className="col-start-2 grid gap-1">
               {s.file && s.file !== 'shell' && <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">{s.file}</p>}

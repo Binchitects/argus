@@ -14,12 +14,15 @@ evals/
 clients/
 tools/*
 !tools/fetch-sqlite-vec.sh
+!tools/publish-arena-code.sh
+!tools/offline-nuget
 src/web/
 tests/Llm.Tests/
 tests/deploy/
 
 **/bin/
 **/obj/
+dist/
 native/
 **/node_modules/
 src/argus-web/dist/

@@ -124,6 +124,44 @@ describe('connect your tools', () => {
     expect(screen.queryByText('Arena MCP (all your tools)')).not.toBeInTheDocument()
   })
 
+  it('offers Arena Code to download for each system it was built for, with the login and the CA note', async () => {
+    const build = (rid: string, system: string, fileName = 'arena-code') => ({ rid, system, fileName, size: 38 * 1024 * 1024, sha256: 'abc' })
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config({ argus: true }) }),
+      'GET /api/downloads/arena-code': () => ({
+        json: { version: '4.2.0', builds: [build('linux-x64', 'Linux (x64)'), build('osx-arm64', 'macOS (Apple silicon)'), build('win-x64', 'Windows (x64)', 'arena-code.exe')] },
+      }),
+    })
+    renderApp('/setup')
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Your tool' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Arena Code (our own agent)' }))
+    const steps = screen.getByRole('region', { name: 'Setting up Arena Code (our own agent)' })
+    expect(within(steps).getByText(/version 4.2.0/)).toBeInTheDocument()
+    expect(within(steps).getByRole('link', { name: /Linux \(x64\)/ })).toHaveAttribute('href', '/api/downloads/arena-code/linux-x64')
+    expect(within(steps).getByRole('link', { name: /Windows \(x64\)/ })).toHaveAttribute('href', '/api/downloads/arena-code/win-x64')
+    expect(within(steps).getByRole('link', { name: 'Download for macOS (Apple silicon), 38 MB' })).toHaveAttribute('download')
+    expect(within(steps).queryByRole('link', { name: /Linux \(ARM64\)/ })).not.toBeInTheDocument()
+    // Signing in names this Arena; the CA note gives the private CA's file.
+    expect(within(steps).getByText(`arena-code login --url ${window.location.origin}`)).toBeInTheDocument()
+    expect(within(steps).getByText(`arena-code login --url ${window.location.origin} --ca ca.crt`)).toBeInTheDocument()
+    expect(within(steps).getByText(/ARENA_CA_CERT/)).toBeInTheDocument()
+    // Argus comes through Arena's own tools: no GitLab token to add.
+    expect(within(steps).getByText(/reaches Argus through Arena's own tools/)).toBeInTheDocument()
+  })
+
+  it('says how to add Arena Code when this Arena has no builds of it', async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config() }),
+      'GET /api/downloads/arena-code': () => ({ json: { version: '4.2.0', builds: [] } }),
+    })
+    renderApp('/setup')
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Your tool' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Arena Code (our own agent)' }))
+    const steps = screen.getByRole('region', { name: 'Setting up Arena Code (our own agent)' })
+    expect(within(steps).getByText(/no builds of it yet/)).toHaveTextContent('tools/publish-arena-code.sh --offline')
+    expect(within(steps).queryByRole('link')).not.toBeInTheDocument()
+  })
+
   it('each tool has its own steps, filled in with the address, the model and its limits', async () => {
     fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config({ argus: true, gitlabUrl: null }) }),
