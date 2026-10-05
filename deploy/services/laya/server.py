@@ -1,7 +1,8 @@
 """
 Laya, the decision model, over HTTP: a state (a text, or JSON) and typed questions in,
 a probability for every option out, in one forward pass on the CPU (the GPU is the chat
-model's). The standard library's server; one forward pass at a time.
+model's). The standard library's server; one forward pass at a time, and "busy" (503) once
+MAX_WAITING calls wait their turn or one has waited LOCK_WAIT seconds.
 
     POST /v1/decide  {"state": "...", "questions": {...}, "checkpoint": "auto"}
     GET  /health
@@ -16,9 +17,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import select
+import socket
 import sys
 import threading
 import time
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LAYA_DIR = os.environ.get("LAYA_DIR", "/models/laya")
@@ -42,8 +46,17 @@ MAX_ID = 64
 MAX_INSTRUCTIONS = 1000
 MAX_OPTION = 300
 
+# One forward pass at a time, so calls wait their turn: at most this many (the one being answered
+# included), each at most this long. Past either, "busy" at once: at 0.6 s a pass, a caller is never
+# kept past Code Arena's 10 seconds by work its callers have given up on.
+MAX_WAITING = 16
+LOCK_WAIT = 8.0
+# A connection that sends nothing for this long is closed (a stalled body holds no thread).
+IDLE = 120
+
 NOT_LATIN = re.compile(r"[^\W\d_a-zA-ZÀ-ɏ]")
 LETTER = re.compile(r"[^\W\d_]")
+CHUNK_SIZE = re.compile(rb"[0-9a-fA-F]{1,8}")
 
 
 class Refused(Exception):
@@ -52,6 +65,14 @@ class Refused(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)
         self.status = status
+
+
+class Gone(Exception):
+    """The caller closed its connection before its turn: nobody to answer."""
+
+
+def busy() -> Refused:
+    return Refused(503, "Laya is busy: try again in a moment")
 
 
 def bad(message: str) -> Refused:
@@ -142,7 +163,7 @@ def is_english(state) -> tuple[bool, str]:
     try:
         from laya.lang import analyse  # noqa: PLC0415 (laya is not there in the tests)
 
-        found = analyse(state)
+        found = analyse(flat)
         language = f", language {found['language']}" if found.get("language") else ""
         return bool(found.get("is_english")), f"{found.get('script')} script{language}"
     except ImportError:
@@ -160,6 +181,9 @@ class Decider:
         self.states = {name: ("ready" if name in self.agents else "waiting") for name in CHECKPOINTS}
         self.detect = detect
         self.lock = threading.Lock()
+        # How many calls wait for the lock or hold it, counted under its own small lock.
+        self.waiting = 0
+        self.counting = threading.Lock()
 
     def choose(self, checkpoint: str, state) -> tuple[str, str]:
         if checkpoint != "auto":
@@ -175,16 +199,30 @@ class Decider:
             return "multilingual", why + "; the English checkpoint is " + self.states["english"]
         raise Refused(503, f"the {wanted} checkpoint is {self.states[wanted]}")
 
-    def decide(self, body) -> dict:
+    def decide(self, body, gone=lambda: False) -> dict:
+        """Laya's answers, or Refused; Gone when gone() says the caller left while it waited its turn."""
         state, questions, checkpoint = validate(body)
         name, reason = self.choose(checkpoint, state)
         started = time.perf_counter()
-        with self.lock:
+        with self.counting:
+            if self.waiting >= MAX_WAITING:
+                raise busy()
+            self.waiting += 1
+        try:
+            if not self.lock.acquire(timeout=LOCK_WAIT):
+                raise busy()
             try:
+                if gone():
+                    raise Gone()
                 result = self.agents[name].predict(state, questions)
             except ValueError as e:
                 # Laya's own refusals: options past its token budget, and the like.
                 raise Refused(422, str(e)) from e
+            finally:
+                self.lock.release()
+        finally:
+            with self.counting:
+                self.waiting -= 1
         ms = (time.perf_counter() - started) * 1000
         return {
             "answers": result.get("answers", {}),
@@ -237,9 +275,19 @@ def log(message: str) -> None:
     print(f"laya: {message}", file=sys.stderr, flush=True)
 
 
+def closed(sock) -> bool:
+    """Whether the other end has closed the connection: readable, with nothing to read."""
+    try:
+        readable, _, _ = select.select([sock], [], [], 0)
+        return bool(readable) and sock.recv(1, socket.MSG_PEEK) == b""
+    except (OSError, ValueError):
+        return True
+
+
 class Handler(BaseHTTPRequestHandler):
     decider: Decider
     protocol_version = "HTTP/1.1"
+    timeout = IDLE
 
     def do_GET(self):
         if self.path.split("?")[0] == "/health":
@@ -263,9 +311,18 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(raw)
             except (UnicodeDecodeError, json.JSONDecodeError) as e:
                 raise bad(f"the body is not JSON: {e}") from e
-            answer = self.decider.decide(body)
+            answer = self.decider.decide(body, gone=lambda: closed(self.connection))
         except Refused as e:
             self.reply(e.status, {"error": str(e)})
+            return
+        except Gone:
+            self.close_connection = True
+            return
+        except Exception as e:  # noqa: BLE001 (every request is answered)
+            # Only the kind and the place go to the log: the message may quote what was asked.
+            where = traceback.extract_tb(e.__traceback__)[-1]
+            log(f"{type(e).__name__} at {os.path.basename(where.filename)}:{where.lineno}")
+            self.reply(500, {"error": f"Laya could not answer this request ({type(e).__name__})"})
             return
         # What was asked stays private: only its shape and the time go to the log.
         log(f"{answer['checkpoint']}: {len(answer['answers'])} questions in {answer['ms']} ms")
@@ -276,14 +333,18 @@ class Handler(BaseHTTPRequestHandler):
         too_big = Refused(413, f"send a JSON body of at most {MAX_BODY // 1024} KiB")
         if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
             data = b""
-            try:
-                while size := int(self.rfile.readline(1024).split(b";")[0].strip() or b"0", 16):
-                    if len(data) + size > MAX_BODY:
-                        raise too_big
-                    data += self.rfile.read(size)
-                    self.rfile.readline(1024)
-            except ValueError as e:
-                raise bad("the body's chunks are malformed") from e
+            while True:
+                # Hex digits only: int() would also take a sign or underscores, and read(-1) reads to the end.
+                field = self.rfile.readline(1024).split(b";")[0].strip() or b"0"
+                if not CHUNK_SIZE.fullmatch(field):
+                    raise bad("the body's chunks are malformed")
+                size = int(field, 16)
+                if not size:
+                    break
+                if len(data) + size > MAX_BODY:
+                    raise too_big
+                data += self.rfile.read(size)
+                self.rfile.readline(1024)
             # Trailers, if any, up to the blank line that ends the request.
             while self.rfile.readline(1024).strip():
                 pass
@@ -307,8 +368,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         if self.close_connection:
             self.send_header("Connection", "close")
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            # The caller gave up waiting: nobody to tell.
+            self.close_connection = True
 
     def log_message(self, format, *args):  # noqa: A002 (the base class's name)
         pass
