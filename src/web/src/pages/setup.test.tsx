@@ -145,6 +145,8 @@ describe('connect your tools', () => {
     expect(within(steps).getByText(`arena-code login --url ${window.location.origin}`)).toBeInTheDocument()
     expect(within(steps).getByText(`arena-code login --url ${window.location.origin} --ca ca.crt`)).toBeInTheDocument()
     expect(within(steps).getByText(/ARENA_CA_CERT/)).toBeInTheDocument()
+    // The same agent in the browser, on the person's machine.
+    expect(steps).toHaveTextContent('Or in your browser: arena-code web opens the same agent')
     // Argus comes through Arena's own tools: no GitLab token to add.
     expect(within(steps).getByText(/reaches Argus through Arena's own tools/)).toBeInTheDocument()
   })

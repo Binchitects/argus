@@ -82,7 +82,7 @@ export const tools: Tool[] = [
     title: 'Arena Code (our own agent)',
     group: 'Coding agents',
     about:
-      'Our own coding agent, in your terminal: one file with nothing to install, that talks only to this Arena (the model through the gateway, all of Arena\'s tools as you), with file, shell and git tools on your machine.',
+      'Our own coding agent, in your terminal or your browser: one file with nothing to install, that talks only to this Arena (the model through the gateway, all of Arena\'s tools as you), with file, shell and git tools on your machine.',
     steps: (c) => {
       const builds = c.arenaCode?.builds ?? []
       return [
@@ -112,6 +112,11 @@ mkdir -p ~/.local/bin && mv arena-code ~/.local/bin/`,
           code: `arena-code login --url ${c.origin} --ca ca.crt`,
         },
         { text: 'Start it in your project (arena-code -p "…" answers once, for scripts):', file: 'shell', code: 'cd your-project\narena-code' },
+        {
+          text: "Or in your browser: arena-code web opens the same agent with the chat's look (its sessions, tool cards, diffs and approvals), served on your machine only.",
+          file: 'shell',
+          code: 'cd your-project\narena-code web',
+        },
       ]
     },
     argus: "Nothing to add: Arena Code reaches Argus through Arena's own tools, as you, with the code you may read.",

@@ -1,6 +1,6 @@
 # Arena Code
 
-Our own coding agent, in the terminal. A person runs it in a project folder on
+Our own coding agent, in the terminal (or in the browser, with `arena-code web`). A person runs it in a project folder on
 their machine; it reads and changes the code there, runs commands, and works
 through the Arena: the model through the gateway, and all of the chat's tools
 (web search and pages, Python in the sandbox, pictures, speech, Argus's code
@@ -88,6 +88,7 @@ arena-code -p "list the TODOs in src/"  # answer once, print the answer, exit
 git diff | arena-code -p - --output json
 arena-code --continue               # carry on with this folder's last session
 arena-code --resume                 # choose a saved session (or --resume <id>)
+arena-code web                      # the same, in your browser (see Web interface)
 ```
 
 The answer streams as it is written; the model's thinking is shown dimmed
@@ -118,6 +119,53 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/clear` | a new session (the last stays saved) |
 | `/resume [id]` | switch to a saved session |
 | `/exit` | leave (also Ctrl+D) |
+
+## Web interface
+
+```bash
+cd my-project
+arena-code web                      # the same agent, in your browser
+arena-code web --port 8765 --no-open
+arena-code web --continue --mode auto-edit
+```
+
+`arena-code web` starts a small web server on this machine, prints its
+address and opens the browser (`--no-open` only prints it). The page is
+Argus Arena's chat around the agent of this folder: the sidebar with the
+folder's sessions (newest first: open one to carry on with it, or start a new
+one), the thread with Markdown, code blocks, the model's thinking, a card for
+each tool call (the local tools and Arena's), a diff under each file edit, and
+each answer's model, time and tokens with the share read from the cache. The
+composer has Stop, the mode (ask, auto-edit, plan, yolo) and the context
+gauge (Compact now); the header has the model picker (the gateway's models),
+the thinking level and the theme (light, dark or the system's). A call that
+needs permission shows Arena's approval card: **Allow**, **Always for this
+session** (as `a` in the terminal) or **Deny**. `/compact` and `/clear` work
+in the composer.
+
+It is the same agent as in the terminal, not a copy: the same tools, modes,
+sessions (the same files: `--resume` in the terminal opens a session started
+in the browser, and the other way round), ARENA.md and MCP servers. The
+terminal shows what the agent does (`● edit_file …`) while the page drives it.
+A page reloaded during a turn picks the turn up from its start. One turn runs
+at a time; switching sessions waits for it. **Ctrl+C** in the terminal stops
+the server (and the turn, if one runs).
+
+Only this machine can use it:
+
+- It listens on `127.0.0.1` only, on a free port unless `--port` says which.
+- The address carries a key made for this run (`?token=…`). Opening it sets a
+  cookie (HttpOnly, SameSite=Strict, one per port) and takes the key out of the
+  address; every request without the key is refused. A new run makes a new
+  key: an old tab says so.
+- The server answers only to `127.0.0.1` and `localhost` at its port (the Host
+  header), so a name pointed at 127.0.0.1 (DNS rebinding) gets nothing; it
+  refuses requests from other sites (Origin, Sec-Fetch-Site), takes only JSON,
+  and its page cannot be framed.
+
+The page is built into the program (below); a build without it says so when
+`arena-code web` starts. Diagrams in answers are drawn by the chat's sandboxed
+runner, served by the same server.
 
 ## Modes
 
@@ -243,7 +291,15 @@ stage), from .NET's runtime packs, which are not part of the SDK:
   `dist/arena-code/<rid>/arena-code` and `SHA256SUMS`, with `dotnet` or
   `tools/dn`. Copy the files to people any way you like.
 
-`ARENA_CODE=none` leaves it out of the image (about 190 MB for the five
+The web interface's page is built first, from `src/web`
+(`vite.arena-code.config.ts`, then the chat's diagram runner) into
+`src/ArenaCode/web`, and embedded in each file whole. The script builds it
+with Node.js and `src/web/node_modules` (`npm ci` there once), downloading
+nothing; `--no-web` leaves it out. The image builds it in a stage of its own,
+`arena-code-web`, whose first steps are `src/web`'s own image's: a host that
+built the web image has its `npm ci` cached. `ARENA_CODE=none` skips it too.
+
+`ARENA_CODE=none` leaves it out of the image (about 210 MB for the five
 systems). Trimming is off: it would need a package the offline folder does not
 hold.
 

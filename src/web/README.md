@@ -11,6 +11,8 @@ src/
   components/ui/    the design system: Radix primitives + Tailwind, our own components
   components/app/   pieces shared by pages (page header, secrets shown once)
   pages/            one file per page; pages/chat/ is the chat (tree, live stream, markdown, files)
+  arena-code/       Arena Code's web interface (arena-code web): the chat's components around its API,
+                    built on its own (vite.arena-code.config.ts) into src/ArenaCode/web, not part of npm run build
   lib/              API client, theme, formatting, command-palette matching
   styles/index.css  design tokens (light and dark) and base styles
 e2e/                Playwright: desktop and phone, both themes, axe accessibility
