@@ -189,6 +189,10 @@ internal static class LocalTools
         {
             throw new ToolError($"{show} does not exist.");
         }
+        if (!Files.Regular(path))
+        {
+            throw new ToolError($"{show} is not a regular file (a named pipe, a socket or a device): it is not read.");
+        }
         if (Files.LooksBinary(path))
         {
             return new ToolResult($"{show} is a binary file ({Files.Size(new FileInfo(path).Length)}): not shown.");
@@ -357,7 +361,7 @@ internal static class LocalTools
             throw new ToolError($"{c.Workspace.Show(dir)} is not a folder.");
         }
         var regex = Files.Glob(pattern);
-        var found = Files.Under(dir, ct)
+        var found = c.Workspace.FilesUnder(dir, ct)
             .Where(f => regex.IsMatch(Path.GetRelativePath(dir, f).Replace('\\', '/')))
             .Select(f => new FileInfo(f))
             .OrderByDescending(f => f.LastWriteTimeUtc)
@@ -388,7 +392,7 @@ internal static class LocalTools
         var context = Math.Clamp(a.Int("context") ?? 0, 0, 10);
         var mode = a.Str("output") ?? "content";
         IEnumerable<string> files = File.Exists(root) ? [root]
-            : Directory.Exists(root) ? Files.Under(root, ct).Where(f => filter is null || filter.IsMatch(Path.GetRelativePath(root, f).Replace('\\', '/')))
+            : Directory.Exists(root) ? c.Workspace.FilesUnder(root, ct).Where(f => filter is null || filter.IsMatch(Path.GetRelativePath(root, f).Replace('\\', '/')))
             : throw new ToolError($"{c.Workspace.Show(root)} does not exist.");
         var output = new List<string>();
         var matches = 0;
@@ -533,29 +537,33 @@ internal static class LocalTools
         {
             throw new ToolError($"git here only reads ({string.Join(", ", GitReading)}). Use run_shell for {(args.Count > 0 ? args[0] : "the rest")}.");
         }
-        // Options that write files, run programs or change branches stay with run_shell.
-        if (args.Any(x => x.StartsWith("--output", StringComparison.Ordinal) || x == "--ext-diff" || x.StartsWith("--exec", StringComparison.Ordinal))
-            || (args[0] == "branch" && args.Skip(1).Any(x => !(x is "-a" or "--all" or "-r" or "--remotes" or "-v" or "-vv" or "--list" or "--show-current" or "--merged" or "--no-merged" or "--contains"))))
+        // Options that write files, run programs, change branches or look into submodules (whose settings are their own) stay with run_shell.
+        if (args.Any(x => x.StartsWith("--output", StringComparison.Ordinal) || x is "--ext-diff" or "--textconv" || x.StartsWith("--exec", StringComparison.Ordinal)
+                || x.StartsWith("--submodule", StringComparison.Ordinal) || x.StartsWith("--ignore-submodules", StringComparison.Ordinal) || x.StartsWith("--recurse-submodules", StringComparison.Ordinal))
+            || (args[0] == "branch" && args.Skip(1).Any(x => !(x is "-a" or "--all" or "-r" or "--remotes" or "-v" or "-vv" or "--list" or "--show-current" or "--merged" or "--no-merged" or "--contains")))
+            || (args[0] == "describe" && args.Any(x => x.StartsWith("--dirty", StringComparison.Ordinal) || x.StartsWith("--broken", StringComparison.Ordinal))))
         {
             throw new ToolError("That git call changes something or runs a program: use run_shell.");
         }
-        var psi = new ProcessStartInfo("git") { WorkingDirectory = c.Workspace.Root };
-        foreach (var arg in new[] { "--no-pager", "-c", "color.ui=never", "-c", "core.fsmonitor=", "-c", "core.quotepath=off" })
+        // Reading stays in the working directory, as read_file's does: not git diff --no-index /etc/shadow, nor blame --contents.
+        if (args.Contains("--no-index") || args.Skip(1).Select(x => x.StartsWith('-') ? x.IndexOf('=') is var eq and > 0 ? x[(eq + 1)..] : null : x)
+                .Any(p => p is { Length: > 0 } && (Path.IsPathRooted(p) || p.Split('/', '\\').Contains("..")) && !c.Workspace.Allowed(Path.TrimEndingDirectorySeparator(Path.GetFullPath(p, c.Workspace.Root)))))
         {
-            psi.ArgumentList.Add(arg);
+            throw new ToolError("git here reads the working directory only: a path outside it is refused.");
         }
-        psi.ArgumentList.Add(args[0]);
-        if (args[0] is "diff" or "log" or "show")
+        // What git turns text into, or diffs with, would be a program the repository's settings name.
+        string[] guards = args[0] switch
         {
-            psi.ArgumentList.Add("--no-ext-diff");
-        }
-        foreach (var arg in args.Skip(1))
-        {
-            psi.ArgumentList.Add(arg);
-        }
+            "diff" => ["--no-ext-diff", "--no-textconv", "--ignore-submodules=all"],
+            "log" or "show" => ["--no-ext-diff", "--no-textconv"],
+            "blame" => ["--no-textconv"],
+            "status" => ["--ignore-submodules=all"],
+            _ => [],
+        };
         Proc.Result run;
         try
         {
+            var psi = await Task.Run(() => CodeArena.Git.Command(c.Workspace.Root, ["--no-pager", "-c", "color.ui=never", args[0], .. guards, .. args.Skip(1)], filters: true), ct);
             run = await Proc.RunAsync(psi, TimeSpan.FromSeconds(60), ct);
         }
         catch (System.ComponentModel.Win32Exception)

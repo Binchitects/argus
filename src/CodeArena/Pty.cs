@@ -62,7 +62,7 @@ internal static class Pty
 }
 
 /// <summary>
-/// openpty makes the terminal; posix_spawn starts the program on its other
+/// posix_openpt makes the terminal; posix_spawn starts the program on its other
 /// side, in a session of its own, with the terminal as its keyboard and screen
 /// and as its controlling terminal (so job control and Ctrl+C work): opened by
 /// name once the new session exists, which makes it the session's terminal on
@@ -77,17 +77,23 @@ internal static class Pty
 /// </summary>
 internal sealed unsafe class UnixPty : IPty
 {
-    private const int EINTR = 4;
+    private const int EINTR = 4, EINVAL = 22;
     private const short POLLIN = 1;
     private const int O_RDWR = 2;
     private const int SIGHUP = 1, SIGKILL = 9;
     // posix_spawnattr_setflags: the same numbers in glibc and musl; macOS's own.
     private const int SpawnSetSid = 0x80, SpawnSetSigDef = 0x04, SpawnSetSigMask = 0x08, SpawnCloseOnExecDefault = 0x4000;
+    private static readonly int NoCtty = OperatingSystem.IsMacOS() ? 0x20000 : 0x100;
+    private static readonly int CloseOnExecFlag = OperatingSystem.IsMacOS() ? 0x1000000 : 0x80000;
 
     private readonly int _master;
     private readonly object _gate = new();
+    // The terminal's descriptor closing, the shell reaped, and the signals sent: never at once. Not _gate, which a write
+    // the program does not read holds, so a terminal is closed even then.
+    private readonly object _signals = new();
     private int _stopped;
     private bool _disposed;
+    private bool _closed;
     private int? _exit;
 
     private UnixPty(int pid, int master)
@@ -102,26 +108,22 @@ internal sealed unsafe class UnixPty : IPty
     {
         var c = Calls.Find();
         using var native = new NativeMemory();
-        var size = (ushort*)native.Alloc(4 * sizeof(ushort));
-        size[0] = (ushort)rows;
-        size[1] = (ushort)cols;
-        int master, slave;
-        if (((delegate* unmanaged[Cdecl]<int*, int*, byte*, void*, ushort*, int>)c.OpenPty)(&master, &slave, null, null, size) != 0)
-        {
-            throw new IOException($"Could not make a terminal: {Marshal.GetPInvokeErrorMessage(Marshal.GetLastSystemError())}");
-        }
-        // Neither end for the programs started later, nor for this one (it opens the terminal by name).
-        CloseOnExec(master);
-        CloseOnExec(slave);
+        // Close-on-exec from the start: a program another thread starts meanwhile (another terminal, git, run_shell)
+        // inherits nothing of it. Only the name goes to the program, which opens the terminal itself.
+        var master = OpenMaster();
         try
         {
-            var name = (byte*)native.Alloc(512);
-            var error = ttyname_r(slave, name, 512);
-            if (error != 0)
+            if (grantpt(master) != 0 || unlockpt(master) != 0)
             {
-                throw new IOException($"Could not make a terminal: {Marshal.GetPInvokeErrorMessage(error)}");
+                throw new IOException($"Could not make a terminal: {Marshal.GetLastPInvokeErrorMessage()}");
+            }
+            var name = (byte*)native.Alloc(512);
+            if (ptsname_r(master, name, 512) != 0)
+            {
+                throw new IOException($"Could not make a terminal: {Marshal.GetLastPInvokeErrorMessage()}");
             }
             var tty = Marshal.PtrToStringUTF8((nint)name)!;
+            SetSize(master, cols, rows);
             string file;
             List<string> argv;
             if (helper is { Count: > 0 })
@@ -146,10 +148,9 @@ internal sealed unsafe class UnixPty : IPty
                 if (helper is { Count: > 0 })
                 {
                     // The helper makes the session and takes the terminal itself; until then (and for what it says when it cannot) the terminal is its screen.
-                    for (var fd = 0; fd <= 2; fd++)
-                    {
-                        Check(posix_spawn_file_actions_adddup2(actions, slave, fd), program);
-                    }
+                    Check(posix_spawn_file_actions_addopen(actions, 0, native.String(tty), O_RDWR | NoCtty, 0), program);
+                    Check(posix_spawn_file_actions_adddup2(actions, 0, 1), program);
+                    Check(posix_spawn_file_actions_adddup2(actions, 0, 2), program);
                 }
                 else
                 {
@@ -192,10 +193,22 @@ internal sealed unsafe class UnixPty : IPty
             close(master);
             throw;
         }
-        finally
+    }
+
+    /// <summary>The terminal's side for this program, close-on-exec as it is made.</summary>
+    private static int OpenMaster()
+    {
+        var master = posix_openpt(O_RDWR | NoCtty | CloseOnExecFlag);
+        if (master < 0 && Marshal.GetLastPInvokeError() == EINVAL)
         {
-            close(slave);
+            // A C library that takes only O_RDWR and O_NOCTTY here: close-on-exec at once, as openpty leaves it to be.
+            master = posix_openpt(O_RDWR | NoCtty);
+            if (master >= 0)
+            {
+                CloseOnExec(master);
+            }
         }
+        return master >= 0 ? master : throw new IOException($"Could not make a terminal: {Marshal.GetLastPInvokeErrorMessage()}");
     }
 
     private static void Check(int error, string program)
@@ -208,6 +221,24 @@ internal sealed unsafe class UnixPty : IPty
 
     // ioctl(fd, FIOCLEX) has no third argument, which keeps it clear of how each system passes variadic ones.
     private static void CloseOnExec(int fd) => ioctl(fd, OperatingSystem.IsMacOS() ? 0x20006601u : 0x5451u);
+
+    /// <summary>TIOCSWINSZ: the kernel tells the program with SIGWINCH.</summary>
+    private static void SetSize(int fd, int cols, int rows)
+    {
+        var size = stackalloc ushort[4];
+        size[0] = (ushort)Math.Clamp(rows, 2, Pty.MaxRows);
+        size[1] = (ushort)Math.Clamp(cols, 2, Pty.MaxCols);
+        size[2] = size[3] = 0;
+        if (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+        {
+            // Apple's ARM64 passes variadic arguments on the stack: past the eight registers, as here.
+            ioctl(fd, 0x80087467u, 0, 0, 0, 0, 0, 0, size);
+        }
+        else
+        {
+            ioctl(fd, OperatingSystem.IsMacOS() ? 0x80087467u : 0x5414u, size);
+        }
+    }
 
     public int Read(byte[] buffer)
     {
@@ -277,20 +308,7 @@ internal sealed unsafe class UnixPty : IPty
             {
                 return;
             }
-            var size = stackalloc ushort[4];
-            size[0] = (ushort)Math.Clamp(rows, 2, Pty.MaxRows);
-            size[1] = (ushort)Math.Clamp(cols, 2, Pty.MaxCols);
-            size[2] = size[3] = 0;
-            // TIOCSWINSZ; the kernel tells the program with SIGWINCH.
-            if (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
-            {
-                // Apple's ARM64 passes variadic arguments on the stack: past the eight registers, as here.
-                ioctl(_master, 0x80087467u, 0, 0, 0, 0, 0, 0, size);
-            }
-            else
-            {
-                ioctl(_master, OperatingSystem.IsMacOS() ? 0x80087467u : 0x5414u, size);
-            }
+            SetSize(_master, cols, rows);
         }
     }
 
@@ -309,26 +327,109 @@ internal sealed unsafe class UnixPty : IPty
                 continue;
             }
             // Reaped by someone else (a parent that ignores SIGCHLD makes the runtime reap every child).
-            return _exit ??= -1;
+            lock (_signals)
+            {
+                return _exit ??= -1;
+            }
         }
         var signal = status & 0x7f;
-        return (_exit = signal == 0 ? (status >> 8) & 0xff : 128 + signal).Value;
+        // At once: from here on its number may be given to another program, which Kill must not signal.
+        lock (_signals)
+        {
+            return (_exit = signal == 0 ? (status >> 8) & 0xff : 128 + signal).Value;
+        }
     }
 
+    /// <summary>SIGHUP to what runs in the terminal, and SIGKILL 3 s later to what is left, whatever became of the shell.</summary>
     public void Kill()
     {
-        // The shell leads its own session and process group (setsid): the whole group hears it.
-        kill(-Pid, SIGHUP);
-        kill(Pid, SIGHUP);
-        var pid = Pid;
-        _ = Task.Delay(TimeSpan.FromSeconds(3)).ContinueWith(_ =>
+        Signal(SIGHUP);
+        _ = Task.Delay(TimeSpan.FromSeconds(3)).ContinueWith(_ => Signal(SIGKILL), TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// A signal to what runs in this terminal: the shell (until it is reaped,
+    /// after which its number may be another program's) and its process group,
+    /// the group in the terminal's foreground (a shell with job control gives
+    /// each job a group of its own), and on Linux every group in the shell's
+    /// session, the jobs in the background too. A program that leaves the
+    /// session (setsid, a daemon, tmux) is not the terminal's any more.
+    /// </summary>
+    private void Signal(int signal)
+    {
+        lock (_signals)
         {
+            var groups = new HashSet<int>();
             if (_exit is null)
             {
-                kill(-pid, SIGKILL);
-                kill(pid, SIGKILL);
+                groups.Add(Pid);
             }
-        }, TaskScheduler.Default);
+            if (!_closed && Foreground() is var foreground and > 0)
+            {
+                groups.Add(foreground);
+            }
+            if (OperatingSystem.IsLinux())
+            {
+                groups.UnionWith(SessionGroups(Pid));
+            }
+            foreach (var group in groups)
+            {
+                kill(-group, signal);
+            }
+            if (_exit is null)
+            {
+                kill(Pid, signal);
+            }
+        }
+    }
+
+    /// <summary>The terminal's foreground process group (TIOCGPGRP, which this side answers on Linux and macOS); 0 when there is none.</summary>
+    private int Foreground()
+    {
+        var group = 0;
+        var r = OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+            ? ioctl(_master, 0x40047477u, 0, 0, 0, 0, 0, 0, &group)
+            : ioctl(_master, OperatingSystem.IsMacOS() ? 0x40047477u : 0x540Fu, &group);
+        return r < 0 ? 0 : group;
+    }
+
+    /// <summary>The process groups of a session's processes, from /proc/PID/stat ("pid (name) state ppid pgrp session ...").</summary>
+    private static HashSet<int> SessionGroups(int session)
+    {
+        var groups = new HashSet<int>();
+        IEnumerable<string> all;
+        try
+        {
+            all = Directory.EnumerateDirectories("/proc");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return groups;
+        }
+        foreach (var dir in all)
+        {
+            if (!int.TryParse(Path.GetFileName(dir), out _))
+            {
+                continue;
+            }
+            string stat;
+            try
+            {
+                stat = File.ReadAllText(Path.Combine(dir, "stat"));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                continue; // ended meanwhile
+            }
+            // The name may hold spaces and brackets: the fields start after its last ')'.
+            var end = stat.LastIndexOf(')');
+            var fields = end < 0 || end + 2 > stat.Length ? [] : stat[(end + 2)..].Split(' ');
+            if (fields.Length > 3 && int.TryParse(fields[3], out var sid) && sid == session && int.TryParse(fields[2], out var group) && group > 0)
+            {
+                groups.Add(group);
+            }
+        }
+        return groups;
     }
 
     public void Stop() => Volatile.Write(ref _stopped, 1);
@@ -343,7 +444,11 @@ internal sealed unsafe class UnixPty : IPty
             }
             _disposed = true;
             Volatile.Write(ref _stopped, 1);
-            close(_master);
+            lock (_signals)
+            {
+                _closed = true;
+                close(_master);
+            }
         }
     }
 
@@ -355,22 +460,19 @@ internal sealed unsafe class UnixPty : IPty
         public short Revents;
     }
 
-    /// <summary>The C functions that are not where DllImport looks on every system: openpty (libutil in older glibc) and the optional chdir action.</summary>
+    /// <summary>The C function that not every C library has: the optional chdir action.</summary>
     private sealed class Calls
     {
         private static readonly Lazy<Calls> Found = new(() => new Calls());
 
-        public nint OpenPty { get; }
         /// <summary>posix_spawn_file_actions_addchdir_np; 0 where the C library has none.</summary>
         public nint AddChdir { get; }
 
         private Calls()
         {
-            string[] names = OperatingSystem.IsMacOS() ? ["/usr/lib/libSystem.B.dylib", "libc"] : ["libc", "libc.so.6", "libutil.so.1"];
+            string[] names = OperatingSystem.IsMacOS() ? ["/usr/lib/libSystem.B.dylib", "libc"] : ["libc", "libc.so.6"];
             var libraries = names.Select(n => NativeLibrary.TryLoad(n, out var h) ? h : 0).Where(h => h != 0).ToList();
-            nint Of(string name) => libraries.Select(l => NativeLibrary.TryGetExport(l, name, out var f) ? f : 0).FirstOrDefault(f => f != 0);
-            OpenPty = Of("openpty") is not 0 and var openpty ? openpty : throw new PlatformNotSupportedException("This system's C library has no openpty: no terminal here.");
-            AddChdir = Of("posix_spawn_file_actions_addchdir_np");
+            AddChdir = libraries.Select(l => NativeLibrary.TryGetExport(l, "posix_spawn_file_actions_addchdir_np", out var f) ? f : 0).FirstOrDefault(f => f != 0);
         }
 
         public static Calls Find() => Found.Value;
@@ -435,8 +537,17 @@ internal sealed unsafe class UnixPty : IPty
     [DllImport("libc", SetLastError = true)]
     private static extern int waitpid(int pid, int* status, int options);
 
-    [DllImport("libc")]
-    private static extern int ttyname_r(int fd, byte* buffer, nuint size);
+    [DllImport("libc", SetLastError = true)]
+    private static extern int posix_openpt(int flags);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int grantpt(int fd);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int unlockpt(int fd);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int ptsname_r(int fd, byte* buffer, nuint size);
 
     [DllImport("libc")]
     private static extern int sigfillset(nint set);
@@ -771,7 +882,17 @@ internal sealed unsafe class WindowsPty : IPty
         return GetExitCodeProcess(_process, out var code) ? (int)code : -1;
     }
 
-    public void Kill() => TerminateProcess(_process, 1);
+    public void Kill()
+    {
+        lock (_gate)
+        {
+            // Once disposed, the handle is closed and its number may be another's.
+            if (!_disposed)
+            {
+                TerminateProcess(_process, 1);
+            }
+        }
+    }
 
     /// <summary>Closing the console ends its output pipe, so Read returns 0 (and the programs still attached are told to close).</summary>
     public void Stop()

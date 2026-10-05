@@ -89,6 +89,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private readonly HttpServer _server;
     private readonly object _gate = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Approval>> _waiting = new();
+    private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Job? _job;
     // The edits made in this run, by result message, with the whole file's lines: the session file keeps only old and new text.
     private readonly Dictionary<string, JsonObject> _diffs = [];
@@ -113,6 +114,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     public int Port => _server.Endpoint.Port;
     /// <summary>The address to open: the token in it once; the page then lives on a cookie.</summary>
     public string Address => $"http://127.0.0.1:{Port}/?token={Token}";
+    /// <summary>Done once a browser has come with the address.</summary>
+    public Task Opened => _opened.Task;
     /// <summary>Per port: two runs side by side keep their own.</summary>
     private string CookieName => $"code_arena_{Port}";
 
@@ -160,6 +163,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 return;
             }
             // The key moves to a cookie, and out of the address bar and the history.
+            _opened.TrySetResult();
             res.Headers["Set-Cookie"] = $"{CookieName}={Token}; Path=/; HttpOnly; SameSite=Strict";
             res.Headers["Location"] = "/";
             await res.SendAsync(302, [], null, ct);

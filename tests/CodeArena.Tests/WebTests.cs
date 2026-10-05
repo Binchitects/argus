@@ -342,6 +342,42 @@ public sealed partial class WebTests : IDisposable
     }
 
     [Fact]
+    public async Task The_browser_is_opened_with_a_file_of_the_persons_own_never_with_the_key_on_its_command_line()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var opened = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var web = await WebRun.StartAsync(h, bare: false, browse: url => opened.TrySetResult(url));
+        string file;
+        try
+        {
+            // A command line is open to every user of the machine (ps, /proc): the browser's holds a file's name, not the key.
+            var url = await opened.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.StartsWith("file://", url);
+            Assert.DoesNotContain(web.Token, url);
+            file = new Uri(url).LocalPath;
+            Assert.StartsWith(h.Paths.DataDir, file);
+            // The file sends the browser on to the address, which is printed for the person as before.
+            Assert.Contains($"url={web.Address}", File.ReadAllText(file));
+            Assert.Contains(web.Address, web.Out);
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file));
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.GetDirectoryName(file)!));
+            }
+            // Followed, it opens the IDE.
+            using var anonymous = WebRun.Client(web.Port, token: null);
+            var entry = await anonymous.GetAsync(web.Address);
+            Assert.Equal(HttpStatusCode.Redirect, entry.StatusCode);
+        }
+        finally
+        {
+            await web.DisposeAsync();
+        }
+        // And it goes with the run.
+        Assert.False(File.Exists(file));
+    }
+
+    [Fact]
     public async Task Without_its_page_built_in_web_says_so_plainly_and_the_bare_command_talks_in_the_terminal()
     {
         using var h = new Harness(_gateway, _mcp);

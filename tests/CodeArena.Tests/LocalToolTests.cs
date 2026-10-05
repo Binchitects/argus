@@ -98,6 +98,96 @@ public sealed class LocalToolTests : IDisposable
     }
 
     [Fact]
+    public async Task A_link_leads_where_the_system_takes_it_not_where_its_name_points()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // links need a right of their own there
+        }
+        var outside = Directory.CreateTempSubdirectory("arena-outside-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(outside, "dir"));
+            var secret = Path.Combine(outside, "secret.txt");
+            File.WriteAllText(secret, "keep out\n");
+            Write("inside.txt", "in\n");
+            // out leads outside (refused on its own). Through it, .. is outside's own folder, not this one: x.txt is
+            // inside by name only, as the system reads it. Nor is z.txt, which points at nothing yet.
+            Directory.CreateSymbolicLink(Path.Combine(_root, "out"), Path.Combine(outside, "dir"));
+            File.CreateSymbolicLink(Path.Combine(_root, "x.txt"), "out/../secret.txt");
+            File.CreateSymbolicLink(Path.Combine(_root, "z.txt"), "out/../planted.txt");
+            // d is the top of the disk: d/../etc/hostname is /etc/hostname.
+            Directory.CreateSymbolicLink(Path.Combine(_root, "d"), "/");
+            File.CreateSymbolicLink(Path.Combine(_root, "y.txt"), "d/../etc/hostname");
+            File.CreateSymbolicLink(Path.Combine(_root, "loop.txt"), "loop.txt");
+            // Out through a link and back in: inside, where it leads.
+            File.CreateSymbolicLink(Path.Combine(_root, "back.txt"), $"out/../../{Path.GetFileName(_root)}/inside.txt");
+
+            foreach (var path in new[] { "x.txt", "y.txt", "z.txt", "loop.txt", "out/secret.txt" })
+            {
+                var read = await Assert.ThrowsAsync<ToolError>(() => Run("read_file", Args(new { path }), Context()));
+                Assert.Contains("outside the working directory", read.Message);
+            }
+            await Assert.ThrowsAsync<ToolError>(() => Run("write_file", Args(new { path = "x.txt", content = "owned" }), Context()));
+            await Assert.ThrowsAsync<ToolError>(() => Run("edit_file", Args(new { path = "x.txt", old_string = "keep", new_string = "owned" }), Context()));
+            await Assert.ThrowsAsync<ToolError>(() => Run("write_file", Args(new { path = "z.txt", content = "planted" }), Context()));
+            Assert.Equal("keep out\n", File.ReadAllText(secret));
+            Assert.False(File.Exists(Path.Combine(outside, "planted.txt")));
+            Assert.Equal("     1\tin\n", (await Run("read_file", Args(new { path = "back.txt" }), Context())).Text);
+
+            // Searched and listed as read: what leads outside is not there.
+            Assert.Equal("No matches.", (await Run("grep", Args(new { pattern = "keep out" }), Context())).Text);
+            Assert.Equal(["back.txt", "inside.txt"], (await Run("glob", Args(new { pattern = "*.txt" }), Context())).Text.Split('\n').Order());
+        }
+        finally
+        {
+            Directory.Delete(outside, true);
+        }
+    }
+
+    [Fact]
+    public async Task A_name_with_spaces_around_it_is_that_name_when_something_has_it()
+    {
+        Write("notes", "plain\n");
+        Write("notes ", "spaced\n");
+        Assert.Equal("     1\tspaced\n", (await Run("read_file", Args(new { path = "notes " }), Context())).Text);
+        Assert.Equal("     1\tplain\n", (await Run("read_file", Args(new { path = " notes" }), Context())).Text);
+    }
+
+    [Fact]
+    public async Task Grep_skips_what_it_cannot_read_and_nothing_waits_on_a_named_pipe()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        Write("ok.txt", "needle\n");
+        var locked = Special.Locked(Write("locked.txt", "needle\n"));
+        Special.Pipe(Path.Combine(_root, "pipe"));
+
+        // Each on a thread of its own: a read that waits on the pipe would wait for ever.
+        var found = await Task.Run(() => Run("grep", Args(new { pattern = "needle" }), Context())).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(locked ? "ok.txt:1: needle" : "locked.txt:1: needle\nok.txt:1: needle", string.Join('\n', found.Text.Split('\n').Order()));
+        var pipe = await Assert.ThrowsAsync<ToolError>(() => Task.Run(() => Run("read_file", Args(new { path = "pipe" }), Context())).WaitAsync(TimeSpan.FromSeconds(20)));
+        Assert.Contains("not a regular file", pipe.Message);
+        var write = await Assert.ThrowsAsync<IOException>(() => Task.Run(() => Run("write_file", Args(new { path = "pipe", content = "x" }), Context())).WaitAsync(TimeSpan.FromSeconds(20)));
+        Assert.Contains("not a regular file", write.Message);
+        Assert.Equal("ok.txt", (await Task.Run(() => Run("glob", Args(new { pattern = "ok*" }), Context())).WaitAsync(TimeSpan.FromSeconds(20))).Text);
+    }
+
+    [Fact]
+    public async Task A_glob_that_is_not_valid_is_said_back_not_thrown()
+    {
+        Write("src/a.txt", "x\n");
+        foreach (var pattern in new[] { "src/{a,b", "[]", "[z-a].txt" })
+        {
+            var glob = await Assert.ThrowsAsync<ToolError>(() => Run("glob", Args(new { pattern }), Context()));
+            Assert.Contains("is not a valid glob", glob.Message);
+            await Assert.ThrowsAsync<ToolError>(() => Run("grep", Args(new { pattern = "x", glob = pattern }), Context()));
+        }
+    }
+
+    [Fact]
     public async Task Read_file_numbers_the_lines_and_says_how_to_read_on()
     {
         Write("long.txt", string.Join('\n', Enumerable.Range(1, 2500).Select(i => $"line {i}")));
@@ -181,6 +271,51 @@ public sealed class LocalToolTests : IDisposable
         Assert.Contains("run_shell", refused.Message);
         await Assert.ThrowsAsync<ToolError>(() => Run("git", Args(new { args = new[] { "branch", "-D", "main" } }), Context()));
         await Assert.ThrowsAsync<ToolError>(() => Run("git", Args(new { args = new[] { "diff", "--output=/tmp/x" } }), Context()));
+    }
+
+    [Fact]
+    public async Task Git_and_the_file_lists_run_no_program_the_repositorys_own_settings_name()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // the traps are shell commands
+        }
+        using var traps = new GitTraps();
+        var context = new ToolContext { Workspace = new Workspace(traps.Repo), Ui = new Ui(new StringReader(""), _out, _out, color: false, canAsk: false) };
+
+        // grep, glob, the IDE's search and quick open list the files through git: its fsmonitor hook does not run.
+        Assert.Equal([".gitattributes", "a.txt", "b.dat", "c.txt"], context.Workspace.FilesUnder(traps.Repo, CancellationToken.None).Select(Path.GetFileName).Order());
+        Assert.Empty(traps.Ran);
+
+        // Every read the git tool takes: no fsmonitor, hook, filter, text conversion, external diff or signature checker.
+        string[][] reads =
+        [
+            ["status"], ["diff"], ["diff", "HEAD"], ["log", "-p", "-2"], ["log", "-1", "--show-signature"], ["show"], ["show", "HEAD~1"],
+            ["blame", "a.txt"], ["blame", "c.txt"], ["describe", "--always"], ["ls-files", "-m"], ["branch", "-v"], ["rev-parse", "HEAD"], ["shortlog", "-1", "HEAD"],
+        ];
+        var said = new Dictionary<string, string>();
+        foreach (var read in reads)
+        {
+            said[string.Join(' ', read)] = (await Run("git", Args(new { args = read }), context)).Text;
+            Assert.True(traps.Ran.Length == 0, $"git {string.Join(' ', read)} ran {string.Join(", ", traps.Ran)}: {said[string.Join(' ', read)]}");
+        }
+        // And they still read: a.txt changed, as git sees it without the filters.
+        Assert.Contains("modified:   a.txt", said["status"]);
+        Assert.DoesNotContain("c.txt", said["status"]);
+        Assert.Contains("+three", said["diff"]);
+        Assert.Contains("signed", said["log -1 --show-signature"]);
+
+        // Nor does it read outside the working directory, or look into what it cannot guard.
+        foreach (var refused in new[]
+        {
+            new[] { "diff", "--no-index", "a.txt", "/etc/hostname" }, ["diff", "a.txt", "/etc/hostname"], ["diff", "../marks"],
+            ["blame", "--contents=/etc/hostname", "a.txt"], ["blame", "--contents", "/etc/hostname", "a.txt"],
+            ["diff", "--textconv"], ["log", "-p", "--ext-diff"], ["status", "--ignore-submodules=none"], ["log", "--submodule=diff"], ["describe", "--dirty"],
+        })
+        {
+            await Assert.ThrowsAsync<ToolError>(() => Run("git", Args(new { args = refused }), context));
+        }
+        Assert.Empty(traps.Ran);
     }
 
     [Fact]

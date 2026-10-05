@@ -46,6 +46,8 @@ internal sealed class CliEnv
     public CancelKey Cancel { get; } = new();
     /// <summary>The web interface's page; null: the one built into the program.</summary>
     public WebAssets? Web { get; init; }
+    /// <summary>Opens an address in the person's browser, false when there is none; null: the system's own way (Browser.Open).</summary>
+    public Func<string, bool>? Browse { get; init; }
 }
 
 /// <summary>The command line: code-arena (the IDE), chat, [options] prompt, login, logout, models.</summary>
@@ -494,7 +496,12 @@ internal static partial class Cli
                     env.Out.WriteLine();
                     env.Out.WriteLine("Only this machine can open it, and only with the key in the address. Ctrl+C stops it.");
                     env.Out.WriteLine("The agent in this terminal instead: code-arena chat");
-                    if (!o.NoOpen && !Browser.Open(app.Address, env.Env))
+                    using var launcher = o.NoOpen ? null : Launcher.Write(env.Paths.DataDir, app.Port, app.Address);
+                    if (launcher is not null && (env.Browse ?? (url => Browser.Open(url, env.Env)))(launcher.Url))
+                    {
+                        _ = NoBrowserYetAsync(app.Opened, env.Out, linked.Token);
+                    }
+                    else if (!o.NoOpen)
                     {
                         env.Out.WriteLine("Open the address in your browser.");
                     }
@@ -515,6 +522,28 @@ internal static partial class Cli
         finally
         {
             env.Cancel.EndTurn();
+        }
+    }
+
+    /// <summary>
+    /// When no browser has come with the key 20 s after one was opened: says to
+    /// open the address by hand. A browser in a sandbox (a snap, as Ubuntu's
+    /// Firefox is, or a Flatpak) cannot read the launcher in its hidden folder.
+    /// </summary>
+    private static async Task NoBrowserYetAsync(Task opened, TextWriter output, CancellationToken ct)
+    {
+        try
+        {
+            await opened.WaitAsync(TimeSpan.FromSeconds(20), ct);
+        }
+        catch (TimeoutException)
+        {
+            output.WriteLine("No browser has opened the IDE yet: open the address above in yours. (A browser in a sandbox, as a snap or a Flatpak, cannot read the file code-arena opened it with.)");
+            output.Flush();
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopped first.
         }
     }
 
@@ -634,5 +663,76 @@ internal static partial class Cli
             rt.Ui.Error(error);
         }
         return code;
+    }
+}
+
+/// <summary>
+/// What the browser is opened with: a page in a file of the person's own (0600,
+/// in a folder of theirs alone, 0700) that sends it on to the address. The
+/// address holds the run's key, and a program's command line is open to every
+/// user of the machine (ps, /proc/PID/cmdline): only the file's name goes on
+/// the browser's, as Jupyter does it. The file goes when the run ends.
+/// </summary>
+internal sealed class Launcher : IDisposable
+{
+    private Launcher(string path) => Path = path;
+
+    public string Path { get; }
+
+    /// <summary>The file as a file:// address: not a path, which a system could run as a program.</summary>
+    public string Url => new Uri(Path).AbsoluteUri;
+
+    /// <summary>The launcher for this port in the data folder's "open"; null when it cannot be written there (the address is still printed).</summary>
+    public static Launcher? Write(string dataDir, int port, string address)
+    {
+        var dir = System.IO.Path.Combine(dataDir, "open");
+        var file = System.IO.Path.Combine(dir, $"code-arena-{port}.html");
+        var html = System.Net.WebUtility.HtmlEncode(address);
+        try
+        {
+            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+            if (OperatingSystem.IsWindows())
+            {
+                Directory.CreateDirectory(dir); // the person's own profile: only theirs to read
+            }
+            else
+            {
+                Directory.CreateDirectory(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                // Made before, or by an older version: theirs alone now, and not a link to elsewhere.
+                if (new DirectoryInfo(dir).LinkTarget is not null)
+                {
+                    return null;
+                }
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+            // One left by a run that did not end well, on the same port.
+            File.Delete(file);
+            using (var stream = new FileStream(file, options))
+            using (var writer = new StreamWriter(stream))
+            {
+                writer.Write($"""
+                    <!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={html}"><meta name="referrer" content="no-referrer"><title>Code Arena</title></head>
+                    <body style="font: 15px/1.5 system-ui, sans-serif; max-width: 36rem; margin: 15vh auto; padding: 0 1rem"><p>Opening Code Arena. If it does not open, <a href="{html}">open it here</a>.</p></body></html>
+                    """);
+            }
+            return new Launcher(file);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            File.Delete(Path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Gone already; or kept, holding a key that ends with this run.
+        }
     }
 }

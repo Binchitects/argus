@@ -40,7 +40,8 @@ internal sealed class IdeFiles(Workspace workspace)
     /// The full path of a path the page gave: relative to the working directory
     /// (empty: the folder itself), with no .. in it, and not through a link that
     /// leads outside. An absolute path, a drive or .. is refused, even where it
-    /// would end up inside: the page never sends one. ~ is a name like any other.
+    /// would end up inside: the page never sends one. ~ is a name like any other,
+    /// and the name is taken exactly as given (`notes ` is not `notes`).
     /// </summary>
     public string Resolve(string? path)
     {
@@ -57,38 +58,14 @@ internal sealed class IdeFiles(Workspace workspace)
         {
             throw Outside(path);
         }
-        try
-        {
-            return workspace.Resolve(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, workspace.Root)));
-        }
-        catch (ToolError)
-        {
-            throw Outside(path);
-        }
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, workspace.Root));
+        return workspace.Allowed(full) ? full : throw Outside(path);
     }
 
+    // A .. between backslashes is refused everywhere, as Windows would read it.
     private static readonly char[] Separators = ['/', '\\'];
 
     private IdeError Outside(string path) => new(403, "outside", $"{path} is outside the folder Code Arena works in ({workspace.Root}).");
-
-    /// <summary>
-    /// Whether a file found by the listing (git's, or the walk) is one to show:
-    /// not a link, or one that stays inside, and not in a folder reached through a
-    /// link that leads out. Each folder is looked at once per call.
-    /// </summary>
-    private Func<string, bool> StaysInside()
-    {
-        var folders = new Dictionary<string, bool>(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        return full =>
-        {
-            var dir = Path.GetDirectoryName(full) ?? workspace.Root;
-            if (!folders.TryGetValue(dir, out var ok))
-            {
-                folders[dir] = ok = workspace.Allowed(dir);
-            }
-            return ok && (new FileInfo(full).LinkTarget is null || workspace.Allowed(full));
-        };
-    }
 
     /// <summary>A path the page gave, which must not be the working directory itself.</summary>
     private string ResolveEntry(string? path)
@@ -118,16 +95,9 @@ internal sealed class IdeFiles(Workspace workspace)
         var entries = new List<(bool Dir, string Name, JsonObject Json)>();
         foreach (var info in new DirectoryInfo(dir).EnumerateFileSystemInfos())
         {
-            if (Hidden.Contains(info.Name))
-            {
-                continue;
-            }
-            string full;
-            try
-            {
-                full = workspace.Resolve(info.FullName);
-            }
-            catch (ToolError)
+            // What is not a link, in a folder that leads inside, is inside; a link is followed to see.
+            var full = Path.TrimEndingDirectorySeparator(info.FullName);
+            if (Hidden.Contains(info.Name) || info.LinkTarget is not null && !workspace.Allowed(full))
             {
                 continue;
             }
@@ -152,8 +122,7 @@ internal sealed class IdeFiles(Workspace workspace)
     {
         var files = new List<string>();
         var truncated = false;
-        var inside = StaysInside();
-        foreach (var full in Files.Under(workspace.Root, ct).Where(inside))
+        foreach (var full in workspace.FilesUnder(workspace.Root, ct))
         {
             if (files.Count == MaxListed)
             {
@@ -185,6 +154,11 @@ internal sealed class IdeFiles(Workspace workspace)
         if (!info.Exists)
         {
             throw new IdeError(404, "not_found", $"There is no file {Show(full)}.");
+        }
+        if (!Files.Regular(full))
+        {
+            // Opening a named pipe waits for a writer: the request would never end.
+            throw new IdeError(400, "special", $"{Show(full)} is not a regular file (a named pipe, a socket or a device): it does not open here.");
         }
         var result = new JsonObject { ["path"] = Show(full), ["size"] = info.Length, ["version"] = Version(full), ["text"] = null };
         if (info.Length > MaxTextBytes)
@@ -336,8 +310,7 @@ internal sealed class IdeFiles(Workspace workspace)
         var truncated = false;
         try
         {
-            var inside = StaysInside();
-            foreach (var full in Files.Under(workspace.Root, limit.Token).OrderBy(f => f, StringComparer.Ordinal).Where(inside))
+            foreach (var full in workspace.FilesUnder(workspace.Root, limit.Token).OrderBy(f => f, StringComparer.Ordinal))
             {
                 limit.Token.ThrowIfCancellationRequested();
                 var relative = Show(full);
@@ -410,9 +383,18 @@ internal sealed class IdeFiles(Workspace workspace)
         return new JsonObject { ["files"] = results, ["count"] = count, ["truncated"] = truncated };
     }
 
-    /// <summary>"src/**/*.ts, docs": globs, a name alone matching at any depth, a folder matching what is in it.</summary>
-    private static List<Regex> Globs(string? list) =>
-        [.. (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).SelectMany(g => new[] { Files.Glob(g), Files.Glob(g.TrimEnd('/') + "/**") })];
+    /// <summary>"src/**/*.ts, docs": globs, a name alone matching at any depth, a folder matching what is in it. One not valid is refused (400).</summary>
+    private static List<Regex> Globs(string? list)
+    {
+        try
+        {
+            return [.. (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).SelectMany(g => new[] { Files.Glob(g), Files.Glob(g.TrimEnd('/') + "/**") })];
+        }
+        catch (ToolError e)
+        {
+            throw new IdeError(400, "invalid", e.Message);
+        }
+    }
 
     private static bool Matches(Regex glob, string path)
     {
