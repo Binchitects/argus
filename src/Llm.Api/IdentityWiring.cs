@@ -302,6 +302,7 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.WebFetcher>();
         services.AddSingleton<Chat.Tools.WebPageCache>();
         services.AddScoped<Chat.Tools.WebTool>();
+        Chat.Tools.LayaTool.AddLaya(services, config);
         services.AddScoped<Chat.Tools.ToolRegistry>();
         Knowledge.KnowledgeWiring.AddKnowledge(services, config);
         services.AddSingleton<Chat.Tools.ToolApprovals>();

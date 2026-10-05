@@ -8,6 +8,9 @@
 #   services:
 #     videogen: { profiles: [off] }
 #
+# Laya (typed decisions on the CPU) is the one module off until asked for:
+# COMPOSE_PROFILES=laya in .env.
+#
 # Traefik does TLS: Let's Encrypt when ACME_EMAIL is set, else its own
 # certificate (config/traefik/README.md has a certificate of your own).
 
@@ -94,6 +97,8 @@ services:
       - engine:/engine-config
       - directory:/directory
       - sandbox:/sandbox
+    # The stack's network, and Laya's, which leads nowhere else.
+    networks: [default, laya]
     # Not required: with an external Postgres this stack's is left out.
     depends_on: { postgres: { condition: service_healthy, required: false } }
 
@@ -264,6 +269,26 @@ services:
     tmpfs: ["/work:size=1g,mode=0711", "/tmp:size=64m,mode=0700"]
     volumes: [sandbox:/jobs]
 
+  # Laya: typed decisions (a text and questions in, probabilities out) for the chat's
+  # Decide tool and Code Arena, on the CPU. Off unless COMPOSE_PROFILES names laya. The
+  # app fetches its two checkpoints into MODELS_DIR/laya; it reads them, and reaches
+  # nothing: its network has no way out, and only the app is on it.
+  laya:
+    <<: *service
+    build: ./services/laya
+    container_name: laya
+    profiles: [laya]
+    user: "65534:65534"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment: { LAYA_THREADS: "4" }
+    volumes: ["${MODELS_DIR:-./models}:/models:ro"]
+    networks: [laya]
+    mem_limit: 6g
+    cpus: 4
+
   # The chat's web search.
   searxng:
     <<: *service
@@ -350,6 +375,10 @@ services:
       CPU_POWER_LIMIT_W: ${CPU_POWER_LIMIT_W:-}
     volumes: [./services/power-limits.sh:/power-limits.sh:ro, power-limits:/state]
     entrypoint: [/bin/sh, /power-limits.sh]
+
+networks:
+  # Between the app and Laya only: internal, so no way out of the stack.
+  laya: { internal: true }
 
 volumes:
   acme:

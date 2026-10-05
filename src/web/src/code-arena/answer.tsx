@@ -55,13 +55,14 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   )
 }
 
-/** A call waiting for the person, as Arena asks before a tool runs: Allow, Always for this session, or Deny. */
-export function Approval({ name, always, onDecide }: { name: string; always?: string; onDecide: (answer: 'allow' | 'always' | 'deny') => void }) {
+/** A call waiting for the person, as Arena asks before a tool runs: Allow, Always for this session, or Deny; for a command, what Laya made of it. */
+export function Approval({ name, always, risk, onDecide }: { name: string; always?: string; risk?: string; onDecide: (answer: 'allow' | 'always' | 'deny') => void }) {
   return (
     <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
       <ShieldQuestion className="size-4 shrink-0 text-warning-ink" aria-hidden="true" />
       <span className="min-w-0 flex-1">
         Allow <strong>{toolTitle(name)}</strong> to run with these arguments?
+        {risk && <span className="block text-xs">{risk}</span>}
         {always && <span className="block text-xs text-muted-foreground">Always for this session: no more questions {always}.</span>}
       </span>
       <Button size="sm" variant="outline" className="h-7" onClick={() => onDecide('deny')}>
@@ -111,6 +112,7 @@ export function CodeAnswer({
   config,
   waiting,
   always,
+  risks,
   calls,
   diffs,
   onDecide,
@@ -123,6 +125,8 @@ export function CodeAnswer({
   /** Calls waiting for the person, and what "always" covers for each. */
   waiting: string[]
   always: Record<string, string>
+  /** Laya's probabilities for a command waiting, by call. */
+  risks?: Record<string, string>
   calls?: Record<string, ToolRunning>
   diffs: Record<string, FileDiff>
   onDecide: (callId: string, answer: 'allow' | 'always' | 'deny') => void
@@ -165,7 +169,7 @@ export function CodeAnswer({
                 <div key={t.id}>
                   <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} />
                   {diff && <DiffView diff={diff} />}
-                  {asking && <Approval name={t.function.name} always={always[t.id]} onDecide={(answer) => onDecide(t.id, answer)} />}
+                  {asking && <Approval name={t.function.name} always={always[t.id]} risk={risks?.[t.id]} onDecide={(answer) => onDecide(t.id, answer)} />}
                 </div>
               )
             })}

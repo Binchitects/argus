@@ -32,13 +32,14 @@ secrets:
   gitlabUsername: ""
   gitlabPassword: ""
 
-# Images. The app, web, Argus and sandbox images are built from this repository (docker compose build)
+# Images. The app, web, Argus, sandbox and Laya images are built from this repository (docker compose build)
 # and pushed to a registry the cluster can pull from; the tag defaults to the chart's appVersion.
 images:
   app: { repository: arena-app, tag: "" }
   web: { repository: arena-web, tag: "" }
   argus: { repository: arena-argus, tag: "" }
   sandbox: { repository: arena-sandbox, tag: "" }
+  laya: { repository: arena-laya, tag: "" }
   postgres: { repository: pgvector/pgvector, tag: 0.8.0-pg16 }
   litellm: { repository: ghcr.io/berriai/litellm, tag: main-stable }
   llamacpp: { repository: ghcr.io/ggml-org/llama.cpp, tag: server-cuda }
@@ -127,6 +128,13 @@ sandbox:
 # The chat's web search.
 searxng:
   enabled: true
+
+# Laya: typed decisions (the chat's Decide tool, Code Arena's look at commands), on the CPU. Off unless
+# turned on; the app fetches its two checkpoints (1.5 GB) into the model library's laya folder.
+laya:
+  enabled: false
+  threads: 4
+  resources: { requests: { cpu: "2", memory: 4Gi }, limits: { cpu: "4", memory: 6Gi } }
 
 # Prometheus, Alertmanager and Loki: what the app's dashboards, alerts and logs read. Shipping the
 # pods' logs to Loki (promtail, or the cluster's own agent) is the cluster's.

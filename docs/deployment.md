@@ -1,8 +1,8 @@
 # Deploying Argus Arena
 
 `deploy/` is the whole platform: one `docker-compose.yml`, a short `.env`, and a
-few configuration files. **Every module runs by default**; a module you do not
-want is left out in one line. Each running image prepares itself, and the app
+few configuration files. **Every module runs by default** but Laya; a module you
+do not want is left out in one line. Each running image prepares itself, and the app
 fetches the models the others read: there are no setup containers and no
 setup scripts.
 
@@ -20,6 +20,7 @@ setup scripts.
 | `imagegen`, `videogen` | pictures (FLUX.2 klein) and video (Wan2.2 TI2V 5B), on the GPU |
 | `audio` | speech to text (Whisper) and text to speech (Kokoro, a Persian voice) |
 | `sandbox` | the chat's Python: no network, a read-only root, each run its own user |
+| `laya` | typed decisions on the CPU (the chat's Decide tool, Code Arena's look at commands); **off** until `COMPOSE_PROFILES=laya` ([below](#laya)) |
 | `searxng` | the chat's web search |
 | `prometheus`, `alertmanager`, `loki`, `promtail`, `node-exporter`, `gpu-exporter`, `cpu-temp-exporter` | what the app's dashboards, logs and alerts read |
 | `power-limits` | GPU and CPU power caps from `.env`, kept applied (privileged) |
@@ -119,6 +120,47 @@ The app finds out by itself: a module left out has no name on the stack's
 network, its tools are not offered, and **Admin → Services** says it does not
 run. Keep `traefik`, `app`, `web`, `postgres` and `litellm`.
 
+## Laya
+
+[Laya](https://github.com/NandhaKishorM/laya) (Convai Innovations, Apache-2.0)
+answers typed questions about a text with a probability for every option, in
+one forward pass, on the CPU: the chat's **Decide (Laya)** tool
+([chat.md](chat.md#decide-laya)), which Arena MCP serves to agents, and Code
+Arena's look at commands ([code-arena.md](code-arena.md#laya-looks-at-commands)).
+It is the one module off by default. To turn it on:
+
+```bash
+echo COMPOSE_PROFILES=laya >> .env
+docker compose up -d --build laya
+```
+
+- **Its weights** are not in the image. The app fetches its two checkpoints
+  from Hugging Face (`convaiinnovations/laya`) into the model library, as it
+  does the picture models: the English one (843 MB, calibrated) into
+  `MODELS_DIR/laya/english`, the multilingual one (678 MB, 100+ languages
+  including Persian) into `MODELS_DIR/laya/multilingual`. **Admin → Models**
+  shows the downloads. The server loads each as soon as its files are all
+  there (a couple of seconds), and the tool is offered once one is loaded.
+- **The image** is `python:3.13-slim` with PyTorch's CPU build (no CUDA: the GPU
+  is the chat model's) and `laya` from PyPI, about 1.7 GB. Its server is
+  `services/laya/server.py`: Python's own HTTP server, `POST /v1/decide` and
+  `GET /health` on port 8000, one forward pass at a time.
+- **Locked down.** A read-only root, no capabilities, the library mounted
+  read-only, `HF_HUB_OFFLINE` (it fetches nothing), and a network of its own
+  that is `internal` and holds only the app: it can reach nothing. 4 CPUs and
+  6 GB; both checkpoints loaded take about 2.1 GB (up to 4.8 GB while they
+  load).
+- **How fast**, on 4 threads of an i7-13700K: four questions about an English
+  incident in about 0.6 s; four about a Persian complaint, on the smaller
+  multilingual checkpoint, in about 0.2 s; three yes/no questions about a
+  command in about 0.35 s. Each checkpoint loads in 2 to 3 seconds and answers
+  once at start, so the first call is no slower. More threads (`LAYA_THREADS`
+  and `cpus` in `docker-compose.override.yml`) make one call faster.
+- **Offline**: `scripts/airgap.sh pack --models` carries the two checkpoints
+  when they are in the library.
+- **Helm**: `laya.enabled=true`, with the `arena-laya` image built and pushed
+  like the app's; a NetworkPolicy lets only the app's pods in, and nothing out.
+
 ## Podman
 
 The same files, with `podman.yml` on top, run on rootless Podman (checked with
@@ -205,11 +247,12 @@ copy's **At once**.
 `deploy/helm/argus-arena` runs the same services on Kubernetes: the app with
 several replicas, web, the gateway, Postgres (or an external one), llama.cpp
 and the media servers on GPUs, embed, Argus, the sandbox (no network: a
-NetworkPolicy), SearXNG, Prometheus, Alertmanager and Loki. Each module is
-turned on or off in `values.yaml`. One release per namespace: the services keep
-the names the app reaches them by.
+NetworkPolicy), SearXNG, Prometheus, Alertmanager, Loki, and Laya (off unless
+`laya.enabled`). Each module is turned on or off in `values.yaml`. One release
+per namespace: the services keep the names the app reaches them by.
 
-1. Build the app, web, Argus and sandbox images (`docker compose build`) and push
+1. Build the app, web, Argus and sandbox images, and Laya's if you turn it on
+   (`docker compose build`, with `COMPOSE_PROFILES=laya` for Laya), and push
    them to a registry the cluster pulls from; name them under `images` (the tag
    defaults to the app's version).
 2. Make a TLS Secret for `DOMAIN`, `gateway.DOMAIN` and `argus.DOMAIN` (a
@@ -353,7 +396,7 @@ became fixed, or went away:
 | `MODEL_ENABLE_THINKING`, `MODEL_REASONING_EFFORT`, `THINKING_PRESETS` | Settings → Chat: default thinking, thinking levels offered |
 | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | `config/litellm.yaml` (`max_internal_user_budget`, `internal_user_budget_duration`); each person's credit in Admin → People |
 | `BACKUP_*` | unchanged, still read by `scripts/backup.sh` from `.env` |
-| `COMPOSE_PROFILES` | every module runs; leave one out in `docker-compose.override.yml` |
+| `COMPOSE_PROFILES` | every module runs but Laya (`COMPOSE_PROFILES=laya`); leave one out in `docker-compose.override.yml` |
 | `IMAGEGEN_*` | the picture model is fixed (FLUX.2 klein 4B), fetched by the app; turned on or off, loaded or kept in Admin → Models |
 | `PROMETHEUS_RETENTION_TIME`, `_SIZE`, `*_CPUS`, `*_MEM_LIMIT`, `SANDBOX_*`, `LITELLM_WORKERS`, `EMBED_CPUS` | fixed in `docker-compose.yml` (30 days or 20 GB of metrics; the sandbox's limits); change one in `docker-compose.override.yml`. The longest Python run is Settings → Python and web |
 | `LITELLM_SALT_KEY`, `SEARXNG_SECRET`, `ENGINE_API_BASE`, `LLAMACPP_ENGINE_URL` and `_SHA256`, `ARGUS_VERSION`, `LLM_UID`, `LLM_GID`, `LLM_CONFIG_DIR`, `LLM_SERVICES_DIR`, `LLM_ENV_SAMPLES_DIR`, `COMPOSE_PROJECT_NAME`, `BIND_ADDRESS`, `DOCKER_SOCKET`, `HOST_*`, `LLAMACPP_RAM_RESERVE_GB`, `HOST_SWAPPINESS` | gone: the stack makes or knows them itself (the search secret is new at each start; no web app gets the Docker socket) |
@@ -492,6 +535,9 @@ server from looking. Then `docker compose up -d --pull never`.
 - **A picture or video model waits for its files**: the app is fetching them;
   **Admin → Models → Downloads** shows how far. A download that failed is tried
   again within ten minutes.
+- **Decide (Laya) says it is still fetching or loading**: the same, for
+  `MODELS_DIR/laya`; `docker compose logs laya` says when each checkpoint
+  loaded, or why it could not.
 - **The first chat on a new deployment waits**: the gateway sets up its
   database (160 migrations) for a minute or more after the model serves.
 - **`MODELS_DIR` is not writable**: the app says so on the download; make the

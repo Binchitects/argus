@@ -159,6 +159,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             {
                 instructions.Add(("Arena", text));
             }
+            Permissions.Guard = LayaGuard.For(arenaClient, Workspace, Ui);
         }
         foreach (var task in own)
         {

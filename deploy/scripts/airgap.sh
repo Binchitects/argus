@@ -19,7 +19,7 @@
 #   deploy/          this folder without .env, backups, the models, certs/ (keys) and
 #                    config/traefik/certificate.yml (it names those keys)
 #   models/MODELS    the library's files the app registered (Admin -> Models) and the
-#                    picture, video and embedding servers read: kind, bytes, path.
+#                    picture, video, embedding and decision servers read: kind, bytes, path.
 #                    With --models the files themselves are in models/library/.
 #   audio/           the speech server's models (the arena_audio volume)
 # pack also writes OUT.tar.sha256, to check the copy that reaches the other host.
@@ -45,7 +45,7 @@ TOP=arena-airgap
 PROJECT="${COMPOSE_PROJECT_NAME:-arena}"
 # In the compose file already (cpu-temp-exporter), so it is in every bundle.
 HELPER=python:3.13-slim
-# The picture, video and embedding servers' files, as src/Llm.Api/Models/MediaModels.cs names them.
+# The picture, video, embedding and decision (Laya) servers' files, as src/Llm.Api/Models/MediaModels.cs names them.
 MEDIA_FILES="
 picture image/flux2-klein-4b/flux-2-klein-4b-Q4_0.gguf
 picture image/flux2-klein-4b/Qwen3-4B-Q4_K_M.gguf
@@ -54,6 +54,16 @@ video video/wan2.2-ti2v-5b/Wan2.2-TI2V-5B-Q4_K_M.gguf
 video video/wan2.2-ti2v-5b/umt5-xxl-encoder-Q4_K_M.gguf
 video video/wan2.2-ti2v-5b/wan2.2_vae.safetensors
 embedding embed/nomic-embed-text-v1.5.f16.gguf
+decision laya/english/rl_agent_config.json
+decision laya/english/model.safetensors
+decision laya/english/encoder/config.json
+decision laya/english/tokenizer/tokenizer.json
+decision laya/english/tokenizer/tokenizer_config.json
+decision laya/multilingual/rl_agent_config.json
+decision laya/multilingual/model.safetensors
+decision laya/multilingual/encoder/config.json
+decision laya/multilingual/tokenizer/tokenizer.json
+decision laya/multilingual/tokenizer/tokenizer_config.json
 "
 
 ACTION="${1:-}"
@@ -205,7 +215,7 @@ if [[ $ACTION == pack ]]; then
       if "$ENGINE" image inspect "$ref" >/dev/null 2>&1; then say "    $ref"; else say "    $ref   NOT ON THIS HOST: build or pull it first"; fi
     done
     say "  deploy/: ${#FILES[@]} files (left out: .env, backups, models, certs/ and config/traefik/certificate.yml)"
-    say "  models: the files in $MODELS_DIR the app registered (the ${PROJECT}_engine volume's models.ini) and the picture, video and embedding files there,"
+    say "  models: the files in $MODELS_DIR the app registered (the ${PROJECT}_engine volume's models.ini) and the picture, video, embedding and decision files there,"
     if [[ $WITH_MODELS -eq 1 ]]; then say "    copied into the bundle (--models)"; else say "    listed in models/MODELS (--models copies them)"; fi
     if "$ENGINE" volume inspect "${PROJECT}_audio" >/dev/null 2>&1; then say "  audio: the ${PROJECT}_audio volume (the speech server's models)"; else say "  audio: no ${PROJECT}_audio volume: the bundle will have no speech models"; fi
     say "  then MANIFEST, SHA256SUMS and $(basename "$OUT").sha256"

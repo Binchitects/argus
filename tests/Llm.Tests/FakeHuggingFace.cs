@@ -8,7 +8,7 @@ namespace Llm.Tests;
 
 /// <summary>
 /// Hugging Face as the downloads see it: a search, one GGUF repository (a single-file model,
-/// a split one, a vision projector), a gated one, and files served with range requests.
+/// a split one, a vision projector), a gated one, Laya's checkpoints, and files served with range requests.
 /// </summary>
 public sealed class FakeHuggingFace : HttpMessageHandler
 {
@@ -22,6 +22,25 @@ public sealed class FakeHuggingFace : HttpMessageHandler
         ["Q8_0/Tiny-Q8_0-00002-of-00002.gguf"] = Content("q8-2", 150_000),
         ["mmproj-Tiny-F16.gguf"] = Content("mmproj", 50_000),
         ["README.md"] = Encoding.UTF8.GetBytes("# Tiny"),
+    };
+
+    public const string LayaRepo = "convaiinnovations/laya";
+
+    /// <summary>Laya's repository: the English checkpoint at its root, the others in folders, and what else it holds.</summary>
+    public static readonly Dictionary<string, byte[]> LayaFiles = new()
+    {
+        ["rl_agent_config.json"] = Encoding.UTF8.GetBytes("""{"encoder":"answerdotai/ModernBERT-large"}"""),
+        ["model.safetensors"] = Content("english", 60_000),
+        ["encoder/config.json"] = Encoding.UTF8.GetBytes("{}"),
+        ["tokenizer/tokenizer.json"] = Content("en-tokens", 3_000),
+        ["tokenizer/tokenizer_config.json"] = Encoding.UTF8.GetBytes("{}"),
+        ["multilingual/rl_agent_config.json"] = Encoding.UTF8.GetBytes("""{"encoder":"jhu-clsp/mmBERT-base"}"""),
+        ["multilingual/model.safetensors"] = Content("multilingual", 50_000),
+        ["multilingual/encoder/config.json"] = Encoding.UTF8.GetBytes("{}"),
+        ["multilingual/tokenizer/tokenizer.json"] = Content("ml-tokens", 30_000),
+        ["multilingual/tokenizer/tokenizer_config.json"] = Encoding.UTF8.GetBytes("{}"),
+        ["typed-decisions/model.safetensors"] = Content("typed", 60_000),
+        ["README.md"] = Encoding.UTF8.GetBytes("# Laya"),
     };
 
     /// <summary>A request for this file is cut off after this many bytes, once.</summary>
@@ -59,6 +78,25 @@ public sealed class FakeHuggingFace : HttpMessageHandler
         if (path == $"/api/models/{Repo}")
         {
             return Json(new { id = Repo, sha = Sha, gated = false, downloads = 1234, likes = 5, cardData = new { license = "apache-2.0" }, gguf = new { total = 600_000_000, architecture = "qwen3", context_length = 40960 } });
+        }
+        if (path == $"/api/models/{LayaRepo}")
+        {
+            return Json(new { id = LayaRepo, sha = Sha, gated = false, downloads = 99, likes = 9, cardData = new { license = "apache-2.0" } });
+        }
+        if (path == $"/api/models/{LayaRepo}/tree/{Sha}")
+        {
+            return Json(LayaFiles.Select(f => f.Key.EndsWith(".safetensors", StringComparison.Ordinal) || f.Key.EndsWith("tokenizer.json", StringComparison.Ordinal)
+                ? (object)new { type = "file", path = f.Key, size = 134, lfs = new { oid = Hash(f.Value), size = f.Value.Length } }
+                : new { type = "file", path = f.Key, size = f.Value.Length }));
+        }
+        if (path.StartsWith($"/{LayaRepo}/resolve/{Sha}/", StringComparison.Ordinal) && LayaFiles.TryGetValue(path[$"/{LayaRepo}/resolve/{Sha}/".Length..], out var laya))
+        {
+            lock (Downloads)
+            {
+                Downloads.Add((LayaRepo + "/" + path[$"/{LayaRepo}/resolve/{Sha}/".Length..], request.Headers.Range));
+            }
+            var at = request.Headers.Range?.Ranges.First().From ?? 0;
+            return new HttpResponseMessage(at > 0 ? HttpStatusCode.PartialContent : HttpStatusCode.OK) { Content = new ByteArrayContent(laya[(int)at..]) };
         }
         if (path == $"/api/models/{Repo}/tree/{Sha}")
         {

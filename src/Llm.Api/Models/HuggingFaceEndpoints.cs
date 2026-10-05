@@ -73,7 +73,7 @@ public static class HuggingFaceEndpoints
         return new
         {
             d.Id, d.Repo, d.Revision, d.State, bytes = live?.Bytes ?? d.Bytes, d.Total, speed = live?.Speed, d.Error, d.CreatedBy, d.CreatedAt, d.FinishedAt,
-            files = d.Files.Select(f => new { f.Path, f.Size, library = $"{d.Dir}/{f.Path}" }),
+            files = d.Files.Select(f => new { f.Path, f.Size, library = $"{d.Dir}/{f.Target ?? f.Path}" }),
         };
     }
 

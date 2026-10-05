@@ -642,6 +642,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 ["tool"] = q.Tool.Server ?? "local",
                 ["title"] = q.Tool.Name,
                 ["always"] = q.Always,
+                ["risk"] = q.Risk,
             });
             return await answer.Task.WaitAsync(ct);
         }

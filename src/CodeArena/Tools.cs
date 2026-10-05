@@ -106,7 +106,11 @@ internal static class Modes
 }
 
 /// <summary>A question for the web interface: the call waiting, and what "always" would cover.</summary>
-internal sealed record ApprovalQuestion(string CallId, ToolDef Tool, JsonObject Args, string Always);
+internal sealed record ApprovalQuestion(string CallId, ToolDef Tool, JsonObject Args, string Always)
+{
+    /// <summary>Laya's probabilities for a command (LayaGuard), and why it asks when the mode would not.</summary>
+    public string? Risk { get; init; }
+}
 
 /// <summary>
 /// Decides whether a call runs: reads always do; edits and commands ask, or not,
@@ -123,6 +127,9 @@ internal sealed class Permissions(Ui ui, Mode mode)
     /// <summary>Asks in the web interface instead of the terminal, when set.</summary>
     public Func<ApprovalQuestion, CancellationToken, Task<Approval>>? Asker { get; set; }
 
+    /// <summary>Laya's look at commands (LayaGuard.cs), when Arena MCP offers decide.</summary>
+    public LayaGuard? Guard { get; set; }
+
     /// <summary>Null when the call may run; otherwise why not, for the model.</summary>
     public async Task<string?> CheckAsync(ToolDef tool, JsonObject args, CancellationToken ct, string? callId = null)
     {
@@ -137,7 +144,10 @@ internal sealed class Permissions(Ui ui, Mode mode)
             ToolKind.Edit => Mode == Mode.Ask,
             _ => Mode != Mode.Yolo,
         };
-        if (!ask)
+        // A command Laya flags asks whatever the mode; its probabilities show whenever a command asks.
+        var risk = tool.Kind == ToolKind.Shell && Guard is { } guard ? await guard.AssessAsync(args.Str("command"), ct) : null;
+        var flagged = risk?.High == true;
+        if (!ask && !flagged)
         {
             return null;
         }
@@ -147,23 +157,28 @@ internal sealed class Permissions(Ui ui, Mode mode)
             ToolKind.Shell when CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => ("shell:" + prefix, $"for `{prefix} …`"),
             _ => ("tool:" + tool.Name, $"for {tool.Name}"),
         };
+        // "Always" said to an unflagged command does not cover one Laya flags; said to a flagged one, it does.
+        var remembered = flagged ? "laya:" + key : key;
         await _asking.WaitAsync(ct);
         try
         {
-            if (_always.Contains(key))
+            if (_always.Contains(remembered))
             {
                 return null;
             }
             if (Asker is null && !ui.CanAsk)
             {
-                return $"{tool.Name} needs the person's approval, and this run cannot ask. " +
+                return flagged ? LayaGuard.CannotAsk(tool.Name, risk!) : $"{tool.Name} needs the person's approval, and this run cannot ask. " +
                        "Say what you would have done; the person can run again with --mode auto-edit (edits) or --mode yolo (everything).";
             }
-            var answer = Asker is { } asker ? await asker(new ApprovalQuestion(callId ?? "", tool, args, always), ct) : ui.Ask($"Allow {tool.Name}?", always);
+            var answer = Asker is { } asker
+                ? await asker(new ApprovalQuestion(callId ?? "", tool, args, always) { Risk = LayaGuard.Note(risk, ask) }, ct)
+                : ui.Ask(LayaGuard.Question(tool.Name, risk, ask), always);
             switch (answer)
             {
                 case Approval.Always:
                     _always.Add(key);
+                    _always.Add(remembered);
                     return null;
                 case Approval.Yes:
                     return null;

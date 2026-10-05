@@ -160,6 +160,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Modules:audio", "false");
             // No embedder unless a test brings it (company knowledge and retrieval do).
             b.UseSetting("Modules:embed", "false");
+            // No Laya unless a test brings it (LayaTests).
+            b.UseSetting("Modules:laya", "false");
             // Nothing listens here: probes are refused at once instead of waiting on DNS.
             b.UseSetting("Stack:LiteLlmProbeUrl", "http://127.0.0.1:9");
             b.UseSetting("Stack:PrometheusUrl", "http://127.0.0.1:9");

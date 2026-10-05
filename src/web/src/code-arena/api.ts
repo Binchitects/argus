@@ -57,11 +57,11 @@ export interface CodeSession {
   busy: boolean
 }
 
-/** Arena's chat events, and what Code Arena adds: a diff with an edit's result, "always" with a question, the history afresh after compaction. */
+/** Arena's chat events, and what Code Arena adds: a diff with an edit's result, "always" and Laya's look with a question, the history afresh after compaction. */
 export type CodeEvent =
   | Exclude<ChatEvent, { type: 'tool_result' } | { type: 'approval' }>
   | (Extract<ChatEvent, { type: 'tool_result' }> & { diff?: FileDiff })
-  | (Extract<ChatEvent, { type: 'approval' }> & { always?: string })
+  | (Extract<ChatEvent, { type: 'approval' }> & { always?: string; risk?: string })
   | { type: 'reset'; messages: Message[]; diffs: Record<string, FileDiff> }
 
 export const stateQuery = {
@@ -85,10 +85,11 @@ export const resumeSession = (id: string) => api<CodeSession>('/api/sessions/res
 export const stopTurn = () => api('/api/stop', { body: {} })
 export const answerApproval = (id: string, answer: 'allow' | 'always' | 'deny') => api('/api/approvals', { body: { id, answer } })
 
-/** The session as it streams: Arena's live state, with the edits' diffs and what "always" covers for each question. */
+/** The session as it streams: Arena's live state, with the edits' diffs, what "always" covers for each question, and Laya's probabilities for a command. */
 export interface CodeLive extends LiveState {
   diffs: Record<string, FileDiff>
   always: Record<string, string>
+  risks: Record<string, string>
 }
 
 export const fromSession = (s: CodeSession | undefined): CodeLive => ({
@@ -99,6 +100,7 @@ export const fromSession = (s: CodeSession | undefined): CodeLive => ({
   thinkingSince: null,
   diffs: s?.diffs ?? {},
   always: {},
+  risks: {},
 })
 
 /** One event folded in: Arena's reducer, and Code Arena's own fields around it. */
@@ -107,7 +109,11 @@ export function reduceCode(state: CodeLive, e: CodeEvent, localId: string | null
     case 'reset':
       return { ...state, messages: e.messages, diffs: e.diffs, leaf: e.messages.at(-1)?.id ?? null, current: null, compacting: false }
     case 'approval':
-      return { ...(reduce(state, e, localId) as CodeLive), always: e.always ? { ...state.always, [e.id]: e.always } : state.always }
+      return {
+        ...(reduce(state, e, localId) as CodeLive),
+        always: e.always ? { ...state.always, [e.id]: e.always } : state.always,
+        risks: e.risk ? { ...state.risks, [e.id]: e.risk } : state.risks,
+      }
     case 'tool_result':
       return { ...(reduce(state, e, localId) as CodeLive), diffs: e.diff ? { ...state.diffs, [e.messageId]: e.diff } : state.diffs }
     default:
