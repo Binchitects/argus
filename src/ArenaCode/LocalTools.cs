@@ -248,7 +248,7 @@ internal static class LocalTools
         var display = before is null
             ? c.Ui.Green($"new file, {lines} lines") + "\n" + Fmt.Indent(c.Ui.Dim(Fmt.Head(content, 8)), "")
             : Diff.Render(before, content, c.Ui);
-        return Task.FromResult(new ToolResult(before is null ? $"Created {show} ({lines} lines)." : $"Wrote {show} ({lines} lines).") { Display = display });
+        return Task.FromResult(new ToolResult(before is null ? $"Created {show} ({lines} lines)." : $"Wrote {show} ({lines} lines).") { Display = display, Change = new FileChange(show, before, content) });
     }
 
     /// <summary>
@@ -273,7 +273,7 @@ internal static class LocalTools
                 throw new ToolError($"{show} does not exist. To create it, give an empty old_string (or use write_file).");
             }
             Files.WriteText(path, newText, false);
-            return Task.FromResult(new ToolResult($"Created {show}.") { Display = c.Ui.Green($"new file, {Diff.Lines(newText).Length} lines") });
+            return Task.FromResult(new ToolResult($"Created {show}.") { Display = c.Ui.Green($"new file, {Diff.Lines(newText).Length} lines"), Change = new FileChange(show, null, newText) });
         }
         var (text, bom) = Files.ReadText(path);
         if (oldText.Length == 0)
@@ -283,7 +283,7 @@ internal static class LocalTools
                 throw new ToolError($"old_string is empty but {show} is not: give the exact text to replace.");
             }
             Files.WriteText(path, newText, bom);
-            return Task.FromResult(new ToolResult($"Wrote {show}.") { Display = Diff.Render(text, newText, c.Ui) });
+            return Task.FromResult(new ToolResult($"Wrote {show}.") { Display = Diff.Render(text, newText, c.Ui), Change = new FileChange(show, text, newText) });
         }
         if (oldText == newText)
         {
@@ -315,7 +315,7 @@ internal static class LocalTools
             updated = string.Concat(text.AsSpan(0, at), newText, text.AsSpan(at + oldText.Length));
         }
         Files.WriteText(path, updated, bom);
-        return Task.FromResult(new ToolResult(count == 1 ? $"Edited {show}." : $"Edited {show}: {count} replacements.") { Display = Diff.Render(text, updated, c.Ui) });
+        return Task.FromResult(new ToolResult(count == 1 ? $"Edited {show}." : $"Edited {show}: {count} replacements.") { Display = Diff.Render(text, updated, c.Ui), Change = new FileChange(show, text, updated) });
     }
 
     internal static int Occurrences(string text, string part)

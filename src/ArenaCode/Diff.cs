@@ -2,6 +2,9 @@ using System.Text;
 
 namespace ArenaCode;
 
+/// <summary>A line of a diff as the web interface shows it.</summary>
+internal readonly record struct DiffLine(char Op, int Old, int New, string Text);
+
 /// <summary>Line diffs for showing an edit: the changed lines, three lines of context around them, numbered.</summary>
 internal static class Diff
 {
@@ -26,10 +29,55 @@ internal static class Diff
     public static string Render(string before, string after, Ui ui, int context = 3, int maxLines = 80)
     {
         var rows = Rows(Lines(before), Lines(after));
+        var (shown, rest) = Window(rows, context, maxLines);
+        if (shown.Count == 0)
+        {
+            return ui.Dim("(no change)");
+        }
+        var width = Math.Max(rows.Max(r => Math.Max(r.Old, r.New)).ToString().Length, 3);
+        var sb = new StringBuilder();
+        foreach (var shownRow in shown)
+        {
+            var line = shownRow is not { } r ? ui.Dim($"{new string(' ', width)}   ⋮") : r.Op switch
+            {
+                Op.Removed => ui.Red($"{r.Old.ToString().PadLeft(width)} - {r.Text}"),
+                Op.Added => ui.Green($"{r.New.ToString().PadLeft(width)} + {r.Text}"),
+                _ => ui.Dim($"{r.New.ToString().PadLeft(width)}   {r.Text}"),
+            };
+            sb.Append(line).Append('\n');
+        }
+        if (rest > 0)
+        {
+            sb.Append(ui.Dim($"{new string(' ', width)}   … {rest} more changed lines")).Append('\n');
+        }
+        return sb.ToString().TrimEnd('\n');
+    }
+
+    /// <summary>
+    /// The same diff as data, for the web interface: each line's kind (' ' the
+    /// same, '-' removed, '+' added, '⋮' lines left out), its old and new numbers
+    /// (0 when it has none), and how many changed lines did not fit.
+    /// </summary>
+    public static (List<DiffLine> Lines, int More) Hunks(string before, string after, int context = 3, int maxLines = 400)
+    {
+        var (shown, rest) = Window(Rows(Lines(before), Lines(after)), context, maxLines);
+        var lines = shown.Select(shownRow => shownRow is not { } r ? new DiffLine('⋮', 0, 0, "") : r.Op switch
+        {
+            Op.Removed => new DiffLine('-', r.Old, 0, r.Text),
+            Op.Added => new DiffLine('+', 0, r.New, r.Text),
+            _ => new DiffLine(' ', r.Old, r.New, r.Text),
+        }).ToList();
+        return (lines, rest);
+    }
+
+    /// <summary>The changed rows with their context (null where lines are left out between them), and how many changed rows did not fit in maxLines.</summary>
+    private static (List<Row?> Shown, int After) Window(List<Row> rows, int context, int maxLines)
+    {
+        var shown = new List<Row?>();
         var changed = rows.Select((r, i) => (r, i)).Where(x => x.r.Op != Op.Same).Select(x => x.i).ToList();
         if (changed.Count == 0)
         {
-            return ui.Dim("(no change)");
+            return (shown, 0);
         }
         var show = new bool[rows.Count];
         foreach (var i in changed)
@@ -39,8 +87,6 @@ internal static class Diff
                 show[j] = true;
             }
         }
-        var width = Math.Max(rows.Max(r => Math.Max(r.Old, r.New)).ToString().Length, 3);
-        var sb = new StringBuilder();
         var lines = 0;
         var gap = false;
         for (var i = 0; i < rows.Count; i++)
@@ -52,29 +98,17 @@ internal static class Diff
             }
             if (lines >= maxLines)
             {
-                var rest = rows.Skip(i).Count(r => r.Op != Op.Same);
-                if (rest > 0)
-                {
-                    sb.Append(ui.Dim($"{new string(' ', width)}   … {rest} more changed lines")).Append('\n');
-                }
-                break;
+                return (shown, rows.Skip(i).Count(r => r.Op != Op.Same));
             }
-            if (gap && sb.Length > 0)
+            if (gap && shown.Count > 0)
             {
-                sb.Append(ui.Dim($"{new string(' ', width)}   ⋮")).Append('\n');
+                shown.Add(null);
             }
             gap = false;
-            var r = rows[i];
-            var line = r.Op switch
-            {
-                Op.Removed => ui.Red($"{r.Old.ToString().PadLeft(width)} - {r.Text}"),
-                Op.Added => ui.Green($"{r.New.ToString().PadLeft(width)} + {r.Text}"),
-                _ => ui.Dim($"{r.New.ToString().PadLeft(width)}   {r.Text}"),
-            };
-            sb.Append(line).Append('\n');
+            shown.Add(rows[i]);
             lines++;
         }
-        return sb.ToString().TrimEnd('\n');
+        return (shown, 0);
     }
 
     /// <summary>The common start and end are kept as they are; the middle is diffed by longest common subsequence.</summary>

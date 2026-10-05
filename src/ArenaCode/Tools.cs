@@ -21,7 +21,12 @@ internal enum ToolKind
 internal sealed record ToolResult(string Text, bool Error = false)
 {
     public string? Display { get; init; }
+    /// <summary>The file an edit changed, for the web interface's diff.</summary>
+    public FileChange? Change { get; init; }
 }
+
+/// <summary>A file as an edit found it (null: it was new) and as it left it.</summary>
+internal sealed record FileChange(string Path, string? Before, string After);
 
 /// <summary>A tool the model can call: its name, description and JSON schema, and what runs.</summary>
 internal sealed class ToolDef
@@ -100,6 +105,9 @@ internal static class Modes
     };
 }
 
+/// <summary>A question for the web interface: the call waiting, and what "always" would cover.</summary>
+internal sealed record ApprovalQuestion(string CallId, ToolDef Tool, JsonObject Args, string Always);
+
 /// <summary>
 /// Decides whether a call runs: reads always do; edits and commands ask, or not,
 /// by the mode; "always" remembers the answer for the session (all edits, a
@@ -112,8 +120,11 @@ internal sealed class Permissions(Ui ui, Mode mode)
 
     public Mode Mode { get; set; } = mode;
 
+    /// <summary>Asks in the web interface instead of the terminal, when set.</summary>
+    public Func<ApprovalQuestion, CancellationToken, Task<Approval>>? Asker { get; set; }
+
     /// <summary>Null when the call may run; otherwise why not, for the model.</summary>
-    public async Task<string?> CheckAsync(ToolDef tool, JsonObject args, CancellationToken ct)
+    public async Task<string?> CheckAsync(ToolDef tool, JsonObject args, CancellationToken ct, string? callId = null)
     {
         if (Mode == Mode.Plan && !tool.ReadOnly && tool.Kind != ToolKind.Agent)
         {
@@ -143,12 +154,13 @@ internal sealed class Permissions(Ui ui, Mode mode)
             {
                 return null;
             }
-            if (!ui.CanAsk)
+            if (Asker is null && !ui.CanAsk)
             {
                 return $"{tool.Name} needs the person's approval, and this run cannot ask. " +
                        "Say what you would have done; the person can run again with --mode auto-edit (edits) or --mode yolo (everything).";
             }
-            switch (ui.Ask($"Allow {tool.Name}?", always))
+            var answer = Asker is { } asker ? await asker(new ApprovalQuestion(callId ?? "", tool, args, always), ct) : ui.Ask($"Allow {tool.Name}?", always);
+            switch (answer)
             {
                 case Approval.Always:
                     _always.Add(key);

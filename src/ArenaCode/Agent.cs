@@ -56,6 +56,27 @@ internal sealed class Spend
 }
 
 /// <summary>
+/// What a front end other than the terminal hears of a turn (the web interface):
+/// a call for each thing the terminal shows, as it happens.
+/// </summary>
+internal interface IAgentEvents
+{
+    /// <summary>A request to the model starts: its answer streams next.</summary>
+    void Step();
+    void Reasoning(string text);
+    void Text(string text);
+    /// <summary>The model's answer is in: its tokens, when the gateway said.</summary>
+    void StepDone(TokenUsage? usage);
+    /// <summary>A call the model made, before it is allowed or run.</summary>
+    void ToolCall(string id, string name, ToolDef? tool, string arguments);
+    /// <summary>A call's result; index is its place among the answer's calls; declined when the permissions refused it.</summary>
+    void ToolResult(string id, string name, int index, ToolResult result, TimeSpan took, bool declined);
+    /// <summary>The history was replaced by a summary (compaction).</summary>
+    void Compacted(string notice);
+    void Notice(string text);
+}
+
+/// <summary>
 /// The agent loop: ask the model, run the tools it calls (those that need no
 /// question at once), give back their results, until it answers without a
 /// call. Compacts the history when it nears the model's window.
@@ -78,6 +99,8 @@ internal sealed class Agent
     public List<JsonObject> Messages { get; private set; } = [];
     /// <summary>The answer's text streams to the terminal (the main agent, not in a quiet run).</summary>
     public bool Stream { get; init; } = true;
+    /// <summary>The web interface's ear on each turn; null in the terminal.</summary>
+    public IAgentEvents? Events { get; set; }
 
     private bool _parallelCalls = true;
     private long _knownTokens;
@@ -106,8 +129,9 @@ internal sealed class Agent
         for (var step = 0; step < MaxSteps; step++)
         {
             await MaybeCompactAsync(ct);
-            var printer = new Printer(Ui, Stream && Depth == 0);
+            var printer = new Printer(Ui, Stream && Depth == 0, Events);
             Completion answer;
+            Events?.Step();
             Ui.StartSpinner(step == 0 ? "Thinking" : "Working");
             try
             {
@@ -126,6 +150,7 @@ internal sealed class Agent
                 Ui.StopSpinner();
             }
             printer.End();
+            Events?.StepDone(answer.Usage);
             if (answer.Usage is { } usage)
             {
                 turn.Add(usage, Model.Info);
@@ -143,14 +168,20 @@ internal sealed class Agent
             {
                 if (answer.FinishReason == "length")
                 {
-                    Ui.Warn("The answer was cut at the model's output limit.");
+                    Warn("The answer was cut at the model's output limit.");
                 }
                 return last;
             }
             await RunToolsAsync(answer.ToolCalls, ct);
         }
-        Ui.Warn($"Stopped after {MaxSteps} steps.");
+        Warn($"Stopped after {MaxSteps} steps.");
         return last;
+    }
+
+    private void Warn(string text)
+    {
+        Ui.Warn(text);
+        Events?.Notice(text);
     }
 
     private async Task<Completion> AskAsync(IStreamSink sink, CancellationToken ct)
@@ -189,7 +220,7 @@ internal sealed class Agent
     /// <summary>Questions first, one at a time; then every allowed call at once. Every call gets a result, in order.</summary>
     private async Task RunToolsAsync(JsonArray calls, CancellationToken ct)
     {
-        var planned = new List<(string Id, string Name, ToolDef? Tool, JsonObject Args, string? Refusal)>();
+        var planned = new List<(string Id, string Name, ToolDef? Tool, JsonObject Args, string? Refusal, bool Declined)>();
         foreach (var call in calls.OfType<JsonObject>())
         {
             var id = call.Str("id") ?? "";
@@ -207,11 +238,14 @@ internal sealed class Agent
                 refusal = $"The arguments for {name} were not valid JSON: {Fmt.OneLine(raw, 200)}";
             }
             ShowCall(name, tool, args);
+            Events?.ToolCall(id, name, tool, string.IsNullOrWhiteSpace(raw) ? "{}" : raw);
+            var declined = false;
             if (refusal is null && tool is not null && args is not null)
             {
                 try
                 {
-                    refusal = await Permissions.CheckAsync(tool, args, ct);
+                    refusal = await Permissions.CheckAsync(tool, args, ct, id);
+                    declined = refusal is not null;
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -219,7 +253,7 @@ internal sealed class Agent
                     throw;
                 }
             }
-            planned.Add((id, name, tool, args ?? [], refusal));
+            planned.Add((id, name, tool, args ?? [], refusal, declined));
         }
 
         var results = new ToolResult[planned.Count];
@@ -230,6 +264,7 @@ internal sealed class Agent
         var running = planned.Select(async (p, i) =>
         {
             ToolResult result;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             if (p.Refusal is not null || p.Tool is null)
             {
                 result = new ToolResult(p.Refusal ?? "Not run.", true) { Display = Ui.Yellow(Fmt.OneLine(p.Refusal, 140)) };
@@ -259,6 +294,7 @@ internal sealed class Agent
             }
             results[i] = result;
             ShowResult(p.Name, result, planned.Count > 1);
+            Events?.ToolResult(p.Id, p.Name, i, result, clock.Elapsed, p.Declined);
         }).ToList();
         await Task.WhenAll(running);
         var limit = MaxToolChars;
@@ -381,6 +417,7 @@ internal sealed class Agent
             Session?.Compacted(Messages);
             _knownTokens = 0;
             _knownCount = 0;
+            Events?.Compacted("Long tool results were cut to fit the model's window.");
             return;
         }
         Ui.StartSpinner("Compacting the conversation");
@@ -407,6 +444,7 @@ internal sealed class Agent
         _knownTokens = 0;
         _knownCount = 0;
         Ui.Info($"Compacted: {older.Count} messages summarized, {kept.Count} kept.");
+        Events?.Compacted($"Compacted: {older.Count} messages summarized, {kept.Count} kept.");
     }
 
     /// <summary>Long tool results, except the last two, cut to their start: a last resort when the recent part is too big.</summary>
@@ -485,8 +523,8 @@ internal sealed class Agent
         return answer.Text.Trim() is { Length: > 0 } s ? s : "(no summary)";
     }
 
-    /// <summary>Streams the answer to the terminal: reasoning dimmed, then the text.</summary>
-    private sealed class Printer(Ui ui, bool show) : IStreamSink
+    /// <summary>Streams the answer to the terminal: reasoning dimmed, then the text; and to the web interface when it listens.</summary>
+    private sealed class Printer(Ui ui, bool show, IAgentEvents? events) : IStreamSink
     {
         private bool _reasoning;
         private bool _any;
@@ -496,6 +534,7 @@ internal sealed class Agent
 
         public void Reasoning(string text)
         {
+            events?.Reasoning(text);
             if (!show)
             {
                 return;
@@ -512,6 +551,7 @@ internal sealed class Agent
         public void Text(string text)
         {
             _said.Append(text);
+            events?.Text(text);
             if (!show)
             {
                 return;

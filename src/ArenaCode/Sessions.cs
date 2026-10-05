@@ -16,6 +16,8 @@ internal sealed class SessionData
     public long Prompt { get; set; }
     public long Cached { get; set; }
     public long Completion { get; set; }
+    /// <summary>Each answer's (by its place in Messages) model and tokens, for the web interface.</summary>
+    public Dictionary<int, (string? Model, TokenUsage? Usage)> Answers { get; } = [];
 }
 
 /// <summary>
@@ -76,7 +78,11 @@ internal sealed class SessionStore
     public static SessionData Load(string file)
     {
         var data = new SessionData { Id = Path.GetFileNameWithoutExtension(file) };
-        foreach (var line in System.IO.File.ReadLines(file))
+        // An answer's tokens are written just before the answer itself.
+        TokenUsage? pending = null;
+        // Shared: the web interface reads a session while its turn appends to it.
+        using var reader = new StreamReader(new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+        while (reader.ReadLine() is { } line)
         {
             if (Json.ParseObject(line) is not { } entry)
             {
@@ -89,10 +95,17 @@ internal sealed class SessionStore
                     data.Model = entry.Str("model");
                     break;
                 case "message" when entry["message"] is JsonObject m:
+                    if (m.Str("role") == "assistant")
+                    {
+                        data.Answers[data.Messages.Count] = (data.Model, pending);
+                    }
+                    pending = null;
                     data.Messages.Add(m.Clone());
                     break;
                 case "compact" when entry["messages"] is JsonArray all:
                     data.Messages.Clear();
+                    data.Answers.Clear();
+                    pending = null;
                     data.Messages.AddRange(all.OfType<JsonObject>().Select(m => m.Clone()));
                     break;
                 case "model":
@@ -105,6 +118,7 @@ internal sealed class SessionStore
                     data.Prompt += entry.Long("prompt") ?? 0;
                     data.Cached += entry.Long("cached") ?? 0;
                     data.Completion += entry.Long("completion") ?? 0;
+                    pending = new TokenUsage(entry.Long("prompt") ?? 0, entry.Long("cached") ?? 0, entry.Long("completion") ?? 0);
                     break;
             }
         }
