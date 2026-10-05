@@ -46,7 +46,11 @@ tools/dn test tests/ArenaCode.Tests -c Release
 Arena Code uses the base class library only (no packages). Its standalone
 files, one per system, need .NET's runtime packs: `tools/publish-arena-code.sh
 --offline` builds them from `tools/offline-nuget/` into `dist/arena-code/`
-([arena-code.md](arena-code.md#building-it-admins)).
+([arena-code.md](arena-code.md#building-it-admins)), after building the page of
+its web interface from `src/web` (`vite.arena-code.config.ts`, into
+`src/ArenaCode/web`, which the program embeds). The page's code is
+`src/web/src/arena-code/`: the chat's components around Arena Code's API; its
+tests run with the web's (`npx vitest run src/arena-code`).
 
 Argus's tests need Universal Ctags (it decides which symbols exist) and the
 pinned sqlite-vec, fetched once and checked against its SHA-256:

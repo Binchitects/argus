@@ -7,7 +7,7 @@ namespace ArenaCode;
 /// <summary>The command line, parsed.</summary>
 internal sealed class Options
 {
-    /// <summary>login, logout, models, help, version; null runs the agent.</summary>
+    /// <summary>login, logout, models, web, help, version; null runs the agent.</summary>
     public string? Command { get; set; }
     public string? Prompt { get; set; }
     /// <summary>One-shot: answer the prompt, print the answer, exit.</summary>
@@ -24,6 +24,9 @@ internal sealed class Options
     public string? Url { get; set; }
     public string? Gateway { get; set; }
     public bool NoColor { get; set; }
+    /// <summary>web: the port (null: a free one), and whether to leave the browser closed.</summary>
+    public int? Port { get; set; }
+    public bool NoOpen { get; set; }
 }
 
 /// <summary>What the program runs with: its streams, environment, folder and paths. Tests make their own.</summary>
@@ -41,6 +44,8 @@ internal sealed class CliEnv
     public bool ErrTerminal { get; init; }
     public Func<string, string?>? ReadSecret { get; init; }
     public CancelKey Cancel { get; } = new();
+    /// <summary>The web interface's page; null: the one built into the program.</summary>
+    public WebAssets? Web { get; init; }
 }
 
 /// <summary>The command line: arena-code [options] [prompt], login, logout, models.</summary>
@@ -58,6 +63,7 @@ internal static partial class Cli
           arena-code login                  sign in: the Arena's address and your API key
           arena-code logout                 forget the API key
           arena-code models                 the models you may use
+          arena-code web                    the same agent in your browser, on this machine only
 
         Options:
           -p, --print [prompt]       one-shot, for scripts; --output json for a JSON answer
@@ -71,6 +77,8 @@ internal static partial class Cli
               --url URL              login: the Arena's address, https://DOMAIN
               --gateway URL          login: the gateway, when it is not https://gateway.DOMAIN
               --no-color             plain text
+              --port N               web: listen on this port (default: a free one)
+              --no-open              web: print the address, do not open the browser
           -v, --version
           -h, --help
 
@@ -104,6 +112,8 @@ internal static partial class Cli
                 return Logout(env, MakeUi(env, o, quiet: false));
             case "models":
                 return await ModelsAsync(o, env, MakeUi(env, o, quiet: false), ct);
+            case "web":
+                return await WebAsync(o, env, ct);
             default:
                 return await AgentAsync(o, env, ct);
         }
@@ -118,7 +128,7 @@ internal static partial class Cli
             var a = args[i];
             string Value() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{a} needs a value.");
             bool NextIsValue() => i + 1 < args.Length && !args[i + 1].StartsWith('-');
-            if (i == 0 && a is "login" or "logout" or "models" or "help" or "version")
+            if (i == 0 && a is "login" or "logout" or "models" or "web" or "help" or "version")
             {
                 o.Command = a;
                 continue;
@@ -176,6 +186,12 @@ internal static partial class Cli
                 case "--no-color":
                     o.NoColor = true;
                     break;
+                case "--port":
+                    o.Port = int.TryParse(Value(), out var port) && port is >= 1 and <= 65535 ? port : throw new ArgumentException("--port is a number from 1 to 65535.");
+                    break;
+                case "--no-open":
+                    o.NoOpen = true;
+                    break;
                 case "--":
                     words.AddRange(args[(i + 1)..]);
                     i = args.Length;
@@ -196,6 +212,10 @@ internal static partial class Cli
         if (o.Ca is { } ca)
         {
             o.Ca = Path.GetFullPath(ca);
+        }
+        if (o.Command == "web" && (o.Prompt is not null || o.Print))
+        {
+            throw new ArgumentException("web takes no prompt: write it in the page.");
         }
         return o;
     }
@@ -385,6 +405,85 @@ internal static partial class Cli
         {
             ui.Error(e.Message);
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// arena-code web: the agent of this folder behind a page on 127.0.0.1, until
+    /// Ctrl+C. What the agent does is logged here as in a one-shot run (on stderr).
+    /// </summary>
+    private static async Task<int> WebAsync(Options o, CliEnv env, CancellationToken ct)
+    {
+        var plain = o.NoColor || env.Env("NO_COLOR") is { Length: > 0 } || env.Env("TERM") == "dumb";
+        var ui = new Ui(TextReader.Null, env.Out, env.Err, !plain && env.ErrTerminal, canAsk: false) { Quiet = true };
+        var assets = env.Web ?? WebAssets.Embedded();
+        if (!assets.Built)
+        {
+            ui.Error("This arena-code has no web interface: its page was not built into it. tools/publish-arena-code.sh builds the page (from src/web) and then the program.");
+            return 1;
+        }
+        // The whole run is one "turn" of Ctrl+C: the first press stops the server.
+        using var key = env.Cancel.BeginTurn();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token);
+        try
+        {
+            Runtime rt;
+            try
+            {
+                rt = await Runtime.StartAsync(o, env, ui, linked.Token);
+            }
+            catch (Runtime.StartException e)
+            {
+                ui.Error(e.Message);
+                return 1;
+            }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested)
+            {
+                return 130;
+            }
+            await using (rt)
+            {
+                WebApp app;
+                try
+                {
+                    app = WebApp.Start(rt, assets, o.Port ?? 0);
+                }
+                catch (System.Net.Sockets.SocketException e)
+                {
+                    ui.Error(e.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse
+                        ? $"Port {o.Port} is taken: choose another with --port, or leave --port out for a free one."
+                        : $"Could not listen on 127.0.0.1: {e.Message}");
+                    return 1;
+                }
+                await using (app)
+                {
+                    var git = SystemPrompt.GitRoot(rt.Workspace.Root) is { } root && SystemPrompt.GitBranch(root) is { } branch ? $" ({branch})" : "";
+                    env.Out.WriteLine($"Arena Code {Version} in your browser: {rt.Workspace.Root}{git}, {rt.Model.Name}, mode {rt.Permissions.Mode.Name()}");
+                    env.Out.WriteLine();
+                    env.Out.WriteLine($"  {app.Address}");
+                    env.Out.WriteLine();
+                    env.Out.WriteLine("Only this machine can open it, and only with the key in the address. Ctrl+C stops it.");
+                    if (!o.NoOpen && !Browser.Open(app.Address, env.Env))
+                    {
+                        env.Out.WriteLine("Open the address in your browser.");
+                    }
+                    env.Out.Flush();
+                    try
+                    {
+                        await Task.Delay(Timeout.Infinite, linked.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Ctrl+C, or the caller stopped it.
+                    }
+                }
+                ui.Info(rt.Agent.Messages.Count > 0 ? $"Stopped. The last session is saved as {rt.Session.Id}: arena-code --resume {rt.Session.Id}" : "Stopped.");
+                return 0;
+            }
+        }
+        finally
+        {
+            env.Cancel.EndTurn();
         }
     }
 
