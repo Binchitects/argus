@@ -294,9 +294,9 @@ bearer_token_env_var = "${KEY}"`,
     about: "Qwen's coding agent. It reads the OpenAI variables.",
     steps: (c) => [
       {
-        text: 'Point it at the gateway, then start it:',
+        text: 'Point it at the gateway, then start it (--auth-type openai: a fresh install would otherwise ask how to sign in):',
         file: 'shell',
-        code: env(c, [['OPENAI_BASE_URL', c.base], ['OPENAI_API_KEY', null], ['OPENAI_MODEL', c.model]], 'qwen'),
+        code: env(c, [['OPENAI_BASE_URL', c.base], ['OPENAI_API_KEY', null], ['OPENAI_MODEL', c.model]], 'qwen --auth-type openai'),
       },
       {
         text: "To keep it, and give it the model's window, put it in its settings instead (the key stays in the environment):",
@@ -311,7 +311,7 @@ bearer_token_env_var = "${KEY}"`,
       },
     ],
     trust: (c) => nodeTrust(c, 'Qwen Code'),
-    check: () => ({ text: 'Check it answers:', file: 'shell', code: `qwen -p "${OK}"` }),
+    check: () => ({ text: 'Check it answers (with the settings file, --auth-type is not needed):', file: 'shell', code: `qwen --auth-type openai -p "${OK}"` }),
     argus: (c) => [
       {
         text: 'Add Argus once (in single quotes, the setting keeps the variable, not the key; --trust runs its tools without asking each time):',
