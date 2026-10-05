@@ -67,10 +67,17 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     restarts go once it is back.
 - **Deep research.** **Deep research** in the composer, for the next message:
   the web and sub-agents are on for that answer, and the model plans the
-  research questions, gives each to a sub-agent, fills gaps, and writes a
-  report with numbered sources. While it works, a line under the answer says
-  which step it is on: planning the research, researching 4 parts (2 of 4
-  parts done), filling gaps, writing the report.
+  research questions and gives each to a sub-agent, which searches the web
+  and reads the best pages. It may send the gaps to sub-agents once more, then
+  writes a report with numbered sources. It delegates twice at most: the
+  delegate calls of one step count once, and one refused for its parts or
+  not allowed does not count. The sub-agents read the web, not the model
+  writing the report: on the small model they are faster. When **Web** asks
+  before each call (Admin → Tools), sub-agents cannot use it (nobody is there
+  to allow their calls), so the model researches with the web itself, each
+  call waiting for your **Allow**. While it works, a line under the answer
+  says which step it is on: planning the research, researching 4 parts (2 of
+  4 parts done), filling gaps (1 of 2 parts done), writing the report.
 - **Answer trace** (admins). The timer under an answer opens where its time
   went: the wait in line, getting ready (the chat's tools started, the chat
   read), each round of the model (tokens in, the share from the cache, tokens

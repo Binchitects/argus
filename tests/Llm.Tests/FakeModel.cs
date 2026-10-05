@@ -22,6 +22,8 @@ namespace Llm.Tests;
 ///   [budget]   refuses as LiteLLM does when credit is used up
 ///   [harm]      flagged (as weapons) by the safeguards' check
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
+///   [script [[{"name":N,"arguments":{…}}, …], …]]  the k-th round of tool calls asks for the k-th list's calls, until
+///               the lists run out or calling is switched off (tool_choice none); then answers "Found it."
 ///   [timed]     its last chunk carries llama.cpp's timings: 60 prompt tokens read in 300 ms, 12 written in 1,200 ms
 ///   [offer {json}]  asks for remember with those arguments (the word itself in a message reads as the person asking to remember)
 /// Its /v1/images/generations answers with a small PNG.
@@ -141,7 +143,30 @@ public sealed class FakeModel : HttpMessageHandler
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
         var call = System.Text.RegularExpressions.Regex.Match(lastUser, @"\[call (\S+) (\{.*\})\]|\[(offer) (\{.*\})\]", System.Text.RegularExpressions.RegexOptions.Singleline);
-        if (call.Success && !toolAnswered)
+        var script = lastUser.IndexOf("[script ", StringComparison.Ordinal);
+        if (script >= 0)
+        {
+            // Round k (the rounds of tool calls since the question) asks for the k-th list of calls, while calling is allowed.
+            var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(lastUser[(script + "[script ".Length)..]));
+            var rounds = JsonNode.Parse(ref reader)!.AsArray();
+            var question = messages.Select((m, i) => (m, i)).Last(x => x.m!["role"]!.GetValue<string>() == "user").i;
+            var round = messages.Skip(question + 1).Count(m => m!["role"]!.GetValue<string>() == "assistant" && m["tool_calls"] is JsonArray);
+            chunks = round < rounds.Count && body["tool_choice"]?.GetValue<string>() != "none"
+                ?
+                [
+                    .. rounds[round]!.AsArray().Select((c, i) => Delta(new JsonObject
+                    {
+                        ["tool_calls"] = new JsonArray(new JsonObject
+                        {
+                            ["index"] = i, ["id"] = $"call_{round}_{i}", ["type"] = "function",
+                            ["function"] = new JsonObject { ["name"] = c!["name"]!.GetValue<string>(), ["arguments"] = c["arguments"]!.ToJsonString() },
+                        }),
+                    })),
+                    Finish("tool_calls"),
+                ]
+                : [Delta(new JsonObject { ["content"] = "Found it." }), Finish("stop")];
+        }
+        else if (call.Success && !toolAnswered)
         {
             var (name, arguments) = call.Groups[1].Success ? (call.Groups[1].Value, call.Groups[2].Value) : ("remember", call.Groups[4].Value);
             chunks =
