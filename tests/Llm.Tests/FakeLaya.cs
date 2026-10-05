@@ -8,7 +8,7 @@ namespace Llm.Tests;
 /// The laya module's server (deploy/services/laya) as the app sees it: /health, and /v1/decide
 /// answering every question as Laya shapes its answers (the first option at 0.97231, a score of
 /// 1.38721, a yes of 0.84987, each with Laya's act-or-escalate head). A state "refuse" is refused
-/// as Laya refuses options past its budget.
+/// as Laya refuses options past its budget; one starting "long" is cut short, as Laya says in its usage.
 /// </summary>
 public sealed class FakeLaya : HttpMessageHandler
 {
@@ -82,7 +82,9 @@ public sealed class FakeLaya : HttpMessageHandler
         return Json(new JsonObject
         {
             ["answers"] = answers,
-            ["usage"] = new JsonObject { ["input_tokens"] = 42, ["output_tokens"] = 0 },
+            ["usage"] = state.StartsWith("long", StringComparison.Ordinal)
+                ? new JsonObject { ["input_tokens"] = 512, ["output_tokens"] = 0, ["state_tokens"] = 812, ["state_tokens_dropped"] = 334, ["truncated"] = true }
+                : new JsonObject { ["input_tokens"] = 42, ["output_tokens"] = 0, ["state_tokens"] = 21, ["state_tokens_dropped"] = 0, ["truncated"] = false },
             ["checkpoint"] = multilingual ? "multilingual" : "english",
             ["routing"] = multilingual ? "arabic script" : "latin script, language en",
             ["calibrated"] = !multilingual,

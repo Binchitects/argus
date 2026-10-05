@@ -35,8 +35,9 @@ CHECKPOINTS = ("english", "multilingual")
 CHOICES = ("auto",) + CHECKPOINTS
 TYPES = ("choice", "score", "noul")
 
-# What one request may hold. Laya reads 512 tokens of state on the English checkpoint and
-# 1024 on the multilingual one, and an option list shares 192 or 256 tokens: more is cut.
+# What one request may hold. Laya reads 512 tokens on the English checkpoint and 1024 on the
+# multilingual one, the question and its options (at most 192 or 256) included: more of the
+# state is cut, and its usage says so (truncated, state_tokens, state_tokens_dropped).
 MAX_BODY = 256 * 1024
 MAX_STATE = 20_000
 MAX_QUESTIONS = 20

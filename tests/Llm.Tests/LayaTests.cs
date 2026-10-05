@@ -172,6 +172,7 @@ public sealed class LayaTests(AppFixture app, ITestOutputHelper output) : IDispo
         Assert.Equal("english", answer["checkpoint"]!.GetValue<string>());
         Assert.True(answer["calibrated"]!.GetValue<bool>());
         Assert.Null(answer["note"]);
+        Assert.Null(answer["truncated"]);
 
         // What Laya was sent: its own shape, every question in one call, the checkpoint by script, with its length.
         var sent = _laya.Requests.Single();
@@ -190,6 +191,13 @@ public sealed class LayaTests(AppFixture app, ITestOutputHelper output) : IDispo
         (answer, _, _) = await DecideAsync(b, chat, new { state = "سفارش من دو هفته است که نرسیده.", questions = new[] { new { id = "late", type = "noul", question = "Is the order late?" } } });
         Assert.Equal("multilingual", answer!["checkpoint"]!.GetValue<string>());
         Assert.Contains("not calibrated", answer["note"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        // A state Laya cut short: how much it read, said (Code Arena reads the rest again in parts).
+        (answer, _, _) = await DecideAsync(b, chat, new { state = "long " + new string('x', 3000), questions = new[] { new { id = "q", type = "noul", question = "Is it long?" } } });
+        Assert.Equal(812, answer!["truncated"]!["tokens"]!.GetValue<int>());
+        Assert.Equal(478, answer["truncated"]!["read"]!.GetValue<int>());
+        Assert.Equal("Laya read only the first 478 of the state's 812 tokens: the answers say nothing of the rest. Shorten it, with what matters first, or split it.",
+            answer["note"]!.GetValue<string>());
 
         // Questions Laya would answer badly are refused before it is asked, with what to fix.
         var asked = _laya.Requests.Count;

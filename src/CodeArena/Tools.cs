@@ -157,8 +157,9 @@ internal sealed class Permissions(Ui ui, Mode mode)
             ToolKind.Shell when CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => ("shell:" + prefix, $"for `{prefix} …`"),
             _ => ("tool:" + tool.Name, $"for {tool.Name}"),
         };
-        // "Always" said to an unflagged command does not cover one Laya flags; said to a flagged one, it does.
-        var remembered = flagged ? "laya:" + key : key;
+        // "Always" covers the commands Laya finds as it found this one: said to an unflagged one, not one it flags or could
+        // not read all of; said to a flagged one, the next flagged one; said to one it could not read all of, the next such.
+        var remembered = risk?.Risky == true ? "laya:" + key : risk?.Unread is not null ? "unread:" + key : key;
         await _asking.WaitAsync(ct);
         try
         {
