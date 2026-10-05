@@ -6,7 +6,8 @@ namespace CodeArena.Tests;
 /// A repository whose own settings name programs, as a .git/config and
 /// .gitattributes from an archive could, or as the agent could write them in
 /// auto-edit: each program leaves a marker file when it runs. Nothing that
-/// only reads may make one.
+/// only reads may make one. And a link and a setting that lead to a file
+/// outside it, which nothing that only reads may show.
 /// </summary>
 internal sealed class GitTraps : IDisposable
 {
@@ -26,6 +27,22 @@ internal sealed class GitTraps : IDisposable
         Git("commit", "-q", "-m", "first");
         File.AppendAllText(Path.Combine(Repo, "a.txt"), "two\n");
         Git("commit", "-q", "-am", "second");
+        // A merge whose merge conflicted in m.txt and n.txt: log and show re-merge it for --remerge-diff, through their merge drivers.
+        Git("checkout", "-q", "-b", "side");
+        File.WriteAllText(Path.Combine(Repo, "m.txt"), "side\n");
+        File.WriteAllText(Path.Combine(Repo, "n.txt"), "side\n");
+        Git("add", "m.txt", "n.txt");
+        Git("commit", "-q", "-m", "side");
+        Git("checkout", "-q", "-");
+        File.WriteAllText(Path.Combine(Repo, "m.txt"), "main\n");
+        File.WriteAllText(Path.Combine(Repo, "n.txt"), "main\n");
+        Git("add", "m.txt", "n.txt");
+        Git("commit", "-q", "-m", "main");
+        Git("merge", "-q", "side");
+        File.WriteAllText(Path.Combine(Repo, "m.txt"), "merged\n");
+        File.WriteAllText(Path.Combine(Repo, "n.txt"), "merged\n");
+        Git("add", "m.txt", "n.txt");
+        Git("commit", "-q", "--no-edit");
         // A signed commit on top: any armored block, which git hands to gpg.program to check.
         var tree = Git("rev-parse", "HEAD^{tree}").Trim();
         var parent = Git("rev-parse", "HEAD").Trim();
@@ -34,8 +51,8 @@ internal sealed class GitTraps : IDisposable
             + "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE\n -----END PGP SIGNATURE-----\n\nsigned\n").Trim();
         Git("update-ref", "HEAD", signed);
 
-        // The traps.
-        File.WriteAllText(Path.Combine(Repo, ".gitattributes"), "*.txt filter=evil diff=evil\n*.dat filter=proc\n");
+        // The traps. merge= with no name picks the driver with an empty one.
+        File.WriteAllText(Path.Combine(Repo, ".gitattributes"), "*.txt filter=evil diff=evil\n*.dat filter=proc\nm.txt merge=evil\nn.txt merge=\n");
         Git("config", "core.fsmonitor", Mark("fsmonitor") + "; false");
         Git("config", "filter.evil.clean", Mark("clean") + "; cat");
         Git("config", "filter.evil.smudge", Mark("smudge") + "; cat");
@@ -43,6 +60,9 @@ internal sealed class GitTraps : IDisposable
         Git("config", "diff.evil.textconv", Mark("textconv") + "; cat");
         Git("config", "diff.evil.command", Mark("diff-command"));
         Git("config", "diff.external", Mark("external"));
+        Git("config", "merge.evil.driver", Mark("merge") + "; false");
+        Git("config", "merge..driver", Mark("merge-unnamed") + "; false");
+        Git("config", "log.diffMerges", "remerge");
         Git("config", "log.showSignature", "true");
         Git("config", "gpg.program", Script("gpg"));
         Git("config", "core.sshCommand", Mark("ssh"));
@@ -51,6 +71,13 @@ internal sealed class GitTraps : IDisposable
         {
             File.Copy(Script("hook-" + hook), Path.Combine(Repo, ".git", "hooks", hook), overwrite: true);
         }
+
+        // A file outside the working directory, and a link inside that leads to it; blame.ignoreRevsFile names it, and blame
+        // would say what is in it (no revision: "invalid object name: ...").
+        Outside = Path.Combine(Directory.CreateDirectory(Path.Combine(Root, "outside")).FullName, "secret.txt");
+        File.WriteAllText(Outside, "secret-outside-content\n");
+        File.CreateSymbolicLink(Path.Combine(Repo, "key"), Outside);
+        Git("config", "blame.ignoreRevsFile", Outside);
 
         // The work tree changed: a.txt in what it says, c.txt and b.dat in their times only, which git must read the files for.
         File.AppendAllText(Path.Combine(Repo, "a.txt"), "three\n");
@@ -61,6 +88,8 @@ internal sealed class GitTraps : IDisposable
     public string Root { get; }
     public string Repo { get; }
     public string Marks { get; }
+    /// <summary>A file outside the repository, which nothing that reads it may show (Repo/key links to it).</summary>
+    public string Outside { get; }
 
     /// <summary>The markers made so far: the programs of the repository's that ran.</summary>
     public string[] Ran => [.. Directory.GetFiles(Marks).Select(Path.GetFileName).Where(n => !n!.EndsWith(".sh", StringComparison.Ordinal)).Order()!];

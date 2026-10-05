@@ -48,6 +48,8 @@ internal sealed class CliEnv
     public WebAssets? Web { get; init; }
     /// <summary>Opens an address in the person's browser, false when there is none; null: the system's own way (Browser.Open).</summary>
     public Func<string, bool>? Browse { get; init; }
+    /// <summary>How long a browser opened for the IDE has to arrive before the person is told to open the address.</summary>
+    public TimeSpan BrowserWait { get; init; } = TimeSpan.FromSeconds(20);
 }
 
 /// <summary>The command line: code-arena (the IDE), chat, [options] prompt, login, logout, models.</summary>
@@ -499,7 +501,7 @@ internal static partial class Cli
                     using var launcher = o.NoOpen ? null : Launcher.Write(env.Paths.DataDir, app.Port, app.Address);
                     if (launcher is not null && (env.Browse ?? (url => Browser.Open(url, env.Env)))(launcher.Url))
                     {
-                        _ = NoBrowserYetAsync(app.Opened, env.Out, linked.Token);
+                        _ = NoBrowserYetAsync(app.Opened, env.BrowserWait, env.Out, linked.Token);
                     }
                     else if (!o.NoOpen)
                     {
@@ -526,15 +528,16 @@ internal static partial class Cli
     }
 
     /// <summary>
-    /// When no browser has come with the key 20 s after one was opened: says to
-    /// open the address by hand. A browser in a sandbox (a snap, as Ubuntu's
-    /// Firefox is, or a Flatpak) cannot read the launcher in its hidden folder.
+    /// When no browser has the page (its cookie with it) 20 s after one was
+    /// opened: says to open the address by hand. A browser in a sandbox (a
+    /// snap, as Ubuntu's Firefox is, or a Flatpak) cannot read the launcher in
+    /// its hidden folder.
     /// </summary>
-    private static async Task NoBrowserYetAsync(Task opened, TextWriter output, CancellationToken ct)
+    private static async Task NoBrowserYetAsync(Task opened, TimeSpan wait, TextWriter output, CancellationToken ct)
     {
         try
         {
-            await opened.WaitAsync(TimeSpan.FromSeconds(20), ct);
+            await opened.WaitAsync(wait, ct);
         }
         catch (TimeoutException)
         {

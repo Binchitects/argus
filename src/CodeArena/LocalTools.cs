@@ -538,32 +538,43 @@ internal static class LocalTools
             throw new ToolError($"git here only reads ({string.Join(", ", GitReading)}). Use run_shell for {(args.Count > 0 ? args[0] : "the rest")}.");
         }
         // Options that write files, run programs, change branches or look into submodules (whose settings are their own) stay with run_shell.
-        if (args.Any(x => x.StartsWith("--output", StringComparison.Ordinal) || x is "--ext-diff" or "--textconv" || x.StartsWith("--exec", StringComparison.Ordinal)
+        if (args.Any(x => x.StartsWith("--output", StringComparison.Ordinal) || Shortens(x, "--ext-diff", 5) || Shortens(x, "--textconv", 7) || x.StartsWith("--exec", StringComparison.Ordinal)
                 || x.StartsWith("--submodule", StringComparison.Ordinal) || x.StartsWith("--ignore-submodules", StringComparison.Ordinal) || x.StartsWith("--recurse-submodules", StringComparison.Ordinal))
             || (args[0] == "branch" && args.Skip(1).Any(x => !(x is "-a" or "--all" or "-r" or "--remotes" or "-v" or "-vv" or "--list" or "--show-current" or "--merged" or "--no-merged" or "--contains")))
             || (args[0] == "describe" && args.Any(x => x.StartsWith("--dirty", StringComparison.Ordinal) || x.StartsWith("--broken", StringComparison.Ordinal))))
         {
             throw new ToolError("That git call changes something or runs a program: use run_shell.");
         }
-        // Reading stays in the working directory, as read_file's does: not git diff --no-index /etc/shadow, nor blame --contents.
-        if (args.Contains("--no-index") || args.Skip(1).Select(x => x.StartsWith('-') ? x.IndexOf('=') is var eq and > 0 ? x[(eq + 1)..] : null : x)
-                .Any(p => p is { Length: > 0 } && (Path.IsPathRooted(p) || p.Split('/', '\\').Contains("..")) && !c.Workspace.Allowed(Path.TrimEndingDirectorySeparator(Path.GetFullPath(p, c.Workspace.Root)))))
+        // status -v shows the changes through the repository's text conversion, which status has no option to turn off.
+        if (args[0] == "status" && args.Skip(1).TakeWhile(x => x != "--").Any(x => x.StartsWith("--v", StringComparison.Ordinal) || (x.Length > 1 && x[0] == '-' && x[1] != '-' && x.Contains('v'))))
         {
-            throw new ToolError("git here reads the working directory only: a path outside it is refused.");
+            throw new ToolError("git status -v here is git diff --cached and git diff: ask for those.");
         }
-        // What git turns text into, or diffs with, would be a program the repository's settings name.
-        string[] guards = args[0] switch
+        if (args.Any(x => x.Contains('\0')))
         {
-            "diff" => ["--no-ext-diff", "--no-textconv", "--ignore-submodules=all"],
-            "log" or "show" => ["--no-ext-diff", "--no-textconv"],
-            "blame" => ["--no-textconv"],
-            "status" => ["--ignore-submodules=all"],
-            _ => [],
-        };
+            throw new ToolError("An argument to git holds a NUL character.");
+        }
         Proc.Result run;
         try
         {
-            var psi = await Task.Run(() => CodeArena.Git.Command(c.Workspace.Root, ["--no-pager", "-c", "color.ui=never", args[0], .. guards, .. args.Skip(1)], filters: true), ct);
+            var repo = await Task.Run(() => CodeArena.Git.Inspect(c.Workspace.Root), ct);
+            // Reading stays in the working directory, as read_file's does: not git diff --no-index /etc/shadow, nor blame --contents
+            // or -S with a file outside, named so or reached through a link inside that leads out.
+            if (args.Contains("--no-index") || PathsIn(args).Any(p => p.Path.Length > 0 && !(InWorkspace(p.Path, c.Workspace.Root, c.Workspace) && (!p.FromTop || InWorkspace(p.Path, repo.Top, c.Workspace)))))
+            {
+                throw new ToolError("git here reads the working directory only: a path outside it is refused.");
+            }
+            // What git turns text into, or diffs with, would be a program the repository's settings name.
+            string[] guards = args[0] switch
+            {
+                "diff" => ["--no-ext-diff", "--no-textconv", "--ignore-submodules=all"],
+                "log" or "show" => ["--no-ext-diff", "--no-textconv"],
+                // blame.ignoreRevsFile, read for revisions to skip, says what is in it when it holds none: one outside is not read.
+                "blame" => ["--no-textconv", .. repo.IgnoreRevs.All(c.Workspace.Allowed) ? Array.Empty<string>() : ["--no-ignore-revs-file"]],
+                "status" => ["--ignore-submodules=all"],
+                _ => [],
+            };
+            var psi = CodeArena.Git.Command(c.Workspace.Root, ["--no-pager", "-c", "color.ui=never", args[0], .. guards, .. args.Skip(1)], repo.Off);
             run = await Proc.RunAsync(psi, TimeSpan.FromSeconds(60), ct);
         }
         catch (System.ComponentModel.Win32Exception)
@@ -577,6 +588,85 @@ internal static class LocalTools
             text += $"\n[exit code {run.ExitCode}]";
         }
         return new ToolResult(text, run.ExitCode != 0) { Display = Fmt.Head(text, 6) };
+    }
+
+    /// <summary>Whether an argument is this long option, or a shortening of it git would take (at least <paramref name="least"/> characters).</summary>
+    private static bool Shortens(string arg, string option, int least) => arg.Length >= least && option.StartsWith(arg, StringComparison.Ordinal);
+
+    /// <summary>
+    /// What in git's arguments could name a file: every argument that is not an
+    /// option (a revision names none, and passes), the value of an
+    /// --option=value, and what follows a short option that takes a file (-S,
+    /// -O, -X), in a cluster too (-wS FILE). The file blame's --contents, -S
+    /// and --ignore-revs-file take, git reads from the repository's top, not
+    /// from the working directory (FromTop).
+    /// </summary>
+    private static IEnumerable<(string Path, bool FromTop)> PathsIn(List<string> args)
+    {
+        var blame = args[0] == "blame";
+        for (var i = 1; i < args.Count; i++)
+        {
+            var arg = args[i];
+            if (arg == "--")
+            {
+                foreach (var rest in args.Skip(i + 1))
+                {
+                    yield return (rest, false);
+                }
+                yield break;
+            }
+            if (!arg.StartsWith('-') || arg == "-")
+            {
+                yield return (arg, false);
+                continue;
+            }
+            if (arg.StartsWith("--", StringComparison.Ordinal))
+            {
+                var eq = arg.IndexOf('=');
+                var name = eq > 0 ? arg[..eq] : arg;
+                // As git takes them shortened too; --ignore-rev is an option of its own, which takes a revision.
+                var file = blame && name != "--ignore-rev" && (Shortens(name, "--contents", 4) || Shortens(name, "--ignore-revs-file", 4));
+                if (eq > 0)
+                {
+                    yield return (arg[(eq + 1)..], file);
+                }
+                else if (file && i + 1 < args.Count)
+                {
+                    yield return (args[++i], true);
+                }
+                continue;
+            }
+            for (var j = 1; j < arg.Length; j++)
+            {
+                if (arg[j] is 'S' or 'O' or 'X')
+                {
+                    // The rest of the argument is its value, or the next argument is.
+                    var top = blame && arg[j] == 'S';
+                    if (j + 1 < arg.Length)
+                    {
+                        yield return (arg[(j + 1)..], top);
+                    }
+                    else if (i + 1 < args.Count)
+                    {
+                        yield return (args[++i], top);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>Whether a path, taken from this folder, may be read: inside the working directory where it leads.</summary>
+    private static bool InWorkspace(string path, string from, Workspace workspace)
+    {
+        try
+        {
+            return workspace.Allowed(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, from)));
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     private static Task<ToolResult> Todo(JsonObject a, ToolContext c, CancellationToken ct)

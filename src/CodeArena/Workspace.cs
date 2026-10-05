@@ -95,7 +95,8 @@ internal sealed class Workspace
         });
     }
 
-    private static bool Within(string full, string root) =>
+    /// <summary>Whether a full path is the folder, or in it, by name.</summary>
+    internal static bool Within(string full, string root) =>
         full.Equals(root, Compare) || full.StartsWith(root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar, Compare);
 
     /// <summary>
@@ -107,7 +108,7 @@ internal sealed class Workspace
     /// links, or more than 40 of them. Windows applies a .. in a link's target by
     /// name, from where the link is: so is it here, there.
     /// </summary>
-    private static string? Physical(string full)
+    internal static string? Physical(string full)
     {
         var current = Path.GetPathRoot(full) ?? "";
         var pending = new Stack<string>();
@@ -455,12 +456,13 @@ internal static class Files
 /// person's say-so. So: no fsmonitor hook when the index is read; no hook of
 /// .git/hooks (status and diff write the index back, which runs
 /// post-index-change); no clean, smudge or process filter, which status, diff
-/// and blame run over the files (when asked, the repository's own are named
-/// and switched off); no signature checker; no submodule visited, whose
-/// settings are its own; and no way to reach another machine (a partial clone
-/// fetches what it lacks, through ssh, a credential helper or a remote helper).
-/// Text conversion and external diff programs are the command's own options:
-/// the git tool turns them off.
+/// and blame run over the files, and no merge driver, which log and show run
+/// to re-merge a merge (--remerge-diff); when asked, the repository's own are
+/// named and switched off; no signature checker; no submodule visited, whose
+/// settings are its own; no bare repository found on the way up; and no way to
+/// reach another machine (a partial clone fetches what it lacks, through ssh, a
+/// credential helper or a remote helper). Text conversion and external diff
+/// programs are the command's own options: the git tool turns them off.
 /// </summary>
 internal static class Git
 {
@@ -482,18 +484,19 @@ internal static class Git
         "gpg.openpgp.program=",
         "gpg.x509.program=",
         "gpg.ssh.program=",
+        // A folder of the working directory that looks like a repository's insides (HEAD, objects, refs), from an archive: not a repository.
+        "safe.bareRepository=explicit",
     ];
 
     /// <summary>
-    /// git with these arguments in this folder, guarded as above.
-    /// <paramref name="filters"/>: the repository's filters too, which takes a
-    /// git config first (for a command that reads the files: status, diff,
-    /// blame).
+    /// git with these arguments in this folder, guarded as above;
+    /// <paramref name="off"/>: settings that switch off what the repository's
+    /// own name (Inspect).
     /// </summary>
-    public static ProcessStartInfo Command(string dir, IEnumerable<string> args, bool filters = false)
+    public static ProcessStartInfo Command(string dir, IEnumerable<string> args, IEnumerable<string>? off = null)
     {
         var psi = new ProcessStartInfo("git") { WorkingDirectory = dir, UseShellExecute = false };
-        foreach (var setting in filters ? Settings.Concat(FiltersOff(dir)) : Settings)
+        foreach (var setting in Settings.Concat(off ?? []))
         {
             psi.ArgumentList.Add("-c");
             psi.ArgumentList.Add(setting);
@@ -516,43 +519,142 @@ internal static class Git
         env["GIT_TERMINAL_PROMPT"] = "0";
     }
 
-    /// <summary>filter.NAME.clean, smudge and process emptied for every filter the settings name (git config reads them, and runs nothing).</summary>
-    private static List<string> FiltersOff(string dir)
+    /// <summary>What the git tool knows of a folder's repository before it runs git there.</summary>
+    /// <param name="Top">The folder holding its .git, which is its work tree.</param>
+    /// <param name="Off">Settings that switch off every filter and merge driver its settings name.</param>
+    /// <param name="IgnoreRevs">The files blame.ignoreRevsFile names, as full paths (git reads them from the top).</param>
+    public sealed record Repository(string Top, List<string> Off, List<string> IgnoreRevs);
+
+    /// <summary>
+    /// The repository git reads from this folder, when it reads only that. Its
+    /// work tree is the folder holding its .git (not where core.worktree says,
+    /// which could put it around the person's home, an index naming
+    /// ~/.ssh/id_rsa). Its own folder (.git, or where a .git file points, and
+    /// its common folder) is in that folder, or is one git made for it
+    /// elsewhere, which names it back: a worktree of another checkout
+    /// (worktrees/NAME/gitdir there), or a submodule (its folder in the
+    /// parent's .git, whose core.worktree is this one). A .git file, a
+    /// commondir or core.worktree the repository's own files set could
+    /// otherwise send git to another repository of the person's: a ToolError,
+    /// as is no repository at all (git's own words). The person's GIT_DIR (or
+    /// GIT_WORK_TREE) is theirs.
+    /// </summary>
+    public static Repository Inspect(string dir)
     {
-        var psi = new ProcessStartInfo("git")
+        var top = SystemPrompt.GitRoot(dir);
+        if (!new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR" }.Any(name => Environment.GetEnvironmentVariable(name) is { Length: > 0 }))
         {
-            WorkingDirectory = dir,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-        };
-        foreach (var arg in new[] { "config", "--name-only", "-z", "--get-regexp", @"^filter\." })
-        {
-            psi.ArgumentList.Add(arg);
+            var (code, output, error) = Run(dir, ["rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"]);
+            var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            if (code != 0 || lines.Length != 3)
+            {
+                throw new ToolError($"git: {(error.Trim() is { Length: > 0 } said ? said : "this is not a repository with a work tree.")}");
+            }
+            var work = Real(lines[0]);
+            var gitDir = Real(lines[1]);
+            var common = Real(Path.GetFullPath(lines[2], dir));
+            if (top is null || !Same(work, Real(top)))
+            {
+                throw new ToolError($"The repository's settings put its work tree at {lines[0]}, not {top ?? "the folder that holds its .git"} (core.worktree): git does not read it here.");
+            }
+            var own = Workspace.Within(gitDir, work) && Workspace.Within(common, work)
+                // A worktree of another checkout: worktrees/NAME in that checkout's .git, whose gitdir file names this .git.
+                || (Same(Path.GetDirectoryName(gitDir) ?? "", Path.Join(common, "worktrees"))
+                    && ReadLine(Path.Join(gitDir, "gitdir")) is { } back && Same(Real(Path.GetFullPath(back, gitDir)), Real(Path.Join(top, ".git"))))
+                // A submodule: its folder in the parent's .git, whose own settings make this folder its work tree.
+                || (Same(gitDir, common)
+                    && Run(dir, ["config", "--file", Path.Join(gitDir, "config"), "--get", "core.worktree"]) is (0, var worktree, _)
+                    && Same(Real(Path.GetFullPath(worktree.Trim(), gitDir)), work));
+            if (!own)
+            {
+                throw new ToolError($"This repository's .git leads to {lines[1]}, the folder of another repository: git does not read it here.");
+            }
         }
-        Guard(psi.Environment);
+        var (off, ignoreRevs) = Named(dir, top ?? dir);
+        return new Repository(top ?? dir, off, ignoreRevs);
+    }
+
+    /// <summary>
+    /// From the settings (git config reads them, and runs nothing): filter.NAME.clean,
+    /// smudge and process, and merge.NAME.driver, emptied for every name there
+    /// (an empty name too, which merge= or filter= in .gitattributes picks); and
+    /// the files blame.ignoreRevsFile names.
+    /// </summary>
+    private static (List<string> Off, List<string> IgnoreRevs) Named(string dir, string top)
+    {
+        var (_, output, _) = Run(dir, ["config", "-z", "--get-regexp", @"^(filter|merge)\.|^blame\.ignorerevsfile$"]);
+        var off = new List<string>();
+        var ignoreRevs = new List<string>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        // KEY\nVALUE, or KEY alone for a bare true; exit code 1 and nothing: none.
+        foreach (var entry in output.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var newline = entry.IndexOf('\n');
+            var key = newline < 0 ? entry : entry[..newline];
+            if (key == "blame.ignorerevsfile")
+            {
+                // A path: ~/ is the home folder, and anything else git would expand is taken as outside. An empty one names no file.
+                var value = newline < 0 ? "" : entry[(newline + 1)..];
+                if (value.Length == 0)
+                {
+                    continue;
+                }
+                ignoreRevs.Add(value.StartsWith("~/", StringComparison.Ordinal) ? Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), value[2..])
+                    : value.StartsWith('~') || value.StartsWith("%(", StringComparison.Ordinal) ? Path.GetPathRoot(top) ?? "/"
+                    : Path.GetFullPath(value, top));
+                continue;
+            }
+            // filter.NAME.VARIABLE or merge.NAME.VARIABLE, where the name may hold dots, or be empty; merge.VARIABLE has none.
+            var section = key.StartsWith("filter.", StringComparison.Ordinal) ? "filter." : "merge.";
+            var dot = key.LastIndexOf('.');
+            if (dot < section.Length || !names.Add(key[..dot]))
+            {
+                continue;
+            }
+            var name = key[section.Length..dot];
+            if (name.Contains('=') || name.Contains('\n'))
+            {
+                throw new ToolError($"The repository's settings name a {section.TrimEnd('.')} that cannot be switched off from git's command line ({name}): git does not read it here.");
+            }
+            off.AddRange(section == "filter."
+                ? [$"filter.{name}.clean=", $"filter.{name}.smudge=", $"filter.{name}.process=", $"filter.{name}.required=false"]
+                : [$"merge.{name}.driver="]);
+        }
+        return (off, ignoreRevs);
+    }
+
+    /// <summary>A guarded git's exit code, output and errors; git that does not answer within 15 s is stopped.</summary>
+    private static (int Code, string Output, string Error) Run(string dir, string[] args)
+    {
+        var psi = Command(dir, args);
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = Encoding.UTF8;
+        psi.StandardErrorEncoding = Encoding.UTF8;
         using var git = Process.Start(psi) ?? throw new IOException("git did not start.");
         var output = git.StandardOutput.ReadToEndAsync();
-        _ = git.StandardError.ReadToEndAsync();
+        var error = git.StandardError.ReadToEndAsync();
         if (!git.WaitForExit(15_000))
         {
             git.Kill(entireProcessTree: true);
-            throw new IOException("git config did not answer within 15 s.");
+            throw new IOException($"git {args[0]} did not answer within 15 s.");
         }
-        var settings = new List<string>();
-        // filter.NAME.VARIABLE, where the name may hold dots; exit code 1 and nothing: no filter.
-        foreach (var name in output.Result.Split('\0', StringSplitOptions.RemoveEmptyEntries)
-                     .Select(key => key.LastIndexOf('.') is var dot && dot > "filter.".Length ? key["filter.".Length..dot] : null)
-                     .OfType<string>()
-                     .Distinct(StringComparer.Ordinal))
-        {
-            if (name.Contains('=') || name.Contains('\n'))
-            {
-                throw new IOException($"The repository's settings name a filter that cannot be switched off from the command line ({name}).");
-            }
-            settings.AddRange([$"filter.{name}.clean=", $"filter.{name}.smudge=", $"filter.{name}.process=", $"filter.{name}.required=false"]);
-        }
-        return settings;
+        return (git.ExitCode, output.Result, error.Result);
     }
+
+    private static string? ReadLine(string file)
+    {
+        try
+        {
+            return File.ReadAllText(file).Trim() is { Length: > 0 } line ? line : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string Real(string path) => Workspace.Physical(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path))) ?? path;
+
+    private static bool Same(string a, string b) => Workspace.Within(a, b) && Workspace.Within(b, a);
 }

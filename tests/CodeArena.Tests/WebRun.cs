@@ -53,10 +53,10 @@ internal sealed partial class WebRun : IAsyncDisposable
     public static Task<WebRun> StartAsync(Harness h, params string[] args) => StartAsync(h, bare: false, args);
 
     /// <summary>code-arena web, or (bare) code-arena with no command and no prompt, which is the IDE too.</summary>
-    public static Task<WebRun> StartAsync(Harness h, bool bare, params string[] args) => StartAsync(h, bare, browse: null, args);
+    public static Task<WebRun> StartAsync(Harness h, bool bare, params string[] args) => StartAsync(h, bare, browse: null, TimeSpan.FromSeconds(20), args);
 
-    /// <summary>With <paramref name="browse"/>, the browser is opened (through it), not left closed with --no-open.</summary>
-    public static async Task<WebRun> StartAsync(Harness h, bool bare, Func<string, bool>? browse, params string[] args)
+    /// <summary>With <paramref name="browse"/>, the browser is opened (through it), not left closed with --no-open; <paramref name="browserWait"/> later, if no browser has the page, the person is told.</summary>
+    public static async Task<WebRun> StartAsync(Harness h, bool bare, Func<string, bool>? browse, TimeSpan browserWait, params string[] args)
     {
         var output = new StringWriter();
         var error = new StringWriter();
@@ -73,6 +73,7 @@ internal sealed partial class WebRun : IAsyncDisposable
                 ("assets/app.js", "console.log('code arena')"),
                 ("preview.html", "<!doctype html><p>runner</p>")),
             Browse = browse,
+            BrowserWait = browserWait,
         };
         var exit = Task.Run(() => Cli.RunAsync([.. bare ? Array.Empty<string>() : ["web"], .. browse is null ? ["--no-open"] : Array.Empty<string>(), .. args], env));
         var run = new WebRun(env, output, error, exit);

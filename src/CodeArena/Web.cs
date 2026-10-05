@@ -114,7 +114,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     public int Port => _server.Endpoint.Port;
     /// <summary>The address to open: the token in it once; the page then lives on a cookie.</summary>
     public string Address => $"http://127.0.0.1:{Port}/?token={Token}";
-    /// <summary>Done once a browser has come with the address.</summary>
+    /// <summary>Done once a browser has the page, the key's cookie with it.</summary>
     public Task Opened => _opened.Task;
     /// <summary>Per port: two runs side by side keep their own.</summary>
     private string CookieName => $"code_arena_{Port}";
@@ -162,16 +162,17 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 await NoEntryAsync(res, "This link is not the one this run of code-arena printed: it makes a new key each time it starts.", ct);
                 return;
             }
-            // The key moves to a cookie, and out of the address bar and the history.
-            _opened.TrySetResult();
+            // The key moves to a cookie, and out of the address bar: by a page that moves itself to /, not a redirect.
+            // A browser opened with the launcher file comes from another site (file://): on a redirect from there it
+            // leaves a SameSite=Strict cookie out, as on this request; from a page of this server's own, it sends it.
             res.Headers["Set-Cookie"] = $"{CookieName}={Token}; Path=/; HttpOnly; SameSite=Strict";
-            res.Headers["Location"] = "/";
-            await res.SendAsync(302, [], null, ct);
+            await HandOffAsync(res, ct);
             return;
         }
         var bearer = req.Header("Authorization") is { } auth && auth.StartsWith("Bearer ", StringComparison.Ordinal) ? auth[7..].Trim() : null;
         var api = req.Path.StartsWith("/api/", StringComparison.Ordinal);
-        if (!TokenIs(req.Cookie(CookieName)) && !TokenIs(bearer))
+        var cookie = TokenIs(req.Cookie(CookieName));
+        if (!cookie && !TokenIs(bearer))
         {
             if (api)
             {
@@ -198,6 +199,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             await ApiAsync(req, res, ct);
             return;
+        }
+        if (cookie && req.Path == "/" && req.Method == "GET")
+        {
+            // A browser has the page, the cookie having come through: the key in the address was not all it took.
+            _opened.TrySetResult();
         }
         await StaticAsync(req, res, ct);
     }
@@ -231,6 +237,18 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             <h1 style="font-size: 1.25rem">Code Arena</h1><p>{WebUtility.HtmlEncode(why)}</p></body></html>
             """;
         return res.TextAsync(401, html, ct, "text/html; charset=utf-8");
+    }
+
+    /// <summary>The answer to the address with the key: a page that goes on to / at once (replacing itself in the tab's history), the cookie set.</summary>
+    private static Task HandOffAsync(HttpResponse res, CancellationToken ct)
+    {
+        res.Headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+        res.Headers["X-Frame-Options"] = "DENY";
+        const string html = """
+            <!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Code Arena</title></head>
+            <body style="font: 15px/1.5 system-ui, sans-serif; max-width: 36rem; margin: 15vh auto; padding: 0 1rem"><p>Opening Code Arena. If it does not open, <a href="/">open it here</a>.</p></body></html>
+            """;
+        return res.TextAsync(200, html, ct, "text/html; charset=utf-8");
     }
 
     private async Task StaticAsync(HttpRequest req, HttpResponse res, CancellationToken ct)

@@ -36,10 +36,14 @@ public sealed partial class WebTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/assets/app.js")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/?token=" + new string('x', 43))).StatusCode);
 
-        // The token in the address once: it becomes a cookie, and leaves the address bar.
+        // The token in the address once: it becomes a cookie, and leaves the address bar. Not by a redirect, which a browser
+        // that came from another site (the launcher file) follows without the SameSite=Strict cookie: by a page of the
+        // server's own that goes on to /, which the browser sends it to.
         var opened = await anonymous.GetAsync("/?token=" + web.Token);
-        Assert.Equal(HttpStatusCode.Found, opened.StatusCode);
-        Assert.Equal("/", opened.Headers.Location!.OriginalString);
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        Assert.Null(opened.Headers.Location);
+        Assert.Contains("""<meta http-equiv="refresh" content="0;url=/">""", await opened.Content.ReadAsStringAsync());
+        Assert.Contains("frame-ancestors 'none'", opened.Headers.GetValues("Content-Security-Policy").Single());
         var cookie = Assert.Single(opened.Headers.GetValues("Set-Cookie"));
         Assert.Equal($"code_arena_{web.Port}={web.Token}; Path=/; HttpOnly; SameSite=Strict", cookie);
 
@@ -346,7 +350,7 @@ public sealed partial class WebTests : IDisposable
     {
         using var h = new Harness(_gateway, _mcp);
         var opened = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var web = await WebRun.StartAsync(h, bare: false, browse: url => opened.TrySetResult(url));
+        var web = await WebRun.StartAsync(h, bare: false, browse: url => opened.TrySetResult(url), TimeSpan.FromSeconds(2));
         string file;
         try
         {
@@ -364,10 +368,22 @@ public sealed partial class WebTests : IDisposable
                 Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file));
                 Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.GetDirectoryName(file)!));
             }
-            // Followed, it opens the IDE.
-            using var anonymous = WebRun.Client(web.Port, token: null);
-            var entry = await anonymous.GetAsync(web.Address);
-            Assert.Equal(HttpStatusCode.Redirect, entry.StatusCode);
+            // Followed, as a browser does from a file: the request comes from another site, so the answer cannot be a redirect,
+            // which the browser would follow without the SameSite=Strict cookie (Chrome showed the page that asks for the key).
+            // It is a page that sets the cookie and goes on to / itself; from it, the browser sends the cookie.
+            using var browser = WebRun.Client(web.Port, token: null);
+            using var entry = new HttpRequestMessage(HttpMethod.Get, web.Address);
+            entry.Headers.Add("Sec-Fetch-Site", "cross-site");
+            var handOff = await browser.SendAsync(entry);
+            Assert.Equal(HttpStatusCode.OK, handOff.StatusCode);
+            Assert.Contains("""<meta http-equiv="refresh" content="0;url=/">""", await handOff.Content.ReadAsStringAsync());
+            using var page = new HttpRequestMessage(HttpMethod.Get, "/");
+            page.Headers.Add("Sec-Fetch-Site", "same-origin");
+            page.Headers.Add("Cookie", handOff.Headers.GetValues("Set-Cookie").Single().Split(';')[0]);
+            Assert.Equal(HttpStatusCode.OK, (await browser.SendAsync(page)).StatusCode);
+            // The browser has the IDE: code-arena does not tell the person to open the address.
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            Assert.DoesNotContain("No browser has opened the IDE yet", web.Out);
         }
         finally
         {
@@ -375,6 +391,18 @@ public sealed partial class WebTests : IDisposable
         }
         // And it goes with the run.
         Assert.False(File.Exists(file));
+
+        // A browser that came with the key but never had the page with its cookie (a hand-off that failed) has not opened
+        // the IDE: the person is told to open the address.
+        await using var lost = await WebRun.StartAsync(h, bare: false, browse: _ => true, TimeSpan.FromSeconds(1));
+        using var anonymous = WebRun.Client(lost.Port, token: null);
+        Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync(lost.Address)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/")).StatusCode);
+        for (var waited = 0; !lost.Out.Contains("No browser has opened the IDE yet: open the address above in yours.") && waited < 10_000; waited += 50)
+        {
+            await Task.Delay(50);
+        }
+        Assert.Contains("No browser has opened the IDE yet: open the address above in yours.", lost.Out);
     }
 
     [Fact]

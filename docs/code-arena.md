@@ -248,15 +248,18 @@ That is why everything below is behind this run's key.
 - It listens on `127.0.0.1` only, on a free port unless `--port` says which.
 - The address carries a key made for this run (`?token=…`). Opening it sets a
   cookie (HttpOnly, SameSite=Strict, one per port) and takes the key out of the
-  address; every request without the key is refused. A new run makes a new
-  key: an old tab says so.
+  address, with a page that goes on to `/` itself: the browser sends a
+  SameSite=Strict cookie on that, not on a redirect it follows from another
+  site, as the launcher file below is. Every request without the key is
+  refused. A new run makes a new key: an old tab says so.
 - The key never goes on a command line, which every user of the machine can
   read (`ps`, `/proc`): the browser is opened with a file,
   `open/code-arena-PORT.html` in code-arena's data folder (0600, in a folder
   of the person's alone, 0700), which sends it on to the address, as Jupyter
   does. The file goes when the run ends. A browser in a sandbox (a snap, as
-  Ubuntu's Firefox is, or a Flatpak) cannot read it: code-arena says so after
-  20 s, and the address it printed opens the IDE there.
+  Ubuntu's Firefox is, or a Flatpak) cannot read it: when no browser has the
+  page, cookie and all, 20 s later, code-arena says so, and the address it
+  printed opens the IDE there.
 - The server answers only to `127.0.0.1` and `localhost` at its port (the Host
   header), so a name pointed at 127.0.0.1 (DNS rebinding) gets nothing; it
   refuses requests from other sites, or another port's page (Origin,
@@ -384,7 +387,7 @@ On the person's machine:
 | `list_dir`, `glob` | folders and file names (`**/*.cs`, `*.{ts,tsx}`); `.gitignore` is respected |
 | `grep` | file contents by regular expression, with context lines; binary and ignored files skipped, and those it cannot read, named pipes and links that lead outside |
 | `run_shell` | a command in bash (sh when missing; `cmd.exe` on Windows; `"shell"` in the file for another), 120 s by default, at most 600; long output is cut in the middle |
-| `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory (`diff --no-index` and paths outside it are refused). It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, text conversion, external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
+| `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
 | `todo_write` | the to-do list the person sees (`/todo`) |
 | `task` | a sub-agent (below) |
 
