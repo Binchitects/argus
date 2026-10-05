@@ -372,7 +372,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         var root = _rt.Workspace.Root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return new JsonObject
         {
+            // The about box: the version, its licence and its source (LICENSING.md).
+            ["name"] = "Code Arena",
             ["version"] = Cli.Version,
+            ["license"] = Cli.License,
+            ["source"] = Cli.Source,
             ["folder"] = _rt.Workspace.Root,
             ["project"] = Path.GetFileName(root) is { Length: > 0 } project ? project : root,
             ["branch"] = git is null ? null : SystemPrompt.GitBranch(git),

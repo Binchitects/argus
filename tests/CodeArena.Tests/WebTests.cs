@@ -57,6 +57,10 @@ public sealed partial class WebTests : IDisposable
         Assert.Equal("model-a", state["model"]!.GetValue<string>());
         Assert.Equal("ask", state["mode"]!.GetValue<string>());
         Assert.Equal(h.Work, state["folder"]!.GetValue<string>());
+        // The about box: the version, its licence and its source.
+        Assert.Equal(Cli.Version, state["version"]!.GetValue<string>());
+        Assert.Equal("AGPL-3.0-only", state["license"]!.GetValue<string>());
+        Assert.Equal("https://github.com/Binchitects/argus", state["source"]!.GetValue<string>());
         // The key works as a bearer token too (scripts, these tests); another key does not.
         Assert.Equal(HttpStatusCode.OK, (await web.Http.GetAsync("/api/state")).StatusCode);
         using var wrong = WebRun.Client(web.Port, token: new string('y', 43));

@@ -61,6 +61,9 @@ public sealed class CliTests : IDisposable
         using var h = new Harness(_gateway, _mcp);
         Assert.Equal(0, await h.Run("", "--version"));
         Assert.StartsWith("code-arena ", h.Out);
+        // The licence and the source, as LICENSING.md's additional terms ask.
+        Assert.Contains("Licence: AGPL-3.0-only", h.Out);
+        Assert.Contains("Source: https://github.com/Binchitects/argus", h.Out);
         Assert.Equal(2, await h.Run("", "--bogus"));
     }
 

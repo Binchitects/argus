@@ -54,6 +54,24 @@ internal static partial class Cli
     public static string Version { get; } =
         typeof(Cli).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
 
+    /// <summary>The licence this version is offered under (LICENSING.md: or a commercial license).</summary>
+    public const string License = "AGPL-3.0-only";
+
+    /// <summary>
+    /// Where this version's complete source is: --version and the IDE's about box
+    /// show it, as LICENSING.md's additional terms ask. A modified version points
+    /// it at its own source.
+    /// </summary>
+    public const string Source = "https://github.com/Binchitects/argus";
+
+    /// <summary>What --version prints: the version, the licence and the source.</summary>
+    public static string About => $"""
+        code-arena {Version}
+        Copyright (C) 2026 Binchitects and contributors. There is no warranty.
+        Licence: {License}, with the additional terms in LICENSING.md (or a commercial license from Binchitects).
+        Source: {Source}
+        """;
+
     public const string Help = """
         Code Arena: an IDE in your browser around a coding agent, on your company's Argus Arena.
 
@@ -106,7 +124,7 @@ internal static partial class Cli
                 env.Out.WriteLine(Help);
                 return 0;
             case "version":
-                env.Out.WriteLine($"code-arena {Version}");
+                env.Out.WriteLine(About);
                 return 0;
             case "login":
                 return await LoginAsync(o, env, MakeUi(env, o, quiet: false), ct);
