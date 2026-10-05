@@ -26,6 +26,14 @@ secret setting is stored encrypted (under `APP_KEY`) and never shown again.
 **Upload a zip** and **From an address** (with its SHA-256, so only that exact
 file installs) take a plugin from outside the catalog.
 
+**Its certificate (https)**, in **Install** and in **Settings**: the same choice
+as for any server in **Admin → Tools**. **Check the certificate** (the
+default), **Trust this CA** (a company CA's certificate in PEM, pasted or from
+a file; the name must still match), or **Do not check** (warned of on its card,
+audited as `tool.server_tls`). It applies to the plugin's MCP server or API,
+and to its OAuth token address when that is on the same server (same host and
+port); an update keeps it.
+
 **Update** appears when the catalog has another version; the settings stay,
 and its prompts become the new version's. **Remove** takes its tool out of
 every chat, its prompts out of the library, and forgets everyone's connected
@@ -106,7 +114,10 @@ plugin. `gitlab-issues` brings `/triage`.
 Without a plugin, **Admin → Tools → Add a server or API → API (OpenAPI)**
 takes a document (pasted, or fetched from its address), the API's address (or
 the document's first server) and an optional key header. **Read it** lists
-the operations before you add it.
+the operations before you add it. On a server with a company CA or a
+self-signed certificate, choose **Trust this CA** or **Do not check** under
+**Its certificate**: the document is fetched, and the calls made, with it.
+**Read it** says why a certificate was refused.
 
 Each operation becomes a function named `{api}__{operationId}` (snake case):
 its path, query and header parameters and its JSON body are the arguments,

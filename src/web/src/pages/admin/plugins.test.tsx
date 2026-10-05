@@ -41,9 +41,48 @@ describe('admin plugins', () => {
     await userEvent.type(within(dialog).getByLabelText('Application secret'), 's3cret')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Install' }))
     await waitFor(() =>
-      expect(calls.find((c) => c.path === '/api/admin/plugins/install')?.body).toEqual({ name: 'gitlab-issues', settings: { gitlab_url: 'https://gitlab.example.test', client_secret: 's3cret' } }),
+      expect(calls.find((c) => c.path === '/api/admin/plugins/install')?.body).toEqual({
+        name: 'gitlab-issues', settings: { gitlab_url: 'https://gitlab.example.test', client_secret: 's3cret' }, tls: 'System', tlsCa: null,
+      }),
     )
     expect(await within(await screen.findByRole('region', { name: 'GitLab issues' })).findByText('Installed 1.0.0')).toBeInTheDocument()
+  })
+
+  it("its server's certificate check is in its settings, and not checking is warned of", async () => {
+    const installed = {
+      id: 's1', toolId: 'mcp:s1', plugin: 'gitlab-issues', title: 'GitLab issues', version: '1.0.0', url: 'https://gitlab.corp.test/api/v4', personAuth: 'oauth2', writes: [],
+      settings: [{ key: 'gitlab_url', title: 'GitLab address', type: 'url', required: true, help: null, value: 'https://gitlab.corp.test', set: true }],
+      tls: 'OwnCa', tlsCa: '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----', tlsCaNames: ['Corp CA'],
+    }
+    const calls = fakeApi(admin, {
+      'GET /api/admin/plugins': () => ({ json: { problem: null, catalog: [], installed: [installed] } }),
+      'PATCH /api/admin/plugins/s1': () => ({ status: 204 }),
+    })
+    renderApp('/admin/plugins')
+    const card = await screen.findByRole('region', { name: 'GitLab issues' })
+    expect(within(card).getByText('Corp CA')).toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('button', { name: /Settings/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'GitLab issues: settings' })
+    expect(within(dialog).getByRole('radio', { name: /Trust this CA/ })).toBeChecked()
+    expect(within(dialog).getByLabelText('CA certificate (PEM)')).toHaveValue(installed.tlsCa)
+    await userEvent.click(within(dialog).getByRole('radio', { name: /Do not check/ }))
+    expect(within(dialog).getByText('Its certificate will not be checked')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('CA certificate (PEM)')).not.toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ settings: {}, tls: 'Off', tlsCa: null }))
+  })
+
+  it('an installed plugin whose certificate is not checked says so on its card', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/plugins': () => ({
+        json: {
+          problem: null, catalog: [],
+          installed: [{ id: 's1', toolId: 'mcp:s1', plugin: 'lab', title: 'Lab', version: '1', url: 'https://lab.test/mcp', personAuth: null, writes: [], settings: [], tls: 'Off', tlsCa: null, tlsCaNames: [] }],
+        },
+      }),
+    })
+    renderApp('/admin/plugins')
+    expect(await within(await screen.findByRole('region', { name: 'Lab' })).findByText('Its certificate is not checked')).toBeInTheDocument()
   })
 })
 

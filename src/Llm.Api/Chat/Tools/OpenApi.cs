@@ -181,6 +181,10 @@ public static partial class OpenApi
         {
             response = await http.SendAsync(request, ct);
         }
+        catch (HttpRequestException ex) when (ServerTls.IsCertificateError(ex))
+        {
+            return new ToolResult(ServerTls.Untrusted(new Uri(url).Host), IsError: true);
+        }
         catch (HttpRequestException ex)
         {
             return new ToolResult($"{new Uri(url).Host} could not be reached: {ex.Message}", IsError: true);

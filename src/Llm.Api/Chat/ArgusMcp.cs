@@ -10,7 +10,11 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Chat;
 
 /// <summary>An MCP server refused, failed, or could not be reached; the message says which.</summary>
-public sealed class McpException(string message) : Exception(message);
+public sealed class McpException(string message) : Exception(message)
+{
+    /// <summary>Its certificate was refused: the admin's test says why (Tools.ServerTls).</summary>
+    public bool Certificate { get; init; }
+}
 
 /// <summary>How far a long tool call is, as its server reports it (MCP notifications/progress).</summary>
 public sealed record McpProgress(double Progress, double? Total, string? Message);
@@ -308,6 +312,10 @@ public static class Mcp
         try
         {
             res = await endpoint.Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (HttpRequestException ex) when (Tools.ServerTls.IsCertificateError(ex))
+        {
+            throw new McpException($"{endpoint.Server}'s certificate is not trusted.") { Certificate = true };
         }
         catch (Exception ex) when (ex is HttpRequestException || (ex is TaskCanceledException && !ct.IsCancellationRequested))
         {
