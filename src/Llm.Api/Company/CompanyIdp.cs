@@ -9,8 +9,8 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Llm.Api.Company;
 
-/// <summary>What the identity provider says about a person, once its token has been checked.</summary>
-public sealed record CompanyPerson(string Subject, string? UserName, string? Email, bool? EmailVerified, string? DisplayName, IReadOnlyList<string> Groups);
+/// <summary>What the identity provider says about a person, once its token (or SAML assertion) has been checked.</summary>
+public sealed record CompanyPerson(string Subject, string? UserName, string? Email, bool? EmailVerified, string? DisplayName, IReadOnlyList<string> Groups, bool Saml = false);
 
 /// <summary>Why a company sign-in failed: the identity provider could not be reached, or what it sent is not acceptable.</summary>
 public sealed class CompanyIdpException(string message, bool unavailable = false, Exception? inner = null) : Exception(message, inner)

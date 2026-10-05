@@ -94,12 +94,12 @@ export function SignInPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              Company sign-in (OIDC) {company.data?.enabled ? <Badge variant="success">On</Badge> : <Badge variant="secondary">Off</Badge>}
+              Company sign-in ({company.data?.protocol === 'saml' ? 'SAML' : 'OIDC'}) {company.data?.enabled ? <Badge variant="success">On</Badge> : <Badge variant="secondary">Off</Badge>}
             </CardTitle>
             <CardDescription>
               {company.data?.enabled
                 ? `The sign-in page offers "Sign in with ${company.data.label}". People are made at their first sign-in, or matched by email; the identity provider does their two-factor sign-in.`
-                : 'Entra ID, Okta, Keycloak, Google or GitLab. Off: set it up under Settings; local accounts keep working next to it.'}
+                : 'Entra ID, Okta, Keycloak, Google or GitLab, by OIDC or SAML. Off: set it up under Settings; local accounts keep working next to it.'}
             </CardDescription>
           </CardHeader>
           {company.data && (

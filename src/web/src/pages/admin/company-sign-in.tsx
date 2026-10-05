@@ -11,28 +11,52 @@ import { api, errorMessage } from '@/lib/api'
 import { ago } from '@/lib/format'
 import { companyStatusQuery, type CompanyStatus } from './company-api'
 
-/** Below the Company sign-in settings: what to register at the identity provider, a test, and SCIM's token. */
+/** Below the Company sign-in settings: what to register at the identity provider (OIDC or SAML, as chosen above), a test, and SCIM's token. */
 export function CompanySignInPanel({ draft }: { draft: Record<string, string> }) {
   const status = useQuery(companyStatusQuery)
+  const saml = (draft['CompanySignIn:Protocol'] ?? status.data?.protocol) === 'saml'
   const test = useMutation({
     mutationFn: () =>
       api<{ ok: boolean; message: string }>('/api/admin/company-sign-in/test', { body: Object.fromEntries(Object.entries(draft).filter(([k]) => k.startsWith('CompanySignIn:'))) }),
   })
+  const code = (key: string, text: string) => (
+    <code key={key} className="font-mono text-xs break-all">
+      {text}
+    </code>
+  )
   return (
     <div className="grid gap-4 pt-4">
       {status.data && (
         <KeyValues
-          items={[
-            ['Redirect URI to register', <code key="r" className="font-mono text-xs">{status.data.redirectUri}</code>],
-            ['People who sign in so', String(status.data.people)],
-          ]}
+          items={
+            saml
+              ? [
+                  ['Entity ID (Identifier)', code('e', status.data.saml.entityId)],
+                  ['Reply URL (ACS)', code('a', status.data.saml.acsUrl)],
+                  [
+                    'Metadata for the provider',
+                    <a key="m" href={status.data.saml.metadataUrl} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+                      {code('mu', status.data.saml.metadataUrl)}
+                    </a>,
+                  ],
+                  ['People who sign in so', String(status.data.people)],
+                ]
+              : [
+                  ['Redirect URI to register', code('r', status.data.redirectUri)],
+                  ['People who sign in so', String(status.data.people)],
+                ]
+          }
         />
       )}
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="outline" onClick={() => test.mutate()} loading={test.isPending}>
           <PlugZap /> Test the identity provider
         </Button>
-        <span className="text-sm text-muted-foreground">Reads its discovery document and keys, with the values above, saved or not.</span>
+        <span className="text-sm text-muted-foreground">
+          {saml
+            ? 'Reads its metadata, or the values by hand, and its certificate, with the values above, saved or not.'
+            : 'Reads its discovery document and keys, with the values above, saved or not.'}
+        </span>
       </div>
       {test.data && <Alert variant={test.data.ok ? 'success' : 'destructive'}>{test.data.message}</Alert>}
       {test.error && <Alert variant="destructive">{errorMessage(test.error)}</Alert>}

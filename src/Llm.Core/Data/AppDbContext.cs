@@ -386,6 +386,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne<McpServer>().WithMany().HasForeignKey(p => p.ServerId).OnDelete(DeleteBehavior.Cascade);
         });
         KnowledgeModel(builder);
+        SamlModel(builder);
 
         builder.Entity<AuditEvent>(e =>
         {

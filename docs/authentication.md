@@ -3,8 +3,8 @@
 Everything reachable from outside authenticates against one identity provider:
 **the app** at `https://DOMAIN`. There is one list of people, one sign-in,
 one place to revoke access. People are local accounts, or come from the company
-directory (LDAP / Active Directory) or the company's identity provider (OIDC,
-with SCIM provisioning), side by side.
+directory (LDAP / Active Directory) or the company's identity provider (OIDC or
+SAML 2.0, with SCIM provisioning), side by side.
 
 ---
 
@@ -166,6 +166,11 @@ as a way in if the directory is down.
 
 ## Company sign-in (OIDC)
 
+Company sign-in speaks OIDC (this section) or SAML 2.0 ([below](#company-sign-in-by-saml-20)):
+**Protocol** in the same settings group picks one, and the page then shows
+only that one's settings. The admin group, the required group, the button
+label and everything about people below apply to both.
+
 Off while no identity provider is set. Set it in **Admin → Settings → Company
 sign-in**; a change applies at once:
 
@@ -263,13 +268,110 @@ off** revokes it.
 
 ---
 
-## SAML
+## Company sign-in by SAML 2.0
 
-Next. Checking a SAML assertion means checking an XML signature, which needs
-`System.Security.Cryptography.Xml`, a package outside .NET's shared framework
-that the app does not ship; checking XML signatures by hand invites signature
-wrapping attacks. Entra ID, Okta, Keycloak, Google and GitLab all speak OIDC:
-use company sign-in.
+For an identity provider that the company runs by SAML (Entra ID, Okta,
+Keycloak, ADFS, PingFederate). Set **Protocol** to `saml` in **Admin → Settings
+→ Company sign-in**; a change applies at once:
+
+| Setting | Example |
+|---|---|
+| Identity provider's metadata | its metadata address: the app reads the provider's entity ID, sign-in address and signing certificates there, and again every hour |
+| Or its metadata XML | the metadata file pasted, when the app cannot reach the provider |
+| Sign-in address, Provider's entity ID, Signing certificate (by hand) | without metadata; set, each wins over the metadata's. The certificate is PEM or its base64, several PEM blocks while the provider rolls over to a new one |
+| This app's entity ID | empty: `https://DOMAIN` |
+| Username attribute | empty: the NameID. An email-like value gives its part before the @ |
+| Email attribute | `email`; without it, an email-like username or NameID is the email |
+| Display name attribute | `displayName` |
+| Groups attribute | `groups`: one value per group |
+| Sign-in started at the provider | off: only sign-ins started from the sign-in page are taken |
+| Admin group, Required group, Button label | as for OIDC above, compared with the groups attribute's values |
+
+An attribute is found by its Name (often a URI), or else its FriendlyName.
+
+Give the provider this app's details, which the Settings page shows below the
+settings: the **entity ID** (Identifier, Audience URI), the **Reply URL**
+`https://DOMAIN/api/auth/company/saml/acs` (Assertion Consumer Service,
+HTTP-POST), or simply this app's metadata at
+`https://DOMAIN/api/auth/company/saml/metadata`. **Test the identity provider**
+reads the metadata (or the values by hand) before you save.
+
+The **Sign in with ...** button sends the person to the provider with an
+AuthnRequest (HTTP-Redirect binding, unsigned). The provider posts its answer
+back through the browser, and the app checks it:
+
+- an XML signature on the Response or the Assertion, by the provider's
+  certificate only: a key or certificate inside the answer proves nothing.
+  RSA with SHA-256 or better; SHA-1 is refused;
+- no signature wrapping: exactly one assertion, no other element with the
+  signed element's ID, and the signature covers the very element the app reads;
+- the issuer, the audience (this app's entity ID), the Destination and
+  Recipient (the Reply URL), and InResponseTo: the request this browser made,
+  whose ID waited in a protected cookie for 10 minutes;
+- the lifetime (NotBefore, NotOnOrAfter, with two minutes for the clocks) and a
+  bearer subject confirmation;
+- each assertion signs someone in once: its ID is kept until it expires, so one
+  captured and posted again is refused, on every replica.
+
+Refused, with the reason in the audit log: an encrypted assertion (the app has
+no key to decrypt it: turn assertion encryption off), an answer nobody here
+asked for (unless **Sign-in started at the provider** is on), and the people
+refusals of OIDC above. People are made, matched by email, given their groups
+and their role exactly as with OIDC; they are company accounts (`oidc` in the
+API), with the provider's NameID as their subject.
+
+**Entra ID.** Enterprise applications → New application → Create your own
+application (non-gallery). Single sign-on → SAML:
+
+1. Basic SAML Configuration: Identifier (Entity ID) `https://DOMAIN`, Reply URL
+   `https://DOMAIN/api/auth/company/saml/acs` (or **Upload metadata file** with
+   this app's metadata).
+2. Attributes & Claims: the NameID (user.userprincipalname) gives the username.
+   **Add a group claim** (security groups, or the groups assigned to the
+   application) for the groups; Entra ID sends their object IDs. Add a claim
+   `displayname` (namespace `http://schemas.microsoft.com/identity/claims`,
+   source user.displayname) for the name.
+3. SAML Certificates: copy the **App Federation Metadata Url** into **Identity
+   provider's metadata**.
+4. Users and groups: assign who may sign in.
+
+Then set the attributes: email
+`http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress`, display
+name `http://schemas.microsoft.com/identity/claims/displayname`, groups
+`http://schemas.microsoft.com/ws/2008/06/identity/claims/groups`.
+
+**Okta.** Applications → Create App Integration → SAML 2.0:
+
+1. Single sign-on URL `https://DOMAIN/api/auth/company/saml/acs` (used for the
+   Recipient and Destination too), Audience URI `https://DOMAIN`, Name ID format
+   EmailAddress or Unspecified, Application username the Okta username.
+2. Attribute Statements: `email` (user.email), `displayName` (user.displayName).
+   Group Attribute Statements: `groups`, with a filter such as "Starts with
+   llm-".
+3. Sign On: copy the **Metadata URL** into **Identity provider's metadata**,
+   and assign people under Assignments.
+
+The default attribute names fit.
+
+**Keycloak.** Clients → Import client, with this app's metadata (or Create
+client, type SAML, Client ID `https://DOMAIN`):
+
+1. Assertion Consumer Service POST Binding URL
+   `https://DOMAIN/api/auth/company/saml/acs`; Name ID format `username` (or
+   `email`) with **Force name ID format** on.
+2. Keys: **Client signature required** off (the app's requests are unsigned).
+   Signature and Encryption: **Sign assertions** on, **Encrypt assertions** off.
+3. Client scopes → the client's dedicated scope → mappers: a **User Property**
+   mapper `email` (SAML Attribute Name `email`), and a **Group list** mapper
+   with Group attribute name `groups` (Full group path off for plain names).
+4. **Identity provider's metadata**:
+   `https://<host>/realms/<realm>/protocol/saml/descriptor`.
+
+Not done: signed requests, encrypted assertions and single logout (signing out
+here ends the session here, not at the provider). When the provider rolls over
+to a new certificate, metadata read from its address is read again on the
+first answer the old one cannot check (at most once a minute); a certificate
+set by hand is changed by hand.
 
 ---
 
@@ -283,7 +385,7 @@ use company sign-in.
 | Guessing from many addresses | 10 failures on an account lock it for 15 minutes, counted atomically so parallel guesses cannot slip past |
 | Floods | 120 sign-in requests per minute per address |
 | Sessions | 1 hour idle, 12 hours absolute (no action extends that), 30 days with "keep me signed in"; re-checked against the account every minute |
-| Cross-site requests | every state change needs an `X-Requested-With` header, which another site cannot send |
+| Cross-site requests | every state change needs an `X-Requested-With` header, which another site cannot send; the SAML Reply URL, which the provider's page posts to, is guarded by the signature and the request this browser made |
 | Answers | a wrong password and an unknown name get the same answer |
 | Keys at rest | the session and OIDC signing keys are stored in the database, encrypted with `APP_KEY` |
 
@@ -314,6 +416,7 @@ to bypass authentication from outside the Docker network.
 | OIDC client secrets | `.env` (`*_OIDC_CLIENT_SECRET`); the app registers the clients from them on every start |
 | Who is who for Argus (username → email, no passwords) | `config/directory/users.yml`, written by the app |
 | Company sign-in settings (the client secret encrypted), the SCIM token's SHA-256 | the `settings` table of `llmapp` |
+| SAML assertions already used, until they expire | the `saml_assertions` table of `llmapp` |
 | Machine-client token helper | `scripts/get-token.sh` |
 
 The app runs as `LLM_UID:LLM_GID` (the owner of `deploy/config`), so the files it

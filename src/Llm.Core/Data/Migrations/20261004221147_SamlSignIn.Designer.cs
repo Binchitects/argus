@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Llm.Core.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261004221147_SamlSignIn")]
+    partial class SamlSignIn
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -815,12 +818,6 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("text[]")
                         .HasDefaultValueSql("'{}'::text[]");
 
-                    b.PrimitiveCollection<List<string>>("Requires")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text[]")
-                        .HasDefaultValueSql("'{}'::text[]");
-
                     b.Property<Guid?>("SourceId")
                         .HasColumnType("uuid");
 
@@ -898,21 +895,11 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Account")
-                        .HasMaxLength(320)
-                        .HasColumnType("character varying(320)");
-
                     b.Property<int>("Audience")
                         .HasColumnType("integer");
 
-                    b.Property<bool>("BlogPosts")
-                        .HasColumnType("boolean");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Cursor")
-                        .HasColumnType("text");
 
                     b.Property<string>("Error")
                         .HasMaxLength(2000)
@@ -944,24 +931,10 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int>("MaxPages")
                         .HasColumnType("integer");
 
-                    b.Property<string>("Mirror")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
-
-                    b.Property<string>("SecretEncrypted")
-                        .HasColumnType("text");
-
-                    b.Property<bool>("SitePages")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Spaces")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
 
                     b.Property<string>("State")
                         .IsRequired()
@@ -973,10 +946,6 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<DateTimeOffset?>("SyncedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Tenant")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
 
                     b.Property<bool>("Wiki")
                         .HasColumnType("boolean");

@@ -79,7 +79,8 @@ public sealed partial class SettingsService(
         string Key, string Group, string Label, string Help, string Type, string Scope,
         IReadOnlyList<string>? Options, decimal? Min, decimal? Max, string? PatternHelp, string? Unit, bool Optional,
         string? Impact, bool Dangerous, string? Default,
-        string? Value, bool IsSet, string Source, string? EnvironmentValue, bool RestartPending, string? Warning);
+        string? Value, bool IsSet, string Source, string? EnvironmentValue, bool RestartPending, string? Warning,
+        string? ShownWhen, int? Lines);
 
     private SettingView View(SettingDefinition d, HashSet<string> saved, string? warning)
     {
@@ -91,7 +92,7 @@ public sealed partial class SettingsService(
         var restart = d.Scope == SettingScope.AppRestart && atStart.Changed(d.Key, effective);
         return new(d.Key, d.Group, d.Label, d.Help, d.Type.ToString().ToLowerInvariant(), d.Scope.ToString().ToLowerInvariant(),
             d.Options, d.Min, d.Max, d.PatternHelp, d.Unit, d.Optional, d.Impact, d.Dangerous, d.IsSecret ? null : d.Default,
-            value, isSet, source, environment, restart, warning);
+            value, isSet, source, environment, restart, warning, d.ShownWhen, d.Lines);
     }
 
     /// <summary>What the configuration says without the Settings page (environment, appsettings).</summary>
@@ -199,7 +200,8 @@ public sealed partial class SettingsService(
         {
             return d.Optional ? null : "Required.";
         }
-        if (value.Length > 4096)
+        // A box of several lines may say it takes more (pasted metadata XML).
+        if (value.Length > (d.Lines is not null && d.Max is { } longest && longest > 4096 ? longest : 4096))
         {
             return "Too long.";
         }
