@@ -24,7 +24,7 @@ tests/
 deploy/                 the platform: docker-compose (and podman.yml), .env.example, config, scripts
   services/             what compose builds or mounts: sandbox, identity proxy, engine router...
   argus-standalone/     Argus alone: its own compose, config and scripts
-tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, publish-code-arena.sh, offline-nuget/, the test GitLab, Hermes add-ons
+tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, publish-code-arena.sh, package-code-arena.sh, offline-nuget/, the test GitLab, Hermes add-ons
 clients/                editor and agent configurations (MCP); the arena CLI and its GitLab CI template
 evals/                  evaluation harnesses and their results
 docs/                   this documentation; docs/plan.md is the plan and its phases
@@ -47,10 +47,13 @@ Code Arena uses the base class library only (no packages). Its standalone
 files, one per system, need .NET's runtime packs: `tools/publish-code-arena.sh
 --offline` builds them from `tools/offline-nuget/` into `dist/code-arena/`
 ([code-arena.md](code-arena.md#building-it-admins)), after building the page of
-its web interface from `src/web` (`vite.code-arena.config.ts`, into
-`src/CodeArena/web`, which the program embeds). The page's code is
-`src/web/src/code-arena/`: the chat's components around Code Arena's API; its
-tests run with the web's (`npx vitest run src/code-arena`).
+its IDE from `src/web` (`vite.code-arena.config.ts`, into
+`src/CodeArena/web`, which the program embeds); `tools/package-code-arena.sh`
+then packs them for a release. The page's code is `src/web/src/code-arena/`:
+the chat's components, Monaco and xterm.js around Code Arena's API
+([its calls](code-arena.md#the-pages-calls)); its tests run with the web's
+(`npx vitest run src/code-arena`). The terminals' tests start a real `/bin/sh`
+on a pseudo-terminal, so run Code Arena's tests on Linux or macOS.
 
 Argus's tests need Universal Ctags (it decides which symbols exist) and the
 pinned sqlite-vec, fetched once and checked against its SHA-256:

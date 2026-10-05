@@ -21,8 +21,9 @@ permissions. Nothing leaves your network.**
   and fair use when the GPU is shared. **Connect your tools** walks each person
   through Claude Code, Codex, Qwen Code, OpenCode, Aider, Hermes, OpenClaw,
   DeepSeek Harness, Continue, Cline and more, and offers
-  [Code Arena](docs/code-arena.md), our own coding agent: one file, nothing to
-  install, every Arena tool as you.
+  [Code Arena](docs/code-arena.md), our own coding agent and an IDE in the
+  browser around it (files, editor, search, terminals, the agent's chat): one
+  file, nothing to install, every Arena tool as you.
 - **Sign-in** for the whole stack: accounts, LDAP or Active Directory, two-factor,
   single sign-on for the services that have their own login, groups that decide
   who may use which model and tool.

@@ -310,7 +310,9 @@ host with internet, `docker compose build app --build-arg CODE_ARENA=online`
 fetches them instead. Without either, the image is built without it and the
 page says so. People on a private CA sign in with
 `code-arena login --url https://DOMAIN --ca ca.crt` (give them `certs/ca.crt`).
-Details: [code-arena.md](code-arena.md).
+To hand it out another way, `tools/package-code-arena.sh` packs each system
+with its README and licence into `dist/` (with `SHA256SUMS`), from the same
+offline folder. Details: [code-arena.md](code-arena.md).
 
 ## Upgrading from v3
 

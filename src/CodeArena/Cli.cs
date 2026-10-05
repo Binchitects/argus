@@ -99,7 +99,7 @@ internal static partial class Cli
               --no-color             plain text
               --port N               the IDE: listen on this port (default: a free one)
               --no-open              the IDE: print the address, do not open the browser
-          -v, --version
+          -v, --version              the version, the licence and where the source is
           -h, --help
 
         In the terminal, /help lists the commands. Ctrl+C stops a turn; twice at the prompt leaves.

@@ -1,10 +1,13 @@
 # Code Arena
 
-Our own coding agent, in the terminal (or in the browser, with `code-arena web`). A person runs it in a project folder on
-their machine; it reads and changes the code there, runs commands, and works
-through the Arena: the model through the gateway, and all of the chat's tools
-(web search and pages, Python in the sandbox, pictures, speech, Argus's code
-search, plugins, knowledge) through Arena's MCP endpoint, as that person.
+Our own coding agent, and an IDE in the browser around it. A person runs
+`code-arena` in a project folder on their machine and gets a page laid out as
+VS Code is: the folder's files, an editor, search, terminals and the agent's
+chat (or `code-arena chat` keeps the agent in the terminal). The agent reads
+and changes the code there, runs commands, and works through the Arena: the
+model through the gateway, and all of the chat's tools (web search and pages,
+Python in the sandbox, pictures, speech, Argus's code search, plugins,
+knowledge) through Arena's MCP endpoint, as that person.
 
 It is **one file with nothing to install**: a self-contained .NET program for
 Linux, macOS and Windows. It talks to the Arena only, never to the internet, so
@@ -36,6 +39,12 @@ them with their SHA-256.
   a folder on `PATH`.
 
 When the page says the Arena has no builds yet, an admin adds them (below).
+
+A release also comes as packages, one per system:
+`code-arena-<version>-<rid>.tar.gz` (a `.zip` for Windows), each holding the
+program, a `README.txt` (how to run it, sign in, the IDE, the terminal, the
+licence), `LICENSE.md` and `LICENSING.md`, with a `SHA256SUMS` for them all.
+`tools/package-code-arena.sh` builds them (below).
 
 ## Signing in
 
@@ -82,16 +91,22 @@ Trusting the CA system-wide works too, and needs nothing here.
 
 ```bash
 cd my-project
-code-arena                          # a conversation
-code-arena "why does the build fail?"   # one that starts with this
+code-arena                          # the IDE for this folder, in your browser (see The IDE)
+code-arena chat                     # a conversation in this terminal instead
+code-arena "why does the build fail?"   # one in this terminal that starts with this
 code-arena -p "list the TODOs in src/"  # answer once, print the answer, exit
 git diff | code-arena -p - --output json
-code-arena --continue               # carry on with this folder's last session
-code-arena --resume                 # choose a saved session (or --resume <id>)
-code-arena web                      # the same, in your browser (see Web interface)
+code-arena chat --continue          # carry on with this folder's last session
+code-arena chat --resume            # choose a saved session (or --resume <id>)
+code-arena --version                # the version, the licence and the source
 ```
 
-The answer streams as it is written; the model's thinking is shown dimmed
+`code-arena` without a prompt is the IDE (`code-arena web` is the same, and
+takes no prompt); a prompt, `-p` or `chat` keeps the conversation in the
+terminal. A build without the IDE's page (below) says so and runs the
+conversation in the terminal.
+
+In the terminal, the answer streams as it is written; the model's thinking is shown dimmed
 before it. Each tool call is a line (`● edit_file src/app.py`), with its result
 under it: a diff for an edit, the last lines of a command's output, a count for
 a search. Each turn ends with its tokens and the share read from the cache
@@ -120,38 +135,75 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/resume [id]` | switch to a saved session |
 | `/exit` | leave (also Ctrl+D) |
 
-## Web interface
+## The IDE
 
 ```bash
 cd my-project
-code-arena web                      # the same agent, in your browser
-code-arena web --port 8765 --no-open
-code-arena web --continue --mode auto-edit
+code-arena                          # or: code-arena web
+code-arena --port 8765 --no-open
+code-arena --continue --mode auto-edit
 ```
 
-`code-arena web` starts a small web server on this machine, prints its
-address and opens the browser (`--no-open` only prints it). The page is
-Argus Arena's chat around the agent of this folder: the sidebar with the
-folder's sessions (newest first: open one to carry on with it, or start a new
-one), the thread with Markdown, code blocks, the model's thinking, a card for
-each tool call (the local tools and Arena's), a diff under each file edit, and
-each answer's model, time and tokens with the share read from the cache. The
-composer has Stop, the mode (ask, auto-edit, plan, yolo) and the context
-gauge (Compact now); the header has the model picker (the gateway's models),
-the thinking level and the theme (light, dark or the system's). A call that
-needs permission shows Arena's approval card: **Allow**, **Always for this
-session** (as `a` in the terminal) or **Deny**. `/compact` and `/clear` work
-in the composer.
+`code-arena` starts a small web server on this machine, prints its address
+and opens the browser (`--no-open`, or a machine without a desktop, only
+prints it). **Ctrl+C** in the terminal stops it, and the turn if one runs;
+the terminal shows what the agent does (`● edit_file …`) while the page drives
+it. On another machine over SSH: `code-arena --port 8765 --no-open` there,
+`ssh -L 8765:127.0.0.1:8765 that-machine` here, and open the address printed.
+
+The page, in Argus Arena's design system (light or dark, as the system is):
+
+- **activity bar**: the left edge, switching the side bar between the Explorer,
+  Search and the agent's changes;
+- **Explorer**: the folder's files and folders: open, new file, new folder,
+  rename, delete; the files the agent changed are marked;
+- **editor tabs**: Monaco, with syntax highlighting; **Ctrl+S** saves, a dot
+  marks unsaved changes, and a file changed on disk since it was opened is not
+  written over unseen;
+- **diff**: Monaco's diff editor for each file the agent changed in this run
+  (as it was before the agent's first change, and now): **Accept** keeps it,
+  **Revert** puts the file back (a file the agent made is deleted);
+- **search**: text across the files git sees (`.gitignore` holds), with match
+  case, whole word, regular expression, and files to include or exclude;
+- **terminals**: a panel under the editor with several terminals, resizable
+  (below);
+- **chat panel**: the agent's chat beside the editor: the thread with a card
+  for each tool call and a diff under each edit, the approval card
+  (**Allow**, **Always for this session**, **Deny**), Stop, the mode, the
+  model, the thinking level, the sessions, `/compact` and `/clear`;
+- **status bar**: the model, the mode, the git branch, the cursor's line and
+  column.
 
 It is the same agent as in the terminal, not a copy: the same tools, modes,
-sessions (the same files: `--resume` in the terminal opens a session started
-in the browser, and the other way round), ARENA.md and MCP servers. The
-terminal shows what the agent does (`● edit_file …`) while the page drives it.
-A page reloaded during a turn picks the turn up from its start. One turn runs
-at a time; switching sessions waits for it. **Ctrl+C** in the terminal stops
-the server (and the turn, if one runs).
+sessions (the same files: `code-arena chat --resume` opens a session started
+in the browser, and the other way round), ARENA.md and MCP servers. A page
+reloaded during a turn picks the turn up from its start. One turn runs at a
+time; switching sessions waits for it. The about box shows the version, the
+licence and the Source link.
 
-Only this machine can use it:
+### Terminals
+
+Each terminal is a shell on a real pseudo-terminal: openpty and posix_spawn
+on Linux; on macOS the shell starts through `code-arena --pty-helper`, which
+makes a session, takes the terminal as its controlling one and becomes the
+shell; ConPTY on Windows (10 1809 or later). Job control, Ctrl+C, colours and
+full-screen programs work, and a resize reaches the program.
+
+The shell is `"terminalShell"` in `config.json` (a path, or a name found on
+`PATH`), else `$SHELL` (a login shell on macOS, as Terminal.app starts it),
+else bash or sh; on Windows PowerShell 7, Windows PowerShell, else `cmd.exe`.
+It starts in the working directory with code-arena's environment, without
+`ARENA_API_KEY`, with `TERM=xterm-256color`, `COLORTERM=truecolor` and
+`TERM_PROGRAM=code-arena`, every signal at its default and none blocked. Ten
+run at once at most. A page that comes back, or a second tab, sees the last
+256 KB of each one's output. Closing one sends its shell and what runs in it
+SIGHUP (SIGKILL 3 s later); stopping code-arena closes them all.
+
+A terminal is as powerful as the person's own shell, and so are the page's
+file calls: the mode (ask, auto-edit, …) guards the agent, not the person.
+That is why everything below is behind this run's key.
+
+### Only this machine can use it
 
 - It listens on `127.0.0.1` only, on a free port unless `--port` says which.
 - The address carries a key made for this run (`?token=…`). Opening it sets a
@@ -160,12 +212,56 @@ Only this machine can use it:
   key: an old tab says so.
 - The server answers only to `127.0.0.1` and `localhost` at its port (the Host
   header), so a name pointed at 127.0.0.1 (DNS rebinding) gets nothing; it
-  refuses requests from other sites (Origin, Sec-Fetch-Site), takes only JSON,
-  and its page cannot be framed.
+  refuses requests from other sites, or another port's page (Origin,
+  Sec-Fetch-Site), takes only JSON, and its page cannot be framed. Every call,
+  the file calls and the terminals' WebSocket included, passes these checks.
+- The file calls take paths relative to the working directory only: an
+  absolute path, a drive or `..` is refused, even one that would land inside.
+  So is a link that leads outside, one to a file not there yet outside, and
+  one inside by name only through another link. The Explorer, search and quick
+  open leave such links out. Folders added with `--add-dir` are the agent's,
+  not the IDE's.
+- A cookie does not tell ports apart: another web server on 127.0.0.1 that
+  the person opens in the same browser is sent it too. Open no local page you
+  do not trust while the IDE runs.
 
 The page is built into the program (below); a build without it says so when
 `code-arena web` starts. Diagrams in answers are drawn by the chat's sandboxed
 runner, served by the same server.
+
+### The page's calls
+
+For whoever changes the page (`src/web/src/code-arena/`). Every call is under
+`/api/`; a refusal is `{"status": code, "error": message}` with its HTTP
+status (403 `outside` for a path outside the folder).
+
+| call | what it does |
+|---|---|
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), the folder, project, branch, model, mode, session, busy |
+| `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
+| `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
+| `GET /api/file?path=FILE` | `{path, size, version, text}`; `text` is null with `binary` or `tooLarge` (over 5 MB) |
+| `POST /api/file` `{path, text, version}` | saves; 409 `changed` when the file changed since `version`; `{path, version, size}` |
+| `POST /api/files/new` `{path, kind}` | a new file, or a folder with `kind: "dir"`; 409 `exists` |
+| `POST /api/files/rename` `{from, to}` | moves a file or folder; `{from, to}` |
+| `POST /api/files/delete` `{path}` | a file, or a folder with what is in it (a link, not what it points at) |
+| `GET /api/search?q=…&regex=1&case=1&word=1&include=…&exclude=…` | `{files: [{path, matches: [{line, column, length, preview, start}]}], count, truncated}` (2,000 matches, 20 s at most) |
+| `GET /api/changes` | the agent's changed files: `[{path, created, deleted, added, removed}]` |
+| `GET /api/changes/diff?path=FILE` | `{path, original, modified, version}` (`original` null: the agent made it) |
+| `POST /api/changes/accept` `{path}` | keeps the change (all of them without `path`); the list left |
+| `POST /api/changes/revert` `{path}` | puts the file back; the list left |
+| `GET /api/terminals` | `[{id, title, pid, cols, rows, exitCode}]` |
+| `POST /api/terminals` `{cols, rows}` | opens one; 409 `too_many` past ten |
+| `POST /api/terminals/close` `{id}` | ends its shell and forgets it |
+| `GET /api/terminals/socket?id=ID` | the terminal's WebSocket |
+
+On the terminal's WebSocket, the server sends the output kept so far, then
+the output as it comes, as binary messages (the terminal's bytes), and
+`{"type":"exit","code":N}` (text) when the shell ends, then closes. The page
+sends keys as `{"type":"input","data":"…"}` (text) or as binary messages, and
+`{"type":"resize","cols":N,"rows":N}`. The chat's calls (`/api/messages`,
+`/api/turn`, `/api/approvals`, `/api/settings`, `/api/sessions`, …) are
+Arena's chat's shapes.
 
 ## Modes
 
@@ -271,7 +367,8 @@ without starting it. On Windows, `npx` and other `.cmd` scripts need
 `"command": "cmd", "args": ["/c", "npx", …]`.
 
 The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
-`"shell"`, `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"gateway"`,
+`"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
+`"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"gateway"`,
 `"mcpUrl"`, `"ca"`.
 
 ## Building it (admins)
@@ -290,6 +387,14 @@ stage), from .NET's runtime packs, which are not part of the SDK:
 - **By hand**: `tools/publish-code-arena.sh --offline [rid ...]` writes
   `dist/code-arena/<rid>/code-arena` and `SHA256SUMS`, with `dotnet` or
   `tools/dn`. Copy the files to people any way you like.
+- **Packages for a release**: `tools/package-code-arena.sh [rid ...]` runs the
+  publish script (offline, from `tools/offline-nuget`; `--online` fetches the
+  packs instead), then packs each system as
+  `dist/code-arena-<version>-<rid>.tar.gz` (`.zip` for `win-x64`): a folder
+  with the program, `README.txt`, `LICENSE.md` and `LICENSING.md`. It writes
+  `dist/SHA256SUMS` for every package of the version (`VERSION`'s) in `dist/`,
+  which git ignores. The packages carry no owner, and the last commit's time
+  on every file. The macOS builds are signed ad hoc by the SDK.
 
 The web interface's page is built first, from `src/web`
 (`vite.code-arena.config.ts`, then the chat's diagram runner) into
@@ -324,3 +429,8 @@ hold.
   `/compact` frees it, and sub-agents keep research out of the main context.
 - **Colours look wrong**: `--no-color` or `NO_COLOR=1`; output to a file or a
   pipe has none.
+- **A terminal does not open**: the shell named by `"terminalShell"` is not
+  there (give its full path), or, on Windows, the system is older than
+  Windows 10 1809 (no ConPTY).
+- **The IDE's address says the key is wrong**: it is an old run's. Each run
+  prints a new address; open that one.

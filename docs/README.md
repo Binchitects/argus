@@ -16,7 +16,7 @@
 | [mcp.md](mcp.md) | Arena MCP: each person's chat tools for their own agent at `/mcp`, signed in with their API key |
 | [knowledge.md](knowledge.md) | company knowledge: GitLab wikis and issues, Confluence, SharePoint and OneDrive, folders and websites, searched by each person within their rights; long files by their passages |
 | [integrations.md](integrations.md) | where people already are: Slack, Mattermost and Teams bots, email in, the installable app with push notifications, the browser extension |
-| [code-arena.md](code-arena.md) | Code Arena, our own coding agent: getting it offline, signing in, the web interface (code-arena web), modes, tools, ARENA.md, sessions, MCP servers, building it |
+| [code-arena.md](code-arena.md) | Code Arena, our own coding agent and its IDE: getting it offline, signing in, the IDE (code-arena) and its terminals, modes, tools, ARENA.md, sessions, MCP servers, building and packaging it |
 | [cpu-temperature.md](cpu-temperature.md) | how CPU temperature reaches the dashboards, on Linux and on Windows |
 | [hermes.md](hermes.md) | pointing Hermes at the model and at Argus |
 
