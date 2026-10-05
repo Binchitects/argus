@@ -55,6 +55,7 @@ public static class MediaModels
     [
         (SpeechToText, "deepdml/faster-whisper-large-v3-turbo-ct2", "audio_transcription"),
         (TextToSpeech, "speaches-ai/Kokoro-82M-v1.0-ONNX", "audio_speech"),
-        (TextToSpeechPersian, "speaches-ai/piper-fa_IR-amir-medium", "audio_speech"),
+        // gyro over amir: Whisper wrote gyro's Persian back with a 3.8% character error rate, amir's with 14.4%.
+        (TextToSpeechPersian, "speaches-ai/piper-fa_IR-gyro-medium", "audio_speech"),
     ];
 }
