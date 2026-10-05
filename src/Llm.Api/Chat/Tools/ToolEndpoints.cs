@@ -157,14 +157,10 @@ public static class ToolEndpoints
             {
                 return Results.Ok(new { ok = false, error = bad, certificate = untrusted is null ? null : await ServerTls.ProbeAsync(untrusted, tls.Tls, tls.TlsCa, ct) });
             }
-            // Its calls go to its address, which the document may not have come from: a certificate refused there is said now, with why.
-            if (await RefusedAsync(api.Url, client, ct) is { } refused)
+            // Its calls go to its address, which the document may not have come from: no secure connection there is said now, with why.
+            if (await SecureAsync(api.Url, client, ct) is ({ } insecure, var refused))
             {
-                return Results.Ok(new
-                {
-                    ok = false, error = $"The API at {refused} cannot be called: its certificate is not trusted. Trust the CA that signed it, or stop checking it.",
-                    certificate = await ServerTls.ProbeAsync(refused, tls.Tls, tls.TlsCa, ct),
-                });
+                return Results.Ok(new { ok = false, error = insecure, certificate = refused is null ? null : await ServerTls.ProbeAsync(refused, tls.Tls, tls.TlsCa, ct) });
             }
             var ops = ((OpenApiTool)registry.Server(api, client)).Operations();
             return Results.Ok(new
@@ -210,14 +206,16 @@ public static class ToolEndpoints
         Uri.TryCreate(url, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttps || u.Scheme == Uri.UriSchemeHttp);
 
     /// <summary>
-    /// The API's https address when the check refuses its certificate (one HEAD request, nothing called), else
-    /// null: an API that is down, slow or does not take HEAD is not what reading its document tests.
+    /// Why no secure connection can be set up with the API's https address (one HEAD request, nothing
+    /// called): its certificate refused (and that address, to say why), or a handshake that failed for
+    /// another reason. Nothing otherwise: an API that is down, slow or does not take HEAD is not what
+    /// reading its document tests.
     /// </summary>
-    private static async Task<Uri?> RefusedAsync(string url, HttpClient http, CancellationToken ct)
+    private static async Task<(string? Problem, Uri? Untrusted)> SecureAsync(string url, HttpClient http, CancellationToken ct)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var at) || at.Scheme != Uri.UriSchemeHttps)
         {
-            return null;
+            return (null, null);
         }
         try
         {
@@ -225,15 +223,19 @@ public static class ToolEndpoints
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
             using var head = new HttpRequestMessage(HttpMethod.Head, at);
             using var answer = await http.SendAsync(head, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-            return null;
+            return (null, null);
         }
         catch (HttpRequestException ex) when (ServerTls.IsCertificateError(ex))
         {
-            return at;
+            return ($"The API at {at} cannot be called: its certificate is not trusted. Trust the CA that signed it, or stop checking it.", at);
+        }
+        catch (HttpRequestException ex) when (ServerTls.HandshakeFailed(at.Host, ex) is { } handshake)
+        {
+            return ($"The API at {at} cannot be called. {handshake}", null);
         }
         catch (Exception ex) when (ex is HttpRequestException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
         {
-            return null;
+            return (null, null);
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Formats.Asn1;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -23,8 +24,12 @@ public static class TestCertificates
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(5));
     }
 
-    /// <summary>An issuing CA signed by <paramref name="root"/>, as a company's servers are signed by: root, then this, then the server.</summary>
-    public static X509Certificate2 Intermediate(X509Certificate2 root, string name)
+    /// <summary>
+    /// An issuing CA signed by <paramref name="root"/>, as a company's servers are signed by: root, then this,
+    /// then the server. Valid from <paramref name="from"/> to <paramref name="to"/> (a day ago to three years
+    /// on by default, outside the root's dates if asked), and only for the names <paramref name="permitted"/> under it when given.
+    /// </summary>
+    public static X509Certificate2 Intermediate(X509Certificate2 root, string name, DateTimeOffset? from = null, DateTimeOffset? to = null, string? permitted = null)
     {
         using var key = RSA.Create(2048);
         var request = new CertificateRequest($"CN={name}, O=Test company", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -32,13 +37,30 @@ public static class TestCertificates
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
         request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
         request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(root, true, false));
-        using var signed = request.Create(root, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(3), RandomNumberGenerator.GetBytes(8));
-        using var withKey = signed.CopyWithPrivateKey(key);
-        return X509CertificateLoader.LoadPkcs12(withKey.Export(X509ContentType.Pfx), null);
+        if (permitted is not null)
+        {
+            // NameConstraints { permittedSubtrees [0] { GeneralSubtree { base dNSName [2] } } } (RFC 5280, 4.2.1.10).
+            var der = new AsnWriter(AsnEncodingRules.DER);
+            using (der.PushSequence())
+            using (der.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0)))
+            using (der.PushSequence())
+            {
+                der.WriteCharacterString(UniversalTagNumber.IA5String, permitted, new Asn1Tag(TagClass.ContextSpecific, 2));
+            }
+            request.CertificateExtensions.Add(new X509Extension("2.5.29.30", der.Encode(), true));
+        }
+        return Sign(request, key, root, from ?? DateTimeOffset.UtcNow.AddDays(-1), to ?? DateTimeOffset.UtcNow.AddYears(3));
     }
 
     /// <summary>A server certificate for these names, signed by <paramref name="ca"/> (or by itself), with its key.</summary>
-    public static X509Certificate2 Server(X509Certificate2? ca, params string[] names)
+    public static X509Certificate2 Server(X509Certificate2? ca, params string[] names) =>
+        Server(ca, names, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+
+    /// <summary>
+    /// The same, valid from <paramref name="from"/> to <paramref name="to"/> (outside its CA's dates if asked),
+    /// and meant for <paramref name="usage"/> (a server, by default).
+    /// </summary>
+    public static X509Certificate2 Server(X509Certificate2? ca, string[] names, DateTimeOffset from, DateTimeOffset to, string usage = "1.3.6.1.5.5.7.3.1")
     {
         using var key = RSA.Create(2048);
         var request = new CertificateRequest($"CN={names[0]}", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -55,15 +77,21 @@ public static class TestCertificates
             }
         }
         request.CertificateExtensions.Add(san.Build());
-        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], false));
-        var (from, to) = (DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid(usage)], false));
         if (ca is null)
         {
             using var self = request.CreateSelfSigned(from, to);
             return X509CertificateLoader.LoadPkcs12(self.Export(X509ContentType.Pfx), null);
         }
         request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(ca, true, false));
-        using var signed = request.Create(ca, from, to, RandomNumberGenerator.GetBytes(8));
+        return Sign(request, key, ca, from, to);
+    }
+
+    /// <summary>Signed by <paramref name="ca"/>'s key with any dates (Create with the CA's certificate keeps them inside its own), with its key.</summary>
+    private static X509Certificate2 Sign(CertificateRequest request, RSA key, X509Certificate2 ca, DateTimeOffset from, DateTimeOffset to)
+    {
+        using var caKey = ca.GetRSAPrivateKey()!;
+        using var signed = request.Create(ca.SubjectName, X509SignatureGenerator.CreateForRSA(caKey, RSASignaturePadding.Pkcs1), from, to, RandomNumberGenerator.GetBytes(8));
         using var withKey = signed.CopyWithPrivateKey(key);
         return X509CertificateLoader.LoadPkcs12(withKey.Export(X509ContentType.Pfx), null);
     }

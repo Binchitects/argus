@@ -194,7 +194,7 @@ public static class ServerTls
         {
             if (errors.HasFlag(SslPolicyErrors.RemoteCertificateChainErrors))
             {
-                reasons.AddRange(ChainReasons(certificate, presented?.ChainStatus ?? [], null));
+                reasons.AddRange(ChainReasons(certificate, presented?.ChainStatus ?? [], Certificates(presented, certificate), null));
             }
             return [.. reasons.Distinct()];
         }
@@ -212,46 +212,65 @@ public static class ServerTls
             chain.ChainPolicy.ExtraStore.AddRange(presented.ChainPolicy.ExtraStore);
             chain.ChainPolicy.ExtraStore.AddRange(presented.ChainElements.Skip(1).Select(e => e.Certificate).ToArray());
         }
-        if (!chain.Build(certificate) && !Reaches(chain, cas))
+        if (!chain.Build(certificate))
         {
-            reasons.AddRange(ChainReasons(certificate, chain.ChainStatus, cas));
+            reasons.AddRange(ChainReasons(certificate, Statuses(chain, cas ?? []), Certificates(chain, certificate), cas));
         }
         return [.. reasons.Distinct()];
     }
 
     /// <summary>
-    /// The chain reaches a certificate the admin gave, every link up to it sound, and stops short only
-    /// above it: a company's issuing CA given without its root (a custom trust store takes only roots
-    /// as anchors), or a server's own certificate.
+    /// What is wrong with a chain built to the admin's CAs. A custom trust store takes only roots as
+    /// anchors, so a chain that reaches a certificate the admin gave (a company's issuing CA without its
+    /// root, or a server's own certificate), each link below it signed by the next, stops short above it:
+    /// that is not a problem then, but the dates up to it are checked here, as the chain does not check
+    /// those of the certificate it stops at. Anything else wrong below it still is.
     /// </summary>
-    private static bool Reaches(X509Chain chain, X509Certificate2Collection? cas)
+    private static List<X509ChainStatus> Statuses(X509Chain chain, X509Certificate2Collection cas)
     {
         const X509ChainStatusFlags AboveIt = X509ChainStatusFlags.UntrustedRoot | X509ChainStatusFlags.PartialChain;
-        if (cas is not { Count: > 0 } || chain.ChainStatus.Any(s => (s.Status & ~AboveIt) != 0))
+        const X509ChainStatusFlags Broken = AboveIt | X509ChainStatusFlags.NotSignatureValid | X509ChainStatusFlags.Cyclic;
+        var statuses = chain.ChainStatus.ToList();
+        var elements = chain.ChainElements;
+        for (var i = 0; i < elements.Count; i++)
         {
-            return false;
-        }
-        foreach (var element in chain.ChainElements)
-        {
-            if (cas.Any(c => c.RawData.AsSpan().SequenceEqual(element.Certificate.RawData)))
+            if (cas.Any(c => c.RawData.AsSpan().SequenceEqual(elements[i].Certificate.RawData)))
             {
-                return true;
+                statuses.RemoveAll(s => (s.Status & AboveIt) != 0);
+                var now = DateTime.UtcNow;
+                if (elements.Take(i + 1).Any(e => e.Certificate.NotBefore.ToUniversalTime() > now || e.Certificate.NotAfter.ToUniversalTime() < now)
+                    && !statuses.Any(s => s.Status.HasFlag(X509ChainStatusFlags.NotTimeValid)))
+                {
+                    statuses.Add(new X509ChainStatus { Status = X509ChainStatusFlags.NotTimeValid });
+                }
+                break;
             }
-            if (element.ChainElementStatus.Length > 0)
+            if (elements[i].ChainElementStatus.Any(s => (s.Status & Broken) != 0))
             {
-                return false;
+                break;
             }
         }
-        return false;
+        return statuses;
     }
 
-    private static IEnumerable<string> ChainReasons(X509Certificate2 certificate, X509ChainStatus[] statuses, X509Certificate2Collection? cas)
+    /// <summary>The chain's certificates, the server's first; just its own when there is no chain.</summary>
+    private static List<X509Certificate2> Certificates(X509Chain? chain, X509Certificate2 certificate) =>
+        chain is { ChainElements.Count: > 0 } ? [.. chain.ChainElements.Select(e => e.Certificate)] : [certificate];
+
+    private static IEnumerable<string> ChainReasons(X509Certificate2 certificate, IReadOnlyList<X509ChainStatus> statuses, List<X509Certificate2> chain, X509Certificate2Collection? cas)
     {
-        var now = DateTimeOffset.UtcNow;
         var selfSigned = certificate.SubjectName.RawData.AsSpan().SequenceEqual(certificate.IssuerName.RawData);
         var issuer = certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: true);
         foreach (var status in statuses.Select(s => s.Status).Distinct())
         {
+            if (status == X509ChainStatusFlags.NotTimeValid)
+            {
+                foreach (var dates in OutOfDates(chain))
+                {
+                    yield return dates;
+                }
+                continue;
+            }
             yield return status switch
             {
                 X509ChainStatusFlags.UntrustedRoot or X509ChainStatusFlags.PartialChain when cas is { Count: > 0 } =>
@@ -259,14 +278,35 @@ public static class ServerTls
                 X509ChainStatusFlags.UntrustedRoot or X509ChainStatusFlags.PartialChain => selfSigned
                     ? "It is self-signed: no CA this server trusts vouches for it."
                     : $"It was issued by {issuer}, a CA this server does not trust.",
-                X509ChainStatusFlags.NotTimeValid when certificate.NotAfter.ToUniversalTime() < now => $"It expired on {certificate.NotAfter.ToUniversalTime():yyyy-MM-dd}.",
-                X509ChainStatusFlags.NotTimeValid when certificate.NotBefore.ToUniversalTime() > now => $"It is not valid before {certificate.NotBefore.ToUniversalTime():yyyy-MM-dd}.",
-                X509ChainStatusFlags.NotTimeValid => "A CA certificate in its chain has expired.",
                 X509ChainStatusFlags.Revoked => "It has been revoked.",
                 X509ChainStatusFlags.NotValidForUsage => "It is not meant for a server (its key usage).",
+                X509ChainStatusFlags.HasNotPermittedNameConstraint or X509ChainStatusFlags.HasExcludedNameConstraint =>
+                    "Its name is not one its CA may vouch for (the CA's name constraints).",
                 X509ChainStatusFlags.NotSignatureValid => "Its signature does not check out.",
-                _ => statuses.First(s => s.Status == status).StatusInformation.Trim() is { Length: > 0 } info ? info : status.ToString(),
+                _ => statuses.First(s => s.Status == status).StatusInformation?.Trim() is { Length: > 0 } info ? info : status.ToString(),
             };
+        }
+    }
+
+    /// <summary>Each certificate of the chain outside its dates, the server's own first, by name.</summary>
+    private static IEnumerable<string> OutOfDates(List<X509Certificate2> chain)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var found = false;
+        for (var i = 0; i < chain.Count; i++)
+        {
+            var (from, to) = (chain[i].NotBefore.ToUniversalTime(), chain[i].NotAfter.ToUniversalTime());
+            if (from <= now && now <= to)
+            {
+                continue;
+            }
+            found = true;
+            var who = i == 0 ? "It" : $"{chain[i].GetNameInfo(X509NameType.SimpleName, forIssuer: false)}, a CA in its chain,";
+            yield return to < now ? $"{who} expired on {to:yyyy-MM-dd}." : $"{who} is not valid before {from:yyyy-MM-dd}.";
+        }
+        if (!found)
+        {
+            yield return "A certificate in its chain is outside its dates.";
         }
     }
 

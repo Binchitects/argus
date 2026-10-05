@@ -314,6 +314,19 @@ public sealed class ToolTlsTests(AppFixture app)
             Assert.StartsWith("No secure connection could be set up with Old Desk (", error, StringComparison.Ordinal);
             Assert.EndsWith("Its certificate is not the reason: it may not speak https there, speak only an old TLS version, or share no cipher with this app.", error, StringComparison.Ordinal);
             Assert.False(test.TryGetProperty("certificate", out var about) && about.ValueKind != JsonValueKind.Null);
+
+            // An API there: its document fetched from it, or pasted (Read it still tries its address), says so too.
+            var fetched = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test", new { name = "Old Pets", specUrl = tls.Url("/openapi.yaml"), tls = check }));
+            Assert.False(fetched.GetProperty("ok").GetBoolean());
+            Assert.StartsWith($"The document could not be fetched from {tls.Url("/openapi.yaml")}. No secure connection could be set up with localhost (", fetched.GetProperty("error").GetString(), StringComparison.Ordinal);
+            Assert.False(fetched.TryGetProperty("certificate", out about) && about.ValueKind != JsonValueKind.Null);
+            var pasted = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test",
+                new { name = "Old Pets", spec = FakeMcp.PetsSpec.Replace("https://pets.test/v1", tls.Url("/v1"), StringComparison.Ordinal), tls = check }));
+            Assert.False(pasted.GetProperty("ok").GetBoolean());
+            error = pasted.GetProperty("error").GetString()!;
+            Assert.StartsWith($"The API at {tls.Url("/v1")} cannot be called. No secure connection could be set up with localhost (", error, StringComparison.Ordinal);
+            Assert.EndsWith("Its certificate is not the reason: it may not speak https there, speak only an old TLS version, or share no cipher with this app.", error, StringComparison.Ordinal);
+            Assert.False(pasted.TryGetProperty("certificate", out about) && about.ValueKind != JsonValueKind.Null);
         }
         Assert.Equal(0, tls.Requests);
     }
@@ -345,6 +358,76 @@ public sealed class ToolTlsTests(AppFixture app)
         Assert.Equal(["It does not lead to the CA you gave (Test root CA): it was issued by Test issuing CA."], Reasons(rootOnly));
         Assert.True((await TestAsync(bare, root, issuing)).GetProperty("ok").GetBoolean());
         Assert.True((await TestAsync(bare, issuing)).GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_chain_outside_its_dates_is_refused_for_its_dates_whether_its_root_or_its_issuing_CA_alone_is_trusted()
+    {
+        var now = DateTimeOffset.UtcNow;
+        using var root = TestCertificates.Ca("Test root CA");
+        using var issuing = TestCertificates.Intermediate(root, "Test issuing CA");
+        using var expired = TestCertificates.Intermediate(root, "Expired issuing CA", now.AddDays(-30), now.AddDays(-2));
+        using var early = TestCertificates.Intermediate(root, "Early issuing CA", now.AddDays(2), now.AddYears(1));
+        using var underExpired = TestCertificates.Server(expired, "localhost");
+        using var underEarly = TestCertificates.Server(early, "localhost");
+        using var outOfDate = TestCertificates.Server(issuing, ["localhost"], now.AddDays(-30), now.AddDays(-3));
+        await using var expiredCa = await TlsServer.StartAsync(underExpired, new FakeMcp(), "tools.example.test", o => o.ServerCertificateChain = [expired]);
+        await using var earlyCa = await TlsServer.StartAsync(underEarly, new FakeMcp(), "tools.example.test", o => o.ServerCertificateChain = [early]);
+        await using var expiredServer = await TlsServer.StartAsync(outOfDate, new FakeMcp(), "tools.example.test", o => o.ServerCertificateChain = [issuing]);
+        await using var f = NewApp(NewDatabase());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<List<string>> RefusedAsync(TlsServer server, X509Certificate2 ca)
+        {
+            var test = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test",
+                new { name = "Dated Desk", url = server.Url("/mcp"), headerName = "X-Api-Key", headerValue = FakeMcp.ApiKey, tls = "OwnCa", tlsCa = TestCertificates.Pem(ca) }));
+            Assert.False(test.GetProperty("ok").GetBoolean(), test.ToString());
+            return Reasons(test);
+        }
+
+        // The issuing CA given alone is held to its dates as the root's chain holds it, and the reason is its dates, not where the chain leads.
+        foreach (var (server, ca, reason) in new[]
+        {
+            (expiredCa, expired, $"Expired issuing CA, a CA in its chain, expired on {now.AddDays(-2):yyyy-MM-dd}."),
+            (earlyCa, early, $"Early issuing CA, a CA in its chain, is not valid before {now.AddDays(2):yyyy-MM-dd}."),
+            (expiredServer, issuing, $"It expired on {now.AddDays(-3):yyyy-MM-dd}."),
+        })
+        {
+            Assert.Equal([reason], await RefusedAsync(server, ca));
+            Assert.Equal([reason], await RefusedAsync(server, root));
+        }
+        Assert.Equal(0, expiredCa.Requests + earlyCa.Requests + expiredServer.Requests);
+    }
+
+    [Fact]
+    public void A_chain_that_reaches_the_issuing_CA_given_alone_is_refused_only_for_what_is_wrong_with_it()
+    {
+        using var root = TestCertificates.Ca("Test root CA");
+        using var issuing = TestCertificates.Intermediate(root, "Test issuing CA");
+        using var corp = TestCertificates.Intermediate(root, "Corp issuing CA", permitted: "corp.test");
+        using var other = TestCertificates.Ca("Other CA");
+        // As the TLS handshake gives it: the server's certificate, the issuing CA it sent, and the system's verdict.
+        static List<string> Problems(X509Certificate2 certificate, X509Certificate2 sent, X509Certificate2 trusted)
+        {
+            using var presented = new X509Chain();
+            presented.ChainPolicy.ExtraStore.Add(sent);
+            return ServerTls.Problems(Llm.Core.Chat.TlsCheck.OwnCa, [trusted], certificate, presented, System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors, "localhost");
+        }
+
+        using var server = TestCertificates.Server(issuing, "localhost");
+        Assert.Empty(Problems(server, issuing, issuing));
+        Assert.Equal(["It does not lead to the CA you gave (Other CA): it was issued by Test issuing CA."], Problems(server, issuing, other));
+
+        // A certificate for a client, not a server.
+        using var client = TestCertificates.Server(issuing, ["localhost"], DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1), "1.3.6.1.5.5.7.3.2");
+        Assert.Equal(["It is not meant for a server (its key usage)."], Problems(client, issuing, issuing));
+        Assert.Equal(["It is not meant for a server (its key usage)."], Problems(client, issuing, root));
+
+        // A name its issuing CA may not vouch for (its name constraints).
+        using var inside = TestCertificates.Server(corp, "api.corp.test");
+        Assert.Empty(Problems(inside, corp, corp));
+        using var outside = TestCertificates.Server(corp, "localhost");
+        Assert.Equal(["Its name is not one its CA may vouch for (the CA's name constraints)."], Problems(outside, corp, corp));
+        Assert.Equal(["Its name is not one its CA may vouch for (the CA's name constraints)."], Problems(outside, corp, root));
     }
 
     [Fact]
