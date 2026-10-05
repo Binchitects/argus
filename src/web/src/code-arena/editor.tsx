@@ -222,10 +222,11 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       return true
     }
 
-    /** The tab's file as it was before a read: still open, the same model, nothing typed in it since. */
-    const unchanged = (t: Tab, f: FileModel) => has(t.id) && files.current.get(t.path) === f && !f.model.isDisposed() && f.model.getAlternativeVersionId() === f.savedAlt
+    /** The tab's file as it was when a read began: still open, the same model, nothing typed in it and nothing saved since. */
+    const unchanged = (t: Tab, f: FileModel, at: { alt: number; version: string }) =>
+      has(t.id) && files.current.get(t.path) === f && !f.model.isDisposed() && f.model.getAlternativeVersionId() === at.alt && f.version === at.version
 
-    /** One tab against the disk. Everything is checked again after each wait: the tab may have closed, or been typed in, meanwhile. */
+    /** One tab against the disk. Everything is checked again after each wait: the tab may have closed, been typed in or saved, meanwhile. */
     const refreshTab = async (t: Tab) => {
       if (t.kind === 'diff') {
         try {
@@ -239,17 +240,19 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         return
       }
       const f = files.current.get(t.path)
-      if (!f || !unchanged(t, f)) return
+      if (!f || f.model.isDisposed() || f.model.getAlternativeVersionId() !== f.savedAlt) return
+      const at = { alt: f.savedAlt, version: f.version }
       let file
       try {
         file = await readFile(t.path)
       } catch (e) {
         // Gone (a change reverted, a file deleted by a command): a tab with nothing unsaved goes too.
-        if (e instanceof ApiError && e.http === 404 && unchanged(t, f)) drop([t.id])
+        if (e instanceof ApiError && e.http === 404 && unchanged(t, f, at)) drop([t.id])
         return
       }
       // Typed in while it was read: the person's text stays, unsaved, and saving asks first (the version on disk moved on).
-      if (!unchanged(t, f) || file.version === f.version || file.text === null) return
+      // Saved while it was read: the read may be from before the save, and what was saved stays.
+      if (!unchanged(t, f, at) || file.version === f.version || file.text === null) return
       if (f.model.getValue() !== file.text) {
         // An edit, not a new model: the cursor and the scroll stay, and Undo takes it back.
         f.model.pushEditOperations([], [{ range: f.model.getFullModelRange(), text: file.text }], () => null)

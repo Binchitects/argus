@@ -367,19 +367,22 @@ function renderIde() {
   return { ...view, client }
 }
 
-/** Holds back the answers to the calls whose address matches until let go: what the page does while one is on its way. */
-function holdBack(match: (path: string) => boolean) {
+/**
+ * Holds back the answers to the calls whose address and method match until let go: what the page does while one is on its way.
+ * The server answers when let go, or with `answeredEarly` when asked: an answer from before what the page does meanwhile.
+ */
+function holdBack(match: (path: string, method: string) => boolean, { answeredEarly = false } = {}) {
   const answer = vi.mocked(fetch).getMockImplementation()!
   const waiting: (() => void)[] = []
   let held = 0
   let open = false
   vi.mocked(fetch).mockImplementation(async (input, init) => {
     const url = new URL(String(input), 'https://llm.test')
-    if (!open && match(url.pathname + url.search)) {
-      held++
-      await new Promise<void>((go) => waiting.push(go))
-    }
-    return answer(input, init)
+    if (open || !match(url.pathname + url.search, (init?.method ?? 'GET').toUpperCase())) return answer(input, init)
+    held++
+    const early = answeredEarly ? answer(input, init) : null
+    await new Promise<void>((go) => waiting.push(go))
+    return early ?? answer(input, init)
   })
   return {
     held: () => held,
@@ -742,6 +745,35 @@ describe('Code Arena, the IDE', () => {
     expect(await screen.findByRole('alertdialog', { name: 'app.ts changed on disk' })).toBeInTheDocument()
   })
 
+  it('keeps what is saved while the file is read again: a read from before the save does not put the older text back', async () => {
+    const { calls, disk } = backend({ 'POST /api/messages': () => answerOnly() })
+    renderIde()
+    await openApp()
+    const model = editor().model!
+
+    // The end of the turn reads app.ts; the server answers before the save below, and the answer comes after it.
+    const hold = holdBack((path) => path === '/api/file?path=src%2Fapp.ts', { answeredEarly: true })
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Hello{Enter}')
+    await waitFor(() => expect(hold.held()).toBe(1))
+    act(() => model.setValue('mine\n'))
+    await userEvent.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(disk['src/app.ts']).toEqual({ text: 'mine\n', version: 'v1+' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts' })).toBeInTheDocument()
+    hold.release()
+    await screen.findByRole('button', { name: 'Send' })
+    await act(async () => {})
+
+    expect(model.value).toBe('mine\n')
+    expect(within(tabs()).getByRole('tab', { name: 'app.ts' })).toBeInTheDocument()
+    // The next save sends the version saved: nothing asks, nothing is overwritten.
+    act(() => model.setValue('mine again\n'))
+    await userEvent.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/file').at(-1)?.body).toEqual({ path: 'src/app.ts', text: 'mine again\n', version: 'v1+' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts' })).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(disk['src/app.ts']!.text).toBe('mine again\n')
+  })
+
   it('a tab closed while the files are checked against the disk does not stop the other tabs from reloading', async () => {
     const { disk } = backend({
       'POST /api/messages': () => {
@@ -879,6 +911,27 @@ describe('Code Arena, the IDE', () => {
     await userEvent.keyboard('{Control>}[Backquote]{/Control}')
     await waitFor(() => expect(opened()).toHaveLength(2))
     expect(await within(screen.getByRole('region', { name: 'Terminal' })).findByRole('tab', { name: 'bash 2' })).toBeInTheDocument()
+  })
+
+  it('opens one terminal when the panel is hidden and shown again while its first one is opening', async () => {
+    const { calls } = backend()
+    renderIde()
+    const opened = () => calls.filter((c) => c.method === 'POST' && c.path === '/api/terminals')
+    await screen.findByRole('tree', { name: 'Files' })
+    const hold = holdBack((path, method) => method === 'POST' && path === '/api/terminals')
+    await userEvent.click(screen.getByRole('button', { name: 'Terminal' }))
+    await waitFor(() => expect(hold.held()).toBe(1))
+    await userEvent.keyboard('{Control>}[Backquote]{/Control}')
+    await userEvent.keyboard('{Control>}[Backquote]{/Control}')
+    await act(() => new Promise((wait) => setTimeout(wait, 20)))
+    expect(hold.held()).toBe(1)
+
+    hold.release()
+    const panel = screen.getByRole('region', { name: 'Terminal' })
+    expect(await within(panel).findByRole('tab', { name: 'bash 1' })).toBeInTheDocument()
+    await act(() => new Promise((wait) => setTimeout(wait, 20)))
+    expect(opened()).toHaveLength(1)
+    expect(within(panel).getAllByRole('tab')).toHaveLength(1)
   })
 
   it('does not search the files again at the end of each turn', async () => {

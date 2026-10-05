@@ -112,12 +112,13 @@ export default function TerminalPanel({ shown, onHide, focusKey }: { shown: bool
   }
 
   // Shown with no terminal: one opens, as an editor's panel does. Each time: closing the last one hides the panel, and showing it again opens one.
+  // Not while one is opening: hidden and shown again before it is there, the panel has its terminal already.
   useEffect(() => {
     if (!shown) {
       seen.current = false
       return
     }
-    if (!list.data || seen.current) return
+    if (!list.data || seen.current || opening) return
     if (list.data.length > 0) {
       seen.current = true
       return
@@ -127,7 +128,7 @@ export default function TerminalPanel({ shown, onHide, focusKey }: { shown: bool
       void add()
     })
     return () => clearTimeout(soon)
-  }, [shown, list.data, add])
+  }, [shown, list.data, opening, add])
 
   return (
     <section aria-label="Terminal" className="flex h-full min-h-0 flex-col bg-background">
