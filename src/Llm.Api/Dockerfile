@@ -43,9 +43,10 @@ FROM code-arena-web-${CODE_ARENA} AS code-arena-web
 # Code Arena, the coding agent people download from Connect your tools: one
 # self-contained file per system (tools/publish-code-arena.sh), its web
 # interface's page embedded. CODE_ARENA=auto builds it from the runtime packs
-# in tools/offline-nuget when they are there, at the version of this SDK's
-# runtime, and skips it otherwise (the script says which version to fetch, and
-# the page how to add it): a newer sdk:10.0 than the packs is no failed image.
+# in tools/offline-nuget when they are there, at the runtime version this SDK
+# publishes with, and skips it otherwise (the script says which version to
+# fetch, and the page how to add it): a newer sdk:10.0 than the packs is no
+# failed image.
 # online fetches the packs from nuget.org; none skips it.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS code-arena
 ARG CODE_ARENA

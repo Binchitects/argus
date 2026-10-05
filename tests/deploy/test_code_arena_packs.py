@@ -1,5 +1,5 @@
 """tools/publish-code-arena.sh --offline and the app image's CODE_ARENA=auto: the runtime packs checked
-against the SDK's own runtime first, with a fake dotnet. Nothing here needs .NET, a container engine or
+first against the runtime version the SDK publishes with, with a fake dotnet. Nothing here needs .NET, a container engine or
 the network."""
 from __future__ import annotations
 
@@ -16,17 +16,21 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 RIDS = ["linux-x64", "linux-arm64", "win-x64", "osx-x64", "osx-arm64"]
 
-# dotnet as far as the script uses it: its runtimes (FAKE_RUNTIME) and publish, which writes the program
-# where -o says, or fails like a compile error (FAKE_PUBLISH_FAILS). Each call is logged as a JSON line.
+# dotnet as far as the script uses it: the runtime version the SDK publishes with (FAKE_RUNTIME), the
+# runtimes installed (that one and FAKE_OTHER_RUNTIMES), and publish, which writes the program where -o
+# says, or fails like a compile error (FAKE_PUBLISH_FAILS). Each call is logged as a JSON line.
 FAKE_DOTNET = r"""#!/usr/bin/env python3
 import json, os, pathlib, sys
 args = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
+if args == ["msbuild", "src/CodeArena/CodeArena.csproj", "-getProperty:BundledNETCoreAppPackageVersion"]:
+    print(os.environ["FAKE_RUNTIME"])
+    sys.exit(0)
 if args[:1] == ["--list-runtimes"]:
-    v = os.environ["FAKE_RUNTIME"]
-    print(f"Microsoft.AspNetCore.App {v} [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]")
-    print(f"Microsoft.NETCore.App {v} [/usr/share/dotnet/shared/Microsoft.NETCore.App]")
+    for v in [os.environ["FAKE_RUNTIME"], *os.environ.get("FAKE_OTHER_RUNTIMES", "").split()]:
+        print(f"Microsoft.AspNetCore.App {v} [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]")
+        print(f"Microsoft.NETCore.App {v} [/usr/share/dotnet/shared/Microsoft.NETCore.App]")
     sys.exit(0)
 if args[:1] == ["publish"]:
     if os.environ.get("FAKE_PUBLISH_FAILS"):
@@ -139,6 +143,23 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertIn("lacks 2 of the 4", r.stderr)
         self.assertNotIn("linux-x64", r.stderr)
+
+    def test_a_newer_dotnet_installed_beside_the_sdk_does_not_change_the_packs_it_needs(self):
+        # A .NET 11 preview's runtime next to SDK 10.0's: the SDK still publishes with 10.0.12.
+        self.packs("10.0.12")
+        r = self.publish("10.0.12", "--offline", FAKE_OTHER_RUNTIMES="11.0.0-rc.2.26473.103 10.0.13")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.built()), 5)
+
+    def test_an_sdk_that_does_not_say_its_runtime_fails_rather_than_skipping(self):
+        self.packs("10.0.12")
+        r = self.publish("", "--offline")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("The .NET SDK did not say which runtime it publishes with", r.stderr)
+        self.assertEqual(self.publishes(), [])
+        r = self.image_step("")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("not built", r.stdout)
 
     def test_the_image_skips_code_arena_when_the_packs_do_not_match_its_sdk_and_builds_it_when_they_do(self):
         self.packs("10.0.12")

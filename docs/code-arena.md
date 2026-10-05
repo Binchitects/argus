@@ -463,8 +463,10 @@ stage), from .NET's runtime packs, which are not part of the SDK:
   internet (its [README](../tools/offline-nuget/README.md) has the commands,
   about 220 MB), carry it over with the repository, and build as usual: the
   image builds Code Arena from that folder only (`CODE_ARENA=auto`, the
-  default). The packs must be at the version of the SDK image's own runtime
-  (`dotnet --list-runtimes`; a newer `sdk:10.0` pulled since moves it).
+  default). The packs must be at the runtime version the SDK publishes with,
+  the SDK image's own runtime (`dotnet msbuild src/CodeArena/CodeArena.csproj
+  -getProperty:BundledNETCoreAppPackageVersion` prints it; a newer `sdk:10.0`
+  pulled since moves it).
   Without them, the image skips Code Arena, the build log lists the files to
   fetch at that version, and the page says how to add it.
 - **By hand**: `tools/publish-code-arena.sh --offline [rid ...]` writes

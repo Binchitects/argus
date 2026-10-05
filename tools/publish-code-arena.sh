@@ -10,9 +10,9 @@
 #   tools/publish-code-arena.sh --no-web            without building the web interface's page
 #
 # --offline needs the .NET runtime and host packs for each system in
-# tools/offline-nuget/ (its README says how to fill it once), at the version of
-# the SDK's own runtime: without them it builds nothing and exits with 3. Uses
-# dotnet when installed, tools/dn (the SDK in a container) otherwise.
+# tools/offline-nuget/ (its README says how to fill it once), at the runtime
+# version the SDK publishes with: without them it builds nothing and exits
+# with 3. Uses dotnet when installed, tools/dn (the SDK in a container) otherwise.
 #
 # First it builds the web interface's page (code-arena web) from src/web into
 # src/CodeArena/web, which the program embeds: with Node.js and src/web's own
@@ -42,11 +42,12 @@ if command -v dotnet >/dev/null 2>&1; then dotnet=(dotnet); else dotnet=("$here/
 
 sources=()
 if [ -n "$offline" ]; then
-  # The packs at the runtime version this SDK publishes with (its own runtime's), for every system asked
-  # for, checked before anything is built: one missing would fail the restore halfway through.
-  runtime="$("${dotnet[@]}" --list-runtimes | awk '$1 == "Microsoft.NETCore.App" { print $2 }' | sort -V | tail -n 1)"
-  if [ -z "$runtime" ]; then
-    echo "dotnet --list-runtimes names no Microsoft.NETCore.App runtime" >&2
+  # The packs at the runtime version this SDK publishes with, for every system asked for, checked before
+  # anything is built: one missing would fail the restore halfway through. The SDK says which version (the
+  # project evaluated, nothing restored): other runtimes installed beside it, a newer .NET's, do not count.
+  runtime="$("${dotnet[@]}" msbuild src/CodeArena/CodeArena.csproj -getProperty:BundledNETCoreAppPackageVersion | tail -n 1)" || runtime=
+  if ! [[ "$runtime" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+    echo "The .NET SDK did not say which runtime it publishes with (BundledNETCoreAppPackageVersion: '$runtime')" >&2
     exit 1
   fi
   missing=()
