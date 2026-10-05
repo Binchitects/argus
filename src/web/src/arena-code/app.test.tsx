@@ -168,6 +168,38 @@ describe('Arena Code in the browser', () => {
     expect(await screen.findByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 
+  it('shows what Laya made of a command it asks about, even in yolo', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const args = '{"command":"rm -rf ~/projects"}'
+    const risk = 'Laya says this command may be destructive (96%) and write outside the workspace (93%), so this asks although the mode would run it. Laya: destructive 96%, outside the workspace 93%, network 3%'
+    const { calls } = backend({
+      state: { mode: 'yolo' },
+      extra: {
+        'POST /api/messages': () => ({
+          events: [
+            { type: 'question', id: 'm0', parentId: null },
+            { type: 'assistant', id: 'm1', parentId: 'm0', model: 'model-a' },
+            { type: 'tool_call', id: 'c1', name: 'run_shell', arguments: args, tool: 'local' },
+            { type: 'approval', id: 'c1', name: 'run_shell', arguments: args, tool: 'local', title: 'run_shell', always: 'for `rm …`', risk },
+          ],
+          until: over,
+        }),
+      },
+    })
+    renderCode()
+    await ask('Clean up my projects')
+
+    const question = await screen.findByRole('alert')
+    expect(question).toHaveTextContent('Allow Run shell to run with these arguments?')
+    expect(question).toHaveTextContent('may be destructive (96%) and write outside the workspace (93%)')
+    expect(question).toHaveTextContent('Laya: destructive 96%, outside the workspace 93%, network 3%')
+    await userEvent.click(within(question).getByRole('button', { name: 'Deny' }))
+    expect(calls.find((c) => c.path === '/api/approvals')?.body).toEqual({ id: 'c1', answer: 'deny' })
+    end()
+    expect(await screen.findByRole('button', { name: 'Send' })).toBeInTheDocument()
+  })
+
   it('switches the mode, the model and the thinking for the next turns', async () => {
     const { calls } = backend()
     renderCode()

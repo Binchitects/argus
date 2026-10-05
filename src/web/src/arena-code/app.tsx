@@ -442,6 +442,7 @@ function Thread({ state, config, onOpenList }: { state: CodeState; config: ChatC
                           config={config}
                           waiting={isLive ? (view.waiting ?? []) : []}
                           always={view.always}
+                          risks={view.risks}
                           calls={isLive ? view.calls : undefined}
                           diffs={view.diffs}
                           onDecide={(id, answer) => void decide(id, answer)}
