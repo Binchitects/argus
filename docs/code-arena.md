@@ -147,7 +147,8 @@ code-arena --continue --mode auto-edit
 
 `code-arena` starts a small web server on this machine, prints its address
 and opens the browser (`--no-open`, or a machine without a desktop, only
-prints it). **Ctrl+C** in the terminal stops it, and the turn if one runs;
+prints it), through a file of the person's own that sends it on to the
+address (below). **Ctrl+C** in the terminal stops it, and the turn if one runs;
 the terminal shows what the agent does (`● edit_file …`) while the page drives
 it. On another machine over SSH: `code-arena --port 8765 --no-open` there,
 `ssh -L 8765:127.0.0.1:8765 that-machine` here, and open the address printed.
@@ -241,8 +242,13 @@ It starts in the working directory with code-arena's environment, without
 `ARENA_API_KEY`, with `TERM=xterm-256color`, `COLORTERM=truecolor` and
 `TERM_PROGRAM=code-arena`, every signal at its default and none blocked. Ten
 run at once at most. A page that comes back, or a second tab, sees the last
-256 KB of each one's output. Closing one sends its shell and what runs in it
-SIGHUP (SIGKILL 3 s later); stopping code-arena closes them all.
+256 KB of each one's output. Closing one sends what runs in it SIGHUP, and
+SIGKILL 3 s later to what is left, whether the shell ended or not: the shell,
+the job in the foreground and, on Linux, every job of the shell's session,
+those in the background and those started with `nohup` too (on macOS, the
+shell's and the foreground job's process groups). A program that leaves the
+session (`setsid`, a daemon, tmux) keeps running. Stopping code-arena closes
+them all.
 
 A terminal is as powerful as the person's own shell, and so are the page's
 file calls: the mode (ask, auto-edit, …) guards the agent, not the person.
@@ -253,8 +259,18 @@ That is why everything below is behind this run's key.
 - It listens on `127.0.0.1` only, on a free port unless `--port` says which.
 - The address carries a key made for this run (`?token=…`). Opening it sets a
   cookie (HttpOnly, SameSite=Strict, one per port) and takes the key out of the
-  address; every request without the key is refused. A new run makes a new
-  key: an old tab says so.
+  address, with a page that goes on to `/` itself: the browser sends a
+  SameSite=Strict cookie on that, not on a redirect it follows from another
+  site, as the launcher file below is. Every request without the key is
+  refused. A new run makes a new key: an old tab says so.
+- The key never goes on a command line, which every user of the machine can
+  read (`ps`, `/proc`): the browser is opened with a file,
+  `open/code-arena-PORT.html` in code-arena's data folder (0600, in a folder
+  of the person's alone, 0700), which sends it on to the address, as Jupyter
+  does. The file goes when the run ends. A browser in a sandbox (a snap, as
+  Ubuntu's Firefox is, or a Flatpak) cannot read it: when no browser has the
+  page, cookie and all, 20 s later, code-arena says so, and the address it
+  printed opens the IDE there.
 - The server answers only to `127.0.0.1` and `localhost` at its port (the Host
   header), so a name pointed at 127.0.0.1 (DNS rebinding) gets nothing; it
   refuses requests from other sites, or another port's page (Origin,
@@ -263,9 +279,13 @@ That is why everything below is behind this run's key.
 - The file calls take paths relative to the working directory only: an
   absolute path, a drive or `..` is refused, even one that would land inside.
   So is a link that leads outside, one to a file not there yet outside, and
-  one inside by name only through another link. The Explorer, search and quick
-  open leave such links out. Folders added with `--add-dir` are the agent's,
-  not the IDE's.
+  one inside by name only: where a link leads is found as the system finds
+  it, one part at a time, a `..` in its target applied after the link before
+  it (with `d → /`, `x → d/../etc/passwd` is `/etc/passwd`). The Explorer,
+  search and quick open leave such links out. A name is taken exactly as it
+  is, spaces and (outside Windows) backslashes included. A named pipe, a
+  socket or a device is not opened (it would keep the call waiting). Folders
+  added with `--add-dir` are the agent's, not the IDE's.
 - A cookie does not tell ports apart: another web server on 127.0.0.1 that
   the person opens in the same browser is sent it too. Open no local page you
   do not trust while the IDE runs.
@@ -328,9 +348,12 @@ mode with `--mode`, `/mode`, or `"mode"` in the config file.
 
 The tools stay inside the working directory, and those added with `--add-dir`
 (or `"allowedPaths"` in the file); a link inside that leads outside counts as
-outside. Commands run in the working directory, but they are the person's own
-commands, with their rights: the mode is what guards them. The API key is
-removed from the environment of every command and MCP server the agent starts.
+outside, where it leads found as the system finds it (a `..` in a link's
+target is applied after the link before it, not by name), and a loop of links
+or more than 40 on the way counts as outside too. Commands run in the working
+directory, but they are the person's own commands, with their rights: the
+mode is what guards them. The API key is removed from the environment of every
+command and MCP server the agent starts.
 
 ### Laya looks at commands
 
@@ -398,9 +421,9 @@ On the person's machine:
 | `write_file` | creates or replaces a file |
 | `edit_file` | replaces an exact piece of a file; it must match once (or `replace_all`), whitespace included; an empty `old_string` makes a new file. Windows line endings are kept |
 | `list_dir`, `glob` | folders and file names (`**/*.cs`, `*.{ts,tsx}`); `.gitignore` is respected |
-| `grep` | file contents by regular expression, with context lines; binary and ignored files skipped |
+| `grep` | file contents by regular expression, with context lines; binary and ignored files skipped, and those it cannot read, named pipes and links that lead outside |
 | `run_shell` | a command in bash (sh when missing; `cmd.exe` on Windows; `"shell"` in the file for another), 120 s by default, at most 600; long output is cut in the middle |
-| `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`) |
+| `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
 | `todo_write` | the to-do list the person sees (`/todo`) |
 | `task` | a sub-agent (below) |
 
@@ -544,3 +567,6 @@ hold.
   Windows 10 1809 (no ConPTY).
 - **The IDE's address says the key is wrong**: it is an old run's. Each run
   prints a new address; open that one.
+- **The browser says it cannot read `code-arena-PORT.html`**: it runs in a
+  sandbox (a snap, as Ubuntu's Firefox and Chromium are, or a Flatpak), which
+  cannot read code-arena's data folder. Open the address code-arena printed.

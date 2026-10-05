@@ -151,6 +151,17 @@ public sealed class IdeTests : IDisposable
         File.CreateSymbolicLink(Path.Combine(h.Work, "sneaky.txt"), Path.Combine(h.Work, "out", "other.txt"));
         File.CreateSymbolicLink(Path.Combine(h.Work, "escape.txt"), secret);
         File.CreateSymbolicLink(Path.Combine(h.Work, "alias.txt"), inside);
+        // Inside by name only, as the system reads them: through out, .. is outside's own folder (where secret.txt
+        // is); through d, the top of the disk, d/../etc is /etc.
+        File.CreateSymbolicLink(Path.Combine(h.Work, "back.txt"), "out/../secret.txt");
+        Directory.CreateSymbolicLink(Path.Combine(h.Work, "d"), "/");
+        File.CreateSymbolicLink(Path.Combine(h.Work, "host.txt"), "d/../etc/hostname");
+        foreach (var link in new[] { "back.txt", "host.txt" })
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync("/api/file?path=" + link)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/file", new JsonObject { ["path"] = link, ["text"] = "owned" })).StatusCode);
+        }
+        Assert.Equal("keep out\n", File.ReadAllText(secret));
 
         Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/file", new JsonObject { ["path"] = "dangling.txt", ["text"] = "planted" })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/files/new", new JsonObject { ["path"] = "dangling.txt" })).StatusCode);
@@ -313,8 +324,116 @@ public sealed class IdeTests : IDisposable
         Assert.Equal(["src/app.ts:1:7", "src/app.ts:2:5", "src/app.ts:2:14"], Hits(await web.GetJsonAsync("/api/search?q=value&exclude=docs")));
         Assert.Equal(HttpStatusCode.BadRequest, (await web.Http.GetAsync("/api/search?q=(&regex=1")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await web.Http.GetAsync("/api/search?q=")).StatusCode);
+        // A glob not valid (as one is while it is typed) is said back, not a failure of the server.
+        foreach (var glob in new[] { "src/{a,b", "[]", "[z-a]" })
+        {
+            var refused = await web.Http.GetAsync("/api/search?q=value&include=" + Uri.EscapeDataString(glob));
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Contains("is not a valid glob", await refused.Content.ReadAsStringAsync());
+        }
+        Assert.DoesNotContain("The web interface", web.Err);
         // Quick open: every file, the binary one too.
         Assert.Equal(["data.bin", "docs/guide.md", "src/app.ts"], (await web.GetJsonAsync("/api/files/all"))["files"]!.AsArray().Select(f => f!.GetValue<string>()));
+
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        // A file that cannot be read is passed over, and a named pipe is neither opened nor waited on.
+        var locked = Special.Locked(h.Write("locked.md", "value\n"));
+        Special.Pipe(Path.Combine(h.Work, "pipe"));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var search = await web.Http.GetAsync("/api/search?q=value", deadline.Token);
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        Assert.Equal(locked ? ["docs/guide.md", "src/app.ts"] : ["docs/guide.md", "locked.md", "src/app.ts"],
+            JsonNode.Parse(await search.Content.ReadAsStringAsync(deadline.Token))!["files"]!.AsArray().Select(f => f!["path"]!.GetValue<string>()));
+        var pipe = await web.Http.GetAsync("/api/file?path=pipe", deadline.Token);
+        Assert.Equal(HttpStatusCode.BadRequest, pipe.StatusCode);
+        Assert.Contains("not a regular file", await pipe.Content.ReadAsStringAsync(deadline.Token));
+        Assert.Equal(HttpStatusCode.Conflict, (await web.PostAsync("/api/file", new JsonObject { ["path"] = "pipe", ["text"] = "x" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_name_is_taken_exactly_as_it_is_spaces_and_backslashes_included()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // neither is part of a name there
+        }
+        using var h = new Harness(_gateway, _mcp);
+        h.Write("notes", "plain\n");
+        h.Write("notes ", "spaced\n");
+        h.Write("a/b", "nested\n");
+        File.WriteAllText(Path.Combine(h.Work, @"a\b"), "backslash\n");
+        await using var web = await WebRun.StartAsync(h);
+
+        Assert.Equal(["a=a", @"a\b=a\b", "notes=notes", "notes =notes "],
+            (await web.GetJsonAsync("/api/files"))["entries"]!.AsArray().Select(e => $"{e!["name"]}={e["path"]}"));
+        Assert.Equal("spaced\n", (await web.GetJsonAsync("/api/file?path=" + Uri.EscapeDataString("notes ")))["text"]!.GetValue<string>());
+        Assert.Equal("backslash\n", (await web.GetJsonAsync("/api/file?path=" + Uri.EscapeDataString(@"a\b")))["text"]!.GetValue<string>());
+        Assert.Equal(["a/b", @"a\b", "notes", "notes "], (await web.GetJsonAsync("/api/files/all"))["files"]!.AsArray().Select(f => f!.GetValue<string>()));
+
+        // Saved and deleted: that file, not the one with the name it would be trimmed or split to.
+        await Json(await web.PostAsync("/api/file", new JsonObject { ["path"] = "notes ", ["text"] = "spaced again\n" }));
+        Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/files/delete", new JsonObject { ["path"] = @"a\b" })).StatusCode);
+        Assert.Equal("plain\n", File.ReadAllText(Path.Combine(h.Work, "notes")));
+        Assert.Equal("spaced again\n", File.ReadAllText(Path.Combine(h.Work, "notes ")));
+        Assert.Equal("nested\n", File.ReadAllText(Path.Combine(h.Work, "a", "b")));
+        Assert.False(File.Exists(Path.Combine(h.Work, @"a\b")));
+    }
+
+    [Fact]
+    public async Task Closing_a_terminal_ends_its_jobs_in_every_group_even_those_deaf_to_SIGHUP()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return; // /proc says whether they ended
+        }
+        using var h = new Harness(_gateway, _mcp, c => c["terminalShell"] = "/bin/sh");
+        await using var web = await WebRun.StartAsync(h);
+        var id = (await Json(await web.PostAsync("/api/terminals", new JsonObject { ["cols"] = 80, ["rows"] = 24 })))["id"]!.GetValue<string>();
+        var pids = new List<int>();
+        try
+        {
+            using var terminal = await TerminalSocket.ConnectAsync(web, id);
+            // A job in the background and one in the foreground, each in a process group of its own, both ignoring SIGHUP
+            // (as a server that reloads on it does).
+            await terminal.TypeAsync("sh -c 'trap \"\" HUP; echo back=$$; exec sleep 600' &\r");
+            await terminal.UntilAsync(@"back=\d+\r\n");
+            await terminal.TypeAsync("sh -c 'trap \"\" HUP; echo front=$$; exec sleep 600'\r");
+            await terminal.UntilAsync(@"front=\d+\r\n");
+            pids.AddRange(new[] { "back", "front" }.Select(job => int.Parse(Regex.Match(terminal.Text, job + @"=(\d+)").Groups[1].Value)));
+            Assert.All(pids, pid => Assert.False(Ended(pid)));
+
+            Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/terminals/close", new JsonObject { ["id"] = id })).StatusCode);
+            // SIGHUP, then SIGKILL 3 s later to what is left of them.
+            for (var waited = 0; waited < 15_000 && !pids.All(Ended); waited += 100)
+            {
+                await Task.Delay(100);
+            }
+            Assert.All(pids, pid => Assert.True(Ended(pid), $"{pid} still runs"));
+        }
+        finally
+        {
+            foreach (var pid in pids.Where(p => !Ended(p)))
+            {
+                System.Diagnostics.Process.GetProcessById(pid).Kill();
+            }
+        }
+    }
+
+    /// <summary>Gone, or a zombie no one has reaped yet (with no init in a container, no one may).</summary>
+    private static bool Ended(int pid)
+    {
+        try
+        {
+            var stat = File.ReadAllText($"/proc/{pid}/stat");
+            return stat[stat.LastIndexOf(')') + 2] is 'Z' or 'X';
+        }
+        catch (IOException)
+        {
+            return true;
+        }
     }
 
     [Fact]

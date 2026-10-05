@@ -424,3 +424,29 @@ public sealed class Harness : IDisposable
         }
     }
 }
+
+/// <summary>What is not a plain file to read, made for a test (Unix).</summary>
+[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+internal static class Special
+{
+    /// <summary>A named pipe: opened to read, it waits for a writer.</summary>
+    public static void Pipe(string path) => Assert.Equal(0, mkfifo(path, 0b110_000_000));
+
+    /// <summary>A file no one but root may read; false when this test runs as root, who reads it all the same.</summary>
+    public static bool Locked(string file)
+    {
+        File.SetUnixFileMode(file, UnixFileMode.None);
+        try
+        {
+            File.ReadAllBytes(file);
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int mkfifo([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPUTF8Str)] string path, uint mode);
+}
