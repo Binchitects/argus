@@ -9,7 +9,7 @@ import type { CodeSession, CodeState, FileDiff, SessionSummary } from './api'
 import { App } from './app'
 
 const state = (over: Partial<CodeState> = {}): CodeState => ({
-  version: '5.0.0', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, thinking: null, mode: 'ask',
+  name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, thinking: null, mode: 'ask',
   modes: [
     { name: 'ask', description: 'edits and commands ask first' },
     { name: 'auto-edit', description: 'file edits run without asking; commands ask' },
@@ -198,6 +198,8 @@ describe('Code Arena in the browser', () => {
     })
     renderCode()
 
+    // The sessions are the side bar's Chat view.
+    await userEvent.click(await screen.findByRole('button', { name: 'Chat' }))
     const list = await screen.findByRole('navigation', { name: 'Sessions' })
     const items = await within(list).findAllByRole('button', { name: /Fix the build|First question/ })
     expect(items.map((b) => b.textContent)).toEqual(['Fix the build', 'First question'])

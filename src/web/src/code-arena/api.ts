@@ -4,7 +4,11 @@ import type { ChatEvent, Message } from '@/pages/chat/types'
 
 /** What code-arena web says of itself: the folder, the model, the mode, the session open now. */
 export interface CodeState {
+  name: string
   version: string
+  /** The licence and where this version's source is, for the about box (LICENSING.md, section 7(b)). */
+  license: string
+  source: string
   folder: string
   project: string
   branch: string | null
@@ -23,6 +27,8 @@ export interface CodeState {
 }
 
 export type Mode = 'ask' | 'auto-edit' | 'plan' | 'yolo'
+
+export const modeLabels: Record<Mode, string> = { ask: 'Ask', 'auto-edit': 'Auto-edit', plan: 'Plan', yolo: 'Yolo' }
 
 /** A saved session of this folder, as the sidebar lists it. */
 export interface SessionSummary {
