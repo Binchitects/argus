@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Download } from 'lucide-react'
+import { Download, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { ApiKey } from '@/components/app/api-key'
 import { CodeBlock } from '@/components/app/code-block'
@@ -15,7 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { api, errorMessage } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
-import { arenaMcp, KEY, tools, type ArenaCodeBuild, type Context, type Step, type Tool } from './setup-tools'
+import { arenaMcp, CA_FILE, caShell, KEY, tools, type ArenaCodeBuild, type Context, type Step, type System, type Tool } from './setup-tools'
 
 interface ChatConfig {
   model: string | null
@@ -28,6 +28,16 @@ interface McpInfo {
   enabled: boolean
   url: string
   tools: { id: string; title: string; askFirst: boolean }[]
+}
+
+/** The certificate the site serves: whether a public CA vouches for it, else the one to trust (/api/downloads/certificate). */
+interface SiteCertificate {
+  available: boolean
+  trusted: boolean
+  subject: string | null
+  issuer: string | null
+  expires: string | null
+  sha256: string | null
 }
 
 const tokens = (n: number | null) => (n ? n.toLocaleString('en-US') : '—')
@@ -44,8 +54,14 @@ export function ConnectPage() {
     queryKey: ['downloads', 'arena-code'],
     queryFn: ({ signal }) => api<{ version: string; builds: ArenaCodeBuild[] }>('/api/downloads/arena-code', { signal }),
   })
+  const certificate = useQuery({
+    queryKey: ['downloads', 'certificate'],
+    queryFn: ({ signal }) => api<SiteCertificate>('/api/downloads/certificate', { signal }),
+    retry: false,
+  })
   const [chosen, setChosen] = useState<string | null>(null)
-  const [toolId, setToolId] = useState(remembered)
+  const [toolId, setToolId] = useState(() => remembered(TOOL_KEY, 'claude'))
+  const [os, setOs] = useState<System>(() => (remembered(OS_KEY, guessSystem()) === 'windows' ? 'windows' : 'unix'))
   // A key made on this page, filled into the Argus setups only when the person asks (it is hidden elsewhere).
   const [newKey, setNewKey] = useState<string | null>(null)
   const [fill, setFill] = useState(false)
@@ -58,14 +74,15 @@ export function ConnectPage() {
   const context: Context = {
     root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, argusUrl,
     apiKey: fill && newKey ? newKey : undefined, origin: window.location.origin, arenaCode: arenaCode.data ?? null,
+    os, ca: !!certificate.data?.available && !certificate.data.trusted,
   }
   const choose = (id: string) => {
     setToolId(id)
-    try {
-      localStorage.setItem(TOOL_KEY, id)
-    } catch {
-      // private window: the choice lasts for this page only
-    }
+    remember(TOOL_KEY, id)
+  }
+  const chooseSystem = (value: string) => {
+    setOs(value === 'windows' ? 'windows' : 'unix')
+    remember(OS_KEY, value)
   }
   return (
     <>
@@ -74,6 +91,8 @@ export function ConnectPage() {
         description="Use the models from your own tools: a coding agent, your editor, a script. They sign in with your API key and spend from your credit."
       />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+        {context.ca && certificate.data && <TrustCertificate certificate={certificate.data} os={os} />}
+
         <ApiKey onNewKey={setNewKey} />
 
         <Card>
@@ -110,11 +129,26 @@ export function ConnectPage() {
           <CardHeader>
             <CardTitle>Set up your tool</CardTitle>
             <CardDescription>
-              Put your key in <code className="font-mono">{KEY}</code> first (<code className="font-mono">export {KEY}=…</code>), choose your tool, and follow its steps.
+              Keep your key in <code className="font-mono">{KEY}</code> for every terminal (once), choose your system and your tool, and follow its steps: each ends with a check that it works.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-5">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <CodeBlock
+              code={os === 'unix' ? `echo 'export ${KEY}=${context.apiKey ?? '<your API key>'}' >> ~/.bashrc   # or ~/.zshrc; then open a new terminal` : `setx ${KEY} "${context.apiKey ?? '<your API key>'}"   # then open a new terminal`}
+              label="keeping the key for every terminal"
+            />
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field label="Your system">
+                <Select value={os} onValueChange={chooseSystem}>
+                  <SelectTrigger className="min-w-0 [&>span]:truncate">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unix">macOS or Linux</SelectItem>
+                    <SelectItem value="windows">Windows (PowerShell)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
               <Field label="Your tool">
                 <Select value={tool.id} onValueChange={choose}>
                   <SelectTrigger className="min-w-0 [&>span]:truncate">
@@ -157,7 +191,7 @@ export function ConnectPage() {
           </CardContent>
         </Card>
 
-        {mcp.data?.enabled && <ArenaMcp info={mcp.data} />}
+        {mcp.data?.enabled && <ArenaMcp info={mcp.data} os={os} />}
 
         {config.data?.argus && (
           <Card>
@@ -187,18 +221,86 @@ export function ConnectPage() {
 }
 
 const TOOL_KEY = 'setup.tool'
+const OS_KEY = 'setup.system'
 const groups = [...new Set(tools.map((t) => t.group))]
 
-function remembered(): string {
+function remembered(key: string, fallback: string): string {
   try {
-    return localStorage.getItem(TOOL_KEY) ?? 'claude'
+    return localStorage.getItem(key) ?? fallback
   } catch {
-    return 'claude'
+    return fallback
   }
 }
 
+function remember(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // private window: the choice lasts for this page only
+  }
+}
+
+/** Windows when the browser runs on it; a Unix shell otherwise. */
+function guessSystem(): System {
+  return /Windows/i.test(navigator.userAgent) ? 'windows' : 'unix'
+}
+
+/**
+ * The site's certificate comes from a private CA (its own, or the company's): the file to
+ * download, its fingerprint to compare, and how to install it where most tools look.
+ */
+function TrustCertificate({ certificate, os }: { certificate: SiteCertificate; os: System }) {
+  const file = caShell({ os } as Context)
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className="size-5 text-primary" aria-hidden="true" /> Trust this site's certificate
+        </CardTitle>
+        <CardDescription>
+          This Arena's certificate comes from its own certificate authority, not a public one, so your tools refuse to connect until they trust it. Download it, check its fingerprint, and install it once on your computer; each tool's steps below add what that tool needs besides.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" asChild>
+            <a href="/api/downloads/certificate/ca.crt" download={CA_FILE}>
+              <Download /> Download {CA_FILE}
+            </a>
+          </Button>
+          <span className="text-sm text-muted-foreground">Save it in your home folder as {CA_FILE}.</span>
+        </div>
+        <dl className="grid gap-1 text-sm sm:grid-cols-[max-content_minmax(0,1fr)] sm:gap-x-4">
+          <dt className="text-muted-foreground">Authority</dt>
+          <dd className="[overflow-wrap:anywhere]">{certificate.subject}</dd>
+          <dt className="text-muted-foreground">SHA-256</dt>
+          <dd className="font-mono text-xs [overflow-wrap:anywhere]">{certificate.sha256}</dd>
+          {certificate.expires && (
+            <>
+              <dt className="text-muted-foreground">Valid until</dt>
+              <dd>{new Date(certificate.expires).toLocaleDateString()}</dd>
+            </>
+          )}
+        </dl>
+        {os === 'unix' ? (
+          <>
+            <CodeBlock code={`sudo cp ${file} /usr/local/share/ca-certificates/${CA_FILE} && sudo update-ca-certificates`} label="installing it on Debian or Ubuntu" />
+            <CodeBlock code={`sudo cp ${file} /etc/pki/ca-trust/source/anchors/ && sudo update-ca-trust`} label="installing it on Fedora or RHEL" />
+            <CodeBlock code={`sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${file}`} label="installing it on macOS" />
+          </>
+        ) : (
+          <CodeBlock code={`Import-Certificate -FilePath "${file}" -CertStoreLocation Cert:\\CurrentUser\\Root`} label="installing it for your Windows account" />
+        )}
+        <p className="text-sm text-muted-foreground">
+          Browsers other than Firefox use the same store; Firefox uses its own (Settings → Privacy &amp; Security → Certificates). Tools built on Node.js or Python's requests do not read the store at all: their steps say what to set.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 /** Arena MCP: every chat tool of the person's, for their agent, at one address with their API key. */
-function ArenaMcp({ info }: { info: McpInfo }) {
+function ArenaMcp({ info, os }: { info: McpInfo; os: System }) {
   return (
     <Card>
       <CardHeader>
@@ -229,7 +331,7 @@ function ArenaMcp({ info }: { info: McpInfo }) {
             A tool that asks first in the chat is marked so your agent asks you before each call: let it ask, rather than trusting every tool.
           </p>
         )}
-        {arenaMcp(info.url).map((s) => (
+        {arenaMcp(info.url, os).map((s) => (
           <section key={s.title} aria-label={`Arena MCP in ${s.title}`} className="grid gap-1.5">
             <h3 className="text-sm font-medium">{s.title}</h3>
             <p className="text-sm text-muted-foreground">{s.text}</p>
@@ -244,11 +346,23 @@ function ArenaMcp({ info }: { info: McpInfo }) {
 /** One tool's steps, numbered: its settings with this deployment filled in, and Argus where it speaks MCP. */
 function Tutorial({ tool, context, argus, fill }: { tool: Tool; context: Context; argus: boolean; fill: { on: boolean; set: (on: boolean) => void } | null }) {
   const steps: Step[] = [...tool.steps(context)]
+  const trust = context.ca ? tool.trust(context) : []
+  const check = tool.check(context)
   const argusSteps = argus && typeof tool.argus === 'function' ? tool.argus(context) : []
   return (
     <section aria-label={`Setting up ${tool.title}`} className="grid gap-4">
       <p className="text-sm text-muted-foreground">{tool.about}</p>
       <StepList steps={steps} tool={tool.title} start={1} />
+      {trust.length > 0 && (
+        <div className="grid gap-3 border-t pt-4">
+          <h3 className="text-sm font-medium">Trust this site's certificate</h3>
+          <StepList steps={trust} tool={tool.title} start={steps.length + 1} />
+        </div>
+      )}
+      <div className="grid gap-3 border-t pt-4">
+        <h3 className="text-sm font-medium">Check it works</h3>
+        <StepList steps={[check]} tool={tool.title} start={steps.length + trust.length + 1} />
+      </div>
       {argus && (
         <div className="grid gap-3 border-t pt-4">
           <h3 className="text-sm font-medium">Argus, with your API key in {KEY}</h3>
@@ -258,7 +372,7 @@ function Tutorial({ tool, context, argus, fill }: { tool: Tool; context: Context
             </Label>
           )}
           {argusSteps.length > 0 ? (
-            <StepList steps={argusSteps} tool={tool.title} start={steps.length + 1} />
+            <StepList steps={argusSteps} tool={tool.title} start={steps.length + trust.length + 2} />
           ) : (
             <p className="text-sm text-muted-foreground">{tool.argus as string}</p>
           )}

@@ -97,14 +97,30 @@ public sealed partial class SiteCertificate(IOptions<CertificateOptions> options
             RemoteCertificateValidationCallback = (_, certificate, chain, errors) =>
             {
                 trusted = errors == SslPolicyErrors.None;
-                // Copied: the chain is gone once this returns.
-                served = chain is { ChainElements.Count: > 0 }
-                    ? [.. chain.ChainElements.Select(e => X509CertificateLoader.LoadCertificate(e.Certificate.RawData))]
-                    : certificate is null ? [] : [X509CertificateLoader.LoadCertificate(certificate.GetRawCertData())];
+                // Copied: the chain is gone once this returns. What the server sent besides its own
+                // certificate (its CA, with make-cert.sh) is in the extra store when no root vouches for it.
+                if (certificate is not null)
+                {
+                    served = [X509CertificateLoader.LoadCertificate(certificate.GetRawCertData()),
+                        .. (chain is null ? [] : chain.ChainPolicy.ExtraStore.Select(c => X509CertificateLoader.LoadCertificate(c.RawData))),
+                        .. (chain is null ? [] : chain.ChainElements.Select(e => X509CertificateLoader.LoadCertificate(e.Certificate.RawData)))];
+                }
                 return true;
             },
         }, timeout.Token);
-        return served.Count == 0 ? SiteCertificateInfo.Unknown : Describe(served, trusted);
+        return served.Count == 0 ? SiteCertificateInfo.Unknown : Describe(Path(served), trusted);
+    }
+
+    /// <summary>From the site's certificate to the CA that signed it, through the certificates the server sent (each once).</summary>
+    private static List<X509Certificate2> Path(List<X509Certificate2> served)
+    {
+        var path = new List<X509Certificate2> { served[0] };
+        while (path[^1].Subject != path[^1].Issuer
+            && served.FirstOrDefault(c => c.Subject == path[^1].Issuer && path.All(p => p.Thumbprint != c.Thumbprint)) is { } issuer)
+        {
+            path.Add(issuer);
+        }
+        return path;
     }
 
     /// <summary>The certificate to trust: the last of the chain (its root when the site sends it, the certificate itself when it signs itself).</summary>

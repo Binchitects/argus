@@ -49,7 +49,7 @@ describe('connect your tools', () => {
     expect(within(argus).getByText(/"Authorization": "Bearer <your API key>"/)).toBeInTheDocument()
     // The chosen tool's steps carry Argus too, with this deployment's address and the key from the environment.
     const steps = screen.getByRole('region', { name: 'Setting up Claude Code' })
-    const add = within(steps).getByText(/claude mcp add --transport http argus/)
+    const add = within(steps).getByText(/claude mcp add --transport http --scope user argus/)
     expect(add).toHaveTextContent(`${window.location.protocol}//argus.${window.location.host}/mcp`)
     expect(add).toHaveTextContent('--header "Authorization: Bearer $LLM_SERVICE_API_KEY"')
     expect(screen.queryByText(/GITLAB_TOKEN/)).not.toBeInTheDocument()
@@ -72,10 +72,10 @@ describe('connect your tools', () => {
     await userEvent.click(fill)
     expect(within(argus).getByText(/"Authorization": "Bearer sk-just-made-key"/)).toBeInTheDocument()
     // A setup that reads the environment keeps reading it; one that cannot gets the key.
-    expect(screen.getByText(/claude mcp add --transport http argus/)).toHaveTextContent('$LLM_SERVICE_API_KEY')
+    expect(screen.getByText(/claude mcp add --transport http --scope user argus/)).toHaveTextContent('$LLM_SERVICE_API_KEY')
     await userEvent.click(screen.getByRole('combobox', { name: 'Your tool' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Continue' }))
-    expect(within(screen.getByRole('region', { name: 'Setting up Continue' })).getByText(/mcpServers:/)).toHaveTextContent('Authorization: Bearer sk-just-made-key')
+    await userEvent.click(await screen.findByRole('option', { name: 'Cline' }))
+    expect(within(screen.getByRole('region', { name: 'Setting up Cline' })).getByText(/mcpServers/)).toHaveTextContent('"Authorization": "Bearer sk-just-made-key"')
     await userEvent.click(screen.getByRole('switch', { name: /Fill in my new key/ }))
     expect(screen.queryByText(/sk-just-made-key/)).not.toBeInTheDocument()
   })
@@ -104,10 +104,10 @@ describe('connect your tools', () => {
     // Each with the person's key from the environment, never --trust (asking first is the client's job here).
     const claude = screen.getByRole('region', { name: 'Arena MCP in Claude Code' })
     expect(within(claude).getByText(/claude mcp add/)).toHaveTextContent(
-      'claude mcp add --transport http arena https://llm.example.com/mcp \\ --header "Authorization: Bearer $LLM_SERVICE_API_KEY"',
+      'claude mcp add --transport http --scope user arena https://llm.example.com/mcp \\ --header "Authorization: Bearer $LLM_SERVICE_API_KEY"',
     )
     const qwen = screen.getByRole('region', { name: 'Arena MCP in Qwen Code' })
-    expect(within(qwen).getByText(/qwen mcp add/)).toHaveTextContent('qwen mcp add arena https://llm.example.com/mcp -t http \\ -H "Authorization: Bearer $LLM_SERVICE_API_KEY"')
+    expect(within(qwen).getByText(/qwen mcp add/)).toHaveTextContent("qwen mcp add arena https://llm.example.com/mcp -t http \\ -H 'Authorization: Bearer $LLM_SERVICE_API_KEY'")
     expect(within(qwen).getByText(/qwen mcp add/)).not.toHaveTextContent('--trust')
     const other = JSON.parse(within(screen.getByRole('region', { name: 'Arena MCP in Other MCP clients' })).getByText(/mcpServers/).textContent!)
     expect(other.mcpServers.arena).toEqual({ type: 'http', url: 'https://llm.example.com/mcp', headers: { Authorization: 'Bearer <your API key>' } })
@@ -141,10 +141,10 @@ describe('connect your tools', () => {
     expect(within(steps).getByRole('link', { name: /Windows \(x64\)/ })).toHaveAttribute('href', '/api/downloads/arena-code/win-x64')
     expect(within(steps).getByRole('link', { name: 'Download for macOS (Apple silicon), 38 MB' })).toHaveAttribute('download')
     expect(within(steps).queryByRole('link', { name: /Linux \(ARM64\)/ })).not.toBeInTheDocument()
-    // Signing in names this Arena; the CA note gives the private CA's file.
+    // Signing in names this Arena; a public certificate needs no CA step, and a check closes the steps.
     expect(within(steps).getByText(`arena-code login --url ${window.location.origin}`)).toBeInTheDocument()
-    expect(within(steps).getByText(`arena-code login --url ${window.location.origin} --ca ca.crt`)).toBeInTheDocument()
-    expect(within(steps).getByText(/ARENA_CA_CERT/)).toBeInTheDocument()
+    expect(within(steps).queryByText(/--ca/)).not.toBeInTheDocument()
+    expect(within(steps).getByText('arena-code -p "Reply with exactly: ok"')).toBeInTheDocument()
     // The same agent in the browser, on the person's machine.
     expect(steps).toHaveTextContent('Or in your browser: arena-code web opens the same agent')
     // Argus comes through Arena's own tools: no GitLab token to add.
@@ -169,17 +169,19 @@ describe('connect your tools', () => {
       'GET /api/chat/config': () => ({ json: config({ argus: true, gitlabUrl: null }) }),
     })
     renderApp('/setup')
+    await screen.findAllByText('Big-Model')
     const base = `${window.location.protocol}//gateway.${window.location.host}/v1`
     const pick = async (name: string) => {
       await userEvent.click(await screen.findByRole('combobox', { name: 'Your tool' }))
       await userEvent.click(await screen.findByRole('option', { name }))
       return screen.getByRole('region', { name: `Setting up ${name}` })
     }
-    // Hermes: its config file, the model with its window, and Argus over MCP.
+    // Hermes: its config file, the model with its window, and Argus over MCP, the key from the environment.
     const hermes = await pick('Hermes')
-    expect(within(hermes).getAllByText('~/.config/hermes/config.yaml', { selector: 'p' })).toHaveLength(2)
-    expect(within(hermes).getAllByText(/base_url:/)[0]).toHaveTextContent(`base_url: ${base} api_key: <your API key> name: Big-Model context_length: 262144`)
-    expect(within(hermes).getByText(/mcp_servers:/)).toBeInTheDocument()
+    expect(within(hermes).getAllByText('~/.hermes/config.yaml', { selector: 'p' })).toHaveLength(2)
+    expect(within(hermes).getAllByText(/base_url:/)[0]).toHaveTextContent(`provider: custom default: Big-Model base_url: ${base} key_env: LLM_SERVICE_API_KEY context_length: 262144`)
+    expect(within(hermes).getByText(/mcp_servers:/)).toHaveTextContent('Authorization: "Bearer ${LLM_SERVICE_API_KEY}"')
+    expect(within(hermes).getByText('hermes chat -q "Reply with exactly: ok"')).toBeInTheDocument()
     // OpenClaw: a provider and the default model, the key from the environment.
     const openclaw = await pick('OpenClaw')
     const claw = JSON.parse(within(openclaw).getAllByText(/"providers"/)[0]!.textContent!)
@@ -190,12 +192,72 @@ describe('connect your tools', () => {
     const dsh = await pick('DeepSeek Harness')
     expect(within(dsh).getAllByText(/apiKeyEnv: LLM_SERVICE_API_KEY/)[0]).toHaveTextContent(`baseURL: ${base}`)
     expect(within(dsh).getByText(/- insert:/)).toHaveTextContent('process.env.LLM_SERVICE_API_KEY')
-    // Codex: the Responses API. Aider: no MCP, and it says so.
+    // Codex: the Responses API, its window, no web search of OpenAI's. Aider: no MCP, and it says so.
     const codex = await pick('Codex CLI')
-    expect(within(codex).getAllByText(/wire_api = "responses"/)[0]).toBeInTheDocument()
+    expect(within(codex).getAllByText(/wire_api = "responses"/)[0]).toHaveTextContent('model_context_window = 262144 web_search = "disabled"')
+    expect(within(codex).getByText(/codex exec --skip-git-repo-check/)).toBeInTheDocument()
     const aider = await pick('Aider')
-    expect(within(aider).getByText(/aider --model openai\/Big-Model/)).toBeInTheDocument()
+    expect(within(aider).getAllByText(/aider --model openai\/Big-Model/)).toHaveLength(2)
     expect(within(aider).getByText(/Aider has no MCP/)).toBeInTheDocument()
+  })
+
+  it('Claude Code points every model it asks for at the chosen one, with its limits, and a check', async () => {
+    fakeApi(member, { 'GET /api/chat/config': () => ({ json: config() }) })
+    renderApp('/setup')
+    await screen.findAllByText('Big-Model')
+    const steps = screen.getByRole('region', { name: 'Setting up Claude Code' })
+    const exports = within(steps).getByText(/export ANTHROPIC_BASE_URL=/)
+    for (const line of ['ANTHROPIC_DEFAULT_OPUS_MODEL=Big-Model', 'ANTHROPIC_DEFAULT_SONNET_MODEL=Big-Model', 'CLAUDE_CODE_SUBAGENT_MODEL=Big-Model',
+      'CLAUDE_CODE_MAX_CONTEXT_TOKENS=262144', 'CLAUDE_CODE_MAX_OUTPUT_TOKENS=32768', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1']) {
+      expect(exports).toHaveTextContent(line)
+    }
+    const settings = JSON.parse(within(steps).getByText(/"env"/).textContent!)
+    expect(settings.env).toMatchObject({ ANTHROPIC_AUTH_TOKEN: '<your API key>', ANTHROPIC_MODEL: 'Big-Model' })
+    expect(settings.env.NODE_EXTRA_CA_CERTS).toBeUndefined()
+    expect(within(steps).getByText('claude -p "Reply with exactly: ok"')).toBeInTheDocument()
+    // A public certificate: nothing to trust.
+    expect(screen.queryByText("Trust this site's certificate")).not.toBeInTheDocument()
+  })
+
+  it('on Windows the commands are PowerShell and the files are in the profile folder', async () => {
+    fakeApi(member, { 'GET /api/chat/config': () => ({ json: config({ argus: true }) }) })
+    renderApp('/setup')
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Your system' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Windows (PowerShell)' }))
+    expect(screen.getByText(/setx LLM_SERVICE_API_KEY/)).toBeInTheDocument()
+    const claude = screen.getByRole('region', { name: 'Setting up Claude Code' })
+    expect(within(claude).getByText(/\$env:ANTHROPIC_BASE_URL = /)).toHaveTextContent('$env:ANTHROPIC_AUTH_TOKEN = $env:LLM_SERVICE_API_KEY')
+    expect(within(claude).getByText('%USERPROFILE%\\.claude\\settings.json', { selector: 'p' })).toBeInTheDocument()
+    expect(within(claude).getByText(/claude mcp add/)).toHaveTextContent('--header "Authorization: Bearer $env:LLM_SERVICE_API_KEY"')
+    await userEvent.click(screen.getByRole('combobox', { name: 'Your tool' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'curl' }))
+    expect(within(screen.getByRole('region', { name: 'Setting up curl' })).getAllByText(/Invoke-RestMethod/)[0]).toBeInTheDocument()
+  })
+
+  it("a private CA: the certificate to download, how to install it, and each tool's own step", async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config() }),
+      'GET /api/downloads/certificate': () => ({
+        json: { available: true, trusted: false, subject: 'CN=Argus Arena CA (llm.example.com)', issuer: 'CN=Argus Arena CA (llm.example.com)', expires: '2036-10-05T00:00:00Z', sha256: 'AB:CD:EF' },
+      }),
+    })
+    renderApp('/setup')
+    expect(await screen.findByRole('link', { name: /Download arena-ca.crt/ })).toHaveAttribute('href', '/api/downloads/certificate/ca.crt')
+    await screen.findAllByText('Big-Model')
+    expect(screen.getByText('AB:CD:EF')).toBeInTheDocument()
+    expect(screen.getByText(/update-ca-certificates/)).toBeInTheDocument()
+    // Claude Code: its own step, and the file in its settings.
+    const claude = screen.getByRole('region', { name: 'Setting up Claude Code' })
+    expect(within(claude).getByText('export NODE_EXTRA_CA_CERTS=$HOME/arena-ca.crt')).toBeInTheDocument()
+    expect(JSON.parse(within(claude).getByText(/"env"/).textContent!).env.NODE_EXTRA_CA_CERTS).toBe('/home/you/arena-ca.crt')
+    // Codex has a variable of its own.
+    await userEvent.click(screen.getByRole('combobox', { name: 'Your tool' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Codex CLI' }))
+    expect(within(screen.getByRole('region', { name: 'Setting up Codex CLI' })).getByText('export CODEX_CA_CERTIFICATE=$HOME/arena-ca.crt')).toBeInTheDocument()
+    // Arena Code signs in with the file.
+    await userEvent.click(screen.getByRole('combobox', { name: 'Your tool' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Arena Code (our own agent)' }))
+    expect(within(screen.getByRole('region', { name: 'Setting up Arena Code (our own agent)' })).getByText(/--ca \$HOME\/arena-ca.crt/)).toBeInTheDocument()
   })
 
   it('GitLab CI: the variables to set, the template to include, and the CLI in a terminal', async () => {

@@ -90,6 +90,15 @@ Traefik does TLS and nothing else does.
   Run it again to renew: the same CA signs the new certificate, so nothing
   needs trusting again. `config/traefik/README.md` has the details.
 
+  People get the CA from **Connect your tools**: when no public CA vouches for
+  the site, the page offers the certificate to download (with its SHA-256 to
+  compare), how to install it on Linux, macOS and Windows, and in each tool's
+  steps what that tool needs besides (`NODE_EXTRA_CA_CERTS` for the Node.js
+  tools, `CODEX_CA_CERTIFICATE` for Codex, a CA bundle path in Continue...).
+  The app reads the certificate Traefik serves (`Certificates:Probe`,
+  `traefik:443` by default) or a file (`Certificates:CaFile`); it never sees a
+  private key.
+
 Admin → Overview shows how many days the certificate has left and who issued
 it (from Traefik's metrics). The alert **CertificateExpiresSoon** warns 30 days
 before it expires (for a day: Traefik renews Let's Encrypt's within that time
