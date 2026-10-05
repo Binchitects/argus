@@ -212,6 +212,8 @@ public static class IdentityWiring
         services.AddHttpClient(Company.CompanyIdp.Client, c => c.Timeout = TimeSpan.FromSeconds(15));
         services.AddScoped<Company.CompanyPeople>();
         services.AddScoped<Company.CompanySignIn>();
+        services.AddSingleton<Company.SamlIdp>();
+        services.AddScoped<Company.SamlReplay>();
         services.AddScoped<Scim.ScimTokens>();
         services.AddScoped<Audit>();
         services.AddScoped<DirectoryFile>();
@@ -412,8 +414,10 @@ public static class IdentityWiring
         {
             var m = ctx.Request.Method;
             // Events for tasks (/api/hooks), the chat bots' platforms and inbound mail come from other systems, with no session: their secrets are the guard.
+            // A SAML identity provider's answer is a form the browser posts from the provider's page: its signature is the guard.
             if (ctx.Request.Path.StartsWithSegments("/api") && !ctx.Request.Path.StartsWithSegments("/api/authz") && !ctx.Request.Path.StartsWithSegments("/api/hooks") &&
                 !ctx.Request.Path.StartsWithSegments("/api/bots") && !ctx.Request.Path.StartsWithSegments("/api/mail/inbound") &&
+                !ctx.Request.Path.StartsWithSegments("/api/auth/company/saml/acs") &&
                 !(HttpMethods.IsGet(m) || HttpMethods.IsHead(m) || HttpMethods.IsOptions(m)) &&
                 !ctx.Request.Headers.ContainsKey("X-Requested-With"))
             {

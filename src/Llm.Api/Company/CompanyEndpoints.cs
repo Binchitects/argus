@@ -29,20 +29,35 @@ public static partial class CompanyEndpoints
     public static void MapCompany(this IEndpointRouteBuilder app)
     {
         var auth = app.MapGroup("/api/auth/company").RequireRateLimiting("sign-in");
-        // Public: the sign-in page shows the button when company sign-in is on.
-        auth.MapGet("", (IOptionsMonitor<CompanySignInOptions> o) =>
-            Results.Ok(new { label = o.CurrentValue.Enabled ? Label(o.CurrentValue) : null }));
+        // Public: the sign-in page shows the button when company sign-in is on (OIDC or SAML, the same button).
+        auth.MapGet("", (IOptionsMonitor<CompanySignInOptions> o) => Results.Ok(new
+        {
+            label = o.CurrentValue.Enabled ? Label(o.CurrentValue) : null,
+            protocol = o.CurrentValue.Enabled ? Protocol(o.CurrentValue) : null,
+        }));
         auth.MapGet("/start", StartAsync);
         auth.MapGet("/callback", CallbackAsync);
+        MapSaml(auth);
 
         var admin = app.MapGroup("/api/admin/company-sign-in").RequireAuthorization(AdminEndpoints.Policy);
         admin.MapGet("", StatusAsync);
-        // Tries the issuer before it is saved: the form's values over the current ones.
-        admin.MapPost("/test", (Dictionary<string, string?> form, IOptionsMonitor<CompanySignInOptions> current, CompanyIdp idp, CancellationToken ct) =>
+        // Tries the provider before it is saved: the form's values over the current ones.
+        admin.MapPost("/test", (Dictionary<string, string?> form, IOptionsMonitor<CompanySignInOptions> current, CompanyIdp idp, SamlIdp saml, CancellationToken ct) =>
         {
             var c = current.CurrentValue;
-            string? F(string name, string? fallback) => form.TryGetValue(name, out var v) ? v : fallback;
-            return idp.TestAsync(new CompanySignInOptions { Issuer = F("CompanySignIn:Issuer", c.Issuer)?.Trim(), ClientId = F("CompanySignIn:ClientId", c.ClientId)?.Trim() }, ct);
+            string? F(string name, string? fallback) => form.TryGetValue("CompanySignIn:" + name, out var v) ? v : fallback;
+            var draft = new CompanySignInOptions
+            {
+                Protocol = F(nameof(c.Protocol), c.Protocol) ?? "oidc",
+                Issuer = F(nameof(c.Issuer), c.Issuer)?.Trim(),
+                ClientId = F(nameof(c.ClientId), c.ClientId)?.Trim(),
+                SamlMetadataUrl = F(nameof(c.SamlMetadataUrl), c.SamlMetadataUrl),
+                SamlMetadata = F(nameof(c.SamlMetadata), c.SamlMetadata),
+                SamlSsoUrl = F(nameof(c.SamlSsoUrl), c.SamlSsoUrl),
+                SamlIdpEntityId = F(nameof(c.SamlIdpEntityId), c.SamlIdpEntityId),
+                SamlCertificate = F(nameof(c.SamlCertificate), c.SamlCertificate),
+            };
+            return draft.IsSaml ? saml.TestAsync(draft, ct) : idp.TestAsync(draft, ct);
         });
         admin.MapPost("/scim-token", async (ScimTokens tokens, Audit audit, CancellationToken ct) =>
         {
@@ -62,17 +77,23 @@ public static partial class CompanyEndpoints
 
     public static string Label(CompanySignInOptions o) => string.IsNullOrWhiteSpace(o.ButtonLabel) ? "your company account" : o.ButtonLabel.Trim();
 
+    public static string Protocol(CompanySignInOptions o) => o.IsSaml ? "saml" : "oidc";
+
     /// <summary>The redirect URI to register at the identity provider.</summary>
     public static string Callback(AuthOptions auth) => auth.Origin + CookiePath + "/callback";
 
     private static ITimeLimitedDataProtector Protector(IDataProtectionProvider dp) => dp.CreateProtector("company-sign-in").ToTimeLimitedDataProtector();
 
-    private static async Task<IResult> StartAsync(HttpContext ctx, string? rd, bool? remember, CompanyIdp idp, IOptionsMonitor<CompanySignInOptions> options,
+    private static async Task<IResult> StartAsync(HttpContext ctx, string? rd, bool? remember, CompanyIdp idp, SamlIdp saml, IOptionsMonitor<CompanySignInOptions> options,
         IOptions<AuthOptions> auth, IDataProtectionProvider dp, Audit audit, ILogger<CompanyIdp> logger)
     {
         var o = options.CurrentValue;
         var redirect = Redirects.Safe(rd, auth.Value.Domain);
-        if (!o.Enabled)
+        if (o.SamlEnabled)
+        {
+            return await SamlStartAsync(ctx, o, redirect, remember == true, saml, auth.Value, dp, audit, logger);
+        }
+        if (!o.OidcEnabled)
         {
             return Results.Redirect(Login("company_off", redirect));
         }
@@ -110,7 +131,7 @@ public static partial class CompanyEndpoints
             return Results.Redirect(Login(error == "access_denied" ? "company_cancelled" : "company_failed", flow.Redirect));
         }
         var o = options.CurrentValue;
-        if (!o.Enabled)
+        if (!o.OidcEnabled)
         {
             return Results.Redirect(Login("company_off", flow.Redirect));
         }
@@ -128,14 +149,17 @@ public static partial class CompanyEndpoints
             await audit.WriteAsync("sign_in", success: false, detail: "company sign-in: " + ex.Message);
             return Results.Redirect(Login(ex.Unavailable ? "company_unavailable" : "company_failed", flow.Redirect));
         }
-        return await signIn.SignInAsync(person, flow.Remember) switch
-        {
-            CompanyOutcome.Success => Results.Redirect(flow.Redirect),
-            CompanyOutcome.NotAllowed => Results.Redirect(Login("company_not_allowed", flow.Redirect)),
-            CompanyOutcome.Disabled => Results.Redirect(Login("company_disabled", flow.Redirect)),
-            _ => Results.Redirect(Login("company_refused", flow.Redirect)),
-        };
+        return Finish(await signIn.SignInAsync(person, flow.Remember), flow.Redirect);
     }
+
+    /// <summary>Where the browser goes after a company sign-in, OIDC or SAML: where it was headed, or the sign-in page saying why not.</summary>
+    private static IResult Finish(CompanyOutcome outcome, string redirect) => outcome switch
+    {
+        CompanyOutcome.Success => Results.Redirect(redirect),
+        CompanyOutcome.NotAllowed => Results.Redirect(Login("company_not_allowed", redirect)),
+        CompanyOutcome.Disabled => Results.Redirect(Login("company_disabled", redirect)),
+        _ => Results.Redirect(Login("company_refused", redirect)),
+    };
 
     private static Flow? ReadFlow(HttpContext ctx, IDataProtectionProvider dp)
     {
@@ -168,17 +192,21 @@ public static partial class CompanyEndpoints
     private static string Login(string error, string redirect) =>
         QueryHelpers.AddQueryString("/login", redirect == "/" ? new Dictionary<string, string?> { ["error"] = error } : new() { ["error"] = error, ["rd"] = redirect });
 
-    private static async Task<IResult> StatusAsync(IOptionsMonitor<CompanySignInOptions> options, IOptions<AuthOptions> auth, ScimTokens tokens, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> StatusAsync(IOptionsMonitor<CompanySignInOptions> options, IOptions<AuthOptions> auth, ScimTokens tokens, SamlIdp saml, AppDbContext db, CancellationToken ct)
     {
         var o = options.CurrentValue;
         return Results.Ok(new
         {
             enabled = o.Enabled,
-            issuer = string.IsNullOrWhiteSpace(o.Issuer) ? null : o.Issuer.Trim(),
+            protocol = Protocol(o),
+            // The OIDC issuer, or the SAML provider's entity ID.
+            issuer = o.IsSaml ? await SamlIssuerAsync(o, saml, ct) : string.IsNullOrWhiteSpace(o.Issuer) ? null : o.Issuer.Trim(),
             label = Label(o),
             adminGroup = string.IsNullOrWhiteSpace(o.AdminGroup) ? null : o.AdminGroup.Trim(),
             requiredGroup = string.IsNullOrWhiteSpace(o.RequiredGroup) ? null : o.RequiredGroup.Trim(),
             redirectUri = Callback(auth.Value),
+            // What to give a SAML provider: this app's entity ID and ACS, or its metadata's address.
+            saml = new { entityId = SamlIdp.EntityId(o, auth.Value.Origin), acsUrl = AcsUrl(auth.Value), metadataUrl = SamlMetadataUrl(auth.Value) },
             people = await db.Users.CountAsync(u => u.Source == UserSource.Oidc, ct),
             scim = new
             {

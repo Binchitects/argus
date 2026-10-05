@@ -55,6 +55,10 @@ public sealed record SettingDefinition(
     public string? Impact { get; init; }
     /// <summary>Asks for confirmation in the UI: a wrong value can take the service down.</summary>
     public bool Dangerous { get; init; }
+    /// <summary>Shown only while another setting has a value ("CompanySignIn:Protocol=saml"); kept and saved all the same.</summary>
+    public string? ShownWhen { get; init; }
+    /// <summary>For Text: edited in a box of this many lines (pasted XML, a certificate). Max may then exceed the usual 4096 characters.</summary>
+    public int? Lines { get; init; }
 
     public bool IsSecret => Type == SettingType.Secret;
 }

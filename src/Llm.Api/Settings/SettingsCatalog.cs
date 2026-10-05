@@ -24,6 +24,8 @@ public static class SettingsCatalog
     private const string Retention = "Data retention";
     private const string Api = "API keys";
     private const string BotsGroup = "Chat bots";
+    private const string Oidc = "CompanySignIn:Protocol=oidc";
+    private const string Saml = "CompanySignIn:Protocol=saml";
 
 
 
@@ -68,18 +70,43 @@ public static class SettingsCatalog
         new("Ldap:IgnoreCertificateErrors", Directory, "Accept any certificate", "Testing only: anyone on the network path could read the service account's password.", SettingType.Boolean, SettingScope.Live)
             { Default = "false", Dangerous = true },
 
+        new("CompanySignIn:Protocol", CompanySignIn, "Protocol", "oidc: the provider's issuer and a client registered there (Entra ID, Okta, Keycloak, Google, GitLab). saml: SAML 2.0, from the provider's metadata (Entra ID, Okta, Keycloak, ADFS, PingFederate). The other one's settings are kept, unused.", SettingType.Choice, SettingScope.Live)
+            { Default = "oidc", Options = ["oidc", "saml"], Optional = false },
         new("CompanySignIn:Issuer", CompanySignIn, "Identity provider", "Its issuer: the app reads .well-known/openid-configuration below it. Entra ID: https://login.microsoftonline.com/<tenant ID>/v2.0, Okta: https://<org>.okta.com, Keycloak: https://<host>/realms/<realm>, Google: https://accounts.google.com, GitLab: its address. Empty turns company sign-in off; local accounts keep working.", SettingType.Url, SettingScope.Live)
-            { Pattern = @"https?://\S+", PatternHelp = "https://..." },
+            { Pattern = @"https?://\S+", PatternHelp = "https://...", ShownWhen = Oidc },
         new("CompanySignIn:ClientId", CompanySignIn, "Client ID", "The app's registration at the identity provider, with the redirect URI shown below.", SettingType.Text, SettingScope.Live)
-            { Max = 200 },
-        new("CompanySignIn:ClientSecret", CompanySignIn, "Client secret", "From the same registration. Empty for a public client (PKCE alone).", SettingType.Secret, SettingScope.Live),
+            { Max = 200, ShownWhen = Oidc },
+        new("CompanySignIn:ClientSecret", CompanySignIn, "Client secret", "From the same registration. Empty for a public client (PKCE alone).", SettingType.Secret, SettingScope.Live)
+            { ShownWhen = Oidc },
         new("CompanySignIn:Scopes", CompanySignIn, "Scopes", "Asked for at sign-in, separated by spaces; openid is always added. Add groups when the provider sends groups only for that scope (Okta, some Keycloak setups).", SettingType.Text, SettingScope.Live)
-            { Default = "openid profile email", Optional = false, Max = 400 },
+            { Default = "openid profile email", Optional = false, Max = 400, ShownWhen = Oidc },
         new("CompanySignIn:UserNameClaim", CompanySignIn, "Username claim", "The claim with the username here, which must equal their GitLab username: preferred_username (Entra ID, Keycloak, Okta), nickname (GitLab), email (Google). An email-like value gives its part before the @.", SettingType.Text, SettingScope.Live)
-            { Default = "preferred_username", Optional = false, Max = 100 },
+            { Default = "preferred_username", Optional = false, Max = 100, ShownWhen = Oidc },
         new("CompanySignIn:GroupsClaim", CompanySignIn, "Groups claim", "The claim with the person's groups, kept for access rules like a directory's: groups (Entra ID, Okta, GitLab, Keycloak with a group mapper). A dotted path reaches into an object (realm_access.roles). Empty: no groups.", SettingType.Text, SettingScope.Live)
-            { Default = "groups", Max = 100 },
-        new("CompanySignIn:AdminGroup", CompanySignIn, "Admin group", "Members are admins here, decided at each sign-in. One value of the groups claim, exactly (any case): /llm-admins for a Keycloak path, a GitLab group's path, an Entra ID group's object ID, or a SCIM group's name. Empty: nobody from the provider is an admin.", SettingType.Text, SettingScope.Live)
+            { Default = "groups", Max = 100, ShownWhen = Oidc },
+        new("CompanySignIn:SamlMetadataUrl", CompanySignIn, "Identity provider's metadata", "Where the provider publishes its SAML metadata; the app reads its entity ID, sign-in address and signing certificates there, again every hour. Entra ID: the App Federation Metadata Url (Single sign-on, SAML Certificates), Okta: the app's Metadata URL (Sign On), Keycloak: https://<host>/realms/<realm>/protocol/saml/descriptor.", SettingType.Url, SettingScope.Live)
+            { Pattern = @"https?://\S+", PatternHelp = "https://...", ShownWhen = Saml },
+        new("CompanySignIn:SamlMetadata", CompanySignIn, "Or its metadata XML", "The metadata file, pasted, when the app cannot reach the provider's address. Not read while the address above is set.", SettingType.Text, SettingScope.Live)
+            { Max = 200_000, Lines = 6, ShownWhen = Saml },
+        new("CompanySignIn:SamlSsoUrl", CompanySignIn, "Sign-in address, by hand", "Without metadata: the provider's SAML sign-in URL (HTTP-Redirect binding). Set, it wins over the metadata's.", SettingType.Url, SettingScope.Live)
+            { Pattern = @"https?://\S+", PatternHelp = "https://...", ShownWhen = Saml },
+        new("CompanySignIn:SamlIdpEntityId", CompanySignIn, "Provider's entity ID, by hand", "Without metadata: the Issuer of its answers. Entra ID: https://sts.windows.net/<tenant ID>/, Okta: http://www.okta.com/<id>, Keycloak: https://<host>/realms/<realm>. Set, it wins over the metadata's.", SettingType.Text, SettingScope.Live)
+            { Max = 500, ShownWhen = Saml },
+        new("CompanySignIn:SamlCertificate", CompanySignIn, "Signing certificate, by hand", "Without metadata: the provider's signing certificate, PEM or its base64; several PEM blocks while it rolls over to a new one. Only these are trusted, never a key inside an answer. Set, it wins over the metadata's.", SettingType.Text, SettingScope.Live)
+            { Max = 20_000, Lines = 6, ShownWhen = Saml },
+        new("CompanySignIn:SamlEntityId", CompanySignIn, "This app's entity ID", "What the provider knows this app as (Identifier, Audience URI, SP Entity ID). Empty: https://DOMAIN. Answers for another audience are refused.", SettingType.Text, SettingScope.Live)
+            { Max = 500, ShownWhen = Saml },
+        new("CompanySignIn:SamlUserNameAttribute", CompanySignIn, "Username attribute", "The attribute with the username here, which must equal their GitLab username. Empty: the NameID (Entra ID: the user principal name; Okta: the Okta username; Keycloak: the username). An email-like value gives its part before the @.", SettingType.Text, SettingScope.Live)
+            { Max = 300, ShownWhen = Saml },
+        new("CompanySignIn:SamlEmailAttribute", CompanySignIn, "Email attribute", "The attribute with the email address, by its Name or FriendlyName. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress. Without it, an email-like username or NameID is the email.", SettingType.Text, SettingScope.Live)
+            { Default = "email", Max = 300, ShownWhen = Saml },
+        new("CompanySignIn:SamlDisplayNameAttribute", CompanySignIn, "Display name attribute", "The attribute with the person's name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname. Without it, the username.", SettingType.Text, SettingScope.Live)
+            { Default = "displayName", Max = 300, ShownWhen = Saml },
+        new("CompanySignIn:SamlGroupsAttribute", CompanySignIn, "Groups attribute", "The attribute with the person's groups, one value each, kept for access rules like a directory's. Entra ID: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups, Keycloak: member (its Group list mapper). Empty: no groups.", SettingType.Text, SettingScope.Live)
+            { Default = "groups", Max = 300, ShownWhen = Saml },
+        new("CompanySignIn:SamlAllowIdpInitiated", CompanySignIn, "Sign-in started at the provider", "Answers no sign-in here asked for are taken: someone opens the app from the provider's portal (My Apps, the Okta dashboard). Off: they are refused and the person signs in from the sign-in page, which keeps anyone from slipping their own sign-in into someone else's browser.", SettingType.Boolean, SettingScope.Live)
+            { Default = "false", ShownWhen = Saml },
+        new("CompanySignIn:AdminGroup", CompanySignIn, "Admin group", "Members are admins here, decided at each sign-in. One value of the groups claim (or attribute), exactly (any case): /llm-admins for a Keycloak path, a GitLab group's path, an Entra ID group's object ID, or a SCIM group's name. Empty: nobody from the provider is an admin.", SettingType.Text, SettingScope.Live)
             { Max = 300 },
         new("CompanySignIn:RequiredGroup", CompanySignIn, "Required group", "Only members may sign in, compared like the admin group; someone who left it is disabled at their next sign-in. Empty: everyone the provider lets through.", SettingType.Text, SettingScope.Live)
             { Max = 300 },

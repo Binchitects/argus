@@ -6,7 +6,7 @@ public enum UserSource
 {
     Local = 0,
     Ldap = 1,
-    /// <summary>Company sign-in (an OIDC identity provider), or made by its SCIM provisioning.</summary>
+    /// <summary>Company sign-in (an OIDC or SAML identity provider), or made by its SCIM provisioning.</summary>
     Oidc = 2,
 }
 
@@ -31,7 +31,7 @@ public sealed class AppUser : IdentityUser<Guid>
     public UserSource Source { get; set; }
     /// <summary>For LDAP people: their entry, so the sync can find them again.</summary>
     public string? LdapDn { get; set; }
-    /// <summary>For company sign-in people: the identity provider's subject (sub), set at their first sign-in.</summary>
+    /// <summary>For company sign-in people: the identity provider's subject (OIDC sub, or "saml:" and the SAML NameID), set at their first sign-in.</summary>
     public string? OidcSubject { get; set; }
     /// <summary>For people SCIM made or manages: the identity provider's own id for them (externalId).</summary>
     public string? ScimExternalId { get; set; }

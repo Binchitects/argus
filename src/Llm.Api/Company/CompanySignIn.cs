@@ -34,6 +34,10 @@ public sealed class CompanySignIn(
     IOptionsMonitor<CompanySignInOptions> options)
 {
     public const string Amr = "oidc";
+    public const string SamlAmr = "saml";
+
+    /// <summary>The audit log's words for a company sign-in, with the protocol it came by.</summary>
+    public static string Detail(bool saml) => saml ? "company sign-in (SAML)" : "company sign-in";
 
     /// <summary>Two sign-ins of one person at once both update their row; the loser retries on fresh data.</summary>
     public async Task<CompanyOutcome> SignInAsync(CompanyPerson person, bool remember)
@@ -58,16 +62,18 @@ public sealed class CompanySignIn(
         var userName = CompanyPeople.UserName(person.UserName);
         if (userName is null)
         {
-            return await FailAsync(who, CompanyOutcome.Refused, $"the {o.UserNameClaim} claim (\"{person.UserName}\") cannot be a username here");
+            var source = !person.Saml ? $"the {o.UserNameClaim} claim"
+                : string.IsNullOrWhiteSpace(o.SamlUserNameAttribute) ? "the NameID" : $"the {o.SamlUserNameAttribute.Trim()} attribute";
+            return await FailAsync(person, who, CompanyOutcome.Refused, $"{source} (\"{person.UserName}\") cannot be a username here");
         }
         var email = CompanyPeople.Email(person.Email) ?? CompanyPeople.Email(person.UserName);
         if (email is null)
         {
-            return await FailAsync(userName, CompanyOutcome.Refused, "the company account has no email address");
+            return await FailAsync(person, userName, CompanyOutcome.Refused, "the company account has no email address");
         }
         if (person.EmailVerified == false)
         {
-            return await FailAsync(userName, CompanyOutcome.Refused, $"the identity provider has not verified {email}");
+            return await FailAsync(person, userName, CompanyOutcome.Refused, $"the identity provider has not verified {email}");
         }
 
         var user = await company.FindBySubjectAsync(person.Subject) ?? await users.FindByEmailAsync(email);
@@ -92,7 +98,7 @@ public sealed class CompanySignIn(
                     // The last admin stays enabled; they are still refused here.
                 }
             }
-            return await FailAsync(userName, CompanyOutcome.NotAllowed, $"not in the sign-in group {o.RequiredGroup}");
+            return await FailAsync(person, userName, CompanyOutcome.NotAllowed, $"not in the sign-in group {o.RequiredGroup}");
         }
 
         try
@@ -109,7 +115,7 @@ public sealed class CompanySignIn(
             {
                 if (user.IsDisabled && user.DisabledReason != "oidc")
                 {
-                    return await FailAsync(userName, CompanyOutcome.Disabled, "disabled");
+                    return await FailAsync(person, userName, CompanyOutcome.Disabled, "disabled");
                 }
                 if (user.OidcSubject != person.Subject)
                 {
@@ -129,19 +135,19 @@ public sealed class CompanySignIn(
         }
         catch (CompanyRefusedException ex)
         {
-            return await FailAsync(userName, CompanyOutcome.Refused, ex.Message);
+            return await FailAsync(person, userName, CompanyOutcome.Refused, ex.Message);
         }
 
-        await signIn.SignInWithClaimsAsync(user, remember, [new Claim("amr", Amr)]);
+        await signIn.SignInWithClaimsAsync(user, remember, [new Claim("amr", person.Saml ? SamlAmr : Amr)]);
         var now = DateTimeOffset.UtcNow;
         await db.Users.Where(u => u.Id == user.Id).ExecuteUpdateAsync(set => set.SetProperty(u => u.LastSignInAt, now));
-        await audit.WriteAsync("sign_in", user.UserName, detail: "company sign-in", actor: user);
+        await audit.WriteAsync("sign_in", user.UserName, detail: Detail(person.Saml), actor: user);
         return CompanyOutcome.Success;
     }
 
-    private async Task<CompanyOutcome> FailAsync(string who, CompanyOutcome outcome, string detail)
+    private async Task<CompanyOutcome> FailAsync(CompanyPerson person, string who, CompanyOutcome outcome, string detail)
     {
-        await audit.WriteAsync("sign_in", who, success: false, detail: "company sign-in: " + detail);
+        await audit.WriteAsync("sign_in", who, success: false, detail: Detail(person.Saml) + ": " + detail);
         return outcome;
     }
 }
