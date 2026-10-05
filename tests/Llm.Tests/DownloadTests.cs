@@ -75,7 +75,8 @@ public sealed class DownloadTests(AppFixture app)
                 names.AddDnsName(dns);
                 request.CertificateExtensions.Add(names.Build());
             }
-            var (from, to) = (DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(issuer is null ? 10 : 2));
+            // Each ends a year before its issuer: made a second later, it must not outlive it.
+            var (from, to) = (DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(issuer is null ? 10 : ca ? 2 : 1));
             if (issuer is null)
             {
                 return request.CreateSelfSigned(from, to);
