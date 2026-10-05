@@ -87,6 +87,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private readonly object _gate = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Approval>> _waiting = new();
     private Job? _job;
+    // The edits made in this run, by result message, with the whole file's lines: the session file keeps only old and new text.
+    private readonly Dictionary<string, JsonObject> _diffs = [];
+    private string? _diffsOf;
     // The answer being written: its message id, and its thinking's start and length.
     private string? _answerId;
     private long _stepStarted;
@@ -421,11 +424,22 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private JsonObject SessionJson()
     {
         var data = File.Exists(_rt.Session.File) ? SessionStore.Load(_rt.Session.File) : new SessionData { Id = _rt.Session.Id };
+        var diffs = History.Diffs(data);
+        lock (_diffs)
+        {
+            if (_diffsOf == _rt.Session.Id)
+            {
+                foreach (var (message, diff) in _diffs)
+                {
+                    diffs[message] = diff.DeepClone();
+                }
+            }
+        }
         return new JsonObject
         {
             ["id"] = _rt.Session.Id,
             ["messages"] = History.Messages(data),
-            ["diffs"] = History.Diffs(data),
+            ["diffs"] = diffs,
             ["busy"] = Current() is not null,
             ["usage"] = new JsonObject { ["prompt"] = data.Prompt, ["cached"] = data.Cached, ["completion"] = data.Completion },
         };
@@ -774,11 +788,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     {
         // The results are added to the history after the answer's message, in the calls' order.
         var text = result.Text.Length <= MaxResultChars ? result.Text : result.Text[..MaxResultChars] + $"\n… ({result.Text.Length - MaxResultChars:N0} more characters)";
+        var messageId = $"m{_rt.Agent.Messages.Count + index}";
         var e = new JsonObject
         {
             ["type"] = "tool_result",
             ["id"] = id,
-            ["messageId"] = $"m{_rt.Agent.Messages.Count + index}",
+            ["messageId"] = messageId,
             ["name"] = name,
             ["text"] = text,
             ["isError"] = result.Error && !declined,
@@ -788,14 +803,28 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         };
         if (result.Change is { } change && !result.Error)
         {
-            e["diff"] = History.DiffJson(change.Path, change.Before, change.After, numbered: true);
+            var diff = History.DiffJson(change.Path, change.Before, change.After, numbered: true);
+            e["diff"] = diff;
+            lock (_diffs)
+            {
+                if (_diffsOf != _rt.Session.Id)
+                {
+                    _diffs.Clear();
+                    _diffsOf = _rt.Session.Id;
+                }
+                _diffs[messageId] = (JsonObject)diff.DeepClone();
+            }
         }
         Emit(e);
     }
 
     void IAgentEvents.Compacted(string notice)
     {
-        // The messages are not the same any more: the page takes the history afresh.
+        // The messages are not the same any more (nor their places): the page takes the history afresh.
+        lock (_diffs)
+        {
+            _diffs.Clear();
+        }
         var session = SessionJson();
         Emit(new JsonObject { ["type"] = "reset", ["messages"] = session["messages"]!.DeepClone(), ["diffs"] = session["diffs"]!.DeepClone() });
         Emit(new JsonObject { ["type"] = "notice", ["kind"] = "compacted", ["text"] = notice });

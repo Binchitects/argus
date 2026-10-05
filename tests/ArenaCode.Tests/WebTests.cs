@@ -214,12 +214,20 @@ public sealed partial class WebTests : IDisposable
         }
         Assert.True(Directory.Exists(Path.Combine(h.Work, "build")));
 
-        // Read back: the edit's diff (from its old and new text) and the refused call.
+        // Read back in this run: the edits' diffs as they were shown, whole-file and numbered, and the refused call.
+        static string[] Lines(JsonNode session, string message) => [.. session["diffs"]![message]!["lines"]!.AsArray().Select(l => l!.ToJsonString(ArenaCode.Json.Relaxed))];
         var session = await web.GetJsonAsync("/api/session");
-        string[] Saved(string message) => [.. session["diffs"]![message]!["lines"]!.AsArray().Select(l => l!.ToJsonString(ArenaCode.Json.Relaxed))];
-        Assert.Equal(["""["-",0,0,"two"]""", """["+",0,0,"2"]"""], Saved("m2"));
-        Assert.Equal(["""["-",0,0,"three"]""", """["+",0,0,"3"]"""], Saved("m6"));
+        Assert.Contains("""["-",2,0,"two"]""", Lines(session, "m2"));
+        Assert.Contains("""["-",3,0,"three"]""", Lines(session, "m6"));
         Assert.Contains(session["messages"]!.AsArray(), m => m!["role"]!.GetValue<string>() == "tool" && m["status"]!.GetValue<string>() == "declined");
+
+        // In a later run the session file has only each edit's old and new text: the diff of those.
+        await web.DisposeAsync();
+        await using var later = await WebRun.StartAsync(h, "--continue");
+        var resumed = await later.GetJsonAsync("/api/session");
+        Assert.Equal(session["id"]!.GetValue<string>(), resumed["id"]!.GetValue<string>());
+        Assert.Equal(["""["-",0,0,"two"]""", """["+",0,0,"2"]"""], Lines(resumed, "m2"));
+        Assert.Equal(["""["-",0,0,"three"]""", """["+",0,0,"3"]"""], Lines(resumed, "m6"));
     }
 
     [Fact]
@@ -400,7 +408,7 @@ public sealed partial class WebTests : IDisposable
             }
         }
 
-        public static async Task<WebRun> StartAsync(Harness h)
+        public static async Task<WebRun> StartAsync(Harness h, params string[] args)
         {
             var output = new StringWriter();
             var error = new StringWriter();
@@ -417,7 +425,7 @@ public sealed partial class WebTests : IDisposable
                     ("assets/app.js", "console.log('arena code')"),
                     ("preview.html", "<!doctype html><p>runner</p>")),
             };
-            var exit = Task.Run(() => Cli.RunAsync(["web", "--no-open"], env));
+            var exit = Task.Run(() => Cli.RunAsync(["web", "--no-open", .. args], env));
             var run = new WebRun(env, output, error, exit);
             for (var waited = 0; ; waited += 50)
             {
@@ -490,6 +498,10 @@ public sealed partial class WebTests : IDisposable
 
         public async ValueTask DisposeAsync()
         {
+            if (_exit.IsCompleted)
+            {
+                return;
+            }
             Http?.Dispose();
             Assert.True(_env.Cancel.Press());
             Assert.Equal(0, await _exit.WaitAsync(TimeSpan.FromSeconds(15)));

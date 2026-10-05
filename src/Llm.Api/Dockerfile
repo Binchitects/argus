@@ -4,6 +4,9 @@
 #
 # Built from the repository root: docker build -f src/Llm.Api/Dockerfile .
 
+# Arena Code's builds (below): auto, online or none.
+ARG ARENA_CODE=auto
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api
 # Empty: VERSION at the repository's root (Directory.Build.props). Passed on only when
 # set: an empty -p:AppVersion= is a global property and would win over VERSION.
@@ -19,18 +22,37 @@ RUN dotnet publish src/Llm.Api/Llm.Api.csproj -c Release --no-restore -o /out ${
  && rm -f /out/*.pdb \
  && mkdir -p /shared/engine-config /shared/directory /shared/sandbox
 
+# Arena Code's web interface (arena-code web): its page, built from src/web
+# into /ArenaCode/web. The first steps are src/web's own image's, to the
+# letter (the same base, and npm ci over the same lock file): a host that
+# built the web image has that layer cached, and downloads nothing here.
+FROM node:22-alpine AS arena-code-web-build
+WORKDIR /web
+COPY src/web/package.json src/web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY src/web/ ./
+RUN node_modules/.bin/vite build --config vite.arena-code.config.ts \
+ && node_modules/.bin/vite build --config vite.preview.config.ts --outDir ../ArenaCode/web
+# ARENA_CODE=none builds no Arena Code, so no page either (and no npm at all).
+FROM node:22-alpine AS arena-code-web-none
+RUN mkdir -p /ArenaCode/web
+FROM arena-code-web-build AS arena-code-web-auto
+FROM arena-code-web-build AS arena-code-web-online
+FROM arena-code-web-${ARENA_CODE} AS arena-code-web
+
 # Arena Code, the coding agent people download from Connect your tools: one
-# self-contained file per system (tools/publish-arena-code.sh). ARENA_CODE=auto
-# builds it from the runtime packs in tools/offline-nuget when they are there
-# and skips it otherwise (the page then says how to add it); online fetches the
-# packs from nuget.org; none skips it.
+# self-contained file per system (tools/publish-arena-code.sh), its web
+# interface's page embedded. ARENA_CODE=auto builds it from the runtime packs
+# in tools/offline-nuget when they are there and skips it otherwise (the page
+# then says how to add it); online fetches the packs from nuget.org; none skips it.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS arena-code
-ARG ARENA_CODE=auto
+ARG ARENA_CODE
 WORKDIR /src
 COPY global.json Directory.Build.props VERSION ./
 COPY tools/publish-arena-code.sh tools/
 COPY tools/offline-nuget/ tools/offline-nuget/
 COPY src/ArenaCode/ src/ArenaCode/
+COPY --from=arena-code-web /ArenaCode/web/ src/ArenaCode/web/
 RUN mkdir -p dist/arena-code \
  && case "$ARENA_CODE" in \
       none) echo "Arena Code: not built (ARENA_CODE=none)" ;; \

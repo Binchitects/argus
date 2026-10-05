@@ -16,7 +16,13 @@ tools/*
 !tools/fetch-sqlite-vec.sh
 !tools/publish-arena-code.sh
 !tools/offline-nuget
-src/web/
+# src/web stays for Arena Code's web interface (the API's arena-code-web stage), without what is built or downloaded.
+src/web/dist/
+src/web/test-results/
+src/web/playwright-report/
+src/web/e2e/.auth/
+# Built in the image from src/web: never a local build.
+src/ArenaCode/web/
 tests/Llm.Tests/
 tests/deploy/
 

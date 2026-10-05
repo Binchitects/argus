@@ -16,6 +16,8 @@ src/argus-web/dist/
 src/argus-web/test-results/
 src/argus-web/playwright-report/
 src/argus-web/e2e/.work/
+# Arena Code's web interface, built from src/web (vite.arena-code.config.ts) and embedded in the program
+src/ArenaCode/web/
 
 # Python (the stack's scripts and tools)
 __pycache__/
