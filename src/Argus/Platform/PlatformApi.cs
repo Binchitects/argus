@@ -88,6 +88,20 @@ public static class PlatformApi
             MaxAge = lifetime, IsEssential = true,
         });
 
+    /// <summary>Where the source is, unless <c>ARGUS_SOURCE_URL</c> says otherwise (a modified version points it at its own).</summary>
+    public const string DefaultSource = "https://github.com/Binchitects/argus";
+
+    /// <summary>
+    /// The version, its licence and where its complete source is, shown in the app's sidebar: the AGPL offers
+    /// the source to everyone who uses it over a network (LICENSING.md, additional term 7(b)).
+    /// </summary>
+    public static JsonObject About() => new()
+    {
+        ["version"] = Metrics.Version,
+        ["license"] = "AGPL-3.0-only",
+        ["source"] = Environment.GetEnvironmentVariable("ARGUS_SOURCE_URL") is { Length: > 0 } source ? source : DefaultSource,
+    };
+
     static JsonObject Endpoints(HttpContext ctx)
     {
         var origin = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
@@ -141,7 +155,7 @@ public static class PlatformApi
         api.MapGet("/me", async (HttpContext ctx) =>
         {
             var user = CurrentUser(ctx)!;
-            var result = new JsonObject { ["user"] = user.ToJson(), ["endpoints"] = Endpoints(ctx) };
+            var result = new JsonObject { ["user"] = user.ToJson(), ["endpoints"] = Endpoints(ctx), ["about"] = About() };
             if (gateway is { CanAdminister: true })
             {
                 try

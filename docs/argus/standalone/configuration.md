@@ -31,6 +31,7 @@ one-liner in [`deploy/argus-standalone/README.md`](../../../deploy/argus-standal
 | `ARGUS_TLS_CERT`, `ARGUS_TLS_KEY` | empty | PEM files (paths inside the container, under `/etc/argus/tls/`) to serve HTTPS; empty = HTTP |
 | `ARGUS_CHAT_SYSTEM_PROMPT` | built in | replaces the chat's opening instruction; the tools' own instructions are always appended |
 | `ARGUS_ADMIN_TOKEN` | empty | lets scripts call `/admin/*` without a session (`X-Argus-Admin-Token`) |
+| `ARGUS_SOURCE_URL` | `https://github.com/Binchitects/argus` | the **Source** link beside the version at the foot of the app's sidebar. Argus is under the AGPL, which has everyone who uses it over a network offered the complete source of the version they use: a modified version points this at its own ([LICENSING.md](../../../LICENSING.md)) |
 
 ## Model
 

@@ -9,8 +9,10 @@
 
 Argus is the code index and documentation server. It mirrors your GitLab, extracts
 a symbol and dependency graph, serves knowledge packs, and enforces each
-developer's real GitLab permissions in SQL. It is GPL v3 and runs standalone
-(`pip install ".[dev]"`) or as part of the stack.
+developer's real GitLab permissions in SQL. It is under the AGPL-3.0-only, or
+a commercial license ([LICENSING.md](../../LICENSING.md) says which you need),
+and runs standalone ([standalone](standalone/configuration.md)) or as part of
+the stack.
 
 ## What your agent gets
 

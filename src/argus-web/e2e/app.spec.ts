@@ -29,6 +29,9 @@ test.describe.serial("Argus", () => {
     await signIn(page, ADMIN.username, ADMIN.password);
     await expect(page.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
     await expect(page.getByRole("link", { name: "People" })).toBeVisible();
+    // The licence's notice: the version, and the source offered to everyone who uses the app.
+    await expect(page.getByLabel("Version")).toHaveText(/^v\d+\.\d+\.\d+/);
+    await expect(page.getByRole("link", { name: "Source" })).toHaveAttribute("href", "https://github.com/Binchitects/argus");
   });
 
   test("overview: services are up and the empty index is called out", async ({ page }) => {

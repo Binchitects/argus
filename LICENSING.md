@@ -60,11 +60,11 @@ to every copy and every modified version:
 
 1. **Attribution and source notice (section 7(b)).** The interactive user
    interfaces of the software show the product's licence and a "Source" link
-   (in the web app, beside its version; in Code Arena, in its about box and
-   `--version` output). Those Appropriate Legal Notices, and the copyright and
-   licence notices in the source files, must be preserved in every copy and
-   modified version, and the "Source" link must lead to the complete source of
-   the version being run.
+   (in the web app and in Argus's own web app, beside the version at the foot
+   of the navigation; in Code Arena, in its about box and `--version` output).
+   Those Appropriate Legal Notices, and the copyright and licence notices in
+   the source files, must be preserved in every copy and modified version, and
+   the "Source" link must lead to the complete source of the version being run.
 2. **Origin (section 7(c)).** A modified version must be marked as changed, and
    must not be presented as the original or as made or endorsed by Binchitects.
 3. **Trademarks (section 7(e)).** The AGPL grants no rights to the names
@@ -76,11 +76,12 @@ to every copy and every modified version:
 ## Third-party components
 
 Components and data from others keep their own licences: the npm and NuGet
-packages listed in the lock files, the language and speech models (each under
-its own licence, shown on Admin → Models), Laya (Apache-2.0), and the knowledge
-packs (CC-BY-4.0, CC-BY-SA-3.0, PSF-2.0, GFDL-1.3 or public domain, per pack;
-`argus pack info <name>` prints each). Their licences, not this one, govern
-them.
+packages listed in the lock files, the language, speech, picture and video
+models (each under its own licence, which its model card on Hugging Face
+gives; Admin → Models → **Find on Hugging Face** shows it before a download),
+Laya (Apache-2.0), and the knowledge packs (CC-BY-4.0, CC-BY-SA-3.0, PSF-2.0,
+GFDL-1.3 or public domain, per pack; `argus pack info <name>` prints each).
+Their licences, not this one, govern them.
 
 ## Contributions
 
