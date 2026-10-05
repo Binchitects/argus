@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Checkbox } from '@/components/ui/checkbox'
 import { useConfirm } from '@/components/ui/confirm'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -21,7 +21,7 @@ import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CompanySignInPanel } from './company-sign-in'
 import { BotAddresses } from './bot-addresses'
-import { bytesHint, initialValue, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
+import { bytesHint, initialValue, isShown, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
 
 const settingsQuery = {
   queryKey: ['admin', 'config'] as const,
@@ -62,12 +62,14 @@ export function SettingsPage() {
   const allGroups = settings.data?.groups ?? []
   const active = allGroups.find((g) => slug(g.title) === hash.slice(1)) ?? allGroups[0]
   const q = search.trim().toLowerCase()
+  // A setting of one protocol (SAML's metadata) only while that protocol is chosen, saved or not.
+  const valueOf = (key: string) => draft[key] ?? (byKey.has(key) ? initialValue(byKey.get(key)!) : '')
   const groups = q
     ? allGroups
-        .map((g) => ({ ...g, settings: g.settings.filter((s) => `${s.label} ${s.key} ${s.help} ${g.title}`.toLowerCase().includes(q)) }))
+        .map((g) => ({ ...g, settings: g.settings.filter((s) => isShown(s, valueOf) && `${s.label} ${s.key} ${s.help} ${g.title}`.toLowerCase().includes(q)) }))
         .filter((g) => g.settings.length)
     : active
-      ? [active]
+      ? [{ ...active, settings: active.settings.filter((s) => isShown(s, valueOf)) }]
       : []
   const unsavedIn = (title: string) => dirty.filter(([k]) => byKey.get(k)!.group === title).length
 
@@ -381,6 +383,8 @@ function Editor({ s, id, value, onChange, describedBy, invalid }: { s: SettingVi
     case 'secret':
       return <Input {...common} type="password" autoComplete="new-password" value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.isSet ? '•••••••• (unchanged)' : 'not set'} />
     default:
+      if (s.lines)
+        return <Textarea {...common} rows={s.lines} spellCheck={false} value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.optional ? 'not set' : undefined} className="font-mono text-xs" />
       return <Input {...common} value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.patternHelp ?? (s.optional ? 'not set' : undefined)} className={cn(s.key.includes('ARGS') || s.key.includes('FILES') ? 'font-mono text-xs' : undefined)} />
   }
 }

@@ -69,6 +69,13 @@ describe('company sign-in', () => {
     expect(screen.getByLabelText('Username or email')).toBeInTheDocument()
   })
 
+  it('offers the same button for a SAML identity provider, which the app starts the same way', async () => {
+    fakeApi(null, { 'GET /api/auth/company': () => ({ json: { label: 'Entra ID', protocol: 'saml' } }) })
+    renderApp('/login?rd=%2Fchat')
+    expect(await screen.findByRole('link', { name: 'Sign in with Entra ID' })).toHaveAttribute('href', '/api/auth/company/start?rd=%2Fchat')
+    expect(screen.getByLabelText('Username or email')).toBeInTheDocument()
+  })
+
   it('shows no company button while it is off', async () => {
     fakeApi(null, { 'GET /api/auth/company': () => ({ json: { label: null } }) })
     renderApp('/login')

@@ -22,6 +22,10 @@ export interface SettingView {
   restartPending: boolean
   /** What is wrong with the value for the rest of the deployment now (a model for small steps that is not kept loaded). */
   warning?: string | null
+  /** Shown only while another setting has a value: "CompanySignIn:Protocol=saml". */
+  shownWhen?: string | null
+  /** Edited in a box of this many lines (pasted XML, a certificate). */
+  lines?: number | null
 }
 
 export interface SettingsData {
@@ -75,6 +79,13 @@ export function initialValue(s: SettingView): string {
 export function wireValue(s: SettingView, text: string): string {
   if (s.type === 'duration') return durationFromUnit(text, s.unit) ?? text
   return text
+}
+
+/** Whether a setting is shown: one for SAML only while the protocol being edited (or saved) is saml. */
+export function isShown(s: SettingView, valueOf: (key: string) => string): boolean {
+  if (!s.shownWhen) return true
+  const at = s.shownWhen.indexOf('=')
+  return valueOf(s.shownWhen.slice(0, at)).trim().toLowerCase() === s.shownWhen.slice(at + 1).toLowerCase()
 }
 
 export function slug(title: string): string {

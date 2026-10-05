@@ -22,10 +22,10 @@ const passwordSchema = z.object({
 })
 const codeSchema = z.object({ code: z.string().trim().min(1, 'Enter the code.') })
 
-/** Company sign-in (OIDC): the button's label when an admin has set it up. */
+/** Company sign-in (OIDC or SAML, one button that starts either): the button's label when an admin has set it up. */
 const companyQuery = {
   queryKey: ['auth', 'company'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ label: string | null }>('/api/auth/company', { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ label: string | null; protocol?: 'oidc' | 'saml' | null }>('/api/auth/company', { signal }),
   staleTime: 5 * 60_000,
 }
 

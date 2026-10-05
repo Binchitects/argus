@@ -22,10 +22,28 @@ const settings: SettingsData = {
 }
 
 const status = (over: Partial<CompanyStatus> = {}): CompanyStatus => ({
-  enabled: true, issuer: 'https://idp.example.test', label: 'Okta', adminGroup: 'llm-admins', requiredGroup: null,
+  enabled: true, protocol: 'oidc', issuer: 'https://idp.example.test', label: 'Okta', adminGroup: 'llm-admins', requiredGroup: null,
   redirectUri: 'https://llm.test/api/auth/company/callback', people: 12,
+  saml: { entityId: 'https://llm.test', acsUrl: 'https://llm.test/api/auth/company/saml/acs', metadataUrl: 'https://llm.test/api/auth/company/saml/metadata' },
   scim: { url: 'https://llm.test/scim/v2', tokenMadeAt: null, groups: 0 }, ...over,
 })
+
+/** OIDC's and SAML's settings side by side, each shown for its protocol, as the API sends them. */
+const both: SettingsData = {
+  groups: [
+    {
+      title: 'Company sign-in',
+      settings: [
+        setting({ key: 'CompanySignIn:Protocol', label: 'Protocol', type: 'choice', options: ['oidc', 'saml'], optional: false, patternHelp: null, value: 'oidc', default: 'oidc' }),
+        setting({ shownWhen: 'CompanySignIn:Protocol=oidc' }),
+        setting({ key: 'CompanySignIn:SamlMetadataUrl', label: 'Identity provider’s metadata', shownWhen: 'CompanySignIn:Protocol=saml' }),
+        setting({ key: 'CompanySignIn:SamlMetadata', label: 'Or its metadata XML', type: 'text', patternHelp: null, lines: 6, shownWhen: 'CompanySignIn:Protocol=saml' }),
+        setting({ key: 'CompanySignIn:AdminGroup', label: 'Admin group', type: 'text', patternHelp: null }),
+      ],
+    },
+  ],
+  restartNeeded: false,
+}
 
 describe('company sign-in settings', () => {
   it('shows the redirect URI, and tests the unsaved issuer', async () => {
@@ -40,6 +58,52 @@ describe('company sign-in settings', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Test the identity provider' }))
     expect(await screen.findByText('Found https://idp.example.test: it signs with 2 keys.')).toBeInTheDocument()
     expect(calls.find((c) => c.path === '/api/admin/company-sign-in/test')?.body).toEqual({ 'CompanySignIn:Issuer': 'https://idp.example.test' })
+  })
+
+  it('shows the chosen protocol’s settings: for SAML its metadata, what to give the provider, a test and the save', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/config': () => ({ json: both }),
+      'GET /api/admin/company-sign-in': () => ({ json: status({ enabled: false }) }),
+      'POST /api/admin/company-sign-in/test': () => ({ json: { ok: true, message: 'Found https://sts.windows.net/t/: people sign in at https://login.microsoftonline.com/t/saml2.' } }),
+      'PUT /api/admin/config': () => ({ json: both }),
+    })
+    renderApp('/admin/settings#company-sign-in')
+    // OIDC, as saved: its issuer and redirect URI, none of SAML's settings.
+    expect(await screen.findByLabelText('Identity provider')).toBeInTheDocument()
+    expect(await screen.findByText('https://llm.test/api/auth/company/callback')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Or its metadata XML')).toBeNull()
+    expect(screen.getByLabelText('Admin group')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Protocol' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'saml' }))
+    expect(screen.queryByLabelText('Identity provider')).toBeNull()
+    expect(screen.getByLabelText('Admin group')).toBeInTheDocument() // shared by both
+    const xml = screen.getByLabelText('Or its metadata XML')
+    expect(xml.tagName).toBe('TEXTAREA')
+    expect(xml).toHaveAttribute('rows', '6')
+    // What the identity provider needs from this app.
+    expect(screen.getByText('https://llm.test/api/auth/company/saml/acs')).toBeInTheDocument()
+    expect(screen.getByText('https://llm.test')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'https://llm.test/api/auth/company/saml/metadata' })).toHaveAttribute('href', 'https://llm.test/api/auth/company/saml/metadata')
+    expect(screen.queryByText('https://llm.test/api/auth/company/callback')).toBeNull()
+
+    await userEvent.click(xml)
+    await userEvent.paste('<md:EntityDescriptor entityID="https://sts.windows.net/t/"/>')
+    await userEvent.click(screen.getByRole('button', { name: 'Test the identity provider' }))
+    expect(await screen.findByText(/^Found https:\/\/sts.windows.net\/t\//)).toBeInTheDocument()
+    expect(calls.find((c) => c.path === '/api/admin/company-sign-in/test')?.body).toEqual({
+      'CompanySignIn:Protocol': 'saml',
+      'CompanySignIn:SamlMetadata': '<md:EntityDescriptor entityID="https://sts.windows.net/t/"/>',
+    })
+    await userEvent.click(within(screen.getByRole('region', { name: 'Unsaved changes' })).getByRole('button', { name: 'Save changes' }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+        changes: [
+          { key: 'CompanySignIn:Protocol', value: 'saml' },
+          { key: 'CompanySignIn:SamlMetadata', value: '<md:EntityDescriptor entityID="https://sts.windows.net/t/"/>' },
+        ],
+      }),
+    )
   })
 
   it('makes a SCIM token, shows it once, and asks before replacing or revoking it', async () => {
@@ -91,6 +155,17 @@ describe('company sign-in elsewhere', () => {
     expect(screen.getByText('everyone the provider lets through')).toBeInTheDocument()
     expect(screen.getByText('on: https://llm.test/scim/v2')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Configure' }).map((a) => a.getAttribute('href'))).toContain('/admin/settings#company-sign-in')
+  })
+
+  it('the Sign-in page names SAML when that is the protocol', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/sign-in': () => ({ json: { ldap: false, ldapUrl: null, adminGroup: null, requiredGroup: null, syncMinutes: 15 } }),
+      'GET /api/admin/company-sign-in': () => ({ json: status({ protocol: 'saml', issuer: 'https://sts.windows.net/t/', label: 'Microsoft' }) }),
+    })
+    renderApp('/admin/sign-in')
+    expect(await screen.findByText(/Company sign-in \(SAML\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Sign in with Microsoft/)).toBeInTheDocument()
+    expect(screen.getByText('https://sts.windows.net/t/')).toBeInTheDocument()
   })
 
   it('a SCIM group is listed as such, and its members are the provider’s to change', async () => {
