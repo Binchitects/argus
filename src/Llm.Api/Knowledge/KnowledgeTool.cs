@@ -5,15 +5,21 @@ using Llm.Api.Chat.Tools;
 using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Knowledge;
 
 /// <summary>
 /// A search of company knowledge as one person: only documents they may read take part. Everyone's,
-/// their groups', admins' when they are one, and the GitLab projects they are a member of (by their
-/// username; a members list not read for a day no longer counts, as it cannot be checked).
+/// their groups', admins' when they are one, the GitLab projects they are a member of (by their
+/// username; a members list not read for a day no longer counts, as it cannot be checked), the
+/// Confluence spaces and restricted pages they may view (by their email or username; read at each
+/// sync, and no longer counted a day after the sync was due), what was shared with them or their
+/// directory groups in SharePoint, and what a source's admin chose for them where its permissions
+/// cannot tell.
 /// </summary>
-public sealed class KnowledgeSearch(AppDbContext db, AccessService access, Embedder embedder, KnowledgeStore store, TimeProvider clock)
+public sealed class KnowledgeSearch(AppDbContext db, AccessService access, Embedder embedder, KnowledgeStore store, TimeProvider clock,
+    IOptionsMonitor<KnowledgeOptions> options)
 {
     private static readonly TimeSpan MembersGrace = TimeSpan.FromDays(1);
 
@@ -27,12 +33,35 @@ public sealed class KnowledgeSearch(AppDbContext db, AccessService access, Embed
             readers.Add(Readers.Admins);
         }
         readers.AddRange(member.Groups.Select(g => "group:" + g));
-        if (user.UserName?.Trim().ToLowerInvariant() is { Length: > 0 } name)
+        var name = user.UserName?.Trim().ToLowerInvariant() ?? "";
+        var email = user.Email?.Trim().ToLowerInvariant() ?? "";
+        if (name.Length > 0 || email.Length > 0)
         {
-            var fresh = clock.GetUtcNow() - MembersGrace;
-            readers.AddRange(await db.KnowledgeReaders.AsNoTracking().Where(r => r.People.Contains(name) && r.FetchedAt > fresh).Select(r => r.Key).Distinct().ToListAsync(ct));
+            // GitLab's members are read every 15 minutes, by username; Confluence's people at each sync of their source, by email or username.
+            var now = clock.GetUtcNow();
+            var members = now - MembersGrace;
+            var synced = now - MembersGrace - options.CurrentValue.SyncEvery;
+            readers.AddRange(await db.KnowledgeReaders.AsNoTracking()
+                .Where(r => r.Key.StartsWith("gitlab:")
+                    ? name.Length > 0 && r.People.Contains(name) && r.FetchedAt > members
+                    : ((name.Length > 0 && r.People.Contains(name)) || (email.Length > 0 && r.People.Contains(email))) && r.FetchedAt > synced)
+                .Select(r => r.Key).Distinct().ToListAsync(ct));
+            readers.AddRange(new[] { name, email }.Where(n => n.Contains('@', StringComparison.Ordinal)).Select(Readers.Person));
         }
-        return readers;
+        // Their directory groups, as SharePoint names Microsoft Entra groups: by the group's name or ID, as the company sign-in's groups claim
+        // does; and the app's groups that stand for one (linked to a directory group, or provisioned by SCIM under the group's name).
+        var directory = user.DirectoryGroups.SelectMany(g => new[] { g, Ldap.LdapDirectory.CommonName(g) }).ToList();
+        if (member.Groups.Count > 0)
+        {
+            directory.AddRange(await db.Groups.AsNoTracking().Where(g => member.Groups.Contains(g.Id) && (g.Directory != null || g.Scim))
+                .Select(g => g.Directory ?? g.Name).ToListAsync(ct));
+        }
+        readers.AddRange(directory.Where(g => g.Trim().Length > 0).Select(Readers.Directory));
+        // Where Confluence's or SharePoint's permissions cannot tell, whom each source's admin chose.
+        var chosen = await db.KnowledgeSources.AsNoTracking().Where(s => s.Kind == "confluence" || s.Kind == "sharepoint")
+            .Select(s => new { s.Id, s.Audience, s.Groups }).ToListAsync(ct);
+        readers.AddRange(chosen.Where(s => Readers.For(s.Audience, s.Groups).Intersect(readers).Any()).Select(s => Readers.Chosen(s.Id)));
+        return [.. readers.Distinct()];
     }
 
     /// <summary>The passages nearest the question that the person may read, best first; at most two of one document.</summary>
@@ -46,7 +75,7 @@ public sealed class KnowledgeSearch(AppDbContext db, AccessService access, Embed
 
 /// <summary>
 /// Company knowledge, for the chat: search_knowledge finds the passages of the company's documents (GitLab
-/// wikis and issues, shared folders, websites) that the person may read, each with its title and link to cite.
+/// wikis and issues, Confluence, SharePoint, shared folders, websites) that the person may read, each with its title and link to cite.
 /// There when an admin has added a source and the embedder runs.
 /// </summary>
 public sealed class KnowledgeTool(AppDbContext db, Embedder embedder, KnowledgeSearch search) : IChatTool
@@ -56,7 +85,7 @@ public sealed class KnowledgeTool(AppDbContext db, Embedder embedder, KnowledgeS
 
     public string Id => "knowledge";
     public string Title => "Company knowledge";
-    public string Description => "Searches the company's documents you may read (GitLab wikis and issues, shared folders, websites), with links to cite.";
+    public string Description => "Searches the company's documents you may read (GitLab wikis and issues, Confluence, SharePoint, shared folders, websites), with links to cite.";
     public string Icon => "library";
 
     public async Task<string?> UnavailableAsync(CancellationToken ct) =>
@@ -65,14 +94,14 @@ public sealed class KnowledgeTool(AppDbContext db, Embedder embedder, KnowledgeS
         : null;
 
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(new LocalRun(
-        [Schema.Function(Function, "Searches the company's own documents that the person may read: GitLab wikis and issues, shared folders and websites. " +
+        [Schema.Function(Function, "Searches the company's own documents that the person may read: GitLab wikis and issues, Confluence pages, SharePoint files and pages, shared folders and websites. " +
             "Returns the passages that best match, each with its document's title, link and section.",
             new JsonObject
             {
                 ["query"] = Schema.Text("What to find, as a question or the words the document would use"),
                 ["limit"] = new JsonObject { ["type"] = "integer", ["description"] = $"How many passages (default 6, at most {Most})" },
             }, "query")],
-        "search_knowledge searches the company's own documents (wikis, issues, shared folders, websites) that the person may read. " +
+        "search_knowledge searches the company's own documents (wikis, issues, Confluence, SharePoint, shared folders, websites) that the person may read. " +
         "Use it for questions about the company's projects, processes, decisions and documents. Answer from the passages, and cite each one you use " +
         "as [its title](its link), or by its title when it has no link. When it finds nothing, say so: do not guess.",
         async (_, args, token) =>

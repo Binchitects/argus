@@ -45,7 +45,7 @@ public sealed partial class KnowledgeSyncer(AppDbContext db, IEnumerable<IKnowle
                 throw new KnowledgeException("The embedder (the embed module) is not running: knowledge cannot be embedded.");
             }
             var known = await db.KnowledgeDocuments.AsNoTracking().Where(d => d.SourceId == id)
-                .Select(d => new { d.Id, d.Key, d.Title, d.Url, d.Version, d.Model, d.Readers }).ToDictionaryAsync(d => d.Key, StringComparer.Ordinal, ct);
+                .Select(d => new { d.Id, d.Key, d.Title, d.Url, d.Version, d.Model, d.Readers, d.Requires }).ToDictionaryAsync(d => d.Key, StringComparer.Ordinal, ct);
             var seen = new HashSet<string>(StringComparer.Ordinal);
             await foreach (var found in connector.ReadAsync(source, pass, ct))
             {
@@ -59,13 +59,16 @@ public sealed partial class KnowledgeSyncer(AppDbContext db, IEnumerable<IKnowle
                     continue;
                 }
                 var had = known.GetValueOrDefault(found.Key);
+                IReadOnlyList<string> requires = found.Requires ?? [];
                 if (had is not null && had.Version == found.Version && had.Model == embedder.Model && had.Title == Cut(found.Title, 500))
                 {
-                    if (had.Url != found.Url || !had.Readers.SequenceEqual(found.Readers))
+                    if (had.Url != found.Url || !had.Readers.SequenceEqual(found.Readers) || !had.Requires.SequenceEqual(requires))
                     {
                         List<string> readers = [.. found.Readers];
+                        List<string> must = [.. requires];
                         var url = found.Url;
-                        await db.KnowledgeDocuments.Where(d => d.Id == had.Id).ExecuteUpdateAsync(u => u.SetProperty(d => d.Readers, readers).SetProperty(d => d.Url, url), ct);
+                        await db.KnowledgeDocuments.Where(d => d.Id == had.Id)
+                            .ExecuteUpdateAsync(u => u.SetProperty(d => d.Readers, readers).SetProperty(d => d.Requires, must).SetProperty(d => d.Url, url), ct);
                     }
                     continue;
                 }
@@ -79,20 +82,24 @@ public sealed partial class KnowledgeSyncer(AppDbContext db, IEnumerable<IKnowle
                 await store.SaveAsync(new KnowledgeDocument
                 {
                     Id = had?.Id ?? Guid.CreateVersion7(), SourceId = id, Key = found.Key, Title = Cut(found.Title, 500)!, Url = Cut(found.Url, 2000), Version = found.Version,
-                    Model = embedder.Model, Readers = [.. found.Readers], SyncedAt = clock.GetUtcNow(),
+                    Model = embedder.Model, Readers = [.. found.Readers], Requires = [.. requires], SyncedAt = clock.GetUtcNow(),
                 }, chunks, vectors, ct);
             }
-            if (!pass.Incomplete)
+            // What the source says is gone goes; what was not seen goes too, unless part of the source could not be read.
+            var gone = known.Values
+                .Where(d => !seen.Contains(d.Key) && !pass.Kept.Contains(d.Key)
+                    && (pass.Gone.Contains(d.Key) || (!pass.Incomplete && !pass.Unchanged.Any(p => d.Key.StartsWith(p, StringComparison.Ordinal)))))
+                .Select(d => d.Id).ToList();
+            foreach (var batch in gone.Chunk(500))
             {
-                var gone = known.Values
-                    .Where(d => !seen.Contains(d.Key) && !pass.Kept.Contains(d.Key) && !pass.Unchanged.Any(p => d.Key.StartsWith(p, StringComparison.Ordinal)))
-                    .Select(d => d.Id).ToList();
-                foreach (var batch in gone.Chunk(500))
-                {
-                    await db.KnowledgeDocuments.Where(d => batch.Contains(d.Id)).ExecuteDeleteAsync(ct);
-                }
+                await db.KnowledgeDocuments.Where(d => batch.Contains(d.Id)).ExecuteDeleteAsync(ct);
             }
             error = pass.Problems.Count > 0 ? Cut(string.Join("; ", pass.Problems), 2000) : null;
+            if (pass.Mirror.Count > 0)
+            {
+                var mirror = Cut(string.Join("\n", pass.Mirror), 2000);
+                await db.KnowledgeSources.Where(s => s.Id == id).ExecuteUpdateAsync(u => u.SetProperty(s => s.Mirror, mirror), ct);
+            }
         }
         catch (Exception ex) when (ex is KnowledgeException or EmbedderException)
         {
@@ -116,7 +123,8 @@ public sealed partial class KnowledgeSyncer(AppDbContext db, IEnumerable<IKnowle
 /// <summary>
 /// Keeps company knowledge current: each source synced when it is due (Knowledge:SyncEvery) or when an
 /// admin asks (Sync now), one at a time; and GitLab projects' members read again every 15 minutes, so
-/// someone who leaves a project stops reading its documents within that.
+/// someone who leaves a project stops reading its documents within that. Confluence's and SharePoint's
+/// permissions are read again at each sync of their source.
 /// </summary>
 public sealed partial class KnowledgeSync(IServiceScopeFactory scopes, IOptionsMonitor<KnowledgeOptions> options, TimeProvider clock, ILogger<KnowledgeSync> logger)
     : BackgroundService
@@ -208,7 +216,8 @@ public sealed partial class KnowledgeSync(IServiceScopeFactory scopes, IOptionsM
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var gitlab = scope.ServiceProvider.GetRequiredService<GitLabConnector>();
             var stale = clock.GetUtcNow() - MembersEvery;
-            foreach (var row in await db.KnowledgeReaders.Where(r => r.FetchedAt < stale).OrderBy(r => r.FetchedAt).Take(100).ToListAsync(ct))
+            // Confluence's readers are read again at each sync of their source.
+            foreach (var row in await db.KnowledgeReaders.Where(r => r.FetchedAt < stale && r.Key.StartsWith("gitlab:")).OrderBy(r => r.FetchedAt).Take(100).ToListAsync(ct))
             {
                 // GitLab does not answer: the next minute tries again, with one request.
                 if (!await gitlab.RefreshAsync(row, ct))

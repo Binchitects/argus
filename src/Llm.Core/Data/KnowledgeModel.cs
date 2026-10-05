@@ -15,9 +15,13 @@ public partial class AppDbContext
             e.Property(x => x.Kind).HasMaxLength(20);
             e.Property(x => x.Location).HasMaxLength(2000);
             e.Property(x => x.Hosts).HasMaxLength(1000);
+            e.Property(x => x.Spaces).HasMaxLength(1000);
+            e.Property(x => x.Account).HasMaxLength(320);
+            e.Property(x => x.Tenant).HasMaxLength(100);
             e.Property(x => x.Groups).HasDefaultValueSql("'{}'::uuid[]");
             e.Property(x => x.State).HasMaxLength(20);
             e.Property(x => x.Error).HasMaxLength(2000);
+            e.Property(x => x.Mirror).HasMaxLength(2000);
             e.HasIndex(x => x.Name).IsUnique();
         });
         builder.Entity<KnowledgeDocument>(e =>
@@ -29,6 +33,7 @@ public partial class AppDbContext
             e.Property(x => x.Version).HasMaxLength(200);
             e.Property(x => x.Model).HasMaxLength(200);
             e.Property(x => x.Readers).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Requires).HasDefaultValueSql("'{}'::text[]");
             e.HasIndex(x => new { x.SourceId, x.Key }).IsUnique();
             e.HasIndex(x => x.AttachmentId);
             e.HasIndex(x => x.Readers).HasMethod("gin");

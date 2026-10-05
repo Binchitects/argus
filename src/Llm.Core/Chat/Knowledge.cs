@@ -4,16 +4,20 @@ namespace Llm.Core.Chat;
 
 /// <summary>
 /// Where company knowledge comes from: a GitLab project or group (its wikis and issues), a folder
-/// the app can read, or a website. Synced into documents and their passages, each document with
-/// who may read it, so a search returns only what the asker may read.
+/// the app can read, a website, Confluence spaces, or SharePoint sites and libraries. Synced into
+/// documents and their passages, each document with who may read it, so a search returns only what
+/// the asker may read.
 /// </summary>
 public sealed class KnowledgeSource
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public required string Name { get; set; }
-    /// <summary>"gitlab", "folder" or "website".</summary>
+    /// <summary>"gitlab", "folder", "website", "confluence" or "sharepoint".</summary>
     public required string Kind { get; set; }
-    /// <summary>A GitLab project's or group's path (group/app), a folder (/knowledge/handbook), or a website's first page.</summary>
+    /// <summary>
+    /// A GitLab project's or group's path (group/app), a folder (/knowledge/handbook), a website's first page, a Confluence
+    /// site's address, or SharePoint sites and libraries by their addresses, one a line.
+    /// </summary>
     public required string Location { get; set; }
     /// <summary>GitLab: its projects' wikis are read.</summary>
     public bool Wiki { get; set; } = true;
@@ -23,13 +27,32 @@ public sealed class KnowledgeSource
     public string? Hosts { get; set; }
     /// <summary>A website: the most pages read.</summary>
     public int MaxPages { get; set; } = 200;
-    /// <summary>A folder or a website: who may read it. A GitLab project's readers are its members, in GitLab.</summary>
+    /// <summary>Confluence: the spaces read, by their keys, comma separated; empty: every space the account may read.</summary>
+    public string? Spaces { get; set; }
+    /// <summary>Confluence: blog posts are read as well as pages.</summary>
+    public bool BlogPosts { get; set; }
+    /// <summary>SharePoint: the sites' pages are read as well as their libraries' files.</summary>
+    public bool SitePages { get; set; } = true;
+    /// <summary>Confluence Cloud: the account's email (empty for Data Center); SharePoint: the app's client (application) ID.</summary>
+    public string? Account { get; set; }
+    /// <summary>SharePoint: the Microsoft Entra tenant's ID or domain.</summary>
+    public string? Tenant { get; set; }
+    /// <summary>Confluence's API token or personal access token, or the SharePoint app's client secret, encrypted with APP_DATA_KEY. Never shown.</summary>
+    public string? SecretEncrypted { get; set; }
+    /// <summary>
+    /// A folder or a website: who may read it. A GitLab project's readers are its members, in GitLab. Confluence and
+    /// SharePoint: who reads what their own permissions cannot tell (the fallback).
+    /// </summary>
     public Audience Audience { get; set; }
     public List<Guid> Groups { get; set; } = [];
     /// <summary>new, syncing, synced or failed.</summary>
     public string State { get; set; } = "new";
     /// <summary>Why the last sync failed, or what it could not read.</summary>
     public string? Error { get; set; }
+    /// <summary>Confluence and SharePoint: what the last sync could mirror of who may read it, and where the fallback applies, in words.</summary>
+    public string? Mirror { get; set; }
+    /// <summary>SharePoint: where each library's changes were read up to (Graph's delta links, as JSON), so the next sync reads only what changed.</summary>
+    public string? Cursor { get; set; }
     public DateTimeOffset? SyncStartedAt { get; set; }
     public DateTimeOffset? SyncedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -54,8 +77,14 @@ public sealed class KnowledgeDocument
     public string? Version { get; set; }
     /// <summary>The embedding model its passages were embedded with: another model's vectors do not compare.</summary>
     public string? Model { get; set; }
-    /// <summary>Who may read it: "everyone", "admins", "group:{id}", or "gitlab:{project id}" (that project's members).</summary>
+    /// <summary>
+    /// Who may read it, any of: "everyone", "admins", "group:{id}", "gitlab:{project id}" or "confluence:{space}" (people
+    /// kept in <see cref="KnowledgeReaders"/>), "person:{email}", "directory:{group}" (a directory group, by its name or
+    /// ID), or "chosen:{source id}" (whom the admin chose for what the source's permissions cannot tell).
+    /// </summary>
     public List<string> Readers { get; set; } = [];
+    /// <summary>What a reader must also be, every one: a Confluence page's read restrictions, its own and its ancestors' ("confluence:{space}/{page id}").</summary>
+    public List<string> Requires { get; set; } = [];
     public DateTimeOffset SyncedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -75,15 +104,18 @@ public sealed class KnowledgeChunk
     public required float[] Embedding { get; set; }
 }
 
-/// <summary>Who may read a GitLab project's documents: its members' usernames, read from GitLab and kept fresh.</summary>
+/// <summary>
+/// Who may read a GitLab project's documents (its members' usernames), a Confluence space's (who may view it) or a
+/// restricted Confluence page's: read from GitLab or Confluence and kept fresh.
+/// </summary>
 public sealed class KnowledgeReaders
 {
     public Guid SourceId { get; set; }
-    /// <summary>"gitlab:{project id}", as its documents name their readers.</summary>
+    /// <summary>"gitlab:{project id}", "confluence:{space}" or "confluence:{space}/{page id}", as its documents name their readers.</summary>
     public required string Key { get; set; }
-    /// <summary>The project's path, for the admin page.</summary>
+    /// <summary>The project's path, or the space or page, for the admin page.</summary>
     public string? Name { get; set; }
-    /// <summary>The GitLab usernames (lower case) of its active members, inherited ones too.</summary>
+    /// <summary>The GitLab usernames (lower case) of its active members, inherited ones too; Confluence's people by their email or username (lower case).</summary>
     public List<string> People { get; set; } = [];
     /// <summary>The project's last activity when its wiki and issues were last read: unchanged, they are not read again (for a day).</summary>
     public string? Activity { get; set; }
