@@ -12,6 +12,9 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // Against the real model (E2E_CHAT=1) one test at a time: the engine answers in turn, and
+  // tests started together wait in its line until they time out.
+  workers: process.env.E2E_CHAT === '1' ? 1 : undefined,
   forbidOnly: !!process.env.CI,
   retries: 1,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',

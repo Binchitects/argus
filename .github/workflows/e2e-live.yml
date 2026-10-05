@@ -1,0 +1,37 @@
+name: Browser tests on the live stack
+
+# The browser suite against the deployed stack and its real model (E2E_CHAT=1),
+# one model test at a time. It needs a runner on the host that runs the stack
+# (GitHub's own runners have no model): register one with the labels
+# "self-hosted" and "argus-arena", and set E2E_PASSWORD (the admin's) as a
+# secret and E2E_BASE_URL (https://DOMAIN) as a variable. Nightly, and by hand.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: [self-hosted, argus-arena]
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: src/web
+    steps:
+      - uses: actions/checkout@v4
+      - name: Packages (from the runner's npm cache)
+        run: npm ci --prefer-offline --no-audit
+      - name: The browser suite with the real model, one model test at a time
+        env:
+          E2E_CHAT: "1"
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          E2E_CHANNEL: chrome
+        run: npx playwright test --project=desktop
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: e2e-live-report, path: src/web/playwright-report }

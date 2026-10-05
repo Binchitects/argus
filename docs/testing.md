@@ -337,6 +337,9 @@ make smoke           # API surface
 # back where it was when a dialog closes, the skip link, every page at 320 px
 # (a11y.spec.ts); E2E_CHAT=1 adds the chat against the real model
 E2E_PASSWORD=<admin password> E2E_CHAT=1 npm run e2e
+# (with E2E_CHAT=1 one test at a time: the engine answers in turn. In CI it is
+# .github/workflows/e2e-live.yml, nightly and by hand, on a self-hosted runner
+# labelled argus-arena on the stack's host, with E2E_PASSWORD and E2E_BASE_URL)
 # ... and Argus's per-person access, with the test GitLab up
 ./tools/test-gitlab/run.sh --keep   # from the repo root
 E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 npm run e2e
