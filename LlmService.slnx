@@ -3,11 +3,11 @@
     <Project Path="src/Llm.Api/Llm.Api.csproj" />
     <Project Path="src/Llm.Core/Llm.Core.csproj" />
     <Project Path="src/Argus/Argus.csproj" />
-    <Project Path="src/ArenaCode/ArenaCode.csproj" />
+    <Project Path="src/CodeArena/CodeArena.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Llm.Tests/Llm.Tests.csproj" />
     <Project Path="tests/Argus.Tests/Argus.Tests.csproj" />
-    <Project Path="tests/ArenaCode.Tests/ArenaCode.Tests.csproj" />
+    <Project Path="tests/CodeArena.Tests/CodeArena.Tests.csproj" />
   </Folder>
 </Solution>

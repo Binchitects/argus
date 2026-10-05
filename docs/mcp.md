@@ -1,7 +1,7 @@
 # Arena MCP
 
 Every tool a person has in the chat, for their own agent: one MCP server at
-`https://DOMAIN/mcp`, signed in with **their API key**. Arena Code, Claude
+`https://DOMAIN/mcp`, signed in with **their API key**. Code Arena, Claude
 Code, Qwen Code, Continue or any MCP client connects once and gets Argus, the
 web, Python, pictures and the servers, APIs and plugins the admins added, with
 the same names and schemas as in the chat, run as that person.

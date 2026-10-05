@@ -14,8 +14,8 @@ export const KEY = 'LLM_SERVICE_API_KEY'
 /** The name the page saves the site's CA certificate under, in the person's home folder. */
 export const CA_FILE = 'arena-ca.crt'
 
-/** A build of Arena Code the app serves (/api/downloads/arena-code). */
-export interface ArenaCodeBuild {
+/** A build of Code Arena the app serves (/api/downloads/code-arena). */
+export interface CodeArenaBuild {
   rid: string
   system: string
   fileName: string
@@ -37,8 +37,8 @@ export interface Context {
   apiKey?: string
   /** This Arena's own address, https://DOMAIN. */
   origin: string
-  /** Arena Code's builds; null when none could be listed. */
-  arenaCode: { version: string; builds: ArenaCodeBuild[] } | null
+  /** Code Arena's builds; null when none could be listed. */
+  codeArena: { version: string; builds: CodeArenaBuild[] } | null
   /** The system the commands are for: a Unix shell (Linux, macOS) or Windows PowerShell. */
   os: System
   /** True when the site's certificate comes from a private CA that tools must be told to trust. */
@@ -139,53 +139,53 @@ export function arenaMcp(url: string, os: System = 'unix'): (Step & { title: str
 
 export const tools: Tool[] = [
   {
-    id: 'arena-code',
-    title: 'Arena Code (our own agent)',
+    id: 'code-arena',
+    title: 'Code Arena (our own agent)',
     group: 'Coding agents',
     about:
       "Our own coding agent, in your terminal or your browser: one file with nothing to install, that talks only to this Arena (the model through the gateway, all of Arena's tools as you), with file, shell and git tools on your machine.",
     steps: (c) => {
-      const builds = c.arenaCode?.builds ?? []
+      const builds = c.codeArena?.builds ?? []
       return [
         builds.length > 0
           ? {
-              text: `Download it for your system (version ${c.arenaCode!.version}):`,
-              links: builds.map((b) => ({ label: b.system, href: `/api/downloads/arena-code/${b.rid}`, detail: megabytes(b.size) })),
+              text: `Download it for your system (version ${c.codeArena!.version}):`,
+              links: builds.map((b) => ({ label: b.system, href: `/api/downloads/code-arena/${b.rid}`, detail: megabytes(b.size) })),
             }
           : {
-              text: "This Arena has no builds of it yet. An admin adds them once: put .NET's runtime packs in tools/offline-nuget (its README says how), then rebuild the app, or run tools/publish-arena-code.sh --offline and hand out the files in dist/arena-code.",
+              text: "This Arena has no builds of it yet. An admin adds them once: put .NET's runtime packs in tools/offline-nuget (its README says how), then rebuild the app, or run tools/publish-code-arena.sh --offline and hand out the files in dist/code-arena.",
             },
         unix(c)
           ? {
               text: 'Make it runnable and put it on your PATH:',
               file: 'shell',
-              code: `chmod +x arena-code
-xattr -d com.apple.quarantine arena-code   # macOS only: the browser's download mark
-mkdir -p ~/.local/bin && mv arena-code ~/.local/bin/`,
+              code: `chmod +x code-arena
+xattr -d com.apple.quarantine code-arena   # macOS only: the browser's download mark
+mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/`,
             }
-          : { text: 'Put arena-code.exe in a folder on your PATH (or run it from where it is, as .\\arena-code.exe).' },
+          : { text: 'Put code-arena.exe in a folder on your PATH (or run it from where it is, as .\\code-arena.exe).' },
         {
           text: "Sign in with this Arena's address and your API key. It asks for the key, checks it with the gateway, and keeps it in your config folder, readable by you only.",
           file: 'shell',
-          code: `arena-code login --url ${c.origin}`,
+          code: `code-arena login --url ${c.origin}`,
         },
-        { text: 'Start it in your project (arena-code -p "…" answers once, for scripts):', file: 'shell', code: 'cd your-project\narena-code' },
+        { text: 'Start it in your project (code-arena -p "…" answers once, for scripts):', file: 'shell', code: 'cd your-project\ncode-arena' },
         {
-          text: "Or in your browser: arena-code web opens the same agent with the chat's look (its sessions, tool cards, diffs and approvals), served on your machine only.",
+          text: "Or in your browser: code-arena web opens the same agent with the chat's look (its sessions, tool cards, diffs and approvals), served on your machine only.",
           file: 'shell',
-          code: 'cd your-project\narena-code web',
+          code: 'cd your-project\ncode-arena web',
         },
       ]
     },
     trust: (c) => [
       {
-        text: "Sign in with the CA's file instead (or set ARENA_CA_CERT to it): Arena Code keeps it, for the gateway and for Arena MCP.",
+        text: "Sign in with the CA's file instead (or set ARENA_CA_CERT to it): Code Arena keeps it, for the gateway and for Arena MCP.",
         file: 'shell',
-        code: `arena-code login --url ${c.origin} --ca ${caShell(c)}`,
+        code: `code-arena login --url ${c.origin} --ca ${caShell(c)}`,
       },
     ],
-    check: () => ({ text: 'Check it answers:', file: 'shell', code: `arena-code -p "${OK}"` }),
-    argus: "Nothing to add: Arena Code reaches Argus through Arena's own tools, as you, with the code you may read.",
+    check: () => ({ text: 'Check it answers:', file: 'shell', code: `code-arena -p "${OK}"` }),
+    argus: "Nothing to add: Code Arena reaches Argus through Arena's own tools, as you, with the code you may read.",
   },
   {
     id: 'claude',

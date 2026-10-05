@@ -1,21 +1,21 @@
 # Connecting an agent to Argus Arena
 
-## Arena Code: our own agent
+## Code Arena: our own agent
 
-The simplest client is our own: **Arena Code**, one file with nothing to
+The simplest client is our own: **Code Arena**, one file with nothing to
 install, that talks only to the Arena (the model through the gateway, and all
 of the chat's tools, Argus included, through `https://DOMAIN/mcp` as you).
-Download it from **Your account → Connect your tools → Arena Code (our own
+Download it from **Your account → Connect your tools → Code Arena (our own
 agent)**, then:
 
 ```bash
-arena-code login --url https://DOMAIN               # asks for your API key
-arena-code login --url https://DOMAIN --ca ca.crt   # when the Arena's certificate is from the company's own CA
-cd my-project && arena-code
+code-arena login --url https://DOMAIN               # asks for your API key
+code-arena login --url https://DOMAIN --ca ca.crt   # when the Arena's certificate is from the company's own CA
+cd my-project && code-arena
 ```
 
-Its source is `src/ArenaCode`; everything else is in
-[docs/arena-code.md](../docs/arena-code.md). The rest of this page is for
+Its source is `src/CodeArena`; everything else is in
+[docs/code-arena.md](../docs/code-arena.md). The rest of this page is for
 other clients, connecting to Argus directly.
 
 ## Other clients

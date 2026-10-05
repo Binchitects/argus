@@ -19,5 +19,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts", "vite.preview.config.ts", "vite.arena-code.config.ts", "playwright.config.ts", "e2e"]
+  "include": ["vite.config.ts", "vite.preview.config.ts", "vite.code-arena.config.ts", "playwright.config.ts", "e2e"]
 }

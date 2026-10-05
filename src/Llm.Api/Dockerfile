@@ -4,8 +4,8 @@
 #
 # Built from the repository root: docker build -f src/Llm.Api/Dockerfile .
 
-# Arena Code's builds (below): auto, online or none.
-ARG ARENA_CODE=auto
+# Code Arena's builds (below): auto, online or none.
+ARG CODE_ARENA=auto
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api
 # Empty: VERSION at the repository's root (Directory.Build.props). Passed on only when
@@ -22,43 +22,43 @@ RUN dotnet publish src/Llm.Api/Llm.Api.csproj -c Release --no-restore -o /out ${
  && rm -f /out/*.pdb \
  && mkdir -p /shared/engine-config /shared/directory /shared/sandbox
 
-# Arena Code's web interface (arena-code web): its page, built from src/web
-# into /ArenaCode/web. The first steps are src/web's own image's, to the
+# Code Arena's web interface (code-arena web): its page, built from src/web
+# into /CodeArena/web. The first steps are src/web's own image's, to the
 # letter (the same base, and npm ci over the same lock file): a host that
 # built the web image has that layer cached, and downloads nothing here.
-FROM node:22-alpine AS arena-code-web-build
+FROM node:22-alpine AS code-arena-web-build
 WORKDIR /web
 COPY src/web/package.json src/web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY src/web/ ./
-RUN node_modules/.bin/vite build --config vite.arena-code.config.ts \
- && node_modules/.bin/vite build --config vite.preview.config.ts --outDir ../ArenaCode/web
-# ARENA_CODE=none builds no Arena Code, so no page either (and no npm at all).
-FROM node:22-alpine AS arena-code-web-none
-RUN mkdir -p /ArenaCode/web
-FROM arena-code-web-build AS arena-code-web-auto
-FROM arena-code-web-build AS arena-code-web-online
-FROM arena-code-web-${ARENA_CODE} AS arena-code-web
+RUN node_modules/.bin/vite build --config vite.code-arena.config.ts \
+ && node_modules/.bin/vite build --config vite.preview.config.ts --outDir ../CodeArena/web
+# CODE_ARENA=none builds no Code Arena, so no page either (and no npm at all).
+FROM node:22-alpine AS code-arena-web-none
+RUN mkdir -p /CodeArena/web
+FROM code-arena-web-build AS code-arena-web-auto
+FROM code-arena-web-build AS code-arena-web-online
+FROM code-arena-web-${CODE_ARENA} AS code-arena-web
 
-# Arena Code, the coding agent people download from Connect your tools: one
-# self-contained file per system (tools/publish-arena-code.sh), its web
-# interface's page embedded. ARENA_CODE=auto builds it from the runtime packs
+# Code Arena, the coding agent people download from Connect your tools: one
+# self-contained file per system (tools/publish-code-arena.sh), its web
+# interface's page embedded. CODE_ARENA=auto builds it from the runtime packs
 # in tools/offline-nuget when they are there and skips it otherwise (the page
 # then says how to add it); online fetches the packs from nuget.org; none skips it.
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS arena-code
-ARG ARENA_CODE
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS code-arena
+ARG CODE_ARENA
 WORKDIR /src
 COPY global.json Directory.Build.props VERSION ./
-COPY tools/publish-arena-code.sh tools/
+COPY tools/publish-code-arena.sh tools/
 COPY tools/offline-nuget/ tools/offline-nuget/
-COPY src/ArenaCode/ src/ArenaCode/
-COPY --from=arena-code-web /ArenaCode/web/ src/ArenaCode/web/
-RUN mkdir -p dist/arena-code \
- && case "$ARENA_CODE" in \
-      none) echo "Arena Code: not built (ARENA_CODE=none)" ;; \
-      online) bash tools/publish-arena-code.sh ;; \
-      *) if ls tools/offline-nuget/*.nupkg >/dev/null 2>&1; then bash tools/publish-arena-code.sh --offline; \
-         else echo "Arena Code: not built, tools/offline-nuget holds no runtime packs (see its README)"; fi ;; \
+COPY src/CodeArena/ src/CodeArena/
+COPY --from=code-arena-web /CodeArena/web/ src/CodeArena/web/
+RUN mkdir -p dist/code-arena \
+ && case "$CODE_ARENA" in \
+      none) echo "Code Arena: not built (CODE_ARENA=none)" ;; \
+      online) bash tools/publish-code-arena.sh ;; \
+      *) if ls tools/offline-nuget/*.nupkg >/dev/null 2>&1; then bash tools/publish-code-arena.sh --offline; \
+         else echo "Code Arena: not built, tools/offline-nuget holds no runtime packs (see its README)"; fi ;; \
     esac
 
 # Chiseled: no shell, no package manager, runs as a non-root user.
@@ -72,8 +72,8 @@ COPY --from=api /usr/share/zoneinfo /usr/share/zoneinfo
 COPY src/Llm.Api/Dashboards/json /dashboards
 # The plugins that come with the app (Admin → Plugins).
 COPY plugins /plugins
-# Arena Code's builds, for download (/api/downloads/arena-code); empty when not built.
-COPY --from=arena-code /src/dist/arena-code /downloads/arena-code
+# Code Arena's builds, for download (/api/downloads/code-arena); empty when not built.
+COPY --from=code-arena /src/dist/code-arena /downloads/code-arena
 # What it shares with other services, as named volumes: a new volume starts as these, the app's.
 COPY --from=api --chown=1000:1000 /shared/ /
 ENV ASPNETCORE_HTTP_PORTS=8080 \

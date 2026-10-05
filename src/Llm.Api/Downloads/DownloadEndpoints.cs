@@ -1,12 +1,12 @@
 namespace Llm.Api.Downloads;
 
-/// <summary>A build of Arena Code the app serves: its system, file name, size and SHA-256.</summary>
-public sealed record ArenaCodeBuild(string Rid, string System, string FileName, long Size, string? Sha256);
+/// <summary>A build of Code Arena the app serves: its system, file name, size and SHA-256.</summary>
+public sealed record CodeArenaBuild(string Rid, string System, string FileName, long Size, string? Sha256);
 
 /// <summary>
-/// Arena Code, the coding agent people run on their own machine: one file per
-/// system, put into the image at /downloads/arena-code/&lt;rid&gt;/ by
-/// tools/publish-arena-code.sh (src/Llm.Api/Dockerfile). Open to anyone who
+/// Code Arena, the coding agent people run on their own machine: one file per
+/// system, put into the image at /downloads/code-arena/&lt;rid&gt;/ by
+/// tools/publish-code-arena.sh (src/Llm.Api/Dockerfile). Open to anyone who
 /// reaches the app, like the web's own files: a build holds no data, and does
 /// nothing without a person's API key.
 /// </summary>
@@ -24,7 +24,7 @@ public static class DownloadEndpoints
 
     public static void MapDownloads(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/downloads/arena-code").AllowAnonymous();
+        var g = app.MapGroup("/api/downloads/code-arena").AllowAnonymous();
         g.MapGet("", List);
         g.MapGet("/{rid}", Download);
         // The certificate people's tools must trust on a self-signed deployment: public, like the web's files.
@@ -41,10 +41,10 @@ public static class DownloadEndpoints
     }
 
     /// <summary>Downloads:Directory, /downloads in the image.</summary>
-    private static string Root(IConfiguration config) => Path.Combine(config["Downloads:Directory"] is { Length: > 0 } d ? d : "/downloads", "arena-code");
+    private static string Root(IConfiguration config) => Path.Combine(config["Downloads:Directory"] is { Length: > 0 } d ? d : "/downloads", "code-arena");
 
     /// <summary>The builds there are, with their checksums (SHA256SUMS beside them).</summary>
-    public static List<ArenaCodeBuild> Builds(string root)
+    public static List<CodeArenaBuild> Builds(string root)
     {
         var sums = new Dictionary<string, string>(StringComparer.Ordinal);
         var sumsFile = Path.Combine(root, "SHA256SUMS");
@@ -59,14 +59,14 @@ public static class DownloadEndpoints
                 }
             }
         }
-        var builds = new List<ArenaCodeBuild>();
+        var builds = new List<CodeArenaBuild>();
         foreach (var (rid, system) in Systems)
         {
-            var name = rid.StartsWith("win-", StringComparison.Ordinal) ? "arena-code.exe" : "arena-code";
+            var name = rid.StartsWith("win-", StringComparison.Ordinal) ? "code-arena.exe" : "code-arena";
             var file = new FileInfo(Path.Combine(root, rid, name));
             if (file.Exists)
             {
-                builds.Add(new ArenaCodeBuild(rid, system, name, file.Length, sums.GetValueOrDefault($"{rid}/{name}")));
+                builds.Add(new CodeArenaBuild(rid, system, name, file.Length, sums.GetValueOrDefault($"{rid}/{name}")));
             }
         }
         return builds;
@@ -79,7 +79,7 @@ public static class DownloadEndpoints
     {
         if (Builds(Root(config)).FirstOrDefault(b => b.Rid == rid) is not { } build)
         {
-            return Results.NotFound(new { error = $"No Arena Code build for {rid}." });
+            return Results.NotFound(new { error = $"No Code Arena build for {rid}." });
         }
         var path = Path.Combine(Root(config), build.Rid, build.FileName);
         return Results.File(path, "application/octet-stream", build.FileName, enableRangeProcessing: true);
