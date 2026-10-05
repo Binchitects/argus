@@ -12,6 +12,59 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.1.0 (2026-10-05)
+
+### :rocket: Epics and highlights
+
+- **Arena Code in the browser**: `arena-code web` serves the same coding agent
+  with Argus Arena's chat interface on your own machine: the folder's sessions,
+  tool cards, diffs for edits, approvals, tokens with the cached share
+- **Connect your tools that work**: every guide checked against its tool's
+  current documentation and the live gateway, each ending with a check, with
+  Windows (PowerShell) commands, and the site's certificate to download and
+  trust on a self-signed deployment
+- **Knowledge packs for Qt and seven more**: a `qt` pack with Qt 4.8, 5.15 and
+  6.10 in one (12,595 pages, 150,648 symbols), each API with the versions that
+  have it; `dotnet`, `cpp`, `cppreference`, `python` (now 3.14), `scripting`,
+  `debugger` and `sqlite` built again. Their digests are in
+  docs/argus/overview.md; they go to the packs bucket beside the Windows ones
+
+### :sparkles: New features & Enhancements
+
+- **Company sign-in by SAML 2.0** beside OIDC: the identity provider's metadata
+  (address or XML) or its address, entity ID and certificate; strict checks
+  (its certificate only, RSA-SHA256 or better, no signature wrapping, audience,
+  recipient, lifetime, each assertion once on every replica); the same people
+  rules as OIDC; steps for Entra ID, Okta and Keycloak
+- **Confluence and SharePoint** as company knowledge: Confluence Cloud and Data
+  Center (space permissions and page restrictions mirrored), SharePoint and
+  OneDrive through Microsoft Graph (each file's permissions, delta sync); where
+  they cannot tell, the groups an admin chose
+- **The certificate to trust**: Connect your tools offers the site's CA
+  (read from what Traefik serves) with its fingerprint and how to install it on
+  Linux, macOS and Windows, and each tool's guide says what that tool needs
+  (`NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, Continue's CA bundle...)
+- Connect your tools: Claude Code points every model alias and its sub-agents
+  at the chosen model with its window and output limit; MCP servers added for
+  every project; Hermes, Cline, Codex, Continue, Qwen Code, OpenClaw, Aider and
+  dsh setups brought up to date; Roo Code (shut down) removed
+- Arena MCP tells an agent the person's default chat model, and Arena Code
+  starts with it
+- A clearer Persian voice (piper's gyro: Whisper writes it back with 3.8%
+  of characters wrong, against 14.4% for the previous voice)
+- The live browser suite runs one model test at a time, and nightly from CI on
+  a self-hosted runner on the stack's host (`.github/workflows/e2e-live.yml`)
+- Argus cuts a text too long for the embedding model to fit, as Ollama does,
+  instead of failing a pack build
+
+### :bug: Bugs fixed
+
+- Video never decoded on the GPU: its 3 GB budget left no room for the decode
+  (about 11 GB). Decoding there now gets a 12 GB budget with the weights in RAM
+  until needed (63 s for a short clip, against 309 s on the CPU)
+- Qwen Code's guide now starts it with `--auth-type openai`: a fresh install
+  stopped at "Operation cancelled" with the variables alone
+
 ## v5.0.0 (2026-10-05)
 
 ### :rocket: Epics and highlights

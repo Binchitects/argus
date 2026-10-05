@@ -120,24 +120,24 @@ xychart-beta
     title "Documented symbols per pack (thousands)"
     x-axis ["dotnet", "qt", "win32", "wdk", "cpp", "python", "scripting", "cppreference"]
     y-axis "Symbols (k)" 0 --> 220
-    bar [215.3, 150.6, 87.2, 37.9, 37.3, 18.8, 9.3, 5.4]
+    bar [215.4, 150.6, 87.2, 37.9, 37.4, 18.9, 9.5, 5.4]
 ```
 
 | pack | Documents | Chunks | Symbols | Size | Licence |
 |---|---|---|---|---|---|
 | [`win32`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32.arguspack) — Windows SDK API reference | 65,906 | 478,788 | 118,242 | 726.1 MB | CC-BY-4.0 |
 | `wdk` — driver DDI reference | 25,903 | 205,848 | 37,938 | 292.5 MB | CC-BY-4.0 |
-| `dotnet` — .NET BCL + MS NuGet packages | 11,013 | 140,661 | **215,269** | 236.4 MB | CC-BY-4.0 |
+| `dotnet` — .NET BCL + MS NuGet packages | 11,015 | 140,763 | **215,423** | 236.1 MB | CC-BY-4.0 |
 | `qt` — Qt 4.8, 5.15 and 6.10, C++ and QML | 12,595 | 190,970 | 150,648 | 340.4 MB | GFDL-1.3 |
-| `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,325 | 180.0 MB | CC-BY-4.0 |
+| `cpp` — MSVC, CRT, STL | 9,766 | 123,713 | 37,428 | 180.3 MB | CC-BY-4.0 |
 | `win32-samples` — Microsoft desktop samples | 5,801 | 67,714 | 139 | 136.2 MB | MIT |
-| `cppreference` — C++ standard library | 6,640 | 68,891 | 5,406 | 125.6 MB | CC-BY-SA-3.0 |
+| `cppreference` — C++ standard library | 6,640 | 68,891 | 5,406 | 125.7 MB | CC-BY-SA-3.0 |
 | `wdk-samples` — Microsoft driver samples | 2,273 | 39,879 | 104 | 76.8 MB | MS-PL |
-| `scripting` — PowerShell, cmd, Unix | 9,310 | 46,052 | 9,310 | 70.9 MB | CC-BY-4.0 |
-| `python` — 3.13 | 540 | 13,751 | 18,778 | 31.8 MB | PSF-2.0 |
+| `scripting` — PowerShell, cmd, Unix | 9,461 | 46,370 | 9,461 | 72.0 MB | CC-BY-4.0 |
+| `python` — 3.14 | 542 | 13,794 | 18,921 | 31.9 MB | PSF-2.0 |
 | `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 25.0 MB | CC-BY-4.0 |
-| `sqlite` — SQL, pragmas, FTS5 | 837 | 8,987 | 36 | 18.4 MB | public domain |
-| **total** | **152,702** | **1,399,012** | **594,706** | **2.2 GB** | |
+| `sqlite` — SQL, pragmas, FTS5 | 837 | 8,931 | 36 | 18.4 MB | public domain |
+| **total** | **152,877** | **1,399,920** | **595,257** | **2.2 GB** | |
 
 ### Downloading a pack
 
@@ -159,9 +159,23 @@ argus pack install \
 | [`win32-samples`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32-samples.arguspack) | ✅ | 142,811,136 B | `e7a80a83d0d918fefdea1725707ce1076afbc39cd06130a766274b8741ba0b17` |
 | [`wdk-samples`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/wdk-samples.arguspack) | ✅ | 80,523,264 B | `786c4a8b38091715cb1c4ec22c87ab1f7784d6c01fe60c7a9cfeca6d3ef063c1` |
 
-The other eight are built and served locally but **not published yet** — there
-is no link for them, and the table above is the whole published set rather than
-a subset of a larger one. A bucket is not versioned, so re-uploading a pack
+The other eight were built on 2026-10-05 and are **not published yet**: the
+maintainer uploads them. Their digests, from the built files, so the upload or
+a mirror can be checked against them:
+
+| pack | published | size | sha256 |
+|---|---|---|---|
+| `qt` | built, to upload | 356,954,112 B | `dfe6084fd1ee419053cf79320b272e1a5d79d25acf780de8e60ae24b18f34627` |
+| `dotnet` | built, to upload | 247,525,376 B | `cf86fa3b9c2607aa5e5239dbc00b6c9afb01a5db2a17d30fdc1f2872368c5696` |
+| `cpp` | built, to upload | 189,030,400 B | `e137fc15a80d03490b7e42510b20667c5ce10fa69a55429d2dde30d8cb0c1c51` |
+| `cppreference` | built, to upload | 131,821,568 B | `5c48b66130c3322ffe2854a9fe63ec6c40e2fa590da68381c44023f0f68885f5` |
+| `scripting` | built, to upload | 75,472,896 B | `3082e93a1e38e84b24787e7fa10f2c04d7d286ccdd4798326cfc199b8f615153` |
+| `python` | built, to upload | 33,419,264 B | `154996ead787442b81207da9bf81c446b68702aa79e6736b60b487a5ab55bde0` |
+| `debugger` | built, to upload | 26,247,168 B | `f2b4b816dc3afa032b478066976454f8758591530b7407f615670d7be34eb5e7` |
+| `sqlite` | built, to upload | 19,255,296 B | `8a4e24d429582e646b2f9aafb83b956bf0d8149d46d349e8153e84c75f74f905` |
+
+The published set is the first table: there is no link for these until they
+are uploaded, at the same addresses (`…/resolve/<pack>.arguspack`). A bucket is not versioned, so re-uploading a pack
 replaces it in place with no history to roll back to.
 
 The same digest list, generated from the built files rather than typed, is in

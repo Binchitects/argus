@@ -962,13 +962,53 @@ Shipped on tests alone, to prove next:
 - N7: the video server's decode on the GPU (the 8 GB threshold).
 - T6: the answer cache through Traefik's health-checked route.
 
-## Next (after v5.0.0)
+## v5.1.0 — Proven, finished, and Arena Code in the browser (2026-10-05)
 
-1. **Prove what shipped on tests** *(S each)*: the list above, on the test
-   GitLab and the live stack, with what each needs asked for first.
-2. **SAML** *(M)*: needs `System.Security.Cryptography.Xml`, which is not in
-   the shared framework (a package: asked for first).
-3. **Confluence and SharePoint** *(M each)*: connectors behind
-   `IKnowledgeConnector`, with their vendors' sandboxes.
-4. **The rest of N8** *(S each)*: the seven unpublished packs published; the
-   live e2e suite one model test at a time in CI; a better Persian voice.
+What v5.0.0 shipped on tests alone, proved on the live stack:
+
+- **W3**: the CI template in the test GitLab's own pipeline (a shell runner):
+  a review comment on a merge request that found both seeded bugs, and a
+  failed job explained on it.
+- **G1**: company sign-in with the test GitLab as the OIDC provider (as
+  `http://gitlab.test:8929` on the stack's network): signed in, refused outside
+  the required group, the groups claim filling a directory group.
+- **E8**: a real Mattermost (10.11.3) bot answering in its thread as the asker;
+  email in answered by email (an SMTP sink). Slack and Teams need their own
+  workspaces: tests only.
+- **E7**: Talk in Chrome with a recorded voice as the microphone: written down
+  (20 s on the CPU speech server), answered, the sentence read aloud.
+- **G6**: two replicas (one leads, settings everywhere, takeover in 4 s, the
+  newcomer not taking the lead back); the Helm chart linted and rendered in
+  five configurations (no cluster: kind's images are on Docker Hub).
+- **N7**: proving it found a bug: the GPU decode never fit its 3 GB budget.
+  Fixed: 63 s on the GPU, 309 s on the CPU, for a 9-frame clip.
+- **T6**: the answer cache through Traefik's health-checked route.
+
+Built: SAML (no package after all: SignedXml is in ASP.NET Core's shared
+framework), Confluence and SharePoint connectors (against fakes: no instance
+here), `arena-code web`, the certificate download and every Connect your tools
+guide reworked (Qwen Code and Arena Code proved through the self-signed CA),
+the gyro Persian voice, the live browser suite one model test at a time and
+nightly on a self-hosted runner, the `qt` pack and the seven packs rebuilt
+(kept local for the maintainer to upload; digests in docs/argus/overview.md).
+
+**T4a measured, not met.** Deep research with Qwen3-4B as the model for small
+steps: the four sub-agents finished 102 s after the plan (they took 255–518 s
+each on the big model), but the whole answer took 1,606 s, because the big
+model went on filling gaps itself: 18 page reads of its own, 679k prompt tokens
+(88% from the cache) at about 160 tokens a second. The report was good (15k
+characters, sources from docs.python.org). Next: send the gap-filling to
+sub-agents too, and cap the big model's own tool rounds in research.
+
+## Next (after v5.1.0)
+
+1. **Deep research under 6 minutes** *(S)*: the big model delegates its gap
+   filling, and its own tool rounds in research are capped (see T4a above).
+2. **The new packs in the bucket** *(S, the maintainer)*: the eight built
+   packs, checked against their digests.
+3. **Live against real platforms** *(S each, with access)*: Slack and Teams
+   bots, SAML with a real IdP, Confluence and SharePoint with an instance or a
+   sandbox, Helm on a cluster.
+4. **The default chat model** *(S)*: a new chat starts on a loaded model, so a
+   small model loaded by one person's agent became everyone's default; the
+   admin's default should win unless it cannot load.
