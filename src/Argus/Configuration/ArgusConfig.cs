@@ -9,7 +9,8 @@ public sealed class ConfigError(string message) : Exception(message);
 /// How Argus authenticates to GitLab: an access token (<c>PRIVATE-TOKEN</c>) or a
 /// username and password exchanged for a token through GitLab's sign-in form.
 /// The password is read from the environment only, never from the config file,
-/// and reaches exactly one request; clones always use the minted token.
+/// and is sent only while signing in (GitLab's own form, then the LDAP sign-ins
+/// tried); requests and clones always use the minted token.
 /// </summary>
 public sealed record GitLabConfig
 {

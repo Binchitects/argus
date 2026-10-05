@@ -157,6 +157,11 @@ public static class ToolEndpoints
             {
                 return Results.Ok(new { ok = false, error = bad, certificate = untrusted is null ? null : await ServerTls.ProbeAsync(untrusted, tls.Tls, tls.TlsCa, ct) });
             }
+            // Its calls go to its address, which the document may not have come from: no secure connection there is said now, with why.
+            if (await SecureAsync(api.Url, client, ct) is ({ } insecure, var refused))
+            {
+                return Results.Ok(new { ok = false, error = insecure, certificate = refused is null ? null : await ServerTls.ProbeAsync(refused, tls.Tls, tls.TlsCa, ct) });
+            }
             var ops = ((OpenApiTool)registry.Server(api, client)).Operations();
             return Results.Ok(new
             {
@@ -201,6 +206,40 @@ public static class ToolEndpoints
         Uri.TryCreate(url, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttps || u.Scheme == Uri.UriSchemeHttp);
 
     /// <summary>
+    /// Why no secure connection can be set up with the API's https address (one HEAD request, nothing
+    /// called): its certificate refused (and that address, to say why), or a handshake that failed for
+    /// another reason. Nothing otherwise: an API that is down, slow or does not take HEAD is not what
+    /// reading its document tests.
+    /// </summary>
+    private static async Task<(string? Problem, Uri? Untrusted)> SecureAsync(string url, HttpClient http, CancellationToken ct)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var at) || at.Scheme != Uri.UriSchemeHttps)
+        {
+            return (null, null);
+        }
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            using var head = new HttpRequestMessage(HttpMethod.Head, at);
+            using var answer = await http.SendAsync(head, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            return (null, null);
+        }
+        catch (HttpRequestException ex) when (ServerTls.IsCertificateError(ex))
+        {
+            return ($"The API at {at} cannot be called: its certificate is not trusted. Trust the CA that signed it, or stop checking it.", at);
+        }
+        catch (HttpRequestException ex) when (ServerTls.HandshakeFailed(at.Host, ex) is { } handshake)
+        {
+            return ($"The API at {at} cannot be called. {handshake}", null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            return (null, null);
+        }
+    }
+
+    /// <summary>
     /// Puts the API's document in place (given, fetched from SpecUrl with the API's certificate check, or kept),
     /// checks it lists at least one operation, and takes the address from it when none is given. Why not
     /// (and the address whose certificate was refused, if that was why), or nothing.
@@ -224,6 +263,10 @@ public static class ToolEndpoints
             catch (HttpRequestException ex) when (ServerTls.IsCertificateError(ex))
             {
                 return ($"The document could not be fetched from {from}: its certificate is not trusted. Trust the CA that signed it, or stop checking it.", from);
+            }
+            catch (HttpRequestException ex) when (ServerTls.HandshakeFailed(from.Host, ex) is { } handshake)
+            {
+                return ($"The document could not be fetched from {from}. {handshake}", null);
             }
             catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
             {

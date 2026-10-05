@@ -32,7 +32,7 @@ default), **Trust this CA** (a company CA's certificate in PEM, pasted or from
 a file; the name must still match), or **Do not check** (warned of on its card,
 audited as `tool.server_tls`). It applies to the plugin's MCP server or API,
 and to its OAuth token address when that is on the same server (same host and
-port); an update keeps it.
+port), never to a host either redirects to (not followed); an update keeps it.
 
 **Update** appears when the catalog has another version; the settings stay,
 and its prompts become the new version's. **Remove** takes its tool out of
@@ -117,7 +117,8 @@ the document's first server) and an optional key header. **Read it** lists
 the operations before you add it. On a server with a company CA or a
 self-signed certificate, choose **Trust this CA** or **Do not check** under
 **Its certificate**: the document is fetched, and the calls made, with it.
-**Read it** says why a certificate was refused.
+**Read it** says why a certificate was refused, at the document's address or
+at the API's own (checked even when the document is pasted).
 
 Each operation becomes a function named `{api}__{operationId}` (snake case):
 its path, query and header parameters and its JSON body are the arguments,

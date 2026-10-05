@@ -161,11 +161,13 @@ token: empty `GITLAB_USERNAME` when you move to a token. (A standalone Argus
 can name the mode with `ARGUS_GITLAB_AUTH=token` or `password`.)
 
 Argus then does what a browser does: fetch GitLab's sign-in form, post the
-username and password to `/users/sign_in` with the form's CSRF token, check the
+username and password to `/users/sign_in` with that form's CSRF token, check the
 session against `/api/v4/user`, and create a personal access token through the
 web endpoint carrying `read_api` and `read_repository` — nothing wider. Every
-request after that uses the minted token, and the password reaches exactly one
-request. Before minting, a token Argus created on a previous run is revoked, so
+request after that uses the minted token: the password is sent only while
+signing in (at start, and again when a minted token dies, below), to GitLab's
+own form and, for an account that form refuses, to the LDAP sign-ins described
+next. Before minting, a token Argus created on a previous run is revoked, so
 restarts do not accumulate credentials.
 
 **LDAP accounts.** GitLab's own form takes accounts whose password GitLab keeps;
@@ -173,15 +175,20 @@ an account GitLab checks against LDAP signs in on the LDAP form instead (the
 "LDAP" tab of GitLab's sign-in page, posting to
 `/users/auth/ldapmain/callback`, one per LDAP server). When GitLab's own form
 refuses the account, Argus tries each LDAP sign-in the page offers, with the
-LDAP username. To go straight to one server, or never try LDAP, set
-`GITLAB_LDAP` in `.env` (`ARGUS_GITLAB_LDAP` for a standalone Argus;
-`gitlab.ldap` in its config file):
+LDAP username, until one takes it (each with a fresh page and that form's own
+token). So by default the password goes to GitLab's own form and then to each
+LDAP sign-in in turn, each checked against its LDAP server: one that holds an
+account of that name with another password sees a failed bind, which can
+count toward that account's lockout. To go straight to one server, or
+never try LDAP, set `GITLAB_LDAP` in `.env` (`ARGUS_GITLAB_LDAP` for a
+standalone Argus; `gitlab.ldap` in its config file); for an LDAP account, name
+its server:
 
-| `GITLAB_LDAP` | what Argus does |
-|---|---|
-| empty (the default) | GitLab's own sign-in, then each LDAP sign-in on the page |
-| `ldapmain` (a provider's name, as in the form's address) | that LDAP sign-in only |
-| `off` | GitLab's own sign-in only |
+| `GITLAB_LDAP` | what Argus does | where the password goes |
+|---|---|---|
+| empty (the default) | GitLab's own sign-in, then each LDAP sign-in on the page | GitLab's own form, then each LDAP sign-in until one takes it |
+| `ldapmain` (a provider's name, as in the form's address) | that LDAP sign-in only | that LDAP sign-in only |
+| `off` | GitLab's own sign-in only | GitLab's own form only |
 
 A refused sign-in says which ones were tried.
 
