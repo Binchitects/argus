@@ -1,6 +1,6 @@
 name: CI
 
-# Every push and pull request: the API, Argus and Arena Code (.NET), both web apps, each
+# Every push and pull request: the API, Argus and Code Arena (.NET), both web apps, each
 # in a real browser, the deployment's tooling, and every env sample resolving
 # into a complete compose file.
 
@@ -38,20 +38,25 @@ jobs:
           git config --global user.email ci@argus.invalid && git config --global user.name ci
           dotnet test tests/Argus.Tests -c Release
 
-  arena-code:
+  code-arena:
     # The coding agent people download: against a fake gateway and fake MCP
-    # servers on real sockets, then published as one file and started.
+    # servers on real sockets, then packaged as one file with its IDE page and
+    # started.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with: { global-json-file: global.json }
-      - run: dotnet test tests/ArenaCode.Tests -c Release
-      - name: One self-contained file starts
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: src/web/package-lock.json }
+      - run: dotnet test tests/CodeArena.Tests -c Release
+      - name: The package for Linux, and its program starts
         run: |
-          tools/publish-arena-code.sh linux-x64
-          dist/arena-code/linux-x64/arena-code --version
-          dist/arena-code/linux-x64/arena-code --help
+          (cd src/web && npm ci)
+          tools/package-code-arena.sh --online linux-x64
+          (cd dist && sha256sum -c SHA256SUMS)
+          dist/code-arena/linux-x64/code-arena --version
+          dist/code-arena/linux-x64/code-arena --help
 
   web:
     runs-on: ubuntu-24.04

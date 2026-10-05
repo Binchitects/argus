@@ -3,7 +3,7 @@
 The chat is at `https://DOMAIN/chat`, for everyone who can sign in. To use
 the models from your own tools (Claude Code, Qwen Code, an editor, a script),
 see **Connect your tools** (`/setup`): your API key, the gateway's address and
-setups to paste, and [Arena Code](arena-code.md), our own coding agent, to
+setups to paste, and [Code Arena](code-arena.md), our own coding agent, to
 download. For a GitLab pipeline, see [ci.md](ci.md). Your agent can use your
 chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 

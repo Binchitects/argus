@@ -21,8 +21,10 @@ permissions. Nothing leaves your network.**
   and fair use when the GPU is shared. **Connect your tools** walks each person
   through Claude Code, Codex, Qwen Code, OpenCode, Aider, Hermes, OpenClaw,
   DeepSeek Harness, Continue, Cline and more, and offers
-  [Arena Code](docs/arena-code.md), our own coding agent: one file, nothing to
-  install, every Arena tool as you.
+  [Code Arena](docs/code-arena.md), our own coding agent and an IDE in the
+  browser around it (files, editor, search, terminals, the agent's chat): one
+  file, nothing to install, every Arena tool as you. `tools/package-code-arena.sh`
+  packs it for Linux, macOS and Windows.
 - **Sign-in** for the whole stack: accounts, LDAP or Active Directory, two-factor,
   single sign-on for the services that have their own login, groups that decide
   who may use which model and tool.
@@ -98,10 +100,10 @@ observability): [deploy/argus-standalone/](deploy/argus-standalone/README.md).
 
 | path | what it is |
 |---|---|
-| [`src/`](src/) | `Llm.Api` and `Llm.Core` (the platform's .NET API), `Argus` (the code index service), `web` (the platform's React app), `argus-web` (Argus's own app) |
-| [`tests/`](tests/) | `Llm.Tests` and `Argus.Tests` (xUnit), `deploy` (the deployment tooling) |
+| [`src/`](src/) | `Llm.Api` and `Llm.Core` (the platform's .NET API), `Argus` (the code index service), `CodeArena` (the coding agent and its IDE), `web` (the platform's React app, and Code Arena's page), `argus-web` (Argus's own app) |
+| [`tests/`](tests/) | `Llm.Tests`, `Argus.Tests` and `CodeArena.Tests` (xUnit), `deploy` (the deployment tooling) |
 | [`deploy/`](deploy/) | the platform's deployment: compose (and Podman's override), config, scripts; `argus-standalone/` |
-| [`tools/`](tools/) | development and operations tools: `dn`, the test GitLab, pack builds |
+| [`tools/`](tools/) | development and operations tools: `dn`, the test GitLab, pack builds, Code Arena's builds and packages (`publish-code-arena.sh`, `package-code-arena.sh`) |
 | [`clients/`](clients/) | MCP configurations for Claude Code, Qwen Code, Continue, DeepSeek Harness and others (the app's **Connect your tools** page has each tool's full setup); the `arena` CLI and a GitLab CI template that reviews merge requests ([docs/ci.md](docs/ci.md)) |
 | [`docs/`](docs/README.md) | the documentation |
 | [`evals/`](evals/) | the evaluation question sets and results |

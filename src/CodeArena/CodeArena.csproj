@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Code Arena: the coding agent people run on their own machine, against
+       their Argus Arena. The base class library only, no package references:
+       it builds with nothing but the SDK. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>code-arena</AssemblyName>
+    <RootNamespace>CodeArena</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsPackable>false</IsPackable>
+    <!-- The terminals' pseudo-terminals: forkpty and ConPTY through the C API. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeArena.Tests" />
+  </ItemGroup>
+
+  <!-- The IDE (code-arena, code-arena web): the page src/web builds into web/
+       (tools/publish-code-arena.sh does it first), embedded whole. Without it,
+       code-arena web says the page is missing. -->
+  <ItemGroup Condition="Exists('web/code-arena.html')">
+    <EmbeddedResource Include="web/**/*" LogicalName="web/%(RecursiveDir)%(Filename)%(Extension)" WithCulture="false" />
+    <None Remove="web/**/*" />
+  </ItemGroup>
+
+  <!-- Published for one system (tools/publish-code-arena.sh, -r <rid>): one
+       self-contained file that runs where no .NET is installed. Only then: a
+       plain build or test needs no runtime pack. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Trimming and the single-file analyzer need the ILLink package, which the
+         offline package folder does not hold. The code keeps clear of what the
+         analyzer warns about (Assembly.Location and the like). -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+    <!-- Only .NET's own runtime pack: not ASP.NET's or Windows Desktop's, which
+         the SDK otherwise fetches in case a referenced project needs them. -->
+    <DisableTransitiveFrameworkReferenceDownloads>true</DisableTransitiveFrameworkReferenceDownloads>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+</Project>

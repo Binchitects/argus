@@ -299,18 +299,20 @@ services:
     environment: { ARGUS_GITLAB_CA_CERT: /tls/company-ca.pem }
 ```
 
-## Arena Code
+## Code Arena
 
-The app's image carries Arena Code, our own coding agent, for people to
+The app's image carries Code Arena, our own coding agent, for people to
 download from **Connect your tools**: one file per system, built with the
 image. Building it needs .NET's runtime packs, which a host with no internet
 cannot fetch: fill `tools/offline-nuget/` once from a machine that can (its
 README has the commands, about 220 MB), then `docker compose build app`. On a
-host with internet, `docker compose build app --build-arg ARENA_CODE=online`
+host with internet, `docker compose build app --build-arg CODE_ARENA=online`
 fetches them instead. Without either, the image is built without it and the
 page says so. People on a private CA sign in with
-`arena-code login --url https://DOMAIN --ca ca.crt` (give them `certs/ca.crt`).
-Details: [arena-code.md](arena-code.md).
+`code-arena login --url https://DOMAIN --ca ca.crt` (give them `certs/ca.crt`).
+To hand it out another way, `tools/package-code-arena.sh` packs each system
+with its README and licence into `dist/` (with `SHA256SUMS`), from the same
+offline folder. Details: [code-arena.md](code-arena.md).
 
 ## Upgrading from v3
 

@@ -9,26 +9,27 @@ export const DropdownMenuGroup = Menu.Group
 export const DropdownMenuSub = Menu.Sub
 export const DropdownMenuRadioGroup = Menu.RadioGroup
 
-const content =
+/** The menus' look, for a context menu that matches them. */
+export const menuContent =
   'z-50 min-w-[10rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95'
-const item =
+export const menuItem =
   'relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground'
 
 export function DropdownMenuContent({ className, sideOffset = 4, ...props }: ComponentProps<typeof Menu.Content>) {
   return (
     <Menu.Portal>
-      <Menu.Content sideOffset={sideOffset} className={cn(content, className)} {...props} />
+      <Menu.Content sideOffset={sideOffset} className={cn(menuContent, className)} {...props} />
     </Menu.Portal>
   )
 }
 
 export function DropdownMenuItem({ className, variant, ...props }: ComponentProps<typeof Menu.Item> & { variant?: 'destructive' }) {
-  return <Menu.Item className={cn(item, variant === 'destructive' && 'text-destructive-ink focus:bg-destructive/10 focus:text-destructive-ink [&_svg]:text-destructive-ink', className)} {...props} />
+  return <Menu.Item className={cn(menuItem, variant === 'destructive' && 'text-destructive-ink focus:bg-destructive/10 focus:text-destructive-ink [&_svg]:text-destructive-ink', className)} {...props} />
 }
 
 export function DropdownMenuCheckboxItem({ className, children, ...props }: ComponentProps<typeof Menu.CheckboxItem>) {
   return (
-    <Menu.CheckboxItem className={cn(item, 'pl-8', className)} {...props}>
+    <Menu.CheckboxItem className={cn(menuItem, 'pl-8', className)} {...props}>
       <span className="absolute left-2 flex size-3.5 items-center justify-center">
         <Menu.ItemIndicator>
           <Check />
@@ -41,7 +42,7 @@ export function DropdownMenuCheckboxItem({ className, children, ...props }: Comp
 
 export function DropdownMenuRadioItem({ className, children, ...props }: ComponentProps<typeof Menu.RadioItem>) {
   return (
-    <Menu.RadioItem className={cn(item, 'pl-8', className)} {...props}>
+    <Menu.RadioItem className={cn(menuItem, 'pl-8', className)} {...props}>
       <span className="absolute left-2 flex size-3.5 items-center justify-center">
         <Menu.ItemIndicator>
           <Circle className="size-2 fill-current" />
@@ -66,7 +67,7 @@ export function DropdownMenuShortcut({ className, ...props }: ComponentProps<'sp
 
 export function DropdownMenuSubTrigger({ className, children, ...props }: ComponentProps<typeof Menu.SubTrigger>) {
   return (
-    <Menu.SubTrigger className={cn(item, 'data-[state=open]:bg-accent', className)} {...props}>
+    <Menu.SubTrigger className={cn(menuItem, 'data-[state=open]:bg-accent', className)} {...props}>
       {children}
       <ChevronRight className="ml-auto" />
     </Menu.SubTrigger>
@@ -76,7 +77,7 @@ export function DropdownMenuSubTrigger({ className, children, ...props }: Compon
 export function DropdownMenuSubContent({ className, ...props }: ComponentProps<typeof Menu.SubContent>) {
   return (
     <Menu.Portal>
-      <Menu.SubContent className={cn(content, className)} {...props} />
+      <Menu.SubContent className={cn(menuContent, className)} {...props} />
     </Menu.Portal>
   )
 }

@@ -1,6 +1,6 @@
-# tools/offline-nuget: .NET runtime packs for Arena Code
+# tools/offline-nuget: .NET runtime packs for Code Arena
 
-Arena Code (src/ArenaCode) is published as one self-contained file per system,
+Code Arena (src/CodeArena) is published as one self-contained file per system,
 so the machines that run it need no .NET. Building those files needs .NET's
 runtime and host packs for each system. They are not part of the SDK, and a
 host with no internet cannot fetch them, so they are kept here, once, as
@@ -8,12 +8,13 @@ host with no internet cannot fetch them, so they are kept here, once, as
 
 With them here:
 
-- `tools/publish-arena-code.sh --offline` builds every system into
-  `dist/arena-code/<rid>/` from this folder only (nothing is downloaded);
-- the app's image (`src/Llm.Api/Dockerfile`, `ARENA_CODE=auto`) builds them the
+- `tools/publish-code-arena.sh --offline` builds every system into
+  `dist/code-arena/<rid>/` from this folder only (nothing is downloaded), and
+  `tools/package-code-arena.sh` packs them for a release;
+- the app's image (`src/Llm.Api/Dockerfile`, `CODE_ARENA=auto`) builds them the
   same way and serves them on Connect your tools.
 
-Without them, the image skips Arena Code and the page says how to add it.
+Without them, the image skips Code Arena and the page says how to add it.
 
 ## What goes here
 

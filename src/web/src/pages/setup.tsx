@@ -15,7 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { api, errorMessage } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
-import { arenaMcp, CA_FILE, caShell, KEY, tools, type ArenaCodeBuild, type Context, type Step, type System, type Tool } from './setup-tools'
+import { arenaMcp, CA_FILE, caShell, KEY, tools, type CodeArenaBuild, type Context, type Step, type System, type Tool } from './setup-tools'
 
 interface ChatConfig {
   model: string | null
@@ -50,9 +50,9 @@ const tokens = (n: number | null) => (n ? n.toLocaleString('en-US') : '—')
 export function ConnectPage() {
   const config = useQuery({ queryKey: ['chat', 'config'], queryFn: ({ signal }) => api<ChatConfig>('/api/chat/config', { signal }) })
   const mcp = useQuery({ queryKey: ['account', 'mcp'], queryFn: ({ signal }) => api<McpInfo>('/api/account/mcp', { signal }) })
-  const arenaCode = useQuery({
-    queryKey: ['downloads', 'arena-code'],
-    queryFn: ({ signal }) => api<{ version: string; builds: ArenaCodeBuild[] }>('/api/downloads/arena-code', { signal }),
+  const codeArena = useQuery({
+    queryKey: ['downloads', 'code-arena'],
+    queryFn: ({ signal }) => api<{ version: string; builds: CodeArenaBuild[] }>('/api/downloads/code-arena', { signal }),
   })
   const certificate = useQuery({
     queryKey: ['downloads', 'certificate'],
@@ -73,7 +73,7 @@ export function ConnectPage() {
   const tool = tools.find((t) => t.id === toolId) ?? tools[0]!
   const context: Context = {
     root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, argusUrl,
-    apiKey: fill && newKey ? newKey : undefined, origin: window.location.origin, arenaCode: arenaCode.data ?? null,
+    apiKey: fill && newKey ? newKey : undefined, origin: window.location.origin, codeArena: codeArena.data ?? null,
     os, ca: !!certificate.data?.available && !certificate.data.trusted,
   }
   const choose = (id: string) => {

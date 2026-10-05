@@ -46,7 +46,7 @@ public sealed class McpCalls
 
 /// <summary>
 /// Arena MCP: https://DOMAIN/mcp, the MCP server (streamable HTTP, 2025-06-18) that gives an
-/// outside agent (Arena Code, Claude Code, Qwen Code, Continue...) the person's chat tools, signed
+/// outside agent (Code Arena, Claude Code, Qwen Code, Continue...) the person's chat tools, signed
 /// in with their own API key. Stateless: every request carries the key, a list is kept a minute,
 /// and a session id is only a label (for cancelling a call). Requests answer as JSON; a tool call
 /// answers as server-sent events, with its progress and a comment line while it runs.
@@ -167,7 +167,7 @@ public static class McpEndpoints
             await WriteAsync(http, StatusCodes.Status400BadRequest, Error(null, -32700, "The body is not JSON."));
             return;
         }
-        // The model a new chat of theirs starts with: an agent with no model of its own takes it (Arena Code).
+        // The model a new chat of theirs starts with: an agent with no model of its own takes it (Code Arena).
         async Task<string?> DefaultModelAsync(CancellationToken token) => (await policy.ForAsync(user, await models.ListAsync(token), token)).Default?.Name ?? models.DefaultName;
         var handler = new Handler(user, protocol, session, tools, prompts, calls, Product(branding), DefaultModelAsync);
 
