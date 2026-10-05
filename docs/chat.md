@@ -150,10 +150,11 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   on in new chats. The model calls a tool when a question needs it.
   - **Argus**: the code you can read in GitLab (below).
   - **Company knowledge**: the company's documents you may read (GitLab
-    wikis and issues, folders, websites an admin added under Admin →
-    Knowledge), found by meaning; the model cites each passage with its
-    title and link. A project's wiki is found only by its members in GitLab.
-    See [knowledge.md](knowledge.md).
+    wikis and issues, Confluence, SharePoint and OneDrive, folders, websites
+    an admin added under Admin → Knowledge), found by meaning; the model
+    cites each passage with its title and link. A project's wiki is found
+    only by its members in GitLab, a Confluence page only by whom Confluence
+    lets view it. See [knowledge.md](knowledge.md).
   - **Image generation**: a picture from a description, made by the picture
     model (FLUX.2 klein). It shows in the answer, opens full size, and is a
     file of the chat.
@@ -798,8 +799,11 @@ So that everyone gets their turn:
   data to the model, not instructions.
 - **Company knowledge is what each person may read.** A GitLab project's wiki
   and issues are found only by its members (matched by username, as Argus
-  does; admins too only when they are members); a folder or a website only by
-  the groups an admin chose. The search filters by reader before it ranks.
+  does; admins too only when they are members); a Confluence page only by
+  whom Confluence lets view it (its space and its restrictions), a SharePoint
+  file only by whom it is shared with, and what they cannot tell by the groups
+  an admin chose; a folder or a website only by the groups an admin chose. The
+  search filters by reader before it ranks.
 - **MCP servers** get the person's email only if the admin set a header for
   it. A server's key is stored encrypted under `APP_KEY` and never shown.
 - **Memories are the person's own**: only their answers read them, and only

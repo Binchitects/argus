@@ -14,6 +14,10 @@ public static class KnowledgeWiring
         services.AddScoped<IKnowledgeConnector>(sp => sp.GetRequiredService<GitLabConnector>());
         services.AddScoped<IKnowledgeConnector, FolderConnector>();
         services.AddScoped<IKnowledgeConnector, WebsiteConnector>();
+        services.AddHttpClient(ConfluenceConnector.Client, c => c.Timeout = TimeSpan.FromMinutes(1));
+        services.AddScoped<IKnowledgeConnector, ConfluenceConnector>();
+        services.AddHttpClient(SharePointConnector.Client, c => c.Timeout = TimeSpan.FromMinutes(2));
+        services.AddScoped<IKnowledgeConnector, SharePointConnector>();
         services.AddScoped<KnowledgeSyncer>();
         services.AddSingleton<KnowledgeSync>();
         services.AddHostedService(sp => sp.GetRequiredService<KnowledgeSync>());

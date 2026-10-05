@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, FileText, FolderOpen, Globe, GitBranch, Library, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { BookOpen, Cloud, ExternalLink, FileText, FolderOpen, Globe, GitBranch, Library, Pencil, PlugZap, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useId, useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -13,7 +13,7 @@ import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Field } from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
@@ -21,7 +21,7 @@ import { ago, count } from '@/lib/format'
 import { AccessPicker, type Audience } from './access-picker'
 import { groupsQuery } from './groups-api'
 
-type Kind = 'gitlab' | 'folder' | 'website'
+type Kind = 'gitlab' | 'folder' | 'website' | 'confluence' | 'sharepoint'
 
 export interface KnowledgeSource {
   id: string
@@ -34,6 +34,17 @@ export interface KnowledgeSource {
   maxPages: number
   audience: Audience
   groups: { id: string; name: string }[]
+  /** Confluence: the space keys read; null: every space the account may read. */
+  spaces: string | null
+  blogPosts: boolean
+  sitePages: boolean
+  /** Confluence Cloud: the account's email; SharePoint: the app's client ID. */
+  account: string | null
+  tenant: string | null
+  /** A token or client secret is saved (it is never sent back). */
+  secretSet: boolean
+  /** Confluence and SharePoint: what the last sync could mirror of who may read it, a line each. */
+  mirror: string | null
   state: 'new' | 'syncing' | 'synced' | 'failed'
   error: string | null
   syncStartedAt: string | null
@@ -42,6 +53,8 @@ export interface KnowledgeSource {
   passages: number
   /** A GitLab source's projects, with how many of their members may read them. */
   projects: { name: string | null; people: number; fetchedAt: string }[] | null
+  /** A Confluence source's spaces, with how many people may view each. */
+  viewers: { name: string | null; people: number; fetchedAt: string }[] | null
 }
 
 interface Knowledge {
@@ -66,7 +79,12 @@ const kinds: Record<Kind, { label: string; icon: typeof Globe }> = {
   gitlab: { label: 'GitLab', icon: GitBranch },
   folder: { label: 'Folder', icon: FolderOpen },
   website: { label: 'Website', icon: Globe },
+  confluence: { label: 'Confluence', icon: BookOpen },
+  sharepoint: { label: 'SharePoint', icon: Cloud },
 }
+
+/** Confluence and SharePoint: who may read is their own permissions; the admin chooses only for what those cannot tell. */
+const mirrors = (kind: Kind) => kind === 'confluence' || kind === 'sharepoint'
 
 const knowledgeQuery = {
   queryKey: ['admin', 'knowledge'] as const,
@@ -80,6 +98,7 @@ export function KnowledgePage() {
     refetchInterval: (q) => (q.state.data?.sources.some((s) => s.state === 'syncing' || s.state === 'new') ? 2000 : false),
   })
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<KnowledgeSource | null>(null)
   const [reading, setReading] = useState<KnowledgeSource | null>(null)
   if (knowledge.isPending) return <PageSkeleton />
   if (knowledge.error) return <QueryError error={knowledge.error} retry={() => knowledge.refetch()} />
@@ -88,7 +107,7 @@ export function KnowledgePage() {
     <>
       <PageHeader
         title="Knowledge"
-        description="The company's documents the chat searches (Company knowledge, a tool in Admin → Tools), each person only what they may read: GitLab wikis and issues, folders and websites. Confluence and SharePoint come next."
+        description="The company's documents the chat searches (Company knowledge, a tool in Admin → Tools), each person only what they may read: GitLab wikis and issues, Confluence, SharePoint and OneDrive, folders and websites."
         actions={
           <Button onClick={() => setAdding(true)}>
             <Plus /> Add a source
@@ -104,17 +123,18 @@ export function KnowledgePage() {
         )}
         {k.sources.length === 0 ? (
           <EmptyState icon={Library} title="No sources yet" action={<Button onClick={() => setAdding(true)}><Plus /> Add a source</Button>}>
-            Add a GitLab project or group (its wiki and issues, read by its members), a folder mounted under {k.folderRoot}, or a website. Each is read again every {every(k.syncEvery)}.
+            Add a GitLab project or group (its wiki and issues, read by its members), Confluence spaces or SharePoint sites (read by whom they let read), a folder mounted under {k.folderRoot}, or a website. Each is read again every {every(k.syncEvery)}.
           </EmptyState>
         ) : (
           <div className="stagger grid gap-4 xl:grid-cols-2">
             {k.sources.map((s) => (
-              <SourceCard key={s.id} source={s} onDocuments={() => setReading(s)} />
+              <SourceCard key={s.id} source={s} onDocuments={() => setReading(s)} onEdit={() => setEditing(s)} />
             ))}
           </div>
         )}
       </div>
-      <AddDialog open={adding} folderRoot={k.folderRoot} onClose={() => setAdding(false)} />
+      <SourceDialog open={adding} folderRoot={k.folderRoot} onClose={() => setAdding(false)} />
+      <SourceDialog key={editing?.id ?? 'none'} open={editing !== null} source={editing ?? undefined} folderRoot={k.folderRoot} onClose={() => setEditing(null)} />
       <DocumentsDialog source={reading} onClose={() => setReading(null)} />
     </>
   )
@@ -141,7 +161,7 @@ function StateBadge({ source }: { source: KnowledgeSource }) {
   }
 }
 
-function SourceCard({ source, onDocuments }: { source: KnowledgeSource; onDocuments: () => void }) {
+function SourceCard({ source, onDocuments, onEdit }: { source: KnowledgeSource; onDocuments: () => void; onEdit: () => void }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'knowledge'] })
@@ -174,10 +194,12 @@ function SourceCard({ source, onDocuments }: { source: KnowledgeSource; onDocume
           <CardTitle className="flex flex-wrap items-center gap-2">
             {source.name} <Badge variant="outline">{kinds[source.kind].label}</Badge> <StateBadge source={source} />
           </CardTitle>
-          <CardDescription className="font-mono text-xs break-all">
+          <CardDescription className="font-mono text-xs break-all whitespace-pre-line">
             {source.location}
             {source.kind === 'gitlab' && ` · ${[source.wiki && 'wiki', source.issues && 'issues'].filter(Boolean).join(' and ')}`}
             {source.kind === 'website' && ` · ${source.hosts ?? 'its own host'}, up to ${count(source.maxPages)} pages`}
+            {source.kind === 'confluence' && ` · ${source.spaces ? `spaces ${source.spaces}` : 'every space it may read'}${source.blogPosts ? ', blog posts too' : ''} · ${source.account ? 'Cloud' : 'Data Center'}`}
+            {source.kind === 'sharepoint' && `${source.sitePages ? '\nsite pages too' : ''} · tenant ${source.tenant ?? ''}`}
           </CardDescription>
         </div>
       </CardHeader>
@@ -203,6 +225,36 @@ function SourceCard({ source, onDocuments }: { source: KnowledgeSource; onDocume
               </ul>
             )}
           </div>
+        ) : mirrors(source.kind) ? (
+          <div className="grid gap-2 text-sm">
+            <p className="text-muted-foreground">
+              Who may read it: {source.kind === 'confluence' ? 'whoever may view each space and page in Confluence, by their email (Cloud) or username (Data Center).' : "each file's permissions in SharePoint, people by their email and Microsoft Entra groups by name."}
+            </p>
+            {(source.viewers ?? []).length > 0 && (
+              <ul className="grid gap-0.5 text-xs" aria-label="Spaces">
+                {source.viewers!.map((v) => (
+                  <li key={v.name} className="flex items-center gap-2">
+                    <span className="font-mono">{v.name}</span>
+                    <span className="text-muted-foreground">
+                      {v.people} {v.people === 1 ? 'person' : 'people'}, read {ago(v.fetchedAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {source.mirror && (
+              <ul className="grid gap-0.5 text-xs text-muted-foreground" aria-label="What is mirrored">
+                {source.mirror.split('\n').map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            )}
+            <AccessPicker
+              label={`Where ${kinds[source.kind].label} cannot tell`}
+              value={{ audience: source.audience, groups: source.groups }}
+              onChange={(audience, groups) => readers.mutate({ audience, groups })}
+            />
+          </div>
         ) : (
           <AccessPicker label="Who may read it" value={{ audience: source.audience, groups: source.groups }} onChange={(audience, groups) => readers.mutate({ audience, groups })} />
         )}
@@ -212,6 +264,9 @@ function SourceCard({ source, onDocuments }: { source: KnowledgeSource; onDocume
           </Button>
           <Button variant="outline" size="sm" onClick={onDocuments} disabled={source.documents === 0}>
             <FileText /> Documents
+          </Button>
+          <Button variant="outline" size="sm" onClick={onEdit}>
+            <Pencil /> Settings
           </Button>
           <Button
             variant="outline"
@@ -238,43 +293,80 @@ interface Draft {
   issues: boolean
   hosts: string
   maxPages: string
+  spaces: string
+  blogPosts: boolean
+  sitePages: boolean
+  account: string
+  tenant: string
+  secret: string
   audience: Audience
   groups: string[]
 }
 
-const empty: Draft = { kind: 'gitlab', name: '', location: '', wiki: true, issues: true, hosts: '', maxPages: '200', audience: 'Everyone', groups: [] }
+const empty: Draft = {
+  kind: 'gitlab', name: '', location: '', wiki: true, issues: true, hosts: '', maxPages: '200', spaces: '', blogPosts: false, sitePages: true, account: '', tenant: '', secret: '',
+  audience: 'Everyone', groups: [],
+}
 
-function AddDialog({ open, folderRoot, onClose }: { open: boolean; folderRoot: string; onClose: () => void }) {
+const draftOf = (s: KnowledgeSource): Draft => ({
+  kind: s.kind, name: s.name, location: s.location, wiki: s.wiki, issues: s.issues, hosts: s.hosts ?? '', maxPages: String(s.maxPages), spaces: s.spaces ?? '',
+  blogPosts: s.blogPosts, sitePages: s.sitePages, account: s.account ?? '', tenant: s.tenant ?? '', secret: '', audience: s.audience, groups: s.groups.map((g) => g.id),
+})
+
+/** What the form sends for its kind; a secret only when one was typed (empty keeps the saved one). */
+function bodyOf(d: Draft): Record<string, unknown> {
+  const readers = d.kind === 'gitlab' ? {} : { audience: d.audience, groups: d.groups }
+  const secret = d.secret.trim() ? { secret: d.secret.trim() } : {}
+  switch (d.kind) {
+    case 'gitlab':
+      return { name: d.name, kind: d.kind, location: d.location, wiki: d.wiki, issues: d.issues }
+    case 'website':
+      return { name: d.name, kind: d.kind, location: d.location, ...readers, hosts: d.hosts, maxPages: Number(d.maxPages) }
+    case 'confluence':
+      return { name: d.name, kind: d.kind, location: d.location, account: d.account, spaces: d.spaces, blogPosts: d.blogPosts, ...secret, ...readers }
+    case 'sharepoint':
+      return { name: d.name, kind: d.kind, location: d.location, tenant: d.tenant, account: d.account, sitePages: d.sitePages, ...secret, ...readers }
+    default:
+      return { name: d.name, kind: d.kind, location: d.location, ...readers }
+  }
+}
+
+/** Add a source, or change one (its kind stays). */
+function SourceDialog({ open, source, folderRoot, onClose }: { open: boolean; source?: KnowledgeSource; folderRoot: string; onClose: () => void }) {
   const queryClient = useQueryClient()
   const groups = useQuery({ ...groupsQuery, enabled: open })
   const id = useId()
-  const [draft, setDraft] = useState<Draft>(empty)
+  const start = source ? draftOf(source) : empty
+  const [draft, setDraft] = useState<Draft>(start)
   const [error, setError] = useState<string | null>(null)
-  const set = (change: Partial<Draft>) => setDraft({ ...draft, ...change })
+  const [tested, setTested] = useState<{ ok: boolean; message: string } | null>(null)
+  const set = (change: Partial<Draft>) => {
+    setDraft({ ...draft, ...change })
+    setTested(null)
+  }
   const close = () => {
-    setDraft(empty)
+    setDraft(start)
     setError(null)
+    setTested(null)
     onClose()
   }
-  const add = useMutation({
-    mutationFn: () =>
-      api('/api/admin/knowledge', {
-        body: {
-          name: draft.name,
-          kind: draft.kind,
-          location: draft.location,
-          ...(draft.kind === 'gitlab' ? { wiki: draft.wiki, issues: draft.issues } : { audience: draft.audience, groups: draft.groups }),
-          ...(draft.kind === 'website' ? { hosts: draft.hosts, maxPages: Number(draft.maxPages) } : {}),
-        },
-      }),
+  const save = useMutation({
+    mutationFn: () => (source ? api(`/api/admin/knowledge/${source.id}`, { method: 'PATCH', body: { ...bodyOf(draft), kind: undefined } }) : api('/api/admin/knowledge', { body: bodyOf(draft) })),
     onSuccess: () => {
-      toast.success(`${draft.name} added`, { description: 'It is being read now: its documents show here as they are embedded.' })
+      if (source) toast.success(`${draft.name} saved`)
+      else toast.success(`${draft.name} added`, { description: 'It is being read now: its documents show here as they are embedded.' })
       queryClient.invalidateQueries({ queryKey: ['admin', 'knowledge'] })
       close()
     },
     onError: (e) => setError(errorMessage(e)),
   })
+  const test = useMutation({
+    mutationFn: () => api<{ message: string }>(source ? `/api/admin/knowledge/${source.id}/test` : '/api/admin/knowledge/test', { body: bodyOf(draft) }),
+    onSuccess: (r) => setTested({ ok: true, message: r.message }),
+    onError: (e) => setTested({ ok: false, message: errorMessage(e) }),
+  })
   const names = (groups.data ?? []).filter((g) => draft.groups.includes(g.id)).map((g) => ({ id: g.id, name: g.name }))
+  const saved = source?.secretSet ? 'Saved: leave empty to keep it' : undefined
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent className="sm:max-w-lg">
@@ -283,28 +375,38 @@ function AddDialog({ open, folderRoot, onClose }: { open: boolean; folderRoot: s
           onSubmit={(e) => {
             e.preventDefault()
             setError(null)
-            add.mutate()
+            save.mutate()
           }}
         >
           <DialogHeader>
-            <DialogTitle>Add a knowledge source</DialogTitle>
-            <DialogDescription>It is read now, then again on schedule; only what changed is embedded again.</DialogDescription>
+            <DialogTitle>{source ? `${source.name}: settings` : 'Add a knowledge source'}</DialogTitle>
+            <DialogDescription>{source ? 'A change to what it reads syncs it again now.' : 'It is read now, then again on schedule; only what changed is embedded again.'}</DialogDescription>
           </DialogHeader>
           {error && <Alert variant="destructive">{error}</Alert>}
-          <Field label="Kind">
-            <Select value={draft.kind} onValueChange={(kind: Kind) => set({ kind, location: '' })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="gitlab">GitLab project or group</SelectItem>
-                <SelectItem value="folder">Folder</SelectItem>
-                <SelectItem value="website">Website</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
+          {!source && (
+            <Field label="Kind">
+              <Select value={draft.kind} onValueChange={(kind: Kind) => set({ kind, location: '', audience: mirrors(kind) ? 'Admins' : 'Everyone', groups: [] })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gitlab">GitLab project or group</SelectItem>
+                  <SelectItem value="confluence">Confluence</SelectItem>
+                  <SelectItem value="sharepoint">SharePoint or OneDrive</SelectItem>
+                  <SelectItem value="folder">Folder</SelectItem>
+                  <SelectItem value="website">Website</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label="Name">
-            <Input required maxLength={100} value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder={draft.kind === 'gitlab' ? 'Engineering wiki' : draft.kind === 'folder' ? 'Handbook' : 'Product docs'} />
+            <Input
+              required
+              maxLength={100}
+              value={draft.name}
+              onChange={(e) => set({ name: e.target.value })}
+              placeholder={{ gitlab: 'Engineering wiki', folder: 'Handbook', website: 'Product docs', confluence: 'Company wiki', sharepoint: 'Engineering site' }[draft.kind]}
+            />
           </Field>
           {draft.kind === 'gitlab' && (
             <>
@@ -321,6 +423,48 @@ function AddDialog({ open, folderRoot, onClose }: { open: boolean; folderRoot: s
                   <label htmlFor={`${id}-issues`}>Issues and their comments (not confidential ones)</label>
                 </span>
               </div>
+            </>
+          )}
+          {draft.kind === 'confluence' && (
+            <>
+              <Field label="Site address" hint="Cloud: https://your-site.atlassian.net. Data Center or Server: its address, with its path if it has one.">
+                <Input required type="url" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder="https://your-site.atlassian.net" />
+              </Field>
+              <Field label="Account's email (Cloud)" hint="The email of the account that reads, with its API token. Empty for Data Center, which takes a personal access token.">
+                <Input type="email" value={draft.account} onChange={(e) => set({ account: e.target.value })} placeholder="knowledge-bot@example.com" />
+              </Field>
+              <Field label="API token or personal access token" hint="An account that only reads is enough. Stored encrypted; never shown again.">
+                <Input type="password" autoComplete="off" required={!source?.secretSet} value={draft.secret} onChange={(e) => set({ secret: e.target.value })} placeholder={saved} />
+              </Field>
+              <Field label="Spaces (optional)" hint="Their keys, comma separated. Empty: every space the account may read.">
+                <Input className="font-mono" value={draft.spaces} onChange={(e) => set({ spaces: e.target.value })} placeholder="ENG, HR" />
+              </Field>
+              <span className="flex items-center gap-2 text-sm">
+                <Checkbox id={`${id}-blog`} checked={draft.blogPosts} onCheckedChange={(v) => set({ blogPosts: v === true })} />
+                <label htmlFor={`${id}-blog`}>Blog posts too</label>
+              </span>
+            </>
+          )}
+          {draft.kind === 'sharepoint' && (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Tenant ID" hint="Microsoft Entra ID → Overview, or the tenant's domain.">
+                  <Input required className="font-mono" value={draft.tenant} onChange={(e) => set({ tenant: e.target.value })} placeholder="contoso.onmicrosoft.com" />
+                </Field>
+                <Field label="Client ID" hint="The app's Application (client) ID.">
+                  <Input required className="font-mono" value={draft.account} onChange={(e) => set({ account: e.target.value })} />
+                </Field>
+              </div>
+              <Field label="Client secret" hint="With Sites.Read.All (or Sites.Selected) as an application permission. Stored encrypted; never shown again.">
+                <Input type="password" autoComplete="off" required={!source?.secretSet} value={draft.secret} onChange={(e) => set({ secret: e.target.value })} placeholder={saved} />
+              </Field>
+              <Field label="Sites or libraries" hint="Their addresses, one a line: a site reads all its libraries; a library's address reads that library only.">
+                <Textarea required rows={3} className="font-mono text-xs" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder="https://contoso.sharepoint.com/sites/engineering" />
+              </Field>
+              <span className="flex items-center gap-2 text-sm">
+                <Checkbox id={`${id}-pages`} checked={draft.sitePages} onCheckedChange={(v) => set({ sitePages: v === true })} />
+                <label htmlFor={`${id}-pages`}>The sites' pages too</label>
+              </span>
             </>
           )}
           {draft.kind === 'folder' && (
@@ -343,15 +487,31 @@ function AddDialog({ open, folderRoot, onClose }: { open: boolean; folderRoot: s
               </div>
             </>
           )}
-          {draft.kind !== 'gitlab' && (
+          {mirrors(draft.kind) && (
+            <div className="grid gap-2">
+              <AccessPicker label={`Where ${kinds[draft.kind].label} cannot tell`} value={{ audience: draft.audience, groups: names }} onChange={(audience, chosen) => set({ audience, groups: chosen })} />
+              <p className="text-xs text-muted-foreground">
+                {draft.kind === 'confluence'
+                  ? 'Each page is read by whoever may view it in Confluence. Where Confluence does not tell (a space whose permissions the account cannot see, someone whose email is hidden), these people read it.'
+                  : "Each file is read by whoever its permissions name. Where Graph cannot tell (SharePoint groups such as a site's Members, and site pages), these people read it."}
+              </p>
+            </div>
+          )}
+          {!mirrors(draft.kind) && draft.kind !== 'gitlab' && (
             <AccessPicker label="Who may read it" value={{ audience: draft.audience, groups: names }} onChange={(audience, chosen) => set({ audience, groups: chosen })} />
           )}
+          {tested && <Alert variant={tested.ok ? 'success' : 'destructive'}>{tested.message}</Alert>}
           <DialogFooter>
+            {mirrors(draft.kind) && (
+              <Button type="button" variant="outline" className="sm:mr-auto" loading={test.isPending} onClick={() => test.mutate()}>
+                <PlugZap /> Test connection
+              </Button>
+            )}
             <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>
-            <Button type="submit" loading={add.isPending}>
-              Add
+            <Button type="submit" loading={save.isPending}>
+              {source ? 'Save' : 'Add'}
             </Button>
           </DialogFooter>
         </form>

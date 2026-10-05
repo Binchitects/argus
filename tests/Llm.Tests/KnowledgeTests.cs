@@ -27,19 +27,19 @@ public sealed class KnowledgeTests(AppFixture app)
         return app.Create(app.ConnectionStringFor("knowledge_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), settings);
     }
 
-    private static async Task<TestBrowser> AdminAsync(WebApplicationFactory<Program> f) => await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+    internal static async Task<TestBrowser> AdminAsync(WebApplicationFactory<Program> f) => await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
 
-    private static async Task<(TestBrowser Browser, Guid Id)> PersonAsync(WebApplicationFactory<Program> f, TestBrowser admin, string name)
+    internal static async Task<(TestBrowser Browser, Guid Id)> PersonAsync(WebApplicationFactory<Program> f, TestBrowser admin, string name)
     {
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
         return (await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!), made.GetProperty("id").GetGuid());
     }
 
-    private static async Task<JsonElement> SourceAsync(TestBrowser admin, Guid id) =>
+    internal static async Task<JsonElement> SourceAsync(TestBrowser admin, Guid id) =>
         (await admin.JsonAsync(await admin.GetAsync("/api/admin/knowledge"))).GetProperty("sources").EnumerateArray().Single(s => s.GetProperty("id").GetGuid() == id);
 
     /// <summary>Waits for a sync that ends after <paramref name="after"/> (null: any).</summary>
-    private static async Task<JsonElement> SyncedAsync(TestBrowser admin, Guid id, DateTimeOffset? after = null)
+    internal static async Task<JsonElement> SyncedAsync(TestBrowser admin, Guid id, DateTimeOffset? after = null)
     {
         for (var i = 0; i < 300; i++)
         {
@@ -54,7 +54,7 @@ public sealed class KnowledgeTests(AppFixture app)
         throw new TimeoutException("the sync never ended");
     }
 
-    private static async Task<(Guid Id, JsonElement Source)> AddAsync(TestBrowser admin, object source)
+    internal static async Task<(Guid Id, JsonElement Source)> AddAsync(TestBrowser admin, object source)
     {
         var res = await admin.PostAsync("/api/admin/knowledge", source);
         await StatusAssert.Is(HttpStatusCode.Created, res);
@@ -62,15 +62,17 @@ public sealed class KnowledgeTests(AppFixture app)
         return (id, await SyncedAsync(admin, id));
     }
 
-    private static async Task<JsonElement> SyncAgainAsync(TestBrowser admin, Guid id)
+    internal static async Task<JsonElement> SyncAgainAsync(TestBrowser admin, Guid id)
     {
         var before = (await SourceAsync(admin, id)).GetProperty("syncedAt").GetDateTimeOffset();
         await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync($"/api/admin/knowledge/{id}/sync"));
         return await SyncedAsync(admin, id, before);
     }
 
+    private Task<JsonElement> SearchAsync(TestBrowser b, string query) => SearchAsync(app, b, query);
+
     /// <summary>The person asks; the model calls search_knowledge; what it got back.</summary>
-    private async Task<JsonElement> SearchAsync(TestBrowser b, string query)
+    internal static async Task<JsonElement> SearchAsync(AppFixture app, TestBrowser b, string query)
     {
         var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { tools = new[] { "knowledge" } }))).GetProperty("id").GetGuid();
         var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = $"Look it up [call search_knowledge {{\"query\":\"{query}\"}}]" });
@@ -81,7 +83,7 @@ public sealed class KnowledgeTests(AppFixture app)
         return JsonDocument.Parse(tool[(tool.IndexOf('\n', StringComparison.Ordinal) + 1)..]).RootElement;
     }
 
-    private static List<string> Links(JsonElement found) => [.. found.GetProperty("results").EnumerateArray().Select(r => r.GetProperty("link").GetString() ?? r.GetProperty("title").GetString()!)];
+    internal static List<string> Links(JsonElement found) => [.. found.GetProperty("results").EnumerateArray().Select(r => r.GetProperty("link").GetString() ?? r.GetProperty("title").GetString()!)];
 
     [Fact]
     public async Task A_GitLab_wiki_answers_only_its_project_members_with_the_passage_and_its_link()

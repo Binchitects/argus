@@ -100,9 +100,9 @@ public sealed class KnowledgeStore(AppDbContext db, VectorSupport vectors)
         rows.ForEach(r => db.Entry(r).State = EntityState.Detached);
     }
 
-    /// <summary>The passages nearest the question among the documents these readers may read.</summary>
+    /// <summary>The passages nearest the question among the documents these readers may read: one of its readers, and all it requires.</summary>
     public Task<List<Passage>> SearchAsync(float[] query, IReadOnlyCollection<string> readers, int limit, CancellationToken ct) =>
-        NearestAsync("d.\"Readers\" && @filter", new NpgsqlParameter("filter", readers.ToArray()), query, limit, ct);
+        NearestAsync("d.\"Readers\" && @filter AND d.\"Requires\" <@ @filter", new NpgsqlParameter("filter", readers.ToArray()), query, limit, ct);
 
     /// <summary>The passages nearest the question in these chat files.</summary>
     public Task<List<Passage>> SearchFilesAsync(float[] query, IReadOnlyCollection<Guid> attachments, int limit, CancellationToken ct) =>
