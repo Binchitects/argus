@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en_US" lang="en_US">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<!-- qstring.cpp -->
+  <title>Qt 4.8: QString Class Reference</title>
+  <link rel="stylesheet" type="text/css" href="style/style.css" />
+  <script src="scripts/jquery.js" type="text/javascript"></script>
+  <script src="scripts/functions.js" type="text/javascript"></script>
+  <link rel="stylesheet" type="text/css" href="style/superfish.css" />
+  <link rel="stylesheet" type="text/css" href="style/narrow.css" />
+  <!--[if IE]>
+<meta name="MSSmartTagsPreventParsing" content="true">
+<meta http-equiv="imagetoolbar" content="no">
+<![endif]-->
+<!--[if lt IE 7]>
+<link rel="stylesheet" type="text/css" href="style/style_ie6.css">
+<![endif]-->
+<!--[if IE 7]>
+<link rel="stylesheet" type="text/css" href="style/style_ie7.css">
+<![endif]-->
+<!--[if IE 8]>
+<link rel="stylesheet" type="text/css" href="style/style_ie8.css">
+<![endif]-->
+
+<script src="scripts/superfish.js" type="text/javascript"></script>
+<script src="scripts/narrow.js" type="text/javascript"></script>
+
+</head>
+<body class="" onload="CheckEmptyAndLoadList();">
+ <div class="header" id="qtdocheader">
+    <div class="content"> 
+    <div id="nav-logo">
+      <a href="index.html">Home</a></div>
+    <a href="index.html" class="qtref"><span>Qt Reference Documentation</span></a>
+    <div id="narrowsearch"></div>
+    <div id="nav-topright">
+      <ul>
+        <li class="nav-topright-home"><a href="http://qt.digia.com/">Qt HOME</a></li>
+        <li class="nav-topright-dev"><a href="http://qt-project.org/">DEV</a></li>
+        <li class="nav-topright-doc nav-topright-doc-active"><a href="http://qt-project.org/doc/">
+          DOC</a></li>
+        <li class="nav-topright-blog"><a href="http://blog.qt.digia.com/">BLOG</a></li>
+      </ul>
+    </div>
+    <div id="shortCut">
+      <ul>
+        <li class="shortCut-topleft-inactive"><span><a href="index.html">Qt 4.8</a></span></li>
+        <li class="shortCut-topleft-active"><a href="http://qt-project.org/doc/">ALL VERSIONS        </a></li>
+      </ul>
+     </div>
+ <ul class="sf-menu" id="narrowmenu"> 
+             <li><a href="#">API Lookup</a> 
+                 <ul> 
+                     <li><a href="classes.html">Class index</a></li> 
+           <li><a href="functions.html">Function index</a></li> 
+           <li><a href="modules.html">Modules</a></li> 
+           <li><a href="namespaces.html">Namespaces</a></li> 
+           <li><a href="qtglobal.html">Global Declarations</a></li> 
+           <li><a href="qdeclarativeelements.html">QML elements</a></li> 
+             </ul> 
+             </li> 
+             <li><a href="#">Qt Topics</a> 
+                 <ul> 
+                        <li><a href="qt-basic-concepts.html">Programming with Qt</a></li>  
+                        <li><a href="qtquick.html">Device UIs &amp; Qt Quick</a></li>  
+                        <li><a href="qt-gui-concepts.html">UI Design with Qt</a></li>  
+                        <li><a href="supported-platforms.html">Supported Platforms</a></li>  
+                        <li><a href="technology-apis.html">Qt and Key Technologies</a></li>  
+                        <li><a href="best-practices.html">How-To's and Best Practices</a></li>  
+              </ul> 
+                 </li> 
+                 <li><a href="#">Examples</a> 
+                     <ul> 
+                       <li><a href="all-examples.html">Examples</a></li> 
+                       <li><a href="tutorials.html">Tutorials</a></li> 
+                       <li><a href="demos.html">Demos</a></li> 
+                       <li><a href="qdeclarativeexamples.html">QML Examples</a></li> 
+                </ul> 
+                     </li> 
+                 </ul> 
+    </div>
+  </div>
+  <div class="wrapper">
+    <div class="hd">
+      <span></span>
+    </div>
+    <div class="bd group">
+      <div class="sidebar">
+        <div class="searchlabel">
+          Search index:</div>
+        <div class="search" id="sidebarsearch">
+          <form id="qtdocsearch" action="" onsubmit="return false;">
+            <fieldset>
+              <input type="text" name="searchstring" id="pageType" value="" />
+ <div id="resultdialog"> 
+ <a href="#" id="resultclose">Close</a> 
+ <p id="resultlinks" class="all"><a href="#" id="showallresults">All</a> | <a href="#" id="showapiresults">API</a> | <a href="#" id="showarticleresults">Articles</a> | <a href="#" id="showexampleresults">Examples</a></p> 
+ <p id="searchcount" class="all"><span id="resultcount"></span><span id="apicount"></span><span id="articlecount"></span><span id="examplecount"></span>&nbsp;results:</p> 
+ <ul id="resultlist" class="all"> 
+ </ul> 
+ </div> 
+            </fieldset>
+          </form>
+        </div>
+        <div class="box first bottombar" id="lookup">
+          <h2 title="API Lookup"><span></span>
+            API Lookup</h2>
+          <div  id="list001" class="list">
+          <ul id="ul001" >
+              <li class="defaultLink"><a href="classes.html">Class index</a></li>
+              <li class="defaultLink"><a href="functions.html">Function index</a></li>
+              <li class="defaultLink"><a href="modules.html">Modules</a></li>
+              <li class="defaultLink"><a href="namespaces.html">Namespaces</a></li>
+              <li class="defaultLink"><a href="qtglobal.html">Global Declarations</a></li>
+              <li class="defaultLink"><a href="qdeclarativeelements.html">QML elements</a></li>
+            </ul> 
+          </div>
+        </div>
+        <div class="box bottombar" id="topics">
+          <h2 title="Qt Topics"><span></span>
+            Qt Topics</h2>
+          <div id="list002" class="list">
+            <ul id="ul002" >
+               <li class="defaultLink"><a href="qt-basic-concepts.html">Programming with Qt</a></li> 
+               <li class="defaultLink"><a href="qtquick.html">Device UIs &amp; Qt Quick</a></li> 
+               <li class="defaultLink"><a href="qt-gui-concepts.html">UI Design with Qt</a></li> 
+               <li class="defaultLink"><a href="supported-platforms.html">Supported Platforms</a></li>  
+               <li class="defaultLink"><a href="technology-apis.html">Qt and Key Technologies</a></li> 
+               <li class="defaultLink"><a href="best-practices.html">How-To's and Best Practices</a></li> 
+            </ul>  
+          </div>
+        </div>
+        <div class="box" id="examples">
+          <h2 title="Examples"><span></span>
+            Examples</h2>
+          <div id="list003" class="list">
+        <ul id="ul003">
+              <li class="defaultLink"><a href="all-examples.html">Examples</a></li>
+              <li class="defaultLink"><a href="tutorials.html">Tutorials</a></li>
+              <li class="defaultLink"><a href="demos.html">Demos</a></li>
+              <li class="defaultLink"><a href="qdeclarativeexamples.html">QML Examples</a></li>
+            </ul> 
+          </div>
+        </div>
+      </div>
+      <div class="wrap">
+        <div class="toolbar">
+          <div class="breadcrumb toolblock">
+            <ul>
+              <li class="first"><a href="index.html">Home</a></li>
+              <!--  Breadcrumbs go here -->
+<li><a href="modules.html">Modules</a></li>
+<li><a href="qtcore.html">QtCore</a></li>
+<li>QString</li>
+            </ul>
+          </div>
+          <div class="toolbuttons toolblock">
+            <ul>
+              <li id="smallA" class="t_button">A</li>
+              <li id="medA" class="t_button active">A</li>
+              <li id="bigA" class="t_button">A</li>
+              <li id="print" class="t_button"><a href="javascript:this.print();">
+                <span>Print</span></a></li>
+            </ul>
+        </div>
+        </div>
+        <div class="content mainContent">
+<div class="toc">
+<h3><a name="toc">Contents</a></h3>
+<ul>
+<li class="level1"><a href="#public-types">Public Types</a></li>
+<li class="level1"><a href="#public-functions">Public Functions</a></li>
+<li class="level1"><a href="#static-public-members">Static Public Members</a></li>
+<li class="level1"><a href="#related-non-members">Related Non-Members</a></li>
+<li class="level1"><a href="#macros">Macros</a></li>
+<li class="level1"><a href="#details">Detailed Description</a></li>
+<li class="level2"><a href="#initializing-a-string">Initializing a String</a></li>
+<li class="level2"><a href="#manipulating-string-data">Manipulating String Data</a></li>
+<li class="level2"><a href="#querying-string-data">Querying String Data</a></li>
+<li class="level2"><a href="#converting-between-8-bit-strings-and-unicode-strings">Converting Between 8-Bit Strings and Unicode Strings</a></li>
+<li class="level2"><a href="#distinction-between-null-and-empty-strings">Distinction Between Null and Empty Strings</a></li>
+<li class="level2"><a href="#argument-formats">Argument Formats</a></li>
+<li class="level2"><a href="#more-efficient-string-construction">More Efficient String Construction</a></li>
+</ul>
+</div>
+<h1 class="title">QString Class Reference</h1>
+<!-- $$$QString-brief -->
+<p>The QString class provides a Unicode character string. <a href="#details">More...</a></p>
+<!-- @@@QString -->
+<pre class="cpp"> <span class="preprocessor">#include &lt;QString&gt;</span></pre><p><b>Inherited by: </b><a href="qconststring.html" class="compat">QConstString</a>, <a href="qdbusobjectpath.html">QDBusObjectPath</a>, and <a href="qdbussignature.html">QDBusSignature</a>.</p>
+<p><b>Note:</b> All functions in this class are <a href="threads-reentrancy.html#reentrant">reentrant</a>, except for <a href="qstring-qt3.html#ascii" class="compat">ascii</a>(), <a href="qstring-qt3.html#latin1" class="compat">latin1</a>(), <a href="qstring-qt3.html#utf8" class="compat">utf8</a>(), and <a href="qstring-qt3.html#local8Bit" class="compat">local8Bit</a>(), which are nonreentrant.</p>
+<ul>
+<li><a href="qstring-members.html">List of all members, including inherited members</a></li>
+<li><a href="qstring-qt3.html">Qt 3 support members</a></li>
+</ul>
+<h2>Member Documentation</h2>
+<!-- $$$arg[overload1]$$$argconstQString&intconstQChar& -->
+<h3 class="fn"><a name="arg"></a><span class="type">QString</span> QString::<span class="name">arg</span> ( const <span class="type">QString</span> &amp; <i>a</i>, <span class="type">int</span> <i>fieldWidth</i> = 0, const <span class="type"><a href="qchar.html">QChar</a></span> &amp; <i>fillChar</i> = QLatin1Char( ' ' ) ) const</h3>
+<p>Returns a copy of this string with the lowest numbered place marker replaced by string <i>a</i>, i.e&#x2e;, <tt>%1</tt>, <tt>%2</tt>, ..&#x2e;, <tt>%99</tt>.</p>
+<p><i>fieldWidth</i> specifies the minimum amount of space that argument <i>a</i> shall occupy. If <i>a</i> requires less space than <i>fieldWidth</i>, it is padded to <i>fieldWidth</i> with character <i>fillChar</i>. A positive <i>fieldWidth</i> produces right-aligned text. A negative <i>fieldWidth</i> produces left-aligned text.</p>
+<p>This example shows how we might create a <tt>status</tt> string for reporting progress while processing a list of files:</p>
+<pre class="cpp"> <span class="type"><a href="qstring.html">QString</a></span> i;           <span class="comment">// current file's number</span>
+ <span class="type"><a href="qstring.html">QString</a></span> total;       <span class="comment">// number of files to process</span>
+ <span class="type"><a href="qstring.html">QString</a></span> fileName;    <span class="comment">// current file's name</span>
+
+ <span class="type"><a href="qstring.html">QString</a></span> status <span class="operator">=</span> <span class="type"><a href="qstring.html">QString</a></span>(<span class="string">&quot;Processing file %1 of %2: %3&quot;</span>)
+                 <span class="operator">.</span>arg(i)<span class="operator">.</span>arg(total)<span class="operator">.</span>arg(fileName);</pre>
+<p>First, <tt>arg(i)</tt> replaces <tt>%1</tt>. Then <tt>arg(total)</tt> replaces <tt>%2</tt>. Finally, <tt>arg(fileName)</tt> replaces <tt>%3</tt>.</p>
+<p>One advantage of using arg() over <a href="qstring.html#sprintf">sprintf</a>() is that the order of the numbered place markers can change, if the application's strings are translated into other languages, but each arg() will still replace the lowest numbered unreplaced place marker, no matter where it appears. Also, if place marker <tt>%i</tt> appears more than once in the string, the arg() replaces all of them.</p>
+<p>If there is no unreplaced place marker remaining, a warning message is output and the result is undefined. Place marker numbers must be in the range 1 to 99.</p>
+<!-- @@@arg -->
+<!-- $$$count$$$count -->
+<h3 class="fn"><a name="count-5"></a><span class="type">int</span> QString::<span class="name">count</span> () const</h3>
+<p>This function overloads <a href="qstring.html#count">count</a>().</p>
+<p>Same as <a href="qstring.html#size">size</a>().</p>
+<!-- @@@count -->
+<!-- $$$fromAscii[overload1]$$$fromAsciiconstchar*int -->
+<h3 class="fn"><a name="fromAscii"></a><span class="type">QString</span> QString::<span class="name">fromAscii</span> ( const <span class="type">char</span> * <i>str</i>, <span class="type">int</span> <i>size</i> = -1 )<tt> [static]</tt></h3>
+<p>Returns a <a href="qstring.html">QString</a> initialized with the first <i>size</i> characters from the string <i>str</i>.</p>
+<p>If <i>size</i> is -1 (default), it is taken to be qstrlen(<i>str</i>).</p>
+<p>Note that, despite the name, this function actually uses the codec defined by <a href="qtextcodec.html#setCodecForCStrings">QTextCodec::setCodecForCStrings</a>() to convert <i>str</i> to Unicode. Depending on the codec, it may not accept valid US-ASCII (ANSI X3.4-1986) input. If no codec has been set, this function does the same as <a href="qstring.html#fromLatin1">fromLatin1</a>().</p>
+<p><b>See also </b><a href="qstring.html#toAscii">toAscii</a>(), <a href="qstring.html#fromLatin1">fromLatin1</a>(), <a href="qstring.html#fromUtf8">fromUtf8</a>(), and <a href="qstring.html#fromLocal8Bit">fromLocal8Bit</a>().</p>
+<!-- @@@fromAscii -->
+<!-- $$$NormalizationForm$$$NormalizationForm_D$$$NormalizationForm_C$$$NormalizationForm_KD$$$NormalizationForm_KC -->
+<h3 class="fn"><a name="NormalizationForm-enum"></a>enum QString::<span class="name">NormalizationForm</span></h3>
+<p>This enum describes the various normalized forms of Unicode text.</p>
+<table class="valuelist"><tr valign="top" class="odd"><th class="tblConst">Constant</th><th class="tblval">Value</th><th class="tbldscr">Description</th></tr>
+<tr><td class="topAlign"><tt>QString::NormalizationForm_D</tt></td><td class="topAlign"><tt>0</tt></td><td class="topAlign">Canonical Decomposition</td></tr>
+<tr><td class="topAlign"><tt>QString::NormalizationForm_C</tt></td><td class="topAlign"><tt>1</tt></td><td class="topAlign">Canonical Decomposition followed by Canonical Composition</td></tr>
+<tr><td class="topAlign"><tt>QString::NormalizationForm_KD</tt></td><td class="topAlign"><tt>2</tt></td><td class="topAlign">Compatibility Decomposition</td></tr>
+<tr><td class="topAlign"><tt>QString::NormalizationForm_KC</tt></td><td class="topAlign"><tt>3</tt></td><td class="topAlign">Compatibility Decomposition followed by Canonical Composition</td></tr>
+</table>
+<p><b>See also </b><a href="qstring.html#normalized">normalized</a>() and <a href="http://www.unicode.org/reports/tr15/">Unicode Standard Annex #15</a>.</p>
+<!-- @@@NormalizationForm -->
+        </div>
+       </div>
+   </div>
+   </div>
+</div>
+<div class="footer">
+    <p>
+      <acronym title="Copyright">&copy;</acronym> 2015 The Qt Company Ltd.
+      Documentation contributions included herein are the copyrights of
+      their respective owners.</p>
+    <br />
+    <p>
+      The documentation provided herein is licensed under the terms of the
+      <a href="http://www.gnu.org/licenses/fdl.html">GNU Free Documentation
+      License version 1.3</a> as published by the Free Software Foundation.</p>
+    <p>
+      Documentation sources may be obtained from <a href="http://www.qt-project.org">
+      www.qt-project.org</a>.</p>
+    <br />
+    <p>
+      Qt and respective logos are trademarks of The Qt Company Ltd 
+      in Finland and/or other countries worldwide. All other trademarks are property
+      of their respective owners. <a title="Privacy Policy"
+      href="http://en.gitorious.org/privacy_policy/">Privacy Policy</a></p>
+  </div>
+
+  <script src="scripts/functions.js" type="text/javascript"></script>
+</body>
+</html>

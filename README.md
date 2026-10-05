@@ -34,7 +34,7 @@ permissions. Nothing leaves your network.**
 - **Observability** in the app: ten dashboards, every service's logs, and the
   alerts, what fires now and what fired before.
 - **Argus**, the code index: it mirrors your GitLab, extracts symbols and
-  dependencies, serves eleven knowledge packs of API documentation, and answers
+  dependencies, serves twelve knowledge packs of API documentation, and answers
   over MCP. Each developer sees exactly the repositories their GitLab account can
   read, enforced in SQL.
 
@@ -127,4 +127,4 @@ change, and [SECURITY.md](SECURITY.md) for reporting a vulnerability.
 GPL v3, see [LICENSE](LICENSE). Knowledge packs carry their own upstream
 licences, which are not GPL and vary per pack (CC-BY-4.0 for the Microsoft
 documentation, CC-BY-SA-3.0 for cppreference, PSF-2.0 for Python, public domain
-for SQLite); `argus pack info <name>` prints each in full.
+for SQLite, GFDL-1.3 for Qt); `argus pack info <name>` prints each in full.

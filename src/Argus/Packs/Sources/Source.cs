@@ -24,6 +24,10 @@ public interface ISource
     IEnumerable<ApiSymbol> IterSymbols(string root);
     /// <summary>For a composite: (part name, checkout) pairs whose commits make up the provenance.</summary>
     IReadOnlyList<(string Name, string Checkout)>? PartCheckouts(string root) => null;
+    /// <summary>For a tree that is neither a checkout nor a fetched archive: the provenance it records itself, or null.</summary>
+    string? Provenance(string root) => null;
+    /// <summary>Slices of the pack a search can be scoped to by name, each the documents under a path prefix (the Qt pack's "qt5").</summary>
+    IReadOnlyList<(string Name, string Prefix)> Facets => [];
 }
 
 /// <summary>The registry of buildable sources, by the name the CLI takes.</summary>
@@ -47,6 +51,7 @@ public static class SourceCatalog
         ["cppreference"] = () => new CppReference(),
         ["dotnet"] = () => new DotnetApiDocs(),
         ["scripting"] = () => Composite.ScriptingDocs(),
+        ["qt"] = () => new QtDocs(),
     };
 }
 

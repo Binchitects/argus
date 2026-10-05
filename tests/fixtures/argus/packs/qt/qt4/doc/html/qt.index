@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE QDOCINDEX>
+<INDEX url="http://doc.qt.io/qt-4.8" title="Qt Reference Documentation" version="4.8.7">
+    <namespace access="public" threadsafety="unspecified" status="commendable" name="" href="" location="" module="">
+        <page access="public" status="commendable" name="Item" href="qml-item.html" subtype="qmlclass" title="QML Item Element" fulltitle="QML Item Element" subtitle="" location="qdeclarativeitem.cpp">
+            <qmlproperty access="public" threadsafety="unspecified" status="commendable" name="x" fullname="Item#x" href="qml-item.html#x-prop" type="real" attached="false" writable="true" />
+            <qmlproperty access="public" threadsafety="unspecified" status="commendable" name="y" fullname="Item#y" href="qml-item.html#y-prop" type="real" attached="false" writable="true" />
+            <qmlproperty access="public" threadsafety="unspecified" status="commendable" name="width" fullname="Item#width" href="qml-item.html#width-prop" type="real" attached="false" writable="true" />
+            <qmlproperty access="public" threadsafety="unspecified" status="commendable" name="height" fullname="Item#height" href="qml-item.html#height-prop" type="real" attached="false" writable="true" />
+            </page>
+        <function access="public" threadsafety="unspecified" status="commendable" name="Q_OBJECT" href="qobject.html#Q_OBJECT" location="qobject.cpp" virtual="non" meta="macrowithoutparams" const="false" static="false" overload="false" relates="QObject" type="" signature="Q_OBJECT()" />
+        <class access="public" threadsafety="reentrant" status="commendable" name="QObject" href="qobject.html" location="qobject.h" bases="" module="QtCore">
+            <function access="public" threadsafety="unspecified" status="commendable" name="objectName" fullname="QObject::objectName" href="qobject.html#objectName-prop" location="qobject.cpp" virtual="non" meta="plain" const="true" static="false" overload="false" associated-property="objectName" type="QString" signature="objectName() const" />
+            <function access="public" threadsafety="unspecified" status="commendable" name="setObjectName" fullname="QObject::setObjectName" href="qobject.html#objectName-prop" location="qobject.cpp" virtual="non" meta="plain" const="false" static="false" overload="false" associated-property="objectName" type="void" signature="setObjectName(const QString &amp; name)">
+                <parameter left="const QString &amp;" right="" name="name" default="" />
+            </function>
+            <function access="public" threadsafety="unspecified" status="commendable" name="destroyed" fullname="QObject::destroyed" href="qobject.html#destroyed" location="qobject.h" virtual="non" meta="signal" const="false" static="false" overload="false" type="void" signature="destroyed(QObject * obj)">
+                <parameter left="QObject *" right="" name="obj" default="0" />
+            </function>
+            <property access="public" threadsafety="unspecified" status="commendable" name="objectName" fullname="QObject::objectName" href="qobject.html#objectName-prop" location="qobject.h" type="QString">
+                <getter name="objectName" />
+                <setter name="setObjectName" />
+            </property>
+            </class>
+        <class access="public" threadsafety="reentrant" status="commendable" name="QRegExp" href="qregexp.html" location="qregexp.h" bases="" module="QtCore">
+            <function access="public" threadsafety="unspecified" status="commendable" name="QRegExp" fullname="QRegExp::QRegExp" href="qregexp.html#QRegExp" location="qregexp.h" virtual="non" meta="constructor" const="false" static="false" overload="false" type="" signature="QRegExp()" />
+            <function access="public" threadsafety="unspecified" status="commendable" name="indexIn" fullname="QRegExp::indexIn" href="qregexp.html#indexIn" location="qregexp.h" virtual="non" meta="plain" const="true" static="false" overload="false" type="int" signature="indexIn(const QString &amp; str, int offset, CaretMode caretMode) const">
+                <parameter left="const QString &amp;" right="" name="str" default="" />
+                <parameter left="int" right="" name="offset" default="0" />
+                <parameter left="CaretMode" right="" name="caretMode" default="CaretAtZero" />
+            </function>
+            </class>
+        <class access="public" threadsafety="reentrant" status="commendable" name="QString" href="qstring.html" location="qstring.h" bases="" module="QtCore">
+            <enum access="public" threadsafety="unspecified" status="commendable" name="NormalizationForm" fullname="QString::NormalizationForm" href="qstring.html#NormalizationForm-enum" location="qstring.h">
+                <value name="NormalizationForm_D" value="0" />
+                <value name="NormalizationForm_C" value="1" />
+                <value name="NormalizationForm_KD" value="2" />
+                <value name="NormalizationForm_KC" value="3" />
+            </enum>
+            <function access="public" threadsafety="unspecified" status="commendable" name="arg" fullname="QString::arg" href="qstring.html#arg" location="qstring.h" virtual="non" meta="plain" const="true" static="false" overload="false" type="QString" signature="arg(const QString &amp; a, int fieldWidth, const QChar &amp; fillChar) const">
+                <parameter left="const QString &amp;" right="" name="a" default="" />
+                <parameter left="int" right="" name="fieldWidth" default="0" />
+                <parameter left="const QChar &amp;" right="" name="fillChar" default="QLatin1Char( ' ' )" />
+            </function>
+            <function access="public" threadsafety="unspecified" status="commendable" name="count" fullname="QString::count" href="qstring.html#count-5" location="qstring.h" virtual="non" meta="plain" const="true" static="false" overload="true" overload-number="5" type="int" signature="count() const" />
+            <function access="public" threadsafety="unspecified" status="commendable" name="fromAscii" fullname="QString::fromAscii" href="qstring.html#fromAscii" location="qstring.h" virtual="non" meta="plain" const="false" static="true" overload="false" type="QString" signature="fromAscii(const char * str, int size)">
+                <parameter left="const char *" right="" name="str" default="" />
+                <parameter left="int" right="" name="size" default="-1" />
+            </function>
+            </class>
+        <class access="public" threadsafety="unspecified" status="commendable" name="QColor" href="qcolor.html" location="qcolor.h" bases="" module="QtGui">
+            <function access="public" threadsafety="unspecified" status="obsolete" name="dark" fullname="QColor::dark" href="qcolor-obsolete.html#dark" location="qcolor.h" virtual="non" meta="plain" const="true" static="false" overload="false" type="QColor" signature="dark(int factor) const">
+                <parameter left="int" right="" name="factor" default="200" />
+            </function>
+            <function access="public" threadsafety="unspecified" status="obsolete" name="light" fullname="QColor::light" href="qcolor-obsolete.html#light" location="qcolor.h" virtual="non" meta="plain" const="true" static="false" overload="false" type="QColor" signature="light(int factor) const">
+                <parameter left="int" right="" name="factor" default="150" />
+            </function>
+            </class>
+        <namespace access="public" threadsafety="unspecified" status="commendable" name="Qt" href="qt.html" location="qtextdocument.h" module="QtCore">
+            <enum access="public" threadsafety="unspecified" status="commendable" name="AlignmentFlag" fullname="Qt::AlignmentFlag" href="qt.html#AlignmentFlag-enum" location="qnamespace.h" typedef="Qt::Alignment">
+                <value name="AlignLeft" value="0x0001" />
+                <value name="AlignLeading" value="AlignLeft" />
+                <value name="AlignRight" value="0x0002" />
+                <value name="AlignTrailing" value="AlignRight" />
+                <value name="AlignHCenter" value="0x0004" />
+                <value name="AlignJustify" value="0x0008" />
+                <value name="AlignAbsolute" value="0x0010" />
+                <value name="AlignHorizontal_Mask" value="AlignLeft | AlignRight | AlignHCenter | AlignJustify | AlignAbsolute" />
+                <value name="AlignTop" value="0x0020" />
+                <value name="AlignBottom" value="0x0040" />
+                <value name="AlignVCenter" value="0x0080" />
+                <value name="AlignVertical_Mask" value="AlignTop | AlignBottom | AlignVCenter" />
+                <value name="AlignCenter" value="AlignVCenter | AlignHCenter" />
+                <value name="AlignAuto" value="AlignLeft" />
+            </enum>
+            </namespace>
+        <page access="public" status="commendable" name="activeqt/comapp/main.cpp" href="activeqt-comapp-main-cpp.html" subtype="file" title="main.cpp Example File" /></namespace>
+</INDEX>

@@ -206,6 +206,7 @@ public static class PackBuilder
             var recorded = PyStr.Strip(File.ReadAllText(stamp));
             if (recorded.Length > 0) return recorded;
         }
+        if (source.Provenance(workDir) is { Length: > 0 } provenance) return provenance;
         var parts = source.PartCheckouts(workDir);
         if (parts is null) return ResolveCommit(workDir);
         var output = new List<string>();
@@ -294,14 +295,19 @@ public static class PackBuilder
             throw new BuildError($"source {PyStr.Repr(source.Name)} records no {string.Join(", ", missing)}; refusing to build a pack that cannot lawfully be shared");
     }
 
-    static IEnumerable<(string, object?)> MetaFor(ISource source, string version, string commit, long docs, long chunks, long symbols, long unresolved) =>
-    [
-        ("source_name", source.Name), ("source_repo", source.RepoUrl), ("source_branch", source.Branch),
-        ("source_commit", commit), ("license", source.License), ("license_url", source.LicenseUrl),
-        ("attribution", source.Attribution), ("embedding_model", Embed.Model), ("embedding_dim", Embed.Dim),
-        ("builder_version", BuilderVersion), ("pack_version", version), ("doc_count", docs),
-        ("chunk_count", chunks), ("symbol_count", symbols), ("unresolved_symbol_count", unresolved),
-    ];
+    static IEnumerable<(string, object?)> MetaFor(ISource source, string version, string commit, long docs, long chunks, long symbols, long unresolved)
+    {
+        IEnumerable<(string, object?)> meta =
+        [
+            ("source_name", source.Name), ("source_repo", source.RepoUrl), ("source_branch", source.Branch),
+            ("source_commit", commit), ("license", source.License), ("license_url", source.LicenseUrl),
+            ("attribution", source.Attribution), ("embedding_model", Embed.Model), ("embedding_dim", Embed.Dim),
+            ("builder_version", BuilderVersion), ("pack_version", version), ("doc_count", docs),
+            ("chunk_count", chunks), ("symbol_count", symbols), ("unresolved_symbol_count", unresolved),
+        ];
+        // A pack with facets says so; the others keep exactly the keys they always had.
+        return source.Facets.Count > 0 ? meta.Append(("facets", PackFormat.FormatFacets(source.Facets))) : meta;
+    }
 
     static void WritePack(ISource source, string workDir, string tempPath, Func<IReadOnlyList<string>, List<double[]>> embedFn,
         string version, string commit, EmbeddingCache cache)

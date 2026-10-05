@@ -164,6 +164,23 @@ public static class PackFormat
         tx.Commit();
     }
 
+    /// <summary>The "facets" meta value: name=prefix pairs, ';'-separated ("qt5=qt-5/;qt6=qt-6/").</summary>
+    public static string FormatFacets(IEnumerable<(string Name, string Prefix)> facets) =>
+        string.Join(";", facets.Select(f => $"{f.Name}={f.Prefix}"));
+
+    /// <summary>A pack's facets by lower-cased name; empty for a pack that declares none.</summary>
+    public static Dictionary<string, string> ParseFacets(string? value)
+    {
+        var facets = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pair in (value ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            int eq = pair.IndexOf('=');
+            if (eq <= 0 || eq == pair.Length - 1) continue;
+            facets[pair[..eq].Trim().ToLowerInvariant()] = pair[(eq + 1)..].Trim();
+        }
+        return facets;
+    }
+
     public static Dictionary<string, string> ReadMeta(SqliteConnection conn)
     {
         var meta = new Dictionary<string, string>(StringComparer.Ordinal);
