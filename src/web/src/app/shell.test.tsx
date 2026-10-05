@@ -20,6 +20,13 @@ describe('shell', () => {
     expect(within(nav).queryByText('Administration')).not.toBeInTheDocument()
   })
 
+  it('offers the source beside the version, as the AGPL asks', async () => {
+    fakeApi(member, { 'GET /api/info': () => ({ json: { name: 'Argus Arena', version: '5.1.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus' } }) })
+    renderApp('/')
+    expect(await screen.findByLabelText('Version')).toHaveTextContent('v5.1.0')
+    expect(screen.getByRole('link', { name: 'Source' })).toHaveAttribute('href', 'https://github.com/Binchitects/argus')
+  })
+
   it('shows admins the administration sections', async () => {
     fakeApi(admin)
     renderApp('/')

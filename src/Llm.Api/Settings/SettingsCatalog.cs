@@ -38,6 +38,8 @@ public static class SettingsCatalog
             { Default = "Your organisation's model, code search and usage, in one place.", Max = 160 },
         new("Branding:SupportContact", Branding, "Where to get help", "An email address or a link, shown on the sign-in page and in the account menu. Empty hides it.", SettingType.Text, SettingScope.Live)
             { Max = 200 },
+        new("Branding:SourceUrl", Branding, "Where the source is", "The complete source of the version you run, linked as \"Source\" beside the version. The AGPL has every user of it offered the source: a modified version points this at its own (LICENSING.md).", SettingType.Url, SettingScope.Live)
+            { Default = "https://github.com/Binchitects/argus", Optional = false, Max = 300 },
 
         new("Auth:SessionIdle", SignIn, "Sign out after idle", "A session with no activity for this long ends.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "01:00:00", Unit = "minutes", Min = 5, Max = 1440, Optional = false, Impact = "Applies to sessions started after the restart." },

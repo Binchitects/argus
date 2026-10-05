@@ -94,7 +94,19 @@ function SignedIn({ me }: { me: Me }) {
             <Button variant="ghost" size={collapsed ? 'icon-sm' : 'sm'} className={cn('text-muted-foreground', !collapsed && 'w-full justify-start')} onClick={toggle} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
               {collapsed ? <ChevronsRight /> : <><ChevronsLeft /> Collapse</>}
             </Button>
-            {!collapsed && info.data && <p className="px-2 pt-1 text-[0.6875rem] text-muted-foreground" aria-label="Version">v{info.data.version}</p>}
+            {!collapsed && info.data && (
+              <p className="px-2 pt-1 text-[0.6875rem] text-muted-foreground">
+                <span aria-label="Version">v{info.data.version}</span>
+                {info.data.source && (
+                  <>
+                    {' · '}
+                    <a href={info.data.source} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline" title={`Licensed under the ${info.data.license ?? 'AGPL-3.0'}: its source is offered to everyone who uses it`}>
+                      Source
+                    </a>
+                  </>
+                )}
+              </p>
+            )}
           </div>
         </div>
       </aside>

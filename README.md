@@ -124,7 +124,12 @@ change, and [SECURITY.md](SECURITY.md) for reporting a vulnerability.
 
 ## Licence
 
-GPL v3, see [LICENSE](LICENSE). Knowledge packs carry their own upstream
+Dual-licensed: the **GNU AGPL v3** ([LICENSE.md](LICENSE.md)), with additional
+terms on attribution and the product names, or a **commercial license** from
+Binchitects for any use that does not meet the AGPL's conditions (a hosted or
+closed-source offering without releasing your source, embedding it in
+proprietary software). [LICENSING.md](LICENSING.md) says which you need.
+Knowledge packs carry their own upstream
 licences, which are not GPL and vary per pack (CC-BY-4.0 for the Microsoft
 documentation, CC-BY-SA-3.0 for cppreference, PSF-2.0 for Python, public domain
 for SQLite, GFDL-1.3 for Qt); `argus pack info <name>` prints each in full.
