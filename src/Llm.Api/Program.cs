@@ -70,6 +70,9 @@ api.MapGet("/info", (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settin
         version = AppInfo.Current.Version,
         signInHeadline = b.SignInHeadline,
         supportContact = string.IsNullOrWhiteSpace(b.SupportContact) ? null : b.SupportContact,
+        // The AGPL's offer of the source to everyone who uses it over a network (LICENSING.md).
+        license = "AGPL-3.0-only",
+        source = b.SourceUrl,
     };
 });
 api.MapFallback(() => Results.NotFound());

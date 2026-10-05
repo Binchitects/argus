@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Llm.Core.Access;
 
 namespace Llm.Core.Chat;
@@ -47,7 +48,23 @@ public sealed class McpServer
     public string? PersonAuth { get; set; }
     /// <summary>Functions (their own names, without the prefix) that change something: each call asks the person first.</summary>
     public List<string> Writes { get; set; } = [];
+    /// <summary>How its HTTPS certificate is checked: against the system's CAs, its own CA (<see cref="TlsCa"/>), or not at all.</summary>
+    public TlsCheck Tls { get; set; }
+    /// <summary>The CA it must chain to, for <see cref="TlsCheck.OwnCa"/>: certificates in PEM (public; kept out of logs all the same).</summary>
+    public string? TlsCa { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>How an admin's server's HTTPS certificate is checked.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<TlsCheck>))]
+public enum TlsCheck
+{
+    /// <summary>Against the CAs the system trusts: the default.</summary>
+    System = 0,
+    /// <summary>Its chain must lead to the CA the admin gave, and the host name must still match.</summary>
+    OwnCa = 1,
+    /// <summary>Any certificate is accepted: encrypted, but whoever is in the way could pose as the server.</summary>
+    Off = 2,
 }
 
 /// <summary>A person's own account at a plugin's service: an API key, or OAuth tokens. Encrypted (Settings crypto).</summary>

@@ -11,6 +11,8 @@ gitlab:
   # Argus reads this GitLab with a read-only token (secrets.gitlabToken).
   url: ""
   verifyTls: true
+  # Password mode with an LDAP account: "" tries GitLab's own sign-in, then each LDAP one; a provider (ldapmain) only it; off never.
+  ldap: ""
 
 # Secrets: left empty, each is made once (randAlphaNum) and kept across upgrades (looked up in the
 # release's Secret). For GitOps tools that cannot look up, set them here or name an existingSecret

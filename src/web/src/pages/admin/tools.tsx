@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plug, PlugZap, Plus, Trash2, Wrench } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
@@ -18,6 +18,8 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { toolIcon } from '../chat/tools'
 import { AccessPicker, type Audience } from './access-picker'
+import { tlsBody, type CertificateProblem, type Tls, type TlsCheck } from './tls'
+import { CertificateRefused, TlsCaLine, TlsChoice, TlsWarning } from './tls-choice'
 
 
 interface ToolRow {
@@ -39,6 +41,9 @@ interface ToolRow {
     prefix: string
     kind: 'mcp' | 'openapi'
     spec: string | null
+    tls: TlsCheck
+    tlsCa: string | null
+    tlsCaNames: string[]
   } | null
 }
 
@@ -115,6 +120,7 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
       </CardHeader>
       <CardContent className="grid gap-4">
         {tool.unavailable && <Alert variant="warning">{tool.unavailable}</Alert>}
+        {tool.server?.tls === 'Off' && <TlsWarning name={tool.title} />}
         {tool.server && (
           <div className="grid gap-1 rounded-lg border bg-muted/30 p-3 text-xs">
             <p className="flex min-w-0 items-center gap-1.5 font-mono break-all">
@@ -130,6 +136,7 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
                 The person's email goes in <span className="font-mono text-foreground">{tool.server.emailHeader}</span>
               </p>
             )}
+            {tool.server.tls === 'OwnCa' && <TlsCaLine names={tool.server.tlsCaNames} />}
             {tool.server.callTimeoutMinutes && (
               <p className="text-muted-foreground">
                 A call may run for up to <span className="text-foreground">{tool.server.callTimeoutMinutes} minutes</span>
@@ -204,8 +211,17 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
     spec: saved?.spec ?? '',
     specUrl: '',
   })
+  const [tls, setTls] = useState<Tls>({ tls: saved?.tls ?? 'System', tlsCa: saved?.tlsCa ?? '' })
+  const caField = useRef<HTMLTextAreaElement>(null)
   const [error, setError] = useState<string | null>(null)
-  const [test, setTest] = useState<{ ok: boolean; error?: string; url?: string; tools?: { name: string; description: string | null; asksFirst?: boolean }[] } | null>(null)
+  const [test, setTest] = useState<{
+    ok: boolean
+    error?: string
+    url?: string
+    tools?: { name: string; description: string | null; asksFirst?: boolean }[]
+    /** Why its certificate was refused, when that was why. */
+    certificate?: CertificateProblem | null
+  } | null>(null)
   const api_ = kind === 'openapi'
   // An MCP server sends "" for the document (it is not an API); an API sends it, or where to fetch it.
   const body = {
@@ -214,6 +230,7 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
     callTimeoutMinutes: Number(form.callTimeoutMinutes) || 0,
     spec: api_ ? (form.specUrl ? null : form.spec || null) : saved?.kind === 'openapi' ? '' : null,
     specUrl: api_ ? form.specUrl || null : null,
+    ...tlsBody(tls),
   }
   const check = useMutation({
     mutationFn: () => api<NonNullable<typeof test>>(`/api/admin/tools/servers/test${saved ? `?id=${saved.id}` : ''}`, { body }),
@@ -296,6 +313,7 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
             <Input type="number" min={1} max={1440} inputMode="numeric" autoComplete="off" {...field('callTimeoutMinutes')} />
           </Field>
         </div>
+        <TlsChoice name="tls" value={tls} onChange={setTls} caRef={caField} />
         {test &&
           (test.ok ? (
             <Alert variant="success" title={api_ ? `${test.tools?.length ?? 0} operations${test.url ? ` at ${test.url}` : ''}` : `Connected: ${test.tools?.length ?? 0} tools`}>
@@ -309,6 +327,15 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
                 ))}
               </ul>
             </Alert>
+          ) : test.certificate ? (
+            <CertificateRefused
+              problem={test.certificate}
+              onTrust={() => {
+                setTls({ ...tls, tls: 'OwnCa' })
+                requestAnimationFrame(() => caField.current?.focus())
+              }}
+              onSkip={() => setTls({ ...tls, tls: 'Off' })}
+            />
           ) : (
             <Alert variant="destructive" title={api_ ? 'The document does not work' : 'Could not connect'}>
               {test.error}

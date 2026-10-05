@@ -25,6 +25,15 @@ Each setting has a badge that says when it applies:
 A value saved here wins over one the environment gives. The page shows the
 value it overrides, and **Back to the environment's value** removes the saved one.
 
+## The source link
+
+**Settings → Branding → Where the source is** is linked as **Source** beside
+the version in the sidebar. Argus Arena is under the AGPL, which has every
+person who uses it over a network offered the complete source of the version
+they use: a deployment of a modified version points this at its own source.
+[LICENSING.md](../LICENSING.md) says when a commercial license is needed
+instead.
+
 ## Secrets
 
 - A secret is write-only in the page. It shows whether it is set, never its

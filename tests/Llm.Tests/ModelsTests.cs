@@ -437,13 +437,14 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         // The one place is kept for the first model: until it is not, tiny-b cannot load.
         await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/models/tiny-b/load"));
         await StatusAssert.Is(HttpStatusCode.OK, await KeepAsync(admin, "Qwen3.8-Flash-Next", false));
-        // Loaded (the first model goes), a chat that chose no model gets the loaded one.
+        // Loaded (the first model goes), tiny-b answers a chat that asks for it; a chat that chose no model
+        // still gets the admin's default, which loads when asked (a model that happens to be loaded does not take its place).
         await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
         await EventuallyAsync(async () => (await ChatModelsAsync(member)).GetValueOrDefault("tiny-b"), "tiny-b loaded for the chat");
         var fresh = (await member.JsonAsync(await member.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
         await (await member.PostAsync($"/api/chat/conversations/{fresh}/messages", new { content = "which model?" })).Content.ReadAsStringAsync();
-        Assert.Equal("tiny-b", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == "modelmember@example.test").Body["model"]!.GetValue<string>());
-        Assert.Equal("tiny-b", (await member.JsonAsync(await member.GetAsync("/api/chat/config"))).GetProperty("model").GetString());
+        Assert.Equal("Qwen3.8-Flash-Next", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == "modelmember@example.test").Body["model"]!.GetValue<string>());
+        Assert.Equal("Qwen3.8-Flash-Next", (await member.JsonAsync(await member.GetAsync("/api/chat/config"))).GetProperty("model").GetString());
     }
 
     private static Task<HttpResponseMessage> SetAsync(TestBrowser admin, string key, string value) =>

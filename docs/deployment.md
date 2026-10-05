@@ -285,6 +285,9 @@ GitLab Maintainer or Owner; Argus's token stays read-only. Details:
 No token can be made for the account (a locked-down GitLab)? Set
 `GITLAB_USERNAME` and `GITLAB_PASSWORD` instead: Argus signs in once and makes
 its own read-only token ([details](argus/README.md#when-no-token-can-be-issued-for-the-account)).
+An account GitLab checks against LDAP works too: Argus uses GitLab's LDAP
+sign-in when its own refuses the account (`GITLAB_LDAP` names one server, or
+`off`).
 
 A GitLab on a private CA: the CA must be trusted inside the Argus container
 (mount it and set `ARGUS_GITLAB_CA_CERT` in `docker-compose.override.yml`):
@@ -339,7 +342,7 @@ became fixed, or went away:
 | v3 | v4 |
 |---|---|
 | `LLM_DOMAIN`, `LLM_MODELS_DIR`, `LLM_PG_PASSWORD`, `APP_DATA_KEY`, `LLAMACPP_API_KEY`, `ARGUS_ADMIN_TOKEN` and `ARGUS_CHAT_CLIENT_TOKEN`, `LITELLM_MASTER_KEY`, `TRAEFIK_HTTP_PORT`, `TRAEFIK_HTTPS_PORT` | renamed: `DOMAIN`, `MODELS_DIR`, `DB_PASSWORD`, `APP_KEY`, `ENGINE_KEY`, `ARGUS_KEY` (one), `GATEWAY_KEY`, `HTTP_PORT`, `HTTPS_PORT` |
-| `ARGUS_GITLAB_URL`, `ARGUS_GITLAB_TOKEN`, `ARGUS_GITLAB_USERNAME`, `ARGUS_GITLAB_PASSWORD`, `ARGUS_GITLAB_VERIFY` | `GITLAB_URL`, `GITLAB_TOKEN`, `GITLAB_USERNAME`, `GITLAB_PASSWORD`, `GITLAB_VERIFY_TLS` (`ARGUS_GITLAB_AUTH` is inferred: a username means password mode) |
+| `ARGUS_GITLAB_URL`, `ARGUS_GITLAB_TOKEN`, `ARGUS_GITLAB_USERNAME`, `ARGUS_GITLAB_PASSWORD`, `ARGUS_GITLAB_LDAP`, `ARGUS_GITLAB_VERIFY` | `GITLAB_URL`, `GITLAB_TOKEN`, `GITLAB_USERNAME`, `GITLAB_PASSWORD`, `GITLAB_LDAP`, `GITLAB_VERIFY_TLS` (`ARGUS_GITLAB_AUTH` is inferred: a username means password mode) |
 | `ARGUS_GITLAB_CA_CERT` | `docker-compose.override.yml` ([above](#gitlab-and-argus)) |
 | `LDAP_*` (server, bind account and password, bases, admin and required groups, StartTLS, sync interval) | Admin → Settings → Company directory (LDAP); the password is stored encrypted |
 | `LLAMACPP_HF_REPO`, `LLAMACPP_HF_FILES`, `LLAMACPP_MODEL_FILE` | `MODEL` (the first model), then Admin → Models → Add, or Hugging Face search |

@@ -49,12 +49,15 @@ public sealed class FoundationTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Info_reports_name_and_version()
+    public async Task Info_reports_name_version_licence_and_where_the_source_is()
     {
         var info = await _client.GetFromJsonAsync<Dictionary<string, string>>(new Uri("/api/info", UriKind.Relative));
         Assert.NotNull(info);
         Assert.Equal("Argus Arena", info["name"]);
         Assert.Matches(@"^\d+\.\d+\.\d+", info["version"]);
+        // The AGPL offers the source to everyone who uses it over a network.
+        Assert.Equal("AGPL-3.0-only", info["license"]);
+        Assert.Equal("https://github.com/Binchitects/argus", info["source"]);
     }
 
     [Fact]

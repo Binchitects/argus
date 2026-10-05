@@ -4,6 +4,9 @@ export interface AppInfo {
   /** Branding (Settings page). */
   signInHeadline?: string | null
   supportContact?: string | null
+  /** The licence, and where this version's source is (the AGPL offers it to everyone who uses it). */
+  license?: string
+  source?: string
 }
 
 /** A support contact as a link: an email address becomes mailto:, a web address stays. */
