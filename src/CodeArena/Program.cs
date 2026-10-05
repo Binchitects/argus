@@ -2,7 +2,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 using CodeArena;
 
-// The start of an IDE terminal's program, where posix_spawn cannot do it (macOS): before anything touches the console.
+// The start of an IDE terminal's shell where posix_spawn cannot do it all (macOS): first,
+// before anything touches the console, the config or the signals.
 if (args is [PtyHelper.Flag, ..])
 {
     return PtyHelper.Run(args[1..]);
@@ -10,7 +11,7 @@ if (args is [PtyHelper.Flag, ..])
 
 // The real console: UTF-8, colours on Windows terminals too, the key read
 // without echo, and Ctrl+C stopping the turn rather than the program.
-var colours = Terminal.Prepare();
+var colours = ConsoleSetup.Prepare();
 var env = new CliEnv
 {
     In = Console.In,
@@ -22,13 +23,13 @@ var env = new CliEnv
     InTerminal = !Console.IsInputRedirected,
     OutTerminal = !Console.IsOutputRedirected && colours,
     ErrTerminal = !Console.IsErrorRedirected && colours,
-    ReadSecret = Console.IsInputRedirected ? null : Terminal.ReadSecret,
+    ReadSecret = Console.IsInputRedirected ? null : ConsoleSetup.ReadSecret,
 };
 Console.CancelKeyPress += (_, e) => e.Cancel = env.Cancel.Press();
 return await Cli.RunAsync(args, env);
 
 /// <summary>Console set-up that differs by system.</summary>
-internal static class Terminal
+internal static class ConsoleSetup
 {
     /// <summary>UTF-8 in and out, and ANSI escapes switched on in a Windows console; false when they cannot be.</summary>
     public static bool Prepare()

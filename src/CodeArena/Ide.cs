@@ -36,17 +36,58 @@ internal sealed class IdeFiles(Workspace workspace)
 
     public Workspace Workspace => workspace;
 
-    /// <summary>The full path of a path the page gave, inside the workspace; refused otherwise.</summary>
+    /// <summary>
+    /// The full path of a path the page gave: relative to the working directory
+    /// (empty: the folder itself), with no .. in it, and not through a link that
+    /// leads outside. An absolute path, a drive or .. is refused, even where it
+    /// would end up inside: the page never sends one. ~ is a name like any other.
+    /// </summary>
     public string Resolve(string? path)
     {
+        if (string.IsNullOrEmpty(path) || path == ".")
+        {
+            return workspace.Root;
+        }
+        if (path.Contains('\0') || OperatingSystem.IsWindows() && path.Contains(':'))
+        {
+            throw new IdeError(400, "invalid", "That is not a file name.");
+        }
+        var parts = path.Split(Separators);
+        if (Path.IsPathRooted(path) || parts.Contains(".."))
+        {
+            throw Outside(path);
+        }
         try
         {
-            return workspace.Resolve(path);
+            return workspace.Resolve(Path.GetFullPath(path, workspace.Root));
         }
         catch (ToolError)
         {
-            throw new IdeError(403, "outside", $"{path} is outside the folder Code Arena works in ({workspace.Root}).");
+            throw Outside(path);
         }
+    }
+
+    private static readonly char[] Separators = ['/', '\\'];
+
+    private IdeError Outside(string path) => new(403, "outside", $"{path} is outside the folder Code Arena works in ({workspace.Root}).");
+
+    /// <summary>
+    /// Whether a file found by the listing (git's, or the walk) is one to show:
+    /// not a link, or one that stays inside, and not in a folder reached through a
+    /// link that leads out. Each folder is looked at once per call.
+    /// </summary>
+    private Func<string, bool> StaysInside()
+    {
+        var folders = new Dictionary<string, bool>(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        return full =>
+        {
+            var dir = Path.GetDirectoryName(full) ?? workspace.Root;
+            if (!folders.TryGetValue(dir, out var ok))
+            {
+                folders[dir] = ok = workspace.Allowed(dir);
+            }
+            return ok && (new FileInfo(full).LinkTarget is null || workspace.Allowed(full));
+        };
     }
 
     /// <summary>A path the page gave, which must not be the working directory itself.</summary>
@@ -106,12 +147,13 @@ internal sealed class IdeFiles(Workspace workspace)
         return new JsonObject { ["path"] = Show(dir), ["entries"] = new JsonArray([.. ordered.Select(e => (JsonNode)e.Json)]) };
     }
 
-    /// <summary>Every file of the working directory (as git sees them, so .gitignore holds), for quick open.</summary>
+    /// <summary>Every file of the working directory (as git sees them, so .gitignore holds), for quick open. Links that lead out are left out.</summary>
     public JsonObject All(CancellationToken ct)
     {
         var files = new List<string>();
         var truncated = false;
-        foreach (var full in Files.Under(workspace.Root, ct))
+        var inside = StaysInside();
+        foreach (var full in Files.Under(workspace.Root, ct).Where(inside))
         {
             if (files.Count == MaxListed)
             {
@@ -262,8 +304,8 @@ internal sealed class IdeFiles(Workspace workspace)
 
     /// <summary>
     /// Text search across the working directory's files (git's list, so
-    /// .gitignore holds), binary and large files skipped: per file, each match's
-    /// line, column, length and a preview of its line.
+    /// .gitignore holds), binary and large files and links that lead out skipped:
+    /// per file, each match's line, column, length and a preview of its line.
     /// </summary>
     public JsonObject Search(SearchQuery q, CancellationToken ct)
     {
@@ -294,7 +336,8 @@ internal sealed class IdeFiles(Workspace workspace)
         var truncated = false;
         try
         {
-            foreach (var full in Files.Under(workspace.Root, limit.Token).OrderBy(f => f, StringComparer.Ordinal))
+            var inside = StaysInside();
+            foreach (var full in Files.Under(workspace.Root, limit.Token).OrderBy(f => f, StringComparer.Ordinal).Where(inside))
             {
                 limit.Token.ThrowIfCancellationRequested();
                 var relative = Show(full);
@@ -420,11 +463,15 @@ internal sealed class AgentChanges(Workspace workspace)
         }
     }
 
-    /// <summary>The changed files: path, whether the agent made it or it is gone now, and the lines added and removed.</summary>
+    /// <summary>
+    /// The changed files in the working directory (the IDE's files; a folder
+    /// added with --add-dir is not among them): path, whether the agent made it or
+    /// it is gone now, and the lines added and removed.
+    /// </summary>
     public JsonArray List()
     {
         var list = new JsonArray();
-        foreach (var (full, before) in Snapshot().OrderBy(c => c.Key, StringComparer.Ordinal))
+        foreach (var (full, before) in Snapshot().Where(c => workspace.InRoot(c.Key)).OrderBy(c => c.Key, StringComparer.Ordinal))
         {
             var now = Current(full);
             if (now == before)

@@ -43,14 +43,25 @@ internal sealed class Workspace
 
     public bool Inside(string full) => Roots.Any(r => Within(full, r));
 
+    /// <summary>Whether a full path is in the working directory itself (not a folder allowed besides it).</summary>
+    public bool InRoot(string full) => Within(full, Root);
+
+    /// <summary>Whether a full path may be used: inside a root, and no link on the way leads outside.</summary>
+    public bool Allowed(string full) => Inside(full) && !LeadsOutside(full);
+
     private static bool Within(string full, string root) =>
         full.Equals(root, Compare) || full.StartsWith(root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar, Compare);
 
-    /// <summary>Whether a link on the way from its root to the path points outside every root.</summary>
-    private bool LeadsOutside(string full)
+    /// <summary>
+    /// Whether a link on the way from its root to the path points outside every
+    /// root. A link whose target is not there counts too: writing through it
+    /// would make the file where it points. So does one whose target is inside
+    /// only by name, through a link of its own (inner → /etc, x → inner/passwd).
+    /// </summary>
+    private bool LeadsOutside(string full, int depth = 0)
     {
         var root = Roots.FirstOrDefault(r => Within(full, r));
-        if (root is null)
+        if (root is null || depth > 40)
         {
             return true;
         }
@@ -62,13 +73,22 @@ internal sealed class Workspace
                 continue;
             }
             current = Path.Combine(current, part);
+            // LinkTarget is the link's own (lstat): null for a plain file or folder, and for nothing there.
             FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
-            if (!info.Exists || info.LinkTarget is null)
+            if (info.LinkTarget is null)
             {
                 continue;
             }
-            var target = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName;
-            if (target is not null && !Inside(Path.GetFullPath(target)))
+            string? target;
+            try
+            {
+                target = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName;
+            }
+            catch (IOException)
+            {
+                return true; // a loop of links
+            }
+            if (target is null || LeadsOutside(Path.GetFullPath(target), depth + 1))
             {
                 return true;
             }

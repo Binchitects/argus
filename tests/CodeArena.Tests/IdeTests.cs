@@ -1,5 +1,7 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -9,6 +11,9 @@ namespace CodeArena.Tests;
 /// <summary>The IDE's calls against the real server: files, search, the agent's changes, and terminals on a real pseudo-terminal.</summary>
 public sealed class IdeTests : IDisposable
 {
+    /// <summary>/proc's SigBlk and SigIgn: none blocked, and none of the signals 1 to 31 ignored.</summary>
+    private const string DefaultSignals = @"SigBlk:\s+0{16}\r\nSigIgn:\s+[0-9a-f]{8}[08]0{7}\r\n";
+
     private readonly FakeGateway _gateway = new();
     private readonly FakeMcp _mcp = new();
 
@@ -104,6 +109,173 @@ public sealed class IdeTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/files")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/file?path=inside.txt")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/terminals")).StatusCode);
+    }
+
+    [Fact]
+    public async Task The_page_names_files_by_relative_paths_only_and_links_that_lead_out_count_as_outside()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var secret = Path.Combine(h.Root, "secret.txt");
+        File.WriteAllText(secret, "keep out\n");
+        var inside = h.Write("inside.txt", "in\n");
+        h.Write("src/app.txt", "app\n");
+        await using var web = await WebRun.StartAsync(h);
+
+        // An absolute path or a .. is refused, even where it would land inside.
+        foreach (var path in new[] { inside, "src/../inside.txt", "./src/../inside.txt", @"src\..\inside.txt", "/etc/hostname" })
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync("/api/file?path=" + Uri.EscapeDataString(path))).StatusCode);
+        }
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/file", new JsonObject { ["path"] = inside, ["text"] = "owned" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/files/rename", new JsonObject { ["from"] = "inside.txt", ["to"] = "src/../moved.txt" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/file", new JsonObject { ["path"] = "in\0side.txt", ["text"] = "x" })).StatusCode);
+        Assert.Equal("in\n", File.ReadAllText(inside));
+        // ~ is a name like any other here, not the home folder.
+        await Json(await web.PostAsync("/api/files/new", new JsonObject { ["path"] = "~/notes.txt" }));
+        Assert.True(File.Exists(Path.Combine(h.Work, "~", "notes.txt")));
+
+        if (OperatingSystem.IsWindows())
+        {
+            return; // links need a right of their own there
+        }
+        var outside = Directory.CreateDirectory(Path.Combine(h.Root, "outside")).FullName;
+        File.WriteAllText(Path.Combine(outside, "other.txt"), "keep out\n");
+        // A link to a file not there yet (saving through it would make it outside), a folder outside,
+        // a link inside by name only (through that folder), a link to a file outside, and one that stays inside.
+        File.CreateSymbolicLink(Path.Combine(h.Work, "dangling.txt"), Path.Combine(h.Root, "planted.txt"));
+        Directory.CreateSymbolicLink(Path.Combine(h.Work, "out"), outside);
+        File.CreateSymbolicLink(Path.Combine(h.Work, "sneaky.txt"), Path.Combine(h.Work, "out", "other.txt"));
+        File.CreateSymbolicLink(Path.Combine(h.Work, "escape.txt"), secret);
+        File.CreateSymbolicLink(Path.Combine(h.Work, "alias.txt"), inside);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/file", new JsonObject { ["path"] = "dangling.txt", ["text"] = "planted" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/files/new", new JsonObject { ["path"] = "dangling.txt" })).StatusCode);
+        Assert.False(File.Exists(Path.Combine(h.Root, "planted.txt")));
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync("/api/files?path=out")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/file", new JsonObject { ["path"] = "out/new.txt", ["text"] = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/files/delete", new JsonObject { ["path"] = "out/other.txt" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/files/rename", new JsonObject { ["from"] = "src/app.txt", ["to"] = "out/app.txt" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync("/api/file?path=sneaky.txt")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync("/api/file?path=escape.txt")).StatusCode);
+        Assert.False(File.Exists(Path.Combine(outside, "new.txt")) || File.Exists(Path.Combine(outside, "app.txt")));
+        Assert.True(File.Exists(Path.Combine(outside, "other.txt")));
+        Assert.Equal("in\n", (await web.GetJsonAsync("/api/file?path=alias.txt"))["text"]!.GetValue<string>());
+
+        // Not listed, not searched, not offered to quick open.
+        Assert.Equal(["src", "~", "alias.txt", "inside.txt"], (await web.GetJsonAsync("/api/files"))["entries"]!.AsArray().Select(e => e!["name"]!.GetValue<string>()));
+        Assert.Equal(0, (await web.GetJsonAsync("/api/search?q=" + Uri.EscapeDataString("keep out")))["count"]!.GetValue<int>());
+        Assert.Equal(["alias.txt", "inside.txt"], (await web.GetJsonAsync("/api/search?q=in"))["files"]!.AsArray().Select(f => f!["path"]!.GetValue<string>()));
+        Assert.Equal(["alias.txt", "inside.txt", "src/app.txt", "~/notes.txt"], (await web.GetJsonAsync("/api/files/all"))["files"]!.AsArray().Select(f => f!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task Every_IDE_call_and_the_terminal_socket_take_only_this_runs_key_from_its_own_host_and_page()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["terminalShell"] = "/bin/sh");
+        var inside = h.Write("inside.txt", "in\n");
+        await using var web = await WebRun.StartAsync(h);
+        (string Method, string Path, JsonObject? Body)[] calls =
+        [
+            ("GET", "/api/files", null),
+            ("GET", "/api/files/all", null),
+            ("GET", "/api/file?path=inside.txt", null),
+            ("POST", "/api/file", new() { ["path"] = "inside.txt", ["text"] = "owned" }),
+            ("POST", "/api/files/new", new() { ["path"] = "made.txt" }),
+            ("POST", "/api/files/rename", new() { ["from"] = "inside.txt", ["to"] = "moved.txt" }),
+            ("POST", "/api/files/delete", new() { ["path"] = "inside.txt" }),
+            ("GET", "/api/search?q=in", null),
+            ("GET", "/api/changes", null),
+            ("GET", "/api/changes/diff?path=inside.txt", null),
+            ("POST", "/api/changes/accept", new()),
+            ("POST", "/api/changes/revert", new() { ["path"] = "inside.txt" }),
+            ("GET", "/api/terminals", null),
+            ("POST", "/api/terminals", new() { ["cols"] = 80, ["rows"] = 24 }),
+            ("POST", "/api/terminals/close", new() { ["id"] = "1" }),
+            ("GET", "/api/terminals/socket?id=1", null),
+        ];
+        using var anonymous = WebRun.Client(web.Port, token: null);
+        var wrong = new List<string>();
+        foreach (var (method, path, body) in calls)
+        {
+            async Task Expect(HttpStatusCode status, string what, HttpClient client, Action<HttpRequestMessage>? change = null)
+            {
+                using var request = new HttpRequestMessage(new HttpMethod(method), path);
+                if (body is not null)
+                {
+                    request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+                }
+                change?.Invoke(request);
+                using var response = await client.SendAsync(request);
+                if (response.StatusCode != status)
+                {
+                    wrong.Add($"{method} {path} {what}: {(int)response.StatusCode}, not {(int)status}");
+                }
+            }
+            await Expect(HttpStatusCode.Unauthorized, "without the key", anonymous);
+            await Expect(HttpStatusCode.Forbidden, "for another host name", web.Http, r => r.Headers.Host = $"evil.example:{web.Port}");
+            await Expect(HttpStatusCode.Forbidden, "from another site", web.Http, r => r.Headers.Add("Origin", "https://evil.example"));
+            await Expect(HttpStatusCode.Forbidden, "from another port's page", web.Http, r => r.Headers.Add("Origin", $"http://localhost:{web.Port + 1}"));
+            await Expect(HttpStatusCode.Forbidden, "said by the browser to come from elsewhere", web.Http, r => r.Headers.Add("Sec-Fetch-Site", "same-site"));
+            if (body is not null)
+            {
+                await Expect(HttpStatusCode.UnsupportedMediaType, "as a form", web.Http, r => r.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "text/plain"));
+            }
+        }
+        Assert.Empty(wrong);
+        // None of it happened.
+        Assert.Equal("in\n", File.ReadAllText(inside));
+        Assert.Equal(["inside.txt"], Directory.GetFiles(h.Work).Select(Path.GetFileName));
+        Assert.Empty((await web.GetJsonAsync("/api/terminals")).AsArray());
+
+        // The terminal's socket, asked for by hand: only with the key, this host name and this page's origin.
+        var id = (await Json(await web.PostAsync("/api/terminals", new JsonObject { ["cols"] = 80, ["rows"] = 24 })))["id"]!.GetValue<string>();
+        var host = ("Host", $"127.0.0.1:{web.Port}");
+        var key = ("Authorization", $"Bearer {web.Token}");
+        var origin = ("Origin", $"http://127.0.0.1:{web.Port}");
+        var socket = $"/api/terminals/socket?id={id}";
+        Assert.Equal(401, await UpgradeAsync(web.Port, socket, host, origin));
+        Assert.Equal(401, await UpgradeAsync(web.Port, socket, host, origin, ("Authorization", "Bearer " + new string('x', 43))));
+        Assert.Equal(403, await UpgradeAsync(web.Port, socket, ("Host", $"evil.example:{web.Port}"), key, origin));
+        Assert.Equal(403, await UpgradeAsync(web.Port, socket, host, key, ("Origin", "https://evil.example")));
+        Assert.Equal(403, await UpgradeAsync(web.Port, socket, host, key, ("Origin", "null")));
+        Assert.Equal(403, await UpgradeAsync(web.Port, socket, host, key, origin, ("Sec-Fetch-Site", "cross-site")));
+        Assert.Equal(101, await UpgradeAsync(web.Port, socket, host, key, origin, ("Sec-Fetch-Site", "same-origin")));
+        Assert.Equal(101, await UpgradeAsync(web.Port, socket, ("Host", $"localhost:{web.Port}"), ("Cookie", $"code_arena_{web.Port}={web.Token}"), ("Origin", $"http://localhost:{web.Port}")));
+    }
+
+    [Fact]
+    public async Task A_terminals_shell_gets_no_API_key_and_starts_with_every_signal_at_its_default()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var h = new Harness(_gateway, _mcp, c => c["terminalShell"] = "/bin/sh");
+        await using var web = await WebRun.StartAsync(h);
+        string id;
+        // code-arena's own environment may hold the key (ARENA_API_KEY): the shell's does not.
+        Environment.SetEnvironmentVariable("ARENA_API_KEY", "sk-not-for-the-shell");
+        try
+        {
+            id = (await Json(await web.PostAsync("/api/terminals", new JsonObject { ["cols"] = 80, ["rows"] = 24 })))["id"]!.GetValue<string>();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ARENA_API_KEY", null);
+        }
+        using var terminal = await TerminalSocket.ConnectAsync(web, id);
+        await terminal.TypeAsync("echo \"key=[${ARENA_API_KEY-none}]\"\r");
+        await terminal.UntilAsync(@"key=\[none\]\r\n");
+        if (OperatingSystem.IsLinux())
+        {
+            // What the runtime ignores (SIGPIPE) or blocks is not passed on to the programs the shell runs:
+            // none blocked, none of 1 to 31 ignored (32 and 33 are the C library's own, which it sets up itself).
+            await terminal.TypeAsync("grep -E '^Sig(Blk|Ign)' /proc/self/status\r");
+            await terminal.UntilAsync(DefaultSignals);
+        }
+        await terminal.TypeAsync("exit\r");
+        Assert.Equal(0, await terminal.ExitAsync());
+        Assert.DoesNotContain("sk-not-for-the-shell", terminal.Text);
     }
 
     [Fact]
@@ -280,7 +452,9 @@ public sealed class IdeTests : IDisposable
                     }
                 }
             });
-            pty.Write(Encoding.UTF8.GetBytes("pwd; (exec 3</dev/tty && echo has-a-tty); exit 7\r"));
+            // Its folder, its controlling terminal, a session it leads, and signals at their defaults (where /proc says).
+            var checks = OperatingSystem.IsLinux() ? "[ \"$(cut -d' ' -f6 /proc/$$/stat)\" = $$ ] && echo leads-its-session; grep -E '^Sig(Blk|Ign)' /proc/self/status; " : "";
+            pty.Write(Encoding.UTF8.GetBytes($"pwd; (exec 3</dev/tty && echo has-a-tty); {checks}exit 7\r"));
             Assert.Equal(7, await Task.Run(pty.WaitForExit).WaitAsync(TimeSpan.FromSeconds(30)));
             await Task.Delay(200);
             pty.Stop();
@@ -292,11 +466,36 @@ public sealed class IdeTests : IDisposable
             }
             Assert.Matches(Regex.Escape(dir) + @"\r\n", text);
             Assert.Matches(@"(?<!echo )has-a-tty\r\n", text);
+            if (OperatingSystem.IsLinux())
+            {
+                Assert.Matches(@"(?<!echo )leads-its-session\r\n", text);
+                Assert.True(Regex.IsMatch(text, DefaultSignals), text);
+            }
         }
         finally
         {
             Directory.Delete(dir, true);
         }
+    }
+
+    /// <summary>A WebSocket handshake written by hand, with exactly these headers besides the upgrade's own: the answer's status.</summary>
+    private static async Task<int> UpgradeAsync(int port, string path, params (string Name, string Value)[] headers)
+    {
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync(IPAddress.Loopback, port);
+        var stream = tcp.GetStream();
+        var head = new StringBuilder($"GET {path} HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n");
+        head.Append($"Sec-WebSocket-Key: {Convert.ToBase64String(RandomNumberGenerator.GetBytes(16))}\r\n");
+        foreach (var (name, value) in headers)
+        {
+            head.Append($"{name}: {value}\r\n");
+        }
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(head.Append("\r\n").ToString()));
+        // "HTTP/1.1 101 ..."
+        var status = new byte[12];
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await stream.ReadExactlyAsync(status, timeout.Token);
+        return int.Parse(Encoding.ASCII.GetString(status, 9, 3), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static async Task<JsonNode> Json(HttpResponseMessage response)

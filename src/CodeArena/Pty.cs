@@ -49,9 +49,15 @@ internal static class Pty
     {
         cols = Math.Clamp(cols, 2, MaxCols);
         rows = Math.Clamp(rows, 2, MaxRows);
-        return OperatingSystem.IsWindows()
-            ? WindowsPty.Start(program, args, cwd, env, cols, rows)
-            : UnixPty.Start(program, args, cwd, env, cols, rows, helper ?? (OperatingSystem.IsMacOS() ? PtyHelper.Command() : null));
+        if (OperatingSystem.IsWindows())
+        {
+            return WindowsPty.Start(program, args, cwd, env, cols, rows);
+        }
+        if (helper is { Count: 0 })
+        {
+            helper = null;
+        }
+        return UnixPty.Start(program, args, cwd, env, cols, rows, helper ?? (OperatingSystem.IsMacOS() ? PtyHelper.Command() : null));
     }
 }
 
@@ -59,13 +65,14 @@ internal static class Pty
 /// openpty makes the terminal; posix_spawn starts the program on its other
 /// side, in a session of its own, with the terminal as its keyboard and screen
 /// and as its controlling terminal (so job control and Ctrl+C work): opened by
-/// name once the new session exists, which makes it the session's terminal. Nothing of
-/// this program runs in the child between fork and exec (posix_spawn does it
-/// all in the C library), which matters: the runtime's code pages are shared
-/// with a forked child, so a child running managed code can break its parent.
-/// macOS opens the file before it makes the session, so there the program
-/// starts through code-arena --pty-helper, which opens the terminal and then
-/// becomes the program.
+/// name once the new session exists, which makes it the session's terminal on
+/// Linux. Nothing of this program runs in the child between fork and exec
+/// (posix_spawn does it all in the C library), which matters: the runtime's
+/// code pages are shared with a forked child, so a child running managed code
+/// can break its parent. macOS's posix_spawn opens files before it makes the
+/// session, and opening a terminal there never makes it the controlling one,
+/// so on macOS the program starts through code-arena --pty-helper (a process
+/// of its own, not a fork), which takes the terminal and becomes the program.
 /// </summary>
 internal sealed unsafe class UnixPty : IPty
 {
@@ -73,6 +80,8 @@ internal sealed unsafe class UnixPty : IPty
     private const short POLLIN = 1;
     private const int O_RDWR = 2;
     private const int SIGHUP = 1, SIGKILL = 9;
+    // posix_spawnattr_setflags: the same numbers in glibc and musl; macOS's own.
+    private const int SpawnSetSid = 0x80, SpawnSetSigDef = 0x04, SpawnSetSigMask = 0x08, SpawnCloseOnExecDefault = 0x4000;
 
     private readonly int _master;
     private readonly object _gate = new();
@@ -135,7 +144,7 @@ internal sealed unsafe class UnixPty : IPty
             {
                 if (helper is { Count: > 0 })
                 {
-                    // The helper opens the terminal itself, in its new session.
+                    // The helper makes the session and takes the terminal itself; until then (and for what it says when it cannot) the terminal is its screen.
                     for (var fd = 0; fd <= 2; fd++)
                     {
                         Check(posix_spawn_file_actions_adddup2(actions, slave, fd), program);
@@ -159,8 +168,9 @@ internal sealed unsafe class UnixPty : IPty
                 sigemptyset(none);
                 Check(posix_spawnattr_setsigdefault(attributes, all), program);
                 Check(posix_spawnattr_setsigmask(attributes, none), program);
-                // SETSID | SETSIGDEF | SETSIGMASK, and on macOS CLOEXEC_DEFAULT: no other descriptor of this program leaks to the shell.
-                var flags = OperatingSystem.IsMacOS() ? 0x0400 | 0x0004 | 0x0008 | 0x4000 : 0x80 | 0x04 | 0x08;
+                // A session of its own (the helper makes its own: setsid fails in a session leader), and on macOS no
+                // other descriptor of this program inherited (Linux's are all opened close-on-exec by the runtime).
+                var flags = (helper is { Count: > 0 } ? 0 : SpawnSetSid) | SpawnSetSigDef | SpawnSetSigMask | (OperatingSystem.IsMacOS() ? SpawnCloseOnExecDefault : 0);
                 Check(posix_spawnattr_setflags(attributes, (short)flags), program);
                 int pid;
                 var started = posix_spawn(&pid, native.String(file), actions, attributes, (byte**)native.Strings(argv), (byte**)native.Strings([.. env.Select(e => $"{e.Key}={e.Value}")]));
@@ -475,14 +485,17 @@ internal sealed unsafe class UnixPty : IPty
 
 /// <summary>
 /// code-arena --pty-helper TTY DIR PROGRAM [ARGS]: the first moments of a
-/// terminal's program where the system cannot do them in posix_spawn (macOS).
-/// It starts as a session leader with the terminal on its standard handles;
-/// opening the terminal by name makes it the session's controlling terminal;
-/// then it moves to the folder and becomes the program.
+/// terminal's program where posix_spawn cannot do them (macOS). Program.cs runs
+/// it before anything else (no console set-up, no config). It makes a session
+/// of its own, takes the terminal as that session's controlling terminal
+/// (TIOCSCTTY) and as its standard handles, moves to the folder, puts every
+/// signal back at its default with none blocked, and becomes the program, with
+/// the environment it was started with.
 /// </summary>
 internal static unsafe class PtyHelper
 {
     public const string Flag = "--pty-helper";
+    private const int O_RDWR = 2;
 
     /// <summary>How this program runs itself: its own file, or dotnet and its assembly.</summary>
     public static IReadOnlyList<string> Command()
@@ -499,55 +512,91 @@ internal static unsafe class PtyHelper
             return 2;
         }
         var (tty, dir, program) = (args[0], args[1], args[2]);
-        fixed (byte* path = Encoding.UTF8.GetBytes(tty + "\0"))
+        var mac = OperatingSystem.IsMacOS();
+        // A session of its own (one made already, by whoever started it, will do).
+        if (setsid() < 0 && getsid(0) != getpid())
         {
-            var fd = open(path, 2); // O_RDWR, not O_NOCTTY
-            if (fd >= 0)
+            return Fail($"cannot make a session for the terminal: {Marshal.GetLastPInvokeErrorMessage()}");
+        }
+        var fd = open(Utf8(tty), O_RDWR | (mac ? 0x20000 : 0x100)); // O_NOCTTY: it becomes the controlling terminal below, the same way on both systems
+        if (fd < 0)
+        {
+            return Fail($"cannot open the terminal {tty}: {Marshal.GetLastPInvokeErrorMessage()}");
+        }
+        if (ioctl(fd, mac ? 0x20007461u : 0x540Eu, 0) < 0) // TIOCSCTTY; macOS ignores the argument, which it would read from the stack on ARM64
+        {
+            return Fail($"cannot take the terminal {tty} as this session's: {Marshal.GetLastPInvokeErrorMessage()}");
+        }
+        for (var std = 0; std <= 2; std++)
+        {
+            if (dup2(fd, std) < 0)
             {
-                close(fd);
+                return Fail($"cannot use the terminal {tty}: {Marshal.GetLastPInvokeErrorMessage()}");
             }
         }
-        try
+        if (fd > 2)
         {
-            Directory.SetCurrentDirectory(dir);
+            close(fd);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        if (chdir(Utf8(dir)) < 0)
         {
-            Console.Error.WriteLine($"code-arena: cannot open {dir}: {e.Message}");
+            // As a terminal does with a folder that is gone: the program starts, where this one is.
+            Console.Error.WriteLine($"code-arena: cannot open {dir}: {Marshal.GetLastPInvokeErrorMessage()}");
         }
-        // As a new process expects them: what a shell may find ignored back at its default (the runtime ignores SIGPIPE), none blocked.
-        int[] signals = OperatingSystem.IsMacOS() ? [1, 2, 3, 13, 15, 18, 21, 22] : [1, 2, 3, 13, 15, 20, 21, 22];
-        foreach (var signal in signals)
+        // As a new program expects them: exec keeps what is ignored (the runtime ignores SIGPIPE) and what is blocked.
+        // The runtime's own handlers for faults stay (exec resets every caught signal anyway): nothing else runs here now.
+        int[] faults = mac ? [4, 5, 8, 10, 11] : [4, 5, 7, 8, 11]; // SIGILL, SIGTRAP, SIGFPE, SIGBUS, SIGSEGV
+        for (var signal = 1; signal < 32; signal++)
         {
-            Signal(signal, 0); // SIG_DFL
+            if (Array.IndexOf(faults, signal) < 0)
+            {
+                Signal(signal, 0); // SIG_DFL; SIGKILL and SIGSTOP refuse, as they must
+            }
         }
-        var none = stackalloc byte[256];
-        sigprocmask(OperatingSystem.IsMacOS() ? 3 : 2, none, null);
-        var argv = args[2..];
-        var envp = Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>().Select(e => $"{e.Key}={e.Value}").ToList();
-        execve(Bytes(program), Pointers(argv), Pointers(envp));
-        Console.Error.WriteLine($"code-arena: cannot start {program}: {Marshal.GetLastPInvokeErrorMessage()}");
-        return 127;
+        var none = stackalloc byte[256]; // a sigset_t, empty: larger than either system's
+        sigprocmask(mac ? 3 : 2, none, null); // SIG_SETMASK
+        var argv = (byte**)Marshal.AllocHGlobal((args.Length - 1) * sizeof(nint));
+        for (var i = 2; i < args.Length; i++)
+        {
+            argv[i - 2] = Utf8(args[i]);
+        }
+        argv[args.Length - 2] = null;
+        execv(Utf8(program), argv);
+        return Fail($"cannot start {program}: {Marshal.GetLastPInvokeErrorMessage()}", 127);
     }
 
-    private static byte* Bytes(string s) => (byte*)Marshal.StringToCoTaskMemUTF8(s);
-
-    private static byte** Pointers(IReadOnlyList<string> items)
+    private static int Fail(string message, int code = 1)
     {
-        var p = (byte**)Marshal.AllocHGlobal((items.Count + 1) * sizeof(nint));
-        for (var i = 0; i < items.Count; i++)
-        {
-            p[i] = Bytes(items[i]);
-        }
-        p[items.Count] = null;
-        return p;
+        Console.Error.WriteLine($"code-arena: {message}");
+        return code;
     }
+
+    /// <summary>A C string; never freed: the program becomes another, or ends.</summary>
+    private static byte* Utf8(string s) => (byte*)Marshal.StringToCoTaskMemUTF8(s);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int setsid();
+
+    [DllImport("libc")]
+    private static extern int getsid(int pid);
+
+    [DllImport("libc")]
+    private static extern int getpid();
 
     [DllImport("libc", SetLastError = true)]
     private static extern int open(byte* path, int flags);
 
     [DllImport("libc", SetLastError = true)]
+    private static extern int ioctl(int fd, nuint request, nint arg);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int dup2(int fd, int to);
+
+    [DllImport("libc", SetLastError = true)]
     private static extern int close(int fd);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int chdir(byte* path);
 
     [DllImport("libc", EntryPoint = "signal")]
     private static extern nint Signal(int signal, nint handler);
@@ -555,8 +604,9 @@ internal static unsafe class PtyHelper
     [DllImport("libc")]
     private static extern int sigprocmask(int how, byte* set, byte* old);
 
+    /// <summary>Becomes the program, with this process's environment (as it was started: the runtime does not change it).</summary>
     [DllImport("libc", SetLastError = true)]
-    private static extern int execve(byte* path, byte** argv, byte** envp);
+    private static extern int execv(byte* path, byte** argv);
 }
 
 /// <summary>
@@ -626,8 +676,9 @@ internal sealed unsafe class WindowsPty : IPty
             }
             var info = new StartupInfoEx { Attributes = attributes };
             info.StartupInfo.Size = sizeof(StartupInfoEx);
-            // No handles of ours: the program's are the console's, even when this program's own are redirected.
+            // No handles of ours: the program's are the console's, even when this program's own are redirected (to a log, say).
             info.StartupInfo.Flags = STARTF_USESTDHANDLES;
+            info.StartupInfo.StdInput = info.StartupInfo.StdOutput = info.StartupInfo.StdError = -1; // INVALID_HANDLE_VALUE
             var line = new StringBuilder(Quote(program));
             foreach (var a in args)
             {
