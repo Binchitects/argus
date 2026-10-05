@@ -170,40 +170,54 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
                 await Reinitialize(ct);
                 continue;
             }
-            await CheckAsync(res, ct);
-            if (res.Headers.TryGetValues("Mcp-Session-Id", out var session))
+            try
             {
-                _session = session.FirstOrDefault() ?? _session;
+                return await AnswerAsync(res, method, id, ct);
             }
-            if (res.Content.Headers.ContentType?.MediaType == "text/event-stream")
+            catch (Exception e) when (e is IOException or HttpRequestException)
             {
-                await using var stream = await res.Content.ReadAsStreamAsync(ct);
-                await foreach (var ev in Sse.ReadAsync(stream, ct))
-                {
-                    if (Json.Parse(ev.Data) is not JsonObject node)
-                    {
-                        continue;
-                    }
-                    if (node["method"] is not null && node["id"] is not null)
-                    {
-                        await AnswerServerAsync(node, ct);
-                    }
-                    else if (SameId(node["id"], id))
-                    {
-                        return Unwrap(node);
-                    }
-                }
-                throw new McpException($"{url} closed the stream without answering {method}.");
+                // The connection dropped while the answer was read (the server went away, a proxy cut it).
+                throw new McpException($"{url} dropped the connection while answering {method}: {e.Message}");
             }
-            var text = await res.Content.ReadAsStringAsync(ct);
-            var answer = Json.Parse(text) switch
-            {
-                JsonObject o => o,
-                JsonArray batch => batch.OfType<JsonObject>().FirstOrDefault(o => SameId(o["id"], id)),
-                _ => null,
-            } ?? throw new McpException($"{url} answered {method} with something that is not JSON-RPC.");
-            return Unwrap(answer);
         }
+    }
+
+    /// <summary>The answer to request id: from the JSON body, or from the event stream (answering the server's own requests on it).</summary>
+    private async Task<JsonNode?> AnswerAsync(HttpResponseMessage res, string method, long id, CancellationToken ct)
+    {
+        await CheckAsync(res, ct);
+        if (res.Headers.TryGetValues("Mcp-Session-Id", out var session))
+        {
+            _session = session.FirstOrDefault() ?? _session;
+        }
+        if (res.Content.Headers.ContentType?.MediaType == "text/event-stream")
+        {
+            await using var stream = await res.Content.ReadAsStreamAsync(ct);
+            await foreach (var ev in Sse.ReadAsync(stream, ct))
+            {
+                if (Json.Parse(ev.Data) is not JsonObject node)
+                {
+                    continue;
+                }
+                if (node["method"] is not null && node["id"] is not null)
+                {
+                    await AnswerServerAsync(node, ct);
+                }
+                else if (SameId(node["id"], id))
+                {
+                    return Unwrap(node);
+                }
+            }
+            throw new McpException($"{url} closed the stream without answering {method}.");
+        }
+        var text = await res.Content.ReadAsStringAsync(ct);
+        var answer = Json.Parse(text) switch
+        {
+            JsonObject o => o,
+            JsonArray batch => batch.OfType<JsonObject>().FirstOrDefault(o => SameId(o["id"], id)),
+            _ => null,
+        } ?? throw new McpException($"{url} answered {method} with something that is not JSON-RPC.");
+        return Unwrap(answer);
     }
 
     public async Task NotifyAsync(string method, JsonObject? parameters, CancellationToken ct)
@@ -233,7 +247,7 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
         {
             using var res = await SendAsync(reply, ct);
         }
-        catch (HttpRequestException)
+        catch (McpException)
         {
             // The answer this stream carries matters more than the server's question.
         }

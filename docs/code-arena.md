@@ -325,21 +325,34 @@ When Arena MCP offers `decide` (the Arena runs the laya module, and the person
 may use **Decide (Laya)**: [chat.md](chat.md#decide-laya)), every command is
 shown to Laya before it runs, with three yes/no questions: is it destructive,
 does it write outside the workspace, does it reach the network. Laya reads
-the command, the working folder, and the paths outside it that the command
-names (`~`, `..`, `/etc`...; found here, since Laya reads text and does not
-compare paths), with its English checkpoint, in about 0.35 s on the Arena's CPU.
+the working folder and the paths outside it that the command names (`~`,
+`..`, `/etc`...; found here, since Laya reads text and does not compare
+paths) first, then the command on one line (its line breaks written `\n`, so
+none can pose as those lines), with its English checkpoint, in about 0.35 s on
+the Arena's CPU. While the English checkpoint is not loaded, the multilingual
+one reads the commands (its probabilities are not calibrated).
+
+Laya reads about 1,500 characters of a command at once. A longer one is read
+in parts, cut after its line breaks, `&&`, `||`, `;` and `|`, each part with the
+folder and the paths first, and each question takes its highest probability
+over the parts: a `git push --force` after a long heredoc is still seen. A
+command that would take more than 8 parts (about 10,000 characters) is not
+read at all, and asks as a flagged one does.
 
 - **Every question about a command shows the three probabilities**:
   `Allow run_shell? (Laya: destructive 96%, outside the workspace 93%, network 3%)`,
   in the terminal and in the IDE.
 - **A command Laya rates at 60% or more on any of the three asks anyway**,
-  in `yolo`, and when **always** was said for its first words. **Always** said
-  to a command Laya flagged covers the next flagged one with those words.
+  in `yolo`, and when **always** was said for its first words; so does one
+  too long for Laya to read. **Always** said to a command Laya flagged covers
+  the next flagged one with those words.
 - **A run that cannot ask** (`-p`) does not run a flagged command: the model is
-  told why, and finds another way.
+  told why, and finds another way (for a long one: write the text with the
+  file tools, and run shorter commands).
 - **It only ever adds a question.** When Laya does not answer (10 seconds at
-  most), commands run as the mode says, and the session says so once. Nothing
-  that would ask runs without asking.
+  most for a command, all its parts; an error, or a connection that drops),
+  commands run as the mode says, and the session says so once, in the
+  terminal and on the IDE's page. Nothing that would ask runs without asking.
 
 The threshold, 0.6, is measured: of 95 commands labelled by hand, Laya asks
 before 45 of the 52 risky ones (`rm -rf ~`, `git reset --hard`, `curl … |
