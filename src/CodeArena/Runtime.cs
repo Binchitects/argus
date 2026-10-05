@@ -205,6 +205,11 @@ internal sealed partial class Runtime : IAsyncDisposable
             Stream = !Ui.Quiet,
         };
         Context.SubAgent = (description, prompt, token) => RunSubAgentAsync(inputs, description, prompt, token);
+        if (Permissions.Guard is { } guard)
+        {
+            // Its one warning reaches the IDE's page too, as the agent's own do.
+            guard.Notify = text => Agent.Events?.Notice(text);
+        }
 
         if (resumed is not null && resumedFile is not null)
         {

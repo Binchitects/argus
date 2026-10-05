@@ -146,7 +146,7 @@ public sealed class LayaTool(LayaClient laya, Modules modules) : IChatTool
         "Question types: choice picks one of a few options (give each a short description of what it covers); score places the text on an ordered scale " +
         "(levels lowest first; the answer is the expected level); noul checks a yes/no statement (the answer is the probability of yes). " +
         "Ask what the text says, not what to do about it. Put numbers and comparisons into words first (\"the order is late\", not two dates). " +
-        "Keep option lists short. Keep the state short with what matters first: about 2,000 characters are read. Ask all the questions about one text in one call. " +
+        "Keep option lists short. Keep the state short with what matters first: about 2,000 characters are read, and the answer says when the rest was cut. Ask all the questions about one text in one call. " +
         "The multilingual checkpoint is not calibrated: read its 100% and 0% as likely, not certain.",
         new JsonObject
         {
@@ -319,12 +319,30 @@ public sealed class LayaTool(LayaClient laya, Modules modules) : IChatTool
             ["calibrated"] = calibrated,
             ["ms"] = laya["ms"]?.DeepClone(),
         };
+        var notes = new List<string>();
+        if (Cut(laya["usage"]) is { } cut)
+        {
+            // Laya reads a few hundred tokens of the state and drops the rest; it counts them, so it is said, not guessed.
+            result["truncated"] = new JsonObject { ["tokens"] = cut.Tokens, ["read"] = cut.Read };
+            notes.Add($"Laya read only the first {cut.Read:N0} of the state's {cut.Tokens:N0} tokens: the answers say nothing of the rest. Shorten it, with what matters first, or split it.");
+        }
         if (!calibrated)
         {
-            result["note"] = "This checkpoint is not calibrated: read its probabilities as a ranking, not as certainty.";
+            notes.Add("This checkpoint is not calibrated: read its probabilities as a ranking, not as certainty.");
+        }
+        if (notes.Count > 0)
+        {
+            result["note"] = string.Join(" ", notes);
         }
         return result;
     }
+
+    /// <summary>The state's tokens and how many Laya read, when its usage says it cut the state short.</summary>
+    private static (int Tokens, int Read)? Cut(JsonNode? usage) =>
+        usage is JsonObject u && u["truncated"] is JsonValue t && t.TryGetValue<bool>(out var truncated) && truncated
+        && u["state_tokens"] is JsonValue s && s.TryGetValue<int>(out var tokens)
+        && u["state_tokens_dropped"] is JsonValue d && d.TryGetValue<int>(out var dropped) && dropped > 0 && dropped <= tokens
+            ? (tokens, tokens - dropped) : null;
 
     private static JsonNode? Round(JsonNode? node) => node switch
     {

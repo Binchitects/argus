@@ -42,10 +42,11 @@ spec:
             {{- include "arena.secretEnv" (list $ "Argus__AdminToken" "ARGUS_KEY") | nindent 12 }}
             - { name: Argus__GitlabUrl, value: {{ .Values.gitlab.url | quote }} }
             {{- include "arena.optionalSecretEnv" (list $ "HuggingFace__Token" "HF_TOKEN") | nindent 12 }}
-            # Which media servers run: said outright rather than looked up by name.
+            # Which media servers and Laya run: said outright rather than looked up by name.
             - { name: Modules__imagegen, value: {{ .Values.imagegen.enabled | quote }} }
             - { name: Modules__videogen, value: {{ .Values.videogen.enabled | quote }} }
             - { name: Modules__audio, value: {{ .Values.audio.enabled | quote }} }
+            - { name: Modules__laya, value: {{ .Values.laya.enabled | quote }} }
             {{- range $k, $v := .Values.app.env }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
             {{- end }}

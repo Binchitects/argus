@@ -598,7 +598,8 @@ probability for every option, all questions in one forward pass.
   ask what the text says, not what to do about it; put numbers and
   comparisons into words first ("the order is a week late", not two dates);
   describe every option; keep option lists short; keep the text short with
-  what matters first (about 2,000 characters are read); and ask every
+  what matters first (about 2,000 characters are read, and when Laya cuts
+  the rest the answer says how many of its tokens it read); and ask every
   question about one text in one call. Wording matters: "Does the customer
   threaten to leave?" read a Persian message at 2%, "Does the customer say
   they will stop buying from us?" at 89%.
@@ -608,7 +609,9 @@ probability for every option, all questions in one forward pass.
   100% there means likely, not certain. `checkpoint` names one instead.
 - **How fast.** On 4 threads of an i7-13700K: four questions about an English
   incident in about 0.6 s, about a Persian complaint in about 0.2 s (the
-  multilingual checkpoint is smaller).
+  multilingual checkpoint is smaller). Calls take turns: with 16 already
+  waiting, or after 8 seconds' wait, Laya answers that it is busy, and the
+  model can try again.
 - **What it is not for.** Reasoning in steps, arithmetic, pulling values out
   of a text, or writing. It is good at clear categories and yes/no checks,
   and weaker on fine scales and subtle judgements: try it on your own
@@ -1004,15 +1007,18 @@ use and edit one); a new chat takes `assistantId`.
   Also Decide (Laya), against a fake Laya: offered only while the module runs
   and a checkpoint is loaded; the model's questions sent in Laya's own shape,
   its probabilities read back to three places, Persian sent to the
-  multilingual checkpoint and marked uncalibrated, bad questions refused
+  multilingual checkpoint and marked uncalibrated, a text Laya cut short
+  said so with how much it read, bad questions refused
   before Laya is asked, Laya's refusal and a Laya that went away said
   plainly; served over Arena MCP as a tool that changes nothing; and both
   checkpoints fetched into the library, each into its folder. The server's
-  own checks are Python tests with its model stubbed (`tests/deploy`). With
+  own checks are Python tests with its model stubbed (`tests/deploy`),
+  including "busy" past its queue and callers that left skipped. With
   `LAYA_URL` naming a running Laya (`-e LAYA_URL=http://127.0.0.1:18000` to
   `tools/dn test`), the `RealLaya` tests ask the real model: an English
-  incident in the chat and a Persian complaint over Arena MCP, and Arena
-  Code's look at 95 labelled commands; without it they are skipped.
+  incident in the chat and a Persian complaint over Arena MCP, and Code
+  Arena's look at 95 labelled commands and at long ones (a push after
+  Persian, a script or base64); without it they are skipped.
   Also memory: "remember I deploy with Podman" in the next chat's system
   prompt (after the fixed notes) and gone once deleted; an offer kept only
   when accepted (in the person's words), taken back, declined, and nobody

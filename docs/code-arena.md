@@ -338,26 +338,49 @@ When Arena MCP offers `decide` (the Arena runs the laya module, and the person
 may use **Decide (Laya)**: [chat.md](chat.md#decide-laya)), every command is
 shown to Laya before it runs, with three yes/no questions: is it destructive,
 does it write outside the workspace, does it reach the network. Laya reads
-the command, the working folder, and the paths outside it that the command
-names (`~`, `..`, `/etc`...; found here, since Laya reads text and does not
-compare paths), with its English checkpoint, in about 0.35 s on the Arena's CPU.
+the command on one line (its line breaks written `\n`, so none can pose as
+the lines after it), then the working folder and the paths outside it that
+the command names (`~`, `..`, `/etc`...; found here, since Laya reads text and
+does not compare paths), with its English checkpoint, in about 0.35 s on the
+Arena's CPU. Only while the English checkpoint is not loaded does the
+multilingual one read the commands (its probabilities are not calibrated).
+
+Laya's English checkpoint reads 512 tokens, the question included: about 460
+are left for the command. Code Arena counts a command's tokens from above
+(shell is about 2.5 characters a token, Persian and base64 about 1), and
+reads a longer command in parts, cut after its line breaks, `&&`, `||`, `;`
+and `|`, each part with the folder and the paths after it; each question
+takes its highest probability over the parts, so a `git push --force` after
+a long heredoc is still seen. Laya says when it cut a part short anyway (it
+counts its own tokens); that part is read again in smaller ones. A command
+that would take more than 8 parts (about 6,000 characters of shell, fewer of
+Persian or base64) is not read at all, and asks as a flagged one does. A
+long command takes Laya a second or more for each part.
 
 - **Every question about a command shows the three probabilities**:
   `Allow run_shell? (Laya: destructive 96%, outside the workspace 93%, network 3%)`,
   in the terminal and in the IDE.
 - **A command Laya rates at 60% or more on any of the three asks anyway**,
-  in `yolo`, and when **always** was said for its first words. **Always** said
-  to a command Laya flagged covers the next flagged one with those words.
+  in `yolo`, and when **always** was said for its first words; so does one
+  Laya could not read all of. **Always** said to a command Laya flagged covers
+  the next flagged one with those words; said to one it could not read all
+  of, it covers the next one it could not read, never one it flags.
 - **A run that cannot ask** (`-p`) does not run a flagged command: the model is
-  told why, and finds another way.
-- **It only ever adds a question.** When Laya does not answer (10 seconds at
-  most), commands run as the mode says, and the session says so once. Nothing
-  that would ask runs without asking.
+  told why, and finds another way (for a long one: write the text with the
+  file tools, and run shorter commands).
+- **It only ever adds a question.** When Laya does not answer at all (10
+  seconds at most for each part; an error, "busy", or a connection that
+  drops), commands run as the mode says, and the session says so once, in the
+  terminal and on the IDE's page. When it answered some parts of a command
+  and not the rest, the command asks, with what Laya found in the parts it
+  read. Nothing that would ask runs without asking.
 
 The threshold, 0.6, is measured: of 95 commands labelled by hand, Laya asks
 before 45 of the 52 risky ones (`rm -rf ~`, `git reset --hard`, `curl … |
 sh`, `git push --force`, `pip install`...) and 2 of the 43 harmless ones
 (`echo hi > /dev/null` and `tar -czf build.tgz dist`, 75% and 74% destructive).
+That is with the command first: with the folder and the paths before it, Laya
+asks before only 41 of the risky ones, and 3 harmless ones.
 It misses `git checkout -- .`, `git branch -D`, `crontab -r`, `docker system prune`,
 `cp config.json ~/.config/shop/`, `go get` and a `curl -X POST` that uploads a
 file. At 0.7 it asks before only 37 of the risky ones, with the same 2 harmless

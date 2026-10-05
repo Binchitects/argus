@@ -144,7 +144,10 @@ docker compose up -d --build laya
 - **The image** is `python:3.13-slim` with PyTorch's CPU build (no CUDA: the GPU
   is the chat model's) and `laya` from PyPI, about 1.7 GB. Its server is
   `services/laya/server.py`: Python's own HTTP server, `POST /v1/decide` and
-  `GET /health` on port 8000, one forward pass at a time.
+  `GET /health` on port 8000, one forward pass at a time. Calls wait their
+  turn, at most 16 of them and 8 seconds each; past that it answers busy
+  (503) at once, and a call whose caller has gone is skipped, so a burst
+  cannot keep it busy for callers that gave up.
 - **Locked down.** A read-only root, no capabilities, the library mounted
   read-only, `HF_HUB_OFFLINE` (it fetches nothing), and a network of its own
   that is `internal` and holds only the app: it can reach nothing. 4 CPUs and
@@ -160,6 +163,8 @@ docker compose up -d --build laya
   when they are in the library.
 - **Helm**: `laya.enabled=true`, with the `arena-laya` image built and pushed
   like the app's; a NetworkPolicy lets only the app's pods in, and nothing out.
+  The app is told whether it runs (`Modules__laya`), as for the media
+  servers, rather than looking the name up.
 
 ## Podman
 
