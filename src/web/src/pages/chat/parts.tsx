@@ -1,4 +1,4 @@
-import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Collapsible } from 'radix-ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNow } from './use-now'
@@ -74,6 +74,7 @@ export function Thinking({ text, live, ms, since, onHurry, hurried }: { text: st
 const toolIcons: [RegExp, LucideIcon][] = [
   [/^delegate$/, Network],
   [/^remember$/, Brain],
+  [/^decide$/, Scale],
   [/^canvas_/, FilePen],
   [/python|run_code/, SquareTerminal],
   [/web|url|fetch/, Globe],

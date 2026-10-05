@@ -33,6 +33,18 @@ describe('admin tools', () => {
     await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toMatchObject({ askFirst: true }))
   })
 
+  it('Decide (Laya) is listed with its own icon, and says when its module is off', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/tools': () => ({
+        json: [tool('laya', 'Decide (Laya)', { icon: 'scale', unavailable: 'The Laya decision model does not run here (the laya module is off: COMPOSE_PROFILES=laya turns it on).' })],
+      }),
+    })
+    renderApp('/admin/tools')
+    const card = (await screen.findByRole('heading', { name: /Decide \(Laya\)/ })).closest('section')!
+    expect(within(card).getByText(/COMPOSE_PROFILES=laya turns it on/)).toBeInTheDocument()
+    expect(card.querySelector('svg.lucide-scale')).not.toBeNull()
+  })
+
   it('an MCP server is tested, then added', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/tools': () => ({ json: [] }),

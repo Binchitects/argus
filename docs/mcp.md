@@ -45,7 +45,8 @@ Other clients (streamable HTTP):
   taking a tool away in Admin → Tools takes it away here at once.
 - **The same functions**: Argus's (`find_symbol`, …), `run_python`, `web_search`,
   `fetch_page`, `generate_image`, `generate_video`, `speak`, `calculate`,
-  `current_time`, `days_between`, and `server__function` for each MCP server,
+  `current_time`, `days_between`, `decide` (Laya, while its module runs:
+  [chat.md](chat.md#decide-laya)), and `server__function` for each MCP server,
   API and plugin (`pets__list_pets`).
 - **Not served**: the chat's own tools. Reading files (a chat's files),
   questions to the person (`ask_user`) and sub-agents (`delegate`) have no chat

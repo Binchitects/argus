@@ -122,7 +122,7 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 /// </summary>
 public sealed class ToolRegistry(
     AppDbContext db, ArgusTool argus, ImageTool image, VideoTool video, SpeechTool speech, CalculatorTool calculator, TimeTool time, FilesTool files, CanvasTool canvas, PythonTool python, WebTool web, AskTool ask, AgentsTool agents, MemoryTool memory,
-    IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people, Knowledge.KnowledgeTool knowledge)
+    IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people, Knowledge.KnowledgeTool knowledge, LayaTool laya)
 {
     public const string McpClient = "mcp";
 
@@ -130,7 +130,7 @@ public sealed class ToolRegistry(
     {
         var settings = await db.ToolSettings.AsNoTracking().ToDictionaryAsync(s => s.ToolId, ct);
         var servers = await db.McpServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
-        IEnumerable<IChatTool> tools = [argus, knowledge, python, web, image, video, speech, calculator, time, files, canvas, ask, agents, memory, .. servers.Select(Server)];
+        IEnumerable<IChatTool> tools = [argus, knowledge, python, web, image, video, speech, calculator, time, files, canvas, ask, agents, memory, laya, .. servers.Select(Server)];
         var all = new List<ToolChoice>();
         foreach (var tool in tools)
         {

@@ -215,6 +215,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     part's result.
   - **Memory**: the model remembers what you ask it to across your chats, and
     offers to remember what would help later ([below](#memory)).
+  - **Decide (Laya)** (when the laya module runs): typed questions about a
+    text, answered with a probability for every option in a fraction of a
+    second by Laya, a decision model on the CPU that never writes text
+    ([below](#decide-laya)).
   - **MCP servers** an admin added: their tools, by name.
   - **APIs** an admin added by their OpenAPI document: each operation is a
     function (`pets__list_pets`); a call that changes something (anything but
@@ -562,6 +566,50 @@ chat, as ChatGPT and Claude do.
 - **For the company:** **Settings → Chat → Memory** turns it off for everyone
   (people's memories stay, to see and delete). The **Memory** tool is also
   in Admin → Tools, like any tool (who may use it, on in new chats).
+
+## Decide (Laya)
+
+Typed decisions about a text, by [Laya](https://github.com/NandhaKishorM/laya)
+(Convai Innovations, Apache-2.0): a decision model that runs on the CPU and
+never writes text. The model asks typed questions with `decide`; Laya gives a
+probability for every option, all questions in one forward pass.
+
+- **When.** Classifying, routing, triage, scoring and yes/no checks: which team
+  a ticket goes to, how urgent it is, whether a message is spam or asks for a
+  refund. Many texts are one call each. The model acts on an answer only when
+  its probability is high (0.85 or more), and says when it is not sure.
+- **Three kinds of question.**
+  - `choice`: one of 2 to 20 options, each with a short description of what it
+    covers. The answer is the option, with each option's probability.
+  - `score`: an ordered scale of 2 to 10 levels, lowest first. The answer is
+    the expected level (2.4 is between the third and fourth level), with each
+    level's probability.
+  - `noul`: a yes/no statement. The answer is the probability of yes.
+
+  Each answer also has a `confidence`, low when the probability is spread out.
+- **What makes answers good.** The tool's description teaches the model:
+  ask what the text says, not what to do about it; put numbers and
+  comparisons into words first ("the order is a week late", not two dates);
+  describe every option; keep option lists short; keep the text short with
+  what matters first (about 2,000 characters are read); and ask every
+  question about one text in one call. Wording matters: "Does the customer
+  threaten to leave?" read a Persian message at 2%, "Does the customer say
+  they will stop buying from us?" at 89%.
+- **Languages.** English goes to the English checkpoint, whose probabilities
+  are calibrated. Other scripts (Persian, Arabic, Chinese...) go to the
+  multilingual one (100+ languages), whose are not: the answer says so, and
+  100% there means likely, not certain. `checkpoint` names one instead.
+- **How fast.** On 4 threads of an i7-13700K: four questions about an English
+  incident in about 0.6 s, about a Persian complaint in about 0.2 s (the
+  multilingual checkpoint is smaller).
+- **What it is not for.** Reasoning in steps, arithmetic, pulling values out
+  of a text, or writing. It is good at clear categories and yes/no checks,
+  and weaker on fine scales and subtle judgements: try it on your own
+  examples first.
+- **Where.** In Admin → Tools while the `laya` module runs (off by default:
+  [deployment.md](deployment.md#laya)); outside agents get `decide` from
+  Arena MCP, and Arena Code uses it to look at commands
+  ([arena-code.md](arena-code.md#laya-looks-at-commands)).
 
 ## Prompts and slash commands
 
@@ -917,6 +965,7 @@ use and edit one); a new chat takes `assistantId`.
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
 | No **Image generation** or **Video generation** in the Tools menu | the model is off, or its server does not run | Admin → Models: turn it on; a module left out in `docker-compose.override.yml` stays out |
 | No **Python** in the Tools menu | the sandbox is not running | `docker compose ps sandbox`; `scripts/sandbox-check.py` says whether it is sound |
+| No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `COMPOSE_PROFILES=laya` in `.env`, then `docker compose up -d laya`; Admin → Models shows the downloads |
 | No **Web** in the Tools menu | it is off (the default), or no site is allowed | Admin → Tools → Web on, and Settings → Python and web → Sites the chat may open |
 | "… is not one of the sites the chat may open" | the page's site is not allowed | allow it in Settings → Python and web, or `*` for any public site |
 
@@ -945,6 +994,18 @@ use and edit one); a new chat takes `assistantId`.
   by difficulty, the route kept, **Ask the big model**, deep research unasked,
   Auto as the default, and who may use the small model). Real Postgres, a fake
   model and a fake Argus.
+  Also Decide (Laya), against a fake Laya: offered only while the module runs
+  and a checkpoint is loaded; the model's questions sent in Laya's own shape,
+  its probabilities read back to three places, Persian sent to the
+  multilingual checkpoint and marked uncalibrated, bad questions refused
+  before Laya is asked, Laya's refusal and a Laya that went away said
+  plainly; served over Arena MCP as a tool that changes nothing; and both
+  checkpoints fetched into the library, each into its folder. The server's
+  own checks are Python tests with its model stubbed (`tests/deploy`). With
+  `LAYA_URL` naming a running Laya (`-e LAYA_URL=http://127.0.0.1:18000` to
+  `tools/dn test`), the `RealLaya` tests ask the real model: an English
+  incident in the chat and a Persian complaint over Arena MCP, and Arena
+  Code's look at 95 labelled commands; without it they are skipped.
   Also memory: "remember I deploy with Podman" in the next chat's system
   prompt (after the fixed notes) and gone once deleted; an offer kept only
   when accepted (in the person's words), taken back, declined, and nobody
