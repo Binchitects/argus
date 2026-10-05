@@ -70,9 +70,10 @@ internal static class Pty
 /// (posix_spawn does it all in the C library), which matters: the runtime's
 /// code pages are shared with a forked child, so a child running managed code
 /// can break its parent. macOS's posix_spawn opens files before it makes the
-/// session, and opening a terminal there never makes it the controlling one,
-/// so on macOS the program starts through code-arena --pty-helper (a process
-/// of its own, not a fork), which takes the terminal and becomes the program.
+/// session, so the terminal cannot become the new session's there: on macOS
+/// the program starts through code-arena --pty-helper (a process of its own,
+/// not a fork), which makes the session, takes the terminal (TIOCSCTTY) and
+/// becomes the program.
 /// </summary>
 internal sealed unsafe class UnixPty : IPty
 {
