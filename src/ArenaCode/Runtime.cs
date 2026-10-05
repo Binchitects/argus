@@ -115,6 +115,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             }
         }
 
+        var arenaClient = await arena;
         var wanted = o.Model ?? resumed?.Model ?? Config.Model;
         var info = Models.FirstOrDefault(m => m.Id == wanted);
         if (info is null)
@@ -123,11 +124,13 @@ internal sealed partial class Runtime : IAsyncDisposable
             {
                 throw new StartException($"The gateway has no model {o.Model}. Yours: {string.Join(", ", Models.Select(m => m.Id))}");
             }
+            // No model of its own: the one a new chat in Arena starts with, as Arena MCP says, else the gateway's first.
+            var fallback = Models.FirstOrDefault(m => m.Id == arenaClient?.DefaultModel) ?? Models[0];
             if (wanted is not null)
             {
-                Ui.Warn($"{wanted} is not offered any more: using {Models[0].Id}.");
+                Ui.Warn($"{wanted} is not offered any more: using {fallback.Id}.");
             }
-            info = Models[0];
+            info = fallback;
         }
         Model = new ModelState { Info = info, Thinking = o.Thinking ?? Config.Thinking, ContextOverride = Config.Context };
 
@@ -140,7 +143,6 @@ internal sealed partial class Runtime : IAsyncDisposable
 
         var tools = LocalTools.All(Config.Shell);
         tools.Add(LocalTools.SubAgentTool());
-        var arenaClient = await arena;
         var instructions = new List<(string, string)>();
         if (arenaClient is not null)
         {

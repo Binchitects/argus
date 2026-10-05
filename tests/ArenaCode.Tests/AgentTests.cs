@@ -152,6 +152,22 @@ public sealed class AgentTests : IDisposable
     }
 
     [Fact]
+    public async Task Without_a_model_of_its_own_it_takes_the_one_a_new_chat_in_Arena_starts_with()
+    {
+        _mcp.DefaultModel = "model-b";
+        try
+        {
+            using var h = new Harness(_gateway, _mcp);
+            Assert.Equal(0, await h.Run("", "-p", "hi"));
+            Assert.Equal("model-b", _gateway.Requests[0]["model"]!.GetValue<string>());
+        }
+        finally
+        {
+            _mcp.DefaultModel = null;
+        }
+    }
+
+    [Fact]
     public async Task The_model_and_thinking_level_reach_the_gateway()
     {
         using var h = new Harness(_gateway, _mcp);

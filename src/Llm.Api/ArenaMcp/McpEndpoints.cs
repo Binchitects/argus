@@ -114,7 +114,7 @@ public static class McpEndpoints
     }
 
     private static async Task PostAsync(HttpContext http, IOptionsMonitor<McpOptions> options, McpPeople people, McpTools tools, McpPrompts prompts, McpCalls calls,
-        IOptionsMonitor<BrandingOptions> branding)
+        IOptionsMonitor<BrandingOptions> branding, Models.ModelPolicy policy, Chat.ChatModels models)
     {
         var ct = http.RequestAborted;
         if (!options.CurrentValue.Enabled)
@@ -167,7 +167,9 @@ public static class McpEndpoints
             await WriteAsync(http, StatusCodes.Status400BadRequest, Error(null, -32700, "The body is not JSON."));
             return;
         }
-        var handler = new Handler(user, protocol, session, tools, prompts, calls, Product(branding));
+        // The model a new chat of theirs starts with: an agent with no model of its own takes it (Arena Code).
+        async Task<string?> DefaultModelAsync(CancellationToken token) => (await policy.ForAsync(user, await models.ListAsync(token), token)).Default?.Name ?? models.DefaultName;
+        var handler = new Handler(user, protocol, session, tools, prompts, calls, Product(branding), DefaultModelAsync);
 
         // A batch (2025-03-26 allows them): each answered, together, as JSON.
         if (kind == JsonValueKind.Array)
@@ -284,7 +286,8 @@ public static class McpEndpoints
     }
 
     /// <summary>One person's requests, as JSON-RPC.</summary>
-    private sealed class Handler(AppUser user, string protocol, string session, McpTools tools, McpPrompts prompts, McpCalls calls, string product)
+    private sealed class Handler(AppUser user, string protocol, string session, McpTools tools, McpPrompts prompts, McpCalls calls, string product,
+        Func<CancellationToken, Task<string?>> defaultModel)
     {
         /// <summary>A notification: a cancelled call is stopped; the rest need nothing.</summary>
         public void Notice(JsonObject message)
@@ -335,6 +338,8 @@ public static class McpEndpoints
                 },
                 ["serverInfo"] = new JsonObject { ["name"] = "arena", ["title"] = product, ["version"] = AppInfo.Current.Version },
                 ["instructions"] = catalog.Instructions,
+                // MCP's place for what a client may use beyond the protocol: the person's default chat model.
+                ["_meta"] = new JsonObject { ["arena/defaultModel"] = await defaultModel(ct) },
             };
         }
 

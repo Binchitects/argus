@@ -44,6 +44,9 @@ internal sealed class McpClient : IAsyncDisposable
     public string Name { get; }
     /// <summary>What the server asks its clients to tell the model.</summary>
     public string? Instructions { get; private set; }
+
+    /// <summary>Arena's default chat model for this person (Arena MCP's initialize, _meta), if the server says.</summary>
+    public string? DefaultModel { get; private set; }
     public string? ServerName { get; private set; }
     public List<JsonObject> Tools { get; private set; } = [];
 
@@ -79,6 +82,7 @@ internal sealed class McpClient : IAsyncDisposable
             ["clientInfo"] = new JsonObject { ["name"] = "arena-code", ["version"] = Cli.Version },
         }, ct) as JsonObject ?? throw new McpException("The server answered initialize with nothing.");
         Instructions = result.Str("instructions");
+        DefaultModel = result["_meta"]?["arena/defaultModel"] is JsonValue model && model.TryGetValue<string>(out var name) ? name : null;
         ServerName = result["serverInfo"].Str("name");
         if (_transport is HttpMcpTransport http)
         {

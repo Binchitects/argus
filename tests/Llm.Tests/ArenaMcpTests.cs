@@ -119,6 +119,8 @@ public sealed class ArenaMcpTests(AppFixture app)
         var agent = Agent(f, key);
         var (res, init, _) = await RpcAsync(agent, "initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "test", version = "1" } });
         Assert.Equal("2025-06-18", init.GetProperty("result").GetProperty("protocolVersion").GetString());
+        // The model a new chat of theirs starts with, for an agent that has none of its own.
+        Assert.Equal("Qwen3.8-Flash-Next", init.GetProperty("result").GetProperty("_meta").GetProperty("arena/defaultModel").GetString());
         Assert.Equal("arena", init.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString());
         Assert.True(init.GetProperty("result").GetProperty("capabilities").TryGetProperty("tools", out _));
         Assert.True(res.Headers.Contains("Mcp-Session-Id"));

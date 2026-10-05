@@ -248,6 +248,8 @@ public sealed class FakeMcp : FakeServer
     private readonly List<(string Method, string? Session)> _calls = [];
 
     public bool Sse { get; set; }
+    /// <summary>Arena's default chat model, told in initialize's _meta as Arena MCP does; null: not told.</summary>
+    public string? DefaultModel { get; set; }
     /// <summary>No endpoint: 404 for everything.</summary>
     public bool Missing { get; set; }
     public string Url => BaseUrl + "/mcp";
@@ -299,6 +301,7 @@ public sealed class FakeMcp : FakeServer
                 ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
                 ["serverInfo"] = new JsonObject { ["name"] = "argus-arena", ["version"] = "4.2.0" },
                 ["instructions"] = "Arena: search the web with web_search before answering about recent events.",
+                ["_meta"] = DefaultModel is null ? null : new JsonObject { ["arena/defaultModel"] = DefaultModel },
             },
             "tools/list" => new JsonObject
             {
