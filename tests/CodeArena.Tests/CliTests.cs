@@ -79,6 +79,13 @@ public sealed class CliTests : IDisposable
         Assert.Null(Cli.Parse(["--resume", "carry on"]).ResumeId);
         Assert.Equal("-", Cli.Parse(["-p", "-"]).Prompt);
         Assert.Equal("login", Cli.Parse(["login", "--url", "x"]).Command);
+        // Alone: the IDE (no command, no prompt); chat: the terminal; a prompt alone: the terminal too.
+        Assert.Null(Cli.Parse(["--continue"]).Command);
+        Assert.Null(Cli.Parse(["--continue"]).Prompt);
+        var chat = Cli.Parse(["chat", "fix", "it"]);
+        Assert.Equal("chat", chat.Command);
+        Assert.Equal("fix it", chat.Prompt);
+        Assert.Throws<ArgumentException>(() => Cli.Parse(["web", "fix", "it"]));
         Assert.Throws<ArgumentException>(() => Cli.Parse(["--thinking", "max"]));
     }
 

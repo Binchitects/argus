@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -33,6 +35,15 @@ internal sealed class HttpRequest
 
     /// <summary>The body as a JSON object, or null when it is not one.</summary>
     public JsonObject? Json() => CodeArena.Json.ParseObject(Encoding.UTF8.GetString(Body));
+
+    /// <summary>A WebSocket handshake (RFC 6455): a GET asking to upgrade, version 13, with a key.</summary>
+    public bool IsWebSocket =>
+        Method == "GET"
+        && (Header("Upgrade") ?? "").Contains("websocket", StringComparison.OrdinalIgnoreCase)
+        && (Header("Connection") ?? "").Contains("upgrade", StringComparison.OrdinalIgnoreCase)
+        && Header("Sec-WebSocket-Version") == "13"
+        && Header("Sec-WebSocket-Key") is { Length: > 0 } key
+        && Convert.TryFromBase64String(key, new byte[24], out var n) && n == 16;
 }
 
 /// <summary>A request the server refuses before it is handled: too large, malformed, or of a kind it does not take.</summary>
@@ -46,7 +57,7 @@ internal sealed class HttpResponse(Stream stream)
 {
     private static readonly Dictionary<int, string> Reasons = new()
     {
-        [100] = "Continue", [200] = "OK", [204] = "No Content", [302] = "Found", [400] = "Bad Request", [401] = "Unauthorized",
+        [100] = "Continue", [101] = "Switching Protocols", [200] = "OK", [204] = "No Content", [302] = "Found", [400] = "Bad Request", [401] = "Unauthorized",
         [403] = "Forbidden", [404] = "Not Found", [405] = "Method Not Allowed", [409] = "Conflict", [413] = "Content Too Large",
         [415] = "Unsupported Media Type", [431] = "Request Header Fields Too Large", [500] = "Internal Server Error", [501] = "Not Implemented",
         [503] = "Service Unavailable",
@@ -140,6 +151,26 @@ internal sealed class HttpResponse(Stream stream)
         }
         head.Append("\r\n");
         await stream.WriteAsync(Encoding.UTF8.GetBytes(head.ToString()), ct);
+    }
+
+    /// <summary>
+    /// Answers a WebSocket handshake (101) and hands the connection over to the
+    /// socket: it serves no more requests. Its frames are the base class
+    /// library's own WebSocket over this stream.
+    /// </summary>
+    public async Task<WebSocket> AcceptWebSocketAsync(HttpRequest request, CancellationToken ct)
+    {
+        if (Started)
+        {
+            throw new InvalidOperationException("The response has started already.");
+        }
+        Started = true;
+        KeepAlive = false;
+        var accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(request.Header("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+        var head = $"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n";
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(head), ct);
+        await stream.FlushAsync(ct);
+        return WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(20) });
     }
 
     /// <summary>"100 Continue", for a client that waits for it before sending the body.</summary>

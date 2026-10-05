@@ -60,7 +60,7 @@ internal sealed class Repl(Runtime rt)
             File.Delete(rt.Session.File);
             return 0;
         }
-        Ui.Info($"Saved as {rt.Session.Id}: code-arena --resume {rt.Session.Id}");
+        Ui.Info($"Saved as {rt.Session.Id}: code-arena chat --resume {rt.Session.Id}");
         return 0;
     }
 

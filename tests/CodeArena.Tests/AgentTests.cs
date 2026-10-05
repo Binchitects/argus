@@ -51,7 +51,7 @@ public sealed class AgentTests : IDisposable
     {
         using var h = new Harness(_gateway, _mcp);
         _gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("Result: " + FakeGateway.Last(req)) : Reply.Call(("create_issue", """{"title":"x"}"""));
-        Assert.Equal(0, await h.Run("open an issue\nn\n/exit\n"));
+        Assert.Equal(0, await h.Run("open an issue\nn\n/exit\n", "chat"));
         Assert.Contains("Allow create_issue?", h.Out);
         Assert.Contains("Result: The person declined", h.Out);
         Assert.DoesNotContain(_mcp.Calls, c => c.Method == "tools/call");
@@ -132,7 +132,7 @@ public sealed class AgentTests : IDisposable
             _ => Reply.Say("?"),
         };
         var input = string.Join('\n', "edit it", "y", "say hi", "/model", "2", "/mode plan", "/thinking off", "/cost", "/tools", "/nope", "/exit") + "\n";
-        Assert.Equal(0, await h.Run(input));
+        Assert.Equal(0, await h.Run(input, "chat"));
 
         Assert.Equal("new\n", File.ReadAllText(file));
         Assert.Contains("Allow edit_file?", h.Out);
@@ -290,7 +290,7 @@ public sealed class AgentTests : IDisposable
     public async Task A_session_where_nothing_was_said_is_not_kept()
     {
         using var h = new Harness(_gateway, _mcp);
-        Assert.Equal(0, await h.Run("/help\n/exit\n"));
+        Assert.Equal(0, await h.Run("/help\n/exit\n", "chat"));
         Assert.Contains("/compact", h.Out);
         Assert.DoesNotContain("Saved as", h.Out);
         Assert.Empty(Directory.GetFiles(h.Paths.SessionsDir));

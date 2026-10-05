@@ -9,13 +9,15 @@
     <RootNamespace>CodeArena</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
     <IsPackable>false</IsPackable>
+    <!-- The terminals' pseudo-terminals: forkpty and ConPTY through the C API. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="CodeArena.Tests" />
   </ItemGroup>
 
-  <!-- The web interface (code-arena web): the page src/web builds into web/
+  <!-- The IDE (code-arena, code-arena web): the page src/web builds into web/
        (tools/publish-code-arena.sh does it first), embedded whole. Without it,
        code-arena web says the page is missing. -->
   <ItemGroup Condition="Exists('web/code-arena.html')">

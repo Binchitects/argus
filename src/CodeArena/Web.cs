@@ -64,20 +64,23 @@ internal sealed class WebAssets
 }
 
 /// <summary>
-/// code-arena web: this folder's agent, driven from a page in the browser. The
-/// same Runtime and agent loop as the terminal; the page hears each turn as
-/// server-sent events (in the shape Arena's chat streams them) and posts
-/// messages, approvals, Stop, and mode and model changes. Only this machine can
-/// reach it (127.0.0.1), only with this run's token (in the address once, then a
-/// cookie), and only from its own page: Host and Origin are checked, so another
-/// site, or a name made to point at 127.0.0.1, cannot drive the agent.
+/// The IDE (code-arena, code-arena web): this folder's agent, files and
+/// terminals, driven from a page in the browser. The same Runtime and agent
+/// loop as the terminal; the page hears each turn as server-sent events (in the
+/// shape Arena's chat streams them) and posts messages, approvals, Stop, and
+/// mode and model changes; the editor, search and terminals have their own calls
+/// (WebIde.cs). Only this machine can reach it (127.0.0.1), only with this run's
+/// token (in the address once, then a cookie), and only from its own page: Host
+/// and Origin are checked, so another site, or a name made to point at
+/// 127.0.0.1, cannot drive the agent, read the files or type in a terminal.
 /// </summary>
 internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 {
     /// <summary>A tool's text sent to the page at most; the model gets its own cut.</summary>
     private const int MaxResultChars = 60_000;
 
-    private const string PageCsp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'";
+    // The editor's and the language services' workers are files of the page's own (worker-src falls back to script-src); the terminals' WebSockets are named, as not every browser counts ws: as 'self'.
+    private string PageCsp => $"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' ws://127.0.0.1:{Port} ws://localhost:{Port}; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'";
     // The diagram runner (as the web's nginx serves it): an origin of its own, no network, framed by the page only.
     private const string PreviewCsp = "sandbox allow-scripts allow-forms allow-modals; default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
 
@@ -101,6 +104,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         _rt = rt;
         _assets = assets;
         _server = server;
+        StartIde();
     }
 
     /// <summary>This run's key to the page: 256 random bits.</summary>
@@ -152,7 +156,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         {
             if (!TokenIs(given))
             {
-                await NoEntryAsync(res, "This link is not the one this run of code-arena web printed: it makes a new key each time it starts.", ct);
+                await NoEntryAsync(res, "This link is not the one this run of code-arena printed: it makes a new key each time it starts.", ct);
                 return;
             }
             // The key moves to a cookie, and out of the address bar and the history.
@@ -167,11 +171,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         {
             if (api)
             {
-                await res.ErrorAsync(401, "unauthorized", "Open the address code-arena web printed in your terminal: it carries this run's key.", ct);
+                await res.ErrorAsync(401, "unauthorized", "Open the address code-arena printed in your terminal: it carries this run's key.", ct);
             }
             else
             {
-                await NoEntryAsync(res, "Open the address code-arena web printed in your terminal: it carries this run's key.", ct);
+                await NoEntryAsync(res, "Open the address code-arena printed in your terminal: it carries this run's key.", ct);
             }
             return;
         }
@@ -343,6 +347,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 }
                 await SwitchAsync(res, file, ct);
                 return;
+        }
+        if (await IdeAsync(req, res, ct))
+        {
+            return;
         }
         await res.ErrorAsync(404, "not_found", "There is no such call.", ct);
     }
@@ -803,6 +811,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         };
         if (result.Change is { } change && !result.Error)
         {
+            _changes.Record(change);
             var diff = History.DiffJson(change.Path, change.Before, change.After, numbered: true);
             e["diff"] = diff;
             lock (_diffs)
@@ -839,6 +848,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await job.Stop.CancelAsync();
             await Task.WhenAny(job.Running, Task.Delay(TimeSpan.FromSeconds(5)));
         }
+        await _terminals.DisposeAsync();
         await _server.DisposeAsync();
         _rt.Agent.Events = null;
         _rt.Permissions.Asker = null;

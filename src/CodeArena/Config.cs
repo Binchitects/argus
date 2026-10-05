@@ -98,6 +98,8 @@ internal sealed class Config
     public int? Context { get; set; }
     /// <summary>The shell run_shell uses (default: bash or sh; cmd.exe on Windows).</summary>
     public string? Shell { get; set; }
+    /// <summary>The shell the IDE's terminals start (default: $SHELL, else bash or sh; PowerShell on Windows).</summary>
+    public string? TerminalShell { get; set; }
     /// <summary>Directories the tools may use besides the working directory.</summary>
     public List<string> AllowedPaths { get; set; } = [];
     public List<McpServerConfig> McpServers { get; set; } = [];
@@ -151,6 +153,7 @@ internal sealed class Config
         config.Mode = raw.Str("mode");
         config.Context = raw.Int("context");
         config.Shell = raw.Str("shell");
+        config.TerminalShell = raw.Str("terminalShell");
         config.AllowedPaths = raw["allowedPaths"] is JsonArray paths ? [.. paths.Select(p => p?.ToString() ?? "").Where(p => p.Length > 0)] : [];
         config.McpServers = raw["mcpServers"] is JsonObject servers
             ? [.. servers.Select(s => McpServerConfig.From(s.Key, s.Value)).OfType<McpServerConfig>()]
@@ -209,6 +212,7 @@ internal sealed class Config
         Set("mode", Mode);
         Set("context", Context);
         Set("shell", Shell);
+        Set("terminalShell", TerminalShell);
         PrivateFiles.WriteAllText(file, raw.ToJsonString(Json.Indented) + "\n");
         _raw = raw;
     }

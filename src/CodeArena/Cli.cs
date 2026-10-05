@@ -7,7 +7,7 @@ namespace CodeArena;
 /// <summary>The command line, parsed.</summary>
 internal sealed class Options
 {
-    /// <summary>login, logout, models, web, help, version; null runs the agent.</summary>
+    /// <summary>login, logout, models, web, chat, help, version; null: the IDE without a prompt, the agent in this terminal with one.</summary>
     public string? Command { get; set; }
     public string? Prompt { get; set; }
     /// <summary>One-shot: answer the prompt, print the answer, exit.</summary>
@@ -24,7 +24,7 @@ internal sealed class Options
     public string? Url { get; set; }
     public string? Gateway { get; set; }
     public bool NoColor { get; set; }
-    /// <summary>web: the port (null: a free one), and whether to leave the browser closed.</summary>
+    /// <summary>The IDE: the port (null: a free one), and whether to leave the browser closed.</summary>
     public int? Port { get; set; }
     public bool NoOpen { get; set; }
 }
@@ -48,22 +48,24 @@ internal sealed class CliEnv
     public WebAssets? Web { get; init; }
 }
 
-/// <summary>The command line: code-arena [options] [prompt], login, logout, models.</summary>
+/// <summary>The command line: code-arena (the IDE), chat, [options] prompt, login, logout, models.</summary>
 internal static partial class Cli
 {
     public static string Version { get; } =
         typeof(Cli).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
 
     public const string Help = """
-        Code Arena: a coding agent in your terminal, on your company's Argus Arena.
+        Code Arena: an IDE in your browser around a coding agent, on your company's Argus Arena.
 
         Usage:
-          code-arena [options] [prompt]     work in this folder (a prompt starts the conversation)
+          code-arena [options]              the IDE for this folder, in your browser, on this machine only
+          code-arena web [options]          the same
+          code-arena chat [prompt]          the agent in this terminal instead
+          code-arena [options] "prompt"     a conversation in this terminal that starts with the prompt
           code-arena -p "prompt"            answer once and print the answer (-p - reads the prompt from stdin)
           code-arena login                  sign in: the Arena's address and your API key
           code-arena logout                 forget the API key
           code-arena models                 the models you may use
-          code-arena web                    the same agent in your browser, on this machine only
 
         Options:
           -p, --print [prompt]       one-shot, for scripts; --output json for a JSON answer
@@ -77,12 +79,12 @@ internal static partial class Cli
               --url URL              login: the Arena's address, https://DOMAIN
               --gateway URL          login: the gateway, when it is not https://gateway.DOMAIN
               --no-color             plain text
-              --port N               web: listen on this port (default: a free one)
-              --no-open              web: print the address, do not open the browser
+              --port N               the IDE: listen on this port (default: a free one)
+              --no-open              the IDE: print the address, do not open the browser
           -v, --version
           -h, --help
 
-        In a session, /help lists the commands. Ctrl+C stops a turn; twice at the prompt leaves.
+        In the terminal, /help lists the commands. Ctrl+C stops a turn; twice at the prompt leaves.
         Settings: code-arena keeps them in config.json in its config folder (see docs/code-arena.md).
         """;
 
@@ -114,8 +116,11 @@ internal static partial class Cli
                 return await ModelsAsync(o, env, MakeUi(env, o, quiet: false), ct);
             case "web":
                 return await WebAsync(o, env, ct);
-            default:
+            case "chat":
                 return await AgentAsync(o, env, ct);
+            default:
+                // Without a prompt, the IDE; a prompt (or -p) starts the conversation in this terminal.
+                return o.Prompt is null && !o.Print ? await WebAsync(o, env, ct) : await AgentAsync(o, env, ct);
         }
     }
 
@@ -128,7 +133,7 @@ internal static partial class Cli
             var a = args[i];
             string Value() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{a} needs a value.");
             bool NextIsValue() => i + 1 < args.Length && !args[i + 1].StartsWith('-');
-            if (i == 0 && a is "login" or "logout" or "models" or "web" or "help" or "version")
+            if (i == 0 && a is "login" or "logout" or "models" or "web" or "chat" or "help" or "version")
             {
                 o.Command = a;
                 continue;
@@ -215,7 +220,7 @@ internal static partial class Cli
         }
         if (o.Command == "web" && (o.Prompt is not null || o.Print))
         {
-            throw new ArgumentException("web takes no prompt: write it in the page.");
+            throw new ArgumentException("web takes no prompt: write it in the IDE's chat (or use code-arena chat \"prompt\").");
         }
         return o;
     }
@@ -409,8 +414,10 @@ internal static partial class Cli
     }
 
     /// <summary>
-    /// code-arena web: the agent of this folder behind a page on 127.0.0.1, until
-    /// Ctrl+C. What the agent does is logged here as in a one-shot run (on stderr).
+    /// The IDE (code-arena, code-arena web): this folder's files, terminals and
+    /// agent behind a page on 127.0.0.1, until Ctrl+C. What the agent does is
+    /// logged here as in a one-shot run (on stderr). A build without the page
+    /// says so; without a command, it runs the conversation here instead.
     /// </summary>
     private static async Task<int> WebAsync(Options o, CliEnv env, CancellationToken ct)
     {
@@ -419,7 +426,12 @@ internal static partial class Cli
         var assets = env.Web ?? WebAssets.Embedded();
         if (!assets.Built)
         {
-            ui.Error("This code-arena has no web interface: its page was not built into it. tools/publish-code-arena.sh builds the page (from src/web) and then the program.");
+            if (o.Command is null)
+            {
+                ui.Warn("This code-arena has no IDE built into it: the conversation runs in this terminal.");
+                return await AgentAsync(o, env, ct);
+            }
+            ui.Error("This code-arena has no IDE: its page was not built into it. tools/publish-code-arena.sh builds the page (from src/web) and then the program.");
             return 1;
         }
         // The whole run is one "turn" of Ctrl+C: the first press stops the server.
@@ -458,11 +470,12 @@ internal static partial class Cli
                 await using (app)
                 {
                     var git = SystemPrompt.GitRoot(rt.Workspace.Root) is { } root && SystemPrompt.GitBranch(root) is { } branch ? $" ({branch})" : "";
-                    env.Out.WriteLine($"Code Arena {Version} in your browser: {rt.Workspace.Root}{git}, {rt.Model.Name}, mode {rt.Permissions.Mode.Name()}");
+                    env.Out.WriteLine($"Code Arena {Version}, the IDE for {rt.Workspace.Root}{git}: {rt.Model.Name}, mode {rt.Permissions.Mode.Name()}");
                     env.Out.WriteLine();
                     env.Out.WriteLine($"  {app.Address}");
                     env.Out.WriteLine();
                     env.Out.WriteLine("Only this machine can open it, and only with the key in the address. Ctrl+C stops it.");
+                    env.Out.WriteLine("The agent in this terminal instead: code-arena chat");
                     if (!o.NoOpen && !Browser.Open(app.Address, env.Env))
                     {
                         env.Out.WriteLine("Open the address in your browser.");

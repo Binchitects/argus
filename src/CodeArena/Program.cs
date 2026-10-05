@@ -2,6 +2,12 @@ using System.Runtime.InteropServices;
 using System.Text;
 using CodeArena;
 
+// The start of an IDE terminal's program, where posix_spawn cannot do it (macOS): before anything touches the console.
+if (args is [PtyHelper.Flag, ..])
+{
+    return PtyHelper.Run(args[1..]);
+}
+
 // The real console: UTF-8, colours on Windows terminals too, the key read
 // without echo, and Ctrl+C stopping the turn rather than the program.
 var colours = Terminal.Prepare();

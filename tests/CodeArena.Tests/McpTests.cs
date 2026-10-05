@@ -74,7 +74,7 @@ public sealed class McpTests : IDisposable
         gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("Got: " + FakeGateway.Last(req)) : Reply.Call(("mcp__echo__echo", """{"word":"hi"}"""));
 
         // Asked first (the server is not trusted), and allowed.
-        Assert.Equal(0, await h.Run("ask me\ny\n/exit\n"));
+        Assert.Equal(0, await h.Run("ask me\ny\n/exit\n", "chat"));
         Assert.Contains("Allow mcp__echo__echo?", h.Out);
         Assert.Contains("Got: echo: hello", h.Out);
         Assert.Contains("1 from echo", h.Out);

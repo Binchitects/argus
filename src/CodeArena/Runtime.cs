@@ -105,7 +105,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             {
                 if (o.ResumeId is not null)
                 {
-                    throw new StartException($"No saved session {o.ResumeId}. code-arena --resume lists them.");
+                    throw new StartException($"No saved session {o.ResumeId}. code-arena chat --resume lists them.");
                 }
                 Ui.Info("No earlier session in this folder: starting a new one.");
             }
