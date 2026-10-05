@@ -57,6 +57,17 @@ jobs:
           (cd dist && sha256sum -c SHA256SUMS)
           dist/code-arena/linux-x64/code-arena --version
           dist/code-arena/linux-x64/code-arena --help
+      - name: The package has the IDE's page built in
+        # The project embeds the page only when it was built (web/code-arena.html): without it the
+        # program says "has no IDE" before anything else; with it, the next thing it needs is a sign-in.
+        run: |
+          test -f src/CodeArena/web/code-arena.html
+          said="$(CODE_ARENA_HOME="$(mktemp -d)" dist/code-arena/linux-x64/code-arena web --no-open 2>&1 || true)"
+          echo "$said"
+          case "$said" in
+            *"Not signed in"*) ;;
+            *) echo "The package's code-arena did not start its IDE (is the page built into it?)" >&2; exit 1 ;;
+          esac
 
   web:
     runs-on: ubuntu-24.04

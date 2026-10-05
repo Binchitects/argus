@@ -463,10 +463,15 @@ stage), from .NET's runtime packs, which are not part of the SDK:
   internet (its [README](../tools/offline-nuget/README.md) has the commands,
   about 220 MB), carry it over with the repository, and build as usual: the
   image builds Code Arena from that folder only (`CODE_ARENA=auto`, the
-  default). Without the packs, the image skips it and the page says so.
+  default). The packs must be at the version of the SDK image's own runtime
+  (`dotnet --list-runtimes`; a newer `sdk:10.0` pulled since moves it).
+  Without them, the image skips Code Arena, the build log lists the files to
+  fetch at that version, and the page says how to add it.
 - **By hand**: `tools/publish-code-arena.sh --offline [rid ...]` writes
   `dist/code-arena/<rid>/code-arena` and `SHA256SUMS`, with `dotnet` or
-  `tools/dn`. Copy the files to people any way you like.
+  `tools/dn`. It checks the packs first: when one is missing for a system
+  asked for, it lists them at the version to fetch, builds nothing and exits
+  with 3. Copy the files to people any way you like.
 - **Packages for a release**: `tools/package-code-arena.sh [rid ...]` runs the
   publish script (offline, from `tools/offline-nuget`; `--online` fetches the
   packs instead), then packs each system as
