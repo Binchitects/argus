@@ -1,7 +1,7 @@
 namespace Llm.Api.Models;
 
 /// <summary>
-/// The models of the picture, video, embedding and speech servers. The file servers read files
+/// The models of the picture, video, embedding, decision and speech servers. The file servers read files
 /// from the library and wait for them; the app fetches those on the first start (<see cref="Provisioning"/>).
 /// The speech server fetches its own when the app asks. Paths match docker-compose.yml.
 /// </summary>
@@ -11,6 +11,7 @@ public static class MediaModels
     public const string ImageTextEncoder = "Qwen3-4B-Q4_K_M.gguf";
     public const string VideoDir = "video/wan2.2-ti2v-5b";
     public const string EmbedDir = "embed";
+    public const string LayaDir = "laya";
 
     /// <summary>What the gateway and the chat call them.</summary>
     public const string ImageModel = "FLUX.2-klein-4B";
@@ -23,11 +24,18 @@ public static class MediaModels
     public const string VideoUrl = "http://videogen:1234";
     public const string AudioUrl = "http://audio:8000";
 
-    /// <summary>A file a server reads: from a Hugging Face repository into a folder of the library, by its own name.</summary>
-    public sealed record ServerFile(string Repo, string Path, string Dir)
+    /// <summary>A file a server reads: from a Hugging Face repository into a folder of the library, by its own name (or <paramref name="As"/>, a path in the folder).</summary>
+    public sealed record ServerFile(string Repo, string Path, string Dir, string? As = null)
     {
-        public string Name => System.IO.Path.GetFileName(Path);
+        public string Name => As ?? System.IO.Path.GetFileName(Path);
     }
+
+    /// <summary>What a Laya checkpoint is: its weights, its settings, its encoder's and tokenizer's.</summary>
+    public static readonly string[] LayaFiles = ["rl_agent_config.json", "model.safetensors", "encoder/config.json", "tokenizer/tokenizer.json", "tokenizer/tokenizer_config.json"];
+
+    /// <summary>A checkpoint of convaiinnovations/laya (its root is the English one), into its own folder under laya/.</summary>
+    private static IReadOnlyList<ServerFile> Laya(string subfolder, string checkpoint) =>
+        [.. LayaFiles.Select(f => new ServerFile("convaiinnovations/laya", subfolder + f, $"{LayaDir}/{checkpoint}", f))];
 
     /// <summary>Each file server by its name on the network, and its files.</summary>
     public static readonly IReadOnlyList<(string Server, IReadOnlyList<ServerFile> Files)> Servers =
@@ -48,6 +56,8 @@ public static class MediaModels
             new("city96/umt5-xxl-encoder-gguf", "umt5-xxl-encoder-Q4_K_M.gguf", VideoDir),
             new("Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "split_files/vae/wan2.2_vae.safetensors", VideoDir),
         ]),
+        // Laya, the decision model (the laya module, off by default): English (calibrated) and multilingual, on the CPU.
+        ("laya", [.. Laya("", "english"), .. Laya("multilingual/", "multilingual")]),
     ];
 
     /// <summary>The speech server's models (its own ids), by the name the gateway gives them.</summary>

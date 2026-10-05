@@ -100,7 +100,12 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
             var names = string.Join(", ", repo.Select(f => f.Name));
             LogFetching(logger, names, repo.Key.Dir);
         }
-        await db.SaveChangesAsync(ct);
+        if (db.ChangeTracker.HasChanges())
+        {
+            await db.SaveChangesAsync(ct);
+            // Woken once they are saved: woken before, it finds none and sleeps a minute.
+            downloads.Wake();
+        }
     }
 
     /// <summary>
@@ -167,6 +172,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
                 {
                     Start(db, repo.Id, repo.Sha, repo.Id, wanted.Select(f => new DownloadFile { Path = f.Path, Size = f.Size, Sha256 = f.Sha256 }));
                     await db.SaveChangesAsync(ct);
+                    downloads.Wake();
                     var fetching = Path.GetFileName(file);
                     LogFetching(logger, fetching, repo.Id);
                 }
@@ -197,12 +203,11 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
         LogAdded(logger, name, file);
     }
 
-    private void Start(AppDbContext db, string repo, string sha, string dir, IEnumerable<DownloadFile> files)
+    private static void Start(AppDbContext db, string repo, string sha, string dir, IEnumerable<DownloadFile> files)
     {
         var d = new ModelDownload { Repo = repo, Revision = sha, Dir = dir, CreatedBy = By, Files = [.. files] };
         d.Total = d.Files.Sum(f => f.Size);
         db.ModelDownloads.Add(d);
-        downloads.Wake();
     }
 
     [GeneratedRegex(@"-\d{5}-of-\d{5}$")]

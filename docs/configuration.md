@@ -32,6 +32,7 @@ Three places, each with one job:
 | `HTTP_PORT`, `HTTPS_PORT` | optional: other ports than 80 and 443 (rootless Podman) |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_SSL_MODE` | optional: an external Postgres instead of the stack's (`postgres`, 5432, `arena`, `prefer`); `DB_SSL_MODE` is `disable`, `prefer` or `require` ([deployment.md](deployment.md#external-postgres)) |
 | `APP_REPLICAS` | optional, with `scale.yml`: how many app replicas run behind Traefik (2) ([deployment.md](deployment.md#scale-out)) |
+| `COMPOSE_PROFILES` | optional: `laya` runs Laya, the one module off by default ([deployment.md](deployment.md#laya)) |
 | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | optional: power caps, kept applied |
 | `XDG_RUNTIME_DIR` | Podman only, from your shell (not `.env`): where Promtail finds the Podman socket |
 

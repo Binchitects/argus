@@ -109,6 +109,67 @@ spec:
   policyTypes: [Ingress, Egress]
 ---
 {{- end }}
+{{- /* Laya: typed decisions on the CPU. It reads its checkpoints from the library and reaches nothing; only the app reaches it. */}}
+{{- if .Values.laya.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laya
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "laya") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "laya") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      automountServiceAccountToken: false
+      securityContext: { runAsUser: 65534, runAsGroup: 65534, runAsNonRoot: true }
+      containers:
+        - name: laya
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.laya) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports: [{ name: http, containerPort: 8000 }]
+          env:
+            - { name: LAYA_THREADS, value: {{ .Values.laya.threads | quote }} }
+          resources: {{- toYaml .Values.laya.resources | nindent 12 }}
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          readinessProbe: { httpGet: { path: /health, port: http }, periodSeconds: 30 }
+          volumeMounts:
+            - { name: models, mountPath: /models, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        {{- include "arena.claim" (list "models" (include "arena.modelsClaim" .)) | nindent 8 }}
+        - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: laya
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "laya") | nindent 4 }}
+  ports: [{ name: http, port: 8000, targetPort: http }]
+---
+# The app's pods in, nothing out: as compose's internal network.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: laya
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "laya") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 14 }}
+      ports: [{ port: 8000 }]
+---
+{{- end }}
 {{- /* The chat's web search. A new secret each start: it signs nothing that outlives the process. */}}
 {{- if .Values.searxng.enabled }}
 apiVersion: apps/v1

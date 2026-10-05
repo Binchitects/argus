@@ -20,8 +20,10 @@ One host, one network, one way in. Only Traefik publishes ports:
 │ app  │   │ postgres│    │ imagegen   │   │ embed     │  │ alertmgr │
 │      │   │         │    │ videogen   │   │ sandbox*  │  │ loki ... │
 │      │   │         │    │ audio      │   │ searxng   │  │          │
+│      │   │         │    │            │   │ laya**    │  │          │
 └──────┘   └─────────┘    └────────────┘   └───────────┘  └──────────┘
                                          * no network at all
+                                         ** off by default; a network of its own with the app
 ```
 
 A broken Traefik is a total outage; a broken Prometheus is not.
@@ -46,8 +48,9 @@ on the network) and stops offering what needs it. The core is `traefik`,
 
 **One network**, compose's default: every service reaches every other by its
 service name (`http://litellm:4000`). The sandbox has none (`network_mode:
-none`): the app hands it jobs through a volume. `argus` and `cpu-temp-exporter`
-also reach the host (`host.docker.internal`): a GitLab on the same machine, and
+none`): the app hands it jobs through a volume. Laya (when on) is only on a
+network of its own with the app, `internal`, so it reaches nothing. `argus`
+and `cpu-temp-exporter` also reach the host (`host.docker.internal`): a GitLab on the same machine, and
 the host's hardware monitor.
 
 **Named volumes**, prefixed with the project (`arena`): `postgres`, `argus`,
