@@ -12,7 +12,7 @@ import { toast } from '@/components/ui/toaster'
 import { ApiError, errorMessage } from '@/lib/api'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
-import { EditorContext, loadMonaco, rankFiles, useEditor, type DiffModels, type EditorApi, type FileModel, type MonacoModule, type Reveal, type Tab, type Unsaved } from './editor-state'
+import { EditorContext, loadMonaco, modKey, rankFiles, useEditor, type DiffModels, type EditorApi, type FileModel, type MonacoModule, type Reveal, type Tab, type Unsaved } from './editor-state'
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, nameOf, readFile, revertChange, within, writeFile, type Change } from './ide-api'
 
 const diffId = (path: string) => `diff:${path}`
@@ -117,24 +117,28 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         activate(id)
         return
       }
-      add({ id, kind: 'file', path, status: 'loading', dirty: false })
+      const load = Symbol(path)
+      add({ id, kind: 'file', path, status: 'loading', dirty: false, load })
+      // This open's tab as it is now: none when it was closed meanwhile (one opened again has a load of its own), renamed perhaps.
+      const mine = () => tabsRef.current.find((t) => t.load === load)
       try {
         const [file, m] = await Promise.all([readFile(path), loadMonaco()])
         mon.current = m
-        // Closed while it loaded.
-        if (!has(id)) return
+        const tab = mine()
+        if (!tab) return
         if (file.text === null) {
-          update(id, { status: file.binary ? 'binary' : 'tooLarge' })
+          update(tab.id, { status: file.binary ? 'binary' : 'tooLarge' })
           return
         }
-        const language = m.languageOf(path)
+        const language = m.languageOf(tab.path)
         const model = m.monaco.editor.createModel(file.text, language.id)
-        const f: FileModel = { path, model, version: file.version, savedAlt: model.getAlternativeVersionId(), view: null }
+        const f: FileModel = { path: tab.path, model, version: file.version, savedAlt: model.getAlternativeVersionId(), view: null }
         model.onDidChangeContent(() => markDirty(f))
-        files.current.set(path, f)
-        update(id, { status: 'ready', language: language.name })
+        files.current.set(tab.path, f)
+        update(tab.id, { status: 'ready', language: language.name })
       } catch (e) {
-        if (has(id)) update(id, { status: 'error', message: errorMessage(e) })
+        const tab = mine()
+        if (tab) update(tab.id, { status: 'error', message: errorMessage(e) })
       }
     }
 
@@ -218,32 +222,54 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       return true
     }
 
+    /** The tab's file as it was when a read began: still open, the same model, nothing typed in it and nothing saved since. */
+    const unchanged = (t: Tab, f: FileModel, at: { alt: number; version: string }) =>
+      has(t.id) && files.current.get(t.path) === f && !f.model.isDisposed() && f.model.getAlternativeVersionId() === at.alt && f.version === at.version
+
+    /** One tab against the disk. Everything is checked again after each wait: the tab may have closed, been typed in or saved, meanwhile. */
+    const refreshTab = async (t: Tab) => {
+      if (t.kind === 'diff') {
+        try {
+          await loadDiff(t.path)
+          // Closed while it loaded: its models go too.
+          if (!has(t.id)) dispose(t)
+        } catch {
+          // Accepted or reverted elsewhere: the diff has nothing to show.
+          drop([t.id])
+        }
+        return
+      }
+      const f = files.current.get(t.path)
+      if (!f || f.model.isDisposed() || f.model.getAlternativeVersionId() !== f.savedAlt) return
+      const at = { alt: f.savedAlt, version: f.version }
+      let file
+      try {
+        file = await readFile(t.path)
+      } catch (e) {
+        // Gone (a change reverted, a file deleted by a command): a tab with nothing unsaved goes too.
+        if (e instanceof ApiError && e.http === 404 && unchanged(t, f, at)) drop([t.id])
+        return
+      }
+      // Typed in while it was read: the person's text stays, unsaved, and saving asks first (the version on disk moved on).
+      // Saved while it was read: the read may be from before the save, and what was saved stays.
+      if (!unchanged(t, f, at) || file.version === f.version || file.text === null) return
+      if (f.model.getValue() !== file.text) {
+        // An edit, not a new model: the cursor and the scroll stay, and Undo takes it back.
+        f.model.pushEditOperations([], [{ range: f.model.getFullModelRange(), text: file.text }], () => null)
+        f.model.pushStackElement()
+      }
+      f.version = file.version
+      f.savedAlt = f.model.getAlternativeVersionId()
+      markDirty(f)
+    }
+
     const refresh = async (path?: string) => {
       for (const t of tabsRef.current.filter((t) => t.status === 'ready' && (path === undefined || t.path === path))) {
-        if (t.kind === 'diff') {
-          // Accepted or reverted elsewhere: the diff has nothing to show.
-          await loadDiff(t.path).catch(() => drop([t.id]))
-          continue
-        }
-        const f = files.current.get(t.path)
-        if (!f || f.model.getAlternativeVersionId() !== f.savedAlt) continue
-        let file
         try {
-          file = await readFile(t.path)
-        } catch (e) {
-          // Gone (a change reverted, a file deleted by a command): a tab with nothing unsaved goes too.
-          if (e instanceof ApiError && e.http === 404) drop([t.id])
-          continue
+          await refreshTab(t)
+        } catch {
+          // One tab that cannot be read again leaves the others to be.
         }
-        if (file.version === f.version || file.text === null) continue
-        if (f.model.getValue() !== file.text) {
-          // An edit, not a new model: the cursor and the scroll stay, and Undo takes it back.
-          f.model.pushEditOperations([], [{ range: f.model.getFullModelRange(), text: file.text }], () => null)
-          f.model.pushStackElement()
-        }
-        f.version = file.version
-        f.savedAlt = f.model.getAlternativeVersionId()
-        markDirty(f)
       }
     }
 
@@ -276,7 +302,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (a && ids.has(a)) activate(ids.get(a)!)
     }
 
-    const removed = (path: string) => drop(tabsRef.current.filter((t) => within(t.path, path)).map((t) => t.id))
+    // A tab with unsaved changes stays: its text is the person's, and saving makes the file again.
+    const removed = (path: string) => drop(tabsRef.current.filter((t) => within(t.path, path) && !t.dirty).map((t) => t.id))
 
     const accept = async (path?: string) => {
       try {
@@ -494,8 +521,6 @@ function QuickOpen() {
   )
 }
 
-const mod = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
-
 /** The tabs, the editor or the diff of the active one, and a few words when nothing is open. */
 export function EditorArea() {
   const ed = useEditor()
@@ -615,9 +640,9 @@ export function EditorArea() {
 
 function Welcome() {
   const keys: [string, string][] = [
-    [`${mod}+P`, 'Go to a file'],
-    [`${mod}+S`, 'Save'],
-    [`${mod}+Shift+F`, 'Search the files'],
+    [`${modKey}+P`, 'Go to a file'],
+    [`${modKey}+S`, 'Save'],
+    [`${modKey}+Shift+F`, 'Search the files'],
     ['Ctrl+`', 'Show or hide the terminal'],
   ]
   return (

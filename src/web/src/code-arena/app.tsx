@@ -1,11 +1,12 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Files, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
-import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { AlertTriangle, Files, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip } from '@/components/ui/tooltip'
 import { ApiError } from '@/lib/api'
+import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { configQuery } from '@/pages/chat/api'
 import type { ChatConfig } from '@/pages/chat/types'
@@ -13,9 +14,9 @@ import { stateQuery, type CodeEvent, type CodeState } from './api'
 import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
 import { EditorArea, EditorProvider } from './editor'
-import { useEditor } from './editor-state'
+import { modKey, onMac, useEditor } from './editor-state'
 import { Explorer } from './explorer'
-import { changesQuery, parentOf, folderQuery } from './ide-api'
+import { changesQuery, folderQuery, parentOf, preferencesQuery, savePreferences, type Preferences } from './ide-api'
 import { SearchPanel } from './search'
 import { Splitter } from './splitter'
 import { About, StatusBar } from './status-bar'
@@ -33,13 +34,17 @@ const TerminalPanel = lazy(() => import('./terminals'))
 export function App() {
   const state = useQuery({ ...stateQuery, refetchInterval: 30_000 })
   const config = useQuery(configQuery)
+  // The layout and the theme as they were left, in any run: waited for, so the workbench opens as it was.
+  const preferences = useQuery(preferencesQuery)
+  useSavedTheme(preferences.data)
 
   useEffect(() => {
     if (state.data) document.title = `${state.data.project} · Code Arena`
   }, [state.data])
 
-  if (state.error || config.error) return <Gone error={state.error ?? config.error} />
-  if (!state.data || !config.data)
+  // Gone only before anything loaded: once the workbench is there, it stays (with what is not saved in it) and says what is wrong.
+  if ((state.error && !state.data) || (config.error && !config.data)) return <Gone error={state.error ?? config.error} />
+  if (!state.data || !config.data || preferences.isPending)
     return (
       <div className="flex h-dvh flex-col" aria-busy="true" aria-label="Loading">
         <div className="flex min-h-0 flex-1">
@@ -61,14 +66,27 @@ export function App() {
 
   return (
     <EditorProvider>
-      <Workbench state={state.data} config={config.data} />
+      <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} />
     </EditorProvider>
   )
 }
 
+/** The theme last picked, in whichever run: applied once, as the page opens (this port's browser storage may hold none, or an older one). */
+function useSavedTheme(saved: Preferences | undefined) {
+  const { setPreference } = useTheme()
+  const applied = useRef(false)
+  useEffect(() => {
+    if (applied.current || !saved) return
+    applied.current = true
+    if (saved.theme === 'light' || saved.theme === 'dark' || saved.theme === 'system') setPreference(saved.theme)
+  }, [saved, setPreference])
+}
+
+const earlierRun = (error: unknown) => error instanceof ApiError && error.http === 401
+
 /** The server went away (Ctrl+C), or this page holds the key of an earlier run. */
 function Gone({ error }: { error: unknown }) {
-  const unauthorized = error instanceof ApiError && error.http === 401
+  const unauthorized = earlierRun(error)
   return (
     <div className="mx-auto grid max-w-lg gap-3 px-4 py-[15vh]">
       <h1 className="text-xl font-semibold">Code Arena</h1>
@@ -81,9 +99,30 @@ function Gone({ error }: { error: unknown }) {
   )
 }
 
+/**
+ * The server stopped answering after the page loaded (it stopped, or the SSH
+ * tunnel to it dropped): the workbench stays, so what is not saved can still be
+ * copied out, and the page keeps asking; this goes when it answers again.
+ */
+function Unreachable({ error }: { error: unknown }) {
+  const unauthorized = earlierRun(error)
+  return (
+    <div role="alert" className="flex shrink-0 items-start gap-2 border-b border-warning/40 bg-warning/10 px-3 py-1.5 text-sm">
+      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+      <p className="min-w-0">
+        <span className="font-medium">{unauthorized ? 'This page is from an earlier run of code-arena.' : 'code-arena web is not answering.'}</span>{' '}
+        <span className="text-muted-foreground">
+          {unauthorized ? 'Open the address it printed in your terminal.' : 'It stopped, or the connection to it dropped: this page keeps trying.'} What is not saved stays in the editor until this page
+          closes: copy it out before you close it.
+        </span>
+      </p>
+    </div>
+  )
+}
+
 type View = 'explorer' | 'search' | 'changes' | 'chat'
 
-/** Where the panels are and how large: the person's own, kept in this browser. */
+/** Where the panels are and how large: the person's own, kept by code-arena for every run. */
 interface Layout {
   view: View
   side: number
@@ -94,33 +133,57 @@ interface Layout {
   panelOpen: boolean
 }
 
-const layoutKey = 'code-arena:layout'
 const defaults: Layout = { view: 'explorer', side: 264, chat: 440, panel: 280, sideOpen: true, chatOpen: true, panelOpen: false }
+/** The panels' sizes, smallest and largest (the terminal's largest also follows the window). */
+const bounds = { side: [180, 640], chat: [320, 960], panel: [100, 4000] } as const
 
-function useLayout() {
-  const [layout, setLayout] = useState<Layout>(() => {
-    try {
-      return { ...defaults, ...(JSON.parse(localStorage.getItem(layoutKey) ?? '{}') as Partial<Layout>) }
-    } catch {
-      return defaults
-    }
-  })
+/** The layout saved, what of it still makes sense: the known keys, of their kind, the sizes within bounds. */
+function layoutOf(saved: Record<string, unknown> | undefined): Layout {
+  const layout = { ...defaults }
+  if (!saved) return layout
+  const view = saved.view
+  if (view === 'explorer' || view === 'search' || view === 'changes' || view === 'chat') layout.view = view
+  for (const k of ['side', 'chat', 'panel'] as const) {
+    const size = saved[k]
+    if (typeof size === 'number' && Number.isFinite(size)) layout[k] = Math.round(Math.min(bounds[k][1], Math.max(bounds[k][0], size)))
+  }
+  for (const k of ['sideOpen', 'chatOpen', 'panelOpen'] as const) {
+    const open = saved[k]
+    if (typeof open === 'boolean') layout[k] = open
+  }
+  return layout
+}
+
+function useLayout(saved: Record<string, unknown> | undefined) {
+  const [layout, setLayout] = useState<Layout>(() => layoutOf(saved))
+  // Kept by code-arena (a page's browser storage is per port, and each run takes a new one): a moment after the
+  // last change, as a drag changes it at every step, or as the page closes.
+  const kept = useRef(JSON.stringify(layout))
   useEffect(() => {
-    try {
-      localStorage.setItem(layoutKey, JSON.stringify(layout))
-    } catch {
-      // A private window: the layout lasts as long as the page.
+    const json = JSON.stringify(layout)
+    if (json === kept.current) return
+    const keep = (keepalive: boolean) => {
+      kept.current = json
+      void savePreferences({ layout: { ...layout } }, keepalive).catch(() => undefined)
+    }
+    const soon = setTimeout(() => keep(false), 400)
+    const leaving = () => {
+      clearTimeout(soon)
+      keep(true)
+    }
+    window.addEventListener('pagehide', leaving)
+    return () => {
+      clearTimeout(soon)
+      window.removeEventListener('pagehide', leaving)
     }
   }, [layout])
   const change = useCallback((c: Partial<Layout>) => setLayout((l) => ({ ...l, ...c })), [])
   return [layout, change] as const
 }
 
-const mod = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
-
 const views: { id: View; label: string; icon: LucideIcon; keys?: string }[] = [
-  { id: 'explorer', label: 'Explorer', icon: Files, keys: `${mod}+Shift+E` },
-  { id: 'search', label: 'Search', icon: Search, keys: `${mod}+Shift+F` },
+  { id: 'explorer', label: 'Explorer', icon: Files, keys: `${modKey}+Shift+E` },
+  { id: 'search', label: 'Search', icon: Search, keys: `${modKey}+Shift+F` },
   { id: 'changes', label: 'Agent changes', icon: GitCompareArrows },
   { id: 'chat', label: 'Chat', icon: MessagesSquare },
 ]
@@ -149,10 +212,10 @@ function ActivityButton({ label, keys, pressed, badge, onClick, children }: { la
   )
 }
 
-function Workbench({ state, config }: { state: CodeState; config: ChatConfig }) {
+function Workbench({ state, config, lost, saved }: { state: CodeState; config: ChatConfig; lost: unknown; saved: Record<string, unknown> | undefined }) {
   const queryClient = useQueryClient()
   const { refresh, setQuickOpen, save, openDiff } = useEditor()
-  const [layout, change] = useLayout()
+  const [layout, change] = useLayout(saved)
   const [about, setAbout] = useState(false)
   // Bumped to put the focus in the search box or the terminal.
   const [searchFocus, setSearchFocus] = useState(0)
@@ -184,9 +247,10 @@ function Workbench({ state, config }: { state: CodeState; config: ChatConfig }) 
   }, [change, layout.panelOpen])
 
   // The editor's keys, wherever the focus is (the terminal too, as an editor's terminal lets them through).
+  // On macOS they are ⌘: Ctrl+S, Ctrl+P… stay the terminal's and the editor's own there.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const ctrl = e.ctrlKey || e.metaKey
+      const ctrl = onMac() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
       const key = e.key.toLowerCase()
       let handled = true
       if (ctrl && !e.shiftKey && !e.altKey && key === 's') void save()
@@ -218,9 +282,10 @@ function Workbench({ state, config }: { state: CodeState; config: ChatConfig }) 
   const onTurnEnd = useCallback(() => void refresh(), [refresh])
 
   const count = changes.data?.length ?? 0
-  const maxPanel = Math.max(160, height - 220)
+  const maxPanel = Math.min(bounds.panel[1], Math.max(160, height - 220))
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+      {!!lost && <Unreachable error={lost} />}
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Activity bar" className="flex w-12 shrink-0 flex-col border-r bg-sidebar">
           {views.map((v) => (
@@ -254,11 +319,11 @@ function Workbench({ state, config }: { state: CodeState; config: ChatConfig }) 
             <Sessions state={state} />
           </div>
         </aside>
-        {layout.sideOpen && <Splitter label="Resize the side bar" orientation="vertical" value={layout.side} min={180} max={640} grow={1} onChange={(side) => change({ side })} />}
+        {layout.sideOpen && <Splitter label="Resize the side bar" orientation="vertical" value={layout.side} min={bounds.side[0]} max={bounds.side[1]} grow={1} onChange={(side) => change({ side })} />}
 
         <main className="flex min-w-0 flex-1 flex-col">
           <EditorArea />
-          {layout.panelOpen && <Splitter label="Resize the terminal" orientation="horizontal" value={Math.min(layout.panel, maxPanel)} min={100} max={maxPanel} grow={-1} onChange={(panel) => change({ panel })} />}
+          {layout.panelOpen && <Splitter label="Resize the terminal" orientation="horizontal" value={Math.min(layout.panel, maxPanel)} min={bounds.panel[0]} max={maxPanel} grow={-1} onChange={(panel) => change({ panel })} />}
           {panelUsed && (
             <div hidden={!layout.panelOpen} style={{ height: Math.min(layout.panel, maxPanel) }} className="shrink-0">
               <Suspense
@@ -268,13 +333,13 @@ function Workbench({ state, config }: { state: CodeState; config: ChatConfig }) 
                   </div>
                 }
               >
-                <TerminalPanel onHide={() => change({ panelOpen: false })} focusKey={terminalFocus} />
+                <TerminalPanel shown={layout.panelOpen} onHide={() => change({ panelOpen: false })} focusKey={terminalFocus} />
               </Suspense>
             </div>
           )}
         </main>
 
-        {layout.chatOpen && <Splitter label="Resize the chat" orientation="vertical" value={layout.chat} min={320} max={960} grow={-1} onChange={(chat) => change({ chat })} />}
+        {layout.chatOpen && <Splitter label="Resize the chat" orientation="vertical" value={layout.chat} min={bounds.chat[0]} max={bounds.chat[1]} grow={-1} onChange={(chat) => change({ chat })} />}
         <aside hidden={!layout.chatOpen} aria-label="Agent" style={{ width: layout.chat }} className="min-h-0 shrink-0">
           <Thread
             key={state.session}

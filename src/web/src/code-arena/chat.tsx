@@ -40,6 +40,7 @@ import {
   type SessionSummary,
 } from './api'
 import { CodeAnswer } from './answer'
+import { changesQuery, savePreferences } from './ide-api'
 
 // The agent's chat, in the IDE's side panel: the folder's sessions (the side
 // bar's Chat view), the thread, the composer, the model and the mode.
@@ -131,9 +132,13 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
   )
 }
 
-/** Light, dark, or the system's. */
+/** Light, dark, or the system's; kept by code-arena, so the next run (on another port) opens in it too. */
 export function ThemeMenu({ side = 'bottom', align = 'end' }: { side?: 'right' | 'bottom' | 'top'; align?: 'start' | 'end' }) {
-  const { preference, resolved, setPreference } = useTheme()
+  const { preference, resolved, setPreference: setTheme } = useTheme()
+  const setPreference = (theme: ThemePreference) => {
+    setTheme(theme)
+    void savePreferences({ theme }).catch(() => undefined)
+  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -233,7 +238,15 @@ export function Thread({
     if (atBottom && el) el.scrollTop = el.scrollHeight
   }, [view.messages, atBottom])
 
-  const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: ['code'] }), [queryClient])
+  /**
+   * What a turn changes, read again: the state and the session are waited for (the thread shows the saved turn
+   * from them), the agent's changes, the files and the session list come when they come. The search is left as
+   * it is: it would read every file again after each answer.
+   */
+  const refresh = useCallback(async () => {
+    for (const queryKey of [changesQuery.queryKey, ['code', 'files'], sessionsQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
+    await Promise.all([queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }), queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey })])
+  }, [queryClient])
 
   /** Streams a turn (or a compaction, or the turn running when the page opened) into the thread, then reads the saved session. */
   const run = useCallback(

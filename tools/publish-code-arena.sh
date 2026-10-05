@@ -10,8 +10,9 @@
 #   tools/publish-code-arena.sh --no-web            without building the web interface's page
 #
 # --offline needs the .NET runtime and host packs for each system in
-# tools/offline-nuget/ (its README says how to fill it once). Uses dotnet when
-# installed, tools/dn (the SDK in a container) otherwise.
+# tools/offline-nuget/ (its README says how to fill it once), at the runtime
+# version the SDK publishes with: without them it builds nothing and exits
+# with 3. Uses dotnet when installed, tools/dn (the SDK in a container) otherwise.
 #
 # First it builds the web interface's page (code-arena web) from src/web into
 # src/CodeArena/web, which the program embeds: with Node.js and src/web's own
@@ -30,7 +31,7 @@ for arg in "$@"; do
   case "$arg" in
     --offline) offline=1 ;;
     --no-web) web= ;;
-    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     linux-x64|linux-arm64|win-x64|osx-x64|osx-arm64) rids+=("$arg") ;;
     *) echo "unknown argument: $arg (systems: ${all[*]})" >&2; exit 2 ;;
   esac
@@ -38,6 +39,33 @@ done
 [ ${#rids[@]} -eq 0 ] && rids=("${all[@]}")
 
 if command -v dotnet >/dev/null 2>&1; then dotnet=(dotnet); else dotnet=("$here/dn"); fi
+
+sources=()
+if [ -n "$offline" ]; then
+  # The packs at the runtime version this SDK publishes with, for every system asked for, checked before
+  # anything is built: one missing would fail the restore halfway through. The SDK says which version (the
+  # project evaluated, nothing restored): other runtimes installed beside it, a newer .NET's, do not count.
+  runtime="$("${dotnet[@]}" msbuild src/CodeArena/CodeArena.csproj -getProperty:BundledNETCoreAppPackageVersion | tail -n 1)" || runtime=
+  if ! [[ "$runtime" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+    echo "The .NET SDK did not say which runtime it publishes with (BundledNETCoreAppPackageVersion: '$runtime')" >&2
+    exit 1
+  fi
+  missing=()
+  for rid in "${rids[@]}"; do
+    for pack in runtime host; do
+      file="microsoft.netcore.app.$pack.$rid.$runtime.nupkg"
+      [ -n "$(find tools/offline-nuget -maxdepth 1 -iname "$file" -print -quit 2>/dev/null)" ] || missing+=("$file")
+    done
+  done
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo "tools/offline-nuget lacks ${#missing[@]} of the $((2 * ${#rids[@]})) .NET packs this SDK publishes with (runtime $runtime):" >&2
+    printf '  %s\n' "${missing[@]}" >&2
+    echo "Fetch them at version $runtime as tools/offline-nuget/README.md says." >&2
+    exit 3
+  fi
+  # Only this folder: a package missing from it fails the restore instead of being downloaded.
+  sources=(--source tools/offline-nuget)
+fi
 
 page=src/CodeArena/web
 if [ -n "$web" ]; then
@@ -57,16 +85,6 @@ if [ -n "$web" ]; then
 else
   # Left out on purpose: none embedded, even if one was built before.
   rm -rf "$page"
-fi
-
-sources=()
-if [ -n "$offline" ]; then
-  if ! ls tools/offline-nuget/*.nupkg >/dev/null 2>&1; then
-    echo "tools/offline-nuget holds no packages: see tools/offline-nuget/README.md" >&2
-    exit 1
-  fi
-  # Only this folder: a package missing from it fails the restore instead of being downloaded.
-  sources=(--source tools/offline-nuget)
 fi
 
 out=dist/code-arena

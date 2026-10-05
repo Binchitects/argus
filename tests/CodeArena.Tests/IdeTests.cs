@@ -196,6 +196,8 @@ public sealed class IdeTests : IDisposable
             ("POST", "/api/terminals", new() { ["cols"] = 80, ["rows"] = 24 }),
             ("POST", "/api/terminals/close", new() { ["id"] = "1" }),
             ("GET", "/api/terminals/socket?id=1", null),
+            ("GET", "/api/preferences", null),
+            ("POST", "/api/preferences", new() { ["theme"] = "dark" }),
         ];
         using var anonymous = WebRun.Client(web.Port, token: null);
         var wrong = new List<string>();
@@ -230,6 +232,7 @@ public sealed class IdeTests : IDisposable
         Assert.Equal("in\n", File.ReadAllText(inside));
         Assert.Equal(["inside.txt"], Directory.GetFiles(h.Work).Select(Path.GetFileName));
         Assert.Empty((await web.GetJsonAsync("/api/terminals")).AsArray());
+        Assert.False(File.Exists(Path.Combine(h.Paths.DataDir, "ide.json")));
 
         // The terminal's socket, asked for by hand: only with the key, this host name and this page's origin.
         var id = (await Json(await web.PostAsync("/api/terminals", new JsonObject { ["cols"] = 80, ["rows"] = 24 })))["id"]!.GetValue<string>();
@@ -312,6 +315,46 @@ public sealed class IdeTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, (await web.Http.GetAsync("/api/search?q=")).StatusCode);
         // Quick open: every file, the binary one too.
         Assert.Equal(["data.bin", "docs/guide.md", "src/app.ts"], (await web.GetJsonAsync("/api/files/all"))["files"]!.AsArray().Select(f => f!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task The_pages_layout_and_theme_are_kept_in_the_data_folder_for_the_next_run_whatever_its_port()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var file = Path.Combine(h.Paths.DataDir, "ide.json");
+        await using (var web = await WebRun.StartAsync(h))
+        {
+            Assert.Empty((await web.GetJsonAsync("/api/preferences")).AsObject());
+            // Each key the page sends goes over what was there.
+            await Json(await web.PostAsync("/api/preferences", new JsonObject { ["layout"] = new JsonObject { ["chat"] = 520, ["panelOpen"] = true } }));
+            var both = await Json(await web.PostAsync("/api/preferences", new JsonObject { ["theme"] = "dark" }));
+            Assert.Equal(520, both["layout"]!["chat"]!.GetValue<int>());
+            Assert.Equal("dark", both["theme"]!.GetValue<string>());
+            // 16 KB at most: more is refused, and what was there stays.
+            var big = await web.PostAsync("/api/preferences", new JsonObject { ["notes"] = new string('x', 20_000) });
+            Assert.Equal(HttpStatusCode.RequestEntityTooLarge, big.StatusCode);
+        }
+        Assert.True(File.Exists(file));
+        Assert.Empty(Directory.GetFiles(h.Paths.DataDir, "*.tmp"));
+
+        // The next run (a new port, so a new page storage in the browser) gives them back.
+        await using (var again = await WebRun.StartAsync(h))
+        {
+            var kept = await again.GetJsonAsync("/api/preferences");
+            Assert.Equal(520, kept["layout"]!["chat"]!.GetValue<int>());
+            Assert.True(kept["layout"]!["panelOpen"]!.GetValue<bool>());
+            Assert.Equal("dark", kept["theme"]!.GetValue<string>());
+            Assert.False(kept.AsObject().ContainsKey("notes"));
+            // null forgets one.
+            Assert.False((await Json(await again.PostAsync("/api/preferences", new JsonObject { ["theme"] = null }))).AsObject().ContainsKey("theme"));
+        }
+
+        // A file that is not JSON reads as none, and the next save replaces it.
+        File.WriteAllText(file, "{ not json");
+        await using var third = await WebRun.StartAsync(h);
+        Assert.Empty((await third.GetJsonAsync("/api/preferences")).AsObject());
+        await Json(await third.PostAsync("/api/preferences", new JsonObject { ["theme"] = "light" }));
+        Assert.Equal("light", JsonNode.Parse(File.ReadAllText(file))!["theme"]!.GetValue<string>());
     }
 
     [Fact]

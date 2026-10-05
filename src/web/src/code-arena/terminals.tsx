@@ -71,12 +71,13 @@ const label = (t: TerminalInfo) => `${t.title} ${t.id}`
  * by the server (a page reloaded sees it again). The panel's height is the
  * workbench's (its top edge is dragged); the terminals follow it.
  */
-export default function TerminalPanel({ onHide, focusKey }: { onHide: () => void; focusKey: number }) {
+export default function TerminalPanel({ shown, onHide, focusKey }: { shown: boolean; onHide: () => void; focusKey: number }) {
   const queryClient = useQueryClient()
   const list = useQuery(terminalsQuery)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
-  const firstDone = useRef(false)
+  // Since the panel was last shown, it has had its terminal: one was there, or one was opened.
+  const seen = useRef(false)
   const terminals = list.data ?? []
   const active = terminals.find((t) => t.id === activeId) ?? terminals.at(-1) ?? null
   const size = useRef({ cols: 80, rows: 24 })
@@ -110,19 +111,24 @@ export default function TerminalPanel({ onHide, focusKey }: { onHide: () => void
     if (left.length === 0) onHide()
   }
 
-  // Shown with no terminal: one opens, as an editor's panel does.
+  // Shown with no terminal: one opens, as an editor's panel does. Each time: closing the last one hides the panel, and showing it again opens one.
+  // Not while one is opening: hidden and shown again before it is there, the panel has its terminal already.
   useEffect(() => {
-    if (!list.data || firstDone.current) return
+    if (!shown) {
+      seen.current = false
+      return
+    }
+    if (!list.data || seen.current || opening) return
     if (list.data.length > 0) {
-      firstDone.current = true
+      seen.current = true
       return
     }
     const soon = setTimeout(() => {
-      firstDone.current = true
+      seen.current = true
       void add()
     })
     return () => clearTimeout(soon)
-  }, [list.data, add])
+  }, [shown, list.data, opening, add])
 
   return (
     <section aria-label="Terminal" className="flex h-full min-h-0 flex-col bg-background">

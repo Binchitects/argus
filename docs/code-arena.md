@@ -63,6 +63,7 @@ the key; `code-arena models` lists the models the key may use.
 |---|---|---|
 | settings (`config.json`, `ARENA.md`) | `~/.config/code-arena/` (or `$XDG_CONFIG_HOME`) | `%APPDATA%\code-arena\` |
 | sessions | `~/.local/share/code-arena/sessions/` (or `$XDG_DATA_HOME`) | `%LOCALAPPDATA%\code-arena\sessions\` |
+| the IDE's layout and theme (`ide.json`) | `~/.local/share/code-arena/` | `%LOCALAPPDATA%\code-arena\` |
 
 `CODE_ARENA_HOME` puts both under one folder (`config/` and `data/`), for a
 portable copy on a USB stick. `ARENA_URL`, `ARENA_API_KEY`, `ARENA_GATEWAY_URL`,
@@ -161,16 +162,20 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   Collapse at its top. Click opens; a right-click menu has new file, new
   folder, Copy path, Rename (F2) and Delete (Del, asks first); the arrow
   keys move through the tree. The files the agent changed are marked, and so
-  are the folders they are in.
+  are the folders they are in. A file deleted with unsaved changes keeps its
+  tab (the question says so): saving it makes the file again.
 - **editor**: tabs with Monaco, highlighting by the file's name, the theme
   following the page's. A dot marks unsaved changes and **Ctrl+S** saves. A
   file changed on disk since it was opened is not written over unseen: saving
   asks first. Closing a tab with unsaved changes asks Save, Don't save or
   Cancel; leaving the page with any warns. A binary file, or one over 5 MB,
-  says so instead of opening.
+  says so instead of opening. When code-arena stops answering (it stopped, or
+  the SSH tunnel dropped), a line at the top says so and the editor stays, so
+  what is not saved can still be copied out; it goes when it answers again.
 - **the agent's edits**: a file the agent edits reloads in its tab when nothing
   in it is unsaved (undo still works), and after each turn every open file is
-  checked against the disk.
+  checked against the disk. What is typed while a file reloads stays, unsaved:
+  saving it then asks first.
 - **diff**: Monaco's diff editor for each file the agent changed in this run,
   as it was before the agent's first change and now, opened from Agent
   changes or the Explorer. Its bar has the counts, Open file, **Revert** (puts
@@ -181,8 +186,9 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   result opens the file at the match. **Ctrl+P** opens any file by a few
   letters of its path.
 - **terminals**: a panel under the editor (Ctrl+`), one tab per shell (bash 1,
-  bash 2, …), + for another; drag its top edge to resize it. A page reloaded
-  attaches to the ones still running, with their screens (below).
+  bash 2, …), + for another; drag its top edge to resize it. Shown with none,
+  it opens one; closing the last one hides it. A page reloaded attaches to the
+  ones still running, with their screens (below).
 - **chat**: the agent's chat on the right: the model and thinking pickers,
   Sessions and Hide at its top; the thread with a card for each tool call and
   a diff under each edit, the approval card (**Allow**, **Always for this
@@ -194,8 +200,13 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   folder and the Source link) on the right.
 
 The side bar, the chat and the terminal panel are resized by dragging their
-edges (or with the arrow keys on the edge); their sizes and which are shown
-are kept in the browser. The keys work wherever the focus is:
+edges (or with the arrow keys on the edge). Their sizes, which are shown and
+the theme are kept by code-arena, in `ide.json` in its data folder: every run
+opens as the last one was left, in any project and whatever its port (a
+browser keeps a page's own storage per port, and each run takes a new one).
+The keys work wherever the focus is, the terminal too. On macOS they are ⌘:
+Ctrl+S, Ctrl+P and the others stay the terminal's and the editor's there (a
+shell's history, emacs, nano).
 
 | keys | |
 |---|---|
@@ -288,6 +299,8 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/terminals` `{cols, rows}` | opens one; 409 `too_many` past ten |
 | `POST /api/terminals/close` `{id}` | ends its shell and forgets it |
 | `GET /api/terminals/socket?id=ID` | the terminal's WebSocket |
+| `GET /api/preferences` | the page's own preferences (`layout`, `theme`), as it saved them; `{}` at first |
+| `POST /api/preferences` `{key: value}` | keeps these keys, merged over the others (`null` forgets one); 413 `too_large` past 16 KB |
 
 On the terminal's WebSocket, the server sends the output kept so far, then
 the output as it comes, as binary messages (the terminal's bytes), and
@@ -450,10 +463,17 @@ stage), from .NET's runtime packs, which are not part of the SDK:
   internet (its [README](../tools/offline-nuget/README.md) has the commands,
   about 220 MB), carry it over with the repository, and build as usual: the
   image builds Code Arena from that folder only (`CODE_ARENA=auto`, the
-  default). Without the packs, the image skips it and the page says so.
+  default). The packs must be at the runtime version the SDK publishes with,
+  the SDK image's own runtime (`dotnet msbuild src/CodeArena/CodeArena.csproj
+  -getProperty:BundledNETCoreAppPackageVersion` prints it; a newer `sdk:10.0`
+  pulled since moves it).
+  Without them, the image skips Code Arena, the build log lists the files to
+  fetch at that version, and the page says how to add it.
 - **By hand**: `tools/publish-code-arena.sh --offline [rid ...]` writes
   `dist/code-arena/<rid>/code-arena` and `SHA256SUMS`, with `dotnet` or
-  `tools/dn`. Copy the files to people any way you like.
+  `tools/dn`. It checks the packs first: when one is missing for a system
+  asked for, it lists them at the version to fetch, builds nothing and exits
+  with 3. Copy the files to people any way you like.
 - **Packages for a release**: `tools/package-code-arena.sh [rid ...]` runs the
   publish script (offline, from `tools/offline-nuget`; `--online` fetches the
   packs instead), then packs each system as
