@@ -75,7 +75,8 @@ public sealed class DownloadTests(AppFixture app)
                 names.AddDnsName(dns);
                 request.CertificateExtensions.Add(names.Build());
             }
-            var (from, to) = (DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(issuer is null ? 10 : 2));
+            // A certificate ends before its issuer does (a second later is refused).
+            var (from, to) = (DateTimeOffset.UtcNow.AddDays(-1), issuer is null ? DateTimeOffset.UtcNow.AddYears(10) : new DateTimeOffset(issuer.NotAfter).AddDays(-1));
             if (issuer is null)
             {
                 return request.CreateSelfSigned(from, to);
