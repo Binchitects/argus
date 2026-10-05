@@ -143,7 +143,7 @@ export const tools: Tool[] = [
     title: 'Code Arena (our own agent)',
     group: 'Coding agents',
     about:
-      "Our own coding agent, in your terminal or your browser: one file with nothing to install, that talks only to this Arena (the model through the gateway, all of Arena's tools as you), with file, shell and git tools on your machine.",
+      "Our own coding agent, with an IDE around it in your browser (or in your terminal): one file with nothing to install, that talks only to this Arena (the model through the gateway, all of Arena's tools as you), with file, shell and git tools on your machine.",
     steps: (c) => {
       const builds = c.codeArena?.builds ?? []
       return [
@@ -169,11 +169,15 @@ mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/`,
           file: 'shell',
           code: `code-arena login --url ${c.origin}`,
         },
-        { text: 'Start it in your project (code-arena -p "…" answers once, for scripts):', file: 'shell', code: 'cd your-project\ncode-arena' },
         {
-          text: "Or in your browser: code-arena web opens the same agent with the chat's look (its sessions, tool cards, diffs and approvals), served on your machine only.",
+          text: "Start it in your project: it opens an IDE in your browser (the project's files, an editor, search, terminals and the agent's chat), served on your machine only. Over SSH, add --port 8765 --no-open and forward that port.",
           file: 'shell',
-          code: 'cd your-project\ncode-arena web',
+          code: 'cd your-project\ncode-arena',
+        },
+        {
+          text: 'Or keep the agent in this terminal: code-arena chat for a conversation, code-arena -p "…" to answer once (for scripts).',
+          file: 'shell',
+          code: 'cd your-project\ncode-arena chat',
         },
       ]
     },

@@ -145,8 +145,11 @@ describe('connect your tools', () => {
     expect(within(steps).getByText(`code-arena login --url ${window.location.origin}`)).toBeInTheDocument()
     expect(within(steps).queryByText(/--ca/)).not.toBeInTheDocument()
     expect(within(steps).getByText('code-arena -p "Reply with exactly: ok"')).toBeInTheDocument()
-    // The same agent in the browser, on the person's machine.
-    expect(steps).toHaveTextContent('Or in your browser: code-arena web opens the same agent')
+    // code-arena alone is the IDE in the browser, on the person's machine; code-arena chat keeps the agent in the terminal.
+    expect(steps).toHaveTextContent("Start it in your project: it opens an IDE in your browser (the project's files, an editor, search, terminals and the agent's chat)")
+    expect(steps).toHaveTextContent('Or keep the agent in this terminal: code-arena chat for a conversation')
+    expect(within(steps).getByText(/^cd your-project\s+code-arena chat$/)).toBeInTheDocument()
+    expect(steps).not.toHaveTextContent('code-arena web')
     // Argus comes through Arena's own tools: no GitLab token to add.
     expect(within(steps).getByText(/reaches Argus through Arena's own tools/)).toBeInTheDocument()
   })
