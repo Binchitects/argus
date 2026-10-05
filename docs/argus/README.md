@@ -168,6 +168,23 @@ request after that uses the minted token, and the password reaches exactly one
 request. Before minting, a token Argus created on a previous run is revoked, so
 restarts do not accumulate credentials.
 
+**LDAP accounts.** GitLab's own form takes accounts whose password GitLab keeps;
+an account GitLab checks against LDAP signs in on the LDAP form instead (the
+"LDAP" tab of GitLab's sign-in page, posting to
+`/users/auth/ldapmain/callback`, one per LDAP server). When GitLab's own form
+refuses the account, Argus tries each LDAP sign-in the page offers, with the
+LDAP username. To go straight to one server, or never try LDAP, set
+`GITLAB_LDAP` in `.env` (`ARGUS_GITLAB_LDAP` for a standalone Argus;
+`gitlab.ldap` in its config file):
+
+| `GITLAB_LDAP` | what Argus does |
+|---|---|
+| empty (the default) | GitLab's own sign-in, then each LDAP sign-in on the page |
+| `ldapmain` (a provider's name, as in the form's address) | that LDAP sign-in only |
+| `off` | GitLab's own sign-in only |
+
+A refused sign-in says which ones were tried.
+
 The token is not the session cookie, because `git`'s askpass protocol has no way
 to present a cookie and git-over-HTTP rejects one outright (measured: `401` on
 `info/refs`). That is also why the whole sign-in exists rather than a simpler

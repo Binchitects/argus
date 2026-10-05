@@ -126,21 +126,66 @@ public static class Credentials
                 "sign-in cannot proceed. Use gitlab.auth=token with " +
                 "ARGUS_GITLAB_TOKEN, or check the URL.");
 
-        HttpResult login, me;
-        try
+        // GitLab's own form takes accounts whose password GitLab keeps; an LDAP account signs in
+        // on its LDAP server's form (/users/auth/ldapmain/callback, one per server), not there.
+        var ldapForms = Regex.Matches(page.Text, "action=\"(?:[^\"]*)/users/auth/(ldap[a-z0-9_]*)/callback\"")
+            .Select(m => m.Groups[1].Value).Distinct(StringComparer.Ordinal).ToList();
+        var attempts = new List<string?>();
+        if (cfg.Ldap.Length == 0)
         {
-            login = Tls.Send(client, HttpMethod.Post, $"{cfg.Url}/users/sign_in", content: new FormUrlEncodedContent(
-            [
-                new("user[login]", cfg.Username),
-                new("user[password]", cfg.Password),
-                new("authenticity_token", found.Groups[1].Value),
-            ]));
+            attempts.Add(null);
+            attempts.AddRange(ldapForms);
         }
-        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException) { throw Fail("sign in", exc); }
-        try { me = Tls.Get(client, $"{cfg.Url}/api/v4/user"); }
-        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException) { throw Fail("verify the sign-in", exc); }
-        if (me.Status != 200)
+        else if (string.Equals(cfg.Ldap, "off", StringComparison.OrdinalIgnoreCase))
         {
+            attempts.Add(null);
+        }
+        else
+        {
+            if (!ldapForms.Contains(cfg.Ldap, StringComparer.Ordinal))
+                throw new CredentialError(
+                    $"gitlab.ldap is {Util.PyStr.Repr(cfg.Ldap)}, but {cfg.Redacted()}'s sign-in page offers " +
+                    (ldapForms.Count == 0 ? "no LDAP sign-in." : $"only {string.Join(", ", ldapForms)}."));
+            attempts.Add(cfg.Ldap);
+        }
+
+        HttpResult login = page, me = page;
+        string? signedInWith = null;
+        foreach (var provider in attempts)
+        {
+            var formToken = found.Groups[1].Value;
+            if (provider is not null)
+            {
+                // A fresh form: a refused sign-in may have changed the session's token.
+                try { page = Tls.Get(client, $"{cfg.Url}/users/sign_in"); }
+                catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException) { throw Fail("sign in", exc); }
+                var fresh = Regex.Match(page.Text, "name=\"authenticity_token\" value=\"([^\"]+)\"");
+                if (fresh.Success) formToken = fresh.Groups[1].Value;
+            }
+            try
+            {
+                login = provider is null
+                    ? Tls.Send(client, HttpMethod.Post, $"{cfg.Url}/users/sign_in", content: new FormUrlEncodedContent(
+                    [
+                        new("user[login]", cfg.Username),
+                        new("user[password]", cfg.Password),
+                        new("authenticity_token", formToken),
+                    ]))
+                    : Tls.Send(client, HttpMethod.Post, $"{cfg.Url}/users/auth/{provider}/callback", content: new FormUrlEncodedContent(
+                    [
+                        new("username", cfg.Username),
+                        new("password", cfg.Password),
+                        new("authenticity_token", formToken),
+                    ]));
+            }
+            catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException) { throw Fail("sign in", exc); }
+            try { me = Tls.Get(client, $"{cfg.Url}/api/v4/user"); }
+            catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException) { throw Fail("verify the sign-in", exc); }
+            if (me.Status == 200)
+            {
+                signedInWith = provider ?? "gitlab";
+                break;
+            }
             var lower = login.Text.ToLowerInvariant();
             if (lower.Contains("two-factor") || lower.Contains("otp"))
                 throw new CredentialError(
@@ -148,10 +193,14 @@ public static class Credentials
                     "account uses two-factor authentication, which a scripted " +
                     "sign-in cannot satisfy. Use gitlab.auth=token with a " +
                     "personal access token instead.");
+        }
+        if (signedInWith is null)
+        {
+            var tried = string.Join(" and ", attempts.Select(a => a is null ? "GitLab's own sign-in" : $"the LDAP sign-in {a}"));
             throw new CredentialError(
                 $"GitLab rejected the username/password sign-in for " +
-                $"{cfg.Redacted()}. Check gitlab.username and " +
-                "ARGUS_GITLAB_PASSWORD.");
+                $"{cfg.Redacted()} ({tried}). Check gitlab.username and " +
+                "ARGUS_GITLAB_PASSWORD" + (ldapForms.Count > 0 && cfg.Ldap.Length == 0 ? "; for an LDAP account, the username is the LDAP one." : "."));
         }
 
         HttpResult minted;

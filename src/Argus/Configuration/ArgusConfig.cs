@@ -20,10 +20,15 @@ public sealed record GitLabConfig
     public string Password { get; init; } = "";
     public string CaCert { get; init; } = "";
     public bool Verify { get; init; } = true;
+    /// <summary>
+    /// Password mode, for accounts GitLab checks against LDAP: "" tries GitLab's own sign-in, then each
+    /// LDAP sign-in its page offers; a provider name (ldapmain) signs in there only; "off" never tries LDAP.
+    /// </summary>
+    public string Ldap { get; init; } = "";
 
     /// <summary>Validate and normalise, exactly as <c>GitLabConfig.__post_init__</c>.</summary>
     public static GitLabConfig Create(string url, string token = "", string auth = "", string username = "",
-        string password = "", string caCert = "", bool verify = true)
+        string password = "", string caCert = "", bool verify = true, string ldap = "")
     {
         var mode = (string.IsNullOrEmpty(auth) ? (string.IsNullOrEmpty(username) ? "token" : "password") : auth).ToLowerInvariant();
         if (mode is not ("token" or "password"))
@@ -37,7 +42,7 @@ public sealed record GitLabConfig
         return new GitLabConfig
         {
             Url = url, Token = token, Auth = mode, Username = username, Password = password,
-            CaCert = caCert, Verify = verify,
+            CaCert = caCert, Verify = verify, Ldap = ldap.Trim(),
         };
     }
 
@@ -170,7 +175,8 @@ public sealed record ArgusConfig
         var packsDir = Scalar(pk, "dir");
         return new ArgusConfig
         {
-            GitLab = GitLabConfig.Create(url.TrimEnd('/'), token, auth, username, password, caCert, verify),
+            GitLab = GitLabConfig.Create(url.TrimEnd('/'), token, auth, username, password, caCert, verify,
+                Env("ARGUS_GITLAB_LDAP") ?? Scalar(gl, "ldap") ?? ""),
             Index = new IndexConfig
             {
                 DataDir = dataDir,
