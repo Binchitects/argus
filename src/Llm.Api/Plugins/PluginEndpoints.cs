@@ -16,9 +16,14 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Plugins;
 
 /// <summary>Installs a plugin: by its name from a catalog, from its zip's address (with its SHA-256), or its zip itself (base64).</summary>
-public sealed record InstallRequest(string? Name = null, string? Url = null, string? Sha256 = null, string? Zip = null, Dictionary<string, string?>? Settings = null);
+/// <param name="Tls">How its server's certificate is checked (Admin → Tools' choice); null: against the system's CAs.</param>
+/// <param name="TlsCa">The CA to trust (PEM), with <see cref="TlsCheck.OwnCa"/>.</param>
+public sealed record InstallRequest(string? Name = null, string? Url = null, string? Sha256 = null, string? Zip = null, Dictionary<string, string?>? Settings = null,
+    TlsCheck? Tls = null, string? TlsCa = null);
 
-public sealed record PluginSettingsRequest(Dictionary<string, string?> Settings);
+/// <param name="Tls">How its server's certificate is checked; null: unchanged.</param>
+/// <param name="TlsCa">The CA to trust (PEM), with <see cref="TlsCheck.OwnCa"/>; null: the one kept.</param>
+public sealed record PluginSettingsRequest(Dictionary<string, string?> Settings, TlsCheck? Tls = null, string? TlsCa = null);
 
 public sealed record ConnectionRequest(string Secret);
 
@@ -58,7 +63,7 @@ public static class PluginEndpoints
             installed = installed.Select(s => new
             {
                 s.Id, toolId = McpServerTool.Prefix + s.Id, plugin = s.Plugin, title = s.Name, version = s.PluginVersion, s.Url, personAuth = s.PersonAuth,
-                writes = s.Writes, settings = PluginInstaller.View(s),
+                writes = s.Writes, settings = PluginInstaller.View(s), tls = s.Tls, tlsCa = s.TlsCa, tlsCaNames = ServerTls.CaNames(s.TlsCa),
             }),
         });
     }
@@ -126,6 +131,10 @@ public static class PluginEndpoints
         {
             return AuthEndpoints.Problem(400, "settings", problem);
         }
+        if (ServerTls.Choose(server, body.Tls, body.TlsCa) is { } tls)
+        {
+            return AuthEndpoints.Problem(400, "tls", tls);
+        }
         var names = await db.McpServers.Select(s => s.Name).ToListAsync(ct);
         for (var n = 2; names.Contains(server.Name, StringComparer.OrdinalIgnoreCase); n++)
         {
@@ -135,6 +144,7 @@ public static class PluginEndpoints
         await db.SaveChangesAsync(ct);
         await Chat.PromptLibrary.SyncAsync(db, server, package, ct);
         await audit.WriteAsync("plugin.install", package.Manifest.Name, detail: $"{package.Manifest.Version}, {server.Url}");
+        await ServerTls.AuditAsync(audit, server, TlsCheck.System, null);
         return Results.Created($"/api/admin/plugins/{server.Id}", new { server.Id, toolId = McpServerTool.Prefix + server.Id });
     }
 
@@ -149,8 +159,14 @@ public static class PluginEndpoints
         {
             return AuthEndpoints.Problem(400, "settings", problem);
         }
+        var (was, wasCa) = (server.Tls, server.TlsCa);
+        if (ServerTls.Choose(server, body.Tls, body.TlsCa) is { } tls)
+        {
+            return AuthEndpoints.Problem(400, "tls", tls);
+        }
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("plugin.settings", server.Plugin);
+        await ServerTls.AuditAsync(audit, server, was, wasCa);
         return Results.NoContent();
     }
 
@@ -190,6 +206,7 @@ public static class PluginEndpoints
         await db.ToolSettings.Where(s => s.ToolId == toolId).ExecuteDeleteAsync(ct);
         await db.PersonCredentials.Where(c => c.ToolId == toolId).ExecuteDeleteAsync(ct);
         await db.SaveChangesAsync(ct);
+        ServerClients.Forget(id);
         await audit.WriteAsync("plugin.remove", server.Plugin);
         return Results.NoContent();
     }

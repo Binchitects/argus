@@ -15,6 +15,8 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
+import { tlsBody, type Tls, type TlsCheck } from './tls'
+import { TlsCaLine, TlsChoice, TlsWarning } from './tls-choice'
 
 interface SettingView {
   key: string
@@ -29,7 +31,21 @@ interface SettingView {
 interface Plugins {
   problem: string | null
   catalog: { name: string; version: string; title: string; description: string; source: 'app' | 'catalog'; personAuth: string | null; installed: { id: string; version: string } | null }[]
-  installed: { id: string; toolId: string; plugin: string; title: string; version: string; url: string; personAuth: string | null; writes: string[]; settings: SettingView[] }[]
+  installed: {
+    id: string
+    toolId: string
+    plugin: string
+    title: string
+    version: string
+    url: string
+    personAuth: string | null
+    writes: string[]
+    settings: SettingView[]
+    /** How its server's certificate is checked (as for any server in Admin → Tools). */
+    tls: TlsCheck
+    tlsCa: string | null
+    tlsCaNames: string[]
+  }[]
 }
 
 interface Preview {
@@ -178,6 +194,12 @@ function InstalledCard({ plugin, newer, onEdit, onChanged }: { plugin: Plugins['
         <CardDescription className="font-mono text-xs break-all">{plugin.url}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
+        {plugin.tls === 'Off' && <TlsWarning name={plugin.title} />}
+        {plugin.tls === 'OwnCa' && (
+          <div className="text-xs">
+            <TlsCaLine names={plugin.tlsCaNames} />
+          </div>
+        )}
         {plugin.writes.length > 0 && <p className="text-xs text-muted-foreground">Asks first before: {plugin.writes.join(', ')} (and any call that changes something).</p>}
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={onEdit}>
@@ -234,12 +256,14 @@ function InstallDialog({ source, onClose, onDone }: { source: Source | null; onC
     retry: false,
   })
   const [values, setValues] = useState<Record<string, string>>({})
+  const [tls, setTls] = useState<Tls>({ tls: 'System', tlsCa: '' })
   const [error, setError] = useState<string | null>(null)
   const install = useMutation({
-    mutationFn: () => api('/api/admin/plugins/install', { body: { ...source, settings: values } }),
+    mutationFn: () => api('/api/admin/plugins/install', { body: { ...source, settings: values, ...tlsBody(tls) } }),
     onSuccess: () => {
       toast.success(`${preview.data?.title} installed`, { description: 'It is on for everyone: choose who may use it in Admin → Tools.' })
       setValues({})
+      setTls({ tls: 'System', tlsCa: '' })
       onDone()
       onClose()
     },
@@ -252,6 +276,7 @@ function InstallDialog({ source, onClose, onDone }: { source: Source | null; onC
       onOpenChange={(o) => {
         if (!o) {
           setValues({})
+          setTls({ tls: 'System', tlsCa: '' })
           setError(null)
           onClose()
         }
@@ -280,6 +305,7 @@ function InstallDialog({ source, onClose, onDone }: { source: Source | null; onC
               {!!p.prompts?.length && <li>Adds prompts for whoever may use it: {p.prompts.map((x) => `/${x.name} (${x.title})`).join(', ')}.</li>}
             </ul>
             <SettingsFields settings={p.settings} values={values} onChange={(k, v) => setValues({ ...values, [k]: v })} />
+            <TlsChoice name="install-tls" value={tls} onChange={setTls} />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancel
@@ -296,10 +322,24 @@ function InstallDialog({ source, onClose, onDone }: { source: Source | null; onC
 }
 
 function SettingsDialog({ plugin, onClose, onDone }: { plugin: Plugins['installed'][number] | null; onClose: () => void; onDone: () => void }) {
+  return (
+    <Dialog
+      open={plugin !== null}
+      onOpenChange={(o) => {
+        if (!o) onClose()
+      }}
+    >
+      <DialogContent className="sm:max-w-lg">{plugin && <SettingsForm key={plugin.id} plugin={plugin} onClose={onClose} onDone={onDone} />}</DialogContent>
+    </Dialog>
+  )
+}
+
+function SettingsForm({ plugin, onClose, onDone }: { plugin: Plugins['installed'][number]; onClose: () => void; onDone: () => void }) {
   const [values, setValues] = useState<Record<string, string>>({})
+  const [tls, setTls] = useState<Tls>({ tls: plugin.tls, tlsCa: plugin.tlsCa ?? '' })
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: () => api(`/api/admin/plugins/${plugin!.id}`, { method: 'PATCH', body: { settings: values } }),
+    mutationFn: () => api(`/api/admin/plugins/${plugin.id}`, { method: 'PATCH', body: { settings: values, ...tlsBody(tls) } }),
     onSuccess: () => {
       toast.success('Saved')
       onDone()
@@ -308,44 +348,34 @@ function SettingsDialog({ plugin, onClose, onDone }: { plugin: Plugins['installe
     onError: (e) => setError(errorMessage(e)),
   })
   return (
-    <Dialog
-      open={plugin !== null}
-      onOpenChange={(o) => {
-        if (!o) onClose()
+    <form
+      className="grid gap-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        setError(null)
+        save.mutate()
       }}
     >
-      <DialogContent className="sm:max-w-lg">
-        {plugin && (
-          <form
-            className="grid gap-4"
-            onSubmit={(e) => {
-              e.preventDefault()
-              setError(null)
-              save.mutate()
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>{plugin.title}: settings</DialogTitle>
-              <DialogDescription>What is left empty stays as it is.</DialogDescription>
-            </DialogHeader>
-            {error && <Alert variant="destructive">{error}</Alert>}
-            <SettingsFields
-              settings={plugin.settings}
-              values={Object.fromEntries(plugin.settings.map((s) => [s.key, values[s.key] ?? (s.type === 'secret' ? '' : (s.value ?? ''))]))}
-              onChange={(k, v) => setValues({ ...values, [k]: v })}
-            />
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="submit" loading={save.isPending}>
-                Save
-              </Button>
-            </DialogFooter>
-          </form>
-        )}
-      </DialogContent>
-    </Dialog>
+      <DialogHeader>
+        <DialogTitle>{plugin.title}: settings</DialogTitle>
+        <DialogDescription>What is left empty stays as it is.</DialogDescription>
+      </DialogHeader>
+      {error && <Alert variant="destructive">{error}</Alert>}
+      <SettingsFields
+        settings={plugin.settings}
+        values={Object.fromEntries(plugin.settings.map((s) => [s.key, values[s.key] ?? (s.type === 'secret' ? '' : (s.value ?? ''))]))}
+        onChange={(k, v) => setValues({ ...values, [k]: v })}
+      />
+      <TlsChoice name="plugin-tls" value={tls} onChange={setTls} />
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="submit" loading={save.isPending}>
+          Save
+        </Button>
+      </DialogFooter>
+    </form>
   )
 }
 

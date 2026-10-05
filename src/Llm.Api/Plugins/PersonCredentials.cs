@@ -56,15 +56,25 @@ public sealed class PersonCredentials(AppDbContext db, IHttpClientFactory http, 
     /// <summary>The plugin's settings, secrets decrypted: to fill its templates and sign in at its service.</summary>
     public IReadOnlyDictionary<string, string> Settings(McpServer server) => PluginInstaller.Values(server, auth.Value.DataKey);
 
-    /// <summary>Trades an OAuth code (or a refresh token) for tokens at the plugin's token address.</summary>
+    /// <summary>
+    /// Trades an OAuth code (or a refresh token) for tokens at the plugin's token address. On the
+    /// plugin's own server (same scheme, host and port), its certificate is checked as the server's is.
+    /// </summary>
     public async Task<(string Token, string? Refresh, DateTimeOffset? Expires)> ExchangeAsync(McpServer server, Dictionary<string, string> form, CancellationToken ct)
     {
         var manifest = PluginManifest.Parse(server.Manifest!);
         var values = Settings(server);
         form["client_id"] = values.GetValueOrDefault("client_id", "");
         form["client_secret"] = values.GetValueOrDefault("client_secret", "");
-        using var res = await http.CreateClient(PluginCatalog.Client).PostAsync(PluginManifest.Fill(manifest.OAuth!.Token, values), new FormUrlEncodedContent(form), ct);
-        var body = await res.Content.ReadAsStringAsync(ct);
+        var address = new Uri(PluginManifest.Fill(manifest.OAuth!.Token, values));
+        var own = server.Tls != TlsCheck.System && Uri.TryCreate(server.Url, UriKind.Absolute, out var at)
+            && Uri.Compare(address, at, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
+        // The server's own connection has no timeout of its own: the catalog's minute, here.
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(TimeSpan.FromSeconds(60));
+        using var res = await (own ? Chat.Tools.ServerClients.For(http, server) : http.CreateClient(PluginCatalog.Client))
+            .PostAsync(address, new FormUrlEncodedContent(form), limit.Token);
+        var body = await res.Content.ReadAsStringAsync(limit.Token);
         if (!res.IsSuccessStatusCode || JsonNode.Parse(body) is not JsonObject tokens || tokens["access_token"]?.GetValue<string>() is not { Length: > 0 } token)
         {
             throw new PluginCatalog.PluginException($"{server.Name} did not give a token ({(int)res.StatusCode}).");

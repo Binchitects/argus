@@ -87,14 +87,27 @@ public sealed partial class McpServerTool(McpServer server, HttpClient http, str
 
     /// <summary>Its tools, as the server lists them (to check a server before anyone relies on it).</summary>
     public async Task<System.Text.Json.Nodes.JsonArray> ListAsync(CancellationToken ct) =>
-        await (await Mcp.ConnectAsync(http, new Uri(server.Url), Headers(null), server.Name, ct)).ToolsAsync(ct);
+        await (await ConnectAsync(Headers(null), null, ct)).ToolsAsync(ct);
+
+    /// <summary>A session; a refused certificate says what an admin can do about it.</summary>
+    private async Task<McpSession> ConnectAsync(IReadOnlyDictionary<string, string> headers, TimeSpan? callTimeout, CancellationToken ct)
+    {
+        try
+        {
+            return await Mcp.ConnectAsync(http, new Uri(server.Url), headers, server.Name, ct, callTimeout);
+        }
+        catch (McpException ex) when (ex.Certificate)
+        {
+            throw new McpException(ServerTls.Untrusted(server.Name)) { Certificate = true };
+        }
+    }
 
     /// <summary>Longest one call may take: the server's own limit, or the chat's.</summary>
     public TimeSpan CallTimeout => server.CallTimeoutMinutes is { } m ? TimeSpan.FromMinutes(m) : callTimeout;
 
     public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
     {
-        var session = await Mcp.ConnectAsync(http, new Uri(server.Url), await PersonHeadersAsync(server, dataKey, People, context, ct), server.Name, ct, CallTimeout);
+        var session = await ConnectAsync(await PersonHeadersAsync(server, dataKey, People, context, ct), CallTimeout, ct);
         var prefix = Slug + "__";
         var functions = Mcp.ToOpenAiTools(await session.ToolsAsync(ct), name => prefix + name);
         return new LocalRun(functions, session.Instructions, async (function, args, token) =>
@@ -139,9 +152,13 @@ public sealed class ToolRegistry(
         return all;
     }
 
-    public IServerTool Server(McpServer server) => server.Spec is { Length: > 0 }
-        ? new OpenApiTool(server, http.CreateClient(McpClient), auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people }
-        : new McpServerTool(server, http.CreateClient(McpClient), auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people };
+    /// <summary>The server as a tool, on its own connection (its certificate checked as the admin chose: ServerClients).</summary>
+    public IServerTool Server(McpServer server) => Server(server, ServerClients.For(http, server));
+
+    /// <param name="client">The connection to use: a test's, with the form's certificate check.</param>
+    public IServerTool Server(McpServer server, HttpClient client) => server.Spec is { Length: > 0 }
+        ? new OpenApiTool(server, client, auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people }
+        : new McpServerTool(server, client, auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people };
 
     /// <summary>The tools this person may use now: on, allowed to them, and available.</summary>
     public async Task<IReadOnlyList<ToolChoice>> ForAsync(Membership member, CancellationToken ct = default) =>
