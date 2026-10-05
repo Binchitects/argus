@@ -163,6 +163,8 @@ docker compose up -d --build laya
   when they are in the library.
 - **Helm**: `laya.enabled=true`, with the `arena-laya` image built and pushed
   like the app's; a NetworkPolicy lets only the app's pods in, and nothing out.
+  The app is told whether it runs (`Modules__laya`), as for the media
+  servers, rather than looking the name up.
 
 ## Podman
 

@@ -6,7 +6,8 @@
 - the configuration files the chart carries (files/) are the same as deploy/config and deploy/services;
 - every template's actions are balanced (if, range, with, define each have their end);
 - every .Values path a template reads is in values.yaml, and every include names a defined template;
-- values.yaml holds no secret: each is empty, made at install, or given by the person installing.
+- values.yaml holds no secret: each is empty, made at install, or given by the person installing;
+- the app is told outright whether each module that can be off runs (Modules__<name>).
 
 It does not render the templates: `helm lint` and `helm template` do that where helm is installed.
 """
@@ -30,6 +31,10 @@ COPIES = {
 }
 for rule in sorted((DEPLOY / "config/prometheus/rules").glob("*.yml")):
     COPIES[f"files/prometheus/rules/{rule.name}"] = f"config/prometheus/rules/{rule.name}"
+
+# The modules that can be off, which the app would otherwise look up by name (src/Llm.Api/Operations/Modules.cs):
+# the chart tells it outright, since a cluster's search domains can answer a short name.
+MODULES = ("imagegen", "videogen", "audio", "laya")
 
 
 def value_paths(text):
@@ -98,6 +103,11 @@ def main():
     for key in re.findall(r"^\s{2}(\w+): \"(.+)\"", values_text.split("secrets:", 1)[1].split("\n\n", 1)[0], re.M):
         if key[0] != "existingSecret":
             problems.append(f"values.yaml: secrets.{key[0]} has a value; secrets are made at install or given then")
+
+    app = (CHART / "templates/app.yaml").read_text()
+    for name in MODULES:
+        if f"- {{ name: Modules__{name}, value: {{{{ .Values.{name}.enabled | quote }}}} }}" not in app:
+            problems.append(f"app.yaml: the app is not told whether {name} runs (Modules__{name} from {name}.enabled)")
 
     templates = sorted((CHART / "templates").glob("*"))
     defined = set()
