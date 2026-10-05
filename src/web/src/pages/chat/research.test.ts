@@ -40,6 +40,19 @@ describe('deep research in words', () => {
     expect(researchStep([wrong, result('d1'), again], {})).toBe('Researching 4 parts: 0 of 4 parts done')
   })
 
+  it('delegate calls of one round are one step: the second is still research, not gaps', () => {
+    const two = JSON.stringify({ tasks: [1, 2].map((i) => ({ title: `Part ${i}`, instructions: 'Look it up.' })) })
+    const both = asking([
+      { id: 'd1', name: 'delegate', args: two },
+      { id: 'd2', name: 'delegate', args: two },
+    ])
+    const first = result('d1', [agent('done'), agent('done')])
+    expect(researchStep([both, first], { d2: [agent('running')] })).toBe('Researching 2 parts: 0 of 2 parts done')
+    // The next round's delegation fills the gaps.
+    const gaps = { ...asking([{ id: 'd3', name: 'delegate', args: two }]), id: 'a2' }
+    expect(researchStep([both, first, result('d2', [agent('done'), agent('done')]), gaps], {})).toBe('Filling gaps: 0 of 2 parts done')
+  })
+
   it('without sub-agents, researches with the tools it has', () => {
     expect(researchStep([asking([{ id: 'w1', name: 'web_search' }])], undefined)).toBe('Researching: Web search')
   })
