@@ -77,6 +77,28 @@ public sealed class WebTests(AppFixture app)
         Assert.DoesNotContain("Example", text, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task In_deep_research_the_parts_read_the_web_and_the_answer_only_delegates_and_writes()
+    {
+        await using var f = NewApp("docs.example.test");
+        var (b, chat) = await PersonWithWebAsync(f);
+        var marker = "research-" + Guid.NewGuid().ToString("N")[..8];
+        // The answer's own model tries to read a page itself.
+        var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages",
+            new { content = $"{marker} [call fetch_page {{\"url\":\"https://docs.example.test/a\"}}]", research = true });
+        var events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+        var refused = events.Single(e => e.GetProperty("type").GetString() == "tool_result");
+        Assert.Contains("In deep research the parts read the web", refused.GetProperty("text").GetString(), StringComparison.Ordinal);
+        // It is offered delegate, and not the web's functions (the parts get those).
+        var first = app.Model.Requests.Select(r => r.Body).First(r => r["messages"]!.ToJsonString().Contains(marker, StringComparison.Ordinal));
+        var offered = first["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
+        Assert.Contains("delegate", offered);
+        Assert.DoesNotContain("fetch_page", offered);
+        Assert.DoesNotContain("web_search", offered);
+        Assert.Contains("twice in all at most", first["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
     private WebApplicationFactory<Program> NewApp(string? sites, string? searchUrl = null) =>
         app.Create(app.ConnectionStringFor("web_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
         {

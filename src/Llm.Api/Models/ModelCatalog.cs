@@ -441,7 +441,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
 /// <summary>Who may use which model, and whether it can answer now.</summary>
 public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineState engine, ModelCatalog catalog, ModelHoursState hours, IOptions<EngineOptions> options,
-    Gateway.Credit credit)
+    Gateway.Credit credit, IOptionsMonitor<Chat.ChatOptions> chat)
 {
     /// <summary>The models on the engine. Their answers need them loaded.</summary>
     public async Task<HashSet<string>> OnEngineAsync(CancellationToken ct = default)
@@ -480,9 +480,11 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
     public bool Ready(string model, IReadOnlySet<string> onEngine) => Loaded(model, onEngine) || OnRequest(model, onEngine);
 
     /// <summary>
-    /// The chat's models this person may use, and the one a chat uses when it chose none:
-    /// the working hours' default when it can answer, else the first loaded, else the first
-    /// that loads when asked.
+    /// The chat's models this person may use, and the one a chat uses when it chose none: the
+    /// working hours' default when it can answer, else the admin's (Chat:DefaultModel) when it can
+    /// answer (loaded, or loaded when asked), else the first loaded, then the first that loads when
+    /// asked, the model for small steps last. A model that happens to be loaded (one person's agent
+    /// asked for the small model) never takes the admin's choice away from everyone.
     /// </summary>
     public async Task<(IReadOnlyList<GatewayModel> Models, GatewayModel? Default, HashSet<string> OnEngine)> ForAsync(AppUser user, IReadOnlyList<GatewayModel> chatModels, CancellationToken ct = default)
     {
@@ -490,7 +492,12 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
         var onEngine = await OnEngineAsync(ct);
         var mine = chatModels.Where(m => allowed.Contains(m.Name)).ToList();
         var hoursDefault = hours.Now.Window?.DefaultModel is { } preferred ? mine.FirstOrDefault(m => m.Name == preferred && Ready(m.Name, onEngine)) : null;
-        return (mine, hoursDefault ?? mine.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? mine.FirstOrDefault(), onEngine);
+        var o = chat.CurrentValue;
+        var adminDefault = o.DefaultModel is { Length: > 0 } chosen && chosen != Chat.SmallModel.Auto ? mine.FirstOrDefault(m => m.Name == chosen && Ready(m.Name, onEngine)) : null;
+        var others = mine.Where(m => m.Name != o.SmallModel).ToList();
+        return (mine, hoursDefault ?? adminDefault
+            ?? others.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? others.FirstOrDefault(m => Ready(m.Name, onEngine))
+            ?? mine.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? mine.FirstOrDefault(), onEngine);
     }
 
     /// <summary>Why this person cannot have an answer from this model now, or null.</summary>

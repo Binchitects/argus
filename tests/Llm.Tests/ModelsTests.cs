@@ -62,6 +62,35 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         return (f, gateway);
     }
 
+    [Fact]
+    public async Task A_new_chat_starts_on_the_admins_default_though_a_small_model_happens_to_be_loaded()
+    {
+        var (f, _) = NewApp(max: 2, first: true);
+        await using var _f = f;
+        var admin = await AdminAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
+        await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("status").GetString() == "unloaded", "the engine lists tiny-b");
+        // Someone's agent asked for the small model: it is the one loaded; the default loads when asked.
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/Qwen3.8-Flash-Next/unload"));
+        await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("tiny-b") == "loaded" && app.Engine.StatusOf("Qwen3.8-Flash-Next") == "unloaded"), "the small model loaded alone");
+        var name = "d" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var person = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        async Task<string?> DefaultAsync() => (await person.JsonAsync(await person.GetAsync("/api/chat/config"))).GetProperty("model").GetString();
+
+        // The admin's default (Qwen3.8-Flash-Next here) wins while it can answer: it loads when asked.
+        Assert.Equal("Qwen3.8-Flash-Next", await DefaultAsync());
+        // A default that is gone: a loaded model goes first, so the small one would be everyone's default...
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
+            new { changes = new[] { new { key = "Chat:DefaultModel", value = (string?)"a-model-since-removed", reset = false } } }));
+        Assert.Equal("tiny-b", await DefaultAsync());
+        // ...unless it is the model for small steps, which comes last.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
+            new { changes = new[] { new { key = "Chat:SmallModel", value = (string?)"tiny-b", reset = false } } }));
+        Assert.Equal("Qwen3.8-Flash-Next", await DefaultAsync());
+    }
+
     private static Task<TestBrowser> AdminAsync(WebApplicationFactory<Program> f) => new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
 
     private static async Task<JsonElement> ModelsAsync(TestBrowser admin) => await admin.JsonAsync(await admin.GetAsync("/api/admin/models"));

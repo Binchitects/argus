@@ -68,6 +68,13 @@ public sealed partial class ChatService(
     /// <summary>Deep research: rounds of tool calls an answer may take (plan, sub-agents, gaps, report).</summary>
     private const int ResearchRounds = 16;
 
+    /// <summary>
+    /// Deep research with sub-agents: how many times the answer may delegate (the research, then
+    /// its gaps) before it writes the report. Measured: the answer's own model reading pages to fill
+    /// gaps took 20 minutes of a 27-minute answer, its sub-agents (on the small model) under two.
+    /// </summary>
+    internal const int ResearchDelegations = 2;
+
     internal const string ResearchNote =
         "Deep research: the person asked for a thorough, sourced report, and waits for it. Work in steps.\n" +
         "1. Plan: break the question into 2 to 4 research questions that cover its angles (facts, recent changes, numbers, " +
@@ -75,7 +82,8 @@ public sealed partial class ChatService(
         "2. Research: call delegate once, one part per question: the parts run side by side, each with its own tools. Tell each " +
         "part to search the web (web_search), open at most two of the best sources (fetch_page, with a focus), and bring back findings with each " +
         "source's title and URL, briefly. Only without delegate, research with the tools you have.\n" +
-        "3. Fill gaps: if something important is missing or sources disagree, research that too.\n" +
+        "3. Fill gaps: if something important is missing or sources disagree, call delegate once more with just those questions " +
+        "(twice in all at most). With delegate, the parts read the web, not you.\n" +
         "4. Report: a title; a short summary of the answer; sections by theme; a table when it compares things; what is uncertain " +
         "or disputed; and numbered citations [1] in the text, listed under a Sources heading at the end with their URLs (always). Prefer primary, " +
         "recent sources. Cite only what you opened; never make up a source or a URL.";
@@ -197,7 +205,7 @@ public sealed partial class ChatService(
         if (overrides.Research)
         {
             ToQuestion(messages, "\n\n(Deep research: plan the research questions, call delegate once with one part per question, " +
-                "then write the report with numbered citations and a Sources list of the pages opened.)");
+                "delegate once more only for real gaps, then write the report with numbered citations and a Sources list of the pages opened.)");
         }
         if (overrides.Again is { Length: > 0 } again)
         {
@@ -209,6 +217,9 @@ public sealed partial class ChatService(
         }
         var next = await db.ChatMessages.Where(m => m.ConversationId == conversation.Id).MaxAsync(m => (int?)m.Sequence, ct) ?? 0;
         var parent = question.Id;
+        // Deep research with sub-agents: the web is theirs, and the answer delegates at most twice, then writes.
+        var researchByAgents = overrides.Research && runs.ContainsKey(AgentsTool.Function);
+        var delegations = 0;
 
         for (var round = 0; ; round++)
         {
@@ -251,7 +262,9 @@ public sealed partial class ChatService(
             }
             if (tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0)
             {
-                Tools(request, demand.Request(), last: round >= (overrides.Research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds));
+                Tools(request, researchByAgents ? WithoutWeb(demand.Request(), runs) : demand.Request(),
+                    last: round >= (overrides.Research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds)
+                        || (researchByAgents && delegations >= ResearchDelegations));
             }
 
             // What fills this request, for the context gauge (scaled to the prompt tokens the model reports).
@@ -386,6 +399,10 @@ public sealed partial class ChatService(
                 var rawArgs = call["function"]!["arguments"]!.GetValue<string>();
                 var known = runs.TryGetValue(name, out var target);
                 var loading = demand.Active && name == OnDemandTools.Function;
+                if (researchByAgents && name == AgentsTool.Function)
+                {
+                    delegations++;
+                }
                 if (known && !demand.IsLoaded(name))
                 {
                     // Called straight from the list: it is loaded now.
@@ -405,6 +422,11 @@ public sealed partial class ChatService(
                     else if (!known)
                     {
                         outcome = new ToolResult($"There is no tool named {name}.", IsError: true);
+                    }
+                    else if (researchByAgents && target.Choice.Tool.Id == "web")
+                    {
+                        // Named from memory or from the list: the parts read the web in deep research.
+                        outcome = new ToolResult("In deep research the parts read the web: call delegate with what is missing, or write the report.", IsError: true);
                     }
                     else if ((target.Choice.Setting.AskFirst || target.Run.AsksFirst(name)) && !await AskAsync(conversation, id, name, rawArgs, target.Choice.Tool, emit, ct))
                     {
@@ -652,6 +674,11 @@ public sealed partial class ChatService(
     }
 
     public const string LastRoundNote = "(No more tool calls are possible in this answer: answer now with what you have, and say what is still open.)";
+
+    /// <summary>The functions without the web's: in deep research with sub-agents, they read the web and the answer writes.</summary>
+    private static JsonArray WithoutWeb(JsonArray functions, Dictionary<string, (ToolChoice Choice, IToolRun Run)> runs) =>
+        [.. functions.Where(f => !(f?["function"]?["name"]?.GetValue<string>() is { } n && runs.TryGetValue(n, out var r) && r.Choice.Tool.Id == "web"))
+            .Select(f => f!.DeepClone())];
 
     private static string Cut(string text, int max) => text.Length <= max ? text : text[..max] + "\n[cut to fit]";
 
