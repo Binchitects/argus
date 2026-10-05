@@ -40,16 +40,21 @@ jobs:
 
   code-arena:
     # The coding agent people download: against a fake gateway and fake MCP
-    # servers on real sockets, then published as one file and started.
+    # servers on real sockets, then packaged as one file with its IDE page and
+    # started.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with: { global-json-file: global.json }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: src/web/package-lock.json }
       - run: dotnet test tests/CodeArena.Tests -c Release
-      - name: One self-contained file starts
+      - name: The package for Linux, and its program starts
         run: |
-          tools/publish-code-arena.sh linux-x64
+          (cd src/web && npm ci)
+          tools/package-code-arena.sh --online linux-x64
+          (cd dist && sha256sum -c SHA256SUMS)
           dist/code-arena/linux-x64/code-arena --version
           dist/code-arena/linux-x64/code-arena --help
 

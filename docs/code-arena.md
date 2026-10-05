@@ -151,35 +151,69 @@ the terminal shows what the agent does (`● edit_file …`) while the page driv
 it. On another machine over SSH: `code-arena --port 8765 --no-open` there,
 `ssh -L 8765:127.0.0.1:8765 that-machine` here, and open the address printed.
 
-The page, in Argus Arena's design system (light or dark, as the system is):
+The page is laid out as VS Code is, in Argus Arena's design system:
 
-- **activity bar**: the left edge, switching the side bar between the Explorer,
-  Search and the agent's changes;
-- **Explorer**: the folder's files and folders: open, new file, new folder,
-  rename, delete; the files the agent changed are marked;
-- **editor tabs**: Monaco, with syntax highlighting; **Ctrl+S** saves, a dot
-  marks unsaved changes, and a file changed on disk since it was opened is not
-  written over unseen;
-- **diff**: Monaco's diff editor for each file the agent changed in this run
-  (as it was before the agent's first change, and now): **Accept** keeps it,
-  **Revert** puts the file back (a file the agent made is deleted);
+- **activity bar** (the left edge): Explorer, Search, Agent changes (with a
+  count of the files) and Chat switch the side bar; the one shown hides it.
+  At its foot: the terminal panel, the theme (light, dark or the system's)
+  and About.
+- **Explorer**: the project's files, with New file, New folder, Refresh and
+  Collapse at its top. Click opens; a right-click menu has new file, new
+  folder, Copy path, Rename (F2) and Delete (Del, asks first); the arrow
+  keys move through the tree. The files the agent changed are marked, and so
+  are the folders they are in.
+- **editor**: tabs with Monaco, highlighting by the file's name, the theme
+  following the page's. A dot marks unsaved changes and **Ctrl+S** saves. A
+  file changed on disk since it was opened is not written over unseen: saving
+  asks first. Closing a tab with unsaved changes asks Save, Don't save or
+  Cancel; leaving the page with any warns. A binary file, or one over 5 MB,
+  says so instead of opening.
+- **the agent's edits**: a file the agent edits reloads in its tab when nothing
+  in it is unsaved (undo still works), and after each turn every open file is
+  checked against the disk.
+- **diff**: Monaco's diff editor for each file the agent changed in this run,
+  as it was before the agent's first change and now, opened from Agent
+  changes or the Explorer. Its bar has the counts, Open file, **Revert** (puts
+  the file back; a file the agent made is deleted) and **Accept** (keeps it);
+  Agent changes also has **Accept all**.
 - **search**: text across the files git sees (`.gitignore` holds), with match
-  case, whole word, regular expression, and files to include or exclude;
-- **terminals**: a panel under the editor with several terminals, resizable
-  (below);
-- **chat panel**: the agent's chat beside the editor: the thread with a card
-  for each tool call and a diff under each edit, the approval card
-  (**Allow**, **Always for this session**, **Deny**), Stop, the mode, the
-  model, the thinking level, the sessions, `/compact` and `/clear`;
-- **status bar**: the model, the mode, the git branch, the cursor's line and
-  column.
+  case, whole word, regular expression, and files to include or exclude; a
+  result opens the file at the match. **Ctrl+P** opens any file by a few
+  letters of its path.
+- **terminals**: a panel under the editor (Ctrl+`), one tab per shell (bash 1,
+  bash 2, …), + for another; drag its top edge to resize it. A page reloaded
+  attaches to the ones still running, with their screens (below).
+- **chat**: the agent's chat on the right: the model and thinking pickers,
+  Sessions and Hide at its top; the thread with a card for each tool call and
+  a diff under each edit, the approval card (**Allow**, **Always for this
+  session**, **Deny**), Stop, the mode, `/compact` and `/clear`. The Chat
+  activity lists this folder's sessions.
+- **status bar**: the git branch, the agent's changes and the terminal on the
+  left; the cursor's line and column, the file's language, the mode, the
+  model and `code-arena <version>` (About: the version, the licence, the
+  folder and the Source link) on the right.
+
+The side bar, the chat and the terminal panel are resized by dragging their
+edges (or with the arrow keys on the edge); their sizes and which are shown
+are kept in the browser. The keys work wherever the focus is:
+
+| keys | |
+|---|---|
+| Ctrl+S (⌘S) | save the file |
+| Ctrl+P (⌘P) | open a file by name |
+| Ctrl+Shift+F (⌘⇧F) | search |
+| Ctrl+Shift+E (⌘⇧E) | the Explorer |
+| Ctrl+` | show or hide the terminals |
+
+Everything the page needs (Monaco and its language workers, xterm.js, the
+fonts) is built into the program; nothing is fetched from anywhere else.
+Monaco loads with the first file opened, xterm.js with the first terminal.
 
 It is the same agent as in the terminal, not a copy: the same tools, modes,
 sessions (the same files: `code-arena chat --resume` opens a session started
 in the browser, and the other way round), ARENA.md and MCP servers. A page
 reloaded during a turn picks the turn up from its start. One turn runs at a
-time; switching sessions waits for it. The about box shows the version, the
-licence and the Source link.
+time; switching sessions waits for it.
 
 ### Terminals
 

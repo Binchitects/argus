@@ -167,7 +167,7 @@ runtime image carries the receipt at `/usr/share/argus/build-verified`.
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push: the API, Argus and Code Arena tests, both web
+`.github/workflows/ci.yml` runs on every push: the API, Argus and Code Arena tests (and Code Arena's Linux package), both web
 apps, each in a browser (the platform's images behind Traefik with no model,
 Argus with its fakes), the deployment tooling's tests, and every env sample
 resolving into a complete compose file. `release.yml` publishes the Argus image
