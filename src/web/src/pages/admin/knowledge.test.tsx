@@ -6,7 +6,8 @@ import type { KnowledgeSource } from './knowledge'
 
 const source = (over: Partial<KnowledgeSource>): KnowledgeSource => ({
   id: 's1', name: 'Engineering', kind: 'gitlab', location: 'group', wiki: true, issues: true, hosts: null, maxPages: 200, audience: 'Everyone', groups: [],
-  state: 'synced', error: null, syncStartedAt: null, syncedAt: new Date().toISOString(), documents: 12, passages: 40, projects: null, ...over,
+  spaces: null, blogPosts: false, sitePages: true, account: null, tenant: null, secretSet: false, mirror: null,
+  state: 'synced', error: null, syncStartedAt: null, syncedAt: new Date().toISOString(), documents: 12, passages: 40, projects: null, viewers: null, ...over,
 })
 
 const page = (sources: KnowledgeSource[], over: object = {}) => ({
@@ -87,6 +88,115 @@ describe('admin knowledge', () => {
     await waitFor(() =>
       expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toEqual({
         name: 'Docs', kind: 'website', location: 'https://docs.example.test/', audience: 'Everyone', groups: [], hosts: '', maxPages: 50,
+      }),
+    )
+  })
+
+  it('shows what a Confluence source mirrors, and whom it falls back to', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/knowledge': () =>
+        page([
+          source({
+            id: 'c1', name: 'Company wiki', kind: 'confluence', location: 'https://acme.atlassian.net', spaces: 'ENG, HR', account: 'bot@acme.test', secretSet: true,
+            audience: 'Groups', groups: [{ id: 'g1', name: 'HR' }],
+            viewers: [{ name: 'ENG · Engineering', people: 34, fetchedAt: new Date().toISOString() }],
+            mirror: 'ENG: mirrored from Confluence, 34 people.\nHR: Confluence does not show the account who may view this space, so the people you chose read it.',
+          }),
+          source({ id: 'p1', name: 'Engineering site', kind: 'sharepoint', location: 'https://contoso.sharepoint.com/sites/eng', tenant: 'contoso.onmicrosoft.com', account: 'app-id', secretSet: true, audience: 'Admins' }),
+        ]),
+      'PATCH /api/admin/knowledge/c1': () => ({ status: 204 }),
+      'GET /api/admin/groups': () => ({ json: [{ id: 'g1', name: 'HR', description: null, directory: null, members: 3, createdAt: '' }] }),
+    })
+    renderApp('/admin/knowledge')
+    const wiki = await screen.findByRole('region', { name: 'Company wiki' })
+    expect(within(wiki).getByText('Confluence')).toBeInTheDocument()
+    expect(within(wiki).getByText(/spaces ENG, HR · Cloud/)).toBeInTheDocument()
+    expect(within(wiki).getByText(/whoever may view each space and page in Confluence/)).toBeInTheDocument()
+    expect(within(within(wiki).getByRole('list', { name: 'Spaces' })).getByText('ENG · Engineering')).toBeInTheDocument()
+    expect(within(wiki).getByText(/34 people, read/)).toBeInTheDocument()
+    const mirrored = within(wiki).getByRole('list', { name: 'What is mirrored' })
+    expect(within(mirrored).getByText(/HR: Confluence does not show the account who may view this space/)).toBeInTheDocument()
+    expect(within(wiki).getByRole('combobox', { name: 'Where Confluence cannot tell' })).toHaveTextContent('Chosen groups')
+
+    const site = screen.getByRole('region', { name: 'Engineering site' })
+    expect(within(site).getByText('SharePoint')).toBeInTheDocument()
+    expect(within(site).getByText(/each file's permissions in SharePoint/)).toBeInTheDocument()
+    expect(within(site).getByRole('combobox', { name: 'Where SharePoint cannot tell' })).toHaveTextContent('Admins only')
+
+    // Its settings: the saved token is not shown, and a change without one keeps it.
+    await userEvent.click(within(wiki).getByRole('button', { name: /Settings/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Company wiki: settings' })
+    expect(within(dialog).getByLabelText('API token or personal access token')).toHaveValue('')
+    expect(within(dialog).getByLabelText('API token or personal access token')).toHaveAttribute('placeholder', 'Saved: leave empty to keep it')
+    await userEvent.clear(within(dialog).getByLabelText('Spaces (optional)'))
+    await userEvent.type(within(dialog).getByLabelText('Spaces (optional)'), 'ENG')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+        name: 'Company wiki', location: 'https://acme.atlassian.net', account: 'bot@acme.test', spaces: 'ENG', blogPosts: false, audience: 'Groups', groups: ['g1'],
+      }),
+    )
+  })
+
+  it('adds Confluence after testing its connection', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/knowledge': () => page([]),
+      'GET /api/admin/groups': () => ({ json: [] }),
+      'POST /api/admin/knowledge/test': () => ({ json: { message: 'Signed in to Confluence Data Center as svc-bot. It may read 2 spaces: ENG, HR.' } }),
+      'POST /api/admin/knowledge': () => ({ status: 201, json: { id: 'c1', name: 'Company wiki' } }),
+    })
+    renderApp('/admin/knowledge')
+    await userEvent.click((await screen.findAllByRole('button', { name: /Add a source/ }))[0])
+    const dialog = await screen.findByRole('dialog', { name: 'Add a knowledge source' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Confluence' }))
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Company wiki')
+    await userEvent.type(within(dialog).getByLabelText('Site address'), 'https://confluence.example.test')
+    await userEvent.type(within(dialog).getByLabelText('API token or personal access token'), 'a-personal-token')
+    await userEvent.type(within(dialog).getByLabelText('Spaces (optional)'), 'ENG, HR')
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Blog posts too' }))
+    // Where Confluence cannot tell: admins only, until the admin says otherwise.
+    expect(within(dialog).getByRole('combobox', { name: 'Where Confluence cannot tell' })).toHaveTextContent('Admins only')
+    const expected = {
+      name: 'Company wiki', kind: 'confluence', location: 'https://confluence.example.test', account: '', spaces: 'ENG, HR', blogPosts: true, secret: 'a-personal-token',
+      audience: 'Admins', groups: [],
+    }
+
+    await userEvent.click(within(dialog).getByRole('button', { name: /Test connection/ }))
+    expect(await within(dialog).findByText(/Signed in to Confluence Data Center as svc-bot/)).toBeInTheDocument()
+    expect(calls.find((c) => c.path === '/api/admin/knowledge/test')?.body).toEqual(expected)
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/knowledge')?.body).toEqual(expected))
+  })
+
+  it('adds SharePoint, and says why its connection fails', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/knowledge': () => page([]),
+      'GET /api/admin/groups': () => ({ json: [] }),
+      'POST /api/admin/knowledge/test': () => ({ status: 400, json: { status: 'connection', error: 'Microsoft Entra refused the app (401 invalid_client): AADSTS7000215: Invalid client secret provided.' } }),
+      'POST /api/admin/knowledge': () => ({ status: 201, json: { id: 'p1', name: 'Engineering site' } }),
+    })
+    renderApp('/admin/knowledge')
+    await userEvent.click((await screen.findAllByRole('button', { name: /Add a source/ }))[0])
+    const dialog = await screen.findByRole('dialog', { name: 'Add a knowledge source' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'SharePoint or OneDrive' }))
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Engineering site')
+    await userEvent.type(within(dialog).getByLabelText('Tenant ID'), 'contoso.onmicrosoft.com')
+    await userEvent.type(within(dialog).getByLabelText('Client ID'), 'app-id')
+    await userEvent.type(within(dialog).getByLabelText('Client secret'), 'the-secret')
+    await userEvent.type(within(dialog).getByLabelText('Sites or libraries'), 'https://contoso.sharepoint.com/sites/eng{Enter}https://contoso.sharepoint.com/sites/eng/Specs')
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: /pages too/ }))
+
+    await userEvent.click(within(dialog).getByRole('button', { name: /Test connection/ }))
+    expect(await within(dialog).findByText(/AADSTS7000215/)).toBeInTheDocument()
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/knowledge')?.body).toEqual({
+        name: 'Engineering site', kind: 'sharepoint', location: 'https://contoso.sharepoint.com/sites/eng\nhttps://contoso.sharepoint.com/sites/eng/Specs', tenant: 'contoso.onmicrosoft.com',
+        account: 'app-id', sitePages: false, secret: 'the-secret', audience: 'Admins', groups: [],
       }),
     )
   })
