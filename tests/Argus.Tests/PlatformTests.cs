@@ -257,6 +257,21 @@ public sealed class PlatformHttpTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_page_is_told_the_version_its_licence_and_where_its_source_is()
+    {
+        var b = NewBrowser();
+        await b.Login("root", "root-long-password");
+        var about = (await b.Json(HttpMethod.Get, "/api/me"))["about"]!;
+        Assert.Equal(Metrics.Version, about["version"]!.GetValue<string>());
+        Assert.Equal("AGPL-3.0-only", about["license"]!.GetValue<string>());
+        Assert.Equal(PlatformApi.DefaultSource, about["source"]!.GetValue<string>());
+
+        // A modified version points it at its own source.
+        using var env = new EnvScope(("ARGUS_SOURCE_URL", "https://git.example.test/our-argus"));
+        Assert.Equal("https://git.example.test/our-argus", (await b.Json(HttpMethod.Get, "/api/me"))["about"]!["source"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task A_change_without_the_request_header_is_refused_as_cross_site()
     {
         var b = NewBrowser();

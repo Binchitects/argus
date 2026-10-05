@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ChevronsLeft, ChevronsRight, Menu, Search } from 'lucide-react'
+import { ChevronsLeft, ChevronsRight, CodeXml, Menu, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useMatch, useMatches, useNavigate, useResolvedPath } from 'react-router'
 import { NotificationBell } from '@/components/app/notifications'
@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
-import { infoQuery, meQuery, type Me } from '@/lib/api'
+import { infoQuery, meQuery, type AppInfo, type Me } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
 import { findNavItem, visibleNavigation, type NavItem, type NavSection } from './nav'
@@ -94,19 +94,7 @@ function SignedIn({ me }: { me: Me }) {
             <Button variant="ghost" size={collapsed ? 'icon-sm' : 'sm'} className={cn('text-muted-foreground', !collapsed && 'w-full justify-start')} onClick={toggle} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
               {collapsed ? <ChevronsRight /> : <><ChevronsLeft /> Collapse</>}
             </Button>
-            {!collapsed && info.data && (
-              <p className="px-2 pt-1 text-[0.6875rem] text-muted-foreground">
-                <span aria-label="Version">v{info.data.version}</span>
-                {info.data.source && (
-                  <>
-                    {' · '}
-                    <a href={info.data.source} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline" title={`Licensed under the ${info.data.license ?? 'AGPL-3.0'}: its source is offered to everyone who uses it`}>
-                      Source
-                    </a>
-                  </>
-                )}
-              </p>
-            )}
+            {info.data && <VersionSource info={info.data} collapsed={collapsed} />}
           </div>
         </div>
       </aside>
@@ -117,6 +105,11 @@ function SignedIn({ me }: { me: Me }) {
           <SheetDescription className="sr-only">Pages of {name}</SheetDescription>
           <Brand name={name} collapsed={false} />
           <SidebarNav sections={sections} collapsed={false} onNavigate={() => setMobileOpen(false)} />
+          {info.data && (
+            <div className="border-t border-sidebar-border p-2">
+              <VersionSource info={info.data} collapsed={false} />
+            </div>
+          )}
         </SheetContent>
       </Sheet>
 
@@ -148,6 +141,36 @@ function SignedIn({ me }: { me: Me }) {
       </div>
       <CommandMenu open={paletteOpen} onOpenChange={setPaletteOpen} me={me} />
     </div>
+  )
+}
+
+/**
+ * The version, and the source offered to everyone who uses the app (the AGPL's section 13,
+ * LICENSING.md 7(b)): a line under the sidebar and the phone's navigation, an icon in the
+ * collapsed sidebar.
+ */
+function VersionSource({ info, collapsed }: { info: AppInfo; collapsed: boolean }) {
+  const licence = `Licensed under the ${info.license ?? 'AGPL-3.0'}: its source is offered to everyone who uses it`
+  if (collapsed)
+    return info.source ? (
+      <Tooltip content={`v${info.version} · Source`} side="right">
+        <a href={info.source} target="_blank" rel="noreferrer" aria-label="Source" className="mt-1 flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+          <CodeXml className="size-4" aria-hidden="true" />
+        </a>
+      </Tooltip>
+    ) : null
+  return (
+    <p className="px-2 pt-1 text-[0.6875rem] text-muted-foreground">
+      <span aria-label="Version">v{info.version}</span>
+      {info.source && (
+        <>
+          {' · '}
+          <a href={info.source} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline" title={licence}>
+            Source
+          </a>
+        </>
+      )}
+    </p>
   )
 }
 

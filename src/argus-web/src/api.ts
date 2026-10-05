@@ -58,6 +58,8 @@ export interface User {
 export interface Me {
   user: User;
   endpoints: { mcp: string; gateway: string | null };
+  /** The version, its licence and where its source is (the AGPL offers it to everyone who uses the app). */
+  about: { version: string; license: string; source: string };
   usage?: { spend: number; max_budget: number | null };
   usage_error?: string;
 }

@@ -20,11 +20,32 @@ describe('shell', () => {
     expect(within(nav).queryByText('Administration')).not.toBeInTheDocument()
   })
 
+  const source = 'https://github.com/Binchitects/argus'
+  const withSource = { 'GET /api/info': () => ({ json: { name: 'Argus Arena', version: '5.1.0', license: 'AGPL-3.0-only', source } }) }
+
   it('offers the source beside the version, as the AGPL asks', async () => {
-    fakeApi(member, { 'GET /api/info': () => ({ json: { name: 'Argus Arena', version: '5.1.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus' } }) })
+    fakeApi(member, withSource)
     renderApp('/')
     expect(await screen.findByLabelText('Version')).toHaveTextContent('v5.1.0')
-    expect(screen.getByRole('link', { name: 'Source' })).toHaveAttribute('href', 'https://github.com/Binchitects/argus')
+    expect(screen.getByRole('link', { name: 'Source' })).toHaveAttribute('href', source)
+  })
+
+  it('offers the source in the collapsed sidebar too', async () => {
+    localStorage.setItem('sidebar', 'collapsed')
+    fakeApi(member, withSource)
+    renderApp('/')
+    const sidebar = await screen.findByRole('complementary', { name: 'Sidebar' })
+    expect(await within(sidebar).findByRole('link', { name: 'Source' })).toHaveAttribute('href', source)
+  })
+
+  it('offers the version and the source in the navigation on a phone', async () => {
+    fakeApi(member, withSource)
+    renderApp('/')
+    await screen.findByLabelText('Version')
+    await userEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Navigation' })
+    expect(within(sheet).getByLabelText('Version')).toHaveTextContent('v5.1.0')
+    expect(within(sheet).getByRole('link', { name: 'Source' })).toHaveAttribute('href', source)
   })
 
   it('shows admins the administration sections', async () => {

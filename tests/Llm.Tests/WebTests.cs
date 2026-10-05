@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Llm.Api.Chat;
 using Llm.Api.Chat.Tools;
 using Microsoft.AspNetCore.Mvc.Testing;
 
@@ -86,18 +88,106 @@ public sealed class WebTests(AppFixture app)
         // The answer's own model tries to read a page itself.
         var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages",
             new { content = $"{marker} [call fetch_page {{\"url\":\"https://docs.example.test/a\"}}]", research = true });
-        var events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+        var events = await EventsAsync(res);
         var refused = events.Single(e => e.GetProperty("type").GetString() == "tool_result");
         Assert.Contains("In deep research the parts read the web", refused.GetProperty("text").GetString(), StringComparison.Ordinal);
-        // It is offered delegate, and not the web's functions (the parts get those).
-        var first = app.Model.Requests.Select(r => r.Body).First(r => r["messages"]!.ToJsonString().Contains(marker, StringComparison.Ordinal));
+        // It is offered delegate, and not the web's functions (the parts get those), nor told it can read the web.
+        var first = AnswerRequests(marker).First();
         var offered = first["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
         Assert.Contains("delegate", offered);
         Assert.DoesNotContain("fetch_page", offered);
         Assert.DoesNotContain("web_search", offered);
-        Assert.Contains("twice in all at most", first["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        var system = first["messages"]![0]!["content"]!.GetValue<string>();
+        Assert.Contains("twice in all at most", system, StringComparison.Ordinal);
+        Assert.DoesNotContain(WebNotes, system, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task In_deep_research_a_web_that_asks_first_stays_with_the_answer_which_asks_the_person()
+    {
+        await using var f = NewApp("docs.example.test");
+        var (b, chat) = await PersonWithWebAsync(f, askFirst: true);
+        app.Web.Html("https://docs.example.test/asked", "<html><head><title>Asked</title></head><body><p>Read once allowed.</p></body></html>");
+        var marker = "research-" + Guid.NewGuid().ToString("N")[..8];
+        var answering = b.PostAsync($"/api/chat/conversations/{chat}/messages",
+            new { content = $"{marker} [call fetch_page {{\"url\":\"https://docs.example.test/asked\"}}]", research = true });
+        // A part could not ask the person, so the answer reads the web itself: its call waits to be allowed, not refused.
+        for (var i = 0; (await b.PostAsync($"/api/chat/conversations/{chat}/tool-calls/call_1", new { allow = true })).StatusCode != HttpStatusCode.NoContent; i++)
+        {
+            Assert.True(i < 100, "the call never waited to be allowed");
+            await Task.Delay(100);
+        }
+        var events = await EventsAsync(await answering);
+        Assert.Equal("web", events.Single(e => e.GetProperty("type").GetString() == "approval").GetProperty("tool").GetString());
+        var read = events.Single(e => e.GetProperty("type").GetString() == "tool_result");
+        Assert.False(read.GetProperty("isError").GetBoolean());
+        Assert.Contains("Read once allowed.", read.GetProperty("text").GetString(), StringComparison.Ordinal);
+        // It is offered the web and told to research with it.
+        var first = AnswerRequests(marker).First();
+        Assert.Contains("fetch_page", first["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
+        var system = first["messages"]![0]!["content"]!.GetValue<string>();
+        Assert.Contains(WebNotes, system, StringComparison.Ordinal);
+        Assert.Contains("research that too", system, StringComparison.Ordinal);
+        Assert.DoesNotContain("The parts read the web", system, StringComparison.Ordinal);
+        Assert.Contains("research each with your tools", first["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Deep_research_delegates_in_two_rounds_at_most_and_only_delegations_whose_parts_ran_count()
+    {
+        await using var f = NewApp("docs.example.test", searchUrl: "http://searxng.test:8080");
+        var (b, chat) = await PersonWithWebAsync(f);
+        var marker = "research-" + Guid.NewGuid().ToString("N")[..8];
+        object Delegate(params string[] titles) =>
+            new { name = "delegate", arguments = new { tasks = titles.Select(t => new { title = t, instructions = $"{marker}: look up {t}." }).ToArray() } };
+        // One part is refused (no delegation), two calls in one round are one delegation, the gaps the second; then calling is off.
+        var script = JsonSerializer.Serialize(new[]
+        {
+            new[] { Delegate("Only") },
+            new[] { Delegate("A", "B"), Delegate("C", "D") },
+            new[] { Delegate("Gap 1", "Gap 2") },
+            new[] { Delegate("More", "Again") },
+        });
+        var events = await EventsAsync(await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = $"{marker} [script {script}]", research = true }));
+
+        var results = events.Where(e => e.GetProperty("type").GetString() == "tool_result").ToList();
+        Assert.Equal(4, results.Count);
+        Assert.Contains("2 to 10 tasks", results[0].GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.All(results.Skip(1), r => Assert.False(r.GetProperty("isError").GetBoolean()));
+        var answer = AnswerRequests(marker);
+        Assert.Equal(4, answer.Count);
+        Assert.All(answer.Take(3), r => Assert.False(r.ContainsKey("tool_choice")));
+        Assert.Equal("none", answer[3]["tool_choice"]!.GetValue<string>());
+        Assert.EndsWith(ChatService.LastRoundNote, answer[3]["messages"]!.AsArray().Last()!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        // The parts (six: the third delegation never ran) get the web's functions and notes, and not the answer's steps.
+        var parts = app.Model.Requests.Select(r => r.Body)
+            .Where(r => r["messages"]![0]!["content"]!.GetValue<string>().Contains("You are a sub-agent", StringComparison.Ordinal)
+                && r["messages"]![1]!["content"]!.GetValue<string>().StartsWith(marker, StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(6, parts.Count);
+        Assert.All(parts, r =>
+        {
+            var functions = r["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
+            Assert.Contains("web_search", functions);
+            Assert.Contains("fetch_page", functions);
+            var system = r["messages"]![0]!["content"]!.GetValue<string>();
+            Assert.Contains(WebNotes, system, StringComparison.Ordinal);
+            Assert.DoesNotContain("Deep research:", system, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>The start of the web tool's notes in a system prompt.</summary>
+    private const string WebNotes = "You can read the web (";
+
+    /// <summary>The answer's own requests for a question with this marker (not its title's, nor its sub-agents').</summary>
+    private List<JsonObject> AnswerRequests(string marker) =>
+        [.. app.Model.Requests.Select(r => r.Body).Where(r => r["tools"] is not null && r["messages"]!.ToJsonString().Contains(marker, StringComparison.Ordinal)
+            && !r["messages"]![0]!["content"]!.GetValue<string>().Contains("You are a sub-agent", StringComparison.Ordinal))];
+
+    private static async Task<List<JsonElement>> EventsAsync(HttpResponseMessage res) =>
+        [.. (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement)];
 
     private WebApplicationFactory<Program> NewApp(string? sites, string? searchUrl = null) =>
         app.Create(app.ConnectionStringFor("web_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
@@ -105,13 +195,13 @@ public sealed class WebTests(AppFixture app)
             ["Web:AllowedSites"] = sites, ["Web:SearchUrl"] = searchUrl,
         });
 
-    private static async Task<(TestBrowser B, Guid Chat)> PersonWithWebAsync(WebApplicationFactory<Program> f, bool turnOn = true)
+    private static async Task<(TestBrowser B, Guid Chat)> PersonWithWebAsync(WebApplicationFactory<Program> f, bool turnOn = true, bool askFirst = false)
     {
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         if (turnOn)
         {
             await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/tools/web", UriKind.Relative),
-                new { enabled = true, audience = "Everyone", groups = Array.Empty<Guid>(), onByDefault = true, askFirst = false }));
+                new { enabled = true, audience = "Everyone", groups = Array.Empty<Guid>(), onByDefault = true, askFirst }));
         }
         var name = "w" + Guid.NewGuid().ToString("N")[..10];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));

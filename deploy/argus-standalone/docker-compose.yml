@@ -543,6 +543,8 @@ services:
       ARGUS_PACK_INDEX_URL: ${ARGUS_PACK_INDEX_URL:-}
       ARGUS_TLS_CERT: ${ARGUS_TLS_CERT:-}
       ARGUS_TLS_KEY: ${ARGUS_TLS_KEY:-}
+      # The "Source" link beside the version (the AGPL); empty = this project's. A modified version sets its own.
+      ARGUS_SOURCE_URL: ${ARGUS_SOURCE_URL:-}
     command:
       - serve
       - --config

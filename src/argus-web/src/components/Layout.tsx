@@ -23,6 +23,7 @@ export default function Layout() {
   useEffect(() => applyTheme(theme), [theme]);
   const next: Record<Theme, Theme> = { auto: "light", light: "dark", dark: "auto" };
   const user = me!.user;
+  const about = me!.about;
 
   return (
     <div className="shell">
@@ -63,6 +64,13 @@ export default function Layout() {
             Sign out
           </button>
         </div>
+        {/* LICENSING.md, additional term 7(b): the licence and the source, beside the version. */}
+        <p className="about">
+          <span aria-label="Version">v{about.version}</span> ·{" "}
+          <a href={about.source} target="_blank" rel="noreferrer" title={`Licensed under the ${about.license}: its source is offered to everyone who uses it`}>
+            Source
+          </a>
+        </p>
       </nav>
       <main className="main">
         <Outlet />

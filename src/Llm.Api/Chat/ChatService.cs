@@ -69,21 +69,28 @@ public sealed partial class ChatService(
     private const int ResearchRounds = 16;
 
     /// <summary>
-    /// Deep research with sub-agents: how many times the answer may delegate (the research, then
-    /// its gaps) before it writes the report. Measured: the answer's own model reading pages to fill
-    /// gaps took 20 minutes of a 27-minute answer, its sub-agents (on the small model) under two.
+    /// Deep research with sub-agents: in how many rounds the answer may delegate (the research, then
+    /// its gaps) before it writes the report. The delegate calls of one round are one step, and a call
+    /// whose parts never ran (refused for its arguments, or declined) is none. Measured: the answer's
+    /// own model reading pages to fill gaps took 20 minutes of a 27-minute answer, its sub-agents (on
+    /// the small model) under two.
     /// </summary>
     internal const int ResearchDelegations = 2;
 
-    internal const string ResearchNote =
+    /// <summary>Deep research's steps, for the answer only. <paramref name="byAgents"/>: its sub-agents research and read the web, and it delegates and writes.</summary>
+    internal static string ResearchNote(bool byAgents) =>
         "Deep research: the person asked for a thorough, sourced report, and waits for it. Work in steps.\n" +
         "1. Plan: break the question into 2 to 4 research questions that cover its angles (facts, recent changes, numbers, " +
         "opposing views). Say the plan in one short line.\n" +
-        "2. Research: call delegate once, one part per question: the parts run side by side, each with its own tools. Tell each " +
-        "part to search the web (web_search), open at most two of the best sources (fetch_page, with a focus), and bring back findings with each " +
-        "source's title and URL, briefly. Only without delegate, research with the tools you have.\n" +
-        "3. Fill gaps: if something important is missing or sources disagree, call delegate once more with just those questions " +
-        "(twice in all at most). With delegate, the parts read the web, not you.\n" +
+        (byAgents
+            ? "2. Research: call delegate once, one part per question: the parts run side by side, each with its own tools. Tell each " +
+              "part to search the web (web_search), open at most two of the best sources (fetch_page, with a focus), and bring back findings with each " +
+              "source's title and URL, briefly.\n" +
+              "3. Fill gaps: if something important is missing or sources disagree, call delegate once more with just those questions " +
+              "(twice in all at most). The parts read the web, not you.\n"
+            : "2. Research each question with the tools you have: search the web (web_search) and open at most two of the best sources " +
+              "(fetch_page, with a focus).\n" +
+              "3. Fill gaps: if something important is missing or sources disagree, research that too.\n") +
         "4. Report: a title; a short summary of the answer; sections by theme; a table when it compares things; what is uncertain " +
         "or disputed; and numbered citations [1] in the text, listed under a Sources heading at the end with their URLs (always). Prefer primary, " +
         "recent sources. Cite only what you opened; never make up a source or a URL.";
@@ -185,14 +192,22 @@ public sealed partial class ChatService(
             }
         }
 
+        // Deep research with sub-agents: the parts research and the web is theirs, and the answer delegates at most
+        // twice, then writes. Not when the web asks before each call: a part has nobody there to allow it, so the
+        // answer reads the web itself, as the person allows.
+        var researchByAgents = overrides.Research && runs.ContainsKey(AgentsTool.Function)
+            && runs.All(kv => kv.Value.Choice.Tool.Id != "web" || ForAgents(kv.Key, kv.Value));
+        // The answer's notes: in deep research its steps, and not the web's while its functions are the parts'.
+        // Sub-agents get the tools' own notes (kit.Instructions), the web's among them.
+        var answerNotes = instructions;
         if (overrides.Research)
         {
-            instructions.Add(("research", ResearchNote));
+            answerNotes = [.. instructions.Where(i => !(researchByAgents && i.Tool == "web")), ("research", ResearchNote(researchByAgents))];
             // The page says which step deep research is on.
             await emit(new { type = "research" });
         }
         // Past the budget, the tools go on demand: those the chat loaded whole, a line for each other.
-        var demand = new OnDemandTools(tools, runs, instructions, conversation.LoadedTools, chat.CurrentValue.ToolTextChars);
+        var demand = new OnDemandTools(tools, runs, answerNotes, conversation.LoadedTools, chat.CurrentValue.ToolTextChars);
         if (overrides.Research && demand.Load(["web", "agents"]).Added.Count > 0)
         {
             conversation.LoadedTools = demand.Loaded;
@@ -204,8 +219,11 @@ public sealed partial class ChatService(
         // cache keeps the rest); the question kept stays as written.
         if (overrides.Research)
         {
-            ToQuestion(messages, "\n\n(Deep research: plan the research questions, call delegate once with one part per question, " +
-                "delegate once more only for real gaps, then write the report with numbered citations and a Sources list of the pages opened.)");
+            ToQuestion(messages, researchByAgents
+                ? "\n\n(Deep research: plan the research questions, call delegate once with one part per question, " +
+                  "delegate once more only for real gaps, then write the report with numbered citations and a Sources list of the pages opened.)"
+                : "\n\n(Deep research: plan the research questions, research each with your tools, " +
+                  "then write the report with numbered citations and a Sources list of the pages opened.)");
         }
         if (overrides.Again is { Length: > 0 } again)
         {
@@ -217,8 +235,7 @@ public sealed partial class ChatService(
         }
         var next = await db.ChatMessages.Where(m => m.ConversationId == conversation.Id).MaxAsync(m => (int?)m.Sequence, ct) ?? 0;
         var parent = question.Id;
-        // Deep research with sub-agents: the web is theirs, and the answer delegates at most twice, then writes.
-        var researchByAgents = overrides.Research && runs.ContainsKey(AgentsTool.Function);
+        // Deep research with sub-agents: the rounds in which the answer delegated (ResearchDelegations).
         var delegations = 0;
 
         for (var round = 0; ; round++)
@@ -391,6 +408,7 @@ public sealed partial class ChatService(
 
             // Questions for the person end the answer: their reply comes as their next message.
             var ends = false;
+            var delegated = false;
             var loadedBefore = demand.Loaded.Count;
             foreach (var call in toolCalls.OfType<JsonObject>())
             {
@@ -399,10 +417,6 @@ public sealed partial class ChatService(
                 var rawArgs = call["function"]!["arguments"]!.GetValue<string>();
                 var known = runs.TryGetValue(name, out var target);
                 var loading = demand.Active && name == OnDemandTools.Function;
-                if (researchByAgents && name == AgentsTool.Function)
-                {
-                    delegations++;
-                }
                 if (known && !demand.IsLoaded(name))
                 {
                     // Called straight from the list: it is loaded now.
@@ -461,6 +475,8 @@ public sealed partial class ChatService(
                     return;
                 }
                 await AuditPluginAsync(known ? target.Choice.Tool : null, name, outcome, user, declined);
+                // A delegation counts when its parts ran (their work is in the details), not when it was refused or declined.
+                delegated |= researchByAgents && name == AgentsTool.Function && outcome.Details?["agents"] is not null;
                 if (!outcome.IsError && Oversized(name, outcome.Text, chat.CurrentValue.ToolResultChars, runs.ContainsKey("read_file"), user.Id) is { } kept)
                 {
                     db.ChatAttachments.Add(kept.File);
@@ -487,6 +503,10 @@ public sealed partial class ChatService(
                     details = outcome.Details,
                     attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType, original = f.Kind != "image" && f.Data != null }),
                 });
+            }
+            if (delegated)
+            {
+                delegations++;
             }
             if (demand.Loaded.Count != loadedBefore)
             {
@@ -683,6 +703,14 @@ public sealed partial class ChatService(
     private static string Cut(string text, int max) => text.Length <= max ? text : text[..max] + "\n[cut to fit]";
 
     /// <summary>
+    /// Whether sub-agents get a function: not delegating again, questions for the person or memory,
+    /// nor a tool that asks before each call (nobody is there to allow it).
+    /// </summary>
+    private static bool ForAgents(string function, (ToolChoice Choice, IToolRun Run) tool) =>
+        function is not AgentsTool.Function and not AskTool.Function and not MemoryTool.Function
+        && !tool.Choice.Setting.AskFirst && !tool.Run.AsksFirst(function);
+
+    /// <summary>
     /// Sub-agents: each part of a task is asked of the answer's model on its own (a clean
     /// context: only its instructions), with the answer's tools except delegating again,
     /// questions for the person and tools that ask before each call (nobody is there to
@@ -695,8 +723,7 @@ public sealed partial class ChatService(
     {
         var callId = kit.Progress.CallId;
         var usable = kit.Tools.OfType<JsonObject>()
-            .Where(f => f["function"]?["name"]?.GetValue<string>() is { } n && n is not AgentsTool.Function and not AskTool.Function and not MemoryTool.Function
-                && kit.Runs.TryGetValue(n, out var r) && !r.Choice.Setting.AskFirst && !r.Run.AsksFirst(n))
+            .Where(f => f["function"]?["name"]?.GetValue<string>() is { } n && kit.Runs.TryGetValue(n, out var r) && ForAgents(n, r))
             .Select(f => (JsonNode)f.DeepClone())
             .ToList();
         var notes = kit.Instructions.Where(i => i.Tool is not "agents" and not "ask" and not "memory").ToList();
