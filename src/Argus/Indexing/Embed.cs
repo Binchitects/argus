@@ -12,6 +12,10 @@ public sealed class EmbeddingUnavailable(string message, Exception? inner = null
 ///
 /// Every vector is L2-normalised here, so cosine is a dot product downstream and
 /// a zero vector -- which has no direction -- is refused rather than stored.
+///
+/// A text longer than the model's window (nomic-embed-text: 2,048 tokens) is cut
+/// to fit, as Ollama does by itself: llama.cpp refuses it, so the batch is sent
+/// again item by item and the long one shortened until the server takes it.
 /// </summary>
 public static class Embed
 {
@@ -45,7 +49,55 @@ public static class Embed
         return vectors;
     }
 
+    /// <summary>How many times a text too long for the model is shortened before giving up.</summary>
+    const int Shortenings = 6;
+
     static List<double[]> EmbedOne(HttpClient client, string b, List<string> batch)
+    {
+        try
+        {
+            return Send(client, b, batch);
+        }
+        catch (TooLong) when (batch.Count > 1)
+        {
+            // Which one is too long the server does not say: each on its own.
+            return [.. batch.SelectMany(t => EmbedOne(client, b, [t]))];
+        }
+        catch (TooLong first)
+        {
+            var text = batch[0];
+            var tooLong = first;
+            for (var i = 0; i < Shortenings; i++)
+            {
+                // The share of the text that fits, with a margin: tokens are not spread evenly.
+                var keep = (int)(text.Length * Math.Min(0.9, 0.9 * tooLong.Fits / Math.Max(tooLong.Tokens, 1)));
+                text = text[..Math.Max(1, Math.Min(keep, text.Length - 1))];
+                try
+                {
+                    return Send(client, b, [text]);
+                }
+                catch (TooLong again)
+                {
+                    tooLong = again;
+                }
+            }
+            throw new EmbeddingUnavailable($"a text of {batch[0].Length:N0} characters is still too long for the model after {Shortenings} cuts");
+        }
+    }
+
+    /// <summary>The server refused a text longer than the model's window: its length and what fits, in tokens.</summary>
+    sealed class TooLong(int tokens, int fits) : Exception
+    {
+        public int Tokens { get; } = tokens;
+        public int Fits { get; } = fits;
+    }
+
+    // llama.cpp: "input (4092 tokens) is larger than the max context size (2048 tokens)", or
+    // "input (4092 tokens) is too large to process. increase the physical batch size (current batch size: 2048)".
+    static readonly System.Text.RegularExpressions.Regex TooLongMessage =
+        new(@"input \((\d+) tokens\) is (?:larger than the max context size|too large to process)\D*(\d+)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    static List<double[]> Send(HttpClient client, string b, List<string> batch)
     {
         HttpResponseMessage response;
         string text;
@@ -68,6 +120,8 @@ public static class Embed
         {
             throw new EmbeddingUnavailable($"POST {url} failed: {exc.Message}", exc);
         }
+        if ((int)response.StatusCode is 400 or 413 or 500 && TooLongMessage.Match(text) is { Success: true } m)
+            throw new TooLong(int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), int.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture));
         if ((int)response.StatusCode != 200)
             throw new EmbeddingUnavailable($"POST /v1/embeddings returned {(int)response.StatusCode}: {Util.PyStr.Prefix(text, 200)}");
         JsonNode? body;
