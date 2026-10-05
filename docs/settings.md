@@ -4,7 +4,10 @@ Admin → Settings (`https://DOMAIN/admin/settings`) lists every setting an
 admin can change, in groups. Each is typed and checked, with its unit, default
 and limits, and a note on what changing it does. Search looks across every
 group. A group can be linked directly, for example
-`/admin/settings#company-directory-ldap`.
+`/admin/settings#company-directory-ldap`. A setting that belongs to one choice
+shows only while it is chosen: **Company sign-in** shows OIDC's settings or
+SAML's, by its **Protocol**. Long values (SAML metadata, a certificate) get a
+box of several lines.
 
 They all live in the app's database; `.env` holds only what the stack needs to
 start ([configuration.md](configuration.md)). The models have their own page:
@@ -31,8 +34,9 @@ value it overrides, and **Back to the environment's value** removes the saved on
   secret, the mail password) is stored AES-256-GCM encrypted under a key derived
   from `APP_KEY`. A database dump alone does not reveal it.
 - The SCIM token is not a setting: **Company sign-in** makes it, shows it once
-  and keeps only its SHA-256. The same group shows the redirect URI to register
-  at the identity provider, and tests the provider before you save.
+  and keeps only its SHA-256. The same group shows what to register at the
+  identity provider (the redirect URI for OIDC; this app's entity ID, Reply URL
+  and metadata address for SAML), and tests the provider before you save.
 
 ## What a group can set for its members
 

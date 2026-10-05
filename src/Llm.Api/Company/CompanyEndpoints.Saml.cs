@@ -64,7 +64,15 @@ public static partial class CompanyEndpoints
         var detail = CompanySignIn.Detail(saml: true) + ": ";
         var flow = ReadSamlFlow(ctx, dp);
         ctx.Response.Cookies.Delete(SamlFlowCookie, SamlCookieOptions(TimeSpan.Zero));
-        var form = ctx.Request.HasFormContentType ? await ctx.Request.ReadFormAsync(ctx.RequestAborted) : null;
+        IFormCollection? form = null;
+        try
+        {
+            form = ctx.Request.HasFormContentType ? await ctx.Request.ReadFormAsync(ctx.RequestAborted) : null;
+        }
+        catch (InvalidDataException)
+        {
+            // Past the form limits: handled below as an answer with no SAMLResponse.
+        }
         var relayState = form?["RelayState"].ToString() ?? "";
         var o = options.CurrentValue;
         var a = auth.Value;
@@ -93,7 +101,8 @@ public static partial class CompanyEndpoints
             {
                 LogUnavailable(logger, ex.Message);
             }
-            await audit.WriteAsync("sign_in", success: false, detail: detail + ex.Message);
+            // The reason may quote the answer (an issuer, an audience, the provider's message): a few hundred characters of it.
+            await audit.WriteAsync("sign_in", success: false, detail: detail + (ex.Message.Length > 500 ? ex.Message[..500] + "..." : ex.Message));
             return Results.Redirect(Login(unavailable ? "company_unavailable" : "company_failed", redirect));
         }
         if (!await replay.FirstUseAsync(assertion.Id, assertion.KeepUntil, ctx.RequestAborted))

@@ -147,7 +147,8 @@ public sealed class CompanySignIn(
 
     private async Task<CompanyOutcome> FailAsync(CompanyPerson person, string who, CompanyOutcome outcome, string detail)
     {
-        await audit.WriteAsync("sign_in", who, success: false, detail: Detail(person.Saml) + ": " + detail);
+        // The provider's raw value (a long SAML NameID) may not fit the audit log's target.
+        await audit.WriteAsync("sign_in", who.Length > 256 ? who[..256] : who, success: false, detail: Detail(person.Saml) + ": " + detail);
         return outcome;
     }
 }

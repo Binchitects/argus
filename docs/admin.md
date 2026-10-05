@@ -11,7 +11,7 @@ out) and a page each. The audit log has filters, paging and CSV export. The
 Settings page edits everything ([settings.md](settings.md)), and the Model page
 has **Switch to this model**.
 
-Sign-in, people, the company directory, company sign-in (OIDC and SCIM) and 2FA
+Sign-in, people, the company directory, company sign-in (OIDC or SAML, and SCIM) and 2FA
 are in [authentication.md](authentication.md), and the chat in [chat.md](chat.md). This
 page covers the rest.
 
@@ -37,7 +37,7 @@ page covers the rest.
 | **Settings** | Every setting, grouped and searchable: applied at once, or by a restart the app does itself. See [settings.md](settings.md). **Chat bots** sets up the Slack, Mattermost and Teams bots and email in, and shows the address to give each platform ([integrations.md](integrations.md)). |
 | **Audit log** | Every sign-in and every change to people or the index, with who, whom and from where. |
 | **Quality** | How people rate the answers, over a day, a week, a month or three: per model and per assistant, the answers written, the share rated, the share rated up, and why they were rated down. The latest down-rated answers by title, model, reason and the person's words, never their content: a chat opens (read only, down to the rated answer) only when its owner shared it with the down vote, and each opening is audited. Below, the arena's leaderboard from the votes cast in the range. See [Quality](#quality) below. |
-| **Sign-in** | Local accounts, the company directory ("Check the directory now") and company sign-in: the identity provider, its admin and required groups, and whether SCIM is on. |
+| **Sign-in** | Local accounts, the company directory ("Check the directory now") and company sign-in: OIDC or SAML, the identity provider (its issuer or SAML entity ID), its admin and required groups, and whether SCIM is on. |
 
 Indexing, Packs and Explore talk to Argus through the app's server with
 `ARGUS_KEY`, which never reaches a browser. With Argus left out they say
