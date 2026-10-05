@@ -332,6 +332,16 @@ public sealed partial class WebTests : IDisposable
     }
 
     [Fact]
+    public async Task The_bare_command_is_the_IDE_and_says_how_to_talk_in_the_terminal_instead()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h, bare: true);
+        Assert.Contains($"the IDE for {h.Work}", web.Out);
+        Assert.Contains("The agent in this terminal instead: code-arena chat", web.Out);
+        Assert.Equal(HttpStatusCode.OK, (await web.Http.GetAsync("/api/files")).StatusCode);
+    }
+
+    [Fact]
     public async Task Without_its_page_built_in_web_says_so_plainly_and_the_bare_command_talks_in_the_terminal()
     {
         using var h = new Harness(_gateway, _mcp);
