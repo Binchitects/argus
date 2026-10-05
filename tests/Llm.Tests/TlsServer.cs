@@ -4,6 +4,7 @@ using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.Logging;
 
 namespace Llm.Tests;
@@ -20,6 +21,20 @@ public static class TestCertificates
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
         request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(5));
+    }
+
+    /// <summary>An issuing CA signed by <paramref name="root"/>, as a company's servers are signed by: root, then this, then the server.</summary>
+    public static X509Certificate2 Intermediate(X509Certificate2 root, string name)
+    {
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest($"CN={name}, O=Test company", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+        request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
+        request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(root, true, false));
+        using var signed = request.Create(root, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(3), RandomNumberGenerator.GetBytes(8));
+        using var withKey = signed.CopyWithPrivateKey(key);
+        return X509CertificateLoader.LoadPkcs12(withKey.Export(X509ContentType.Pfx), null);
     }
 
     /// <summary>A server certificate for these names, signed by <paramref name="ca"/> (or by itself), with its key.</summary>
@@ -80,12 +95,17 @@ public sealed class TlsServer : IAsyncDisposable
     /// <param name="host">The host name in the address: localhost (the certificates' name), or 127.0.0.1.</param>
     public string Url(string path, string host = "localhost") => $"https://{host}:{Port}{path}";
 
-    public static async Task<TlsServer> StartAsync(X509Certificate2 certificate, HttpMessageHandler fake, string asHost)
+    /// <param name="https">More of its TLS: the issuing CAs it sends with its certificate, the TLS versions it speaks.</param>
+    public static async Task<TlsServer> StartAsync(X509Certificate2 certificate, HttpMessageHandler fake, string asHost, Action<HttpsConnectionAdapterOptions>? https = null)
     {
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory, EnvironmentName = "Production" });
         builder.Logging.ClearProviders();
         builder.WebHost.UseKestrelHttpsConfiguration();
-        builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, 0, l => l.UseHttps(certificate)));
+        builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, 0, l => l.UseHttps(o =>
+        {
+            o.ServerCertificate = certificate;
+            https?.Invoke(o);
+        })));
         var app = builder.Build();
         TlsServer? server = null;
         app.Run(async ctx => await server!.ForwardAsync(ctx, fake, asHost));
@@ -119,6 +139,10 @@ public sealed class TlsServer : IAsyncDisposable
         using var invoker = new HttpMessageInvoker(fake, disposeHandler: false);
         using var response = await invoker.SendAsync(request, ctx.RequestAborted);
         ctx.Response.StatusCode = (int)response.StatusCode;
+        if (response.Headers.Location is { } location)
+        {
+            ctx.Response.Headers.Location = location.ToString();
+        }
         if (response.Content.Headers.ContentType is { } type)
         {
             ctx.Response.ContentType = type.ToString();

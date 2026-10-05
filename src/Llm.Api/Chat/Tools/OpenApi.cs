@@ -183,7 +183,11 @@ public static partial class OpenApi
         }
         catch (HttpRequestException ex) when (ServerTls.IsCertificateError(ex))
         {
-            return new ToolResult(ServerTls.Untrusted(new Uri(url).Host), IsError: true);
+            return new ToolResult(ServerTls.Untrusted(new Uri(url).Host, "Read it"), IsError: true);
+        }
+        catch (HttpRequestException ex) when (ServerTls.HandshakeFailed(new Uri(url).Host, ex) is { } handshake)
+        {
+            return new ToolResult(handshake, IsError: true);
         }
         catch (HttpRequestException ex)
         {

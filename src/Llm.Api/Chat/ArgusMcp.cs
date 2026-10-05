@@ -133,13 +133,15 @@ public static class Mcp
     public static readonly JsonSerializerOptions Plain = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     /// <summary>
-    /// The MCP clients' connections: no overall timeout (calls set their own), and TCP
-    /// keep-alive, so a firewall does not drop a connection that waits an hour for its answer.
+    /// The MCP clients' connections: no overall timeout (calls set their own), TCP keep-alive, so a
+    /// firewall does not drop a connection that waits an hour for its answer, and the system's CAs
+    /// deciding a server's certificate, a refusal told apart (Tools.ServerTls.Strict).
     /// </summary>
     public static SocketsHttpHandler Handler() => new()
     {
         PooledConnectionLifetime = TimeSpan.FromMinutes(10),
         ConnectTimeout = TimeSpan.FromSeconds(15),
+        SslOptions = { RemoteCertificateValidationCallback = Tools.ServerTls.Strict },
         ConnectCallback = async (context, ct) =>
         {
             var socket = new System.Net.Sockets.Socket(System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp) { NoDelay = true };
@@ -316,6 +318,10 @@ public static class Mcp
         catch (HttpRequestException ex) when (Tools.ServerTls.IsCertificateError(ex))
         {
             throw new McpException($"{endpoint.Server}'s certificate is not trusted.") { Certificate = true };
+        }
+        catch (HttpRequestException ex) when (Tools.ServerTls.HandshakeFailed(endpoint.Server, ex) is { } handshake)
+        {
+            throw new McpException(handshake);
         }
         catch (Exception ex) when (ex is HttpRequestException || (ex is TaskCanceledException && !ct.IsCancellationRequested))
         {

@@ -210,6 +210,14 @@ public sealed class ToolTlsTests(AppFixture app)
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var api = new { name = "Pets", specUrl = tls.Url("/openapi.yaml"), headerName = "X-Api-Key", headerValue = "pets-key" };
 
+        // Its document pasted: Read it still meets its address's certificate, and says why it is refused.
+        var pasted = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test",
+            new { api.name, spec = FakeMcp.PetsSpec.Replace("https://pets.test/v1", tls.Url("/v1"), StringComparison.Ordinal) }));
+        Assert.False(pasted.GetProperty("ok").GetBoolean());
+        Assert.Equal($"The API at {tls.Url("/v1")} cannot be called: its certificate is not trusted. Trust the CA that signed it, or stop checking it.",
+            pasted.GetProperty("error").GetString());
+        Assert.Equal(["It was issued by Test company CA, a CA this server does not trust."], Reasons(pasted));
+
         // Its document cannot be fetched by default: Read it says why, and adding it is refused.
         var refused = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test", api));
         Assert.False(refused.GetProperty("ok").GetBoolean());
@@ -239,7 +247,104 @@ public sealed class ToolTlsTests(AppFixture app)
         // Its CA taken away: the call is refused, and the model is told why.
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/tools/servers/{toolId[4..]}", UriKind.Relative), new { tls = "System" }));
         var failed = Event(await SendAsync(admin, chat, """Again? [call pets__list_pets {"limit":1}]"""), "tool_result");
-        Assert.Equal("localhost's certificate is not trusted. An admin can trust the CA that signed it, or stop checking it, in Admin → Tools (Test says why).", failed.GetProperty("text").GetString());
+        Assert.Equal("localhost's certificate is not trusted. An admin can trust the CA that signed it, or stop checking it, in Admin → Tools (Read it says why).", failed.GetProperty("text").GetString());
+        // And Read it on its kept document says why.
+        var reread = await admin.JsonAsync(await admin.PostAsync($"/api/admin/tools/servers/test?id={toolId[4..]}", new { api.name }));
+        Assert.False(reread.GetProperty("ok").GetBoolean());
+        Assert.Equal(["It was issued by Test company CA, a CA this server does not trust."], Reasons(reread));
+    }
+
+    /// <summary>The MCP server, but /moved sends each request on (307) to the address <paramref name="to"/> gives.</summary>
+    private sealed class Moved(FakeMcp mcp, Func<string> to) : DelegatingHandler(mcp)
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            request.RequestUri!.AbsolutePath == "/moved"
+                ? Task.FromResult(new HttpResponseMessage(HttpStatusCode.TemporaryRedirect) { Headers = { Location = new Uri(to()) } })
+                : base.SendAsync(request, cancellationToken);
+    }
+
+    [Fact]
+    public async Task A_server_trusted_by_its_own_CA_or_not_checked_is_followed_on_its_own_host_but_never_to_another()
+    {
+        using var ca = TestCertificates.Ca("Test company CA");
+        using var here = TestCertificates.Server(ca, "localhost");
+        using var there = TestCertificates.Server(ca, "127.0.0.1");
+        var to = "";
+        await using var tls = await TlsServer.StartAsync(here, new Moved(new FakeMcp(), () => to), "tools.example.test");
+        await using var elsewhere = await TlsServer.StartAsync(there, new FakeMcp(), "tools.example.test");
+        await using var f = NewApp(NewDatabase());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        foreach (var (check, pem) in new (string, string?)[] { ("Off", null), ("OwnCa", TestCertificates.Pem(ca)) })
+        {
+            object Server(string url) => new { name = "Moving Desk", url, headerName = "X-Api-Key", headerValue = FakeMcp.ApiKey, tls = check, tlsCa = pem };
+
+            // On its own host: followed, with its key.
+            to = tls.Url("/mcp");
+            var same = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test", Server(tls.Url("/moved"))));
+            Assert.True(same.GetProperty("ok").GetBoolean(), same.ToString());
+
+            // To another host (its certificate signed by the same CA): not followed, so neither the choice nor its key goes there.
+            to = elsewhere.Url("/mcp", "127.0.0.1");
+            var other = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test", Server(tls.Url("/moved"))));
+            Assert.False(other.GetProperty("ok").GetBoolean(), other.ToString());
+            Assert.Contains("HTTP 307", other.GetProperty("error").GetString(), StringComparison.Ordinal);
+            Assert.Equal(0, elsewhere.Requests);
+        }
+        // Asked for directly, the other host is trusted as its own server.
+        var direct = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test",
+            new { name = "Other Desk", url = elsewhere.Url("/mcp", "127.0.0.1"), headerName = "X-Api-Key", headerValue = FakeMcp.ApiKey, tls = "OwnCa", tlsCa = TestCertificates.Pem(ca) }));
+        Assert.True(direct.GetProperty("ok").GetBoolean(), direct.ToString());
+    }
+
+    [Fact]
+    public async Task A_handshake_that_fails_for_another_reason_than_the_certificate_says_so_and_offers_no_certificate_choice()
+    {
+        using var certificate = TestCertificates.Server(null, "localhost");
+#pragma warning disable SYSLIB0039, CA5397 // A server that speaks only TLS 1.1, as an old one does.
+        await using var tls = await TlsServer.StartAsync(certificate, new FakeMcp(), "tools.example.test", o => o.SslProtocols = System.Security.Authentication.SslProtocols.Tls11);
+#pragma warning restore SYSLIB0039, CA5397
+        await using var f = NewApp(NewDatabase());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        foreach (var check in new[] { "System", "Off" })
+        {
+            var test = await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test",
+                new { name = "Old Desk", url = tls.Url("/mcp"), headerName = "X-Api-Key", headerValue = FakeMcp.ApiKey, tls = check }));
+            Assert.False(test.GetProperty("ok").GetBoolean());
+            var error = test.GetProperty("error").GetString()!;
+            Assert.StartsWith("No secure connection could be set up with Old Desk (", error, StringComparison.Ordinal);
+            Assert.EndsWith("Its certificate is not the reason: it may not speak https there, speak only an old TLS version, or share no cipher with this app.", error, StringComparison.Ordinal);
+            Assert.False(test.TryGetProperty("certificate", out var about) && about.ValueKind != JsonValueKind.Null);
+        }
+        Assert.Equal(0, tls.Requests);
+    }
+
+    [Fact]
+    public async Task A_server_signed_by_an_issuing_CA_is_trusted_by_its_root_by_the_issuing_CA_alone_and_by_both_when_it_does_not_send_it()
+    {
+        using var root = TestCertificates.Ca("Test root CA");
+        using var issuing = TestCertificates.Intermediate(root, "Test issuing CA");
+        using var other = TestCertificates.Ca("Other CA");
+        using var certificate = TestCertificates.Server(issuing, "localhost");
+        await using var sends = await TlsServer.StartAsync(certificate, new FakeMcp(), "tools.example.test", o => o.ServerCertificateChain = [issuing]);
+        await using var bare = await TlsServer.StartAsync(certificate, new FakeMcp(), "tools.example.test");
+        await using var f = NewApp(NewDatabase());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<JsonElement> TestAsync(TlsServer server, params X509Certificate2[] cas) => await admin.JsonAsync(await admin.PostAsync("/api/admin/tools/servers/test",
+            new { name = "Chain Desk", url = server.Url("/mcp"), headerName = "X-Api-Key", headerValue = FakeMcp.ApiKey, tls = "OwnCa", tlsCa = string.Join("\n", cas.Select(TestCertificates.Pem)) }));
+
+        // It sends its issuing CA: its root is enough, and so is the issuing CA alone (as far as it goes).
+        foreach (var trusted in new[] { await TestAsync(sends, root), await TestAsync(sends, issuing), await TestAsync(sends, root, issuing) })
+        {
+            Assert.True(trusted.GetProperty("ok").GetBoolean(), trusted.ToString());
+        }
+        Assert.Equal(["It does not lead to the CA you gave (Other CA): it was issued by Test issuing CA."], Reasons(await TestAsync(sends, other)));
+
+        // It does not: the root alone cannot be reached, so the issuing CA is given too, or alone.
+        var rootOnly = await TestAsync(bare, root);
+        Assert.False(rootOnly.GetProperty("ok").GetBoolean());
+        Assert.Equal(["It does not lead to the CA you gave (Test root CA): it was issued by Test issuing CA."], Reasons(rootOnly));
+        Assert.True((await TestAsync(bare, root, issuing)).GetProperty("ok").GetBoolean());
+        Assert.True((await TestAsync(bare, issuing)).GetProperty("ok").GetBoolean());
     }
 
     [Fact]

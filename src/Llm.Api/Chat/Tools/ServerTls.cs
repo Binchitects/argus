@@ -15,6 +15,12 @@ public sealed record CertificateProblem(string Subject, string Issuer, IReadOnly
     string Sha256, IReadOnlyList<string> Reasons);
 
 /// <summary>
+/// Thrown by a certificate check that refuses the server's certificate, so a refusal is told apart
+/// from a handshake that failed for another reason (an old TLS version, no cipher in common).
+/// </summary>
+public sealed class CertificateRefusedException() : AuthenticationException("The server's certificate was refused.");
+
+/// <summary>
 /// How an admin's MCP server or API is trusted over HTTPS: by the system's CAs (the default), by
 /// a CA the admin gave (its chain must lead there, and the host name must still match), or not
 /// checked at all. Only these servers' own connections are touched: the gateway, Argus, webhooks
@@ -27,12 +33,41 @@ public static class ServerTls
 
     private static readonly Oid ServerAuth = new("1.3.6.1.5.5.7.3.1");
 
-    /// <summary>The message people see in the chat when the certificate is refused; the admin's test says why.</summary>
-    public static string Untrusted(string server) =>
-        $"{server}'s certificate is not trusted. An admin can trust the CA that signed it, or stop checking it, in Admin → Tools (Test says why).";
+    /// <summary>The message people see in the chat when the certificate is refused; the admin's test (Test, or Read it for an API) says why.</summary>
+    public static string Untrusted(string server, string test = "Test") =>
+        $"{server}'s certificate is not trusted. An admin can trust the CA that signed it, or stop checking it, in Admin → Tools ({test} says why).";
 
-    /// <summary>A request refused because of the server's certificate (not a server down or a name that does not resolve).</summary>
-    public static bool IsCertificateError(Exception ex) => ex is HttpRequestException { InnerException: AuthenticationException };
+    /// <summary>
+    /// A request refused because of the server's certificate (not a server down, a name that does not
+    /// resolve, or a handshake that failed for another reason): the checks throw <see cref="CertificateRefusedException"/>.
+    /// </summary>
+    public static bool IsCertificateError(Exception ex) => ex is HttpRequestException { InnerException: CertificateRefusedException };
+
+    /// <summary>
+    /// The system's CAs decide, as without a callback; a refusal throws, so that it is told apart
+    /// (<see cref="IsCertificateError"/>). For the MCP clients' shared connections (<see cref="Mcp.Handler"/>).
+    /// </summary>
+    public static bool Strict(object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors errors) =>
+        errors == SslPolicyErrors.None ? true : throw new CertificateRefusedException();
+
+    /// <summary>
+    /// What people are told when no secure connection could be set up with a server for another
+    /// reason than its certificate (an old TLS version, no cipher in common); null for any other failure.
+    /// </summary>
+    public static string? HandshakeFailed(string server, Exception ex)
+    {
+        if (ex is not HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError } || IsCertificateError(ex))
+        {
+            return null;
+        }
+        var cause = ex;
+        while (cause.InnerException is { } inner)
+        {
+            cause = inner;
+        }
+        return $"No secure connection could be set up with {server} ({cause.Message.Trim().TrimEnd('.')}). "
+            + "Its certificate is not the reason: it may not speak https there, speak only an old TLS version, or share no cipher with this app.";
+    }
 
     /// <summary>The certificates of a PEM text (a CA, or a bundle). Throws with why not.</summary>
     public static X509Certificate2Collection ReadCa(string pem)
@@ -135,7 +170,8 @@ public static class ServerTls
     /// <summary>
     /// What is wrong with the certificate a server presented, under the admin's choice; empty when it
     /// is trusted. With its own CA, the chain must lead to one of <paramref name="cas"/> (the system's
-    /// roots do not count) and the name must match; nothing is checked when the check is off.
+    /// roots do not count; a CA given that is not a root, such as the issuing CA alone, is trusted as
+    /// far as it goes) and the name must match; nothing is checked when the check is off.
     /// </summary>
     /// <param name="host">The host name asked for, for the message.</param>
     public static List<string> Problems(TlsCheck mode, X509Certificate2Collection? cas, X509Certificate2? certificate, X509Chain? presented, SslPolicyErrors errors, string host)
@@ -176,11 +212,37 @@ public static class ServerTls
             chain.ChainPolicy.ExtraStore.AddRange(presented.ChainPolicy.ExtraStore);
             chain.ChainPolicy.ExtraStore.AddRange(presented.ChainElements.Skip(1).Select(e => e.Certificate).ToArray());
         }
-        if (!chain.Build(certificate))
+        if (!chain.Build(certificate) && !Reaches(chain, cas))
         {
             reasons.AddRange(ChainReasons(certificate, chain.ChainStatus, cas));
         }
         return [.. reasons.Distinct()];
+    }
+
+    /// <summary>
+    /// The chain reaches a certificate the admin gave, every link up to it sound, and stops short only
+    /// above it: a company's issuing CA given without its root (a custom trust store takes only roots
+    /// as anchors), or a server's own certificate.
+    /// </summary>
+    private static bool Reaches(X509Chain chain, X509Certificate2Collection? cas)
+    {
+        const X509ChainStatusFlags AboveIt = X509ChainStatusFlags.UntrustedRoot | X509ChainStatusFlags.PartialChain;
+        if (cas is not { Count: > 0 } || chain.ChainStatus.Any(s => (s.Status & ~AboveIt) != 0))
+        {
+            return false;
+        }
+        foreach (var element in chain.ChainElements)
+        {
+            if (cas.Any(c => c.RawData.AsSpan().SequenceEqual(element.Certificate.RawData)))
+            {
+                return true;
+            }
+            if (element.ChainElementStatus.Length > 0)
+            {
+                return false;
+            }
+        }
+        return false;
     }
 
     private static IEnumerable<string> ChainReasons(X509Certificate2 certificate, X509ChainStatus[] statuses, X509Certificate2Collection? cas)
@@ -216,23 +278,65 @@ public static class ServerTls
         return names.Count > 0 ? names : [certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false)];
     }
 
-    /// <summary>The MCP clients' connections (<see cref="Mcp.Handler"/>), with this check of the server's certificate.</summary>
-    public static SocketsHttpHandler Handler(TlsCheck mode, X509Certificate2Collection? cas)
+    /// <summary>
+    /// The MCP clients' connections (<see cref="Mcp.Handler"/>), with this check of the server's certificate.
+    /// With its own CA or no check, a redirect is followed only on the same host: the choice is for that
+    /// server, so a redirect to another host comes back as it is (not followed, nothing sent there).
+    /// </summary>
+    public static HttpMessageHandler Handler(TlsCheck mode, X509Certificate2Collection? cas)
     {
         var handler = Mcp.Handler();
+        if (mode == TlsCheck.System)
+        {
+            return handler;
+        }
         if (mode == TlsCheck.Off)
         {
 #pragma warning disable CA5359 // Only for a server an admin marked "do not check" (Admin → Tools, audited); the form says what that gives up.
             handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, _) => true;
 #pragma warning restore CA5359
         }
-        else if (mode == TlsCheck.OwnCa)
+        else
         {
             handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, chain, errors) =>
                 Problems(mode, cas, certificate is null ? null : certificate as X509Certificate2 ?? X509CertificateLoader.LoadCertificate(certificate.GetRawCertData()),
-                    chain, errors, "").Count == 0;
+                    chain, errors, "").Count == 0 ? true : throw new CertificateRefusedException();
         }
-        return handler;
+        var most = handler.MaxAutomaticRedirections;
+        handler.AllowAutoRedirect = false;
+        return new SameHostRedirects(handler, most);
+    }
+
+    /// <summary>
+    /// Follows a server's redirects as the system's client does (a 303, and a 301 or 302 after a POST,
+    /// become a GET; never from https to http), but only on the host first asked: any other comes back as it is.
+    /// </summary>
+    private sealed class SameHostRedirects(HttpMessageHandler inner, int most) : DelegatingHandler(inner)
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var host = request.RequestUri!.IdnHost;
+            for (var hops = 0; ; hops++)
+            {
+                var response = await base.SendAsync(request, cancellationToken);
+                var status = (int)response.StatusCode;
+                var from = request.RequestUri!;
+                if (hops >= most || status is not (301 or 302 or 303 or 307 or 308) || response.Headers.Location is not { } location
+                    || !Uri.TryCreate(from, location, out var next) || next.Scheme is not ("http" or "https")
+                    || !string.Equals(next.IdnHost, host, StringComparison.OrdinalIgnoreCase)
+                    || (from.Scheme == Uri.UriSchemeHttps && next.Scheme != Uri.UriSchemeHttps))
+                {
+                    return response;
+                }
+                response.Dispose();
+                if ((status == 303 && request.Method != HttpMethod.Head) || (status is 301 or 302 && request.Method == HttpMethod.Post))
+                {
+                    request.Method = HttpMethod.Get;
+                    request.Content = null;
+                }
+                request.RequestUri = next;
+            }
+        }
     }
 
     /// <summary>
