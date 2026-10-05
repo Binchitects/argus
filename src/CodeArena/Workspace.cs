@@ -32,7 +32,8 @@ internal sealed class Workspace
         {
             return Root;
         }
-        var full = Path.GetFullPath(Home(path.Trim()), Root);
+        // Without a trailing separator: "./" is the folder itself, not something in it.
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Home(path.Trim()), Root));
         if (!Inside(full) || LeadsOutside(full))
         {
             var others = Roots.Count > 1 ? " or " + string.Join(", ", Roots.Skip(1)) : "";

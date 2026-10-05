@@ -59,7 +59,7 @@ internal sealed class IdeFiles(Workspace workspace)
         }
         try
         {
-            return workspace.Resolve(Path.GetFullPath(path, workspace.Root));
+            return workspace.Resolve(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, workspace.Root)));
         }
         catch (ToolError)
         {

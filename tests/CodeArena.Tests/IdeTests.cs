@@ -89,9 +89,13 @@ public sealed class IdeTests : IDisposable
         Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/files/rename", new JsonObject { ["from"] = "inside.txt", ["to"] = "../moved.txt" })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/files/rename", new JsonObject { ["from"] = "../secret.txt", ["to"] = "stolen.txt" })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/files/delete", new JsonObject { ["path"] = "../secret.txt" })).StatusCode);
-        // The working directory itself is not a file to delete or move.
-        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/files/delete", new JsonObject { ["path"] = "." })).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/files/rename", new JsonObject { ["from"] = ".", ["to"] = "elsewhere" })).StatusCode);
+        // The working directory itself is not a file to delete or move, however it is written.
+        foreach (var root in new[] { ".", "./", "./.", ".//", "" })
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/files/delete", new JsonObject { ["path"] = root })).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/files/rename", new JsonObject { ["from"] = root, ["to"] = "elsewhere" })).StatusCode);
+        }
+        Assert.True(File.Exists(Path.Combine(h.Work, "inside.txt")));
         Assert.Equal("keep out\n", File.ReadAllText(secret));
         Assert.True(File.Exists(Path.Combine(h.Work, "inside.txt")));
         Assert.False(File.Exists(Path.Combine(h.Root, "new.txt")) || File.Exists(Path.Combine(h.Root, "moved.txt")) || File.Exists(Path.Combine(h.Work, "stolen.txt")));
