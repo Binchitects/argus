@@ -133,6 +133,26 @@ export const acceptChange = (path?: string) => api<Change[]>('/api/changes/accep
 /** Puts the file back as it was before the agent (deletes a file it made). */
 export const revertChange = (path: string) => api<Change[]>('/api/changes/revert', { body: { path } })
 
+/**
+ * The page's own preferences, kept by code-arena in its data folder: the browser
+ * keeps a page's storage per port, and each run takes a new one. What is there
+ * is checked when read (another version may have written it).
+ */
+export interface Preferences {
+  layout?: Record<string, unknown>
+  theme?: unknown
+}
+
+/** Read once, when the page opens. */
+export const preferencesQuery = {
+  queryKey: ['code', 'preferences'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<Preferences>('/api/preferences', { signal }),
+  staleTime: Infinity,
+}
+
+/** Keeps these keys (the others stay as they were); keepalive when the page is closing. */
+export const savePreferences = (change: Preferences, keepalive = false) => api<Preferences>('/api/preferences', { body: change, keepalive })
+
 export const openTerminal = (cols: number, rows: number) => api<TerminalInfo>('/api/terminals', { body: { cols, rows } })
 export const closeTerminal = (id: string) => api('/api/terminals/close', { body: { id } })
 

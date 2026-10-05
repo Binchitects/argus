@@ -21,12 +21,14 @@ internal sealed partial class WebApp
     private IdeFiles _files = null!;
     private AgentChanges _changes = null!;
     private Terminals _terminals = null!;
+    private PagePreferences _preferences = null!;
 
     private void StartIde()
     {
         _files = new IdeFiles(_rt.Workspace);
         _changes = new AgentChanges(_rt.Workspace);
         _terminals = new Terminals(_rt.Workspace, _rt.Config, _rt.Env.Env);
+        _preferences = new PagePreferences(Path.Combine(_rt.Env.Paths.DataDir, PagePreferences.FileName));
     }
 
     /// <summary>One of the IDE's calls; false when the path is none of them.</summary>
@@ -118,6 +120,12 @@ internal sealed partial class WebApp
                     return true;
                 case ("GET", "/api/terminals/socket"):
                     await TerminalSocketAsync(req, res, ct);
+                    return true;
+                case ("GET", "/api/preferences"):
+                    await res.JsonAsync(200, _preferences.Read(), ct);
+                    return true;
+                case ("POST", "/api/preferences"):
+                    await res.JsonAsync(200, _preferences.Save(Body(req)), ct);
                     return true;
             }
         }
@@ -253,6 +261,76 @@ internal sealed partial class WebApp
                     terminal.Resize(json.Int("cols") ?? terminal.Cols, json.Int("rows") ?? terminal.Rows);
                     break;
             }
+        }
+    }
+}
+
+/// <summary>
+/// The page's own preferences (the layout of its panels, the theme), kept in the
+/// data folder: a browser keeps a page's storage per port, and each run takes a
+/// free port, so the browser alone would forget them at every start. One file
+/// for every project, as an editor keeps its layout; the page's keys merged into
+/// it as it sends them (null forgets one), 16 KB at most.
+/// </summary>
+internal sealed class PagePreferences(string file)
+{
+    /// <summary>The file's name in the data folder.</summary>
+    public const string FileName = "ide.json";
+
+    /// <summary>The most the file holds.</summary>
+    public const int MaxBytes = 16 * 1024;
+
+    private readonly object _gate = new();
+
+    /// <summary>What was saved; none when the file is missing or unreadable.</summary>
+    public JsonObject Read()
+    {
+        lock (_gate)
+        {
+            return Load();
+        }
+    }
+
+    /// <summary>The keys sent, over what was saved; the whole of it back.</summary>
+    public JsonObject Save(JsonObject change)
+    {
+        lock (_gate)
+        {
+            var all = Load();
+            foreach (var (key, value) in change)
+            {
+                if (value is null)
+                {
+                    all.Remove(key);
+                }
+                else
+                {
+                    all[key] = value.DeepClone();
+                }
+            }
+            var text = all.ToJsonString();
+            if (Encoding.UTF8.GetByteCount(text) > MaxBytes)
+            {
+                throw new IdeError(413, "too_large", $"The page's preferences are kept up to {MaxBytes / 1024} KB.");
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            // Whole or not at all: another run of code-arena may read it meanwhile.
+            var temp = $"{file}.{Environment.ProcessId}.tmp";
+            File.WriteAllText(temp, text);
+            File.Move(temp, file, overwrite: true);
+            return all;
+        }
+    }
+
+    private JsonObject Load()
+    {
+        try
+        {
+            return File.Exists(file) ? Json.ParseObject(File.ReadAllText(file)) ?? [] : [];
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return [];
         }
     }
 }

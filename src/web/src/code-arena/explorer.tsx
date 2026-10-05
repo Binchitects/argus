@@ -102,9 +102,13 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
 
   const remove = async (t: Target) => {
     const name = nameOf(t.path)
+    // Their tabs stay open (the editor keeps what is typed): said here, so the delete is not taken to lose it.
+    const unsaved = editor.tabs.filter((tab) => tab.kind === 'file' && tab.dirty && within(tab.path, t.path)).map((tab) => nameOf(tab.path))
+    const kept =
+      unsaved.length === 0 ? '' : unsaved.length === 1 ? ` ${unsaved[0]} has unsaved changes: its tab stays open, and saving it makes the file again.` : ` ${unsaved.join(', ')} have unsaved changes: their tabs stay open, and saving one makes the file again.`
     const ok = await confirm({
       title: `Delete ${name}?`,
-      description: t.kind === 'dir' ? `The folder ${t.path} and everything in it are deleted from the disk. This cannot be undone.` : `${t.path} is deleted from the disk. This cannot be undone.`,
+      description: (t.kind === 'dir' ? `The folder ${t.path} and everything in it are deleted from the disk. This cannot be undone.` : `${t.path} is deleted from the disk. This cannot be undone.`) + kept,
       confirm: 'Delete',
       destructive: true,
     })

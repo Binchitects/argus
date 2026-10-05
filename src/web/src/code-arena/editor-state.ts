@@ -13,6 +13,12 @@ export const loadMonaco = () =>
     throw e
   }))
 
+/** macOS (and iPadOS): the editor's keys are ⌘ there, and Ctrl stays the terminal's and the editor's own. */
+export const onMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+
+/** The editor's modifier key, as its tooltips and the welcome name it. */
+export const modKey = onMac() ? '⌘' : 'Ctrl'
+
 /** Where to put the cursor in a file opened: a line, and a column and the length to select there. */
 export interface Reveal {
   line: number
@@ -28,6 +34,8 @@ export interface Tab {
   path: string
   status: 'loading' | 'ready' | 'binary' | 'tooLarge' | 'error'
   message?: string
+  /** The open that is loading it: closed and opened again, or renamed, the load finds its own tab or none. */
+  load?: symbol
   dirty: boolean
   /** The language's name, for the status bar. */
   language?: string
@@ -65,7 +73,7 @@ export interface EditorApi {
   refresh: (path?: string) => Promise<void>
   /** A file or folder renamed in the explorer: its tabs follow. */
   moved: (from: string, to: string) => void
-  /** A file or folder deleted in the explorer: its tabs close. */
+  /** A file or folder deleted in the explorer: its tabs close, but those with unsaved changes (saving one makes the file again). */
   removed: (path: string) => void
   accept: (path?: string) => Promise<void>
   revert: (path: string) => Promise<void>

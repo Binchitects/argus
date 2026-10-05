@@ -1,5 +1,19 @@
-import { useRef, type KeyboardEvent, type PointerEvent } from 'react'
+import { useEffect, useRef, type KeyboardEvent, type PointerEvent, type RefObject } from 'react'
 import { cn } from '@/lib/utils'
+
+/** Where a drag started: the pointer, and the panel's size then. */
+interface Drag {
+  at: number
+  size: number
+}
+
+/** A drag over, however it ended (let go, cancelled, the capture lost, the splitter gone): the page selects text again. */
+function endDrag(drag: RefObject<Drag | null>) {
+  if (!drag.current) return
+  drag.current = null
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
 
 /**
  * The line between two panels, dragged to resize one of them (or moved with
@@ -24,7 +38,13 @@ export function Splitter({
   grow: 1 | -1
   onChange: (size: number) => void
 }) {
-  const start = useRef<{ at: number; size: number } | null>(null)
+  const start = useRef<Drag | null>(null)
+  const end = () => endDrag(start)
+  // Gone mid-drag (Ctrl+` hides the terminal panel and its edge with it): no pointerup reaches it.
+  useEffect(() => {
+    const drag = start
+    return () => endDrag(drag)
+  }, [])
   const clamp = (n: number) => Math.round(Math.min(max, Math.max(min, n)))
   const coordinate = (e: PointerEvent) => (orientation === 'vertical' ? e.clientX : e.clientY)
   const onKey = (e: KeyboardEvent) => {
@@ -62,11 +82,11 @@ export function Splitter({
         onChange(clamp(start.current.size + (coordinate(e) - start.current.at) * grow))
       }}
       onPointerUp={(e) => {
-        start.current = null
-        e.currentTarget.releasePointerCapture(e.pointerId)
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+        end()
       }}
+      onPointerCancel={end}
+      onLostPointerCapture={end}
       className={cn(
         'group relative z-10 shrink-0 touch-none bg-border outline-none',
         orientation === 'vertical' ? 'w-px cursor-col-resize' : 'h-px cursor-row-resize',

@@ -53,6 +53,8 @@ export interface ApiInit {
   method?: string
   body?: unknown
   signal?: AbortSignal
+  /** Sent even when the page closes meanwhile (a small body only). */
+  keepalive?: boolean
 }
 
 /**
@@ -64,6 +66,7 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
   const res = await fetch(path, {
     method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
     signal: init.signal,
+    ...(init.keepalive ? { keepalive: true } : {}),
     credentials: 'same-origin',
     headers: {
       Accept: 'application/json',

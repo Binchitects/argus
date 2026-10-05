@@ -7,7 +7,7 @@ import { fakeApi, type Handler } from '@/test/utils'
 import type { CodeState } from './api'
 import { App } from './app'
 import { rankFiles } from './editor-state'
-import type { Change, Entry, TerminalInfo } from './ide-api'
+import type { Change, Entry, Preferences, TerminalInfo } from './ide-api'
 
 // Monaco, xterm.js and the terminal's socket, as fakes that remember what the page did with them.
 const fakes = vi.hoisted(() => {
@@ -23,7 +23,15 @@ const fakes = vi.hoisted(() => {
       this.language = language
       fakes.models.push(this)
     }
+    /** As Monaco's: a model disposed of throws when read. */
+    live() {
+      if (this.disposed) throw new Error('Model is disposed!')
+    }
+    isDisposed() {
+      return this.disposed
+    }
     getValue() {
+      this.live()
       return this.value
     }
     /** What typing in the editor does: new text, a new version. */
@@ -33,6 +41,7 @@ const fakes = vi.hoisted(() => {
       for (const f of this.listeners) f()
     }
     getAlternativeVersionId() {
+      this.live()
       return this.alt
     }
     onDidChangeContent(f: () => void) {
@@ -252,8 +261,8 @@ const config: ChatConfig = {
   auto: null, presets: [], defaultThinking: null, argus: false, tools: [], gitlabUrl: null, maxUploadBytes: 0, imageTypes: [],
 }
 
-/** code-arena web with a small folder: src/app.ts (changed by the agent), src/lib/, README.md. */
-function backend(extra: Record<string, Handler> = {}) {
+/** code-arena web with a small folder: src/app.ts (changed by the agent), src/lib/, README.md; the page's preferences as an earlier run left them. */
+function backend(extra: Record<string, Handler> = {}, preferences: Preferences = {}) {
   const disk: Record<string, { text: string; version: string }> = {
     'src/app.ts': { text: 'const total = 1\nconsole.log(total)\n', version: 'v1' },
     'README.md': { text: '# Shop\n', version: 'r1' },
@@ -269,7 +278,7 @@ function backend(extra: Record<string, Handler> = {}) {
     ],
     'src/lib': [],
   }
-  const now = { changes: [{ path: 'src/app.ts', created: false, deleted: false, added: 1, removed: 1 }] as Change[], terminals: [] as TerminalInfo[], next: 1 }
+  const now = { changes: [{ path: 'src/app.ts', created: false, deleted: false, added: 1, removed: 1 }] as Change[], terminals: [] as TerminalInfo[], next: 1, preferences }
   const calls = fakeApi(null, {
     'GET /api/state': () => ({ json: state }),
     'GET /api/chat/config': () => ({ json: config }),
@@ -337,6 +346,11 @@ function backend(extra: Record<string, Handler> = {}) {
       now.terminals = now.terminals.filter((t) => t.id !== (body as { id: string }).id)
       return { status: 204 }
     },
+    'GET /api/preferences': () => ({ json: now.preferences }),
+    'POST /api/preferences': (body) => {
+      now.preferences = { ...now.preferences, ...(body as Preferences) }
+      return { json: now.preferences }
+    },
     ...extra,
   })
   return { calls, disk, now }
@@ -345,12 +359,45 @@ function backend(extra: Record<string, Handler> = {}) {
 function renderIde() {
   const client = makeQueryClient()
   client.setDefaultOptions({ queries: { ...client.getDefaultOptions().queries, retry: false } })
-  return render(
+  const view = render(
     <Providers client={client}>
       <App />
     </Providers>,
   )
+  return { ...view, client }
 }
+
+/** Holds back the answers to the calls whose address matches until let go: what the page does while one is on its way. */
+function holdBack(match: (path: string) => boolean) {
+  const answer = vi.mocked(fetch).getMockImplementation()!
+  const waiting: (() => void)[] = []
+  let held = 0
+  let open = false
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = new URL(String(input), 'https://llm.test')
+    if (!open && match(url.pathname + url.search)) {
+      held++
+      await new Promise<void>((go) => waiting.push(go))
+    }
+    return answer(input, init)
+  })
+  return {
+    held: () => held,
+    release: () => {
+      open = true
+      for (const go of waiting.splice(0)) go()
+    },
+  }
+}
+
+/** One turn of the agent that only answers: its end checks every open tab against the disk. */
+const answerOnly = (at = 0) => ({
+  events: [
+    { type: 'question', id: `m${at}`, parentId: at ? `m${at - 1}` : null },
+    { type: 'assistant', id: `m${at + 1}`, parentId: `m${at}`, model: 'model-a' },
+    { type: 'content', text: 'Done.' },
+  ],
+})
 
 const editor = () => fakes.editors[0]!
 const tabs = () => screen.getByRole('tablist', { name: 'Open files' })
@@ -467,7 +514,7 @@ describe('Code Arena, the IDE', () => {
     // Changed on disk meanwhile: the save asks, then sends no version.
     disk['src/app.ts'] = { text: 'by the agent\n', version: 'agent' }
     act(() => editor().model!.setValue('const total = 3\n'))
-    await userEvent.keyboard('{Meta>}s{/Meta}')
+    await userEvent.keyboard('{Control>}s{/Control}')
     const ask = await screen.findByRole('alertdialog', { name: 'app.ts changed on disk' })
     await userEvent.click(within(ask).getByRole('button', { name: 'Overwrite' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/file').at(-1)?.body).toEqual({ path: 'src/app.ts', text: 'const total = 3\n', version: null }))
@@ -659,6 +706,198 @@ describe('Code Arena, the IDE', () => {
     expect(within(tabs()).getByRole('tab', { name: 'app.ts, not saved' })).toBeInTheDocument()
   })
 
+  it('keeps what is typed while the file the agent edited is read again: the tab stays unsaved, and saving asks', async () => {
+    const { calls, disk } = backend({
+      'POST /api/messages': () => {
+        disk['src/app.ts'] = { text: 'by the agent\n', version: 'v5' }
+        const diff = { path: 'src/app.ts', added: 1, removed: 1, more: 0, created: false, lines: [['+', 0, 1, 'x']] }
+        return {
+          events: [
+            ...answerOnly().events,
+            { type: 'tool_call', id: 'c1', name: 'edit_file', arguments: '{"path":"src/app.ts"}', tool: 'local' },
+            { type: 'tool_result', id: 'c1', messageId: 'm2', name: 'edit_file', text: 'Edited src/app.ts.', isError: false, declined: false, noAccess: false, durationMs: 3, diff },
+          ],
+        }
+      },
+    })
+    renderIde()
+    await openApp()
+    const model = editor().model!
+    const read = (c: { path: string }) => c.path === '/api/file?path=src%2Fapp.ts'
+    const before = calls.filter(read).length
+
+    // The agent's edit is being read from the disk when the person types.
+    const hold = holdBack((path) => path === '/api/file?path=src%2Fapp.ts')
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Change it{Enter}')
+    await waitFor(() => expect(hold.held()).toBeGreaterThan(0))
+    act(() => model.setValue('mine\n'))
+    hold.release()
+    await screen.findByRole('button', { name: 'Send' })
+    await waitFor(() => expect(calls.filter(read)).toHaveLength(before + hold.held()))
+    await act(async () => {})
+
+    expect(model.value).toBe('mine\n')
+    expect(within(tabs()).getByRole('tab', { name: 'app.ts, not saved' })).toBeInTheDocument()
+    await userEvent.keyboard('{Control>}s{/Control}')
+    expect(await screen.findByRole('alertdialog', { name: 'app.ts changed on disk' })).toBeInTheDocument()
+  })
+
+  it('a tab closed while the files are checked against the disk does not stop the other tabs from reloading', async () => {
+    const { disk } = backend({
+      'POST /api/messages': () => {
+        disk['src/app.ts'] = { text: 'app, by a command\n', version: 'v5' }
+        disk['README.md'] = { text: '# Shop, by a command\n', version: 'r5' }
+        return answerOnly()
+      },
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(editor().model?.value).toBe('# Shop\n'))
+    const readme = editor().model!
+
+    // The end of the turn reads app.ts first; it is closed meanwhile.
+    const hold = holdBack((path) => path === '/api/file?path=src%2Fapp.ts')
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Run the formatter{Enter}')
+    await waitFor(() => expect(hold.held()).toBe(1))
+    await userEvent.click(within(tabs()).getByRole('button', { name: 'Close app.ts' }))
+    hold.release()
+    await waitFor(() => expect(readme.value).toBe('# Shop, by a command\n'))
+  })
+
+  it('a file closed while it opens and opened again has one model, the one the editor shows and saves', async () => {
+    const { calls } = backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'src, the agent changed files in it' }))
+    const row = await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' })
+    const hold = holdBack((path) => path === '/api/file?path=src%2Fapp.ts')
+    await userEvent.click(row)
+    await userEvent.click(within(tabs()).getByRole('button', { name: 'Close app.ts' }))
+    await userEvent.click(row)
+    await waitFor(() => expect(hold.held()).toBe(2))
+    hold.release()
+    await waitFor(() => expect(editor().model?.value).toBe('const total = 1\nconsole.log(total)\n'))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/file?path=src%2Fapp.ts')).toHaveLength(2))
+    await act(async () => {})
+    expect(fakes.models.filter((m) => !m.disposed)).toHaveLength(1)
+
+    act(() => editor().model!.setValue('typed\n'))
+    await userEvent.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'src/app.ts', text: 'typed\n', version: 'v1' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts' })).toBeInTheDocument()
+  })
+
+  it('a file renamed while it opens opens under its new name', async () => {
+    // Read before the rename: the answer comes after it.
+    backend({ 'GET /api/file': () => ({ json: { path: 'src/app.ts', size: 34, version: 'v1', text: 'const total = 1\nconsole.log(total)\n' } }) })
+    renderIde()
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'src, the agent changed files in it' }))
+    const row = await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' })
+    const hold = holdBack((path) => path === '/api/file?path=src%2Fapp.ts')
+    await userEvent.click(row)
+    await waitFor(() => expect(hold.held()).toBe(1))
+    act(() => row.focus())
+    await userEvent.keyboard('{F2}')
+    const name = screen.getByRole('textbox', { name: 'New name for app.ts' })
+    await userEvent.clear(name)
+    await userEvent.type(name, 'main.ts{Enter}')
+    expect(await within(tabs()).findByRole('tab', { name: 'main.ts' })).toBeInTheDocument()
+    hold.release()
+    await waitFor(() => expect(editor().model?.value).toBe('const total = 1\nconsole.log(total)\n'))
+    expect(screen.queryByLabelText('Opening main.ts')).not.toBeInTheDocument()
+  })
+
+  it('deleting a file with unsaved changes says so, and keeps its tab: saving makes the file again', async () => {
+    const { calls } = backend()
+    renderIde()
+    await openApp()
+    act(() => editor().model!.setValue('draft\n'))
+
+    const row = screen.getByRole('treeitem', { name: 'app.ts, changed by the agent' })
+    act(() => row.focus())
+    await userEvent.keyboard('{Delete}')
+    const ask = await screen.findByRole('alertdialog', { name: 'Delete app.ts?' })
+    expect(ask).toHaveTextContent('app.ts has unsaved changes: its tab stays open, and saving it makes the file again.')
+    await userEvent.click(within(ask).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/files/delete')?.body).toEqual({ path: 'src/app.ts' }))
+
+    expect(within(tabs()).getByRole('tab', { name: 'app.ts, not saved' })).toBeInTheDocument()
+    expect(editor().model?.disposed).toBe(false)
+    await userEvent.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'src/app.ts', text: 'draft\n', version: 'v1' }))
+  })
+
+  it('keeps the workbench and its unsaved changes when code-arena web stops answering, and says so until it answers again', async () => {
+    let down = false
+    backend({ 'GET /api/state': () => (down ? { offline: true } : { json: state }) })
+    const { client } = renderIde()
+    await openApp()
+    act(() => editor().model!.setValue('draft\n'))
+
+    down = true
+    await act(() => client.refetchQueries({ queryKey: ['code', 'state'] }))
+    expect(await screen.findByText('code-arena web is not answering.')).toBeInTheDocument()
+    expect(within(tabs()).getByRole('tab', { name: 'app.ts, not saved' })).toBeInTheDocument()
+    expect(editor().model?.disposed).toBe(false)
+    expect(editor().model?.value).toBe('draft\n')
+
+    down = false
+    await act(() => client.refetchQueries({ queryKey: ['code', 'state'] }))
+    await waitFor(() => expect(screen.queryByText('code-arena web is not answering.')).not.toBeInTheDocument())
+    expect(within(tabs()).getByRole('tab', { name: 'app.ts, not saved' })).toBeInTheDocument()
+  })
+
+  it('on macOS takes ⌘ for its keys and leaves Ctrl+P and Ctrl+S to the terminal and the editor', async () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
+    backend()
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    const press = (key: string, mods: KeyboardEventInit) => {
+      const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...mods })
+      act(() => document.body.dispatchEvent(e))
+      return e.defaultPrevented
+    }
+    expect(press('s', { ctrlKey: true })).toBe(false)
+    expect(press('p', { ctrlKey: true })).toBe(false)
+    expect(press('F', { ctrlKey: true, shiftKey: true })).toBe(false)
+    expect(screen.queryByPlaceholderText('Go to file: type a few letters of its path')).not.toBeInTheDocument()
+
+    await userEvent.keyboard('{Meta>}p{/Meta}')
+    expect(await screen.findByPlaceholderText('Go to file: type a few letters of its path')).toBeInTheDocument()
+  })
+
+  it('opens a terminal each time the panel is shown with none: after the last one closed too', async () => {
+    const { calls } = backend()
+    renderIde()
+    const opened = () => calls.filter((c) => c.method === 'POST' && c.path === '/api/terminals')
+    await userEvent.click(await screen.findByRole('button', { name: 'Terminal' }))
+    await waitFor(() => expect(opened()).toHaveLength(1))
+    const panel = screen.getByRole('region', { name: 'Terminal' })
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Close bash 1' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Terminal' })).not.toBeInTheDocument())
+
+    await userEvent.keyboard('{Control>}[Backquote]{/Control}')
+    await waitFor(() => expect(opened()).toHaveLength(2))
+    expect(await within(screen.getByRole('region', { name: 'Terminal' })).findByRole('tab', { name: 'bash 2' })).toBeInTheDocument()
+  })
+
+  it('does not search the files again at the end of each turn', async () => {
+    const { calls } = backend({ 'POST /api/messages': () => answerOnly() })
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Search' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Search' }), 'total')
+    await screen.findByRole('list', { name: 'Search results' })
+    const searches = () => calls.filter((c) => c.path.startsWith('/api/search')).length
+    const before = searches()
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Hello{Enter}')
+    // Over: the saved session is read again, and the changes; the search is not.
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/session').length).toBeGreaterThan(1))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/changes').length).toBeGreaterThan(1))
+    await screen.findByRole('button', { name: 'Send' })
+    expect(searches()).toBe(before)
+  })
+
   it('opens any file with Ctrl+P by a few letters of its path', async () => {
     const { calls } = backend()
     renderIde()
@@ -670,6 +909,26 @@ describe('Code Arena, the IDE', () => {
     await userEvent.keyboard('{Enter}')
     await waitFor(() => expect(calls.some((c) => c.path === '/api/file?path=src%2Flib%2Fcart.ts')).toBe(true))
     expect(await within(tabs()).findByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('opens as it was left in an earlier run, whatever its port: code-arena keeps the layout and the theme', async () => {
+    const { calls, now } = backend({}, { layout: { view: 'search', chatOpen: false, side: 300, chat: 5000, unknown: 1 }, theme: 'dark' })
+    renderIde()
+    expect(await screen.findByRole('textbox', { name: 'Search' })).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Search' })).toHaveStyle({ width: '300px' })
+    expect(screen.queryByRole('region', { name: 'Chat' })).not.toBeInTheDocument()
+    await waitFor(() => expect(document.documentElement).toHaveClass('dark'))
+    const saves = () => calls.filter((c) => c.method === 'POST' && c.path === '/api/preferences')
+    expect(saves()).toHaveLength(0)
+
+    // A change is kept a moment later (the sizes within bounds), the theme at once.
+    await userEvent.click(screen.getByRole('button', { name: 'Explorer' }))
+    await waitFor(() => expect(now.preferences.layout).toEqual({ view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false }))
+    expect(saves()).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Light' }))
+    await waitFor(() => expect(now.preferences.theme).toBe('light'))
+    expect(document.documentElement).not.toHaveClass('dark')
   })
 
   it('follows the light and dark theme in the editor', async () => {
