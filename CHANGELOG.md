@@ -12,6 +12,89 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.2.0 (2026-10-06)
+
+### :rocket: Epics and highlights
+
+- **Code Arena, an IDE in the browser**: Arena Code is now Code Arena, and
+  `code-arena` opens an IDE like VS Code on your own machine around the same
+  agent: an explorer, Monaco editor tabs, the agent's edits as diffs to accept
+  or revert file by file, search, quick open, real terminals (a
+  pseudo-terminal on Linux and macOS, ConPTY on Windows) and the chat beside
+  them, with a status bar. `code-arena chat` keeps the agent in the terminal.
+  `tools/package-code-arena.sh` builds packages for five systems with their
+  checksums
+- **Laya, typed decisions on the CPU**: an optional module
+  (`COMPOSE_PROFILES=laya`, `laya.enabled` in Helm) runs the Laya decision
+  model. The chat gets **Decide (Laya)**, typed questions about a text answered
+  with probabilities in about half a second, in English (calibrated) and 100+
+  languages including Persian; Arena MCP serves it to agents. Code Arena shows
+  every command to Laya first and asks before one it rates likely to destroy
+  something, write outside the workspace or reach the network, even in yolo
+- **Dual licensing**: the AGPL-3.0-only, with additional terms (attribution,
+  origin, trademarks), or a commercial license from Binchitects for uses the
+  AGPL does not cover (LICENSING.md). Every interface shows its version and a
+  Source link
+
+### :sparkles: New features & Enhancements
+
+- **Tools on servers with a self-signed certificate or a company CA**: per MCP
+  server or API, **Trust this CA** (a CA in PEM; the chain must lead to it and
+  the name must match) or **Do not check**, beside the default check. Test and
+  Read it say why a certificate was refused (self-signed, an untrusted issuer,
+  another name, its dates) with its fingerprint; each choice is audited, and
+  it applies to that server's own host only
+- **Argus signs in with GitLab accounts that LDAP checks**: after GitLab's own
+  form refuses the password, each LDAP sign-in the page offers is tried, or
+  only the one `GITLAB_LDAP` names (`off` turns it off)
+- **Deep research leaves the web to its parts**: the report's model delegates
+  the reading and the gap-filling (two rounds at most) and writes; 616 s here
+  against 1,606 s in v5.1.0. With Web set to ask first, the model reads the
+  web itself, each read asked
+- Code Arena: `--version` prints the licence and the source; the IDE's layout
+  and theme are kept between runs; the browser opens through a private
+  launcher file, so the run's key is never on a command line
+- Argus's own web app shows its version and a Source link
+  (`ARGUS_SOURCE_URL` for a modified version)
+
+### :bug: Bugs fixed
+
+- A new chat starts on the admin's default model when it can load; a small
+  model one person's agent loaded no longer became everyone's default
+- Code Arena (found by a review before this release): a link whose target
+  went through another link and then `..` could reach files outside the
+  working directory; git reads could run a command the repository's own
+  settings name (fsmonitor, hooks, filters, merge drivers, text conversion);
+  the git tool could read outside the working directory (`diff --no-index`,
+  `blame --contents`); unsaved text could be lost when the agent's edit was
+  read again or the server stopped answering; macOS keys clashed with Ctrl in
+  the terminal
+- Laya's look at commands reads every part of a long command, asks when a
+  part could not be read, and tells the IDE's page when it stops checking;
+  the Laya server answers "busy" instead of queueing without limit
+- Tool servers: a redirect to another host is not followed with a custom CA
+  or no check; a failed TLS handshake is no longer called an untrusted
+  certificate; an issuing CA given alone is held to its dates
+- Argus posts each GitLab sign-in form with that form's own CSRF token
+- The app image skips Code Arena instead of failing when its offline packs do
+  not match the SDK's runtime
+
+### :boom: Breaking changes & Deprecations
+
+- **Arena Code is renamed Code Arena**: the binary `code-arena`, its config
+  folder `code-arena`, the download `/api/downloads/code-arena`,
+  `tools/publish-code-arena.sh` and docs/code-arena.md. The old config is not
+  read: sign in again with `code-arena login`. `code-arena` alone now opens
+  the IDE; the terminal agent is `code-arena chat`
+- **The licence is the AGPL-3.0-only** (was the GPL-3.0), with a commercial
+  license for other uses
+
+### :arrow_up: Deps updates
+
+- Code Arena's page: monaco-editor 0.57.0, @xterm/xterm 6.0.0,
+  @xterm/addon-fit 0.11.0
+- The laya image: laya 0.3.27 with torch 2.14.1+cpu on python:3.13-slim
+
 ## v5.1.0 (2026-10-05)
 
 ### :rocket: Epics and highlights

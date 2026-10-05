@@ -1000,15 +1000,43 @@ model went on filling gaps itself: 18 page reads of its own, 679k prompt tokens
 characters, sources from docs.python.org). Next: send the gap-filling to
 sub-agents too, and cap the big model's own tool rounds in research.
 
-## Next (after v5.1.0)
+## v5.2.0 — Code Arena, Laya, and the AGPL (2026-10-06)
 
-1. **Deep research under 6 minutes** *(S)*: the big model delegates its gap
-   filling, and its own tool rounds in research are capped (see T4a above).
+- **Code Arena**: Arena Code renamed, and its page an IDE (explorer, Monaco
+  tabs, the agent's diffs, search, real terminals, the chat), proved in
+  headless Chrome against the packaged Linux binary; packages for five systems
+  from `tools/package-code-arena.sh`. The macOS and Windows terminals are
+  built, not run.
+- **Laya**: the module live on this host (both checkpoints load in about 2 s
+  on 4 CPUs, 2.1 GiB), Decide (Laya) called by the real model in a chat;
+  Code Arena's look at commands measured on 95 labelled commands (45 of 52
+  risky ones ask at 0.6, 2 of 43 harmless ones).
+- **Tools over a self-signed certificate or a company CA**: proved live with a
+  CA-signed and a self-signed MCP server (refused with why, then trusted or
+  unchecked, and called by the real model).
+- **Argus with LDAP accounts**: proved against the test GitLab with an
+  OpenLDAP server.
+- **Deep research**: 616 s here (it was 1,606 s): the plan 155 s, the parts
+  64 s, the report about 400 s at the big model's 10 tokens a second.
+- **The default chat model**: the admin's default wins unless it cannot load.
+- **Licensing**: AGPL-3.0-only with section 7 terms, or a commercial license.
+- Before the tag, an adversarial review of everything since v5.1.0 found 13
+  confirmed defects (two serious, in Code Arena: a link escape and git running
+  a repository's own commands) and 36 smaller ones; all fixed with tests, each
+  fix checked by a second reviewer.
+
+## Next (after v5.2.0)
+
+1. **Deep research under 6 minutes** *(M)*: the report itself is the cost now
+   (about 400 s of writing at 10 tokens a second); a smaller model for the
+   report's draft, or a faster engine setting, is what is left.
 2. **The new packs in the bucket** *(S, the maintainer)*: the eight built
    packs, checked against their digests.
 3. **Live against real platforms** *(S each, with access)*: Slack and Teams
    bots, SAML with a real IdP, Confluence and SharePoint with an instance or a
    sandbox, Helm on a cluster.
-4. **The default chat model** *(S)*: a new chat starts on a loaded model, so a
-   small model loaded by one person's agent became everyone's default; the
-   admin's default should win unless it cannot load.
+4. **Code Arena on a real Mac and Windows** *(S, with the machines)*: the
+   terminals (the pty helper, ConPTY) and the launcher file there.
+5. **Laya's routing** *(S)*: it is good at clear categories and weak at
+   routing nuance (an outage with "connection refused to the database" went to
+   frontend); criteria in the questions, or a small fine-tune, to try.

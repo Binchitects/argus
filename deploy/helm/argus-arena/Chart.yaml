@@ -4,6 +4,6 @@ description: Argus Arena on Kubernetes - chat, API keys and credit, code search,
 type: application
 # The chart's own version; appVersion is the app's (VERSION at the repository's root), the default tag of its images.
 version: 0.1.0
-appVersion: "5.1.0"
+appVersion: "5.2.0"
 home: https://github.com/Binchitects/argus
 keywords: [llm, chat, litellm, llama.cpp, gitlab]
