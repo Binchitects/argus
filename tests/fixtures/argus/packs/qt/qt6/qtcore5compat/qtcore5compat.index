@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE QDOCINDEX>
+<INDEX url="https://doc.qt.io/qt" title="Qt 5 Core Compatibility APIs Documentation" version="6.10.3" project="QtCore5Compat" indexTitle="Qt 5 Core Compatibility APIs">
+    <namespace name="" status="active" access="public" module="qtcore5compat">
+        <class threadsafety="reentrant" name="QRegExp" href="qregexp.html" status="active" access="public" location="qregexp.h" documented="true" groups="shared,tools" module="QtCore5Compat" brief="Pattern matching using regular expressions">
+            <function name="QRegExp" fullname="QRegExp::QRegExp" href="qregexp.html#QRegExp" status="active" access="public" location="qregexp.h" documented="true" meta="constructor" signature="QRegExp()" />
+            <function name="indexIn" fullname="QRegExp::indexIn" href="qregexp.html#indexIn" status="active" access="public" location="qregexp.h" documented="true" meta="plain" const="true" type="int" signature="int indexIn(const QStringList &amp;list, int from) const">
+                <parameter type="const QStringList &amp;" name="list" default="" />
+                <parameter type="int" name="from" default="" />
+            </function>
+            </class>
+        </namespace>
+</INDEX>

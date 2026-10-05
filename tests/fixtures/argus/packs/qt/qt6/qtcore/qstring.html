@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+<!-- qstring.cpp -->
+  <meta name="description" content="The QString class provides a Unicode character string.">
+  <title>QString Class | Qt Core | Qt 6.10.3</title>
+  <link rel="stylesheet" type="text/css" href="style/offline-simple.css" />
+  <script type="text/javascript">
+    document.getElementsByTagName("link").item(0).setAttribute("href", "style/offline.css");
+    // loading style sheet breaks anchors that were jumped to before
+    // so force jumping to anchor again
+    setTimeout(function() {
+        var anchor = location.hash;
+        // need to jump to different anchor first (e.g. none)
+        location.hash = "#";
+        setTimeout(function() {
+            location.hash = anchor;
+        }, 0);
+    }, 0);
+  </script>
+</head>
+<body>
+<div class="header" id="qtdocheader">
+    <div class="main">
+    <div class="main-rounded">
+        <div class="navigationbar">
+        <ul>
+<li><a href="../qtdoc/index.html">Qt 6.10</a></li>
+<li><a href="qtcore-index.html">Qt Core</a></li>
+<li><a href="qtcore-module.html" translate="no">C++ Classes</a></li>
+<li>QString</li>
+<li id="buildversion"><a href="qtcore-index.html">Qt 6.10.3 Reference Documentation</a></li>
+    </ul>
+    </div>
+</div>
+<div class="content">
+<div class="line">
+<div class="content mainContent">
+<div class="sidebar">
+<div class="toc">
+<h3 id="toc">Contents</h3>
+<ul>
+<li class="level1"><a href="#public-types">Public Types</a></li>
+<li class="level1"><a href="#public-functions">Public Functions</a></li>
+<li class="level1"><a href="#static-public-members">Static Public Members</a></li>
+<li class="level1"><a href="#related-non-members">Related Non-Members</a></li>
+<li class="level1"><a href="#macros">Macros</a></li>
+<li class="level1"><a href="#details">Detailed Description</a></li>
+<li class="level2"><a href="#initializing-a-string">Initializing a string</a></li>
+<li class="level2"><a href="#manipulating-string-data">Manipulating string data</a></li>
+<li class="level2"><a href="#querying-string-data">Querying string data</a></li>
+<li class="level2"><a href="#converting-between-encoded-string-data-and-qstring">Converting between encoded string data and QString</a></li>
+<li class="level2"><a href="#distinction-between-null-and-empty-strings">Distinction between null and empty strings</a></li>
+<li class="level2"><a href="#number-formats">Number formats</a></li>
+<li class="level2"><a href="#more-efficient-string-construction">More efficient string construction</a></li>
+<li class="level2"><a href="#maximum-size-and-out-of-memory-conditions">Maximum size and out-of-memory conditions</a></li>
+</ul>
+</div>
+<div class="sidebar-content" id="sidebar-content"></div></div>
+<h1 class="title" translate="no">QString Class</h1>
+<!-- $$$QString-brief -->
+<p>The QString class provides a Unicode character string. <a href="#details">More...</a></p>
+<!-- @@@QString -->
+<div class="table"><table class="alignedsummary requisites" translate="no">
+<tr><td class="memItemLeft rightAlign topAlign"> Header:</td><td class="memItemRight bottomAlign"> <code translate="no">#include &lt;QString&gt;</code></td></tr>
+<tr><td class="memItemLeft rightAlign topAlign"> CMake:</td><td class="memItemRight bottomAlign"> <code translate="no">find_package(Qt6 REQUIRED COMPONENTS Core)</code><br/>
+<code translate="no">target_link_libraries(mytarget PRIVATE Qt6::Core)</code></td></tr>
+<tr><td class="memItemLeft rightAlign topAlign"> qmake:</td><td class="memItemRight bottomAlign"> <code translate="no">QT += core</code></td></tr>
+</table></div>
+<ul>
+<li><a href="qstring-members.html">List of all members, including inherited members</a></li>
+<li><a href="qstring-obsolete.html">Deprecated members</a></li>
+<li>QString is part of <a href="shared.html">Implicitly Shared Classes</a> and <a href="string-processing.html">Classes for string data</a>.</li>
+</ul>
+<p>This class is <i>strongly comparable</i>.</p>
+<p>This class is <b>strongly comparable</b> with <a href="qchar.html" translate="no">QChar</a>, <a href="qlatin1stringview.html" translate="no">QLatin1StringView</a>, const char16_t *, <a href="qstringview.html" translate="no">QStringView</a>, and <a href="qutf8stringview.html" translate="no">QUtf8StringView</a>.</p>
+<p>This class is <b>strongly comparable</b> with <a href="qbytearray.html" translate="no">QByteArray</a>, <a href="qbytearrayview.html" translate="no">QByteArrayView</a>, and const char *.</p>
+<p>When comparing with byte arrays, their content is interpreted as UTF-8.</p>
+<p><b>Note:</b> All functions in this class are <a href="../qtdoc/threads-reentrancy.html">reentrant</a>.</p>
+<h2 id="details">Detailed Description</h2>
+<p>QString stores a string of 16-bit <a href="qchar.html" translate="no">QChar</a>s, where each <a href="qchar.html" translate="no">QChar</a> corresponds to one UTF-16 code unit. (Unicode characters with code values above 65535 are stored using surrogate pairs, that is, two consecutive <a href="qchar.html" translate="no">QChar</a>s.)</p>
+<h2>Member Documentation</h2>
+<!-- $$$ -->
+<div class="fngroup">
+<h3 class="fn fngroupitem" translate="no" id="left"><span class="type"><a href="qstring.html" translate="no">QString</a></span> QString::<span class="name">left</span>(<span class="type"><a href="qttypes.html#qsizetype-typedef" translate="no">qsizetype</a></span> <i>n</i>) &&</h3><h3 class="fn fngroupitem" translate="no" id="left-1"><span class="type"><a href="qstring.html" translate="no">QString</a></span> QString::<span class="name">left</span>(<span class="type"><a href="qttypes.html#qsizetype-typedef" translate="no">qsizetype</a></span> <i>n</i>) const &</h3></div>
+<p>Returns a substring that contains the <i translate="no">n</i> leftmost characters of this string (that is, from the beginning of this string up to, but not including, the element at index position <i translate="no">n</i>).</p>
+<p>If you know that <i translate="no">n</i> cannot be out of bounds, use <a href="qstring.html#first" translate="no">first</a>() instead in new code, because it is faster.</p>
+<p>The entire string is returned if <i translate="no">n</i> is greater than or equal to <a href="qstring.html#size" translate="no">size</a>(), or less than zero.</p>
+<p><b>See also </b><a href="qstring.html#first" translate="no">first</a>(), <a href="qstring.html#last" translate="no">last</a>(), <a href="qstring.html#startsWith" translate="no">startsWith</a>(), <a href="qstring.html#chopped" translate="no">chopped</a>(), <a href="qstring.html#chop" translate="no">chop</a>(), and <a href="qstring.html#truncate" translate="no">truncate</a>().</p>
+<!-- @@@ -->
+<!-- $$$QString$$$QStringconstchar8_t* -->
+<h3 class="fn" translate="no" id="QString-8"><code class="details extra" translate="no">[since 6.1]</code> QString::<span class="name">QString</span>(const <span class="type">char8_t</span> *<i>str</i>)</h3>
+<p>Constructs a string initialized with the UTF-8 string <i translate="no">str</i>. The given const char8_t pointer is converted to Unicode using the <a href="qstring.html#fromUtf8" translate="no">fromUtf8</a>() function.</p>
+<p>This function was introduced in Qt 6.1.</p>
+<p><b>See also </b><a href="qstring.html#fromLatin1" translate="no">fromLatin1</a>(), <a href="qstring.html#fromLocal8Bit" translate="no">fromLocal8Bit</a>(), and <a href="qstring.html#fromUtf8" translate="no">fromUtf8</a>().</p>
+<!-- @@@QString -->
+<!-- $$$arg$$$argconstT&intQChar -->
+<h3 class="fn" translate="no" id="arg-1">template &lt;typename T, QString::if_string_like&lt;T&gt; = true&gt; <span class="type"><a href="qstring.html" translate="no">QString</a></span> QString::<span class="name">arg</span>(const <span class="type">T</span> &amp;<i>a</i>, <span class="type">int</span> <i>fieldWidth</i> = 0, <span class="type"><a href="qchar.html" translate="no">QChar</a></span> <i>fillChar</i> = u' ') const</h3>
+<p>Returns a copy of this string with the lowest-numbered place-marker replaced by string <i translate="no">a</i>, i.e., <code translate="no">%1</code>, <code translate="no">%2</code>, ..., <code translate="no">%99</code>.</p>
+<p><i translate="no">fieldWidth</i> specifies the minimum amount of space that <i translate="no">a</i> shall occupy. If <i translate="no">a</i> requires less space than <i translate="no">fieldWidth</i>, it is padded to <i translate="no">fieldWidth</i> with character <i translate="no">fillChar</i>. A positive <i translate="no">fieldWidth</i> produces right-aligned text. A negative <i translate="no">fieldWidth</i> produces left-aligned text.</p>
+<p>This example shows how we might create a <code translate="no">status</code> string for reporting progress while processing a list of files:</p>
+<pre class="cpp" translate="no">
+ <span class="type">int</span> i;                <span class="comment">// current file's number</span>
+ <span class="type">int</span> total;            <span class="comment">// number of files to process</span>
+ <span class="type"><a href="qstringview.html" translate="no">QStringView</a></span> fileName; <span class="comment">// current file's name</span>
+
+ <span class="type"><a href="qstring.html" translate="no">QString</a></span> status <span class="operator">=</span> <span class="type"><a href="qstring.html" translate="no">QString</a></span>(<span class="string">&quot;Processing file %1 of %2: %3&quot;</span>)
+                 <span class="operator">.</span>arg(i)<span class="operator">.</span>arg(total)<span class="operator">.</span>arg(fileName);
+</pre>
+<p>First, <code translate="no">arg(i)</code> replaces <code translate="no">%1</code>. Then <code translate="no">arg(total)</code> replaces <code translate="no">%2</code>. Finally, <code translate="no">arg(fileName)</code> replaces <code translate="no">%3</code>.</p>
+<p>One advantage of using arg() over <a href="qstring.html#asprintf" translate="no">asprintf</a>() is that the order of the numbered place markers can change, if the application's strings are translated into other languages, but each arg() will still replace the lowest-numbered unreplaced place-marker, no matter where it appears. Also, if place-marker <code translate="no">%i</code> appears more than once in the string, arg() replaces all of them.</p>
+<p>If there is no unreplaced place-marker remaining, a warning message is printed and the result is undefined. Place-marker numbers must be in the range 1 to 99.</p>
+<div class="admonition note">
+<p><b>Note: </b>In Qt versions prior to 6.9, this function was overloaded on <code translate="no">char</code>, <a href="qchar.html" translate="no">QChar</a>, <a href="qstring.html" translate="no">QString</a>, <a href="qstringview.html" translate="no">QStringView</a>, and <a href="qlatin1stringview.html" translate="no">QLatin1StringView</a> and in some cases, <code translate="no">wchar_t</code> and <code translate="no">char16_t</code> arguments would resolve to the integer overloads. In Qt versions prior to 5.10, this function lacked the <a href="qstringview.html" translate="no">QStringView</a> and <a href="qlatin1stringview.html" translate="no">QLatin1StringView</a> overloads.</p>
+</div>
+<!-- @@@arg -->
+<!-- $$$count[overload1]$$$countconstQString&Qt::CaseSensitivity -->
+<h3 class="fn" translate="no" id="count"><span class="type"><a href="qttypes.html#qsizetype-typedef" translate="no">qsizetype</a></span> QString::<span class="name">count</span>(const <span class="type"><a href="qstring.html" translate="no">QString</a></span> &amp;<i>str</i>, <span class="type"><a href="qt.html#CaseSensitivity-enum" translate="no">Qt::CaseSensitivity</a></span> <i>cs</i> = Qt::CaseSensitive) const</h3>
+<p>Returns the number of (potentially overlapping) occurrences of the string <i translate="no">str</i> in this string.</p>
+<p>If <i translate="no">cs</i> is <a href="qt.html#CaseSensitivity-enum" translate="no">Qt::CaseSensitive</a> (the default), the search is case-sensitive; otherwise the search is case-insensitive.</p>
+<p><b>See also </b><a href="qstring.html#contains" translate="no">contains</a>() and <a href="qstring.html#indexOf" translate="no">indexOf</a>().</p>
+<!-- @@@count -->
+<!-- $$$count$$$countQStringViewQt::CaseSensitivity -->
+<h3 class="fn" translate="no" id="count-4"><code class="details extra" translate="no">[since 6.0]</code> <span class="type"><a href="qttypes.html#qsizetype-typedef" translate="no">qsizetype</a></span> QString::<span class="name">count</span>(<span class="type"><a href="qstringview.html" translate="no">QStringView</a></span> <i>str</i>, <span class="type"><a href="qt.html#CaseSensitivity-enum" translate="no">Qt::CaseSensitivity</a></span> <i>cs</i> = Qt::CaseSensitive) const</h3>
+<p>Returns the number of (potentially overlapping) occurrences of the string view <i translate="no">str</i> in this string.</p>
+<p>If <i translate="no">cs</i> is <a href="qt.html#CaseSensitivity-enum" translate="no">Qt::CaseSensitive</a> (the default), the search is case-sensitive; otherwise the search is case-insensitive.</p>
+<div class="admonition auto"><p>This function overloads QString::count().</p>
+</div><p>This function was introduced in Qt 6.0.</p>
+<p><b>See also </b><a href="qstring.html#contains" translate="no">contains</a>() and <a href="qstring.html#indexOf" translate="no">indexOf</a>().</p>
+<!-- @@@count -->
+<!-- $$$NormalizationForm$$$NormalizationForm_D$$$NormalizationForm_C$$$NormalizationForm_KD$$$NormalizationForm_KC -->
+<h3 class="fn" translate="no" id="NormalizationForm-enum">enum QString::<span class="name">NormalizationForm</span></h3>
+<p>This enum describes the various normalized forms of Unicode text.</p>
+<div class="table"><table class="valuelist"><tr valign="top" class="odd"><th class="tblConst">Constant</th><th class="tblval">Value</th><th class="tbldscr">Description</th></tr>
+<tr><td class="topAlign"><code translate="no">QString::NormalizationForm_D</code></td><td class="topAlign tblval"><code translate="no">0</code></td><td class="topAlign">Canonical Decomposition</td></tr>
+<tr><td class="topAlign"><code translate="no">QString::NormalizationForm_C</code></td><td class="topAlign tblval"><code translate="no">1</code></td><td class="topAlign">Canonical Decomposition followed by Canonical Composition</td></tr>
+<tr><td class="topAlign"><code translate="no">QString::NormalizationForm_KD</code></td><td class="topAlign tblval"><code translate="no">2</code></td><td class="topAlign">Compatibility Decomposition</td></tr>
+<tr><td class="topAlign"><code translate="no">QString::NormalizationForm_KC</code></td><td class="topAlign tblval"><code translate="no">3</code></td><td class="topAlign">Compatibility Decomposition followed by Canonical Composition</td></tr>
+</table></div>
+<p><b>See also </b><a href="qstring.html#normalized" translate="no">normalized</a>() and <a href="https://www.unicode.org/reports/tr15/">Unicode Standard Annex #15</a>.</p>
+<!-- @@@NormalizationForm -->
+<!-- $$$QStringLiteral[overload1]$$$QStringLiteral -->
+<h3 class="fn" translate="no" id="QStringLiteral"><span class="name">QStringLiteral</span>(<i>str</i>)</h3>
+<p>The macro generates the data for a <a href="qstring.html" translate="no">QString</a> out of the string literal <i translate="no">str</i> at compile time. Creating a <a href="qstring.html" translate="no">QString</a> from it is free in this case, and the generated string data is stored in the read-only segment of the compiled object file.</p>
+<p>If you have code that looks like this:</p>
+<pre class="cpp" translate="no">
+ <span class="comment">// hasAttribute takes a QString argument</span>
+ <span class="keyword">if</span> (node<span class="operator">.</span>hasAttribute(<span class="string">&quot;http-contents-length&quot;</span>)) <span class="comment">//...</span>
+</pre>
+<p>then a temporary <a href="qstring.html" translate="no">QString</a> will be created to be passed as the <code translate="no">hasAttribute</code> function parameter. This can be quite expensive, as it involves a memory allocation and the copy/conversion of the data into <a href="qstring.html" translate="no">QString</a>'s internal encoding.</p>
+<p>This cost can be avoided by using QStringLiteral instead:</p>
+<pre class="cpp" translate="no">
+ <span class="keyword">if</span> (node<span class="operator">.</span>hasAttribute(<span class="type">QStringLiteral</span>(u<span class="string">&quot;http-contents-length&quot;</span>))) <span class="comment">//...</span>
+</pre>
+<p>In this case, <a href="qstring.html" translate="no">QString</a>'s internal data will be generated at compile time; no conversion or allocation will occur at runtime.</p>
+<p>Using QStringLiteral instead of a double quoted plain C++ string literal can significantly speed up creation of <a href="qstring.html" translate="no">QString</a> instances from data known at compile time.</p>
+<div class="admonition note">
+<p><b>Note: </b><a href="qlatin1stringview.html" translate="no">QLatin1StringView</a> can still be more efficient than QStringLiteral when the string is passed to a function that has an overload taking <a href="qlatin1stringview.html" translate="no">QLatin1StringView</a> and this overload avoids conversion to <a href="qstring.html" translate="no">QString</a>. For instance, QString::operator==() can compare to a <a href="qlatin1stringview.html" translate="no">QLatin1StringView</a> directly:</p>
+</div>
+<pre class="cpp" translate="no">
+ <span class="keyword">if</span> (attribute<span class="operator">.</span>name() <span class="operator">=</span><span class="operator">=</span> <span class="string">&quot;http-contents-length&quot;</span>_L1) <span class="comment">//...</span>
+</pre>
+<div class="admonition note">
+<p><b>Note: </b>Some compilers have bugs encoding strings containing characters outside the US-ASCII character set. Make sure you prefix your string with <code translate="no">u</code> in those cases. It is optional otherwise.</p>
+</div>
+<div class="admonition note">
+<p><b>Note: </b>QStringLiteral is interchangeable with <a href="qstring.html#operator-22-22_s" translate="no">operator&quot;&quot;_s</a>. The latter saves typing when many string literals are present in the code.</p>
+</div>
+<p><b>See also </b><a href="qbytearray.html#QByteArrayLiteral" translate="no">QByteArrayLiteral</a>.</p>
+<!-- @@@QStringLiteral -->
+        </div>
+       </div>
+   </div>
+   </div>
+</div>
+<div class="footer">
+   <p>
+   <abbr title="Copyright">&copy;</abbr> 2025 <span translate="no">The Qt Company Ltd.</span>
+   Documentation contributions included herein are the copyrights of
+   their respective owners.<br/>    The documentation provided herein is licensed under the terms of the    <a href="http://www.gnu.org/licenses/fdl.html">GNU Free Documentation    License version 1.3</a> as published by the <span translate="no">Free Software Foundation</span>.<br/>    <span translate="no">Qt</span> and respective logos are <a href="https://doc.qt.io/qt/trademarks.html">    trademarks</a> of <span translate="no">The Qt Company Ltd.</span> in Finland and/or other countries
+   worldwide. All other trademarks are property of their respective owners. </p>
+</div>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE QDOCINDEX>
+<INDEX url="https://doc.qt.io/qt" title="Qt Core Reference Documentation" version="6.10.3" project="QtCore" indexTitle="Qt Core">
+    <namespace name="" status="active" access="public" module="qtcore">
+        <function name="QStringLiteral" href="qstring.html#QStringLiteral" status="active" access="public" documented="true" related="11" meta="macrowithparams" signature="QStringLiteral(str)">
+            <parameter type="" name="str" default="" />
+        </function>
+        <namespace name="Qt" href="qt.html" status="active" access="public" location="qcompare.h" documented="true" module="QtCore" brief="Contains miscellaneous identifiers used throughout the Qt library">
+            <enum name="AlignmentFlag" fullname="Qt::AlignmentFlag" href="qt.html#AlignmentFlag-enum" status="active" access="public" location="qnamespace.h" documented="true" typedef="Qt::Alignment">
+                <value name="AlignLeft" value="0x0001" />
+                <value name="AlignLeading" value="AlignLeft" />
+                <value name="AlignRight" value="0x0002" />
+                <value name="AlignTrailing" value="AlignRight" />
+                <value name="AlignHCenter" value="0x0004" />
+                <value name="AlignJustify" value="0x0008" />
+                <value name="AlignAbsolute" value="0x0010" />
+                <value name="AlignHorizontal_Mask" value="AlignLeft | AlignRight | AlignHCenter | AlignJustify | AlignAbsolute" />
+                <value name="AlignTop" value="0x0020" />
+                <value name="AlignBottom" value="0x0040" />
+                <value name="AlignVCenter" value="0x0080" />
+                <value name="AlignBaseline" value="0x0100" />
+                <value name="AlignVertical_Mask" value="AlignTop | AlignBottom | AlignVCenter | AlignBaseline" />
+                <value name="AlignCenter" value="AlignVCenter | AlignHCenter" />
+            </enum>
+            <enum name="ColorScheme" fullname="Qt::ColorScheme" href="qt.html#ColorScheme-enum" status="active" access="public" location="qnamespace.h" documented="true" scoped="true">
+                <value name="Unknown" value="0" />
+                <value name="Light" value="1" />
+                <value name="Dark" value="2" />
+            </enum>
+            <typedef name="Alignment" fullname="Qt::Alignment" href="qt.html#AlignmentFlag-enum" status="active" access="public" location="qnamespace.h" enum="Qt::AlignmentFlag" />
+            </namespace>
+        <class threadsafety="reentrant" name="QString" href="qstring.html" status="active" access="public" location="qstring.h" documented="true" groups="shared,string-processing,tools" module="QtCore" brief="Unicode character string" comparison_category="strong">
+            <function name="QString" fullname="QString::QString" href="qstring.html#QString-8" status="active" access="public" location="qstring.h" documented="true" since="6.1" meta="constructor" overload="true" overload-number="8" signature="QString(const char8_t *str)">
+                <parameter type="const char8_t *" name="str" default="" />
+            </function>
+            <function name="QStringLiteral" href="qstring.html#QStringLiteral" status="active" access="public" documented="true" related="11" meta="macrowithparams" signature="QStringLiteral(str)">
+                <parameter type="" name="str" default="" />
+            </function>
+            <function name="append" fullname="QString::append" href="qstring.html#append" status="active" access="public" location="qstring.h" documented="true" meta="plain" type="QString &amp;" signature="QString &amp; append(const QString &amp;str)">
+                <parameter type="const QString &amp;" name="str" default="" />
+            </function>
+            <function name="arg" fullname="QString::arg" href="qstring.html#arg-1" status="active" access="public" location="qstring.h" documented="true" meta="plain" const="true" overload="true" overload-number="1" type="QString" signature="QString arg(const T &amp;a, int fieldWidth, QChar fillChar) const">
+                <parameter type="const T &amp;" name="a" default="" />
+                <parameter type="int" name="fieldWidth" default="0" />
+                <parameter type="QChar" name="fillChar" default="u' '" />
+            </function>
+            <function name="count" fullname="QString::count" href="qstring.html#count" status="active" access="public" location="qstring.h" documented="true" meta="plain" const="true" type="qsizetype" signature="qsizetype count(const QString &amp;str, Qt::CaseSensitivity cs) const">
+                <parameter type="const QString &amp;" name="str" default="" />
+                <parameter type="Qt::CaseSensitivity" name="cs" default="Qt::CaseSensitive" />
+            </function>
+            <function name="count" fullname="QString::count" href="qstring-obsolete.html#count-1" status="deprecated" access="public" location="qstring.h" documented="true" meta="plain" const="true" constexpr="true" overload="true" overload-number="1" type="qsizetype" signature="qsizetype count() const" />
+            <function name="count" fullname="QString::count" href="qstring.html#count-4" status="active" access="public" location="qstring.h" documented="true" since="6.0" meta="plain" const="true" overload="true" overload-number="4" type="qsizetype" signature="qsizetype count(QStringView str, Qt::CaseSensitivity cs) const">
+                <parameter type="QStringView" name="str" default="" />
+                <parameter type="Qt::CaseSensitivity" name="cs" default="Qt::CaseSensitive" />
+            </function>
+            <function name="fromUcs4" fullname="QString::fromUcs4" href="qstring-obsolete.html#fromUcs4-1" status="deprecated" access="public" location="qstring.h" documented="true" meta="plain" static="true" overload="true" overload-number="1" type="QString" signature="QString fromUcs4(const uint *str, qsizetype size)">
+                <parameter type="const uint *" name="str" default="" />
+                <parameter type="qsizetype" name="size" default="-1" />
+            </function>
+            <function name="left" fullname="QString::left" href="qstring.html#left" status="active" access="public" location="qstring.h" documented="true" meta="plain" refness="2" type="QString" signature="QString left(qsizetype n) &amp;&amp;">
+                <parameter type="qsizetype" name="n" default="" />
+            </function>
+            <function name="left" fullname="QString::left" href="qstring.html#left-1" status="active" access="public" location="qstring.h" documented="true" meta="plain" const="true" overload="true" overload-number="1" refness="1" type="QString" signature="QString left(qsizetype n) const &amp;">
+                <parameter type="qsizetype" name="n" default="" />
+            </function>
+            <enum name="NormalizationForm" fullname="QString::NormalizationForm" href="qstring.html#NormalizationForm-enum" status="active" access="public" location="qstring.h" documented="true">
+                <value name="NormalizationForm_D" value="0" />
+                <value name="NormalizationForm_C" value="1" />
+                <value name="NormalizationForm_KD" value="2" />
+                <value name="NormalizationForm_KC" value="3" />
+            </enum>
+            </class>
+        <page name="signalsandslots.html" href="signalsandslots.html" status="active" location="signalsandslots.qdoc" documented="true" groups="explanations-basics,qt-basic-concepts" subtype="page" title="Signals &amp; Slots" fulltitle="Signals &amp; Slots" subtitle="" brief="An overview of Qt's signals and slots inter-object communication mechanism. Signals and slots are used for communication between objects. The signals and slots mechanism is a central feature of Qt and probably the part that differs most from the features provided by other frameworks. Signals and slots are made possible by Qt's meta-object system">
+            </page>
+        </namespace>
+</INDEX>

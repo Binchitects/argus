@@ -302,7 +302,7 @@ public sealed class Tools
     {
         var hits = PackStore.LookupSymbol(opened, name, lang, limit);
         if (hits.Count > 0 || string.IsNullOrEmpty(lang)) return (JsonNode)Arr(hits);
-        if (opened.Select(p => (p.Name ?? "").ToLowerInvariant()).Contains(lang.ToLowerInvariant())) return Arr(hits);
+        if (PackStore.SelectPacks(opened, lang).Count > 0) return Arr(hits);
         var widened = PackStore.LookupSymbol(opened, name, null, limit);
         foreach (var hit in widened) hit["lang_filter_ignored"] = lang;
         return Arr(widened);
@@ -312,7 +312,7 @@ public sealed class Tools
     {
         var scoped = lang;
         string? widenedFrom = null;
-        if (!string.IsNullOrEmpty(lang) && !opened.Select(p => (p.Name ?? "").ToLowerInvariant()).Contains(PyStr.Strip(lang).ToLowerInvariant()))
+        if (!string.IsNullOrEmpty(lang) && PackStore.SelectPacks(opened, lang).Count == 0)
             (scoped, widenedFrom) = (null, lang);
         double[] queryVec;
         try { queryVec = Embed.EmbedBatch([description])[0]; }
@@ -384,7 +384,7 @@ public sealed class Tools
         }
         try
         {
-            var names = opened.Select(p => p.Name).Where(n => !string.IsNullOrEmpty(n)).Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList();
+            var names = opened.SelectMany(p => p.Facets.Keys.Prepend(p.Name)).Where(n => !string.IsNullOrEmpty(n)).Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList();
             if (names.Count == 0) return baseDescription;
             return $"{baseDescription} Installed sources, and the only accepted values for lang: {string.Join(", ", names)}.";
         }

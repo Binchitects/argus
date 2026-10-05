@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE QDOCINDEX>
+<INDEX url="https://doc.qt.io/qt" title="Qt Quick Reference Documentation" version="6.10.3" project="QtQuick" indexTitle="Qt Quick">
+    <namespace name="" status="active" access="public" module="qtquick">
+        <qmlclass name="Item" qml-module-name="QtQuick" fullname="QtQuick.Item" href="qml-qtquick-item.html" status="active" access="public" documented="true" groups="qtquick-visual" title="Item" fulltitle="Item" subtitle="" brief="A basic visual QML type">
+            <qmlproperty name="height" fullname="QtQuick.Item.height" href="qml-qtquick-item.html#height-prop" status="active" access="public" documented="true" type="real" attached="false" writable="true" />
+            <qmlproperty name="width" fullname="QtQuick.Item.width" href="qml-qtquick-item.html#width-prop" status="active" access="public" documented="true" type="real" attached="false" writable="true" />
+            <qmlproperty name="x" fullname="QtQuick.Item.x" href="qml-qtquick-item.html#x-prop" status="active" access="public" documented="true" type="real" attached="false" writable="true" />
+            <qmlproperty name="y" fullname="QtQuick.Item.y" href="qml-qtquick-item.html#y-prop" status="active" access="public" documented="true" type="real" attached="false" writable="true" />
+            </qmlclass>
+        </namespace>
+</INDEX>

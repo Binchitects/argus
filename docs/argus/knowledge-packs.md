@@ -88,6 +88,54 @@ Build 17763)`. `docs_contracts` splits the field on `;` and reads only the keys
 it knows, so the trailing fragment is ignored rather than becoming a field.
 A test holds that.
 
+## Which Qt version an API is in
+
+The `qt` pack holds the Qt C++ reference from Qt 4 to Qt 6 in one file: the
+Qt 4.8.7, 5.15.2 and 6.10.3 documentation sets. Each set is the last release
+of its major version. Each says when an API arrived ("This function was
+introduced in Qt 5.10") and keeps the obsolete members on their own pages, so
+the three cover every 4.x, 5.x and 6.x release.
+
+A page is a document per version, linked to that version on doc.qt.io
+(`https://doc.qt.io/qt-6/qstring.html`, `.../qt-5/...`,
+`.../archives/qt-4.8/...`), and its title says which: `QString Class (Qt 5.15)`.
+Symbols come from qdoc's own `.index` files, which name every class, member
+function, signal, slot, property, enum value, typedef, macro and QML type with
+its status. A symbol has a row per version that documents it, newest first,
+and every row leads with the same line, then the header, the release it
+arrived in and the module:
+
+```
+Qt 4.8, Qt 5.15, Qt 6.10 in QtCore5Compat; Header: <QRegExp>; Module: QtCore5Compat -- class QRegExp
+Qt 4.8, Qt 5.15 (obsolete), not in Qt 6; Header: <QString>; Module: QtCore -- [static] QString QString::fromAscii(const char *str, int size = -1)
+Qt 4.8, Qt 5.15, Qt 6.10 (deprecated since 6.4); Header: <QString>; Module: QtCore -- [constexpr] qsizetype QString::count() const -- Use size() or length() instead.
+Qt 4.8, Qt 5.15 in QtWidgets, Qt 6.10; Header: <QWidget>; Module: QtWidgets -- [slot] void QWidget::show()
+```
+
+"in QtWidgets" marks the version where a name changed module, which is most of
+a port from Qt 4 to 5 or from 5 to 6. Class pages carry the same line under
+their title ("Documented in: ..."), so a search finds it too.
+
+A search can ask for one version: `lang="qt4"`, `"qt5"` or `"qt6"` scopes
+`docs_lookup`, `docs_find` and `docs_search` to that version's pages, and
+`lang="qt"` means all three. The pack declares these slices itself (the
+`facets` entry of its metadata), so the server needs no list of them, and
+`docs_find` names them with the installed sources.
+
+Build it from the offline documentation, unpacked as `qt4/` (Qt 4's
+`doc/html`), `qt5/` (`Docs/Qt-5.15.2/<module>`) and `qt6/` (`<module>`) under
+one directory. The directory is not a git checkout and there is nothing to
+`--fetch`: the pack records the three releases as its provenance
+(`qt4=4.8.7,qt5=5.15.2,qt6=6.10.3`).
+
+```bash
+argus pack build --source qt --work-dir .packwork/docsrc/qt --out qt.arguspack --version 1.0
+```
+
+Member lists (`-members.html`) and the source listings of examples are left
+out. Parsing the three sets takes about 10 seconds; the build's time is the
+embedding of its 190,970 chunks.
+
 ## Using packs
 
 Everything below works without a GitLab config. `--packs-dir` exists precisely
@@ -194,7 +242,7 @@ repository would otherwise record that repository's commit as the pack's
 provenance.
 
 Available sources: `python`, `react`, `cpp`, `dotnet`, `scripting`, `sqlite`,
-`cppreference`, `debugger`, `algorithms`, `system-design`, the two composites
+`cppreference`, `qt`, `debugger`, `algorithms`, `system-design`, the two composites
 `win32` and `wdk` (API reference *and* samples in one pack), and the halves on
 their own — `win32-docs`, `wdk-docs`, `win32-samples`, `wdk-samples`.
 `argus pack build --help` prints the list.

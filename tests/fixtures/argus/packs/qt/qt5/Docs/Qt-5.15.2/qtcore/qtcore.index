@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE QDOCINDEX>
+<INDEX url="http://doc.qt.io/qt-5" title="Qt Core Reference Documentation" version="5.15.2" project="QtCore" indexTitle="Qt Core">
+    <namespace name="" status="active" access="public" module="qtcore">
+        <class threadsafety="reentrant" name="QRegExp" href="qregexp.html" status="active" access="public" location="qregexp.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qregexp.h" lineno="58" documented="true" module="QtCore" groups="tools,shared" brief="Pattern matching using regular expressions">
+            <function name="QRegExp" fullname="QRegExp::QRegExp" href="qregexp.html#QRegExp" status="active" access="public" location="qregexp.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qregexp.h" lineno="70" documented="true" meta="constructor" virtual="non" const="false" static="false" final="false" override="false" type="" signature="QRegExp()" />
+            <function name="indexIn" fullname="QRegExp::indexIn" href="qregexp.html#indexIn" status="active" access="public" location="qregexp.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qregexp.h" lineno="96" documented="true" meta="plain" virtual="non" const="true" static="false" final="false" override="false" type="int" signature="int indexIn(const QString &amp;str, int offset, QRegExp::CaretMode caretMode) const">
+                <parameter type="const QString &amp;" name="str" default="" />
+                <parameter type="int" name="offset" default="0" />
+                <parameter type="QRegExp::CaretMode" name="caretMode" default="CaretAtZero" />
+            </function>
+            </class>
+        <class threadsafety="reentrant" name="QString" href="qstring.html" status="active" access="public" location="qstring.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qstring.h" lineno="258" documented="true" module="QtCore" groups="tools,shared,string-processing" brief="Unicode character string">
+            <function name="arg" fullname="QString::arg" href="qstring.html#arg" status="active" access="public" location="qstring.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qstring.h" lineno="336" documented="true" meta="plain" virtual="non" const="true" static="false" final="false" override="false" type="QString" signature="QString arg(const QString &amp;a, int fieldWidth, QChar fillChar) const">
+                <parameter type="const QString &amp;" name="a" default="" />
+                <parameter type="int" name="fieldWidth" default="0" />
+                <parameter type="QChar" name="fillChar" default="QLatin1Char(' ')" />
+            </function>
+            <function name="arg" fullname="QString::arg" href="qstring.html#arg-12" status="active" access="public" location="qstring.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qstring.h" lineno="339" documented="true" since="5.10" meta="plain" virtual="non" const="true" static="false" final="false" override="false" overload="true" overload-number="12" type="QString" signature="QString arg(QStringView a, int fieldWidth, QChar fillChar) const">
+                <parameter type="QStringView" name="a" default="" />
+                <parameter type="int" name="fieldWidth" default="0" />
+                <parameter type="QChar" name="fillChar" default="QLatin1Char(' ')" />
+            </function>
+            <function name="count" fullname="QString::count" href="qstring.html#count-1" status="active" access="public" location="qstring.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qstring.h" lineno="278" documented="true" meta="plain" virtual="non" const="true" static="false" final="false" override="false" overload="true" overload-number="1" type="int" signature="int count() const" />
+            <function name="fromAscii" fullname="QString::fromAscii" href="qstring-obsolete.html#fromAscii" status="obsolete" access="public" location="qstring.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qstring.h" lineno="730" documented="true" meta="plain" virtual="non" const="false" static="true" final="false" override="false" type="QString" signature="QString fromAscii(const char *str, int size)">
+                <parameter type="const char *" name="str" default="" />
+                <parameter type="int" name="size" default="-1" />
+            </function>
+            <enum name="NormalizationForm" fullname="QString::NormalizationForm" href="qstring.html#NormalizationForm-enum" status="active" access="public" location="qstring.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qstring.h" lineno="666" documented="true">
+                <value name="NormalizationForm_D" value="0" />
+                <value name="NormalizationForm_C" value="1" />
+                <value name="NormalizationForm_KD" value="2" />
+                <value name="NormalizationForm_KC" value="3" />
+            </enum>
+            <enum name="SplitBehavior" fullname="QString::SplitBehavior" href="qstring-obsolete.html#SplitBehavior-enum" status="obsolete" access="public" location="qstring.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/text/qstring.h" lineno="602" documented="true">
+                <value name="KeepEmptyParts" value="0" />
+                <value name="SkipEmptyParts" value="1" />
+            </enum>
+            </class>
+        <namespace name="Qt" href="qt.html" status="active" access="public" location="qnamespace.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/global/qnamespace.h" lineno="68" documented="true" module="QtCore" brief="Contains miscellaneous identifiers used throughout the Qt library">
+            <enum name="AlignmentFlag" fullname="Qt::AlignmentFlag" href="qt.html#AlignmentFlag-enum" status="active" access="public" location="qnamespace.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/global/qnamespace.h" lineno="216" documented="true" typedef="Qt::Alignment">
+                <value name="AlignLeft" value="0x0001" />
+                <value name="AlignLeading" value="AlignLeft" />
+                <value name="AlignRight" value="0x0002" />
+                <value name="AlignTrailing" value="AlignRight" />
+                <value name="AlignHCenter" value="0x0004" />
+                <value name="AlignJustify" value="0x0008" />
+                <value name="AlignAbsolute" value="0x0010" />
+                <value name="AlignHorizontal_Mask" value="AlignLeft | AlignRight | AlignHCenter | AlignJustify | AlignAbsolute" />
+                <value name="AlignTop" value="0x0020" />
+                <value name="AlignBottom" value="0x0040" />
+                <value name="AlignVCenter" value="0x0080" />
+                <value name="AlignBaseline" value="0x0100" />
+                <value name="AlignVertical_Mask" value="AlignTop | AlignBottom | AlignVCenter | AlignBaseline" />
+                <value name="AlignCenter" value="AlignVCenter | AlignHCenter" />
+            </enum>
+            <typedef name="Alignment" fullname="Qt::Alignment" href="qt.html#AlignmentFlag-enum" status="active" access="public" location="qnamespace.h" filepath="/home/qt/work/build/qtbase/include/QtCore/../../../../qt/tqtc-qt5/qtbase/src/corelib/global/qnamespace.h" lineno="239" enum="Qt::AlignmentFlag" />
+            </namespace>
+        </namespace>
+</INDEX>

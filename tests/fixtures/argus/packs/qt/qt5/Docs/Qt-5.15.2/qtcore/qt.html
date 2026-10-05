@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+<!-- qnamespace.qdoc -->
+  <title>Qt Namespace | Qt Core 5.15.2</title>
+  <link rel="stylesheet" type="text/css" href="style/offline-simple.css" />
+  <script type="text/javascript">
+    document.getElementsByTagName("link").item(0).setAttribute("href", "style/offline.css");
+    // loading style sheet breaks anchors that were jumped to before
+    // so force jumping to anchor again
+    setTimeout(function() {
+        var anchor = location.hash;
+        // need to jump to different anchor first (e.g. none)
+        location.hash = "#";
+        setTimeout(function() {
+            location.hash = anchor;
+        }, 0);
+    }, 0);
+  </script>
+</head>
+<body>
+<div class="header" id="qtdocheader">
+    <div class="main">
+    <div class="main-rounded">
+        <div class="navigationbar">
+        <ul>
+<li><a href="../qtdoc/index.html">Qt 5.15</a></li>
+<li><a href="qtcore-index.html">Qt Core</a></li>
+<li>Qt Namespace</li>
+<li id="buildversion"><a href="qtcore-index.html">Qt 5.15.2 Reference Documentation</a></li>
+    </ul>
+    </div>
+</div>
+<div class="content">
+<div class="line">
+<div class="content mainContent">
+<div class="sidebar">
+<div class="toc">
+<h3><a name="toc">Contents</a></h3>
+<ul>
+<li class="level1"><a href="#types">Types</a></li>
+<li class="level1"><a href="#functions">Functions</a></li>
+<li class="level1"><a href="#details">Detailed Description</a></li>
+</ul>
+</div>
+<div class="sidebar-content" id="sidebar-content"></div></div>
+<h1 class="title">Qt Namespace</h1>
+<!-- $$$Qt-brief -->
+<p>The Qt namespace contains miscellaneous identifiers used throughout the Qt library. <a href="#details">More...</a></p>
+<!-- @@@Qt -->
+<div class="table"><table class="alignedsummary">
+<tr><td class="memItemLeft rightAlign topAlign"> Header:</td><td class="memItemRight bottomAlign">  <span class="preprocessor">#include &lt;Qt&gt;</span>
+</td></tr><tr><td class="memItemLeft rightAlign topAlign"> qmake:</td><td class="memItemRight bottomAlign"> QT += core</td></tr></table></div><ul>
+<li><a href="qt-obsolete.html">Obsolete members</a></li>
+</ul>
+<h2>Member Documentation</h2>
+<!-- $$$AlignmentFlag$$$AlignLeft$$$AlignLeading$$$AlignRight$$$AlignTrailing$$$AlignHCenter$$$AlignJustify$$$AlignAbsolute$$$AlignHorizontal_Mask$$$AlignTop$$$AlignBottom$$$AlignVCenter$$$AlignBaseline$$$AlignVertical_Mask$$$AlignCenter -->
+<h3 class="flags" id="AlignmentFlag-enum"><a name="AlignmentFlag-enum"></a>enum Qt::<span class="name">AlignmentFlag</span><br/>flags Qt::<span class="name">Alignment</span></h3>
+<p>This enum type is used to describe alignment. It contains horizontal and vertical flags that can be combined to produce the required effect.</p>
+<p>The <a href="qt.html#TextElideMode-enum">TextElideMode</a> enum can also be used in many situations to fine-tune the appearance of aligned text.</p>
+<p>The horizontal flags are:</p>
+<div class="table"><table class="valuelist"><tr valign="top" class="odd"><th class="tblConst">Constant</th><th class="tblval">Value</th><th class="tbldscr">Description</th></tr>
+<tr><td class="topAlign"><code>Qt::AlignLeft</code></td><td class="topAlign tblval"><code>0x0001</code></td><td class="topAlign">Aligns with the left edge.</td></tr>
+<tr><td class="topAlign"><code>Qt::AlignRight</code></td><td class="topAlign tblval"><code>0x0002</code></td><td class="topAlign">Aligns with the right edge.</td></tr>
+<tr><td class="topAlign"><code>Qt::AlignHCenter</code></td><td class="topAlign tblval"><code>0x0004</code></td><td class="topAlign">Centers horizontally in the available space.</td></tr>
+<tr><td class="topAlign"><code>Qt::AlignJustify</code></td><td class="topAlign tblval"><code>0x0008</code></td><td class="topAlign">Justifies the text in the available space.</td></tr>
+</table></div>
+<p>The vertical flags are:</p>
+<div class="table"><table class="valuelist"><tr valign="top" class="even"><th class="tblConst">Constant</th><th class="tblval">Value</th><th class="tbldscr">Description</th></tr>
+<tr><td class="topAlign"><code>Qt::AlignTop</code></td><td class="topAlign tblval"><code>0x0020</code></td><td class="topAlign">Aligns with the top.</td></tr>
+<tr><td class="topAlign"><code>Qt::AlignBottom</code></td><td class="topAlign tblval"><code>0x0040</code></td><td class="topAlign">Aligns with the bottom.</td></tr>
+<tr><td class="topAlign"><code>Qt::AlignVCenter</code></td><td class="topAlign tblval"><code>0x0080</code></td><td class="topAlign">Centers vertically in the available space.</td></tr>
+<tr><td class="topAlign"><code>Qt::AlignBaseline</code></td><td class="topAlign tblval"><code>0x0100</code></td><td class="topAlign">Aligns with the baseline.</td></tr>
+</table></div>
+<p>You can use only one of the horizontal flags at a time. There is one two-dimensional flag:</p>
+<div class="table"><table class="valuelist"><tr valign="top" class="odd"><th class="tblConst">Constant</th><th class="tblval">Value</th><th class="tbldscr">Description</th></tr>
+<tr><td class="topAlign"><code>Qt::AlignCenter</code></td><td class="topAlign tblval"><code>AlignVCenter | AlignHCenter</code></td><td class="topAlign">Centers in both dimensions.</td></tr>
+</table></div>
+<p>You can use at most one horizontal and one vertical flag at a time. Qt::AlignCenter counts as both horizontal and vertical.</p>
+<p>Three enum values are useful in applications that can be run in right-to-left mode:</p>
+<div class="table"><table class="valuelist"><tr valign="top" class="even"><th class="tblConst">Constant</th><th class="tblval">Value</th><th class="tbldscr">Description</th></tr>
+<tr><td class="topAlign"><code>Qt::AlignAbsolute</code></td><td class="topAlign tblval"><code>0x0010</code></td><td class="topAlign">If the widget's layout direction is <a href="qt.html#LayoutDirection-enum">Qt::RightToLeft</a> (instead of <a href="qt.html#LayoutDirection-enum">Qt::LeftToRight</a>, the default), Qt::AlignLeft refers to the <i>right</i> edge and Qt::AlignRight to the <i>left</i> edge. This is normally the desired behavior. If you want Qt::AlignLeft to always mean &quot;left&quot; and Qt::AlignRight to always mean &quot;right&quot;, combine the flag with Qt::AlignAbsolute.</td></tr>
+<tr><td class="topAlign"><code>Qt::AlignLeading</code></td><td class="topAlign tblval"><code>AlignLeft</code></td><td class="topAlign">Synonym for Qt::AlignLeft.</td></tr>
+<tr><td class="topAlign"><code>Qt::AlignTrailing</code></td><td class="topAlign tblval"><code>AlignRight</code></td><td class="topAlign">Synonym for Qt::AlignRight.</td></tr>
+</table></div>
+<p>Masks:</p>
+<div class="table"><table class="valuelist"><tr><th class="tblConst">Constant</th><th class="tblVal">Value</th></tr>
+<tr><td class="topAlign"><code>Qt::AlignHorizontal_Mask</code></td><td class="topAlign tblval"><code>AlignLeft | AlignRight | AlignHCenter | AlignJustify | AlignAbsolute</code></td></tr>
+<tr><td class="topAlign"><code>Qt::AlignVertical_Mask</code></td><td class="topAlign tblval"><code>AlignTop | AlignBottom | AlignVCenter | AlignBaseline</code></td></tr>
+</table></div>
+<p>Conflicting combinations of flags have undefined meanings.</p>
+<p>The Alignment type is a typedef for <a href="qflags.html">QFlags</a>&lt;AlignmentFlag&gt;. It stores an OR combination of AlignmentFlag values.</p>
+<!-- @@@AlignmentFlag -->
+        </div>
+       </div>
+   </div>
+   </div>
+</div>
+<div class="footer">
+   <p>
+   <acronym title="Copyright">&copy;</acronym> 2020 The Qt Company Ltd.
+   Documentation contributions included herein are the copyrights of
+   their respective owners.<br/>    The documentation provided herein is licensed under the terms of the    <a href="http://www.gnu.org/licenses/fdl.html">GNU Free Documentation    License version 1.3</a> as published by the Free Software Foundation.<br/>    Qt and respective logos are trademarks of The Qt Company Ltd.     in Finland and/or other countries worldwide. All other trademarks are property
+   of their respective owners. </p>
+</div>
+</body>
+</html>

@@ -29,11 +29,14 @@ ARGUS="${ARGUS_BIN:-argus}"
 
 # pack name -> checkout directory. Ordered smallest first: a cheap pack that
 # fails tells you the pipeline is broken before an eleven-hour one does.
-order=(system-design algorithms scripting cpp wdk win32)
+order=(system-design algorithms scripting cpp qt wdk win32)
 declare -A checkout=(
     [system-design]="system-design-primer"
     [algorithms]="C-Plus-Plus"
     [cpp]="cpp-docs"
+    # Qt's offline documentation, unpacked as qt/qt4, qt/qt5 and qt/qt6 (not a
+    # git checkout: the pack records the three releases as its provenance).
+    [qt]="qt"
     # Also a composite: PowerShell + windows-commands + tldr.
     [scripting]="."
     # wdk and win32 are composites: reference AND samples in one pack. A

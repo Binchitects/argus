@@ -34,7 +34,7 @@ graphs and file contents. `find_symbol`, `find_references`, `search_code`,
 `code_contracts` work across every repository the caller is allowed to see.
 
 **Documentation packs.** Self-contained archives of public reference material —
-Windows SDK and WDK, MSVC C++, cppreference, .NET, Python, PowerShell and shell
+Windows SDK and WDK, MSVC C++, cppreference, Qt 4 to 6, .NET, Python, PowerShell and shell
 tooling, algorithms, system design. `docs_lookup` (you know the name),
 `docs_find` (you know only the behaviour), `docs_search` + `docs_get` (you need
 the page) and `docs_verify` (check a draft you already wrote).

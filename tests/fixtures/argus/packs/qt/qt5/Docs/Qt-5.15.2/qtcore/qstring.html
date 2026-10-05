@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+<!-- qstring.cpp -->
+  <title>QString Class | Qt Core 5.15.2</title>
+  <link rel="stylesheet" type="text/css" href="style/offline-simple.css" />
+  <script type="text/javascript">
+    document.getElementsByTagName("link").item(0).setAttribute("href", "style/offline.css");
+    // loading style sheet breaks anchors that were jumped to before
+    // so force jumping to anchor again
+    setTimeout(function() {
+        var anchor = location.hash;
+        // need to jump to different anchor first (e.g. none)
+        location.hash = "#";
+        setTimeout(function() {
+            location.hash = anchor;
+        }, 0);
+    }, 0);
+  </script>
+</head>
+<body>
+<div class="header" id="qtdocheader">
+    <div class="main">
+    <div class="main-rounded">
+        <div class="navigationbar">
+        <ul>
+<li><a href="../qtdoc/index.html">Qt 5.15</a></li>
+<li><a href="qtcore-index.html">Qt Core</a></li>
+<li><a href="qtcore-module.html">C++ Classes</a></li>
+<li>QString</li>
+<li id="buildversion"><a href="qtcore-index.html">Qt 5.15.2 Reference Documentation</a></li>
+    </ul>
+    </div>
+</div>
+<div class="content">
+<div class="line">
+<div class="content mainContent">
+<div class="sidebar">
+<div class="toc">
+<h3><a name="toc">Contents</a></h3>
+<ul>
+<li class="level1"><a href="#public-types">Public Types</a></li>
+<li class="level1"><a href="#public-functions">Public Functions</a></li>
+<li class="level1"><a href="#static-public-members">Static Public Members</a></li>
+<li class="level1"><a href="#related-non-members">Related Non-Members</a></li>
+<li class="level1"><a href="#macros">Macros</a></li>
+<li class="level1"><a href="#details">Detailed Description</a></li>
+<li class="level2"><a href="#initializing-a-string">Initializing a String</a></li>
+<li class="level2"><a href="#manipulating-string-data">Manipulating String Data</a></li>
+<li class="level2"><a href="#querying-string-data">Querying String Data</a></li>
+<li class="level2"><a href="#converting-between-8-bit-strings-and-unicode-strings">Converting Between 8-Bit Strings and Unicode Strings</a></li>
+<li class="level2"><a href="#distinction-between-null-and-empty-strings">Distinction Between Null and Empty Strings</a></li>
+<li class="level2"><a href="#argument-formats">Argument Formats</a></li>
+<li class="level2"><a href="#more-efficient-string-construction">More Efficient String Construction</a></li>
+<li class="level2"><a href="#maximum-size-and-out-of-memory-conditions">Maximum size and out-of-memory conditions</a></li>
+</ul>
+</div>
+<div class="sidebar-content" id="sidebar-content"></div></div>
+<h1 class="title">QString Class</h1>
+<!-- $$$QString-brief -->
+<p>The QString class provides a Unicode character string. <a href="#details">More...</a></p>
+<!-- @@@QString -->
+<div class="table"><table class="alignedsummary">
+<tr><td class="memItemLeft rightAlign topAlign"> Header:</td><td class="memItemRight bottomAlign">  <span class="preprocessor">#include &lt;QString&gt;</span>
+</td></tr><tr><td class="memItemLeft rightAlign topAlign"> qmake:</td><td class="memItemRight bottomAlign"> QT += core</td></tr></table></div><ul>
+<li><a href="qstring-members.html">List of all members, including inherited members</a></li>
+<li><a href="qstring-obsolete.html">Obsolete members</a></li>
+</ul>
+<p><b>Note:</b> All functions in this class are <a href="../qtdoc/threads-reentrancy.html">reentrant</a>.</p>
+<h2 id="details">Detailed Description</h2>
+<p>QString stores a string of 16-bit <a href="qchar.html">QChar</a>s, where each <a href="qchar.html">QChar</a> corresponds to one UTF-16 code unit. (Unicode characters with code values above 65535 are stored using surrogate pairs, i.e&#x2e;, two consecutive <a href="qchar.html">QChar</a>s.)</p>
+<h2>Member Documentation</h2>
+<!-- $$$arg[overload1]$$$argconstQString&intQChar -->
+<h3 class="fn" id="arg"><a name="arg"></a><span class="type"><a href="qstring.html#QString">QString</a></span> QString::<span class="name">arg</span>(const <span class="type"><a href="qstring.html#QString">QString</a></span> &amp;<i>a</i>, <span class="type">int</span> <i>fieldWidth</i> = 0, <span class="type"><a href="qchar.html">QChar</a></span> <i>fillChar</i> = QLatin1Char(' ')) const</h3>
+<p>Returns a copy of this string with the lowest numbered place marker replaced by string <i>a</i>, i.e&#x2e;, <code>%1</code>, <code>%2</code>, ..&#x2e;, <code>%99</code>.</p>
+<p><i>fieldWidth</i> specifies the minimum amount of space that argument <i>a</i> shall occupy. If <i>a</i> requires less space than <i>fieldWidth</i>, it is padded to <i>fieldWidth</i> with character <i>fillChar</i>. A positive <i>fieldWidth</i> produces right-aligned text. A negative <i>fieldWidth</i> produces left-aligned text.</p>
+<p>This example shows how we might create a <code>status</code> string for reporting progress while processing a list of files:</p>
+<pre class="cpp">
+ <span class="type"><a href="qstring.html#QString">QString</a></span> i;           <span class="comment">// current file's number</span>
+ <span class="type"><a href="qstring.html#QString">QString</a></span> total;       <span class="comment">// number of files to process</span>
+ <span class="type"><a href="qstring.html#QString">QString</a></span> fileName;    <span class="comment">// current file's name</span>
+
+ <span class="type"><a href="qstring.html#QString">QString</a></span> status <span class="operator">=</span> <span class="type"><a href="qstring.html#QString">QString</a></span>(<span class="string">&quot;Processing file %1 of %2: %3&quot;</span>)
+                 <span class="operator">.</span>arg(i)<span class="operator">.</span>arg(total)<span class="operator">.</span>arg(fileName);
+</pre>
+<p>First, <code>arg(i)</code> replaces <code>%1</code>. Then <code>arg(total)</code> replaces <code>%2</code>. Finally, <code>arg(fileName)</code> replaces <code>%3</code>.</p>
+<p>One advantage of using arg() over <a href="qstring.html#asprintf">asprintf</a>() is that the order of the numbered place markers can change, if the application's strings are translated into other languages, but each arg() will still replace the lowest numbered unreplaced place marker, no matter where it appears. Also, if place marker <code>%i</code> appears more than once in the string, the arg() replaces all of them.</p>
+<p>If there is no unreplaced place marker remaining, a warning message is output and the result is undefined. Place marker numbers must be in the range 1 to 99.</p>
+<!-- @@@arg -->
+<!-- $$$arg$$$argQStringViewintQChar -->
+<h3 class="fn" id="arg-12"><a name="arg-12"></a><span class="type"><a href="qstring.html#QString">QString</a></span> QString::<span class="name">arg</span>(<span class="type"><a href="qstringview.html">QStringView</a></span> <i>a</i>, <span class="type">int</span> <i>fieldWidth</i> = 0, <span class="type"><a href="qchar.html">QChar</a></span> <i>fillChar</i> = QLatin1Char(' ')) const</h3>
+<p>This is an overloaded function.</p>
+<p>Returns a copy of this string with the lowest-numbered place-marker replaced by string <i>a</i>, i.e&#x2e;, <code>%1</code>, <code>%2</code>, ..&#x2e;, <code>%99</code>.</p>
+<p><i>fieldWidth</i> specifies the minimum amount of space that <i>a</i> shall occupy. If <i>a</i> requires less space than <i>fieldWidth</i>, it is padded to <i>fieldWidth</i> with character <i>fillChar</i>. A positive <i>fieldWidth</i> produces right-aligned text. A negative <i>fieldWidth</i> produces left-aligned text.</p>
+<p>This example shows how we might create a <code>status</code> string for reporting progress while processing a list of files:</p>
+<pre class="cpp">
+ <span class="type">int</span> i;                <span class="comment">// current file's number</span>
+ <span class="type">int</span> total;            <span class="comment">// number of files to process</span>
+ <span class="type"><a href="qstringview.html">QStringView</a></span> fileName; <span class="comment">// current file's name</span>
+
+ <span class="type"><a href="qstring.html#QString">QString</a></span> status <span class="operator">=</span> <span class="type"><a href="qstring.html#QString">QString</a></span>(<span class="string">&quot;Processing file %1 of %2: %3&quot;</span>)
+                 <span class="operator">.</span>arg(i)<span class="operator">.</span>arg(total)<span class="operator">.</span>arg(fileName);
+</pre>
+<p>First, <code>arg(i)</code> replaces <code>%1</code>. Then <code>arg(total)</code> replaces <code>%2</code>. Finally, <code>arg(fileName)</code> replaces <code>%3</code>.</p>
+<p>One advantage of using arg() over <a href="qstring.html#asprintf">asprintf</a>() is that the order of the numbered place markers can change, if the application's strings are translated into other languages, but each arg() will still replace the lowest-numbered unreplaced place-marker, no matter where it appears. Also, if place-marker <code>%i</code> appears more than once in the string, arg() replaces all of them.</p>
+<p>If there is no unreplaced place-marker remaining, a warning message is printed and the result is undefined. Place-marker numbers must be in the range 1 to 99.</p>
+<p>This function was introduced in Qt 5.10.</p>
+<!-- @@@arg -->
+<!-- $$$count$$$count -->
+<h3 class="fn" id="count-1"><a name="count-1"></a><span class="type">int</span> QString::<span class="name">count</span>() const</h3>
+<p>This function overloads count().</p>
+<p>Same as <a href="qstring.html#size">size</a>().</p>
+<!-- @@@count -->
+<!-- $$$NormalizationForm$$$NormalizationForm_D$$$NormalizationForm_C$$$NormalizationForm_KD$$$NormalizationForm_KC -->
+<h3 class="fn" id="NormalizationForm-enum"><a name="NormalizationForm-enum"></a>enum QString::<span class="name">NormalizationForm</span></h3>
+<p>This enum describes the various normalized forms of Unicode text.</p>
+<div class="table"><table class="valuelist"><tr valign="top" class="odd"><th class="tblConst">Constant</th><th class="tblval">Value</th><th class="tbldscr">Description</th></tr>
+<tr><td class="topAlign"><code>QString::NormalizationForm_D</code></td><td class="topAlign tblval"><code>0</code></td><td class="topAlign">Canonical Decomposition</td></tr>
+<tr><td class="topAlign"><code>QString::NormalizationForm_C</code></td><td class="topAlign tblval"><code>1</code></td><td class="topAlign">Canonical Decomposition followed by Canonical Composition</td></tr>
+<tr><td class="topAlign"><code>QString::NormalizationForm_KD</code></td><td class="topAlign tblval"><code>2</code></td><td class="topAlign">Compatibility Decomposition</td></tr>
+<tr><td class="topAlign"><code>QString::NormalizationForm_KC</code></td><td class="topAlign tblval"><code>3</code></td><td class="topAlign">Compatibility Decomposition followed by Canonical Composition</td></tr>
+</table></div>
+<p><b>See also </b><a href="qstring.html#normalized">normalized</a>() and <a href="http://www.unicode.org/reports/tr15/">Unicode Standard Annex #15</a>.</p>
+<!-- @@@NormalizationForm -->
+        </div>
+       </div>
+   </div>
+   </div>
+</div>
+<div class="footer">
+   <p>
+   <acronym title="Copyright">&copy;</acronym> 2020 The Qt Company Ltd.
+   Documentation contributions included herein are the copyrights of
+   their respective owners.<br/>    The documentation provided herein is licensed under the terms of the    <a href="http://www.gnu.org/licenses/fdl.html">GNU Free Documentation    License version 1.3</a> as published by the Free Software Foundation.<br/>    Qt and respective logos are trademarks of The Qt Company Ltd.     in Finland and/or other countries worldwide. All other trademarks are property
+   of their respective owners. </p>
+</div>
+</body>
+</html>

@@ -113,14 +113,14 @@ would otherwise become an agent that cannot finish a sentence.
 [`clients/claude-code/verify-after.sh`](../../clients/claude-code/verify-after.sh) wires
 it into a Claude Code `Stop` hook.
 
-## Eleven knowledge packs, 1.87 GB, zero unresolved symbols
+## Twelve knowledge packs, 2.2 GB, zero unresolved symbols
 
 ```mermaid
 xychart-beta
     title "Documented symbols per pack (thousands)"
-    x-axis ["dotnet", "win32", "wdk", "cpp", "python", "scripting", "cppreference"]
+    x-axis ["dotnet", "qt", "win32", "wdk", "cpp", "python", "scripting", "cppreference"]
     y-axis "Symbols (k)" 0 --> 220
-    bar [215.3, 87.2, 37.9, 37.3, 18.8, 9.3, 5.4]
+    bar [215.3, 150.6, 87.2, 37.9, 37.3, 18.8, 9.3, 5.4]
 ```
 
 | pack | Documents | Chunks | Symbols | Size | Licence |
@@ -128,6 +128,7 @@ xychart-beta
 | [`win32`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32.arguspack) — Windows SDK API reference | 65,906 | 478,788 | 118,242 | 726.1 MB | CC-BY-4.0 |
 | `wdk` — driver DDI reference | 25,903 | 205,848 | 37,938 | 292.5 MB | CC-BY-4.0 |
 | `dotnet` — .NET BCL + MS NuGet packages | 11,013 | 140,661 | **215,269** | 236.4 MB | CC-BY-4.0 |
+| `qt` — Qt 4.8, 5.15 and 6.10, C++ and QML | 12,595 | 190,970 | 150,648 | 340.4 MB | GFDL-1.3 |
 | `cpp` — MSVC, CRT, STL | 9,746 | 123,212 | 37,325 | 180.0 MB | CC-BY-4.0 |
 | `win32-samples` — Microsoft desktop samples | 5,801 | 67,714 | 139 | 136.2 MB | MIT |
 | `cppreference` — C++ standard library | 6,640 | 68,891 | 5,406 | 125.6 MB | CC-BY-SA-3.0 |
@@ -136,7 +137,7 @@ xychart-beta
 | `python` — 3.13 | 540 | 13,751 | 18,778 | 31.8 MB | PSF-2.0 |
 | `debugger` — WinDbg + how-to | 2,138 | 14,259 | 1,511 | 25.0 MB | CC-BY-4.0 |
 | `sqlite` — SQL, pragmas, FTS5 | 837 | 8,987 | 36 | 18.4 MB | public domain |
-| **total** | **140,107** | **1,208,042** | **444,058** | **1.87 GB** | |
+| **total** | **152,702** | **1,399,012** | **594,706** | **2.2 GB** | |
 
 ### Downloading a pack
 
@@ -158,7 +159,7 @@ argus pack install \
 | [`win32-samples`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32-samples.arguspack) | ✅ | 142,811,136 B | `e7a80a83d0d918fefdea1725707ce1076afbc39cd06130a766274b8741ba0b17` |
 | [`wdk-samples`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/wdk-samples.arguspack) | ✅ | 80,523,264 B | `786c4a8b38091715cb1c4ec22c87ab1f7784d6c01fe60c7a9cfeca6d3ef063c1` |
 
-The other seven are built and served locally but **not published yet** — there
+The other eight are built and served locally but **not published yet** — there
 is no link for them, and the table above is the whole published set rather than
 a subset of a larger one. A bucket is not versioned, so re-uploading a pack
 replaces it in place with no history to roll back to.
@@ -247,6 +248,21 @@ driver: **1,770 symbols state a KMDF or UMDF release and no OS at all**, which
 is the only floor pages like `WdfDriverCreate` give you. The remaining pages
 have no version metadata upstream — 12,779 of them are ordinary function,
 struct and enum pages Microsoft never filled the fields in for.
+
+### Which Qt an API is in
+
+The `qt` pack is Qt 4, 5 and 6 in one file, built from the last release of
+each (4.8.7, 5.15.2, 6.10.3). A symbol has a row per version that documents
+it, each linked to that version's page, and every row leads with where the
+name lives across all three:
+
+```
+Qt 4.8, Qt 5.15, Qt 6.10 in QtCore5Compat; Header: <QRegExp>; Module: QtCore5Compat -- class QRegExp
+Qt 4.8, Qt 5.15 (obsolete), not in Qt 6; Header: <QString>; Module: QtCore -- [static] QString QString::fromAscii(const char *str, int size = -1)
+```
+
+`lang="qt5"` (or `qt4`, `qt6`) keeps a lookup or a search to one version's
+pages. Details: [knowledge-packs.md](knowledge-packs.md#which-qt-version-an-api-is-in).
 
 Three more are built and parked in `packs/disabled/` (`algorithms`, `react`,
 `system-design`) — small corpora that were not worth the shelf space. Every pack

@@ -22,6 +22,9 @@ public sealed class Pack(string name, string path, SqliteConnection conn, Dictio
     public string License => Meta.GetValueOrDefault("license", "");
     public string Attribution => Meta.GetValueOrDefault("attribution", "");
     public string UrlBase => Meta.GetValueOrDefault("source_repo", "");
+    /// <summary>The slices a lang can name instead of the whole pack ("qt5"), to their doc path prefixes.</summary>
+    public Dictionary<string, string> Facets => _facets ??= PackFormat.ParseFacets(Meta.GetValueOrDefault("facets"));
+    Dictionary<string, string>? _facets;
     public void Dispose() => Conn.Dispose();
 }
 
@@ -67,11 +70,35 @@ public static class PackStore
         }
     }
 
+    /// <summary>The packs a lang names: a pack by its name, or the pack declaring a facet of that name.</summary>
     public static List<Pack> SelectPacks(IReadOnlyList<Pack> packs, string? lang)
     {
         if (string.IsNullOrEmpty(lang)) return packs.ToList();
         var wanted = PyStr.Strip(lang).ToLowerInvariant();
-        return packs.Where(p => p.Name.ToLowerInvariant() == wanted).ToList();
+        return packs.Where(p => p.Name.ToLowerInvariant() == wanted || p.Facets.ContainsKey(wanted)).ToList();
+    }
+
+    /// <summary>The doc path prefix a facet narrows this pack to; "" when lang names the pack itself or nothing.</summary>
+    static string FacetPrefix(Pack pack, string? lang)
+    {
+        if (string.IsNullOrEmpty(lang)) return "";
+        var wanted = PyStr.Strip(lang).ToLowerInvariant();
+        return pack.Name.ToLowerInvariant() != wanted && pack.Facets.TryGetValue(wanted, out var prefix) ? prefix : "";
+    }
+
+    /// <summary>A SQL condition on d.path for a facet, true when there is none, and its arguments.</summary>
+    const string InFacet = "(? = '' OR substr(d.path, 1, length(?)) = ?)";
+    static object?[] FacetArgs(string prefix) => [prefix, prefix, prefix];
+
+    static HashSet<long> ChunksInFacet(Pack pack, IEnumerable<long> chunkIds, string prefix)
+    {
+        var ids = chunkIds.Distinct().ToList();
+        if (ids.Count == 0) return [];
+        var args = ids.Cast<object?>().Concat(FacetArgs(prefix)).ToArray();
+        return Query(pack, $"""
+            SELECT c.id FROM chunks c JOIN docs d ON d.id = c.doc_id
+            WHERE c.id IN ({Sql.Marks(ids.Count)}) AND {InFacet}
+            """, args).Select(r => r.Long("id")).ToHashSet();
     }
 
     static List<Row> Query(Pack pack, string sql, params object?[] args)
@@ -130,14 +157,15 @@ public static class PackStore
     {
         var results = new List<JsonObject>();
         foreach (var pack in SelectPacks(packs, lang))
-            foreach (var row in Query(pack, """
+            // s.id last: rows a source wrote for one name in a deliberate order (the Qt pack's newest version first) keep it.
+            foreach (var row in Query(pack, $"""
                          SELECT s.name, s.kind, s.namespace, s.anchor, s.signature,
                                 d.title, d.url, d.path
                          FROM api_symbols s JOIN docs d ON d.id = s.doc_id
-                         WHERE s.name = ? OR lower(s.name) = lower(?)
-                         ORDER BY (s.name = ?) DESC, s.name
+                         WHERE (s.name = ? OR lower(s.name) = lower(?)) AND {InFacet}
+                         ORDER BY (s.name = ?) DESC, s.name, s.id
                          LIMIT ?
-                         """, name, name, name, (long)limit))
+                         """, [name, name, .. FacetArgs(FacetPrefix(pack, lang)), name, (long)limit]))
                 results.Add(SymbolRow(pack, row));
 
         var sorted = results.OrderBy(r => Authority(r, name), AuthorityComparer.Instance).ToList();
@@ -217,14 +245,14 @@ public static class PackStore
             List<Row> rows;
             try
             {
-                rows = Sql.Query(pack.Conn, """
+                rows = Sql.Query(pack.Conn, $"""
                     SELECT d.id, d.title, d.url, d.path, d.content,
                            bm25(docs_fts) AS rank
                     FROM docs_fts JOIN docs d ON d.id = docs_fts.rowid
-                    WHERE docs_fts MATCH ?
+                    WHERE docs_fts MATCH ? AND {InFacet}
                     ORDER BY rank
                     LIMIT ?
-                    """, match, (long)limit);
+                    """, [match, .. FacetArgs(FacetPrefix(pack, lang)), (long)limit]);
             }
             catch (SqliteException exc)
             {
@@ -294,6 +322,15 @@ public static class PackStore
         return Quantize.Rescore(queryVec, vectors.Select(r => (r.Long("chunk_id"), r.Bytes("embedding") ?? [])).ToList());
     }
 
+    /// <summary>The coarse pass and rescore, kept to a facet's chunks; a facet widens the coarse pass, since it keeps only part of it.</summary>
+    static List<(long, double)> Ranked(Pack pack, IReadOnlyList<double> queryVec, int coarse, string prefix)
+    {
+        if (prefix.Length == 0) return CoarseAndRescore(pack, queryVec, coarse);
+        var ranked = CoarseAndRescore(pack, queryVec, coarse * 3);
+        var inFacet = ChunksInFacet(pack, ranked.Select(r => r.Item1), prefix);
+        return ranked.Where(r => inFacet.Contains(r.Item1)).ToList();
+    }
+
     public static List<JsonObject> SearchDocs(IReadOnlyList<Pack> packs, IReadOnlyList<double> queryVec, string? lang = null,
         int limit = 10, int coarse = DefaultCoarse, string queryText = "")
     {
@@ -302,7 +339,7 @@ public static class PackStore
         var scored = new List<(double, JsonObject)>();
         foreach (var pack in selected)
         {
-            var ranked = CoarseAndRescore(pack, queryVec, coarse);
+            var ranked = Ranked(pack, queryVec, coarse, FacetPrefix(pack, lang));
             var top = ranked.Take(limit * MaxChunksPerDoc * 3).ToList();
             if (top.Count == 0) continue;
             var byId = new Dictionary<long, double>();
@@ -504,11 +541,12 @@ public static class PackStore
             var where = string.Join(" OR ", terms.Select(_ => "lower(s.signature) LIKE ? OR lower(s.name) LIKE ?"));
             var args = new List<object?>();
             foreach (var t in terms) { args.Add($"%{t}%"); args.Add($"%{t}%"); }
+            args.AddRange(FacetArgs(FacetPrefix(pack, lang)));
             candidates.AddRange(Query(pack, $"""
                 SELECT s.name, s.kind, s.namespace, s.anchor, s.signature,
                        d.title, d.url, d.path
                 FROM api_symbols s JOIN docs d ON d.id = s.doc_id
-                WHERE s.signature != '' AND ({where})
+                WHERE s.signature != '' AND ({where}) AND {InFacet}
                 """, args.ToArray()).Select(r => (pack, r)));
         }
         if (candidates.Count == 0) return [];
@@ -604,7 +642,7 @@ public static class PackStore
             {
                 try { PackFormat.RequireCompatible(pack.Meta, Embed.Model, Embed.Dim); }
                 catch (PackMismatch) { continue; }
-                foreach (var (chunkId, score) in CoarseAndRescore(pack, queryVec, coarse).Take(limit))
+                foreach (var (chunkId, score) in Ranked(pack, queryVec, coarse, FacetPrefix(pack, lang)).Take(limit))
                     foreach (var row in SymbolsForChunk(pack, chunkId, terms))
                         Keep(row, SemanticWeight * score, chunkId);
             }

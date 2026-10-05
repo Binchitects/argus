@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+<!-- signalsandslots.qdoc -->
+  <meta name="description" content="An overview of Qt's signals and slots inter-object communication mechanism. Signals and slots are used for communication between objects. The signals and slots mechanism is a central feature of Qt and probably the part that differs most from the features provided by other frameworks. Signals and slots are made possible by Qt's meta-object system.">
+  <title>Signals &amp; Slots | Qt Core | Qt 6.10.3</title>
+  <link rel="stylesheet" type="text/css" href="style/offline-simple.css" />
+  <script type="text/javascript">
+    document.getElementsByTagName("link").item(0).setAttribute("href", "style/offline.css");
+    // loading style sheet breaks anchors that were jumped to before
+    // so force jumping to anchor again
+    setTimeout(function() {
+        var anchor = location.hash;
+        // need to jump to different anchor first (e.g. none)
+        location.hash = "#";
+        setTimeout(function() {
+            location.hash = anchor;
+        }, 0);
+    }, 0);
+  </script>
+</head>
+<body>
+<div class="header" id="qtdocheader">
+    <div class="main">
+    <div class="main-rounded">
+        <div class="navigationbar">
+        <ul>
+<li><a href="../qtdoc/index.html">Qt 6.10</a></li>
+<li><a href="qtcore-index.html">Qt Core</a></li>
+<li>Signals &amp; Slots</li>
+<li id="buildversion"><a href="qtcore-index.html">Qt 6.10.3 Reference Documentation</a></li>
+    </ul>
+    </div>
+</div>
+<div class="content">
+<div class="line">
+<div class="content mainContent">
+  <link rel="prev" href="objecttrees.html" />
+  <link rel="next" href="bindableproperties.html" />
+<p class="naviNextPrevious headerNavi">
+<a class="prevPage" href="objecttrees.html">Object Trees &amp; Ownership</a>
+<span class="naviSeparator">  &#9702;  </span>
+<a class="nextPage" href="bindableproperties.html">Qt Bindable Properties</a>
+</p>
+<div class="sidebar">
+<div class="toc">
+<h3 id="toc">Contents</h3>
+<ul>
+<li class="level1"><a href="#introduction">Introduction</a></li>
+<li class="level1"><a href="#signals-and-slots">Signals and Slots</a></li>
+<li class="level1"><a href="#signals">Signals</a></li>
+<li class="level1"><a href="#slots">Slots</a></li>
+<li class="level1"><a href="#a-small-example">A Small Example</a></li>
+<li class="level1"><a href="#a-real-example">A Real Example</a></li>
+<li class="level1"><a href="#connecting-to-overloaded-signals-and-slots">Connecting to Overloaded Signals and Slots</a></li>
+<li class="level1"><a href="#automatic-connection-management">Automatic Connection Management</a></li>
+<li class="level1"><a href="#signals-and-slots-with-default-arguments">Signals And Slots With Default Arguments</a></li>
+<li class="level1"><a href="#advanced-signals-and-slots-usage">Advanced Signals and Slots Usage</a></li>
+<li class="level2"><a href="#using-qt-with-3rd-party-signals-and-slots">Using Qt with 3rd Party Signals and Slots</a></li>
+<li class="level2"><a href="#signals-and-slots-in-qt-based-libraries">Signals and slots in Qt-based libraries</a></li>
+</ul>
+</div>
+<div class="sidebar-content" id="sidebar-content"></div></div>
+<h1 class="title">Signals &amp; Slots</h1>
+<!-- $$$signalsandslots.html-description -->
+<div class="descr" id="details">
+<h2 id="introduction">Introduction</h2>
+<p>In GUI programming, when we change one widget, we often want another widget to be notified. More generally, we want objects of any kind to be able to communicate with one another. For example, if a user clicks a <b translate="no">Close</b> button, we probably want the window's <a href="../qtwidgets/qwidget.html#close" translate="no">close</a>() function to be called.</p>
+<p>Other toolkits achieve this kind of communication using callbacks. A callback is a pointer to a function, so if you want a processing function to notify you about some event you pass a pointer to another function (the callback) to the processing function. The processing function then calls the callback when appropriate. While successful frameworks using this method do exist, callbacks can be unintuitive and may suffer from problems in ensuring the type-correctness of callback arguments.</p>
+<h2 id="signals-and-slots">Signals and Slots</h2>
+<p>In Qt, we have an alternative to the callback technique: We use signals and slots. A signal is emitted when a particular event occurs. Qt's widgets have many predefined signals, but we can always subclass widgets to add our own signals to them. A slot is a function that is called in response to a particular signal. Qt's widgets have many pre-defined slots, but it is common practice to subclass widgets and add your own slots so that you can handle the signals that you are interested in.</p>
+<p class="centerAlign"><img src="images/abstract-connections.png" alt="" /></p><p>The signals and slots mechanism is type safe: The signature of a signal must match the signature of the receiving slot. (In fact a slot may have a shorter signature than the signal it receives because it can ignore extra arguments.) Since the signatures are compatible, the compiler can help us detect type mismatches when using the function pointer-based syntax. The string-based SIGNAL and SLOT syntax will detect type mismatches at runtime. Signals and slots are loosely coupled: A class which emits a signal neither knows nor cares which slots receive the signal. Qt's signals and slots mechanism ensures that if you connect a signal to a slot, the slot will be called with the signal's parameters at the right time. Signals and slots can take any number of arguments of any type. They are completely type safe.</p>
+<p>All classes that inherit from <a href="qobject.html" translate="no">QObject</a> or one of its subclasses (e.g., <a href="../qtwidgets/qwidget.html" translate="no">QWidget</a>) can contain signals and slots. Signals are emitted by objects when they change their state in a way that may be interesting to other objects. This is all the object does to communicate. It does not know or care whether anything is receiving the signals it emits. This is true information encapsulation, and ensures that the object can be used as a software component.</p>
+<p>Slots can be used for receiving signals, but they are also normal member functions. Just as an object does not know if anything receives its signals, a slot does not know if it has any signals connected to it. This ensures that truly independent components can be created with Qt.</p>
+<p>You can connect as many signals as you want to a single slot, and a signal can be connected to as many slots as you need. It is even possible to connect a signal directly to another signal. (This will emit the second signal immediately whenever the first is emitted.)</p>
+<p>Together, signals and slots make up a powerful component programming mechanism.</p>
+        </div>
+       </div>
+   </div>
+   </div>
+</div>
+<div class="footer">
+   <p>
+   <abbr title="Copyright">&copy;</abbr> 2025 <span translate="no">The Qt Company Ltd.</span>
+   Documentation contributions included herein are the copyrights of
+   their respective owners.<br/>    The documentation provided herein is licensed under the terms of the    <a href="http://www.gnu.org/licenses/fdl.html">GNU Free Documentation    License version 1.3</a> as published by the <span translate="no">Free Software Foundation</span>.<br/>    <span translate="no">Qt</span> and respective logos are <a href="https://doc.qt.io/qt/trademarks.html">    trademarks</a> of <span translate="no">The Qt Company Ltd.</span> in Finland and/or other countries
+   worldwide. All other trademarks are property of their respective owners. </p>
+</div>
+</body>
+</html>
