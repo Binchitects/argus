@@ -106,6 +106,18 @@ public static class Credentials
     public const string TokenName = "argus";
     public static readonly string[] TokenScopes = ["read_api", "read_repository"];
 
+    /// <summary>
+    /// The CSRF token in the sign-in page's form that posts to <paramref name="action"/> (GitLab's own, or an
+    /// LDAP server's, under any relative URL root); null when the page has no such form.
+    /// </summary>
+    static string? FormToken(string page, string action)
+    {
+        var form = Regex.Match(page, "<form\\b[^>]*\\baction=\"[^\"]*" + Regex.Escape(action) + "\"[^>]*>(.*?)</form>",
+            RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        var token = form.Success ? Regex.Match(form.Groups[1].Value, "name=\"authenticity_token\" value=\"([^\"]+)\"") : Match.Empty;
+        return token.Success ? token.Groups[1].Value : null;
+    }
+
     static string MintToken(GitLabConfig cfg)
     {
         CredentialError Fail(string what, Exception exc) =>
@@ -151,17 +163,18 @@ public static class Credentials
 
         HttpResult login = page, me = page;
         string? signedInWith = null;
+        var refused = false;
         foreach (var provider in attempts)
         {
-            var formToken = found.Groups[1].Value;
-            if (provider is not null)
+            if (refused)
             {
-                // A fresh form: a refused sign-in may have changed the session's token.
+                // A fresh page: a refused sign-in may have changed the session's tokens.
                 try { page = Tls.Get(client, $"{cfg.Url}/users/sign_in"); }
                 catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException) { throw Fail("sign in", exc); }
-                var fresh = Regex.Match(page.Text, "name=\"authenticity_token\" value=\"([^\"]+)\"");
-                if (fresh.Success) formToken = fresh.Groups[1].Value;
             }
+            refused = true;
+            // Each form carries its own token (GitLab may bind one to its form), so the one of the form posted to.
+            var formToken = FormToken(page.Text, provider is null ? "/users/sign_in" : $"/users/auth/{provider}/callback") ?? found.Groups[1].Value;
             try
             {
                 login = provider is null
