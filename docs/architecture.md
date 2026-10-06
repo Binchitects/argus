@@ -80,7 +80,15 @@ One issuer, the app.
 **A person chats.** Browser → Traefik → app (session) → the gateway with the
 chat's own key, naming the person (their spend, their credit) → llama.cpp. The
 app streams the answer back, runs tools (Argus, Python in the sandbox, the web,
-pictures, video, speech), and keeps every message.
+pictures, video, speech), and keeps every message. An answer first takes a
+place in its model's line (`AnswerGate`: each model has as many places as it
+serves at once, so people on one model never wait for another's). Each turn
+goes to the engine slot that holds its conversation's start (`SlotTable`, sent
+as `id_slot`, which LiteLLM passes on), so the engine reads only the new turn
+(a sub-agent keeps a slot the same way); side requests (titles, the
+safeguards' check, summaries, Auto's choice) keep to a slot of their own. A
+model that is not loaded while the engine is full gets room from an idle model
+that is not kept loaded (`EngineRoute`), never from the kept big one.
 
 **Sound and video in.** On upload the app has the sandbox's ffmpeg make an MP3
 of a sound, and a video's frames and sound track. A model that hears gets the

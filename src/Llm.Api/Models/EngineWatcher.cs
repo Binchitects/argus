@@ -11,29 +11,33 @@ namespace Llm.Api.Models;
 /// the engine restarts, or after a model loaded on request pushed one out), the
 /// presets and the gateway in step with the database, and Prometheus scraping
 /// whichever models are loaded. Checks every 10 seconds, every 3 while a model
-/// loads. A model that fails to load is not tried again (it would fail every few
-/// seconds); when every kept model failed, the .env model takes their place.
+/// loads. A model that fails to load is tried again after a minute, then less and
+/// less often (not every few seconds); when every kept model failed, the .env model
+/// takes their place.
 /// With several replicas, only the one that leads changes anything; the others
-/// only read what the engine has loaded (their line and model list need it).
+/// only read what the engine has loaded (their lines, slot table and model list need it).
 /// </summary>
 public sealed partial class EngineWatcher : BackgroundService
 {
     private const string WakeTopic = "engine:wake";
     private readonly SemaphoreSlim _wake = new(0);
+    /// <summary>The loaded and kept models <see cref="EngineState.Spare"/> was worked out for.</summary>
+    private string? _spareFor;
     private readonly IServiceScopeFactory scopes;
     private readonly EngineClient engine;
     private readonly EngineState state;
     private readonly ChatModels chatModels;
     private readonly AnswerGate gate;
+    private readonly SlotTable slotTable;
     private readonly Replicas replicas;
     private readonly IOptions<EngineOptions> options;
     private readonly ILogger<EngineWatcher> logger;
 
-    public EngineWatcher(IServiceScopeFactory scopes, EngineClient engine, EngineState state, ChatModels chatModels, AnswerGate gate, Replicas replicas,
+    public EngineWatcher(IServiceScopeFactory scopes, EngineClient engine, EngineState state, ChatModels chatModels, AnswerGate gate, SlotTable slotTable, Replicas replicas,
         IOptions<EngineOptions> options, ILogger<EngineWatcher> logger)
     {
-        (this.scopes, this.engine, this.state, this.chatModels, this.gate, this.replicas, this.options, this.logger) =
-            (scopes, engine, state, chatModels, gate, replicas, options, logger);
+        (this.scopes, this.engine, this.state, this.chatModels, this.gate, this.slotTable, this.replicas, this.options, this.logger) =
+            (scopes, engine, state, chatModels, gate, slotTable, replicas, options, logger);
         replicas.On(WakeTopic, _ =>
         {
             WakeHere();
@@ -120,15 +124,21 @@ public sealed partial class EngineWatcher : BackgroundService
                 {
                     // One at a time: a load at the engine's limit first unloads the model used least recently,
                     // which may be a kept one that sat idle; it comes back on a later round.
-                    if (kept.FirstOrDefault(k => Status(k) == "unloaded") is { } next)
+                    // One that failed is tried again once its wait is over: the router also marks failed a model it
+                    // had to kill while it was being stopped, which is not broken (EngineState.MayRetry).
+                    if ((kept.FirstOrDefault(k => Status(k) == "unloaded") ?? kept.FirstOrDefault(state.MayRetry)) is { } next)
                     {
                         LogLoading(logger, next);
+                        if (Status(next) == "failed")
+                        {
+                            state.Tried(next);
+                        }
                         await engine.LoadAsync(next, stoppingToken);
                         loading = true;
                     }
                     else if (kept.Count > 0 && kept.All(k => Status(k) == "failed") && !models.Any(m => m.Status == "loaded"))
                     {
-                        // Every kept model failed to load (they are not tried again: each would fail every few seconds).
+                        // Every kept model failed to load (each is tried again after a while, not every few seconds).
                         if (reported != string.Join(',', kept))
                         {
                             LogNothing(logger, string.Join(", ", kept));
@@ -136,20 +146,19 @@ public sealed partial class EngineWatcher : BackgroundService
                         }
                     }
                 }
-                var now = string.Join(',', models.Where(m => m.Status == "loaded").Select(m => m.Name).Order(StringComparer.Ordinal));
+                var names = models.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
+                var now = string.Join(',', names.Order(StringComparer.Ordinal));
                 if (now != loaded)
                 {
-                    var names = models.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
                     if (lead)
                     {
                         catalog.WriteTargets(names);
                     }
                     chatModels.Forget();
-                    // What the loaded models serve at once: the answers' line, and sub-agents, keep within it.
-                    gate.EngineSlots = await scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().LocalModels
-                        .Where(m => names.Contains(m.Name)).SumAsync(m => m.Parallel, stoppingToken);
                     loaded = now;
                 }
+                // What each model serves at once: its line's places, and the slots conversations keep; and which may make room.
+                await CapacityAsync(scope.ServiceProvider, true, names, catalog.Kept(), stoppingToken);
             }
             catch (EngineException ex)
             {
@@ -184,6 +193,66 @@ public sealed partial class EngineWatcher : BackgroundService
         }
     }
 
+    /// <summary>
+    /// What each chat model serves at once, for the answers' lines (AnswerGate) and the engine's slots
+    /// (SlotTable): a model of this engine alone, its parallel slots, less the one kept for side requests;
+    /// a model with copies on other GPU servers, the slots of all its copies (the gateway spreads the
+    /// requests among them), unless a copy does not say how many it serves; any other, no limit.
+    /// </summary>
+    public static (Dictionary<string, int> Places, Dictionary<string, int> Slots) Capacity(IEnumerable<(string Name, int Parallel)> local, IEnumerable<(string Name, int? Parallel)> remote)
+    {
+        var (places, slots) = (new Dictionary<string, int>(StringComparer.Ordinal), new Dictionary<string, int>(StringComparer.Ordinal));
+        var copies = remote.GroupBy(r => r.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Select(r => r.Parallel).ToList(), StringComparer.Ordinal);
+        foreach (var (name, parallel) in local)
+        {
+            var here = Math.Max(1, parallel);
+            if (!copies.Remove(name, out var elsewhere))
+            {
+                slots[name] = here;
+                places[name] = SlotTable.Places(here);
+            }
+            else if (elsewhere.All(p => p > 0))
+            {
+                places[name] = here + elsewhere.Sum(p => p!.Value);
+            }
+        }
+        foreach (var (name, elsewhere) in copies.Where(c => c.Value.All(p => p > 0)))
+        {
+            places[name] = elsewhere.Sum(p => p!.Value);
+        }
+        return (places, slots);
+    }
+
+    /// <summary>
+    /// The loaded models that may make room for another (EngineRoute), the quickest to load again first: not
+    /// kept loaded, smallest file first (a model the app did not add, the .env one, last).
+    /// </summary>
+    public static IReadOnlyList<string> SpareOf(IEnumerable<string> loaded, IReadOnlyCollection<string> kept, IReadOnlyDictionary<string, long> sizes) =>
+        [.. loaded.Where(n => !kept.Contains(n)).OrderBy(n => sizes.TryGetValue(n, out var size) ? size : long.MaxValue).ThenBy(n => n, StringComparer.Ordinal)];
+
+    /// <summary>
+    /// Each model's places and slots from the database, on every replica (each keeps its own lines and table),
+    /// and the loaded models that may make room for another.
+    /// </summary>
+    private async Task CapacityAsync(IServiceProvider services, bool onEngine, IReadOnlyList<string> loaded, IReadOnlyCollection<string> kept, CancellationToken ct)
+    {
+        var db = services.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        var models = onEngine ? await db.LocalModels.AsNoTracking().Select(m => new { m.Name, m.Parallel, m.File }).ToListAsync(ct) : [];
+        var remote = (await db.RemoteServers.AsNoTracking().ToListAsync(ct)).SelectMany(s => s.Models).Select(m => (m.Name, m.Parallel));
+        var (places, slots) = Capacity(models.Select(m => (m.Name, m.Parallel)), remote);
+        gate.SetPlaces(places);
+        slotTable.SetModels(slots, loaded.ToHashSet(StringComparer.Ordinal));
+        // Read again only when what is loaded or kept changed: the library's files are listed for their sizes.
+        var spareFor = string.Join(',', loaded.Order(StringComparer.Ordinal)) + "|" + string.Join(',', kept.Order(StringComparer.Ordinal));
+        if (onEngine && spareFor != _spareFor)
+        {
+            var files = services.GetRequiredService<ModelLibrary>().List().ToDictionary(e => e.File.Path, e => e.File.Size, StringComparer.Ordinal);
+            state.Spare = SpareOf(loaded, kept,
+                models.Where(m => files.ContainsKey(m.File)).ToDictionary(m => m.Name, m => files[m.File], StringComparer.Ordinal));
+            _spareFor = spareFor;
+        }
+    }
+
     /// <summary>Without the llama.cpp engine, the other GPU servers' models still reach the gateway: every minute.</summary>
     private async Task GatewayOnlyAsync(CancellationToken stoppingToken)
     {
@@ -191,11 +260,12 @@ public sealed partial class EngineWatcher : BackgroundService
         {
             try
             {
+                await using var scope = scopes.CreateAsyncScope();
                 if (replicas.IsLeader)
                 {
-                    await using var scope = scopes.CreateAsyncScope();
                     await scope.ServiceProvider.GetRequiredService<ModelCatalog>().SyncGatewayAsync(stoppingToken);
                 }
+                await CapacityAsync(scope.ServiceProvider, false, [], [], stoppingToken);
             }
             catch (GatewayException ex)
             {

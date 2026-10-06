@@ -1,4 +1,12 @@
-import type { ChatConfig, Message } from './types'
+import type { ChatConfig, InLine, Message } from './types'
+
+/** What an answer waiting for its turn says: whose line it is in, and how many go first. */
+export function waitingText(line: InLine | null | undefined): string {
+  if (line == null) return 'Waiting for the model…'
+  if (line.yours) return 'Waiting for your other answer to end first.'
+  const busy = line.model ? `${line.model} is busy` : 'The chat is busy'
+  return line.ahead === 0 ? `${busy}: your turn is next.` : `${busy}: ${line.ahead} ${line.ahead === 1 ? 'answer' : 'answers'} ahead of you.`
+}
 
 /** "0.4 s", "12 s", "1 min 5 s", "1 h 12 min". */
 export function seconds(ms: number | null | undefined): string {
@@ -42,7 +50,8 @@ export function answerUsage(messages: Message[], config: ChatConfig): AnswerUsag
     u.completion += completion
     const p = config.models.find((x) => x.name === model)?.prices
     if (!p || p.input === null || p.output === null) return
-    u.cost = (u.cost ?? 0) + ((prompt - cached) * p.input + cached * (p.cachedInput ?? p.input) + completion * p.output) / 1_000_000
+    // A model with no cached price (one added in Admin -> Models): the gateway charges its cached tokens nothing (measured).
+    u.cost = (u.cost ?? 0) + ((prompt - cached) * p.input + cached * (p.cachedInput ?? 0) + completion * p.output) / 1_000_000
   }
   for (const m of messages) {
     if (m.role === 'assistant' && m.promptTokens !== null) add(m.model, m.promptTokens, m.cachedTokens ?? 0, m.completionTokens ?? 0)

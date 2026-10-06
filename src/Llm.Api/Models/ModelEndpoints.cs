@@ -70,6 +70,8 @@ public static class ModelEndpoints
         var kept = e.Enabled ? catalog.Kept() : [];
         var pinned = e.Enabled ? catalog.Pinned() : [];
         var hw = e.Enabled ? await hardware.GetAsync(ct) : null;
+        var servers = await db.RemoteServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
+        var onServers = servers.SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
         var rows = new List<object>();
         foreach (var m in local)
         {
@@ -83,9 +85,10 @@ public static class ModelEndpoints
                 m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.OutputPerMtok,
                 vision = m.Projector is { Length: > 0 }, atGateway = At(m.Name) is not null, access = Access(m.Name),
                 profile = files.GetValueOrDefault(m.File),
+                // What its token cache keeps, and the RAM it takes.
+                cache = TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name)),
             });
         }
-        var servers = await db.RemoteServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
         foreach (var s in servers)
         {
             foreach (var m in s.Models)
@@ -106,7 +109,6 @@ public static class ModelEndpoints
                 keptNow = x.State.Kept, vision = false, atGateway = At(x.Model.Name) is not null, access = Access(x.Model.Name),
             });
         }
-        var onServers = servers.SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var m in atGateway.Where(m => local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name) && MediaControl.Find(m.Name) is null))
         {
             rows.Add(new { name = m.Name, source = "gateway", mode = m.Mode, status = (string?)null, context = m.Context, vision = m.Vision, access = Access(m.Name) });

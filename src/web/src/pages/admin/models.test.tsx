@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { admin, fakeApi, renderApp } from '@/test/utils'
+import { cacheLine } from './model-profile'
 
 const everyone = { audience: 'Everyone', groups: [] }
 
@@ -13,7 +14,10 @@ const view = (over: object = {}) => ({
     ...over,
   },
   models: [
-    { name: 'Big-Model', source: 'local', mode: 'chat', status: 'loaded', file: 'big/Big-Q4.gguf', context: 131072, vision: false, access: everyone, kept: true },
+    {
+      name: 'Big-Model', source: 'local', mode: 'chat', status: 'loaded', file: 'big/Big-Q4.gguf', context: 131072, vision: false, access: everyone, kept: true,
+      cache: { slots: 4, sideSlot: 3, pinned: true, keepsIdle: true, checkpoints: 4, checkpointBytes: 117_669_888, ramBytes: 16 * 117_669_888 },
+    },
     {
       name: 'Small-Model', source: 'local', mode: 'chat', status: 'unloaded', file: 'small/Small-Q8.gguf', projector: null, context: 32768, maxOutput: null,
       gpuLayers: 99, cpuMoe: 0, kvType: 'q8_0', parallel: 1, extraPreset: null, thinking: true, tools: true, inputPerMtok: null, outputPerMtok: null,
@@ -88,6 +92,26 @@ describe('admin models', () => {
     await userEvent.click(within(big).getByRole('button', { name: 'Choose groups' }))
     await userEvent.click(await screen.findByRole('checkbox', { name: /Research/ }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ audience: 'Groups', groups: ['g1'] }))
+  })
+
+  it("a model's card says what its token cache keeps and the RAM it takes", async () => {
+    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: view() }) })
+    renderApp('/admin/models')
+    const big = (await screen.findByRole('heading', { name: /Big-Model/ })).closest('section')!
+    expect(
+      within(big).getByText('Token cache: 4 slots: 3 keep a conversation each, 1 for small steps (titles, checks, summaries) · 4 checkpoints a slot of 112.2 MiB: up to 1.8 GiB of RAM'),
+    ).toBeInTheDocument()
+    // A model without a cache line (a gateway one) shows none.
+    const image = screen.getByRole('heading', { name: /flux-image/ }).closest('section')!
+    expect(within(image).queryByText(/Token cache/)).not.toBeInTheDocument()
+  })
+
+  it('the token cache line covers one slot, copies elsewhere and idle slots emptied', () => {
+    const c = { slots: 2, sideSlot: null, pinned: true, keepsIdle: true, checkpoints: null, checkpointBytes: null, ramBytes: null }
+    expect(cacheLine(c)).toBe('Token cache: 2 slots, each keeping a conversation')
+    expect(cacheLine({ ...c, slots: 1, pinned: false })).toBe('Token cache: 1 slot: conversations take turns in it')
+    expect(cacheLine({ ...c, slots: 4, pinned: false })).toBe('Token cache: 4 slots; the gateway shares requests among its copies, so a conversation does not keep one')
+    expect(cacheLine({ ...c, keepsIdle: false, checkpoints: 8 })).toBe('Token cache: 2 slots, each keeping a conversation · idle slots are emptied at each new request · 8 checkpoints a slot, in RAM')
   })
 
   it('a model is added from the library, starting from what fits its kind and the machine', async () => {

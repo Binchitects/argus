@@ -792,16 +792,24 @@ minute) are the chat's only: keys have their own requests-at-once limit.
 
 ## Fair use
 
-The model serves few people at once (llama.cpp's `LLAMACPP_PARALLEL` slots).
-So that everyone gets their turn:
+A model serves few people at once: its slots (**Answers at once** on its card
+in Admin → Models, and its copies on other GPU servers). So that everyone gets
+their turn:
 
-- **In the chat**, a person has one answer running at a time (Settings → Chat →
-  Answers at once, per person), and the chat as many as the engine serves at
-  once (Answers at once, everyone; 0 means the engine's slots). Others wait in
-  line and see how many answers are ahead of them. A free place goes to
-  whoever has had least: someone with nothing running goes before someone
-  whose last answer just ended. A wait of more than ten minutes gives up and
-  says the model is busy.
+- **In the chat**, each model has its own line: it runs as many answers at
+  once as it serves (from 3 slots, one less: that slot is kept for titles, the
+  safeguards' check and summaries), so someone on a small model
+  never waits behind people on the big one. A person has one answer running
+  at a time, on any model (Settings → Chat → Answers at once, per person).
+  **Answers at once, everyone** can also limit all models together (0, the
+  default: no limit beyond each model's own). Who waits sees which model is
+  busy and how many answers are ahead of them ("Qwen3.8-Flash-Next is busy:
+  2 answers ahead of you"), or that their own other answer goes first. A free
+  place goes to whoever has had least: someone with nothing running goes
+  before someone whose last answer just ended. A wait of more than ten minutes
+  gives up and says which model is busy.
+- **Each conversation keeps its slot** in the engine, so the next turn reads
+  only what is new from the cache (see [admin.md](admin.md#the-token-cache)).
 - **API keys** (Qwen Code, IDEs, scripts) have at most two requests at once
   (API requests at once, per key); a third at the same time gets HTTP 429 and
   can retry. It applies to every key, within seconds of a change.

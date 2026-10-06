@@ -19,9 +19,9 @@ namespace Llm.Api.Chat;
 /// <param name="Research">Deep research: the web and sub-agents on for this answer, a plan, and a sourced report.</param>
 /// <param name="Again">Said with the question for this answer only: answer again shorter or longer (AnswerLengths.Again), or answer in spoken sentences (Talk.Note).</param>
 /// <param name="Titled">The chat's first question: the model for small steps writes its title beside the answer (ChatTitles).</param>
-/// <param name="QueuedMs">How long the answer waited in line (AnswerGate) before it started, for its trace.</param>
+/// <param name="Line">Waits for a place in the line of the model that answers (AnswerGate), saying so meanwhile; null: no line (AnswerJobs gives one).</param>
 public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false, string? Again = null, bool Titled = false,
-    int? QueuedMs = null);
+    Func<string, CancellationToken, Task<IDisposable>>? Line = null);
 
 /// <summary>
 /// "Answer now" (as in ChatGPT and Gemini): the person asked the answer to stop thinking.
@@ -112,7 +112,7 @@ public sealed partial class ChatService(
 
     public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {
-        _answerClock = new AnswerClock(overrides.QueuedMs ?? 0);
+        _answerClock = new AnswerClock();
         var email = user.Email!.ToLowerInvariant();
         // The model for sub-agents and small steps, when one is set and this person may use it now.
         var helper = await small.ForAsync(user, ct);
@@ -139,6 +139,11 @@ public sealed partial class ChatService(
             return;
         }
         var thinking = overrides.Thinking ?? route?.Thinking ?? conversation.Thinking;
+
+        // Fair use: a place among the few this model serves at once, in turn (AnswerGate); other models' lines are not this one's.
+        var inLine = Stopwatch.StartNew();
+        using var place = overrides.Line is { } line ? await line(modelName, ct) : null;
+        _answerClock.Placed((int)inLine.ElapsedMilliseconds);
 
         // The chat's tools that this person may use, each made ready for this answer.
         var runs = new Dictionary<string, (ToolChoice Choice, IToolRun Run)>();
@@ -314,7 +319,7 @@ public sealed partial class ChatService(
                 for (var pass = 0; ; pass++)
                 {
                 var cut = false;
-                await foreach (var e in gateway.StreamAsync(request, email, ct))
+                await foreach (var e in gateway.StreamAsync(request, email, conversation.Id, ct))
                 {
                     timing.Saw(e);
                     switch (e)
@@ -728,8 +733,10 @@ public sealed partial class ChatService(
             .ToList();
         var notes = kit.Instructions.Where(i => i.Tool is not "agents" and not "ask" and not "memory").ToList();
         var toolIds = usable.Select(f => kit.Runs[f["function"]!["name"]!.GetValue<string>()].Choice.Tool.Id).ToHashSet(StringComparer.Ordinal);
-        // No more at once than the engine has places: one more would push another's cache out, and it would read its whole context again.
-        var atOnce = Math.Max(1, gate.EngineSlots > 0 ? Math.Min(chat.CurrentValue.AgentsAtOnce, gate.EngineSlots) : chat.CurrentValue.AgentsAtOnce);
+        // No more at once than their model serves at once (its places): one more would push another's cache out, and it
+        // would read its whole context again. Each keeps an engine slot of its own for its steps (SlotTable), as a chat does.
+        var places = gate.PlacesOf(kit.Model);
+        var atOnce = Math.Max(1, places > 0 ? Math.Min(chat.CurrentValue.AgentsAtOnce, places) : chat.CurrentValue.AgentsAtOnce);
         using var turns = new SemaphoreSlim(atOnce);
         var done = 0;
         async Task<(JsonObject Result, JsonObject Shown, List<ChatAttachment> Files)> RunAsync(AgentTask part, int index)
@@ -806,6 +813,8 @@ public sealed partial class ChatService(
         // Every round's tokens: the answer's cost counts its sub-agents' too. And its time, for the answer's trace.
         var used = new UsageReport(0, 0, 0);
         var timed = new TimingTotal();
+        // Its steps go back to the engine slot that holds its start, as a chat's turns do.
+        var holder = Guid.NewGuid();
         for (var round = 0; ; round++)
         {
             var request = new JsonObject
@@ -832,7 +841,7 @@ public sealed partial class ChatService(
             UsageReport? roundUsage = null;
             try
             {
-                await foreach (var e in gateway.StreamAsync(request, kit.Email, ct))
+                await foreach (var e in gateway.StreamAsync(request, kit.Email, holder, ct))
                 {
                     timing.Saw(e);
                     switch (e)

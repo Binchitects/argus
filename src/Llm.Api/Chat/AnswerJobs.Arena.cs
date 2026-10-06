@@ -8,9 +8,9 @@ namespace Llm.Api.Chat;
 public sealed partial class AnswerJobs
 {
     /// <summary>
-    /// Arena: the question answered by each model of the match, one after the other, in one
-    /// place in line (the engine may hold one model at a time; two at once would swap it back
-    /// and forth). Every event is blind: "Model A" and "Model B", never the names, until the
+    /// Arena: the question answered by each model of the match, one after the other, each in its
+    /// model's line (two at once could swap an engine that holds few models back and forth).
+    /// Every event is blind: "Model A" and "Model B", never the names, until the
     /// person votes. The chat then shows Model A's answer; the next question follows it.
     /// </summary>
     public void StartArena(Job job, Guid questionId, Guid matchId) =>
@@ -55,7 +55,7 @@ public sealed partial class AnswerJobs
                     }
                     job.Emit(Arena.Blind(node, match.ModelA, match.ModelB)!);
                 }
-                await chat.AnswerAsync(user, conversation, question, new AnswerOverrides(model, Hurry: job.Hurry), EmitAsync, ct);
+                await chat.AnswerAsync(user, conversation, question, new AnswerOverrides(model, Hurry: job.Hurry, Line: (m, token) => PlaceAsync(job, m, blind: true, token)), EmitAsync, ct);
                 if (side == "a")
                 {
                     endA = conversation.CurrentLeafId;

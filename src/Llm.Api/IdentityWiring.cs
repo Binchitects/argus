@@ -260,6 +260,8 @@ public static class IdentityWiring
             }
         });
         services.AddSingleton<Chat.AnswerGate>();
+        services.AddSingleton<Chat.SlotTable>();
+        services.AddSingleton<Chat.EngineRoute>();
         services.AddHttpClient<Chat.GatewayChat>((sp, c) =>
         {
             var o = sp.GetRequiredService<IOptions<Chat.ChatOptions>>().Value;

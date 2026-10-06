@@ -31,8 +31,12 @@ public sealed class EngineOptions
     /// <summary>The picture model's folder in the library: its text encoder there is no chat model.</summary>
     public string ImageModelDir { get; set; } = MediaModels.ImageDir;
     public string ImageTextEncoder { get; set; } = MediaModels.ImageTextEncoder;
-    /// <summary>How many models may be loaded at once, those kept loaded included (Settings, Engine).</summary>
-    public int ModelsMax { get; set; } = 1;
+    /// <summary>
+    /// How many models may be loaded at once, those kept loaded included (Settings, Engine). Two: a small
+    /// model asked for loads beside the big one (in what is left of the GPU, else in RAM) instead of
+    /// unloading it for everyone.
+    /// </summary>
+    public int ModelsMax { get; set; } = 2;
 }
 
 /// <summary>A model in the engine's list, and whether it is loaded.</summary>
@@ -63,6 +67,31 @@ public sealed class EngineClient(HttpClient http, IOptions<EngineOptions> option
     public Task LoadAsync(string name, CancellationToken ct = default) => SendAsync(HttpMethod.Post, "/models/load", new JsonObject { ["model"] = name }, ct);
 
     public Task UnloadAsync(string name, CancellationToken ct = default) => SendAsync(HttpMethod.Post, "/models/unload", new JsonObject { ["model"] = name }, ct);
+
+    /// <summary>
+    /// A loaded model's slots as the engine has them (llama-server's /slots): how many, and which are
+    /// answering now. Null when the engine does not say within two seconds (not reachable, the
+    /// endpoint off): the caller goes by what it knows itself.
+    /// </summary>
+    public async Task<(int Count, IReadOnlySet<int> Busy)?> SlotsAsync(string model, CancellationToken ct = default)
+    {
+        using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        quick.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            if (await SendAsync(HttpMethod.Get, "/slots?model=" + Uri.EscapeDataString(model), null, quick.Token) is not JsonArray slots)
+            {
+                return null;
+            }
+            var all = slots.OfType<JsonObject>().ToList();
+            return (all.Count, all.Where(s => s["is_processing"] is JsonValue v && v.TryGetValue<bool>(out var p) && p)
+                .Select(s => s["id"] is JsonValue id && id.TryGetValue<int>(out var n) ? n : -1).Where(n => n >= 0).ToHashSet());
+        }
+        catch (Exception ex) when (ex is EngineException or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
 
     private async Task<JsonNode?> SendAsync(HttpMethod method, string path, JsonNode? body, CancellationToken ct)
     {

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -17,20 +18,76 @@ using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Models;
 
-/// <summary>What the engine said last: its models and which are loaded. Kept by <see cref="EngineWatcher"/>.</summary>
-public sealed class EngineState
+/// <summary>
+/// What the engine said last: its models and which are loaded, and when each that failed to load is tried
+/// again. Kept by <see cref="EngineWatcher"/>.
+/// </summary>
+public sealed class EngineState(TimeProvider clock)
 {
     private volatile Snapshot _now = new([], null, null);
+    private readonly ConcurrentDictionary<string, Failure> _failed = new(StringComparer.Ordinal);
 
     public sealed record Snapshot(IReadOnlyList<EngineModel> Models, string? Error, DateTimeOffset? At);
 
+    /// <summary>A model the router marked failed: how many tries failed, since when it waits, and when it was last tried.</summary>
+    private sealed record Failure(int Count, DateTimeOffset Since, DateTimeOffset? Tried);
+
     public Snapshot Now => _now;
 
-    public void Set(IReadOnlyList<EngineModel> models) => _now = new Snapshot(models, null, DateTimeOffset.UtcNow);
+    /// <summary>
+    /// Loaded models that may make room for another, the quickest to load again first: those not kept
+    /// loaded, smallest file first (the watcher keeps it). A kept one never makes room for a request.
+    /// </summary>
+    public IReadOnlyList<string> Spare { get; set; } = [];
 
-    public void Fail(string error) => _now = _now with { Error = error, At = DateTimeOffset.UtcNow };
+    public void Set(IReadOnlyList<EngineModel> models)
+    {
+        var now = clock.GetUtcNow();
+        foreach (var m in models)
+        {
+            if (m.Status == "failed")
+            {
+                _failed.TryAdd(m.Name, new Failure(1, now, null));
+            }
+            else if (m.Status == "loaded")
+            {
+                _failed.TryRemove(m.Name, out _);
+            }
+        }
+        _now = new Snapshot(models, null, now);
+    }
 
-    /// <summary>"loaded", "loading", "unloaded", or null when the engine does not have that model.</summary>
+    /// <summary>
+    /// Whether a model the router marked failed is tried again now. Failed is not always broken: the router
+    /// kills a model that does not stop within 10 seconds of being told to (one stopped while it loads, to make
+    /// room for another, goes on loading and answering), and marks it failed. So it is tried again after a
+    /// minute, then after twice as long at each failure, up to 30 minutes; for half a minute after a try, the
+    /// requests that come meanwhile go too (the engine is loading it).
+    /// </summary>
+    public bool MayRetry(string model)
+    {
+        if (StatusOf(model) != "failed" || !_failed.TryGetValue(model, out var f))
+        {
+            return false;
+        }
+        var now = clock.GetUtcNow();
+        return now - f.Since >= Wait(f.Count) || (f.Tried is { } at && now - at < TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>A failed model is tried again: should it fail again, the next wait is twice as long.</summary>
+    public void Tried(string model)
+    {
+        var now = clock.GetUtcNow();
+        _failed.AddOrUpdate(model, _ => new Failure(1, now, now),
+            (_, f) => f.Tried is { } at && now - at < TimeSpan.FromSeconds(30) ? f : new Failure(f.Count + 1, now, now));
+    }
+
+    /// <summary>The wait before a model that failed this many times is tried again: 1, 2, 4, 8, 16, then 30 minutes.</summary>
+    public static TimeSpan Wait(int failures) => TimeSpan.FromMinutes(Math.Min(30, 1 << Math.Clamp(failures - 1, 0, 5)));
+
+    public void Fail(string error) => _now = _now with { Error = error, At = clock.GetUtcNow() };
+
+    /// <summary>"loaded", "loading", "unloaded", "failed" (its last load ended in an error), or null when the engine does not have that model.</summary>
     public string? StatusOf(string model) => _now.Models.FirstOrDefault(m => m.Name == model)?.Status;
 }
 
@@ -201,12 +258,26 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             sb.Append(inv, $"presence-penalty = {presence:0.###}\n");
         }
         sb.Append("jinja = true\nmetrics = true\n");
+        var own = ExtraValues(m.ExtraPreset);
         // A prompt whose start matches what a slot holds reads that part from the cache; with
         // cache-reuse, chunks further on that match too (after a cut in the middle) are shifted
         // into place. The extra lines may set another size, or 0 for none.
-        if (!(m.ExtraPreset ?? "").Split('\n').Any(l => PresetLine().Match(l.Trim()) is { Success: true } k && k.Groups[1].Value == "cache-reuse"))
+        if (!own.ContainsKey("cache-reuse"))
         {
             sb.Append("cache-reuse = 256\n");
+        }
+        // Each conversation keeps its slot (SlotTable): an idle slot keeps what it holds. Otherwise, with one
+        // cache for all slots, llama.cpp moves idle slots to RAM and empties them at every new request,
+        // and a hybrid model's never come back. When the cache is full, it still empties idle slots one by one.
+        if (!own.ContainsKey("cache-idle-slots") && !own.ContainsKey("no-cache-idle-slots"))
+        {
+            sb.Append("no-cache-idle-slots = true\n");
+        }
+        // A hybrid or recurrent model cannot cut its state back to a shorter prompt: it goes back to a
+        // checkpoint, a copy of its state in RAM. Four a slot read as fast as 32 (measured), for an eighth of the RAM.
+        if (TokenCache.Checkpointed(profile) && !own.ContainsKey("ctx-checkpoints") && !own.ContainsKey("swa-checkpoints"))
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"ctx-checkpoints = {TokenCache.DefaultCheckpoints}\n");
         }
         foreach (var raw in (m.ExtraPreset ?? "").Split('\n'))
         {
@@ -225,11 +296,17 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         return sb.ToString();
     }
 
+    /// <summary>What a model's extra preset lines set: each key and its value.</summary>
+    public static Dictionary<string, string> ExtraValues(string? extra) =>
+        (extra ?? "").Split('\n').Select(l => PresetLine().Match(l.Trim())).Where(k => k.Success)
+            .GroupBy(k => k.Groups[1].Value, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Last().Groups[2].Value.Trim(), StringComparer.Ordinal);
+
     /// <summary>Writes the presets for the engine; it restarts when they change.</summary>
     public async Task WritePresetsAsync(CancellationToken ct = default)
     {
         var models = await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct);
-        var profiles = models.Any(m => m.Yarn) ? library.List().ToDictionary(e => e.File.Path, e => e.Profile, StringComparer.Ordinal) : [];
+        // Each file's profile: its attention decides the checkpoints, its training the YaRN stretch.
+        var profiles = models.Count > 0 ? library.List().ToDictionary(e => e.File.Path, e => e.Profile, StringComparer.Ordinal) : [];
         var text = "# Written by the app (Admin -> Models). The engine restarts when this changes.\n\n" +
             string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File))));
         Write(PresetsFile, text);
@@ -470,10 +547,11 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
 
     /// <summary>
     /// An engine model that is not loaded but loads when asked for: the engine has a place
-    /// besides the models kept loaded (the least recently used unloads to make room).
+    /// besides the models kept loaded (one not kept, idle, makes room: EngineRoute). One that
+    /// failed to load does too once its wait is over (EngineState.MayRetry).
     /// </summary>
     public bool OnRequest(string model, IReadOnlySet<string> onEngine) =>
-        onEngine.Contains(model) && !Loaded(model, onEngine) && engine.StatusOf(model) is "unloaded" or "loading"
+        onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" || engine.MayRetry(model))
         && catalog.Kept().Count < options.Value.ModelsMax;
 
     /// <summary>Whether a model can answer: loaded, or loaded on request.</summary>
@@ -514,8 +592,13 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
             return engine.StatusOf(model) == "loading"
                 ? $"{model} is loading. Try again in a minute, or choose another model."
                 : engine.StatusOf(model) == "failed"
-                    ? $"{model} could not be loaded. Choose another model; an admin can see why under Admin → Models."
+                    ? $"{model} could not be loaded just now. Choose another model, or try again in a few minutes; an admin can see why under Admin → Models."
                     : $"{model} is not loaded right now, and the engine has no place for it beside the models kept loaded. An admin can load it under Admin → Models, or choose another model.";
+        }
+        if (onEngine.Contains(model) && engine.StatusOf(model) == "failed")
+        {
+            // Its wait is over: this request has the engine load it again.
+            engine.Tried(model);
         }
         // One credit over the chat and API keys, and the groups' credit.
         return await credit.RefusalAsync(user, ct);

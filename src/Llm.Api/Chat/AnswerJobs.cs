@@ -68,8 +68,8 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
         /// <summary>"Answer now": the person asked it to stop thinking.</summary>
         public Hurry Hurry { get; } = new();
 
-        /// <summary>How long it waited in line for a place (AnswerGate), for its trace.</summary>
-        internal int QueuedMs { get; set; }
+        /// <summary>Its place in line: the person's groups' priority (Admin → Groups).</summary>
+        internal int Priority { get; set; }
 
         /// <summary>Its end goes to the person's bell when no page watched it (off for a scheduled task's, which says so itself, and a compaction).</summary>
         public bool Notify { get; set; } = true;
@@ -276,7 +276,8 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
                 : Task.CompletedTask;
             try
             {
-                await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question, overrides with { Hurry = job.Hurry, QueuedMs = job.QueuedMs }, job.EmitAsync, ct);
+                await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question,
+                    overrides with { Hurry = job.Hurry, Line = (model, token) => PlaceAsync(job, model, blind: false, token) }, job.EmitAsync, ct);
             }
             finally
             {
@@ -284,7 +285,10 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
             }
         });
 
-    /// <summary>Compacts the branch down to <paramref name="leafId"/> in the background (the model writes a summary: it waits its turn as an answer does).</summary>
+    /// <summary>
+    /// Compacts the branch down to <paramref name="leafId"/> in the background. The summary is a side request: it takes
+    /// no place in line, and keeps off the conversations' slots (SlotTable).
+    /// </summary>
     public void StartCompaction(Job job, Guid leafId)
     {
         job.Notify = false;
@@ -311,25 +315,13 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
                 return;
             }
 
-            // Fair use: a place of the few the model serves at once, in turn (AnswerGate), first for the higher priority.
-            var priority = await services.GetRequiredService<Access.AccessService>().PriorityAsync(user, ct);
-            gate.Replicas = replicas.Count;
-            AnswerGate.Place place;
-            var waited = System.Diagnostics.Stopwatch.StartNew();
-            try
-            {
-                place = await gate.EnterAsync(job.Person, priority, line => job.EmitAsync(new { type = "queued", ahead = line.Ahead }), ct);
-                job.QueuedMs = (int)waited.ElapsedMilliseconds;
-            }
-            catch (TimeoutException ex)
-            {
-                job.Emit(new { type = "error", message = ex.Message });
-                return;
-            }
-            using (place)
-            {
-                await work(services, user, conversation, ct);
-            }
+            // Fair use: once the answer knows its model, a place of the few that model serves at once (PlaceAsync).
+            job.Priority = await services.GetRequiredService<Access.AccessService>().PriorityAsync(user, ct);
+            await work(services, user, conversation, ct);
+        }
+        catch (AnswerGate.TooLongException ex)
+        {
+            job.Emit(new { type = "error", message = ex.Message });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -363,6 +355,17 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
                 await NotifyAsync(job, outcome == "error" ? error ?? "The answer failed." : null);
             }
         }
+    }
+
+    /// <summary>
+    /// A place for the job's answer in <paramref name="model"/>'s line (AnswerGate), in turn, first for the higher
+    /// priority. The pages watching are told the line while it waits; in an arena without the model's name.
+    /// </summary>
+    private async Task<IDisposable> PlaceAsync(Job job, string model, bool blind, CancellationToken ct)
+    {
+        gate.Replicas = replicas.Count;
+        return await gate.EnterAsync(job.Person, job.Priority, model,
+            line => job.EmitAsync(new { type = "queued", ahead = line.Ahead, model = blind ? null : line.Model, yours = line.Yours }), ct);
     }
 
     /// <summary>An answer that ended while no page watched it (the person left, or closed the tab): the bell says so.</summary>

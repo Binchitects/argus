@@ -3,7 +3,7 @@
 # /presets/models.ini), loaded and unloaded live with no restart.
 #
 #   /presets/keep  the models kept loaded, one a line (loaded at start)
-#   /presets/max   how many may be loaded at once, those kept included (1)
+#   /presets/max   how many may be loaded at once, those kept included (2)
 #
 # Presets are read only when llama-server starts, so a change to the list
 # restarts it here. When a place is left beside the kept models, any other
@@ -13,7 +13,7 @@ key="${ENGINE_KEY:?set ENGINE_KEY in .env}"
 models=/presets/models.ini
 keep=/presets/keep
 
-max() { m=$(cat /presets/max 2>/dev/null); echo "${m:-1}"; }
+max() { m=$(cat /presets/max 2>/dev/null); echo "${m:-2}"; }
 stamp() { cat "$models" /presets/max 2>/dev/null | cksum; }
 kept() {
   [ -f "$keep" ] || return 0

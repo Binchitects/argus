@@ -19,7 +19,7 @@ import { AccessPicker, type AccessRule } from './access-picker'
 import { ModelForm, type SavedModel } from './model-form'
 import { WorkingHours } from './model-hours'
 import { DownloadsCard, HuggingFaceBrowser } from './huggingface'
-import { bytes, summary, type ModelProfile } from './model-profile'
+import { bytes, cacheLine, summary, type ModelProfile, type TokenCache } from './model-profile'
 import { ServersSection } from './servers'
 
 interface ModelRow extends SavedModel {
@@ -39,6 +39,8 @@ interface ModelRow extends SavedModel {
   access: AccessRule
   /** What its file is, when it is in the library. */
   profile?: ModelProfile | null
+  /** A model added here: what its token cache keeps, and the RAM it takes. */
+  cache?: TokenCache | null
   /** Pinned to keep loaded: loaded at start, and again whenever it is not (outside working hours). */
   kept?: boolean
   /** Kept loaded now: pinned, or by the working hours in force. */
@@ -328,6 +330,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
                 (image ? 'An image model' : 'Served by the gateway')}
           </CardDescription>
           {m.profile && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary(m.profile)}</p>}
+          {m.cache && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{cacheLine(m.cache)}</p>}
         </div>
         <Status status={m.status} />
       </CardHeader>

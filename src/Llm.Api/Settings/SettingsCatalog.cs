@@ -143,7 +143,7 @@ public static class SettingsCatalog
             { Default = "60", Min = 5, Max = 300, Unit = "seconds", Optional = false },
         new("Chat:AnswersPerPerson", Chat, "Answers at once, per person", "Answers one person may have running at once, across their chats. More wait their turn, so nobody takes the model from the others.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "1", Min = 1, Max = 16, Optional = false },
-        new("Chat:AnswersAtOnce", Chat, "Answers at once, everyone", "Answers the chat runs at once; the rest wait in line, served in turn (whoever has had least goes first). 0: as many as the engine serves at once (People served at once).", SettingType.WholeNumber, SettingScope.Live)
+        new("Chat:AnswersAtOnce", Chat, "Answers at once, everyone", "Each model runs as many answers at once as it serves (its Answers at once in Admin → Models, and its copies on other GPU servers); the rest wait in that model's line, served in turn (whoever has had least goes first), so people on one model never wait for another's. Set this to also limit all models together. 0: no limit beyond each model's own.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "0", Min = 0, Max = 256, Optional = false },
         new("Chat:QueueTimeout", Chat, "Longest wait in line", "An answer that has waited this long for its turn gives up and says the model is busy.", SettingType.Duration, SettingScope.Live)
             { Default = "00:10:00", Unit = "minutes", Min = 1, Max = 120, Optional = false },
@@ -167,8 +167,8 @@ public static class SettingsCatalog
             { Default = "xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking", Optional = false, Max = 400, Pattern = @"[a-z]+:[^,]+(,[a-z]+:[^,]+)*", PatternHelp = "level:Label pairs, e.g. medium:Balanced,off:No thinking" },
         new("Chat:DefaultThinking", Model, "Default thinking", "How hard the model thinks when a chat does not choose: one of the levels above.", SettingType.Text, SettingScope.Live)
             { Default = "medium", Optional = false, Max = 20 },
-        new("Engine:ModelsMax", Model, "Models loaded at once", "Those kept loaded included. A place beyond them lets other models load when asked for.", SettingType.WholeNumber, SettingScope.AppRestart)
-            { Default = "1", Min = 1, Max = 8, Optional = false, Impact = "The engine restarts and reloads its models: chat and the API pause for a few minutes." },
+        new("Engine:ModelsMax", Model, "Models loaded at once", "Those kept loaded included. A place beyond them lets other models load when asked for, beside the loaded ones (in what is left of the GPU, else in RAM), instead of unloading them for everyone. At the limit, a model asked for waits until the one used least recently is idle, then takes its place. 1: one model at a time, and people on different models take turns, each loading it again.", SettingType.WholeNumber, SettingScope.AppRestart)
+            { Default = "2", Min = 1, Max = 8, Optional = false, Impact = "The engine restarts and reloads its models: chat and the API pause for a few minutes." },
         new("ModelHours:TimeZone", Model, "Time zone of working hours", "The clock the models' working hours follow (Admin → Models → Working hours): an IANA name such as Europe/Berlin, Asia/Tehran or America/New_York.", SettingType.Text, SettingScope.Live)
             { Default = "UTC", Pattern = @"^(UTC|[A-Za-z]+(/[A-Za-z0-9_+\-]+){1,2})$", PatternHelp = "An IANA time zone, e.g. Europe/Berlin, or UTC." },
         new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)

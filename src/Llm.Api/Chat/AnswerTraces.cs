@@ -76,19 +76,23 @@ public sealed class TimingTotal
 }
 
 /// <summary>An answer's own clock, for its trace: its time in line before it started, getting ready, each round, and the round that ends it.</summary>
-public sealed class AnswerClock(int queuedMs)
+public sealed class AnswerClock
 {
     private readonly Stopwatch _since = Stopwatch.StartNew();
+    private int _queuedMs;
     private int? _readyMs;
     private int _rounds;
 
     /// <summary>The answer's newest round: its end is written there.</summary>
     public ChatMessage? Last { get; private set; }
 
+    /// <summary>It had its place in its model's line after this long (AnswerGate); getting ready starts then.</summary>
+    public void Placed(int queuedMs) => _queuedMs = queuedMs;
+
     /// <summary>A round begins: the first one ends getting ready (its tools started, the chat read).</summary>
     public ModelTiming Round(ChatMessage message)
     {
-        _readyMs ??= (int)_since.ElapsedMilliseconds;
+        _readyMs ??= Math.Max(0, (int)_since.ElapsedMilliseconds - _queuedMs);
         Last = message;
         return new ModelTiming();
     }
@@ -101,18 +105,18 @@ public sealed class AnswerClock(int queuedMs)
         var json = total.ToJson();
         if (_rounds++ == 0)
         {
-            json["queueMs"] = queuedMs;
+            json["queueMs"] = _queuedMs;
             json["setupMs"] = _readyMs;
         }
         return json.ToJsonString();
     }
 
-    /// <summary>The answer ended: its whole time goes on its last round.</summary>
+    /// <summary>The answer ended: its whole time, the wait in line included, goes on its last round.</summary>
     public void End()
     {
         if (Last is not null)
         {
-            Last.AnswerMs = queuedMs + (int)_since.ElapsedMilliseconds;
+            Last.AnswerMs = (int)_since.ElapsedMilliseconds;
         }
     }
 }
