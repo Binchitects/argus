@@ -169,7 +169,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     the video model (Wan2.2 TI2V 5B). It takes minutes (more while the chat
     model fills the GPU); it plays in the answer and is a file of the chat.
   - **Speech**: a text read aloud into an MP3 (a voice-over, a pronunciation),
-    in English or Persian.
+    in the person's voice for its language ([Your voice](#your-voice)).
   - **Calculator**: exact arithmetic to 28 digits, so the model does not
     guess. Functions like sqrt and sin are good to 15 digits.
   - **Date and time**: the time in any time zone, and the days between dates.
@@ -501,7 +501,8 @@ many as it needs (up to 50).
 ## Sound and video
 
 - **Voice messages**: the microphone beside the paperclip records one; the
-  answer to a voice message is read aloud.
+  answer to a voice message is read aloud (unless you turned that off). It is
+  written down in the language you speak, when you chose one.
 - **Sound and video files** attach like any file (MP3, WAV, OGG, M4A, WebM,
   MP4, MOV, MKV) and play in place. On upload the sandbox's ffmpeg makes what
   the models take: a sound as an MP3, a video as up to eight frames and its
@@ -511,9 +512,11 @@ many as it needs (up to 50).
   made once and kept). A video's frames go as pictures to a model that sees,
   with the second each was taken at.
 - **Read aloud**: under every answer, the speaker reads its prose (no code, no
-  links' addresses): Kokoro's voice, or a Persian voice for Persian.
+  links' addresses) in your voice for its language, at your speed.
 - The speech models are at the gateway too: `/v1/audio/transcriptions` and
-  `/v1/audio/speech` with a person's key.
+  `/v1/audio/speech` with a person's key. Speech that names no voice is read in
+  the key's person's voice for the text's language, at their speed when it names
+  none; with no model either, that voice's model.
 
 ### Talk
 
@@ -522,13 +525,16 @@ chat. The browser asks for the microphone once.
 
 - **You speak, then pause.** The browser listens all along and cuts what you
   said at a pause of about a second: louder than the room for a moment starts
-  it, quiet ends it. What was said is written down (Whisper, in your name) and
-  sent as your question. It is saved in the chat like a typed one, and answered
-  with the chat's model and tools, asked to answer in plain spoken sentences.
+  it, quiet ends it. What was said is written down (Whisper, in your name, in
+  the language you speak when you chose one) and sent as your question. It is
+  saved in the chat like a typed one, and answered with the chat's model and
+  tools, asked to answer in plain spoken sentences.
 - **The answer is read aloud as it is written.** Each sentence is spoken as
   soon as it is complete, in order, while the next ones are still being
-  written: Kokoro's voice, or the Persian voice for a Persian sentence. Code
-  blocks are not read. The text appears as usual.
+  written, each in your voice for its language: a Persian sentence in the
+  Persian voice. Code blocks are not read. The text appears as usual. With
+  **Read answers aloud in Talk** off (Your account → Voice) the answer is only
+  shown, and speaking still stops it.
 - **Speak over it to stop it.** Your voice while the answer is read (or while
   it is still thinking) stops the reading and the answer, which keeps what it
   has; what you say next is the next question.
@@ -543,6 +549,39 @@ chat. The browser asks for the microphone once.
 - Talk uses the speech server's plain endpoints. Its realtime API is not used:
   it would answer with a model of its own, outside the chat's history, tools
   and credit.
+
+### Your voice
+
+**Your account → Voice** sets how the chat hears you and reads to you. Each
+choice is yours or the company's (Admin → Settings → Speech,
+[settings.md](settings.md#speech-everyones-until-they-choose)); **Use the
+company's** puts them all back.
+
+- **The language you speak**: what you say in Talk and your voice messages is
+  written down in it. **Detect it** lets Whisper hear which; naming it helps
+  short or accented speech. Other sound and video files are always heard in
+  the language Whisper detects. The list is the languages the speech to text
+  model knows.
+- **Voices**: a voice for each language, from the voices the speech models
+  really offer. The app asks the speech server: Kokoro reads American and
+  British English, Spanish, French, Italian, Brazilian Portuguese, Japanese,
+  Chinese and Hindi, each voice a woman's or a man's; Piper reads Persian. A
+  model turned off (Admin → Models) offers none. **Try it** reads a sample in
+  the voice, at your speed.
+- **A text is read in the voice of its language**: Persian text in your Persian
+  voice when English is the one you speak. The language is told by the
+  text's script (Persian, Hindi, Japanese, Chinese) and, in the Latin script,
+  by its small words (Spanish, French, Italian, Portuguese, else English). A
+  language with no voice is read in the voice of the language you speak, then
+  in English's.
+- **Speed**: 0.5 to 2 times the voice's own pace.
+- **Read answers aloud in Talk**: off, the answers in Talk and to your voice
+  messages are only shown.
+- **Everywhere you hear or are heard**: read aloud, Talk, voice messages, the
+  Speech tool, and your API key's `/v1/audio/speech` when the request names no
+  voice.
+- While the speech server cannot be asked, only the voices already chosen (by
+  you or the company) are listed, and they are used as chosen.
 
 ## Memory
 
@@ -904,7 +943,9 @@ The chat's limits are under Admin → Settings → Chat ([settings.md](settings.
 | Arena leaderboard for everyone | on | everyone sees the leaderboard of Compare's votes; off: admins only (Admin → Quality) |
 
 The thinking levels (`THINKING_PRESETS`) and **Model for sub-agents and small
-steps** are under Settings → Model.
+steps** are under Settings → Model. Everyone's language, voices, reading speed
+and reading aloud in Talk are under Settings → Speech, until each person
+chooses their own ([Your voice](#your-voice)).
 **GitLab address for links** (Settings → Argus, applies at once) is where
 browsers open GitLab from Argus's answers. Leave it empty to use the address
 Argus indexes. Set it when Argus reaches GitLab by an internal name.
@@ -991,7 +1032,14 @@ use and edit one); a new chat takes `assistantId`.
   a revoked key being replaced, attachments, and ownership. Also the GitLab
   link address applying at once, and Talk: a recording written down in the
   person's name, a spoken question's note for its answer only, and each
-  sentence read in the voice of its language.
+  sentence read in the voice of its language. And each person's voice: the
+  voices found at a fake speech server (only the app's models, with language,
+  accent and gender), the choices saved and used by read aloud, Talk, voice
+  messages and Try it, the company's defaults from Settings, a text's language
+  picking its voice (and falling back when no voice reads it), choices refused
+  that the speech models do not offer, an API key's speech that names no voice
+  read in its person's voice, the voices chosen believed while the speech server
+  is down, and a person from v5.2.0 upgraded with nothing lost.
   Also branches (edits, answering again, switching, parents from another chat
   refused), archiving (and coming back when written in), forks (up to the
   chosen answer, with settings and files; never inside a tool round; the owner
@@ -1096,7 +1144,13 @@ use and edit one); a new chat takes `assistantId`.
     question written down and sent as spoken, its first sentence read aloud
     while the answer is still being written, speaking over it stopping both,
     and End talk letting go of the microphone; the voice activity check, the
-    sentence cutting (code left out, Persian marks) and the reading queue
+    sentence cutting (code left out, Persian marks) and the reading queue;
+    with reading aloud off, the answer only shown
+  - Your account → Voice: the language spoken, a voice per language (the
+    language spoken first), the speed once the slider rests, reading aloud, and
+    back to the company's; Try it with the voice shown and the person's speed,
+    and again to stop; what it says when speech is not set up or the speech
+    server cannot be asked
   - the canvas: the line diff, a selection's lines and its message; the panel
     from the header, a save as a version, the versions' diff and a restore, a
     selection sent to the chat quoted, a tool card opening its canvas, the

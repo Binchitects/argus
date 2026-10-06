@@ -92,6 +92,9 @@ key → LiteLLM → llama.cpp, another GPU server, the picture server or the spe
 server. While the answer cache is on (Settings → API keys), chat completions
 go by the app first: a repeated request is answered from its database, the
 rest go on to LiteLLM with the same key ([admin.md](admin.md#the-answer-cache-for-api-keys)).
+Text to speech (`/v1/audio/speech`) also goes by the app: a request that names
+no voice gets the key's person's voice ([chat.md](chat.md#your-voice)), and goes
+on to LiteLLM with the same key.
 
 **Argus.** A developer's agent → `argus.DOMAIN/mcp` with the person's API key,
 which Argus checks with the app (`app:8080/api/authz/key`); the chat →
