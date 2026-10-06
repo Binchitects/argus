@@ -295,10 +295,22 @@ test.describe.serial("Argus", () => {
   });
 
   test("help: each page has its own, it follows from page to page, and /help has them all", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByText("Help with signing in").click();
+    await expect(page.getByTestId("login-help")).toContainText("Ask an admin to reset your password");
     await signIn(page, ADMIN.username, ADMIN.password);
-    await page.getByRole("button", { name: "Help", exact: true }).click();
+    const button = page.getByRole("button", { name: "Help", exact: true });
+    await button.click();
     const panel = page.getByTestId("help-panel");
     await expect(panel.getByRole("heading", { name: "Help: Chat" })).toBeVisible();
+    await expect(panel).toBeFocused();
+    // Beside the page, not over it: an Esc in the page is the page's.
+    const main = await page.getByRole("main").boundingBox();
+    const beside = await panel.boundingBox();
+    expect(main!.x + main!.width).toBeLessThanOrEqual(beside!.x + 1);
+    await page.getByRole("textbox").first().focus();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeVisible();
     const pages = ["Settings & keys", "Overview", "People", "Indexing", "Explore", "Knowledge packs"];
     for (const name of pages) {
       await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name }).click();
@@ -309,5 +321,6 @@ test.describe.serial("Argus", () => {
     await expect(page.getByRole("main").getByRole("heading", { name: "Knowledge packs", level: 2 })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
+    await expect(button).toBeFocused();
   });
 });

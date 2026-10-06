@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useAuth } from "../auth";
 import { applyTheme, currentTheme, type Theme } from "../theme";
@@ -23,13 +23,14 @@ export default function Layout() {
   const [theme, setTheme] = useState<Theme>(currentTheme());
   const [helpOpen, setHelpOpen] = useState(false);
   const closeHelp = useCallback(() => setHelpOpen(false), []);
+  const helpButton = useRef<HTMLButtonElement>(null);
   useEffect(() => applyTheme(theme), [theme]);
   const next: Record<Theme, Theme> = { auto: "light", light: "dark", dark: "auto" };
   const user = me!.user;
   const about = me!.about;
 
   return (
-    <div className="shell">
+    <div className={helpOpen ? "shell help-open" : "shell"}>
       <nav className="side" aria-label="Main">
         <div className="brand">
           <span className="logo"><Icon name="logo" size={18} /></span> Argus
@@ -51,7 +52,15 @@ export default function Layout() {
           </>
         )}
         <div className="spacer" />
-        <button className="item ghost" onClick={() => setHelpOpen((o) => !o)} aria-expanded={helpOpen} title="Help for this page">
+        <button
+          ref={helpButton}
+          className="item ghost"
+          onClick={() => setHelpOpen((o) => !o)}
+          onKeyDown={(e) => e.key === "Escape" && helpOpen && setHelpOpen(false)}
+          aria-expanded={helpOpen}
+          aria-controls={helpOpen ? "help-panel" : undefined}
+          title="Help for this page"
+        >
           <Icon name="help" /> Help
         </button>
         <button className="item ghost" onClick={() => setTheme(next[theme])} title="Switch theme">
@@ -81,7 +90,7 @@ export default function Layout() {
       <main className="main">
         <Outlet />
       </main>
-      {helpOpen && <HelpPanel onClose={closeHelp} />}
+      {helpOpen && <HelpPanel onClose={closeHelp} button={helpButton} />}
     </div>
   );
 }

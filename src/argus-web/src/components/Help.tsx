@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { Link, useLocation } from "react-router";
 import { useAuth } from "../auth";
 import { help, helpFor, type ArgusRoute, type Topic } from "../help";
 
-function TopicBody({ topic }: { topic: Topic }) {
+/** A page's help: what it is for, its parts, and the common tasks. */
+export function TopicBody({ topic }: { topic: Topic }) {
   return (
     <>
       <p className="dim">{topic.about}</p>
@@ -31,21 +32,39 @@ function TopicBody({ topic }: { topic: Topic }) {
   );
 }
 
-/** The page's help, beside it: it follows you from page to page until closed (Esc). */
-export function HelpPanel({ onClose }: { onClose: () => void }) {
+/**
+ * The page's help, beside it (on a wide screen the page makes room for it): it follows you from
+ * page to page until closed. Esc closes it from inside it; an Esc in the page is the page's.
+ */
+export function HelpPanel({ onClose, button }: { onClose: () => void; button: RefObject<HTMLButtonElement | null> }) {
   const { pathname } = useLocation();
   const { me } = useAuth();
   const topic = helpFor(pathname, me?.user.role === "admin");
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const ref = useRef<HTMLElement>(null);
+  // Focus goes into the panel as it opens.
+  useEffect(() => ref.current?.focus(), []);
+  const close = () => {
+    const inside = ref.current?.contains(document.activeElement);
+    onClose();
+    if (inside) button.current?.focus();
+  };
   return (
-    <aside className="help-panel" aria-labelledby="help-title" data-testid="help-panel">
+    <aside
+      ref={ref}
+      id="help-panel"
+      className="help-panel"
+      aria-labelledby="help-title"
+      data-testid="help-panel"
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented) return;
+        e.preventDefault();
+        close();
+      }}
+    >
       <div className="row between">
         <h2 id="help-title">Help: {topic.title}</h2>
-        <button className="btn small ghost" onClick={onClose} aria-label="Close the help">
+        <button className="btn small ghost" onClick={close} aria-label="Close the help">
           Close
         </button>
       </div>

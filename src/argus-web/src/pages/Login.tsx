@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useAuth } from "../auth";
+import { TopicBody } from "../components/Help";
 import Icon from "../components/Icon";
+import { help } from "../help";
 
 export default function Login() {
   const { me, login } = useAuth();
@@ -45,6 +47,10 @@ export default function Login() {
         <button className="btn primary wide" type="submit" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
+        <details className="help-inline" data-testid="login-help">
+          <summary>Help with signing in</summary>
+          <TopicBody topic={help["/login"]} />
+        </details>
       </form>
     </div>
   );

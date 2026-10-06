@@ -270,9 +270,17 @@ pre.log { max-height: 280px; background: #111418; color: #d6dae0; font-size: 12p
   border-left: 1px solid var(--line);
   box-shadow: -8px 0 24px rgba(16, 24, 40, 0.12);
 }
+.help-panel:focus { outline: none; }
+/* Wide enough: a column of its own, so nothing of the page is under it. */
+@media (min-width: 1100px) {
+  .shell.help-open { grid-template-columns: 232px minmax(0, 1fr) 360px; }
+  .shell.help-open .help-panel { position: static; width: auto; box-shadow: none; }
+}
 .help-panel h2 { font-size: 16px; }
-.help-panel h3, .help-page h3 { font-size: 13.5px; margin: 16px 0 4px; }
-.help-panel ol, .help-page ol { margin: 0; padding-left: 20px; }
+.help-inline { margin-top: 4px; }
+.help-inline summary { cursor: pointer; font-size: 13px; color: var(--dim); }
+.help-panel h3, .help-page h3, .help-inline h3 { font-size: 13.5px; margin: 16px 0 4px; }
+.help-panel ol, .help-page ol, .help-inline ol { margin: 0; padding-left: 20px; }
 .help-parts { display: grid; gap: 10px; margin: 12px 0 0; }
 .help-parts dt { font-weight: 600; }
 .help-parts dd { margin: 0; }
