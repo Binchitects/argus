@@ -17,29 +17,56 @@ async function eyesOverForm(page: Page) {
 
 const sideways = "document.documentElement.scrollWidth - document.documentElement.clientWidth";
 
+/** Each eye drawn now: where it is put and how big, and its box on the screen. */
+const placed = `[...document.querySelectorAll(".eyes .eye")].map((e) => {
+  const b = e.getBoundingClientRect();
+  return { at: [e.style.left, e.style.top, e.style.width].join(" "), left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+})`;
+type Placed = { at: string; left: number; top: number; right: number; bottom: number };
+
 test("sign-in: the logo, then its eyes, play behind the form, which stays usable", async ({ page }) => {
   await page.goto("/login");
   const stage = page.locator(".eyes");
   await expect(stage).toHaveAttribute("aria-hidden", "true");
   await expect.poll(() => stage.locator(".eye").count()).toBeGreaterThan(30);
   const eyes = await stage.locator(".eye").count();
-  expect(eyes).toBeLessThanOrEqual(110);
-  expect(await eyesOverForm(page)).toBe(0);
+  expect(eyes).toBeLessThanOrEqual(130);
+  await expect.poll(() => eyesOverForm(page)).toBe(0);
   // The logo and every eye share one 12-second turn, started together: they keep in step.
+  // (The same start can read back a hair apart, as 118.466 and 118.46600000000001.)
   const turns = await page.evaluate(`(() => {
     const turns = document.getAnimations().filter((a) => a.effect && a.effect.getTiming().duration === 12000);
-    return { count: turns.length, starts: new Set(turns.map((a) => a.startTime)).size, logo: turns.some((a) => a.effect.target.classList.contains("eyes-logo")) };
-  })()`);
-  expect(turns).toEqual({ count: eyes + 1, starts: 1, logo: true });
+    const starts = turns.map((a) => a.startTime);
+    return { count: turns.length, spread: Math.max(...starts) - Math.min(...starts), logo: turns.some((a) => a.effect.target.classList.contains("eyes-logo")) };
+  })()`) as { count: number; spread: number; logo: boolean };
+  expect(turns.count).toBe(eyes + 1);
+  expect(turns.spread).toBeLessThan(1);
+  expect(turns.logo).toBe(true);
   // Nothing of it takes a click.
   await expect(stage).toHaveCSS("pointer-events", "none");
   await page.getByLabel("Password").click();
   await expect(page.getByLabel("Password")).toBeFocused();
 
+  // A wrong password grows the form by its message: only the eyes beside it go, every other stays put.
+  const before = await page.evaluate(placed) as Placed[];
+  await page.getByLabel("Username or email").fill("nobody");
+  await page.getByLabel("Password").fill("not-a-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  // They are laid out again on the next frame; those going fade out first.
+  await page.waitForTimeout(600);
+  await expect.poll(() => eyesOverForm(page)).toBe(0);
+  const form = (await page.locator("form.card.login").boundingBox())!;
+  const after = new Set((await page.evaluate(placed) as Placed[]).map((e) => e.at));
+  const beside = (e: Placed) => e.right > form.x - 80 && e.left < form.x + form.width + 80 && e.bottom > form.y - 80 && e.top < form.y + form.height + 80;
+  const away = before.filter((e) => !beside(e));
+  expect(away.length).toBeGreaterThan(eyes / 2);
+  expect(away.filter((e) => !after.has(e.at))).toEqual([]);
+
   // A phone gets fewer eyes, none over the form either, and nothing scrolls sideways.
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect.poll(() => stage.locator(".eye").count()).toBeLessThanOrEqual(30);
-  expect(await eyesOverForm(page)).toBe(0);
+  await expect.poll(() => stage.locator(".eye").count()).toBeLessThan(eyes / 2);
+  await expect.poll(() => eyesOverForm(page)).toBe(0);
   expect(await page.evaluate(sideways)).toBeLessThanOrEqual(0);
 });
 

@@ -43,9 +43,12 @@ export interface Box {
   bottom: number
 }
 
-/** At most this many eyes on a screen this wide: fewer on a phone. */
+/**
+ * At most this many eyes on a screenful this wide, counting those the form and the
+ * words then hide (on a phone they hide more than half): fewer on a phone.
+ */
 export function eyeCap(width: number): number {
-  return width < 640 ? 36 : width < 1100 ? 72 : 120
+  return width < 640 ? 72 : width < 1100 ? 110 : 160
 }
 
 /** A small seeded random number generator (mulberry32): the same screen gets the same eyes. */
@@ -61,12 +64,12 @@ function seeded(seed: number) {
 
 const overlaps = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 
-/** A staggered grid of eyes `size` px wide, a little out of line, none over `clear`. */
-function grid(width: number, height: number, size: number, clear: Box[]) {
+/** A staggered grid of eyes `size` px wide over a stage, a little out of line, each with the room it keeps around it. */
+function grid(width: number, height: number, size: number) {
   const pitchX = size * 1.75
   const pitchY = size * 1.2
   const margin = size * 0.25
-  const eyes: { key: string; x: number; y: number; width: number; random: () => number }[] = []
+  const eyes: { key: string; x: number; y: number; width: number; room: Box; random: () => number }[] = []
   for (let row = 0; row < Math.ceil(height / pitchY); row++)
     for (let col = 0; col <= Math.ceil(width / pitchX); col++) {
       const random = seeded(row * 7919 + col * 104_729 + 1)
@@ -75,46 +78,69 @@ function grid(width: number, height: number, size: number, clear: Box[]) {
       const x = (col + (row % 2) * 0.5) * pitchX + (random() - 0.5) * pitchX * 0.35
       const y = (row + 0.5) * pitchY + (random() - 0.5) * pitchY * 0.3
       if (x < w / 4 || x > width - w / 4 || y < h / 2 || y > height - h / 4) continue
-      const box = { left: x - w / 2 - margin, top: y - h / 2 - margin, right: x + w / 2 + margin, bottom: y + h / 2 + margin }
-      if (clear.some((c) => overlaps(box, c))) continue
-      eyes.push({ key: `${row}:${col}`, x, y, width: w, random })
+      const room = { left: x - w / 2 - margin, top: y - h / 2 - margin, right: x + w / 2 + margin, bottom: y + h / 2 + margin }
+      eyes.push({ key: `${row}:${col}`, x, y, width: w, room, random })
     }
   return eyes
 }
 
 /**
  * Where the eyes go on a stage `width` × `height`, and when each opens and closes:
- * the screen filled, at most `eyeCap(width)` (bigger eyes on a crowded screen),
- * none over `clear` (the form, the words). The farther from `origin` (the logo),
+ * the screen filled, none over `clear` (the form, the words). Their size and places
+ * come from the stage alone, at most `eyeCap(width)` on a screenful of it (`view` px
+ * high; bigger eyes on a big screen), and those over `clear` are then left out: when
+ * the form grows or shrinks (an error shown, the next step), only the eyes beside it
+ * come or go, and every other stays where it is. The farther from `origin` (the logo),
  * the later an eye opens and the sooner it closes.
  */
-export function placeEyes(width: number, height: number, origin: { x: number; y: number }, clear: Box[]): Eye[] {
+export function placeEyes(width: number, height: number, origin: { x: number; y: number }, clear: Box[], view = height): Eye[] {
   if (width <= 0 || height <= 0) return []
   const cap = eyeCap(width)
+  const seen = Math.min(height, view)
   let size = Math.min(64, Math.max(30, width / 20))
-  let cells = grid(width, height, size, clear)
-  for (let round = 0; round < 8 && cells.length > cap; round++) {
-    size *= Math.sqrt(cells.length / cap) * 1.03
-    cells = grid(width, height, size, clear)
+  for (let round = 0, count = grid(width, seen, size).length; round < 8 && count > cap; round++) {
+    size *= Math.sqrt(count / cap) * 1.03
+    count = grid(width, seen, size).length
   }
-  cells = cells.slice(0, cap)
-  const far = Math.max(1, ...cells.map((c) => Math.hypot(c.x - origin.x, c.y - origin.y)))
-  return cells.map(({ random, ...c }) => {
-    const t = Math.hypot(c.x - origin.x, c.y - origin.y) / far
-    const blink = 3.2 + random() * 3.8
-    const look = 5 + random() * 4
-    return {
-      ...c,
-      open: Math.round(OPEN_AT + t * SPREAD + (random() - 0.5) * 240),
-      close: Math.round(CLOSE_AT + (1 - t) * SPREAD + (random() - 0.5) * 240),
-      blink,
-      blinkAt: -random() * blink,
-      look,
-      lookAt: -random() * look,
-      reverse: random() < 0.5,
-    }
-  })
+  // A page taller than the screen (a small phone) has rows below it too, as many a screenful.
+  const cells = grid(width, height, size).slice(0, Math.ceil((cap * height) / seen))
+  // The wave reaches the farthest corner of a screenful last, whatever the form or the page does.
+  const far = Math.max(1, ...[[0, 0], [width, 0], [0, seen], [width, seen]].map(([x, y]) => Math.hypot(x - origin.x, y - origin.y)))
+  return cells
+    .filter((c) => !clear.some((b) => overlaps(c.room, b)))
+    .map(({ key, x, y, width: w, random }) => {
+      const t = Math.min(1, Math.hypot(x - origin.x, y - origin.y) / far)
+      const blink = 3.2 + random() * 3.8
+      const look = 5 + random() * 4
+      return {
+        key,
+        x,
+        y,
+        width: w,
+        open: Math.round(OPEN_AT + t * SPREAD + (random() - 0.5) * 240),
+        close: Math.round(CLOSE_AT + (1 - t) * SPREAD + (random() - 0.5) * 240),
+        blink,
+        blinkAt: -random() * blink,
+        look,
+        lookAt: -random() * look,
+        reverse: random() < 0.5,
+      }
+    })
 }
+
+/** An eye drawn: one in the layout, or one going (the form grew over it), which fades out before it is dropped. */
+export interface Shown extends Eye {
+  going?: boolean
+}
+
+/** The eyes to draw after a new layout: those in it, and those drawn before and not in it any more, kept to fade out. */
+export function nextShown(shown: Shown[], eyes: Eye[]): Shown[] {
+  const now = new Set(eyes.map((e) => e.key))
+  return [...eyes, ...shown.filter((e) => !now.has(e.key)).map((e) => (e.going ? e : { ...e, going: true }))]
+}
+
+/** How long an eye takes to fade in when it comes, or out when it goes, beside a form that changed size. */
+export const FADE = 350
 
 const easeOut = 'cubic-bezier(0.16, 1, 0.3, 1)'
 const easeIn = 'cubic-bezier(0.7, 0, 0.84, 0)'

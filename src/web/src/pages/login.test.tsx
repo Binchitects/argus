@@ -1,8 +1,8 @@
-import { screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeApi, renderApp } from '@/test/utils'
-import { CYCLE, eyeCap } from './eyes'
+import { CYCLE, eyeCap, FADE } from './eyes'
 
 const assign = vi.fn()
 beforeEach(() => {
@@ -94,11 +94,11 @@ describe('company sign-in', () => {
 
 describe('behind the form', () => {
   // jsdom has no Web Animations: each animation started is recorded instead.
-  let started: { el: Element; options: KeyframeAnimationOptions; animation: { startTime: number | null; cancel: () => void } }[] = []
+  let started: { el: Element; options: KeyframeAnimationOptions; animation: { startTime: number | null; cancel: () => void; onfinish?: () => void } }[] = []
   beforeEach(() => {
     started = []
     Element.prototype.animate = function (this: Element, _frames: Keyframe[] | PropertyIndexedKeyframes | null, options?: number | KeyframeAnimationOptions) {
-      const animation = { startTime: null, cancel: vi.fn() }
+      const animation: (typeof started)[number]['animation'] = { startTime: null, cancel: vi.fn() }
       started.push({ el: this, options: options as KeyframeAnimationOptions, animation })
       return animation as unknown as Animation
     }
@@ -127,16 +127,57 @@ describe('behind the form', () => {
     expect(turns).toHaveLength(eyes + 1)
     for (const s of turns) expect(s.options.iterations).toBe(Infinity)
     expect(new Set(turns.map((s) => s.animation.startTime)).size).toBe(1)
-    // Each eye blinks and looks about, on its own time.
-    expect(started.filter((s) => s.el.classList.contains('watch-eye-lid'))).toHaveLength(eyes)
+    // Each eye blinks and looks about, on its own time, and fades in as it comes.
+    const blinks = started.filter((s) => s.el.classList.contains('watch-eye-lid') && s.options.iterations === Infinity)
+    expect(blinks).toHaveLength(eyes)
     expect(started.filter((s) => s.el.classList.contains('watch-eye-iris'))).toHaveLength(eyes)
-    expect(new Set(started.filter((s) => s.el.classList.contains('watch-eye-lid')).map((s) => s.options.duration)).size).toBeGreaterThan(eyes / 2)
+    expect(new Set(blinks.map((s) => s.options.duration)).size).toBeGreaterThan(eyes / 2)
+    expect(started.filter((s) => s.el.classList.contains('watch-eye-lid') && s.options.duration === FADE)).toHaveLength(eyes)
 
     // The form is not behind it, and works as ever.
     expect(backdrop.contains(name)).toBe(false)
     expect(name.closest('[data-keep-clear]')).not.toBeNull()
     await userEvent.type(name, 'ada')
     expect(name).toHaveValue('ada')
+  })
+
+  it('when the form grows, the eyes beside it fade out and go, and every other stays put', async () => {
+    // jsdom lays nothing out: the form is put on the screen by hand, and what watches the eyes' stage told.
+    const watching: { on: () => void; what: Element[] }[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      watch: { on: () => void; what: Element[] }
+      constructor(on: () => void) {
+        this.watch = { on, what: [] }
+        watching.push(this.watch)
+      }
+      observe(e: Element) {
+        this.watch.what.push(e)
+      }
+      unobserve() {}
+      disconnect() {}
+    })
+    fakeApi(null)
+    renderApp('/login')
+    const form = (await screen.findByLabelText('Username or email')).closest('[data-keep-clear]')!
+    const backdrop = document.querySelector('.eyes-backdrop')!
+    await waitFor(() => expect(backdrop.querySelectorAll('.watch-eye').length).toBeGreaterThan(20))
+    const place = () => [...backdrop.querySelectorAll('.watch-eye')].map((e) => e.getAttribute('style')).sort()
+    const before = place()
+
+    vi.spyOn(form, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ x: 560, y: 180, width: 380, height: 420 }))
+    act(() => watching.find((w) => w.what.includes(backdrop))!.on())
+    let going: typeof started = []
+    await waitFor(() => {
+      going = started.filter((s) => s.options.fill === 'forwards')
+      expect(going.length).toBeGreaterThan(0)
+    })
+    expect(going.every((s) => s.options.duration === FADE && s.el.classList.contains('watch-eye-lid'))).toBe(true)
+    // Still drawn while they fade; gone when they have.
+    expect(place()).toEqual(before)
+    act(() => going.forEach((s) => s.animation.onfinish!()))
+    const after = place()
+    expect(after).toHaveLength(before.length - going.length)
+    expect(after.every((style) => before.includes(style))).toBe(true)
   })
 
   it('with reduced motion, only the logo, still', async () => {

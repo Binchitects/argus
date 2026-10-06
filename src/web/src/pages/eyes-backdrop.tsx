@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useMedia } from '@/lib/use-media'
-import { blinkFrames, CYCLE, EYE_RATIO, EYE_VIEW, eyeFrames, logoFrames, lookFrames, placeEyes, type Box, type Eye } from './eyes'
+import { blinkFrames, CYCLE, EYE_RATIO, EYE_VIEW, eyeFrames, FADE, logoFrames, lookFrames, nextShown, placeEyes, type Box, type Shown } from './eyes'
 
 /**
  * Behind the sign-in form: the Argus logo, then its eyes (Argus Panoptes, the
@@ -15,10 +15,11 @@ import { blinkFrames, CYCLE, EYE_RATIO, EYE_VIEW, eyeFrames, logoFrames, lookFra
 export function EyesBackdrop({ logo }: { logo: RefObject<HTMLElement | null> }) {
   const still = useMedia('(prefers-reduced-motion: reduce)')
   const stage = useRef<HTMLDivElement>(null)
-  const [eyes, setEyes] = useState<Eye[]>([])
+  const [eyes, setEyes] = useState<Shown[]>([])
   // One clock for the logo and every eye: one laid out later (the window resized) keeps in step.
   const started = useRef<number | null>(null)
   const clock = useCallback(() => (started.current ??= (document.timeline?.currentTime as number | null) ?? performance.now()), [])
+  const drop = useCallback((key: string) => setEyes((shown) => shown.filter((e) => !(e.going && e.key === key))), [])
 
   // Lays the eyes out, and again when the page or what they keep off changes size.
   useEffect(() => {
@@ -26,6 +27,9 @@ export function EyesBackdrop({ logo }: { logo: RefObject<HTMLElement | null> }) 
     const page = el?.parentElement
     if (still || !el || !page) return
     let frame = 0
+    // Where the wave starts, measured again only when the stage changes size: the
+    // form growing (an error shown) may move the logo a little, not every eye's time.
+    let origin: { x: number; y: number; width: number; height: number } | null = null
     const layout = () => {
       frame = 0
       const s = el.getBoundingClientRect()
@@ -33,10 +37,14 @@ export function EyesBackdrop({ logo }: { logo: RefObject<HTMLElement | null> }) 
       const width = s.width || window.innerWidth
       const height = s.height || window.innerHeight
       const local = (b: DOMRect): Box => ({ left: b.left - s.left, top: b.top - s.top, right: b.right - s.left, bottom: b.bottom - s.top })
-      const l = logo.current?.getBoundingClientRect()
-      const origin = l?.width ? { x: (l.left + l.right) / 2 - s.left, y: (l.top + l.bottom) / 2 - s.top } : { x: width / 2, y: height / 3 }
+      if (!origin || origin.width !== width || origin.height !== height) {
+        const l = logo.current?.getBoundingClientRect()
+        origin = l?.width ? { x: (l.left + l.right) / 2 - s.left, y: (l.top + l.bottom) / 2 - s.top, width, height } : { x: width / 2, y: height / 3, width, height }
+      }
+      const from = origin
       const clear = [...page.querySelectorAll('[data-keep-clear]')].map((e) => local(e.getBoundingClientRect())).filter((b) => b.right > b.left)
-      setEyes(placeEyes(width, height, origin, clear))
+      // Sized for the screen, not the page: on a small phone the page grows with the form.
+      setEyes((shown) => nextShown(shown, placeEyes(width, height, from, clear, window.innerHeight || height)))
     }
     const later = () => {
       frame ||= requestAnimationFrame(layout)
@@ -75,31 +83,48 @@ export function EyesBackdrop({ logo }: { logo: RefObject<HTMLElement | null> }) 
           </radialGradient>
         </defs>
       </svg>
-      {!still && eyes.map((eye) => <EyeView key={eye.key} eye={eye} clock={clock} />)}
+      {!still && eyes.map((eye) => <EyeView key={eye.key} eye={eye} clock={clock} drop={drop} />)}
     </div>
   )
 }
 
-/** One eye, drawn as the logo's: the white, and over it the iris, which looks about. */
-function EyeView({ eye, clock }: { eye: Eye; clock: () => number }) {
+/**
+ * One eye, drawn as the logo's: the white, and over it the iris, which looks about.
+ * It fades in when it comes and out when it goes (beside a form that changed size).
+ */
+function EyeView({ eye, clock, drop }: { eye: Shown; clock: () => number; drop: (key: string) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const lid = useRef<HTMLDivElement>(null)
   const iris = useRef<HTMLDivElement>(null)
-  const { open, close, blink, blinkAt, look, lookAt, reverse } = eye
+  const { key, open, close, blink, blinkAt, look, lookAt, reverse, going } = eye
+  // Its turn, on the shared clock.
   useEffect(() => {
-    const el = ref.current
-    if (!el?.animate || !lid.current || !iris.current) return
-    const turn = el.animate(eyeFrames(open, close), { duration: CYCLE, iterations: Infinity })
+    if (!ref.current?.animate) return
+    const turn = ref.current.animate(eyeFrames(open, close), { duration: CYCLE, iterations: Infinity })
     turn.startTime = clock()
-    // Script-made like its turn, not CSS animations: Chrome runs these on the compositor.
+    return () => turn.cancel()
+  }, [open, close, clock])
+  // Its blinks and looks about, on its own time. Script-made like its turn, not CSS
+  // animations: Chrome runs these on the compositor.
+  useEffect(() => {
+    if (!lid.current?.animate || !iris.current) return
     const blinks = lid.current.animate(blinkFrames, { duration: blink * 1000, delay: blinkAt * 1000, iterations: Infinity })
     const looks = iris.current.animate(lookFrames, { duration: look * 1000, delay: lookAt * 1000, iterations: Infinity, direction: reverse ? 'reverse' : 'normal' })
     return () => {
-      turn.cancel()
       blinks.cancel()
       looks.cancel()
     }
-  }, [open, close, blink, blinkAt, look, lookAt, reverse, clock])
+  }, [blink, blinkAt, look, lookAt, reverse])
+  useEffect(() => {
+    const el = lid.current
+    if (!el?.animate) {
+      if (going) drop(key)
+      return
+    }
+    const fade = el.animate([{ opacity: going ? 1 : 0 }, { opacity: going ? 0 : 1 }], { duration: FADE, easing: 'ease', fill: going ? 'forwards' : 'none' })
+    if (going) fade.onfinish = () => drop(key)
+    return () => fade.cancel()
+  }, [going, key, drop])
   return (
     // Each moving part is a box of its own: an <svg> itself is never moved on the compositor.
     <div ref={ref} className="watch-eye" style={{ left: eye.x - eye.width / 2, top: eye.y - (eye.width * EYE_RATIO) / 2, width: eye.width }}>
