@@ -681,12 +681,17 @@ function StatusCell({ r }: { r: RepoRow }) {
   )
 }
 
+/** A time within the next minute: the scheduler picks it up on its next look. */
+const dueNow = (seconds: number) => seconds * 1000 - Date.now() < 60_000
+
 /** The schedule it runs on, and when it next runs and last ran. */
 function ScheduleCell({ r, passNext }: { r: RepoRow; passNext: number | null }) {
   const next = !r.included
     ? null
     : r.next_run_at
-      ? `next ${ago(r.next_run_at)}`
+      ? dueNow(r.next_run_at)
+        ? 'due now'
+        : `next ${ago(r.next_run_at)}`
       : r.schedule_kind === 'pass'
         ? passNext
           ? `next pass ${ago(passNext)}`
