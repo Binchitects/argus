@@ -14,9 +14,6 @@ export interface Topic {
 /** Every route of App.tsx. Each needs its help below: the record's type says so. */
 export type ArgusRoute = "/login" | "/" | "/chat/:id" | "/settings" | "/help" | "/manage" | "/manage/people" | "/manage/indexing" | "/manage/explore" | "/manage/packs";
 
-/** A route's path inside the signed-in layout (App.tsx), from its whole path. */
-export const inLayout = (path: ArgusRoute) => path.slice(1);
-
 export const help: Record<ArgusRoute, Topic> = {
   "/login": {
     title: "Signing in",
@@ -119,11 +116,19 @@ export const help: Record<ArgusRoute, Topic> = {
   },
 };
 
+/** For an address no route knows, or an admins' page someone else is on: no page's help, but where to find it. */
+export const noHelp: Topic = {
+  title: "This page",
+  about: "This page has no help of its own.",
+  parts: [["Every page's help", "What each page is for, what its parts do, and the common tasks: the link below."]],
+  tasks: [],
+};
+
 const routes = Object.keys(help) as ArgusRoute[];
 
 /** The help for an address (the most specific route that matches it); admins' pages for admins only. */
 export function helpFor(pathname: string, isAdmin: boolean): Topic {
   const route = routes.filter((r) => matchPath(r, pathname)).sort((a, b) => b.length - a.length)[0];
-  const topic = route ? help[route] : help["/"];
-  return topic.admin && !isAdmin ? help["/help"] : topic;
+  const topic = route ? help[route] : noHelp;
+  return topic.admin && !isAdmin ? noHelp : topic;
 }

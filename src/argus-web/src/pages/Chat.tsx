@@ -118,7 +118,10 @@ export default function Chat() {
       });
   }, [id, navigate]);
 
-  useEffect(() => bottom.current?.scrollIntoView({ block: "end" }), [turns]);
+  // A block, not an arrow's value: scrollIntoView returns a promise in newer browsers, and an effect may return only its clean-up.
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ block: "end" });
+  }, [turns]);
 
   async function send() {
     const text = draft.trim();

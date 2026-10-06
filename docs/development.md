@@ -97,6 +97,7 @@ and `/mcp` to a backend on `:7700`:
 
 ```bash
 cd src/argus-web && npm ci && npm run dev      # http://localhost:5173
+cd src/argus-web && npm test && npm run build  # every route has its help (src/help.ts); typecheck and build
 ```
 
 ## Browser tests

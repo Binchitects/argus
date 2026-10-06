@@ -9,7 +9,8 @@ what each part does, and the common tasks step by step
 (`src/web/src/help/topics.ts`). On a wide screen it sits beside the page and
 stays open while you work; on a smaller one it opens over the page. Argus's
 own app has a lighter version: **Help** in its sidebar (and on its sign-in
-page), and `/help`.
+page), beside the page on a wide screen and over it on a smaller one, and
+`/help`.
 
 The manual lists an admin's pages for admins only, but that only tidies it: it
 is not access control. Every page of the manual, admins' too, is in the web's

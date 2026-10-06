@@ -89,8 +89,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: src/argus-web/package-lock.json }
-      - name: Typecheck and build
-        run: npm ci && npm run build
+      - name: Test, typecheck and build
+        run: npm ci && npm test && npm run build
 
   web-browser:
     # The API and web images behind Traefik, as deployed, driven by Playwright
