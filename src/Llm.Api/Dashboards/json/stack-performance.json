@@ -807,7 +807,7 @@
       "id": 28,
       "type": "timeseries",
       "title": "GPU utilisation",
-      "description": "Expect LOW GPU% during generation on this deployment -- the experts run on CPU, so the GPU idles between attention layers. That is the design, not a fault.",
+      "description": "When the model's experts run on the CPU (--n-cpu-moe), expect LOW GPU% during generation: the GPU idles between attention layers. That is the design, not a fault.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1144,7 +1144,7 @@
     {
       "id": 40,
       "type": "row",
-      "title": "CPU & memory \u2014 the real bottleneck on this box",
+      "title": "CPU and memory",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1158,7 +1158,7 @@
       "id": 42,
       "type": "timeseries",
       "title": "CPU utilisation (total)",
-      "description": "During generation this should be HIGH -- the expert matmuls run here. If tok/s is low and this is low too, the engine is waiting on memory or disk, not compute.",
+      "description": "When the model's experts run on the CPU (--n-cpu-moe), this should be HIGH during generation: the expert matmuls run here. If tok/s is low and this is low too, the engine is waiting on memory or disk, not compute.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1226,7 +1226,7 @@
       "id": 44,
       "type": "timeseries",
       "title": "CPU per core",
-      "description": "24 logical CPUs: 0-15 are the 8 P-cores (hyperthreaded), 16-23 the 8 E-cores. Shows whether -t is actually spreading work, and whether E-cores are dragging.",
+      "description": "One line per logical CPU, however many the machine has: the seven busiest, and the rest as their average. Shows whether -t is actually spreading work, and whether some cores (on a hybrid CPU, the efficiency cores) are dragging.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1294,7 +1294,7 @@
       "id": 48,
       "type": "timeseries",
       "title": "Memory: page cache is model residency",
-      "description": "THE panel for this deployment. The GGUF is mmap'd, so resident model weights show up as PAGE CACHE, not as used memory. Page cache collapsing means the model is being evicted and you will see tok/s fall with disk reads rising.",
+      "description": "The GGUF is mmap'd, so resident model weights show up as PAGE CACHE, not as used memory. Page cache collapsing means the model is being evicted and you will see tok/s fall with disk reads rising.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1384,7 +1384,7 @@
       "id": 51,
       "type": "timeseries",
       "title": "Disk I/O \u2014 is the model paging?",
-      "description": "Sustained reads on nvme0n1 DURING generation mean the working set does not fit and you are paging weights off disk. Brief reads at load are normal.",
+      "description": "Per drive, as the machine names them. Sustained reads on the drive that holds the models DURING generation mean the working set does not fit and you are paging weights off disk. Brief reads at load are normal.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1462,7 +1462,7 @@
       "id": 55,
       "type": "timeseries",
       "title": "Load average",
-      "description": "Above 24 (the logical CPU count) means runnable work is queuing.",
+      "description": "Above the logical CPUs line, runnable work is queuing for the CPU.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1509,6 +1509,18 @@
           "range": true,
           "instant": false,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "count(count by (cpu) (node_cpu_seconds_total))",
+          "legendFormat": "logical CPUs",
+          "range": true,
+          "instant": false,
+          "refId": "D"
         }
       ],
       "options": {
@@ -1552,7 +1564,7 @@
       "id": 57,
       "type": "timeseries",
       "title": "CPU temperature",
-      "description": "Sustained CPU load on a 13700K can thermally throttle, which shows up as tok/s decay over a long run.",
+      "description": "The hottest CPU sensor and the average of all of them: two lines whatever the core count. Sustained CPU load can make the CPU throttle, which shows up as tok/s decay over a long run.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1570,11 +1582,23 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "cpu_temperature_celsius",
-          "legendFormat": "{{sensor}}",
+          "expr": "max(cpu_temperature_celsius)",
+          "legendFormat": "hottest",
           "range": true,
           "instant": false,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "avg(cpu_temperature_celsius)",
+          "legendFormat": "average",
+          "range": true,
+          "instant": false,
+          "refId": "B"
         }
       ],
       "options": {
@@ -1596,6 +1620,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
+          "noValue": "No CPU sensor",
           "color": {
             "mode": "palette-classic"
           },
@@ -1617,7 +1642,7 @@
     {
       "type": "timeseries",
       "title": "NVMe temperature over time",
-      "description": "NVMe composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. Series are the two drives, named by the query from the hwmon chip (nvme_nvme0 = WD_BLACK SN850X, nvme_nvme1 = Samsung 990 PRO); update those names if the drives change. The 990 PRO also reports Sensor 1 and Sensor 2 (NAND and controller) as temp2/temp3, which the drive's Composite lags under sustained writes.",
+      "description": "Each NVMe drive's composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. A drive is named by the model it reports (node_nvme_info) and its device, or by its device alone when it reports no model. Some drives also report their NAND and controller as temp2/temp3, which the composite lags under sustained writes. SATA drives have no sensor here.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1631,13 +1656,14 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_replace(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"},\"drive\",\"$1\",\"chip\",\"^nvme_(nvme[0-9]+)$\"),\"drive\",\"Samsung SSD 990 PRO 2TB\",\"chip\",\"^nvme_nvme1$\"),\"drive\",\"WD_BLACK SN850X 1TB\",\"chip\",\"^nvme_nvme0$\")",
+          "expr": "label_replace(label_join(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"device\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\") * on (instance, device) group_left (model) max by (instance, device, model) (node_nvme_info{model!=\"\"}), \"drive\", \" (\", \"model\", \"device\"), \"drive\", \"$1)\", \"drive\", \"^(.+)$\") or on (instance, chip) label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"drive\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\")",
           "legendFormat": "{{drive}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
+          "noValue": "No NVMe drive",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10,
@@ -1652,8 +1678,7 @@
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
-        },
-        "noValue": "No NVMe sensor available on this host"
+        }
       }
     },
     {

@@ -459,6 +459,7 @@
     {
       "type": "timeseries",
       "title": "Load average",
+      "description": "Runnable and waiting tasks. Above the logical CPUs line, work is queuing for the CPU.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -484,6 +485,11 @@
           "refId": "C",
           "expr": "node_load15",
           "legendFormat": "15m"
+        },
+        {
+          "refId": "D",
+          "expr": "count(count by (cpu) (node_cpu_seconds_total))",
+          "legendFormat": "logical CPUs"
         }
       ],
       "fieldConfig": {
@@ -1246,7 +1252,7 @@
     {
       "type": "stat",
       "title": "Host CPU temperature",
-      "description": "From the cpu-temp-exporter. Linux reads coretemp/k10temp via hwmon. Windows has no CPU temperature in node-exporter or windows_exporter (its ACPI thermal zone measured a fixed 27.85 C under full load), so it scrapes LibreHardwareMonitor on the host. cpu_temperature_available is 0 when no real sensor exists.",
+      "description": "The hottest CPU sensor, from the cpu-temp-exporter: one number whatever the core count. Linux reads coretemp/k10temp via hwmon. Windows has no CPU temperature in node-exporter or windows_exporter (its ACPI thermal zone measured a fixed 27.85 C under full load), so it scrapes LibreHardwareMonitor on the host. cpu_temperature_available is 0 when no real sensor exists.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1260,14 +1266,15 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "cpu_temperature_celsius",
-          "legendFormat": "{{sensor}}"
+          "expr": "max(cpu_temperature_celsius)",
+          "legendFormat": "hottest"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
           "decimals": 1,
+          "noValue": "No CPU sensor",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1297,8 +1304,7 @@
           ],
           "fields": "",
           "values": false
-        },
-        "noValue": "No CPU sensor. Linux: automatic. Windows: install LibreHardwareMonitor and enable its web server."
+        }
       }
     },
     {
@@ -1317,13 +1323,19 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "cpu_temperature_celsius",
-          "legendFormat": "{{sensor}}"
+          "expr": "max(cpu_temperature_celsius)",
+          "legendFormat": "hottest"
+        },
+        {
+          "refId": "B",
+          "expr": "avg(cpu_temperature_celsius)",
+          "legendFormat": "average"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
+          "noValue": "No CPU sensor",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10,
@@ -1338,15 +1350,14 @@
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
-        },
-        "noValue": "No CPU sensor available on this host"
+        }
       },
-      "description": "From the cpu-temp-exporter. Linux reads coretemp/k10temp via hwmon. Windows has no CPU temperature in node-exporter or windows_exporter (its ACPI thermal zone measured a fixed 27.85 C under full load), so it scrapes LibreHardwareMonitor on the host. cpu_temperature_available is 0 when no real sensor exists."
+      "description": "The hottest CPU sensor and the average of all of them, from the cpu-temp-exporter: two lines whatever the core count. A gap between them is one core or one die running hot. Linux reads coretemp/k10temp via hwmon; Windows scrapes LibreHardwareMonitor on the host."
     },
     {
       "type": "stat",
       "title": "NVMe temperature",
-      "description": "NVMe composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. Series are the two drives, named by the query from the hwmon chip (nvme_nvme0 = WD_BLACK SN850X, nvme_nvme1 = Samsung 990 PRO); update those names if the drives change. The 990 PRO also reports Sensor 1 and Sensor 2 (NAND and controller) as temp2/temp3, which the drive's Composite lags under sustained writes.",
+      "description": "Each NVMe drive's composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. A drive is named by the model it reports (node_nvme_info) and its device, or by its device alone when it reports no model. Some drives also report their NAND and controller as temp2/temp3, which the composite lags under sustained writes. SATA drives have no sensor here.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1360,7 +1371,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_replace(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"},\"drive\",\"$1\",\"chip\",\"^nvme_(nvme[0-9]+)$\"),\"drive\",\"Samsung SSD 990 PRO 2TB\",\"chip\",\"^nvme_nvme1$\"),\"drive\",\"WD_BLACK SN850X 1TB\",\"chip\",\"^nvme_nvme0$\")",
+          "expr": "label_replace(label_join(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"device\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\") * on (instance, device) group_left (model) max by (instance, device, model) (node_nvme_info{model!=\"\"}), \"drive\", \" (\", \"model\", \"device\"), \"drive\", \"$1)\", \"drive\", \"^(.+)$\") or on (instance, chip) label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"drive\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\")",
           "legendFormat": "{{drive}}"
         }
       ],
@@ -1368,6 +1379,7 @@
         "defaults": {
           "unit": "celsius",
           "decimals": 1,
+          "noValue": "No NVMe drive",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1397,14 +1409,13 @@
           ],
           "fields": "",
           "values": false
-        },
-        "noValue": "No NVMe sensor on this host"
+        }
       }
     },
     {
       "type": "timeseries",
       "title": "NVMe temperature over time",
-      "description": "NVMe composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. Series are the two drives, named by the query from the hwmon chip (nvme_nvme0 = WD_BLACK SN850X, nvme_nvme1 = Samsung 990 PRO); update those names if the drives change. The 990 PRO also reports Sensor 1 and Sensor 2 (NAND and controller) as temp2/temp3, which the drive's Composite lags under sustained writes.",
+      "description": "Each NVMe drive's composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. A drive is named by the model it reports (node_nvme_info) and its device, or by its device alone when it reports no model. Some drives also report their NAND and controller as temp2/temp3, which the composite lags under sustained writes. SATA drives have no sensor here.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1418,13 +1429,14 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_replace(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"},\"drive\",\"$1\",\"chip\",\"^nvme_(nvme[0-9]+)$\"),\"drive\",\"Samsung SSD 990 PRO 2TB\",\"chip\",\"^nvme_nvme1$\"),\"drive\",\"WD_BLACK SN850X 1TB\",\"chip\",\"^nvme_nvme0$\")",
+          "expr": "label_replace(label_join(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"device\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\") * on (instance, device) group_left (model) max by (instance, device, model) (node_nvme_info{model!=\"\"}), \"drive\", \" (\", \"model\", \"device\"), \"drive\", \"$1)\", \"drive\", \"^(.+)$\") or on (instance, chip) label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"drive\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\")",
           "legendFormat": "{{drive}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
+          "noValue": "No NVMe drive",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10,
@@ -1439,8 +1451,7 @@
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
-        },
-        "noValue": "No NVMe sensor available on this host"
+        }
       }
     },
     {
@@ -1465,8 +1476,8 @@
           },
           "gridPos": {
             "h": 7,
-            "w": 9,
-            "x": 15,
+            "w": 12,
+            "x": 0,
             "y": 63
           },
           "targets": [
@@ -1532,9 +1543,9 @@
           },
           "gridPos": {
             "h": 7,
-            "w": 8,
+            "w": 12,
             "x": 0,
-            "y": 63
+            "y": 70
           },
           "targets": [
             {
@@ -1582,8 +1593,8 @@
           },
           "gridPos": {
             "h": 7,
-            "w": 8,
-            "x": 8,
+            "w": 12,
+            "x": 12,
             "y": 63
           },
           "targets": [
@@ -1622,9 +1633,9 @@
           },
           "gridPos": {
             "h": 7,
-            "w": 8,
-            "x": 16,
-            "y": 63
+            "w": 12,
+            "x": 12,
+            "y": 70
           },
           "targets": [
             {

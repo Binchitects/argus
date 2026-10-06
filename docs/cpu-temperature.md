@@ -40,8 +40,15 @@ cpu_temperature_source_info{source="lhm"} 1
 ```
 
 `cpu_temperature_available` exists so that **no sensor** and **a sensor reading
-27.85** cannot look the same. When it is 0 the dashboard panel says "No CPU
-sensor available on this host" rather than plotting nothing and looking broken.
+27.85** cannot look the same. When there is no sensor the dashboard panels say
+"No CPU sensor" rather than plotting nothing and looking broken.
+
+The dashboards (Resources, Stack Performance) draw two lines, the hottest sensor
+and the average of all of them, rather than one per sensor: an Intel CPU reports
+one per core and one for the package, so a line each would make the chart, and
+the row it sits in, grow with the core count. A gap between the two lines is one
+core or one die running hot; `cpu_temperature_celsius` in Prometheus has every
+sensor for a closer look.
 
 ## Linux
 
