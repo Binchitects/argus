@@ -9,17 +9,23 @@ public sealed class LdapOptions
     /// <summary>Upgrade a plain ldap:// connection with StartTLS before binding.</summary>
     public bool StartTls { get; set; }
 
+    /// <summary>The CA that issued the directory's certificate, in PEM. Set, the certificate must lead to it (the system's CAs do not count); empty, to one of the system's CAs.</summary>
+    public string? CaCertificate { get; set; }
+
     /// <summary>Accept any server certificate. For testing only; the app logs a warning when it is on.</summary>
     public bool IgnoreCertificateErrors { get; set; }
 
-    /// <summary>A read-only service account used to find people and their groups.</summary>
+    /// <summary>A read-only service account used to find people and their groups: a DN, or on Active Directory also user@domain or DOMAIN\user. Empty: anonymous.</summary>
     public string? BindDn { get; set; }
     public string? BindPassword { get; set; }
 
     public string UserBaseDn { get; set; } = "";
 
-    /// <summary>{0} is the escaped sign-in name. Matches OpenLDAP (uid) and Active Directory (sAMAccountName) alike.</summary>
-    public string UserFilter { get; set; } = "(&(|(objectClass=person)(objectClass=inetOrgPerson))(|(uid={0})(sAMAccountName={0})(mail={0})))";
+    /// <summary>{0} is the escaped sign-in name. Matches OpenLDAP (uid) and Active Directory (sAMAccountName, userPrincipalName) alike.</summary>
+    public string UserFilter { get; set; } = DefaultUserFilter;
+
+    /// <summary>The user filter when none is set.</summary>
+    public const string DefaultUserFilter = "(&(|(objectClass=person)(objectClass=inetOrgPerson))(|(uid={0})(sAMAccountName={0})(userPrincipalName={0})(mail={0})))";
 
     /// <summary>Tried in order; the first present becomes the username.</summary>
     public string UserNameAttributes { get; set; } = "uid,sAMAccountName";

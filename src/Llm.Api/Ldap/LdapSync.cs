@@ -45,6 +45,12 @@ public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonito
                 {
                     return;
                 }
+                catch (Exception ex)
+                {
+                    // Anything else (the database, say): the next round tries again. An exception
+                    // left to escape here would stop the whole app, not just the check.
+                    LogFailed(logger, ex);
+                }
             }
             using var changed = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             using var subscription = options.OnChange((_, _) => changed.Cancel());
@@ -97,6 +103,9 @@ public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonito
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Directory sync skipped, nobody changed: {Reason}")]
     private static partial void LogUnavailable(ILogger logger, string reason);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Directory sync failed; it runs again at the next check")]
+    private static partial void LogFailed(ILogger logger, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ldap:IgnoreCertificateErrors is on: the directory's certificate is NOT checked. Use it for testing only.")]
     private static partial void LogInsecure(ILogger logger);

@@ -12,6 +12,14 @@ shows only while it is chosen: **Company sign-in** shows OIDC's settings or
 SAML's, by its **Protocol**. Long values (SAML metadata, a certificate) get a
 box of several lines.
 
+**Company directory (LDAP)** opens with a step-by-step guide and a table of
+examples for OpenLDAP and Active Directory, and each of its settings' help has
+both. Below them, **Test the settings** checks the server, its certificate, the
+service account, where people are and the groups, step by step, and **Try a
+person's sign-in** checks a username and password as signing in does, both with
+the values in the form, saved or not
+([authentication.md](authentication.md#the-company-directory-ldap--active-directory)).
+
 They all live in the app's database; `.env` holds only what the stack needs to
 start ([configuration.md](configuration.md)). The models have their own page:
 Admin → Models.
@@ -69,7 +77,13 @@ instead.
   screenshot.
 - A saved secret (the directory's service password, the company sign-in client
   secret, the mail password) is stored AES-256-GCM encrypted under a key derived
-  from `APP_KEY`. A database dump alone does not reveal it.
+  from `APP_KEY`. A database dump alone does not reveal it. One that no longer
+  decrypts (`APP_KEY` lost and replaced) says so under it, to be typed again.
+- A blank secret field keeps the saved value. The directory's **Test the
+  settings** then uses the saved password, and says so. Other values are saved
+  without spaces at their ends; the directory's service password is saved
+  exactly as typed, since a space can be part of a password (the test says
+  when a typed one starts or ends with a space).
 - The SCIM token is not a setting: **Company sign-in** makes it, shows it once
   and keeps only its SHA-256. The same group shows what to register at the
   identity provider (the redirect URI for OIDC; this app's entity ID, Reply URL

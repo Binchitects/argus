@@ -282,6 +282,7 @@ public sealed partial class SettingsTests(AppFixture app)
             ["Auth:SessionMax"] = auth.SessionMax.ToString("c"),
             ["Auth:RememberMe"] = auth.RememberMe.ToString("c"),
             ["Ldap:SyncInterval"] = ldap.SyncInterval.ToString("c"),
+            ["Ldap:UserFilter"] = ldap.UserFilter,
             ["Branding:ProductName"] = branding.ProductName,
             ["Branding:SignInHeadline"] = branding.SignInHeadline!,
             ["Chat:ThinkingPresets"] = chat.ThinkingPresets,
