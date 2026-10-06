@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Files, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, CircleHelp, Files, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -16,6 +16,8 @@ import { Sessions, ThemeMenu, Thread } from './chat'
 import { EditorArea, EditorProvider } from './editor'
 import { modKey, onMac, useEditor } from './editor-state'
 import { Explorer } from './explorer'
+import { HelpProvider } from './help'
+import { useOpenHelp } from './help-context'
 import { changesQuery, folderQuery, parentOf, preferencesQuery, savePreferences, type Preferences } from './ide-api'
 import { SearchPanel } from './search'
 import { Splitter } from './splitter'
@@ -66,7 +68,9 @@ export function App() {
 
   return (
     <EditorProvider>
-      <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} />
+      <HelpProvider manual={state.data.manual}>
+        <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} />
+      </HelpProvider>
     </EditorProvider>
   )
 }
@@ -217,6 +221,7 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
   const { refresh, setQuickOpen, save, openDiff } = useEditor()
   const [layout, change] = useLayout(saved)
   const [about, setAbout] = useState(false)
+  const openHelp = useOpenHelp()
   // Bumped to put the focus in the search box or the terminal.
   const [searchFocus, setSearchFocus] = useState(0)
   const [terminalFocus, setTerminalFocus] = useState(0)
@@ -300,6 +305,9 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
           <div className="grid place-items-center pb-1">
             <ThemeMenu side="right" align="end" />
           </div>
+          <ActivityButton label="Help" onClick={() => openHelp?.()}>
+            <CircleHelp aria-hidden="true" />
+          </ActivityButton>
           <ActivityButton label="About Code Arena" onClick={() => setAbout(true)}>
             <Info aria-hidden="true" />
           </ActivityButton>

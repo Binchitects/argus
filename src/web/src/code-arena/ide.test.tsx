@@ -1,12 +1,15 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import codeArenaDoc from '@docs/code-arena.md?raw'
 import { makeQueryClient, Providers } from '@/app/providers'
+import { manualDocs, parseDoc } from '@/help/manual'
 import type { ChatConfig } from '@/pages/chat/types'
 import { fakeApi, type Handler } from '@/test/utils'
 import type { CodeState } from './api'
 import { App } from './app'
 import { rankFiles } from './editor-state'
+import { parts, regions, tasks } from './help-text'
 import type { Change, Entry, Preferences, TerminalInfo } from './ide-api'
 
 // Monaco, xterm.js and the terminal's socket, as fakes that remember what the page did with them.
@@ -245,7 +248,7 @@ afterEach(() => {
 })
 
 const state: CodeState = {
-  name: 'Code Arena', version: '5.2.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', folder: '/home/ada/shop', project: 'shop', branch: 'feature/cart', model: 'model-a', context: 32768, thinking: null, mode: 'auto-edit',
+  name: 'Code Arena', version: '5.2.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'feature/cart', model: 'model-a', context: 32768, thinking: null, mode: 'auto-edit',
   modes: [
     { name: 'ask', description: 'edits and commands ask first' },
     { name: 'auto-edit', description: 'file edits run without asking; commands ask' },
@@ -419,7 +422,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Agent changes (1)', 'Chat', 'Terminal', 'Theme', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Agent changes (1)', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -992,6 +995,85 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Dark' }))
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-dark'))
+  })
+})
+
+describe('Code Arena, the help', () => {
+  /** The workbench's regions on screen, by the names a screen reader gives them. */
+  const regionsShown = () => {
+    // The workbench: from the activity bar up to what holds the status bar too (not the page's toasts, nor a dialog).
+    let workbench = screen.getByRole('navigation', { name: 'Activity bar' }).parentElement!
+    while (!workbench.querySelector('footer[aria-label="Status bar"]')) workbench = workbench.parentElement!
+    return [...workbench.querySelectorAll('nav[aria-label], aside[aria-label], section[aria-label], footer[aria-label], form[aria-label]')].map((el) => el.getAttribute('aria-label')!)
+  }
+
+  it('has help for every part of the workbench: a region without it fails here', async () => {
+    backend()
+    renderIde()
+    const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
+    await screen.findByRole('tree', { name: 'Files' })
+    const seen = new Set(regionsShown())
+    // Every view of the side bar, and the terminal panel, drawn once.
+    for (const name of ['Search', 'Agent changes (1)', 'Chat']) {
+      await userEvent.click(within(bar).getByRole('button', { name }))
+      for (const r of regionsShown()) seen.add(r)
+    }
+    await userEvent.click(within(bar).getByRole('button', { name: 'Terminal' }))
+    await screen.findByRole('region', { name: 'Terminal' })
+    for (const r of regionsShown()) seen.add(r)
+    expect([...seen].filter((name) => !Object.hasOwn(regions, name)), 'a region with no help: give it its part in help-text.ts (regions), and the part its help').toEqual([])
+    expect([...seen].toSorted()).toEqual(Object.keys(regions).toSorted())
+    // Each part is a region on screen.
+    expect(new Set(Object.values(regions))).toEqual(new Set(Object.keys(parts)))
+  })
+
+  it("points each part at a heading of the manual's Code Arena page, at the address code-arena gives", () => {
+    const ids = parseDoc(codeArenaDoc).headings.map((h) => h.id)
+    for (const p of Object.values(parts)) expect(ids, p.name).toContain(p.manual)
+    expect(ids).toContain('the-ide')
+    // code-arena's state names /help/code-arena (Config.ManualUrl): the manual's page for docs/code-arena.md.
+    expect(manualDocs.find((d) => d.file === 'code-arena.md')?.id).toBe('code-arena')
+    for (const t of tasks) expect(t.steps.length, t.title).toBeGreaterThan(0)
+  })
+
+  it("opens from Help in the activity bar with every part, and at a panel's part from its ?", async () => {
+    backend()
+    renderIde()
+    const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
+    const help = within(bar).getByRole('button', { name: 'Help' })
+    await userEvent.click(help)
+    let sheet = await screen.findByRole('dialog', { name: 'Code Arena' })
+    expect(within(sheet).getAllByRole('term').map((t) => t.textContent)).toEqual(expect.arrayContaining(Object.values(parts).map((p) => p.name)))
+    expect(within(sheet).queryByRole('heading', { name: /^This part/ })).not.toBeInTheDocument()
+    expect(within(sheet).getByRole('heading', { name: 'Ask the agent for a change' })).toBeInTheDocument()
+    const manual = within(sheet).getByRole('link', { name: 'Code Arena in the manual' })
+    expect(manual).toHaveAttribute('href', 'https://llm.test/help/code-arena#the-ide')
+    expect(manual).toHaveAttribute('target', '_blank')
+    // Over the workbench: Esc closes it, and the focus goes back to Help.
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(help).toHaveFocus()
+
+    const at = async (button: string, part: string, anchor: string) => {
+      await userEvent.click(screen.getByRole('button', { name: button }))
+      sheet = await screen.findByRole('dialog', { name: 'Code Arena' })
+      expect(within(sheet).getByRole('heading', { name: `This part: ${part}` })).toBeInTheDocument()
+      expect(within(sheet).getByRole('link', { name: 'More on this in the manual' })).toHaveAttribute('href', `https://llm.test/help/code-arena#${anchor}`)
+      expect(within(sheet).getByText(part, { selector: 'dt' }).parentElement).toHaveAttribute('aria-current', 'true')
+      await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      expect(screen.getByRole('button', { name: button })).toHaveFocus()
+    }
+    await at('Help: Explorer', 'Explorer', 'the-ide')
+    await at('Help: Chat with the agent', 'Chat with the agent', 'modes')
+    await userEvent.click(within(bar).getByRole('button', { name: 'Search' }))
+    await at('Help: Search', 'Search', 'the-ide')
+    await userEvent.click(within(bar).getByRole('button', { name: 'Agent changes (1)' }))
+    await at('Help: Agent changes', 'Agent changes', 'the-ide')
+    await userEvent.click(within(bar).getByRole('button', { name: 'Chat' }))
+    await at('Help: Sessions', 'Sessions', 'sessions-and-the-models-window')
+    await userEvent.click(within(bar).getByRole('button', { name: 'Terminal' }))
+    await at('Help: Terminal', 'Terminal', 'terminals')
   })
 })
 

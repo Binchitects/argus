@@ -10,7 +10,8 @@ what each part does, and the common tasks step by step
 stays open while you work; on a smaller one it opens over the page. Argus's
 own app has a lighter version: **Help** in its sidebar (and on its sign-in
 page), beside the page on a wide screen and over it on a smaller one, and
-`/help`.
+`/help`. Code Arena's IDE has **Help** in its activity bar and a **?** on each
+panel, with links into the manual's Code Arena page.
 
 The manual lists an admin's pages for admins only, but that only tidies it: it
 is not access control. Every page of the manual, admins' too, is in the web's

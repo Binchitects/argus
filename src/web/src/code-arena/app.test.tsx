@@ -9,7 +9,7 @@ import type { CodeSession, CodeState, FileDiff, SessionSummary } from './api'
 import { App } from './app'
 
 const state = (over: Partial<CodeState> = {}): CodeState => ({
-  name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, thinking: null, mode: 'ask',
+  name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, thinking: null, mode: 'ask',
   modes: [
     { name: 'ask', description: 'edits and commands ask first' },
     { name: 'auto-edit', description: 'file edits run without asking; commands ask' },
@@ -249,5 +249,14 @@ describe('Code Arena in the browser', () => {
     fakeApi(null, { 'GET /api/state': () => ({ status: 401, json: { status: 'unauthorized', error: 'Open the address' } }), 'GET /api/chat/config': () => ({ status: 401 }) })
     renderCode()
     expect(await screen.findByText('This page is from an earlier run')).toBeInTheDocument()
+  })
+
+  it("says where the manual is when code-arena knows no Arena's address to link to", async () => {
+    backend({ state: { manual: null } })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Help' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Code Arena' })
+    expect(within(sheet).queryByRole('link')).not.toBeInTheDocument()
+    expect(within(sheet).getByText(/in your Argus Arena's manual: Manual, then Code Arena/)).toBeInTheDocument()
   })
 })

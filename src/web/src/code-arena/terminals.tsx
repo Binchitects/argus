@@ -11,6 +11,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { ApiError, errorMessage } from '@/lib/api'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
+import { PartHelp } from './help'
 import { closeTerminal, openTerminal, terminalSocketUrl, terminalsQuery, type TerminalInfo } from './ide-api'
 
 // The page's colours around the ANSI palette editors use, for a light and a dark background.
@@ -169,6 +170,7 @@ export default function TerminalPanel({ shown, onHide, focusKey }: { shown: bool
             </Button>
           </Tooltip>
         )}
+        <PartHelp part="terminal" />
         <Tooltip content="Hide the panel (Ctrl+`)">
           <Button variant="ghost" size="icon-sm" className="size-6" aria-label="Hide the terminal" onClick={onHide}>
             <ChevronDown />

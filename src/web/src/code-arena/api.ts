@@ -9,6 +9,8 @@ export interface CodeState {
   /** The licence and where this version's source is, for the about box (LICENSING.md, section 7(b)). */
   license: string
   source: string
+  /** Code Arena's page of the manual, in the Arena signed in to (https://DOMAIN/help/code-arena); null without its address. */
+  manual: string | null
   folder: string
   project: string
   branch: string | null

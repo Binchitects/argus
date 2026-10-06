@@ -11,6 +11,7 @@ import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
+import { PartHelp } from './help'
 import { changesQuery, createEntry, deleteEntry, folderQuery, join, nameOf, parentOf, renameEntry, within, type Change, type Entry } from './ide-api'
 
 /** A row's place in the tree, for keys and the context menu. */
@@ -184,6 +185,7 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
             </button>
           </Tooltip>
         ))}
+        <PartHelp part="explorer" />
       </div>
       <ContextMenu.Root onOpenChange={(open) => !open && setMenuFor(null)}>
         <ContextMenu.Trigger asChild>

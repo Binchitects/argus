@@ -6,14 +6,10 @@ import { ScrollRegion } from '@/components/app/scroll-region'
 import { SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { infoQuery, meQuery, supportHref } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { Inline } from './inline'
 import { manualHref, topicAnchor } from './pages-doc'
 import { helpFor } from './route-help'
 import type { HelpPart } from './topics'
-
-/** Help text: **words** are the page's own labels, in bold. */
-export function Inline({ text }: { text: string }) {
-  return <>{text.split(/\*\*(.+?)\*\*/g).map((part, i) => (i % 2 ? <strong key={i} className="font-medium text-foreground">{part}</strong> : part))}</>
-}
 
 function Parts({ parts, current }: { parts: (HelpPart & { id?: string })[]; current?: string }) {
   return (

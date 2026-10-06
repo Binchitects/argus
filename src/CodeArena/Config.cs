@@ -110,6 +110,9 @@ internal sealed class Config
     /// <summary>https://DOMAIN/mcp, or the address given.</summary>
     public string? ArenaMcpUrl => McpUrl is { Length: > 0 } m ? m : Url is { Length: > 0 } u ? u.TrimEnd('/') + "/mcp" : null;
 
+    /// <summary>Code Arena's page of the Arena's manual, https://DOMAIN/help/code-arena: the IDE's help links to it.</summary>
+    public string? ManualUrl => Url is { Length: > 0 } u ? u.TrimEnd('/') + "/help/code-arena" : null;
+
     public static string? DeriveGateway(string? url)
     {
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u))

@@ -7,6 +7,7 @@ import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
+import { PartHelp } from './help'
 import { nameOf, parentOf, searchQuery, type SearchMatch, type SearchOptions } from './ide-api'
 
 /** A value that settles: the last one given, once it has not changed for `ms`. */
@@ -78,8 +79,9 @@ export function SearchPanel({ focusKey }: { focusKey: number }) {
   const data = results.data
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center px-3">
+      <div className="flex h-9 shrink-0 items-center justify-between pr-1.5 pl-3">
         <h2 className="text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">Search</h2>
+        <PartHelp part="search" />
       </div>
       <form
         aria-label="Search the files"

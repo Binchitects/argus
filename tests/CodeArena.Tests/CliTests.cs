@@ -58,6 +58,8 @@ public sealed class CliTests : IDisposable
         var config = new Config { Url = "https://llm.example.com", Gateway = "https://ai.example.com/v1/" };
         Assert.Equal("https://ai.example.com", config.GatewayUrl);
         Assert.Equal("https://llm.example.com/mcp", config.ArenaMcpUrl);
+        Assert.Equal("https://llm.example.com/help/code-arena", config.ManualUrl);
+        Assert.Null(new Config().ManualUrl);
         using var h = new Harness(_gateway, _mcp);
         Assert.Equal(0, await h.Run("", "--version"));
         Assert.StartsWith("code-arena ", h.Out);
