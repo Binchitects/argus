@@ -106,7 +106,7 @@ afterEach(() => {
   Reflect.deleteProperty(navigator, 'mediaDevices')
 })
 
-function backend() {
+function backend(extra: Parameters<typeof fakeApi>[1] = {}) {
   return fakeApi(member, {
     'GET /api/chat/config': () => ({ json: config }),
     'GET /api/chat/conversations': () => ({ json: [] }),
@@ -125,6 +125,7 @@ function backend() {
     }),
     'POST /api/chat/speech': () => ({ json: {} }),
     'POST /api/chat/conversations/c1/stop': () => ({ status: 202 }),
+    ...extra,
   })
 }
 
@@ -167,6 +168,34 @@ describe('talk', () => {
     expect(screen.queryByRole('status', { name: 'Talk' })).not.toBeInTheDocument()
     expect(tracks.stopped).toBe(1)
     expect(screen.getByRole('button', { name: 'Talk' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('with reading aloud turned off (Your account → Voice) the answer is only shown, and speaking still stops it', async () => {
+    const voice = {
+      chosen: { language: null, voices: {}, speed: null, readAloud: false },
+      company: { language: 'auto', voices: {}, speed: 1, readAloud: true },
+      voices: [],
+      languages: [],
+      hears: true,
+      known: true,
+    }
+    const calls = backend({ 'GET /api/account/voice': () => ({ json: voice }) })
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: 'Talk' }))
+    const status = () => screen.getByRole('status', { name: 'Talk' })
+    await waitFor(() => expect(status()).toHaveTextContent('Listening: speak when you are ready.'))
+    mic = 0.2
+    await waitFor(() => expect(status()).toHaveTextContent('Hearing you…'))
+    mic = 0.001
+    expect(await screen.findByText(/It lies on the/)).toBeInTheDocument()
+    await waitFor(() => expect(status()).toHaveTextContent('Thinking… speak to stop it.'))
+    expect(calls.some((c) => c.path === '/api/chat/speech')).toBe(false)
+    expect(sounds).toHaveLength(0)
+
+    mic = 0.2
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/chat/conversations/c1/stop')).toBe(true))
+    mic = 0.001
+    await userEvent.click(screen.getByRole('button', { name: 'End talk' }))
   })
 
   it('a microphone that is refused says so, and Talk stays off', async () => {

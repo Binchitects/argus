@@ -34,6 +34,7 @@ import { ShareDialog } from './share-dialog'
 import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export'
 import type { ExportKind } from './header'
 import { saveBlob } from '@/lib/zip'
+import { readsAloud, voiceQuery } from '@/lib/voice'
 import type { Queued } from './composer'
 import { speak, voicePrefix } from './sound'
 import { TalkBar, TalkButton } from './talk'
@@ -146,6 +147,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const gone = useRef(false)
   /** A question said in Talk while an answer ran: asked once it is over. */
   const talkNext = useRef<{ text: string; turn: TalkTurn } | null>(null)
+  // Answers to what is said aloud are read aloud, unless the person (or the company) turned that off.
+  const aloudToo = readsAloud(useQuery(voiceQuery).data)
   useEffect(() => {
     liveRef.current = live
   }, [live])
@@ -473,7 +476,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     const localId = newLocalId()
     const attachments = files ?? uploads.attachments
     // Asked by voice: answered aloud.
-    const aloud = attachments.some((a) => a.fileName.startsWith(voicePrefix))
+    const aloud = aloudToo && attachments.some((a) => a.fileName.startsWith(voicePrefix))
     // The files went with the question once the server has it: the box is free for the next one while the answer streams.
     const body = { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null, ...(deep && !versus ? { research: true } : {}), ...(versus?.models ? { models: versus.models } : {}), ...(talkTurn ? { spoken: true } : {}) }
     const sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
@@ -548,7 +551,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const watchNext = (chat: string, saved: Conversation) => {
     // Asked by voice: answered aloud, a queued voice message too.
     const asked = saved.messages.find((m) => m.id === saved.currentLeafId)
-    const aloud = asked?.role === 'user' && asked.attachments.some((a) => a.fileName.startsWith(voicePrefix))
+    const aloud = aloudToo && asked?.role === 'user' && asked.attachments.some((a) => a.fileName.startsWith(voicePrefix))
     void run(chat, 'stream', null, { messages: saved.messages, leaf: saved.currentLeafId, notices: [], title: null, thinkingSince: null }, null, (e) => {
       if (e.type !== 'done' || !aloud) return
       const s = liveRef.current
@@ -629,6 +632,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       } else void send(text, [], turn)
     },
     onInterrupt: () => void stop(),
+    readAloud: aloudToo,
   })
   const talkButton = <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />
 

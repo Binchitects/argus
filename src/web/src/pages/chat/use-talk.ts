@@ -17,7 +17,7 @@ export interface TalkTurn {
 export const canTalk = () =>
   typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined' && typeof AudioContext !== 'undefined'
 
-/** Each sentence through the app's text to speech (Persian in a Persian voice), played as an MP3. */
+/** Each sentence through the app's text to speech (in the person's voice for its language), played as an MP3. */
 export const browserVoice: Voice = {
   fetch: async (text, signal) => {
     const res = await fetch('/api/chat/speech', {
@@ -68,15 +68,15 @@ interface Live {
 /**
  * Talk: a voice conversation in the chat. The microphone is listened to all along; what is
  * said up to a pause is written down and asked (`onHeard`, as a spoken question); the answer
- * is read aloud sentence by sentence as it is written; speaking over it stops the reading
- * and the answer (`onInterrupt`).
+ * is read aloud sentence by sentence as it is written (unless `readAloud` is off: the person's
+ * choice); speaking over it stops the reading and the answer (`onInterrupt`).
  */
-export function useTalk({ onHeard, onInterrupt, voice = browserVoice }: { onHeard: (text: string, turn: TalkTurn) => void; onInterrupt: () => void; voice?: Voice }) {
+export function useTalk({ onHeard, onInterrupt, voice = browserVoice, readAloud = true }: { onHeard: (text: string, turn: TalkTurn) => void; onInterrupt: () => void; voice?: Voice; readAloud?: boolean }) {
   const [state, setState] = useState<TalkState>('off')
-  // The latest callbacks: Talk calls them long after the render that made them.
-  const handlers = useRef({ onHeard, onInterrupt })
+  // The latest callbacks and choice: Talk uses them long after the render that made them.
+  const handlers = useRef({ onHeard, onInterrupt, readAloud })
   useEffect(() => {
-    handlers.current = { onHeard, onInterrupt }
+    handlers.current = { onHeard, onInterrupt, readAloud }
   })
   const live = useRef<Live | null>(null)
   /** The answer being heard: its number (a newer one or an interruption leaves older ones' words unsaid), its sentences, whether it is over. */
@@ -151,7 +151,8 @@ export function useTalk({ onHeard, onInterrupt, voice = browserVoice }: { onHear
       watch: (e) => {
         const now = turn.current
         if (now?.n !== n || !live.current) return
-        if (e.type === 'content') for (const s of now.sentences.push(e.text)) live.current.queue.say(s)
+        // Not read aloud: the answer is only shown, and speaking still stops it.
+        if (e.type === 'content' && handlers.current.readAloud) for (const s of now.sentences.push(e.text)) live.current.queue.say(s)
         if (e.type === 'done' || e.type === 'error' || e.type === 'stopped') finish(n)
       },
       ended: () => finish(n),

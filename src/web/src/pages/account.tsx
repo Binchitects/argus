@@ -26,17 +26,19 @@ import { ago } from '@/lib/format'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
 import { YourData } from './account-data'
+import { VoiceSection } from './account-voice'
 
 export function AccountPage() {
   const me = useOutletContext<Me>()
   return (
     <>
-      <PageHeader title="Your account" description="Your profile, API key, answers, memory, sign-in security and appearance." />
+      <PageHeader title="Your account" description="Your profile, API key, answers, voice, memory, sign-in security and appearance." />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="grid content-start gap-6">
           <Profile me={me} />
           <ApiKey />
           <Answers />
+          <VoiceSection />
           <Memory />
           <Appearance />
           <YourData />
