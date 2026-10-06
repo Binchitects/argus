@@ -123,4 +123,5 @@ same certificate with your own proxy if it leaves the machine.
 | an editor gets `421` on `/mcp` | connect by a name listed in `ARGUS_HOSTNAME` |
 | an editor gets `401` on `/mcp` | the key is wrong, revoked, or its account disabled |
 | *Too many failed sign-ins* | ten failures for that name in ten minutes; wait, or reset the password |
-| the Overview says the index is stale | the schedule is off (`ARGUS_INDEX_INTERVAL=0`) or GitLab is failing: see the Indexing page's log |
+| the Overview says the index is stale | the schedule is off (`ARGUS_INDEX_INTERVAL=0`) or GitLab is failing: Repositories, filter by *Out of date* or *Failed*, and read each one's **Log** |
+| every repository is listed twice | an index from v5.2.0 or before, brought up with another token on a GitLab set up anew: upgrading merges the copies, and a new token never makes them again |

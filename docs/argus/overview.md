@@ -45,7 +45,7 @@ server — see [Checking it](#checking-it).
 
 ## Keeping the index current
 
-Three things keep the index fresh, and the first two are independent:
+Four things keep the index fresh, and the first two are independent:
 
 - **A poll.** The serve process runs a periodic pass, and the engine exports
   `argus_index_age_seconds` per repository. An `ArgusIndexStale` alert fires when
@@ -55,10 +55,12 @@ Three things keep the index fresh, and the first two are independent:
 - **A push and merge webhook.** `POST /hook/gitlab` takes a GitLab push or a
   merged merge request and indexes the repository that changed, gated by its own
   secret (made on Admin → Indexing, kept as a hash; or `ARGUS_WEBHOOK_TOKEN`;
-  none = the route answers 404). A push during a pass is queued rather than dropped
-  and drained one repository per pass; an overfull queue collapses into one full
-  pass. Events it has no use for are acknowledged rather than refused, because
-  GitLab disables a webhook that keeps failing. The poll stays on as the floor.
+  none = the route answers 404). A push during a run is queued rather than dropped,
+  and all that waited run together when the run ends. Events it has no use for
+  are acknowledged rather than refused, because GitLab disables a webhook that
+  keeps failing. The poll stays on as the floor.
+- **Each repository's own schedule.** Every N hours, daily or weekly at a time,
+  or off, run by Argus's own scheduler; the rest follow the schedule for all.
 - **`argus index`** by hand, from the CLI or **Admin → Indexing**.
 
 **Indexing is embedding now.** `argus index` embeds as it goes, so the poller and
