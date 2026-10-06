@@ -45,7 +45,7 @@ public sealed class DataExport(AppDbContext db, AccessService access)
             user.UserName, user.DisplayName, user.Email,
             source = user.Source == UserSource.Ldap ? "ldap" : "local",
             user.CreatedAt, user.LastSignInAt,
-            preferences = new { answerLength = user.AnswerLength ?? AnswerLengths.Normal },
+            preferences = new { answerLength = user.AnswerLength ?? AnswerLengths.Normal, voice = VoiceChoices.Of(user.Voice) },
             groups,
             legalHold = hidden && user.LegalHoldSince is { } since ? new { since, reason = user.LegalHoldReason } : null,
         }, ct);

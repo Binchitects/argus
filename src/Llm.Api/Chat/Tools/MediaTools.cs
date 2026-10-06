@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -9,17 +8,72 @@ using Llm.Core.Data;
 
 namespace Llm.Api.Chat.Tools;
 
-/// <summary>Which text to speech model and voice say a text, and the text as it is said (no Markdown, no code).</summary>
+/// <summary>A text as it is read aloud: the language it is written in (which picks the voice), and its words (no Markdown, no code).</summary>
 public static partial class Voices
 {
     public const int MaxChars = 4000;
 
-    /// <summary>Persian in the Persian voice, anything else in Kokoro's.</summary>
-    public static (string Model, string Voice) For(string text) =>
-        Persian(text) ? (MediaModels.TextToSpeechPersian, "amir") : (MediaModels.TextToSpeech, "af_heart");
+    /// <summary>The small words that tell the languages of the Latin script apart; their accents count too.</summary>
+    private static readonly (string Language, HashSet<string> Words, string Marks)[] Latin =
+    [
+        ("en", ["the", "and", "is", "are", "of", "to", "in", "that", "it", "you", "for", "with", "this", "was", "on", "be", "have", "not", "what", "how"], ""),
+        ("es", ["el", "los", "las", "del", "que", "y", "en", "es", "por", "una", "para", "con", "se", "lo", "como", "más", "está", "pero", "muy", "yo"], "ñ¿¡"),
+        ("fr", ["le", "les", "des", "et", "est", "une", "pour", "dans", "pas", "du", "avec", "ce", "il", "je", "vous", "nous", "sur", "qui", "au", "c'est"], "èêœù"),
+        ("it", ["il", "che", "di", "è", "per", "non", "sono", "della", "gli", "anche", "più", "questo", "ma", "ho", "lo", "nel", "alla", "uno", "ci", "si"], "ìò"),
+        ("pt", ["os", "as", "que", "é", "não", "uma", "um", "para", "com", "do", "da", "em", "você", "mas", "por", "isso", "ele", "ela", "dos", "das"], "ãõ"),
+    ];
 
-    private static bool Persian(string text) =>
-        text.Count(c => c is >= '؀' and <= 'ۿ') > text.Count(c => c is >= 'A' and <= 'z');
+    /// <summary>
+    /// The language a text is written in, as far as reading it aloud needs: by its script (Persian for the Arabic
+    /// script, Hindi, Japanese, Chinese), and for the Latin script by its small words, else English. Only
+    /// <paramref name="among"/> (the languages there are voices for) are told apart; null: all of these.
+    /// </summary>
+    public static string LanguageOf(string text, IReadOnlyCollection<string>? among = null)
+    {
+        int arabic = 0, devanagari = 0, kana = 0, han = 0, latin = 0;
+        foreach (var c in text)
+        {
+            switch (c)
+            {
+                case >= '\u0600' and <= '\u06FF' or >= '\u0750' and <= '\u077F' or >= '\uFB50' and <= '\uFDFF' or >= '\uFE70' and <= '\uFEFF':
+                    arabic++;
+                    break;
+                case >= '\u0900' and <= '\u097F':
+                    devanagari++;
+                    break;
+                case >= '\u3040' and <= '\u30FF':
+                    kana++;
+                    break;
+                case >= '\u3400' and <= '\u4DBF' or >= '\u4E00' and <= '\u9FFF':
+                    han++;
+                    break;
+                case < '\u0250' when char.IsLetter(c):
+                    latin++;
+                    break;
+            }
+        }
+        var most = new[] { arabic, devanagari, kana + han, latin }.Max();
+        if (most == 0 || most == latin)
+        {
+            return LatinLanguage(text, among);
+        }
+        return most == arabic ? "fa" : most == devanagari ? "hi" : kana > 0 ? "ja" : "zh";
+    }
+
+    /// <summary>English, unless another language's small words (and accents) are clearly more of the text: a name or two in it is not enough.</summary>
+    private static string LatinLanguage(string text, IReadOnlyCollection<string>? among)
+    {
+        var words = LatinWord().Matches(text.ToLowerInvariant()).Select(m => m.Value).ToList();
+        var scores = Latin.Where(l => l.Language == "en" || among is null || among.Contains(l.Language))
+            .Select(l => (l.Language, Score: words.Count(l.Words.Contains) + text.Count(c => l.Marks.Contains(char.ToLowerInvariant(c)))))
+            .ToList();
+        var english = scores[0].Score;
+        var best = scores.Skip(1).OrderByDescending(s => s.Score).FirstOrDefault();
+        return best.Language is { } other && best.Score >= 2 && best.Score > 2 * english ? other : "en";
+    }
+
+    [GeneratedRegex(@"[\p{L}']+")]
+    private static partial Regex LatinWord();
 
     /// <summary>What is read aloud of an answer: its prose, without code, links' addresses or Markdown's marks.</summary>
     public static string Plain(string markdown)
@@ -163,12 +217,12 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
     }
 }
 
-/// <summary>A text read aloud into a sound file, by the gateway's text to speech.</summary>
-public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbContext db) : IChatTool
+/// <summary>A text read aloud into a sound file, by the gateway's text to speech, in the person's voice for its language.</summary>
+public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbContext db, VoiceCatalog voices) : IChatTool
 {
     public string Id => "speech";
     public string Title => "Speech";
-    public string Description => "Reads a text aloud into a sound file (MP3), in English or Persian.";
+    public string Description => "Reads a text aloud into a sound file (MP3), in the person's voice for its language.";
     public string Icon => "audio-lines";
 
     public async Task<string?> UnavailableAsync(CancellationToken ct) =>
@@ -189,11 +243,15 @@ public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbCont
             {
                 return new ToolResult("Give the words to say in 'text'.", IsError: true);
             }
-            var (model, voice) = Voices.For(text);
+            var speech = await voices.ForAsync(context.User, token);
+            if (speech.For(text) is not { } voice)
+            {
+                return new ToolResult("The gateway has no text to speech model (the audio module).", IsError: true);
+            }
             byte[] mp3;
             try
             {
-                mp3 = await gateway.SpeakAsync(model, text, voice, context.Email, token);
+                mp3 = await gateway.SpeakAsync(voice.Model, text, voice.Name, context.Email, token, speech.Speed);
             }
             catch (ChatGatewayException ex)
             {
@@ -209,7 +267,7 @@ public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbCont
             await db.SaveChangesAsync(token);
             return new ToolResult(new JsonObject
             {
-                ["shown_to_the_person"] = true, ["file"] = file.FileName, ["voice"] = string.Create(CultureInfo.InvariantCulture, $"{model}/{voice}"),
+                ["shown_to_the_person"] = true, ["file"] = file.FileName, ["voice"] = voice.Id,
             }.ToJsonString(Mcp.Plain), Files: [file]);
         }));
 }

@@ -766,10 +766,11 @@ public static partial class ChatEndpoints
     }
 
     /// <summary>
-    /// A text read aloud: an MP3 from the gateway's text to speech, in the person's name (Persian in a Persian voice),
-    /// passed on as the speech server writes it. Talk asks for each sentence of an answer as it is written.
+    /// A text read aloud: an MP3 from the gateway's text to speech, in the person's name and in their voice for the
+    /// text's language, at their speed (Your account → Voice), passed on as the speech server writes it. Talk asks for
+    /// each sentence of an answer as it is written.
     /// </summary>
-    private static async Task<IResult> SpeechAsync(SpeechRequest body, HttpContext http, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, ChatModels models, CancellationToken ct)
+    private static async Task<IResult> SpeechAsync(SpeechRequest body, HttpContext http, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, VoiceCatalog voices, CancellationToken ct)
     {
         var me = await Me(p, users);
         var text = Tools.Voices.Plain(body.Text ?? "");
@@ -777,21 +778,8 @@ public static partial class ChatEndpoints
         {
             return AuthEndpoints.Problem(400, "text", "Nothing to read aloud.");
         }
-        if (await models.OfModeAsync("audio_speech", null, ct) is null)
-        {
-            return AuthEndpoints.Problem(503, "no_speech", "The gateway has no text to speech model (the audio module).");
-        }
-        var (model, voice) = Tools.Voices.For(text);
-        try
-        {
-            var res = await gateway.OpenSpeechAsync(model, text, voice, me.Email!, ct);
-            http.Response.RegisterForDispose(res);
-            return Results.Stream(await res.Content.ReadAsStreamAsync(ct), "audio/mpeg");
-        }
-        catch (ChatGatewayException ex)
-        {
-            return AuthEndpoints.Problem(502, "gateway", ex.Message);
-        }
+        var speech = await voices.ForAsync(me, ct);
+        return await VoiceEndpoints.ReadAloudAsync(http, gateway, speech.For(text), text, speech.Speed, me.Email!, ct);
     }
 
     private static async Task<IResult> UploadAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> monitor,

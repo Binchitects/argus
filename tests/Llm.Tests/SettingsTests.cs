@@ -267,6 +267,7 @@ public sealed partial class SettingsTests(AppFixture app)
         var auth = new AuthOptions();
         var ldap = new Llm.Api.Ldap.LdapOptions();
         var branding = new BrandingOptions();
+        var speech = new Llm.Api.Chat.SpeechOptions();
         var expected = new Dictionary<string, string>
         {
             ["Chat:MaxToolRounds"] = chat.MaxToolRounds.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -287,6 +288,10 @@ public sealed partial class SettingsTests(AppFixture app)
             ["Chat:ThinkingPresets"] = chat.ThinkingPresets,
             ["Chat:DefaultThinking"] = chat.DefaultThinking,
             ["Engine:ModelsMax"] = new Llm.Api.Models.EngineOptions().ModelsMax.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Speech:Language"] = speech.Language,
+            ["Speech:Voices"] = speech.Voices,
+            ["Speech:Speed"] = speech.Speed.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Speech:ReadAloud"] = speech.ReadAloud ? "true" : "false",
         };
         foreach (var (key, value) in expected)
         {
