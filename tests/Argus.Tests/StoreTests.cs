@@ -14,7 +14,7 @@ public class StoreTests
         var version = Convert.ToInt32(Sql.Scalar(ix.Conn, "PRAGMA user_version"));
         Assert.Equal(Db.Migrations[^1].Version, version);
         Assert.Equal(version, Db.Migrate(ix.Conn));
-        Assert.Equal(16, Db.Migrations.Count);
+        Assert.Equal(18, Db.Migrations.Count);
     }
 
     [Fact]
@@ -301,10 +301,13 @@ public class ChoicesTests
         Argus.Indexing.Progress.Write = lines.Add;
         try
         {
-            Argus.Indexing.Progress.Pass(2);
+            Argus.Indexing.Progress.Pass(["g/a", "g/b"]);
+            Argus.Indexing.Progress.Fetching(1, "g/a");
             Argus.Indexing.Progress.Branch(1, "g/a", "main");
             Argus.Indexing.Progress.Files("g/a", "main", 40, 160);
             Argus.Indexing.Progress.BranchDone("g/a", "main", "ok");
+            Argus.Indexing.Progress.RepoDone("g/a", "ok", "Done in 2.0 s: 1 branch, 1 updated.");
+            Argus.Indexing.Progress.Fetching(2, "g/b");
             Argus.Indexing.Progress.Branch(2, "g/b", "main");
             Argus.Indexing.Progress.Finishing("embeddings");
         }
@@ -324,5 +327,7 @@ public class ChoicesTests
         Assert.Equal("ok", p["outcomes"]!["g/a@main"]!.GetValue<string>());
         Assert.Equal("finishing", p["stage"]!.GetValue<string>());
         Assert.Equal("embeddings", p["what"]!.GetValue<string>());
+        Assert.Equal("done", p["by_repo"]!["g/a"]!["state"]!.GetValue<string>());
+        Assert.Equal("files", p["by_repo"]!["g/b"]!["state"]!.GetValue<string>());
     }
 }

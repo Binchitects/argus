@@ -15,6 +15,12 @@ public sealed class IndexResult
     public string Sha { get; init; } = "";
     public bool TimedOut { get; set; }
     public bool SymbolsFailed { get; set; }
+    /// <summary>Files looked at: the changes since the commit indexed (every file, on a full read), and retries.</summary>
+    public int Considered { get; set; }
+    /// <summary>Every file was read: the first time, or when the commit indexed is no longer in its history.</summary>
+    public bool FullReindex { get; set; }
+    /// <summary>Why symbols could not be read, when they could not.</summary>
+    public string? SymbolsProblem { get; set; }
 }
 
 /// <summary>
@@ -29,8 +35,9 @@ public static class Worker
         Sql.One(conn, "SELECT id FROM repos WHERE gitlab_id = ? ORDER BY (branch = default_branch) DESC, id LIMIT 1", gitlabId)!.Long("id");
 
     /// <param name="progress">Told the files done of those to look at, now and then (and once at the end of the files).</param>
+    /// <param name="symbols">Told how many files' symbols are read next.</param>
     public static IndexResult IndexRepo(SqliteConnection conn, IndexConfig index, Project project, string mirrorPath, string tree,
-        string newSha, string? oldSha, Func<double>? now = null, long? repoId = null, Action<int, int>? progress = null)
+        string newSha, string? oldSha, Func<double>? now = null, long? repoId = null, Action<int, int>? progress = null, Action<int>? symbols = null)
     {
         now ??= () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
         var started = now();
@@ -40,6 +47,7 @@ public static class Worker
 
         if (oldSha is not null && ContractIsStale(conn, rid)) oldSha = null;
         var (fullReindex, changes) = Mirror.ChangesSince(mirrorPath, oldSha, newSha);
+        result.FullReindex = fullReindex;
         var shas = Mirror.BlobShas(mirrorPath, newSha);
 
         foreach (var change in changes)
@@ -63,6 +71,7 @@ public static class Worker
         var toParse = new List<string>();
         var failedPaths = new List<string>();
         var unreachedRetry = new List<string>();
+        result.Considered = pending.Count;
 
         var told = now();
         for (int position = 0; position < pending.Count; position++)
@@ -151,6 +160,7 @@ public static class Worker
         }
 
         progress?.Invoke(pending.Count, pending.Count);
+        if (toParse.Count > 0) symbols?.Invoke(toParse.Count);
         var (uncovered, unattributable) = ApplySymbols(conn, rid, tree, toParse, result, Ts, shas);
         failedPaths.AddRange(uncovered);
 
@@ -250,6 +260,7 @@ public static class Worker
             Writes.RecordError(conn, repoId, null, "ctags", exc.Message, ts());
             result.Errors++;
             result.SymbolsFailed = true;
+            result.SymbolsProblem = exc.Message;
             Writes.ClearSymbolsForPaths(conn, repoId, paths);
             return ([], []);
         }

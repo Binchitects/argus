@@ -65,15 +65,19 @@ public static class Writes
     public static int DeleteRepos(SqliteConnection conn, IReadOnlyList<long> repoIds)
     {
         if (repoIds.Count == 0) return 0;
+        var n = 0;
+        Atomic(conn, () => n = DeleteReposIn(conn, repoIds));
+        return n;
+    }
+
+    /// <summary><see cref="DeleteRepos"/> inside a transaction the caller holds.</summary>
+    public static int DeleteReposIn(SqliteConnection conn, IReadOnlyList<long> repoIds)
+    {
+        if (repoIds.Count == 0) return 0;
         var marks = Sql.Marks(repoIds.Count);
         var ids = repoIds.Cast<object?>().ToArray();
-        var n = 0;
-        Atomic(conn, () =>
-        {
-            Sql.ExecList(conn, $"INSERT INTO files_fts(files_fts, rowid, path, content) SELECT 'delete', id, path, content FROM files WHERE repo_id IN ({marks})", ids);
-            n = Sql.ExecList(conn, $"DELETE FROM repos WHERE id IN ({marks})", ids);
-        });
-        return n;
+        Sql.ExecList(conn, $"INSERT INTO files_fts(files_fts, rowid, path, content) SELECT 'delete', id, path, content FROM files WHERE repo_id IN ({marks})", ids);
+        return Sql.ExecList(conn, $"DELETE FROM repos WHERE id IN ({marks})", ids);
     }
 
     /// <summary>The commit an index row is at, in words: its subject line and when it was committed.</summary>

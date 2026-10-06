@@ -34,7 +34,35 @@ public static class Metrics
         (Convert.ToString(value, CultureInfo.InvariantCulture) ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n");
 
     public sealed record RepoState(string Repo, string Branch, bool IsDefault, long? LastRunAt, long? LastIndexedAt, double? AgeSeconds,
-        bool Stale, bool TimedOut, bool SymbolsFailed, string? Error, long Files, long Symbols);
+        bool Stale, bool TimedOut, bool SymbolsFailed, string? Error, long Files, long Symbols, long GitlabId = 0);
+
+    /// <summary>
+    /// How long a repository on this schedule may go unchecked before it is stale: the threshold,
+    /// plus the time its own schedule leaves between runs; null (never, once checked) when it is off.
+    /// </summary>
+    public static double? StaleLimit(Indexing.RepoSchedule schedule, int staleAfter) => schedule.Kind switch
+    {
+        Indexing.ScheduleKind.Off => null,
+        _ => staleAfter + (schedule.Period?.TotalSeconds ?? 0),
+    };
+
+    /// <summary>Each repository's schedule (its own, or the default), by project id; read without the migrations' help.</summary>
+    static (Dictionary<long, Indexing.RepoSchedule> ById, Indexing.RepoSchedule Fallback) Schedules(SqliteConnection conn)
+    {
+        var byId = new Dictionary<long, Indexing.RepoSchedule>();
+        var fallback = Indexing.RepoSchedule.WithPass;
+        try
+        {
+            fallback = Indexing.RepoSchedule.Parse(Sql.One(conn, "SELECT value FROM argus_meta WHERE key = ?", Choices.DefaultScheduleKey)?.Str("value"));
+            foreach (var row in Sql.Query(conn, "SELECT gitlab_id, schedule FROM repo_choices WHERE schedule <> ''"))
+                byId[row.Long("gitlab_id")] = Indexing.RepoSchedule.Parse(row.Str("schedule"));
+        }
+        catch (SqliteException)
+        {
+            // An index older than schedules: every repository goes with the passes.
+        }
+        return (byId, fallback);
+    }
 
     public sealed record Snapshot(double Now, int StaleAfterSeconds, List<RepoState> Repos, int StaleRepos, int ErroredRepos, string Version);
 
@@ -55,8 +83,9 @@ public static class Metrics
                 if (!counts.TryGetValue(id, out var d)) counts[id] = d = new();
                 d[table] = row.Long("n");
             }
+        var (schedules, fallback) = Schedules(conn);
         foreach (var row in Sql.Query(conn,
-                     "SELECT id, path_with_namespace, branch, default_branch," +
+                     "SELECT id, gitlab_id, path_with_namespace, branch, default_branch," +
                      "       last_run_at, last_indexed_at, last_run_timed_out," +
                      "       last_run_symbols_failed, last_run_error" +
                      "  FROM repos ORDER BY path_with_namespace, branch"))
@@ -65,13 +94,15 @@ public static class Metrics
             double? age = lastRun is null ? null : Math.Max(0.0, t - lastRun.Value);
             var byTable = counts.GetValueOrDefault(row.Long("id")) ?? new();
             var branch = row.StrOrNull("branch") is { Length: > 0 } b ? b : row.Str("default_branch");
+            // A repository on a daily schedule is not stale an hour after its run.
+            var allowed = StaleLimit(schedules.GetValueOrDefault(row.Long("gitlab_id"), fallback), limit);
             repos.Add(new RepoState(
                 row.Str("path_with_namespace"), branch, branch == row.Str("default_branch"),
                 lastRun, row.LongOrNull("last_indexed_at"), age,
-                age is null || age > limit,
+                age is null || (allowed is { } a && age > a),
                 row.Long("last_run_timed_out") != 0, row.Long("last_run_symbols_failed") != 0,
                 row.StrOrNull("last_run_error"),
-                byTable.GetValueOrDefault("files", 0), byTable.GetValueOrDefault("symbols", 0)));
+                byTable.GetValueOrDefault("files", 0), byTable.GetValueOrDefault("symbols", 0), row.Long("gitlab_id")));
         }
         return new Snapshot(t, limit, repos, repos.Count(r => r.Stale), repos.Count(r => !string.IsNullOrEmpty(r.Error)), Version);
     }
@@ -122,7 +153,7 @@ public static class Metrics
         x.Line($"{Prefix}_index_build_info", 1, [("version", snap.Version)], "Argus build, always 1");
         x.Line($"{Prefix}_index_scrape_ok", 1, help: "1 when this scrape read the index successfully");
         x.Line($"{Prefix}_index_repos", snap.Repos.Count, help: "Repositories (at one branch each) in the index");
-        x.Line($"{Prefix}_index_stale_repos", snap.StaleRepos, help: $"No successful pass within {snap.StaleAfterSeconds}s, or never indexed");
+        x.Line($"{Prefix}_index_stale_repos", snap.StaleRepos, help: $"No check within {snap.StaleAfterSeconds}s (plus the time a repository's own schedule leaves between runs), or never indexed");
         x.Line($"{Prefix}_index_errored_repos", snap.ErroredRepos, help: "Repositories whose last pass recorded an error");
         x.Line($"{Prefix}_index_stale_after_seconds", snap.StaleAfterSeconds, help: "Threshold this build applies to the stale gauges");
         // Family-major, not repo-major: the text format requires every sample of a

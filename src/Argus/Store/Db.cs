@@ -60,12 +60,14 @@ public static class Db
         return conn;
     }
 
-    public static int Migrate(SqliteConnection conn)
+    /// <param name="upTo">Stop after this version (an index as an older release left it, for the upgrade tests); null: the latest.</param>
+    public static int Migrate(SqliteConnection conn, int? upTo = null)
     {
         var current = Convert.ToInt32(Sql.Scalar(conn, "PRAGMA user_version"));
         foreach (var (version, sql) in Migrations)
         {
             if (version <= current) continue;
+            if (version > upTo) break;
             Sql.Script(conn, sql);
             Sql.Script(conn, $"PRAGMA user_version = {version}");
             current = version;

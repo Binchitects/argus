@@ -6,9 +6,11 @@ using Argus.Access;
 using Argus.Indexing;
 using Argus.Server;
 using Argus.Store;
+using Argus.Util;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Argus.Tests;
 
@@ -280,6 +282,97 @@ public sealed class ServerTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, (await AdminSend(HttpMethod.Put, "/admin/repos/settings", new { new_repos = "exclude" })).Status);
         Choices.Record(_ix.Conn, [new Project(13, "grp/new", "main", "http://x/n.git")], 200);
         Assert.False((await AdminGet("/admin/repos")).Body["repos"]!.AsArray().Single(r => r!["gitlab_id"]!.GetValue<long>() == 13)!["included"]!.GetValue<bool>());
+    }
+
+    static JsonNode Repo(JsonNode list, long id) => list["repos"]!.AsArray().Single(r => r!["gitlab_id"]!.GetValue<long>() == id)!;
+
+    static Dictionary<long, (bool Ok, string Message)> Results(JsonNode batch) =>
+        batch["results"]!.AsArray().ToDictionary(r => r!["gitlab_id"]!.GetValue<long>(), r => (r!["ok"]!.GetValue<bool>(), r["message"]!.GetValue<string>()));
+
+    [Fact]
+    public async Task Repositories_say_their_state_and_schedule_and_change_many_at_once_with_an_outcome_each()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        Project P(long id, string path) => new(id, path, "main", $"http://x/{path}.git");
+        Choices.Record(_ix.Conn, [P(11, "grp/alpha"), P(12, "grp/hidden"), P(13, "other/never")], now);
+        Writes.SetLastIndexed(_ix.Conn, _repo, "abc12345", now);
+        Writes.RecordRunState(_ix.Conn, _repo, false, false, now);
+        var hiddenRow = Sql.One(_ix.Conn, "SELECT id FROM repos WHERE gitlab_id = 12")!.Long("id");
+        Writes.RecordRunState(_ix.Conn, hiddenRow, false, false, now, "git fetch failed: 403");
+        var jobs = _app.Services.GetRequiredService<Jobs>();
+        var runs = new List<IReadOnlyList<string>>();
+        jobs.Runner = (argv, _) => { lock (runs) runs.Add(argv); return 0; };
+
+        var list = (await AdminGet("/admin/repos")).Body;
+        var alpha = Repo(list, 11);
+        Assert.Equal("alpha", alpha["name"]!.GetValue<string>());
+        Assert.Equal("grp", alpha["group"]!.GetValue<string>());
+        Assert.Equal("C", alpha["language"]!.GetValue<string>());
+        Assert.Equal("indexed", alpha["state"]!.GetValue<string>());
+        Assert.True(alpha["listed"]!.GetValue<bool>());
+        Assert.Equal("With each scheduled pass", alpha["schedule_words"]!.GetValue<string>());
+        Assert.Null(alpha["next_run_at"]);
+        Assert.Equal(now, alpha["last_run_at"]!.GetValue<long>());
+        Assert.Equal("failed", Repo(list, 12)["state"]!.GetValue<string>());
+        Assert.Equal("git fetch failed: 403", Repo(list, 12)["problem"]!.GetValue<string>());
+        Assert.Equal("never", Repo(list, 13)["state"]!.GetValue<string>());
+        Assert.Equal("pass", list["schedule"]!["default"]!.GetValue<string>());
+
+        // A schedule of its own, and the default for every other one, in a time zone.
+        Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Patch, "/admin/repos/11", new { schedule = "every day" })).Status);
+        Assert.Equal(HttpStatusCode.OK, (await AdminSend(HttpMethod.Patch, "/admin/repos/11", new { schedule = "daily:02:30" })).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Put, "/admin/repos/settings", new { schedule = "hours:6", schedule_tz = "Mars/Base" })).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Put, "/admin/repos/settings", new { schedule = "" })).Status);
+        Assert.Equal(HttpStatusCode.OK, (await AdminSend(HttpMethod.Put, "/admin/repos/settings", new { schedule = "hours:6", schedule_tz = "Europe/Berlin" })).Status);
+        list = (await AdminGet("/admin/repos")).Body;
+        Assert.Equal("Every day at 02:30", Repo(list, 11)["schedule_words"]!.GetValue<string>());
+        Assert.True(Repo(list, 11)["next_run_at"]!.GetValue<long>() > now);
+        Assert.Equal("Every 6 hours", Repo(list, 13)["schedule_words"]!.GetValue<string>());
+        Assert.Equal("", Repo(list, 13)["schedule"]!.GetValue<string>());
+        Assert.Equal("Europe/Berlin", list["schedule"]!["time_zone"]!.GetValue<string>());
+
+        // Many at once, each with its outcome.
+        var (status, batch) = await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "schedule", ids = new long[] { 12, 13, 999 }, schedule = "weekly:1:03:00" });
+        Assert.Equal(HttpStatusCode.OK, status);
+        var outcome = Results(batch);
+        Assert.Equal((true, "Schedule: Mondays at 03:00."), outcome[12]);
+        Assert.False(outcome[999].Ok);
+        Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "bogus", ids = new long[] { 11 } })).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "reindex", ids = Array.Empty<long>() })).Status);
+
+        outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "exclude", ids = new long[] { 13 } })).Body);
+        Assert.True(outcome[13].Ok);
+        outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "reindex", ids = new long[] { 11, 13 } })).Body);
+        Assert.Equal((true, "Updating now."), outcome[11]);
+        Assert.Equal((false, "Not indexed: choose it for the index first."), outcome[13]);
+        Assert.True(SpinWait.SpinUntil(() => { lock (runs) return runs.Count == 1; }, TimeSpan.FromSeconds(10)));
+        Assert.Equal(["--repo", "grp/alpha", "--trigger", "manual"], runs[0].SkipWhile(a => a != "--repo").Take(4));
+        Assert.True(SpinWait.SpinUntil(() => jobs.IndexJobSnapshot()["state"]?.ToString() == "idle", TimeSpan.FromSeconds(10)));
+
+        outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "add_branches", ids = new long[] { 11 }, branches = new[] { "release/*", "" } })).Body);
+        Assert.Equal((true, "Also indexes release/* from the next run."), outcome[11]);
+        outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "remove", ids = new long[] { 12 } })).Body);
+        Assert.True(outcome[12].Ok);
+        list = (await AdminGet("/admin/repos")).Body;
+        Assert.Equal(["release/*"], Repo(list, 11)["branches"]!.AsArray().Select(b => b!.GetValue<string>()));
+        Assert.False(Repo(list, 12)["included"]!.GetValue<bool>());
+        Assert.Empty(Repo(list, 12)["indexed"]!.AsArray());
+        Assert.Equal("off", Repo(list, 12)["state"]!.GetValue<string>());
+
+        // One GitLab no longer lists (a token that cannot see it, a repository deleted) is forgotten when removed.
+        Choices.Record(_ix.Conn, [P(11, "grp/alpha"), P(12, "grp/hidden")], now + 10);
+        Assert.False(Repo((await AdminGet("/admin/repos")).Body, 13)["listed"]!.GetValue<bool>());
+        outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "remove", ids = new long[] { 13 } })).Body);
+        Assert.StartsWith("Forgotten: GitLab no longer lists it", outcome[13].Message);
+        Assert.DoesNotContain((await AdminGet("/admin/repos")).Body["repos"]!.AsArray(), r => r!["gitlab_id"]!.GetValue<long>() == 13);
+
+        // Its log, in sentences: what admins did to it.
+        var (logStatus, log) = await AdminGet("/admin/repos/11/log");
+        Assert.Equal(HttpStatusCode.OK, logStatus);
+        var lines = log["lines"]!.AsArray().Select(l => l!["text"]!.GetValue<string>()).ToList();
+        Assert.Contains("An admin set its schedule: every day at 02:30.", lines);
+        Assert.Contains("An admin added branches to index: release/*.", lines);
+        Assert.Equal(HttpStatusCode.NotFound, (await AdminGet("/admin/repos/999/log")).Status);
     }
 
     [Fact]

@@ -19,7 +19,14 @@ public sealed record IndexRequest(string[]? Branches, bool AllowPartial = false,
 
 /// <param name="Included">In the index or out; null: unchanged.</param>
 /// <param name="Branches">Branches indexed besides the default one (names or globs); null: unchanged.</param>
-public sealed record RepoChoiceRequest(bool? Included = null, string[]? Branches = null);
+/// <param name="Schedule">Its own schedule (pass, off, hours:N, daily:HH:MM, weekly:D:HH:MM), "" for the default; null: unchanged.</param>
+public sealed record RepoChoiceRequest(bool? Included = null, string[]? Branches = null, string? Schedule = null);
+
+/// <param name="Ids">The repositories (GitLab project ids).</param>
+/// <param name="Action">include, exclude, reindex, schedule, add_branches or remove.</param>
+/// <param name="Schedule">For schedule: as <see cref="RepoChoiceRequest.Schedule"/>.</param>
+/// <param name="Branches">For add_branches: names or globs.</param>
+public sealed record RepoBatchRequest(long[] Ids, string Action, string? Schedule = null, string[]? Branches = null);
 
 /// <param name="LeaveOut">Leave the repository out of the index too; else it is built anew by the next pass or an update.</param>
 public sealed record RemoveIndexRequest(bool LeaveOut = false);
@@ -28,8 +35,10 @@ public sealed record RemoveIndexRequest(bool LeaveOut = false);
 /// <param name="TimeZone">IANA, e.g. Europe/Berlin.</param>
 public sealed record IndexScheduleRequest(string Schedule, string TimeZone);
 
-/// <param name="NewRepos">include or exclude: whether a repository GitLab lists for the first time is indexed.</param>
-public sealed record RepoPolicyRequest(string NewRepos);
+/// <param name="NewRepos">include or exclude: whether a repository GitLab lists for the first time is indexed; null: unchanged.</param>
+/// <param name="Schedule">The schedule of every repository without one of its own (pass, off, hours:N, daily:HH:MM, weekly:D:HH:MM); null: unchanged.</param>
+/// <param name="TimeZone">The IANA zone daily and weekly schedules are in; null: unchanged.</param>
+public sealed record RepoPolicyRequest(string? NewRepos = null, string? Schedule = null, string? TimeZone = null);
 public sealed record PackRequest(string? Source, string? Sha256, string? Name, string? IndexUrl, string? File = null);
 
 public static class OperationsEndpoints
@@ -97,12 +106,42 @@ public static class OperationsEndpoints
             {
                 payload["branches"] = new JsonArray([.. branches.Select(b => JsonValue.Create(b.Trim()))]);
             }
+            if (body.Schedule is { } schedule)
+            {
+                payload["schedule"] = schedule.Trim();
+            }
             var res = await a.PatchAsync($"repos/{gitlabId}", payload, ct);
             var repo = res?["repo"]?.GetValue<string>() ?? gitlabId.ToString(System.Globalization.CultureInfo.InvariantCulture);
             await audit.WriteAsync("argus.repo_choice", repo,
-                detail: string.Join("; ", new[] { body.Included is { } i ? (i ? "indexed" : "not indexed") : null, body.Branches is { } b ? $"branches: {string.Join(", ", b)}" : null }.OfType<string>()));
+                detail: string.Join("; ", new[]
+                {
+                    body.Included is { } i ? (i ? "indexed" : "not indexed") : null, body.Branches is { } b ? $"branches: {string.Join(", ", b)}" : null,
+                    body.Schedule is { } s ? $"schedule: {(s.Trim().Length > 0 ? s.Trim() : "default")}" : null,
+                }.OfType<string>()));
             return res;
         }, a));
+        // Several at once, each with its outcome: in or out, updated now, a schedule, more branches, removed.
+        argus.MapPost("/repos/batch", (RepoBatchRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        {
+            var payload = new JsonObject { ["action"] = body.Action, ["ids"] = new JsonArray([.. (body.Ids ?? []).Select(id => JsonValue.Create(id))]) };
+            if (body.Schedule is { } schedule)
+            {
+                payload["schedule"] = schedule.Trim();
+            }
+            if (body.Branches is { } branches)
+            {
+                payload["branches"] = new JsonArray([.. branches.Select(b => JsonValue.Create(b.Trim()))]);
+            }
+            var res = await a.PostAsync("repos/batch", payload, ct);
+            var results = res?["results"] as JsonArray ?? [];
+            await audit.WriteAsync("argus.repos_batch", body.Action,
+                detail: $"{results.Count(r => r?["ok"]?.GetValue<bool>() == true)} of {results.Count} repositories" +
+                        (body.Schedule is { } s ? $"; schedule: {(s.Trim().Length > 0 ? s.Trim() : "default")}" : "") +
+                        (body.Branches is { } b ? $"; branches: {string.Join(", ", b)}" : ""));
+            return res;
+        }, a));
+        argus.MapGet("/repos/{gitlabId:long}/log", (long gitlabId, int? runs, ArgusAdmin a, CancellationToken ct) =>
+            Relay(() => a.GetAsync($"repos/{gitlabId}/log?runs={Math.Clamp(runs ?? 5, 1, 20)}", ct), a));
         argus.MapGet("/repos/{gitlabId:long}/branches", (long gitlabId, ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync($"repos/{gitlabId}/branches", ct), a));
         // Its index removed now; left out too, or kept in to be built anew.
         argus.MapPost("/repos/{gitlabId:long}/index/remove", (long gitlabId, RemoveIndexRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
@@ -114,8 +153,26 @@ public static class OperationsEndpoints
         }, a));
         argus.MapPut("/repos/settings", (RepoPolicyRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
-            var res = await a.PutAsync("repos/settings", new JsonObject { ["new_repos"] = body.NewRepos }, ct);
-            await audit.WriteAsync("argus.repo_policy", body.NewRepos);
+            var payload = new JsonObject();
+            if (body.NewRepos is { } policy)
+            {
+                payload["new_repos"] = policy;
+            }
+            if (body.Schedule is { } schedule)
+            {
+                payload["schedule"] = schedule.Trim();
+            }
+            if (body.TimeZone is { } zone)
+            {
+                payload["schedule_tz"] = zone.Trim();
+            }
+            var res = await a.PutAsync("repos/settings", payload, ct);
+            await audit.WriteAsync("argus.repo_policy", body.NewRepos ?? body.Schedule,
+                detail: string.Join("; ", new[]
+                {
+                    body.NewRepos is { } n ? $"new repositories: {n}" : null, body.Schedule is { } s ? $"schedule for all: {s.Trim()}" : null,
+                    body.TimeZone is { } z ? $"time zone: {z.Trim()}" : null,
+                }.OfType<string>()));
             return res;
         }, a));
         argus.MapGet("/schedule", ScheduleAsync);

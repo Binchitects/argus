@@ -296,7 +296,8 @@ public static class Credentials
 /// <summary>GitLab returned an error or unusable response.</summary>
 public sealed class GitLabError(string message) : Exception(message);
 
-public sealed record Project(long GitlabId, string PathWithNamespace, string DefaultBranch, string HttpUrl);
+/// <summary>A project as GitLab lists it; <paramref name="CreatedAt"/> (GitLab's own text) tells an id kept by a renamed project from one reused by another GitLab.</summary>
+public sealed record Project(long GitlabId, string PathWithNamespace, string DefaultBranch, string HttpUrl, string? CreatedAt = null);
 
 /// <summary>A branch as GitLab lists it, with its latest commit.</summary>
 public sealed record RemoteBranch(string Name, string Sha, string? Title, string? CommittedAt, bool IsDefault, bool IsProtected);
@@ -321,6 +322,16 @@ public static class GitLab
 {
     public const int PerPage = 100;
     public const int MaxPages = 1000;
+
+    /// <summary>
+    /// Which GitLab a listing came from: the configured URL's scheme, host and port, in lower case
+    /// (what a clone URL begins with, since <see cref="CloneUrlFor"/> rewrites it to the configured GitLab).
+    /// </summary>
+    public static string Instance(string url)
+    {
+        var (scheme, netloc, _, _, _) = SplitUrl(url.Trim());
+        return scheme.Length > 0 && netloc.Length > 0 ? $"{scheme}://{netloc}".ToLowerInvariant() : url.Trim().TrimEnd('/').ToLowerInvariant();
+    }
 
     /// <summary>http_url_to_repo with its origin replaced by the configured, reachable GitLab.</summary>
     public static string CloneUrlFor(GitLabConfig cfg, string advertised)
@@ -395,7 +406,8 @@ public static class GitLab
                         GitlabId: Convert.ToInt64(item!["id"]!.ToString()),
                         PathWithNamespace: item["path_with_namespace"]!.GetValue<string>(),
                         DefaultBranch: def,
-                        HttpUrl: CloneUrlFor(cfg, item["http_url_to_repo"]!.GetValue<string>())));
+                        HttpUrl: CloneUrlFor(cfg, item["http_url_to_repo"]!.GetValue<string>()),
+                        CreatedAt: item["created_at"] is JsonValue created && created.TryGetValue<string>(out var at) && at.Length > 0 ? at : null));
                 }
             }
         }

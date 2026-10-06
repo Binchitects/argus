@@ -45,7 +45,15 @@ public sealed class FakeArgus : HttpMessageHandler
                  "seen_at":1790000000,"changed_at":null,"indexed":[{"branch":"main","default":true,"sha":"0123456789abcdef","message":"Fix the decoder","committed_at":1789999000,
                  "indexed_at":1790000090,"last_run_at":1790000090,"stale":false,"timed_out":false,"symbols_failed":false,"error":null,"files":12,"symbols":340}]}]}
                 """),
-            ("PATCH", "/admin/repos/7") => Json(HttpStatusCode.OK, """{"status":"saved","repo":"group/app","included":false,"removed":1,"deferred":false}"""),
+            ("PATCH", "/admin/repos/7") => Json(HttpStatusCode.OK, """{"status":"saved","repo":"group/app","included":false,"removed":1,"deferred":false,"schedule":""}"""),
+            ("POST", "/admin/repos/batch") => Json(HttpStatusCode.OK, """
+                {"action":"schedule","results":[{"gitlab_id":7,"repo":"group/app","ok":true,"message":"Schedule: Every day at 02:30."},
+                 {"gitlab_id":8,"repo":null,"ok":false,"message":"No such repository: refresh the list."}]}
+                """),
+            ("GET", "/admin/repos/7/log") => Json(HttpStatusCode.OK, """
+                {"gitlab_id":7,"repo":"group/app","progress":null,"lines":[{"run":1790000000000,"at":1790000000.5,"level":"info","text":"Run started by an admin."},
+                 {"run":1790000000000,"at":1790000003.1,"level":"warning","text":"main: 2 files could not be read or stored; each is tried again on the next runs (up to 3 times)."}]}
+                """),
             ("PATCH", _) => Json(HttpStatusCode.NotFound, """{"error":"no such repository"}"""),
             ("GET", "/admin/repos/7/branches") => Json(HttpStatusCode.OK, """[{"name":"main","sha":"0123","message":"Fix","committed_at":"2026-09-30T10:00:00Z","default":true,"protected":true}]"""),
             ("PUT", "/admin/repos/settings") => Json(HttpStatusCode.OK, """{"status":"saved","new_repos":"exclude"}"""),
