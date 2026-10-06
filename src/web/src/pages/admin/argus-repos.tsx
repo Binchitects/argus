@@ -292,9 +292,10 @@ export function RepositoriesCard({ gitlabUrl }: { gitlabUrl: string | null }) {
         <div className="grid min-w-0 gap-1">
           <span className="min-w-0">
             <span className="font-medium [overflow-wrap:anywhere]">{r.name}</span>
+            {/* Its whole path, group and all: what GitLab and people call it. */}
             <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">
-              {r.group}
-              {r.group && r.language && ' · '}
+              {r.repo}
+              {r.language && ' · '}
               {r.language && <span title={r.languages.map((l) => `${l.name}: ${l.files.toLocaleString()} files`).join('\n')}>{r.language}</span>}
             </span>
           </span>

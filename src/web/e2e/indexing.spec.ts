@@ -96,3 +96,45 @@ test("a repository's index is removed and built anew", async ({ page, isMobile }
   await repos.getByRole('searchbox').fill('eal-core')
   await expect(row).toContainText('add src/decoder.c', { timeout: 30_000 })
 })
+
+test('a repository is given a schedule of its own in a batch, with an outcome, and its log says so', async ({ page, isMobile }, info) => {
+  test.skip(isMobile, 'one browser changes the index at a time')
+  test.skip(!(await argusUp(page)), 'needs the deployed Argus with the test GitLab')
+  // An Argus from before repository schedules has none to show.
+  test.skip(!(await (await page.request.get('/api/admin/argus/repos')).json()).schedule, 'needs an Argus with repository schedules')
+  const errors = watchConsole(page)
+  await page.goto('/admin/indexing')
+  const repos = page.getByRole('region', { name: 'Repositories' })
+  await repos.getByRole('searchbox').fill('eal-core')
+  const row = repos.getByRole('row').filter({ hasText: 'root/eal-core' })
+  await expect(row).toBeVisible()
+  await row.getByRole('checkbox', { name: 'Select row' }).check()
+  await repos.getByRole('region', { name: 'Bulk actions' }).getByRole('button', { name: /Schedule…/ }).click()
+  const dialog = page.getByRole('dialog', { name: 'Schedule of 1 repository' })
+  try {
+    await dialog.getByRole('combobox', { name: 'Reindex' }).click()
+    await page.getByRole('option', { name: 'Every day' }).click()
+    await dialog.getByLabel('At', { exact: true }).fill('03:30')
+    await expect(dialog).toContainText('Every day at 03:30.')
+    await expectAccessible(page, info, 'repository-schedule')
+    await dialog.getByRole('button', { name: 'Apply to 1 repository' }).click()
+    const outcome = page.getByRole('dialog', { name: 'Schedule changed' })
+    await expect(outcome).toContainText('root/eal-core')
+    await expect(outcome).toContainText('Schedule: Every day at 03:30.')
+    await outcome.getByRole('button', { name: 'Done' }).click()
+    await expect(row).toContainText('Every day at 03:30')
+    await expect(row).toContainText(/next in/)
+
+    await row.getByRole('button', { name: 'Log of root/eal-core' }).click()
+    const log = page.getByRole('dialog', { name: 'Log of root/eal-core' })
+    await expect(log).toContainText('An admin set its schedule: every day at 03:30.')
+    await expectAccessible(page, info, 'repository-log')
+    await screenshot(page, info, 'repository-log')
+    await page.keyboard.press('Escape')
+  } finally {
+    const listed = await (await page.request.get('/api/admin/argus/repos')).json()
+    const id = listed.repos.find((r: { repo: string }) => r.repo === 'root/eal-core').gitlab_id
+    expect((await page.request.patch(`/api/admin/argus/repos/${id}`, { data: { schedule: '' }, headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(200)
+  }
+  expect(errors).toEqual([])
+})
