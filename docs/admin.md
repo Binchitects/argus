@@ -354,8 +354,9 @@ over time and by model.
 
 ### Dashboards
 
-The dashboards are files in Grafana's JSON format, in `deploy/config/dashboards/`,
-and the app draws them itself. Each panel's query runs on the app's server:
+The dashboards are files in Grafana's JSON format, in `src/Llm.Api/Dashboards/json/`
+(built into the app's image, so an upgrade brings the new ones), and the app draws
+them itself. Each panel's query runs on the app's server:
 
 - **PostgreSQL** (the usage panels read the gateway's spend tables): Grafana's
   macros are reproduced (`$__timeFilter`, `$__timeGroupAlias`, `$__interval`,
@@ -370,6 +371,14 @@ and the app draws them itself. Each panel's query runs on the app's server:
 - The browser asks for "panel N of dashboard X over this range, with these
   variables" and gets data back. It never sends or receives a query, and a
   variable's value is only ever one of its options.
+
+The machine dashboards show whatever machine they run on, as it reports itself:
+a drive is named by the model it reports and its device (`node_nvme_info`; the
+device alone when it reports no model), the CPU temperature is the hottest sensor
+and the average of all of them however many cores there are, and the load
+average has the machine's logical CPU count beside it. No file names one
+machine's drives, CPU or core count: a test checks that, and checks every
+Prometheus query with the stack's own `promtool`.
 
 Live dashboards (those with a refresh in their file) refresh themselves, and
 can pause. Edit a dashboard file and the next request uses it: the app reads
@@ -387,6 +396,11 @@ python3 scripts/audit-dashboards.py 6h
 One value axis per chart. Colours come in a fixed order, checked for
 colour-vision deficiency against the light and dark backgrounds; a series keeps
 its colour by name. At most eight series are drawn: the seven largest, and the
-rest summed as "Other". Every chart has a legend when it has more than one
-series, a tooltip, and **Show as table**. The time axis always spans the chosen
-range.
+rest summed as "Other", or averaged where a sum means nothing (temperatures,
+percentages, clock speeds and durations, unless the chart is stacked). Every
+chart has a legend when it has more than one series, a tooltip, and **Show as
+table**. The time axis always spans the chosen range.
+
+A stat shows a value per series. Past two it leaves out their sparklines, and on
+a wide screen it scrolls rather than grow taller than a chart: a row of panels
+stays one height whatever the machine reports.

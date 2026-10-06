@@ -39,6 +39,30 @@ describe('dashboards', () => {
     await waitFor(() => expect(calls.filter((c) => c.path.endsWith('/query')).at(-1)?.body).toMatchObject({ vars: { container: ['web'] } }))
   })
 
+  it('keeps a stat with a value per sensor as short as a chart, and an empty chart says its own no-value text', async () => {
+    const series = (names: string[]) => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, error: null, series: names.map((name, i) => ({ name, points: [[1, 40 + i], [2, 41 + i]] })) }] } })
+    const panel = (key: number, type: string, title: string, defaults = {}) => ({ key, type, title, gridPos: { x: key * 4, y: 0, w: 4, h: 7 }, supported: true, datasources: ['prometheus'], options: { graphMode: 'area' }, fieldConfig: { defaults } })
+    fakeApi(admin, {
+      'GET /api/dashboards/host': () => ({ json: { uid: 'host', title: 'Host', time: { from: 'now-1h', to: 'now' }, panels: [panel(0, 'stat', 'Sensors', { unit: 'celsius' }), panel(1, 'stat', 'Drives'), panel(2, 'timeseries', 'Drives over time', { noValue: 'No NVMe drive' })] } }),
+      'POST /api/dashboards/host/panels/0/query': () => series(Array.from({ length: 20 }, (_, i) => `Core ${i}`)),
+      'POST /api/dashboards/host/panels/1/query': () => series(['Drive A (nvme0)', 'Drive B (nvme1)']),
+      'POST /api/dashboards/host/panels/2/query': () => series([]),
+    })
+    renderApp('/admin/dashboards/host')
+
+    // Twenty values, every one of them, without sparklines, in a box that scrolls past a chart's height on a wide screen.
+    const box = await screen.findByRole('region', { name: 'Sensors, every value' })
+    expect(within(box).getAllByLabelText(/^Sensors: Core \d+$/)).toHaveLength(20)
+    expect(box).toHaveClass('lg:max-h-65')
+    expect(box.querySelector('svg')).toBeNull()
+    // Two keep their sparklines and need no box; a cut-off name is whole on hover.
+    const drives = screen.getByRole('region', { name: 'Drives' })
+    expect(within(drives).queryByRole('region')).toBeNull()
+    expect(drives.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(2)
+    expect(within(drives).getByText('Drive A (nvme0)')).toHaveAttribute('title', 'Drive A (nvme0)')
+    expect(await screen.findByText('No NVMe drive')).toBeInTheDocument()
+  })
+
   it('is for admins only', async () => {
     fakeApi(member)
     renderApp('/admin/dashboards')

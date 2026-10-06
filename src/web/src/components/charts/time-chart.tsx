@@ -5,7 +5,7 @@ import { SVGRenderer } from 'echarts/renderers'
 import { useEffect, useMemo, useRef } from 'react'
 import { formatValue } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
-import { alignForStack, foldSeries, type ChartSeries } from './fold'
+import { alignForStack, foldBy, foldSeries, type ChartSeries } from './fold'
 import { cssColor, seriesColors } from './palette'
 
 echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, AxisPointerComponent, SVGRenderer])
@@ -13,7 +13,7 @@ echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, LegendCompone
 /**
  * Time on x, one value axis (never two). Stacked bars or lines, a crosshair
  * tooltip, and a legend whenever there is more than one series. At most eight
- * series: the seven largest and "Other".
+ * series: the seven largest and "Other" (averaged where a sum means nothing).
  */
 export function TimeChart({ series: raw, unit, stacked, bars, height = 260, label, from, to, fixed }: {
   series: ChartSeries[]
@@ -30,7 +30,10 @@ export function TimeChart({ series: raw, unit, stacked, bars, height = 260, labe
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { resolved } = useTheme()
-  const series = useMemo(() => (stacked ? alignForStack(foldSeries(raw)) : foldSeries(raw)), [raw, stacked])
+  const series = useMemo(() => {
+    const folded = foldSeries(raw, 8, foldBy(unit, stacked))
+    return stacked ? alignForStack(folded) : folded
+  }, [raw, stacked, unit])
 
   useEffect(() => {
     if (!ref.current) return
