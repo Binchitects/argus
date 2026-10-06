@@ -58,11 +58,12 @@ cpu_temperature_source_info{source="lhm"} 1
 "No CPU sensor" rather than plotting nothing and looking broken.
 
 The dashboards (Resources, Stack Performance) draw two lines, the hottest sensor
-and the average of all of them, rather than one per sensor: an Intel CPU reports
-one per core and one for the package, so a line each would make the chart, and
-the row it sits in, grow with the core count. A gap between the two lines is one
-core or one die running hot; `cpu_temperature_celsius` in Prometheus has every
-sensor for a closer look.
+and the average of all of them, beside other panels: an Intel CPU reports one
+sensor per core and one for the package, so a line each there would make the
+chart, and the row it sits in, grow with the core count. A gap between the two
+lines is one core or one die running hot. To see which, **CPU temperature per
+sensor** on Resources has a line per sensor across the whole width (the seven
+hottest, the rest averaged as Other; **Show as table** lists every sensor).
 
 ## Linux
 

@@ -61,6 +61,20 @@ export function formatValue(v: unknown, unit?: string, decimals?: number | null)
       return v < 1 ? `${fixed(v * 1000, 0)} ms` : `${fixed(v, decimals ?? 2)} s`
     case 'ms':
       return v >= 1000 ? `${fixed(v / 1000, decimals ?? 2)} s` : `${fixed(v, decimals ?? 0)} ms`
+    // The machine's own readings: a temperature, a power draw, a clock speed (Hz, or MHz as Windows reports it), a disk or network rate.
+    case 'celsius':
+      return `${fixed(v, decimals ?? (Number.isInteger(v) ? 0 : 1))} °C`
+    case 'watt':
+      return Math.abs(v) >= 1000 ? `${fixed(v / 1000, decimals ?? 2)} kW` : `${fixed(v, decimals ?? 0)} W`
+    case 'rotmhz':
+      return formatValue(v * 1e6, 'hertz', decimals)
+    case 'hertz':
+    case 'Bps': {
+      const [one, ...steps] = unit === 'hertz' ? ['Hz', 'kHz', 'MHz', 'GHz', 'THz'] : ['B/s', 'kB/s', 'MB/s', 'GB/s', 'TB/s']
+      const scaled = (n: number) => (decimals !== undefined && decimals !== null ? fixed(n, decimals) : fixed(n, 2).replace(/\.?0+$/, ''))
+      for (const [i, s] of [...steps.entries()].reverse()) if (Math.abs(v) >= 1000 ** (i + 1)) return `${scaled(v / 1000 ** (i + 1))} ${s}`
+      return `${fixed(v, decimals ?? 0)} ${one}`
+    }
     case 'bytes': {
       const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
       let i = 0

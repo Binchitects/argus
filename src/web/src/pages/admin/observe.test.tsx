@@ -45,7 +45,7 @@ describe('dashboards', () => {
     fakeApi(admin, {
       'GET /api/dashboards/host': () => ({ json: { uid: 'host', title: 'Host', time: { from: 'now-1h', to: 'now' }, panels: [panel(0, 'stat', 'Sensors', { unit: 'celsius' }), panel(1, 'stat', 'Drives'), panel(2, 'timeseries', 'Drives over time', { noValue: 'No NVMe drive' })] } }),
       'POST /api/dashboards/host/panels/0/query': () => series(Array.from({ length: 20 }, (_, i) => `Core ${i}`)),
-      'POST /api/dashboards/host/panels/1/query': () => series(['Drive A (nvme0)', 'Drive B (nvme1)']),
+      'POST /api/dashboards/host/panels/1/query': () => series(['nvme0 · Samsung SSD 990 PRO 2TB', 'nvme1 · Samsung SSD 990 PRO 2TB']),
       'POST /api/dashboards/host/panels/2/query': () => series([]),
     })
     renderApp('/admin/dashboards/host')
@@ -55,12 +55,60 @@ describe('dashboards', () => {
     expect(within(box).getAllByLabelText(/^Sensors: Core \d+$/)).toHaveLength(20)
     expect(box).toHaveClass('lg:max-h-65')
     expect(box.querySelector('svg')).toBeNull()
-    // Two keep their sparklines and need no box; a cut-off name is whole on hover.
+    // Two keep their sparklines and need no box. A name wraps to two lines before it is cut, and is whole on hover.
     const drives = screen.getByRole('region', { name: 'Drives' })
     expect(within(drives).queryByRole('region')).toBeNull()
     expect(drives.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(2)
-    expect(within(drives).getByText('Drive A (nvme0)')).toHaveAttribute('title', 'Drive A (nvme0)')
+    const name = within(drives).getByText('nvme1 · Samsung SSD 990 PRO 2TB')
+    expect(name).toHaveAttribute('title', 'nvme1 · Samsung SSD 990 PRO 2TB')
+    expect(name).toHaveClass('line-clamp-2')
+    expect(name).not.toHaveClass('truncate')
     expect(await screen.findByText('No NVMe drive')).toBeInTheDocument()
+  })
+
+  it('draws a gauge per GPU small, every one of them, and past two in a box as short as a chart', async () => {
+    const series = (names: string[]) => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, error: null, series: names.map((name, i) => ({ name, points: [[1, 40 + i]] })) }] } })
+    const gauge = (key: number, title: string) => ({ key, type: 'gauge', title, gridPos: { x: key * 4, y: 0, w: 4, h: 5 }, supported: true, datasources: ['prometheus'], fieldConfig: { defaults: { unit: 'celsius' } } })
+    const gpus = (n: number) => Array.from({ length: n }, (_, i) => `GPU ${i} · GeForce RTX 3090`)
+    fakeApi(admin, {
+      'GET /api/dashboards/gpus': () => ({ json: { uid: 'gpus', title: 'GPUs', time: { from: 'now-1h', to: 'now' }, panels: [gauge(0, 'One'), gauge(1, 'Two'), gauge(2, 'Ten')] } }),
+      'POST /api/dashboards/gpus/panels/0/query': () => series(['{uuid="u1"}']),
+      'POST /api/dashboards/gpus/panels/1/query': () => series(gpus(2)),
+      'POST /api/dashboards/gpus/panels/2/query': () => series(gpus(10)),
+    })
+    renderApp('/admin/dashboards/gpus')
+
+    // One GPU: one full-size gauge named by its panel.
+    const one = await screen.findByRole('region', { name: 'One' })
+    expect((await within(one).findByRole('figure', { name: /^One: 40/ })).querySelector('svg')).toHaveClass('h-28')
+    // Two: small, side by side where they fit, each named whole on hover, and no box.
+    const two = screen.getByRole('region', { name: 'Two' })
+    expect(within(two).queryByRole('region')).toBeNull()
+    const second = await within(two).findByRole('figure', { name: /^GPU 1 · GeForce RTX 3090: 41/ })
+    expect(second.querySelector('svg')).toHaveClass('h-20')
+    expect(within(two).getByText('GPU 1 · GeForce RTX 3090')).toHaveAttribute('title', 'GPU 1 · GeForce RTX 3090')
+    // Ten: every one, in a box that scrolls past a chart's height on a wide screen.
+    const box = await screen.findByRole('region', { name: 'Ten, every value' })
+    expect(box).toHaveClass('lg:max-h-65')
+    expect(within(box).getAllByRole('figure')).toHaveLength(10)
+  })
+
+  it('shows a chart as a table from a button that is only its icon in a narrow panel, and keeps a cut title whole on hover', async () => {
+    const title = 'NVMe temperature over time, every drive'
+    fakeApi(admin, {
+      'GET /api/dashboards/drives': () => ({ json: { uid: 'drives', title: 'Drives', time: { from: 'now-1h', to: 'now' }, panels: [{ key: 0, type: 'timeseries', title, gridPos: { x: 0, y: 0, w: 8, h: 8 }, supported: true, datasources: ['prometheus'], fieldConfig: { defaults: { unit: 'celsius' } } }] } }),
+      'POST /api/dashboards/drives/panels/0/query': () => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, error: null, series: [{ name: 'nvme0 · Drive A', points: [[1, 40]] }, { name: 'nvme1 · Drive B', points: [[1, 50]] }] }] } }),
+    })
+    renderApp('/admin/dashboards/drives')
+
+    const panel = await screen.findByRole('region', { name: title })
+    expect(panel).toHaveClass('@container')
+    expect(within(panel).getByText(title)).toHaveAttribute('title', title)
+    const button = await within(panel).findByRole('button', { name: 'Show as table' })
+    expect(within(button).getByText('Show as table')).toHaveClass('hidden', '@sm:inline')
+    await userEvent.click(button)
+    expect(await within(panel).findByText('nvme1 · Drive B')).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Show chart' })).toBeInTheDocument()
   })
 
   it('is for admins only', async () => {

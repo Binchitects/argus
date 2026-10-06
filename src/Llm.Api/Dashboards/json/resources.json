@@ -159,7 +159,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_utilization_gpu_ratio",
+          "expr": "nvidia_smi_utilization_gpu_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "{{gpu}}"
         }
       ],
@@ -211,7 +211,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes",
+          "expr": "nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "{{gpu}}"
         }
       ],
@@ -266,7 +266,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_temperature_gpu",
+          "expr": "nvidia_smi_temperature_gpu * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "{{gpu}}"
         }
       ],
@@ -325,13 +325,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_power_draw_watts",
-          "legendFormat": "draw"
+          "expr": "nvidia_smi_power_draw_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
+          "legendFormat": "draw {{gpu}}"
         },
         {
           "refId": "B",
-          "expr": "nvidia_smi_power_limit_watts",
-          "legendFormat": "limit"
+          "expr": "nvidia_smi_power_limit_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
+          "legendFormat": "limit {{gpu}}"
         }
       ],
       "fieldConfig": {
@@ -672,12 +672,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_utilization_gpu_ratio",
+          "expr": "nvidia_smi_utilization_gpu_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "compute {{gpu}}"
         },
         {
           "refId": "B",
-          "expr": "nvidia_smi_utilization_memory_ratio",
+          "expr": "nvidia_smi_utilization_memory_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "memory bw {{gpu}}"
         }
       ],
@@ -719,17 +719,17 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_memory_used_bytes",
+          "expr": "nvidia_smi_memory_used_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "used {{gpu}}"
         },
         {
           "refId": "B",
-          "expr": "nvidia_smi_memory_free_bytes",
+          "expr": "nvidia_smi_memory_free_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "free {{gpu}}"
         },
         {
           "refId": "C",
-          "expr": "nvidia_smi_memory_total_bytes",
+          "expr": "nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "total {{gpu}}"
         }
       ],
@@ -800,12 +800,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_temperature_gpu",
+          "expr": "nvidia_smi_temperature_gpu * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "temp {{gpu}}"
         },
         {
           "refId": "B",
-          "expr": "100 * nvidia_smi_fan_speed_ratio",
+          "expr": "100 * nvidia_smi_fan_speed_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "fan % {{gpu}}"
         }
       ],
@@ -877,12 +877,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_power_draw_watts",
+          "expr": "nvidia_smi_power_draw_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "draw {{gpu}}"
         },
         {
           "refId": "B",
-          "expr": "nvidia_smi_power_limit_watts",
+          "expr": "nvidia_smi_power_limit_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "limit {{gpu}}"
         }
       ],
@@ -953,17 +953,17 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_clocks_current_sm_clock_hz",
+          "expr": "nvidia_smi_clocks_current_sm_clock_hz * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "SM {{gpu}}"
         },
         {
           "refId": "B",
-          "expr": "nvidia_smi_clocks_current_memory_clock_hz",
+          "expr": "nvidia_smi_clocks_current_memory_clock_hz * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "memory {{gpu}}"
         },
         {
           "refId": "C",
-          "expr": "nvidia_smi_clocks_max_sm_clock_hz",
+          "expr": "nvidia_smi_clocks_max_sm_clock_hz * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "SM max {{gpu}}"
         }
       ],
@@ -1034,23 +1034,23 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_clocks_event_reasons_hw_thermal_slowdown",
-          "legendFormat": "hw thermal"
+          "expr": "nvidia_smi_clocks_event_reasons_hw_thermal_slowdown * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
+          "legendFormat": "hw thermal {{gpu}}"
         },
         {
           "refId": "B",
-          "expr": "nvidia_smi_clocks_event_reasons_sw_thermal_slowdown",
-          "legendFormat": "sw thermal"
+          "expr": "nvidia_smi_clocks_event_reasons_sw_thermal_slowdown * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
+          "legendFormat": "sw thermal {{gpu}}"
         },
         {
           "refId": "C",
-          "expr": "nvidia_smi_clocks_event_reasons_sw_power_cap",
-          "legendFormat": "sw power cap"
+          "expr": "nvidia_smi_clocks_event_reasons_sw_power_cap * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
+          "legendFormat": "sw power cap {{gpu}}"
         },
         {
           "refId": "D",
-          "expr": "nvidia_smi_clocks_event_reasons_hw_power_brake_slowdown",
-          "legendFormat": "hw power brake"
+          "expr": "nvidia_smi_clocks_event_reasons_hw_power_brake_slowdown * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
+          "legendFormat": "hw power brake {{gpu}}"
         }
       ],
       "fieldConfig": {
@@ -1252,7 +1252,7 @@
     {
       "type": "stat",
       "title": "Host CPU temperature",
-      "description": "The hottest CPU sensor, from the cpu-temp-exporter: one number whatever the core count. Linux reads coretemp/k10temp via hwmon. Windows has no CPU temperature in node-exporter or windows_exporter (its ACPI thermal zone measured a fixed 27.85 C under full load), so it scrapes LibreHardwareMonitor on the host. cpu_temperature_available is 0 when no real sensor exists.",
+      "description": "The hottest CPU sensor, from the cpu-temp-exporter: one number whatever the core count. Linux reads coretemp/k10temp via hwmon. Windows has no CPU temperature in node-exporter or windows_exporter (its ACPI thermal zone is usually a board sensor that does not move with load), so it scrapes LibreHardwareMonitor on the host. cpu_temperature_available is 0 when no real sensor exists.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1352,12 +1352,12 @@
           "showLegend": true
         }
       },
-      "description": "The hottest CPU sensor and the average of all of them, from the cpu-temp-exporter: two lines whatever the core count. A gap between them is one core or one die running hot. Linux reads coretemp/k10temp via hwmon; Windows scrapes LibreHardwareMonitor on the host."
+      "description": "The hottest CPU sensor and the average of all of them, from the cpu-temp-exporter: two lines whatever the core count. A gap between them is one core or one die running hot; CPU temperature per sensor, below, shows which. Linux reads coretemp/k10temp via hwmon; Windows scrapes LibreHardwareMonitor on the host."
     },
     {
       "type": "stat",
       "title": "NVMe temperature",
-      "description": "Each NVMe drive's composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. A drive is named by the model it reports (node_nvme_info) and its device, or by its device alone when it reports no model. Some drives also report their NAND and controller as temp2/temp3, which the composite lags under sustained writes. SATA drives have no sensor here.",
+      "description": "Each NVMe drive's composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. A drive is named by its device, then the model it reports (node_nvme_info), as in nvme0 · <model>, or by its device alone when it reports no model. Some drives also report their NAND and controller as temp2/temp3, which the composite lags under sustained writes. SATA drives have no sensor here.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1371,7 +1371,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_join(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"device\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\") * on (instance, device) group_left (model) max by (instance, device, model) (node_nvme_info{model!=\"\"}), \"drive\", \" (\", \"model\", \"device\"), \"drive\", \"$1)\", \"drive\", \"^(.+)$\") or on (instance, chip) label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"drive\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\")",
+          "expr": "label_join(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"device\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\") * on (instance, device) group_left (model) max by (instance, device, model) (node_nvme_info{model!=\"\"}), \"drive\", \" · \", \"device\", \"model\") or on (instance, chip) label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"drive\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\")",
           "legendFormat": "{{drive}}"
         }
       ],
@@ -1415,7 +1415,7 @@
     {
       "type": "timeseries",
       "title": "NVMe temperature over time",
-      "description": "Each NVMe drive's composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. A drive is named by the model it reports (node_nvme_info) and its device, or by its device alone when it reports no model. Some drives also report their NAND and controller as temp2/temp3, which the composite lags under sustained writes. SATA drives have no sensor here.",
+      "description": "Each NVMe drive's composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. A drive is named by its device, then the model it reports (node_nvme_info), as in nvme0 · <model>, or by its device alone when it reports no model. Some drives also report their NAND and controller as temp2/temp3, which the composite lags under sustained writes. SATA drives have no sensor here.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1429,7 +1429,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_join(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"device\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\") * on (instance, device) group_left (model) max by (instance, device, model) (node_nvme_info{model!=\"\"}), \"drive\", \" (\", \"model\", \"device\"), \"drive\", \"$1)\", \"drive\", \"^(.+)$\") or on (instance, chip) label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"drive\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\")",
+          "expr": "label_join(label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"device\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\") * on (instance, device) group_left (model) max by (instance, device, model) (node_nvme_info{model!=\"\"}), \"drive\", \" · \", \"device\", \"model\") or on (instance, chip) label_replace(node_hwmon_temp_celsius{chip=~\"nvme_nvme[0-9]+\",sensor=\"temp1\"}, \"drive\", \"$1\", \"chip\", \"^nvme_(nvme[0-9]+)$\")",
           "legendFormat": "{{drive}}"
         }
       ],
@@ -1455,6 +1455,48 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "CPU temperature per sensor",
+      "description": "Every CPU sensor the cpu-temp-exporter reads: on Intel one per core and one for the package, on AMD one per die. The seven hottest keep a line each and the rest are averaged into Other; Show as table lists every sensor.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "cpu_temperature_celsius",
+          "legendFormat": "{{sensor}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "noValue": "No CPU sensor",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Windows host (windows_exporter; Docker Desktop on Windows only)",
       "collapsed": true,
@@ -1462,7 +1504,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 62
+        "y": 70
       },
       "id": 1,
       "panels": [
@@ -1478,7 +1520,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 63
+            "y": 71
           },
           "targets": [
             {
@@ -1545,7 +1587,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 70
+            "y": 78
           },
           "targets": [
             {
@@ -1595,7 +1637,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 63
+            "y": 71
           },
           "targets": [
             {
@@ -1635,7 +1677,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 70
+            "y": 78
           },
           "targets": [
             {

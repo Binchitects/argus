@@ -24,7 +24,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
       "targets": [
-        { "refId": "A", "expr": "nvidia_smi_utilization_gpu_ratio", "legendFormat": "{{gpu}}" }
+        { "refId": "A", "expr": "nvidia_smi_utilization_gpu_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}}" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -52,7 +52,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes",
+          "expr": "nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
           "legendFormat": "{{gpu}}"
         }
       ],
@@ -80,7 +80,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
       "targets": [
-        { "refId": "A", "expr": "nvidia_smi_temperature_gpu", "legendFormat": "{{gpu}}" }
+        { "refId": "A", "expr": "nvidia_smi_temperature_gpu * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}}" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -107,7 +107,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
       "targets": [
-        { "refId": "A", "expr": "nvidia_smi_power_draw_watts", "legendFormat": "{{gpu}}" }
+        { "refId": "A", "expr": "nvidia_smi_power_draw_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}}" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "watt", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "orange" } },
@@ -125,8 +125,8 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
       "targets": [
-        { "refId": "A", "expr": "nvidia_smi_utilization_gpu_ratio", "legendFormat": "compute {{gpu}}" },
-        { "refId": "B", "expr": "nvidia_smi_utilization_memory_ratio", "legendFormat": "mem bandwidth {{gpu}}" }
+        { "refId": "A", "expr": "nvidia_smi_utilization_gpu_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "compute {{gpu}}" },
+        { "refId": "B", "expr": "nvidia_smi_utilization_memory_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "mem bandwidth {{gpu}}" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -144,8 +144,8 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
       "targets": [
-        { "refId": "A", "expr": "nvidia_smi_memory_used_bytes", "legendFormat": "used {{gpu}}" },
-        { "refId": "B", "expr": "nvidia_smi_memory_total_bytes", "legendFormat": "total {{gpu}}" }
+        { "refId": "A", "expr": "nvidia_smi_memory_used_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "used {{gpu}}" },
+        { "refId": "B", "expr": "nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "total {{gpu}}" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -163,8 +163,8 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
       "targets": [
-        { "refId": "A", "expr": "nvidia_smi_temperature_gpu", "legendFormat": "temp {{gpu}}" },
-        { "refId": "B", "expr": "nvidia_smi_power_draw_watts", "legendFormat": "power {{gpu}}" }
+        { "refId": "A", "expr": "nvidia_smi_temperature_gpu * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "temp {{gpu}}" },
+        { "refId": "B", "expr": "nvidia_smi_power_draw_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "power {{gpu}}" }
       ],
       "fieldConfig": {
         "defaults": {

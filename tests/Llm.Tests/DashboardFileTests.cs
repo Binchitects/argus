@@ -40,7 +40,7 @@ public sealed partial class Promtool : IAsyncLifetime
 
 /// <summary>
 /// The dashboard files: they show any machine as it reports itself (no drive,
-/// CPU or core count of the machine they were written on), a list that grows
+/// CPU, GPU or core count of the machine they were written on), a list that grows
 /// with the core count is never a stat that stretches its row, their panels fit
 /// the grid, and every Prometheus query parses in the stack's own Prometheus.
 /// </summary>
@@ -80,17 +80,26 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
     }
 
     [Fact]
-    public void A_list_that_grows_with_the_core_count_is_never_a_stat_and_cpu_temperatures_are_summed_up()
+    public void A_list_that_grows_with_the_core_count_is_never_a_stat_and_has_a_line_of_the_grid_to_itself()
     {
+        var perSensor = 0;
         foreach (var (d, p, t) in PromTargets())
         {
             if (p.Type is "stat" or "gauge")
             {
                 Assert.False(PerCore().IsMatch(t.Expr! + " " + t.LegendFormat), $"{d.Uid} / {p.Title}: a value per core or sensor makes the row as tall as the core count");
             }
-            // One line per sensor is one per core: the hottest and the average say it in two.
-            Assert.False(RawCpuTemperature().IsMatch(t.Expr!), $"{d.Uid} / {p.Title}: cpu_temperature_celsius is drawn per sensor: {t.Expr}");
+            // One line per sensor is one per core. Beside other panels the hottest and the average
+            // say it in two; a chart of every sensor has the dashboard's whole width.
+            if (RawCpuTemperature().IsMatch(t.Expr!))
+            {
+                Assert.True(p.Type == "timeseries" && p.Definition["gridPos"]!["w"]!.GetValue<int>() == 24,
+                    $"{d.Uid} / {p.Title}: cpu_temperature_celsius per sensor beside other panels: {t.Expr}");
+                perSensor++;
+            }
         }
+        // Which core runs hot is still on a dashboard.
+        Assert.True(perSensor > 0, "no dashboard draws each CPU sensor");
     }
 
     [Fact]
@@ -132,14 +141,15 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
     }
 
     [Fact]
-    public async Task Drives_are_named_by_the_model_they_report_on_a_machine_with_one_three_or_no_nvme_drives()
+    public async Task Drives_are_named_by_their_device_then_their_model_on_a_machine_with_one_three_or_no_nvme_drives()
     {
         var queries = PromTargets().Where(x => x.Target.Expr!.Contains("node_nvme_info", StringComparison.Ordinal)).Select(x => x.Target.Expr!).Distinct().ToList();
         Assert.True(queries.Count == 1, "every NVMe panel names its drives with the same query");
         Assert.Equal(3, PromTargets().Count(x => x.Target.Expr == queries[0] && x.Target.LegendFormat == "{{drive}}"));
-        // "one": a drive with its model. "three": two of one model (told apart by device), one
-        // reporting no model, and a second sensor (temp2) that is not the composite. "old": a
-        // node-exporter without the nvme collector. "sata": no NVMe drive at all.
+        // "one": a drive with its model. "three": two of one model (told apart by the device,
+        // which comes first so a cell that cuts the name keeps it), one reporting no model, and a
+        // second sensor (temp2) that is not the composite. "old": a node-exporter without the nvme
+        // collector. "sata": no NVMe drive at all.
         var test = $$"""
             evaluation_interval: 1m
             tests:
@@ -173,11 +183,11 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
                   - expr: {{JsonSerializer.Serialize(queries[0])}}
                     eval_time: 2m
                     exp_samples:
-                      - labels: '{instance="one",chip="nvme_nvme0",sensor="temp1",device="nvme0",model="Drive A",drive="Drive A (nvme0)"}'
+                      - labels: '{instance="one",chip="nvme_nvme0",sensor="temp1",device="nvme0",model="Drive A",drive="nvme0 · Drive A"}'
                         value: 41
-                      - labels: '{instance="three",chip="nvme_nvme0",sensor="temp1",device="nvme0",model="Drive B",drive="Drive B (nvme0)"}'
+                      - labels: '{instance="three",chip="nvme_nvme0",sensor="temp1",device="nvme0",model="Drive B",drive="nvme0 · Drive B"}'
                         value: 50
-                      - labels: '{instance="three",chip="nvme_nvme1",sensor="temp1",device="nvme1",model="Drive B",drive="Drive B (nvme1)"}'
+                      - labels: '{instance="three",chip="nvme_nvme1",sensor="temp1",device="nvme1",model="Drive B",drive="nvme1 · Drive B"}'
                         value: 51
                       - labels: 'node_hwmon_temp_celsius{instance="three",chip="nvme_nvme2",sensor="temp1",drive="nvme2"}'
                         value: 52
@@ -186,6 +196,80 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
             """;
         var (exit, output) = await promtool.RunAsync("drives.yml", test, "test", "rules");
         Assert.True(exit == 0, output);
+    }
+
+    [Fact]
+    public async Task Gpus_are_told_apart_by_their_index_and_model_only_on_a_machine_with_more_than_one()
+    {
+        var targets = PromTargets().Where(x => x.Target.Expr!.Contains("nvidia_smi_", StringComparison.Ordinal)).ToList();
+        Assert.True(targets.Count > 20, $"only {targets.Count} nvidia-smi queries");
+        // Every nvidia-smi query ends in the same naming of its GPU, and its legend shows it.
+        var naming = targets[0].Target.Expr![targets[0].Target.Expr!.IndexOf(" * on (instance, uuid) group_left (gpu) (", StringComparison.Ordinal)..];
+        foreach (var (d, p, t) in targets)
+        {
+            Assert.True(t.Expr!.EndsWith(naming, StringComparison.Ordinal), $"{d.Uid} / {p.Title}: the GPU is not named: {t.Expr}");
+            Assert.True(t.LegendFormat?.Contains("{{gpu}}", StringComparison.Ordinal) == true, $"{d.Uid} / {p.Title}: the legend \"{t.LegendFormat}\" leaves out the GPU");
+        }
+        // "one": a single GPU keeps its legends short ("temp", not "temp GPU 0 · ..."). "two": two
+        // of one model, told apart by the index nvidia-smi gives them. "mixed": the vendor's
+        // "NVIDIA " is left out where the name has it. "none": a machine with no GPU.
+        var test = $$"""
+            evaluation_interval: 1m
+            tests:
+              - interval: 1m
+                input_series:
+                  - series: 'nvidia_smi_temperature_gpu{instance="one",uuid="u1"}'
+                    values: '50x3'
+                  - series: 'nvidia_smi_index{instance="one",uuid="u1"}'
+                    values: '0x3'
+                  - series: 'nvidia_smi_gpu_info{instance="one",uuid="u1",name="NVIDIA GeForce RTX 3090",driver_version="595.91.07"}'
+                    values: '1x3'
+                  - series: 'nvidia_smi_temperature_gpu{instance="two",uuid="u2"}'
+                    values: '60x3'
+                  - series: 'nvidia_smi_temperature_gpu{instance="two",uuid="u3"}'
+                    values: '61x3'
+                  - series: 'nvidia_smi_index{instance="two",uuid="u2"}'
+                    values: '0x3'
+                  - series: 'nvidia_smi_index{instance="two",uuid="u3"}'
+                    values: '1x3'
+                  - series: 'nvidia_smi_gpu_info{instance="two",uuid="u2",name="NVIDIA GeForce RTX 3090"}'
+                    values: '1x3'
+                  - series: 'nvidia_smi_gpu_info{instance="two",uuid="u3",name="NVIDIA GeForce RTX 3090"}'
+                    values: '1x3'
+                  - series: 'nvidia_smi_temperature_gpu{instance="mixed",uuid="u4"}'
+                    values: '70x3'
+                  - series: 'nvidia_smi_temperature_gpu{instance="mixed",uuid="u5"}'
+                    values: '71x3'
+                  - series: 'nvidia_smi_index{instance="mixed",uuid="u4"}'
+                    values: '0x3'
+                  - series: 'nvidia_smi_index{instance="mixed",uuid="u5"}'
+                    values: '1x3'
+                  - series: 'nvidia_smi_gpu_info{instance="mixed",uuid="u4",name="Tesla T4"}'
+                    values: '1x3'
+                  - series: 'nvidia_smi_gpu_info{instance="mixed",uuid="u5",name="NVIDIA A100-SXM4-80GB"}'
+                    values: '1x3'
+                  - series: 'node_hwmon_temp_celsius{instance="none",chip="platform_coretemp_0",sensor="temp1"}'
+                    values: '45x3'
+                promql_expr_test:
+                  - expr: {{JsonSerializer.Serialize("nvidia_smi_temperature_gpu" + naming)}}
+                    eval_time: 2m
+                    exp_samples:
+                      - labels: '{instance="one",uuid="u1"}'
+                        value: 50
+                      - labels: '{instance="two",uuid="u2",gpu="GPU 0 · GeForce RTX 3090"}'
+                        value: 60
+                      - labels: '{instance="two",uuid="u3",gpu="GPU 1 · GeForce RTX 3090"}'
+                        value: 61
+                      - labels: '{instance="mixed",uuid="u4",gpu="GPU 0 · Tesla T4"}'
+                        value: 70
+                      - labels: '{instance="mixed",uuid="u5",gpu="GPU 1 · A100-SXM4-80GB"}'
+                        value: 71
+            """;
+        var (exit, output) = await promtool.RunAsync("gpus.yml", test, "test", "rules");
+        Assert.True(exit == 0, output);
+        // With one GPU the label is not there, and its legend loses the space it would have taken.
+        Assert.Equal("temp", Interpolation.Legend("temp {{gpu}}", new Dictionary<string, string> { ["uuid"] = "u1" }, "x"));
+        Assert.Equal("temp GPU 1 · A100-SXM4-80GB", Interpolation.Legend("temp {{gpu}}", new Dictionary<string, string> { ["gpu"] = "GPU 1 · A100-SXM4-80GB" }, "x"));
     }
 
     /// <summary>Each call of a PromQL function in an expression: its top-level arguments, as written.</summary>

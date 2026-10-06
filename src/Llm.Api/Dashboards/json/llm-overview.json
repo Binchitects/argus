@@ -621,8 +621,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "nvidia_smi_utilization_gpu_ratio * 100",
-          "legendFormat": "GPU"
+          "expr": "nvidia_smi_utilization_gpu_ratio * 100 * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
+          "legendFormat": "compute {{gpu}}"
         }
       ],
       "fieldConfig": {
@@ -675,8 +675,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "nvidia_smi_memory_used_bytes",
-          "legendFormat": "used"
+          "expr": "nvidia_smi_memory_used_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
+          "legendFormat": "used {{gpu}}"
         },
         {
           "refId": "B",
@@ -684,8 +684,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "nvidia_smi_memory_total_bytes",
-          "legendFormat": "total"
+          "expr": "nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
+          "legendFormat": "total {{gpu}}"
         }
       ],
       "fieldConfig": {

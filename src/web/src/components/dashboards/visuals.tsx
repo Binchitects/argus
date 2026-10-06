@@ -22,9 +22,10 @@ export function Sparkline({ points, className }: { points: (number | null)[][]; 
 
 /**
  * A gauge: an arc from min to max, filled to the value in its threshold's
- * colour, with the threshold steps marked on the rim.
+ * colour, with the threshold steps marked on the rim. Small when it shares its
+ * panel with others (a gauge per GPU).
  */
-export function Gauge({ value, min, max, steps, unit, decimals, label }: {
+export function Gauge({ value, min, max, steps, unit, decimals, label, small }: {
   value: number | null
   min: number
   max: number
@@ -32,6 +33,7 @@ export function Gauge({ value, min, max, steps, unit, decimals, label }: {
   unit?: string
   decimals?: number
   label: string
+  small?: boolean
 }) {
   const ratio = value === null ? 0 : Math.min(1, Math.max(0, (value - min) / (max - min || 1)))
   const color = tone(thresholdColor(value, steps))?.stroke ?? 'var(--primary)'
@@ -45,7 +47,7 @@ export function Gauge({ value, min, max, steps, unit, decimals, label }: {
   }
   return (
     <figure className="grid justify-items-center" aria-label={`${label}: ${formatValue(value, unit, decimals)}`}>
-      <svg viewBox="0 0 100 86" className="h-28 w-full max-w-44" aria-hidden="true">
+      <svg viewBox="0 0 100 86" className={cn('w-full', small ? 'h-20 max-w-28' : 'h-28 max-w-44')} aria-hidden="true">
         <path d={arc(0, 1)} fill="none" stroke="var(--muted)" strokeWidth="8" strokeLinecap="round" />
         {ratio > 0 && <path d={arc(0, Math.max(ratio, 0.005))} fill="none" stroke={color} strokeWidth="8" strokeLinecap="round" />}
         {(steps ?? []).filter((s) => s.value !== null && s.value > min && s.value < max).map((s) => {
@@ -54,7 +56,7 @@ export function Gauge({ value, min, max, steps, unit, decimals, label }: {
           return <line key={s.value} x1={50 + 46 * Math.cos(a)} y1={52 + 46 * Math.sin(a)} x2={50 + 50 * Math.cos(a)} y2={52 + 50 * Math.sin(a)} stroke={tone(s.color)?.stroke ?? 'var(--muted-foreground)'} strokeWidth="1.5" />
         })}
       </svg>
-      <figcaption className="-mt-12 text-xl font-semibold tabular-nums">{formatValue(value, unit, decimals)}</figcaption>
+      <figcaption className={cn('font-semibold tabular-nums', small ? '-mt-9 text-base' : '-mt-12 text-xl')}>{formatValue(value, unit, decimals)}</figcaption>
     </figure>
   )
 }
