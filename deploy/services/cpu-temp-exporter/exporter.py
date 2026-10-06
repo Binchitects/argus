@@ -33,6 +33,12 @@ Every series is a temperature of the CPU itself, because the dashboards take
 the hottest and the average of all of them: a board, a wifi card or a core's
 distance to its throttle point would pass for a core.
 
+Every series also has a name of its own. On a machine with two CPUs, both
+sockets' chips are "coretemp" and each numbers its cores from 0; two series
+with one name would reach Prometheus as one, and half the cores would be lost.
+So a chip, an LHM CPU or a zone whose name repeats takes its place among its
+namesakes: "coretemp.0/Core 0" and "coretemp.1/Core 0".
+
 Environment:
     LHM_URL          default http://host.docker.internal:8085/data.json
     LISTEN_PORT      default 9110
@@ -48,6 +54,7 @@ import socket
 import sys
 import time
 import urllib.request
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 LHM_URL = os.environ.get("LHM_URL", "http://host.docker.internal:8085/data.json")
@@ -76,14 +83,41 @@ def _read(path: str) -> str | None:
         return None
 
 
+def _natural(path: str) -> list:
+    """A sort key that puts hwmon2 before hwmon10."""
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", path)]
+
+
+def _numbered(names: list[str], first: int = 0, sep: str = ".") -> list[str]:
+    """Names that repeat take their place among their namesakes: two sockets'
+    "coretemp" become "coretemp.0" and "coretemp.1". A name that does not
+    repeat stays as it is, so a one-CPU machine keeps its series."""
+    counts = Counter(names)
+    seen: Counter = Counter()
+    out = []
+    for name in names:
+        if name and counts[name] > 1:
+            out.append(f"{name}{sep}{first + seen[name]}")
+            seen[name] += 1
+        else:
+            out.append(name)
+    return out
+
+
 def from_hwmon(root: str = "/sys/class/hwmon") -> list[tuple[str, float]]:
-    """Linux: /sys/class/hwmon/hwmonN/{name,tempN_input,tempN_label}."""
-    out: list[tuple[str, float]] = []
-    for base in sorted(glob.glob(f"{root}/hwmon*")):
+    """Linux: /sys/class/hwmon/hwmonN/{name,tempN_input,tempN_label}. Chips in
+    the order of the devices they are (coretemp.0, coretemp.1, or the PCI
+    address of each socket's k10temp), which stays put across boots while the
+    hwmon numbers may not."""
+    chips = []
+    for base in glob.glob(f"{root}/hwmon*"):
         chip = (_read(f"{base}/name") or "").lower()
-        if not any(c in chip for c in CPU_CHIPS):
-            continue
-        for inp in sorted(glob.glob(f"{base}/temp*_input")):
+        if any(c in chip for c in CPU_CHIPS):
+            chips.append((_natural(os.path.realpath(f"{base}/device")), base, chip))
+    chips.sort()
+    out: list[tuple[str, float]] = []
+    for (_, base, _chip), chip in zip(chips, _numbered([c for _, _, c in chips])):
+        for inp in sorted(glob.glob(f"{base}/temp*_input"), key=_natural):
             raw = _read(inp)
             if raw is None:
                 continue
@@ -100,13 +134,15 @@ def from_hwmon(root: str = "/sys/class/hwmon") -> list[tuple[str, float]]:
     return out
 
 
-def _lhm_sensors(node: dict, path: tuple[str, ...] = (), on_cpu: bool = False) -> list[tuple[tuple[str, ...], float, bool]]:
+def _lhm_sensors(node: dict, path: tuple[str, ...] = (), on_cpu: bool = False, text: str | None = None) -> list[tuple[tuple[str, ...], float, bool]]:
     """Every degree reading in LibreHardwareMonitor's /data.json, a tree of
     {Text, Value, ImageURL, SensorId, Children}: the names down to it (a name
     may hold a slash, "Core (Tctl/Tdie)"), its value, and whether it sits under
-    the CPU itself rather than the board."""
+    the CPU itself rather than the board. Two of one name side by side (two
+    CPUs of one model) are told apart by their place, as LHM numbers cores:
+    "Intel Xeon Gold 6230 #1" and "#2"."""
     found: list[tuple[tuple[str, ...], float, bool]] = []
-    text = (node.get("Text") or "").strip()
+    text = text if text is not None else (node.get("Text") or "").strip()
     here = path + (text,) if text else path
     on_cpu = (on_cpu or str(node.get("ImageURL") or "").endswith("cpu.png")
               or str(node.get("SensorId") or "").startswith(("/intelcpu/", "/amdcpu/")))
@@ -116,8 +152,10 @@ def _lhm_sensors(node: dict, path: tuple[str, ...] = (), on_cpu: bool = False) -
         m = re.search(r"(-?\d+(?:[.,]\d+)?)", value)
         if m:
             found.append((here, float(m.group(1).replace(",", ".")), on_cpu))
-    for child in node.get("Children") or []:
-        found.extend(_lhm_sensors(child, here, on_cpu))
+    children = node.get("Children") or []
+    names = _numbered([(c.get("Text") or "").strip() for c in children], first=1, sep=" #")
+    for child, name in zip(children, names):
+        found.extend(_lhm_sensors(child, here, on_cpu, name))
     return found
 
 
@@ -148,11 +186,14 @@ def from_acpi(root: str = "/sys/class/thermal") -> list[tuple[str, float]]:
     """Last resort, labelled source="acpi": the thermal zones that are the CPU.
     acpitz is often a board sensor that never moves, and a wifi card or the
     chipset would pass for the hottest core."""
-    out: list[tuple[str, float]] = []
-    for zone in sorted(glob.glob(f"{root}/thermal_zone*")):
+    zones = []
+    for zone in sorted(glob.glob(f"{root}/thermal_zone*"), key=_natural):
         kind = _read(f"{zone}/type") or ""
-        if not CPU_ZONES.search(kind):
-            continue
+        if CPU_ZONES.search(kind):
+            zones.append((zone, kind))
+    out: list[tuple[str, float]] = []
+    # Two sockets have an x86_pkg_temp each.
+    for (zone, _kind), name in zip(zones, _numbered([k for _, k in zones])):
         raw = _read(f"{zone}/temp")
         if raw is None:
             continue
@@ -161,7 +202,7 @@ def from_acpi(root: str = "/sys/class/thermal") -> list[tuple[str, float]]:
         except ValueError:
             continue
         if 0.0 < celsius < 150.0:
-            out.append((kind, celsius))
+            out.append((name, celsius))
     return out
 
 
@@ -179,10 +220,21 @@ def _without_offset_tctl(readings: list[tuple[str, float]]) -> list[tuple[str, f
     return [(n, v) for n, v in readings if not tctl.search(n) or tdie.search(n)]
 
 
+def _unique(readings: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Last guard: a name that still repeats (one chip labelling two sensors
+    alike) gets " (2)", " (3)", since Prometheus would keep only one of them."""
+    seen: Counter = Counter()
+    out = []
+    for name, value in readings:
+        seen[name] += 1
+        out.append((name if seen[name] == 1 else f"{name} ({seen[name]})", value))
+    return out
+
+
 def collect() -> tuple[str, list[tuple[str, float]]]:
     for name, fn in PROVIDERS:
         try:
-            readings = _without_offset_tctl(fn())
+            readings = _unique(_without_offset_tctl(fn()))
         except Exception:        # noqa: BLE001
             readings = []
         if readings:

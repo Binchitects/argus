@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import { ems } from '@/components/dashboards/fit'
+import { formatValue } from '@/lib/format'
 import { admin, fakeApi, member, renderApp } from '@/test/utils'
 
 const line = (nanos: string, container: string, text: string, level?: string) => ({
@@ -80,17 +82,56 @@ describe('dashboards', () => {
 
     // One GPU: one full-size gauge named by its panel.
     const one = await screen.findByRole('region', { name: 'One' })
-    expect((await within(one).findByRole('figure', { name: /^One: 40/ })).querySelector('svg')).toHaveClass('h-28')
+    expect(await within(one).findByRole('figure', { name: /^One: 40/ })).toHaveClass('max-w-[130px]')
     // Two: small, side by side where they fit, each named whole on hover, and no box.
     const two = screen.getByRole('region', { name: 'Two' })
     expect(within(two).queryByRole('region')).toBeNull()
     const second = await within(two).findByRole('figure', { name: /^GPU 1 · GeForce RTX 3090: 41/ })
-    expect(second.querySelector('svg')).toHaveClass('h-20')
+    expect(second).toHaveClass('max-w-[93px]')
     expect(within(two).getByText('GPU 1 · GeForce RTX 3090')).toHaveAttribute('title', 'GPU 1 · GeForce RTX 3090')
     // Ten: every one, in a box that scrolls past a chart's height on a wide screen.
     const box = await screen.findByRole('region', { name: 'Ten, every value' })
     expect(box).toHaveClass('lg:max-h-65')
     expect(within(box).getAllByRole('figure')).toHaveLength(10)
+  })
+
+  it("fits a value to its own cell rather than running past the panel, and sizes a panel's values alike", async () => {
+    const values = (pairs: [string, number][]) => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, error: null, series: pairs.map(([name, v]) => ({ name, points: [[1, v]] })) }] } })
+    const panel = (key: number, type: string, title: string, unit: string) => ({ key, type, title, gridPos: { x: key * 4, y: 0, w: 4, h: 7 }, supported: true, datasources: ['prometheus'], fieldConfig: { defaults: { unit } } })
+    fakeApi(admin, {
+      'GET /api/dashboards/fit': () => ({ json: { uid: 'fit', title: 'Fit', time: { from: 'now-1h', to: 'now' }, panels: [panel(0, 'stat', 'Power', 'watt'), panel(1, 'gauge', 'Heat', 'celsius'), panel(2, 'stat', 'Drives', 'celsius')] } }),
+      'POST /api/dashboards/fit/panels/0/query': () => values([['draw', 35], ['limit', 150]]),
+      'POST /api/dashboards/fit/panels/1/query': () => values([['GPU 0', 52], ['GPU 1', 48.4]]),
+      'POST /api/dashboards/fit/panels/2/query': () => values(Array.from({ length: 6 }, (_, i): [string, number] => [`nvme${i} · WD_BLACK SN850X 1000GB`, 50 + i])),
+    })
+    renderApp('/admin/dashboards/fit')
+
+    // Two values: columns of 7rem only where the cell has that much, else one under the other, never wider than it.
+    // Each value fits its own column (a container), at the size the widest of them needs, up to the usual size.
+    const power = await screen.findByRole('region', { name: 'Power' })
+    const shown = await within(power).findAllByLabelText(/^Power: /)
+    expect(shown.map((v) => v.textContent)).toEqual(['35 W', '150 W'])
+    expect(shown[0]!.closest('.grid.gap-3')).toHaveClass('grid-cols-[repeat(auto-fit,minmax(min(7rem,100%),1fr))]')
+    for (const v of shown) {
+      expect(v.parentElement).toHaveClass('@container')
+      expect(v).toHaveClass('text-[length:min(1.5rem,var(--fit))]', 'xl:text-[length:min(1.75rem,var(--fit))]', 'whitespace-nowrap')
+      expect(v.style.getPropertyValue('--fit')).toBe(`calc(100cqi / ${ems('150 W').toFixed(2)})`)
+    }
+    // Many: the same, in the box that scrolls up and down; nothing in it is wider than the cell, so it never scrolls sideways.
+    const drives = await screen.findByRole('region', { name: 'Drives, every value' })
+    expect(drives.firstElementChild).toHaveClass('grid-cols-[repeat(auto-fit,minmax(min(7rem,100%),1fr))]')
+    expect(within(drives).getAllByLabelText(/^Drives: nvme\d/)).toHaveLength(6)
+
+    // Gauges: each ring is its cell's width up to its full size, and its caption keeps inside the ring's ends
+    // (0.62 of it), every caption of the panel at one size.
+    const heat = screen.getByRole('region', { name: 'Heat' })
+    const figures = await within(heat).findAllByRole('figure')
+    expect(figures[0]!.parentElement!.parentElement).toHaveClass('grid-cols-[repeat(auto-fit,minmax(min(4.5rem,100%),1fr))]')
+    const widest = Math.max(ems(formatValue(52, 'celsius')), ems(formatValue(48.4, 'celsius')))
+    for (const f of figures) {
+      expect(f).toHaveClass('@container', 'w-full', 'aspect-[100/78]')
+      expect(f.querySelector('figcaption')!.style.getPropertyValue('--fit')).toBe(`calc(100cqi * 0.62 / ${widest.toFixed(2)})`)
+    }
   })
 
   it('shows a chart as a table from a button that is only its icon in a narrow panel, and keeps a cut title whole on hover', async () => {

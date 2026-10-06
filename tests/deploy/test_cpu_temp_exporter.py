@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,17 +43,17 @@ def lhm_tree(cpu: dict | None) -> dict:
     return group("Sensor", "", host)
 
 
-def intel_cpu() -> dict:
+def intel_cpu(name: str = "13th Gen Intel Core i7-13700K", index: int = 0, base: int = 40) -> dict:
     """An Intel CPU in LHM: per core a reading and its distance to TjMax (100 minus it), the package, and LHM's own max and average."""
-    cores = [sensor(f"CPU Core #{i + 1}", f"{40 + i},0 °C", f"/intelcpu/0/temperature/{i}") for i in range(4)]
-    distances = [sensor(f"CPU Core #{i + 1} Distance to TjMax", f"{60 - i}.0 °C", f"/intelcpu/0/temperature/{i + 4}") for i in range(4)]
+    cores = [sensor(f"CPU Core #{i + 1}", f"{base + i},0 °C", f"/intelcpu/{index}/temperature/{i}") for i in range(4)]
+    distances = [sensor(f"CPU Core #{i + 1} Distance to TjMax", f"{100 - base - i}.0 °C", f"/intelcpu/{index}/temperature/{i + 4}") for i in range(4)]
     temps = group(
         "Temperatures", "images_icon/temperature.png",
-        *cores, sensor("CPU Package", "45.0 °C", "/intelcpu/0/temperature/8"), *distances,
-        sensor("Core Max", "43.0 °C", "/intelcpu/0/temperature/9"), sensor("Core Average", "41.5 °C", "/intelcpu/0/temperature/10"),
+        *cores, sensor("CPU Package", f"{base + 5}.0 °C", f"/intelcpu/{index}/temperature/8"), *distances,
+        sensor("Core Max", f"{base + 3}.0 °C", f"/intelcpu/{index}/temperature/9"), sensor("Core Average", f"{base + 1}.5 °C", f"/intelcpu/{index}/temperature/10"),
     )
     load = group("Load", "images_icon/load.png", sensor("CPU Total", "12.0 %"))
-    return group("13th Gen Intel Core i7-13700K", "images_icon/cpu.png", load, temps)
+    return group(name, "images_icon/cpu.png", load, temps)
 
 
 def amd_cpu(first_gen: bool) -> dict:
@@ -95,6 +96,15 @@ class Lhm(unittest.TestCase):
         with mock.patch.object(exporter, "PROVIDERS", (("lhm", lambda: exporter._walk_lhm(lhm_tree(amd_cpu(first_gen=True)))),)):
             self.assertEqual(exporter.collect(), ("lhm", [("AMD Ryzen 7 1800X/Core (Tdie)", 50.0)]))
 
+    def test_two_cpus_of_one_model_are_told_apart_by_their_place(self):
+        xeon = "Intel Xeon Gold 6230"
+        tree = group("Sensor", "", group("HOST", "images_icon/computer.png", intel_cpu(xeon, 0, 40), intel_cpu(xeon, 1, 60)))
+        got = dict(exporter._walk_lhm(tree))
+        self.assertEqual(len(got), 10)
+        self.assertEqual(got[f"{xeon} #1/CPU Core #1"], 40.0)
+        self.assertEqual(got[f"{xeon} #2/CPU Core #1"], 60.0)
+        self.assertEqual(got[f"{xeon} #2/CPU Package"], 65.0)
+
     def test_the_metrics_have_the_cpus_hottest_sensor(self):
         with mock.patch.object(exporter, "PROVIDERS", (("lhm", lambda: exporter._walk_lhm(lhm_tree(intel_cpu()))),)):
             text = exporter.render()
@@ -123,6 +133,41 @@ class Linux(unittest.TestCase):
             })
             self.assertEqual(exporter._without_offset_tctl(exporter.from_hwmon(root)), [("k10temp/Tctl", 61.0), ("k10temp/Tccd1", 58.0)])
 
+    def test_two_sockets_of_one_chip_are_told_apart_in_the_order_of_their_devices(self):
+        # Both sockets' chips are "coretemp" and both number their cores from 0. The hwmon numbers are not the
+        # sockets' order (they may change across boots); the devices, coretemp.0 and coretemp.1, are.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sysfs(root, {
+                "devices/coretemp.0/x": "", "devices/coretemp.1/x": "",
+                "hwmon/hwmon2/name": "coretemp", "hwmon/hwmon2/temp1_input": "61000", "hwmon/hwmon2/temp1_label": "Package id 1",
+                "hwmon/hwmon2/temp2_input": "60000", "hwmon/hwmon2/temp2_label": "Core 0",
+                "hwmon/hwmon10/name": "coretemp", "hwmon/hwmon10/temp1_input": "41000", "hwmon/hwmon10/temp1_label": "Package id 0",
+                "hwmon/hwmon10/temp2_input": "40000", "hwmon/hwmon10/temp2_label": "Core 0",
+                "hwmon/hwmon10/temp10_input": "42000", "hwmon/hwmon10/temp10_label": "Core 8",
+                "hwmon/hwmon3/name": "nvme", "hwmon/hwmon3/temp1_input": "45850",
+            })
+            os.symlink(root / "devices/coretemp.1", root / "hwmon/hwmon2/device")
+            os.symlink(root / "devices/coretemp.0", root / "hwmon/hwmon10/device")
+            got = exporter.from_hwmon(str(root / "hwmon"))
+        self.assertEqual(got, [("coretemp.0/Package id 0", 41.0), ("coretemp.0/Core 0", 40.0), ("coretemp.0/Core 8", 42.0),
+                               ("coretemp.1/Package id 1", 61.0), ("coretemp.1/Core 0", 60.0)])
+        # Every one a series of its own, so Prometheus keeps both sockets.
+        with mock.patch.object(exporter, "PROVIDERS", (("hwmon", lambda: got),)):
+            series = [l.rsplit(" ", 1)[0] for l in exporter.render().splitlines() if l.startswith("cpu_temperature_celsius{")]
+        self.assertEqual(len(series), 5)
+        self.assertEqual(len(set(series)), 5)
+
+    def test_one_socket_keeps_the_names_it_had(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = sysfs(Path(tmp), {"hwmon1/name": "coretemp", "hwmon1/temp1_input": "41000", "hwmon1/temp1_label": "Package id 0",
+                                     "hwmon1/temp2_input": "40000", "hwmon1/temp2_label": "Core 0"})
+            self.assertEqual(exporter.from_hwmon(root), [("coretemp/Package id 0", 41.0), ("coretemp/Core 0", 40.0)])
+
+    def test_a_name_that_still_repeats_is_made_unique(self):
+        with mock.patch.object(exporter, "PROVIDERS", (("hwmon", lambda: [("k10temp/Tccd1", 50.0), ("k10temp/Tccd1", 52.0)]),)):
+            self.assertEqual(exporter.collect(), ("hwmon", [("k10temp/Tccd1", 50.0), ("k10temp/Tccd1 (2)", 52.0)]))
+
     def test_acpi_keeps_the_zones_that_are_the_cpu(self):
         # This machine's zones: the board's acpitz, the wifi card, and Intel's package sensor.
         with tempfile.TemporaryDirectory() as tmp:
@@ -135,6 +180,15 @@ class Linux(unittest.TestCase):
                 "thermal_zone5/type": "TCPU", "thermal_zone5/temp": "79000",
             })
             self.assertEqual(exporter.from_acpi(root), [("x86_pkg_temp", 81.0), ("cpu-thermal", 55.0), ("TCPU", 79.0)])
+
+    def test_acpi_tells_two_sockets_package_zones_apart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = sysfs(Path(tmp), {
+                "thermal_zone0/type": "acpitz", "thermal_zone0/temp": "27800",
+                "thermal_zone10/type": "x86_pkg_temp", "thermal_zone10/temp": "62000",
+                "thermal_zone2/type": "x86_pkg_temp", "thermal_zone2/temp": "81000",
+            })
+            self.assertEqual(exporter.from_acpi(root), [("x86_pkg_temp.0", 81.0), ("x86_pkg_temp.1", 62.0)])
 
     def test_acpi_with_only_a_board_zone_says_there_is_no_cpu_sensor(self):
         with tempfile.TemporaryDirectory() as tmp:

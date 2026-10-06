@@ -1457,7 +1457,7 @@
     {
       "type": "timeseries",
       "title": "CPU temperature per sensor",
-      "description": "Every CPU sensor the cpu-temp-exporter reads: on Intel one per core and one for the package, on AMD one per die. The seven hottest keep a line each and the rest are averaged into Other; Show as table lists every sensor.",
+      "description": "Every CPU sensor the cpu-temp-exporter reads: on Intel one per core and one for the package, on AMD one per die. With two CPUs a name starts with its CPU, as in coretemp.0/Core 0 and coretemp.1/Core 0. The seven hottest keep a line each and the rest are averaged into Other; Show as table lists every sensor.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

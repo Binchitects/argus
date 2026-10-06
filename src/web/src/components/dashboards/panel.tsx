@@ -17,6 +17,7 @@ import { reduceEach } from './reduce'
 import type { Column, PanelData, PanelDef } from './types'
 import type { Chosen } from './variables'
 import { thresholdColor, tone } from './colors'
+import { ems, fitting } from './fit'
 import { Gauge, Sparkline } from './visuals'
 
 /** level: its title's heading level (3 under a row's heading, 2 when the panel has none above it). */
@@ -127,14 +128,15 @@ function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; pan
       } else if (panel.type === 'gauge') {
         const min = defaults?.min ?? 0
         const max = defaults?.max ?? (unit === 'percentunit' ? 1 : 100)
-        // A gauge per series (a GPU each). Several are drawn small, two to a narrow cell's line, and past two
+        // A gauge per series (a GPU each). Several are drawn small, as many to a line as fit, and past two
         // they scroll at a chart's height as a stat's values do: a machine with many GPUs keeps its row one height.
         const several = values.length > 1
+        const em = Math.max(...values.map((v) => ems(formatValue(v.value, unit, decimals))))
         const gauges = (
-          <div className={cn('grid gap-2', several && 'grid-cols-[repeat(auto-fit,minmax(4.5rem,1fr))]')}>
+          <div className={cn('grid gap-2', several && 'grid-cols-[repeat(auto-fit,minmax(min(4.5rem,100%),1fr))]')}>
             {values.map((v) => (
               <div key={v.name} className="grid min-w-0 justify-items-center">
-                <Gauge value={v.value} min={min} max={max} steps={steps} unit={unit} decimals={decimals} label={several ? v.name : (panel.title ?? v.name)} small={several} />
+                <Gauge value={v.value} min={min} max={max} steps={steps} unit={unit} decimals={decimals} label={several ? v.name : (panel.title ?? v.name)} small={several} em={em} />
                 {several && (
                   <p className="line-clamp-2 max-w-full text-center text-xs break-words text-muted-foreground" title={v.name}>
                     {v.name}
@@ -156,13 +158,17 @@ function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; pan
         // A value per series. Many of them (a sensor per core) must not make the row taller than a chart
         // beside it: past two they drop their sparklines, and on a wide screen the list scrolls at a chart's height.
         const many = values.length > 2
+        const text = (v: (typeof values)[number]) => (v.value === null ? (defaults?.noValue ?? '—') : formatValue(v.value, unit, decimals))
+        const em = Math.max(...values.map((v) => ems(text(v))))
         const list = (
-          <div className={cn('grid gap-3', values.length > 1 && 'grid-cols-[repeat(auto-fit,minmax(7rem,1fr))]')}>
+          <div className={cn('grid gap-3', values.length > 1 && 'grid-cols-[repeat(auto-fit,minmax(min(7rem,100%),1fr))]')}>
             {values.map((v) => {
               const t = tone(fixed ?? thresholdColor(v.value, steps))
               const background = panel.options?.colorMode === 'background' && t
               return (
-                <div key={v.name} className={cn('grid min-w-0 gap-1 rounded-lg', background && `${t.fill} px-3 py-2`)}>
+                // Its own width for the value to fit (@container): a column narrower than the number shrinks the number,
+                // and every value of the panel by as much, so they stay one size.
+                <div key={v.name} className={cn('grid min-w-0 gap-1 rounded-lg @container', background && `${t.fill} px-3 py-2`)}>
                   {/* Two lines before it is cut, and whole on hover: a narrow cell keeps more than the start of a name. */}
                   {values.length > 1 && (
                     <p className="line-clamp-2 text-xs break-words text-muted-foreground" title={v.name}>
@@ -170,10 +176,14 @@ function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; pan
                     </p>
                   )}
                   <div
-                    className={cn('text-2xl font-semibold tracking-tight whitespace-nowrap tabular-nums xl:text-[1.75rem]', panel.options?.colorMode !== 'none' && t?.ink)}
+                    className={cn(
+                      'text-[length:min(1.5rem,var(--fit))] leading-[1.333] font-semibold tracking-tight whitespace-nowrap tabular-nums xl:text-[length:min(1.75rem,var(--fit))]',
+                      panel.options?.colorMode !== 'none' && t?.ink,
+                    )}
+                    style={fitting(em, '100cqi')}
                     aria-label={values.length > 1 ? `${panel.title}: ${v.name}` : panel.title}
                   >
-                    {v.value === null ? (defaults?.noValue ?? '—') : formatValue(v.value, unit, decimals)}
+                    {text(v)}
                   </div>
                   {!many && panel.options?.graphMode === 'area' && v.points.length > 1 && <Sparkline points={v.points} className={t?.ink ?? 'text-primary'} />}
                 </div>

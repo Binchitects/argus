@@ -44,6 +44,19 @@ dashboards take the hottest and the average of all of them. So it leaves out:
 - Thermal zones that are not the CPU: `acpitz` (the board, see above), a wifi
   card, the chipset, a battery.
 
+Every series has a name of its own. On a machine with two CPUs both sockets'
+chips are `coretemp` (or `k10temp`), and each numbers its cores from 0. Two
+series with one name would reach Prometheus as one, and half the cores would
+be lost. So a name that repeats takes its place among its namesakes:
+
+- hwmon: `coretemp.0/Core 0` and `coretemp.1/Core 0`, in the order of the
+  chips' devices, which stays the same across reboots.
+- LHM: two CPUs of one model become `Intel Xeon Gold 6230 #1/CPU Core #1` and
+  `Intel Xeon Gold 6230 #2/CPU Core #1`, numbered as LHM numbers cores.
+- acpi: two sockets' package zones become `x86_pkg_temp.0` and `x86_pkg_temp.1`.
+
+A machine with one CPU keeps the names it had.
+
 Metrics:
 
 ```

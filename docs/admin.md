@@ -417,4 +417,8 @@ A stat shows a value per series. Past two it leaves out their sparklines, and on
 a wide screen it scrolls rather than grow taller than a chart: a row of panels
 stays one height whatever the machine reports. A name takes two lines before it
 is cut short, and shows whole on hover. A gauge per series (a GPU each) is drawn
-small when there are several, and past two they scroll the same way.
+small when there are several, and past two they scroll the same way. Values sit
+side by side only where the panel has room for them, else one under the other;
+a value too wide for its panel (a small panel on a window of 1024 to 1280
+pixels) is drawn smaller rather than past the panel's edge, and a gauge's ring
+and number shrink together. A panel's values stay one size.
