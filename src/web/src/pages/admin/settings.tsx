@@ -20,7 +20,7 @@ import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CompanySignInPanel } from './company-sign-in'
 import { BotAddresses } from './bot-addresses'
-import { bytesHint, initialValue, isShown, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
+import { bytesHint, initialValue, isShown, limits, shownValue, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
 
 const settingsQuery = {
   queryKey: ['admin', 'config'] as const,
@@ -306,15 +306,27 @@ function SettingRow({ s, value, error, onChange }: { s: SettingView; value: stri
   )
 }
 
-/** Where the value comes from, in words. */
+/** Where the value comes from, in words; a changed one says what the default is. */
 function Provenance({ s }: { s: SettingView }) {
   let text: ReactNode = null
-  if (s.source === 'saved' && s.environmentValue !== null && s.type !== 'secret') {
-    text = <>Overrides <code className="font-mono">{s.environmentValue || '(empty)'}</code> from the environment.</>
-  } else if (s.type === 'secret') {
+  if (s.type === 'secret') {
     text = s.isSet ? 'Set. Type a new value to replace it.' : 'Not set.'
-  } else if (s.source === 'default' && s.default) {
-    text = 'The default.'
+  } else if (s.source === 'default') {
+    text = s.default ? 'The default.' : null
+  } else {
+    const fallback = shownValue(s, s.default)
+    text = (
+      <>
+        {s.source === 'saved' && s.environmentValue !== null ? (
+          <>
+            Overrides <code className="font-mono">{shownValue(s, s.environmentValue) ?? '(empty)'}</code> from the environment.{' '}
+          </>
+        ) : (
+          s.source === 'environment' && 'Set by the environment. '
+        )}
+        The default: {fallback === null ? 'not set' : <code className="font-mono">{fallback}</code>}.
+      </>
+    )
   }
   return text ? <p className="text-xs text-muted-foreground">{text}</p> : null
 }
@@ -363,24 +375,23 @@ function Editor({ s, id, value, onChange, describedBy, invalid }: { s: SettingVi
       )
     }
     case 'duration':
-      return (
-        <div className="flex items-center gap-2">
-          <Input {...common} inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)} className="w-32" />
-          <span className="text-sm text-muted-foreground">{s.unit}</span>
-        </div>
-      )
     case 'wholenumber':
     case 'number': {
       const hint = s.unit === 'bytes' ? bytesHint(value) : null
+      const range = limits(s)
       return (
-        <div className="flex items-center gap-2">
-          <Input {...common} inputMode={s.type === 'number' ? 'decimal' : 'numeric'} value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.optional ? 'not set' : undefined} className="w-40" />
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Input
+            {...common}
+            inputMode={s.type === 'wholenumber' ? 'numeric' : 'decimal'}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={s.optional ? 'not set' : undefined}
+            className={s.type === 'duration' ? 'w-32' : 'w-40'}
+          />
+          {s.unit && <span className="text-sm text-muted-foreground">{s.unit}</span>}
           {hint && <span className="text-sm text-muted-foreground">= {hint}</span>}
-          {s.min !== null && s.max !== null && s.unit !== 'bytes' && (
-            <span className="text-xs text-muted-foreground">
-              {s.min}–{s.max}
-            </span>
-          )}
+          {range && <span className="text-xs text-muted-foreground">{range}</span>}
         </div>
       )
     }

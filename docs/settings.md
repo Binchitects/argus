@@ -1,9 +1,12 @@
 # Settings in the app
 
 Admin → Settings (`https://DOMAIN/admin/settings`) lists every setting an
-admin can change, in groups. Each is typed and checked, with its unit, default
-and limits, and a note on what changing it does, all in plain view (nothing only
-on hover). Search looks across every group. A group can be linked directly, for example
+admin can change, in groups. Each is typed and checked. In plain view (nothing
+only on hover) each says what it does, when a change applies and, where it
+matters, what else a change affects. A number or a duration shows its unit and
+its limits beside its box (a size in bytes shows it in KB or MB instead), and a
+changed setting shows its default ("The default: 60 minutes"). A text that is
+too long is refused when saved, with its limit. Search looks across every group. A group can be linked directly, for example
 `/admin/settings#company-directory-ldap`. A setting that belongs to one choice
 shows only while it is chosen: **Company sign-in** shows OIDC's settings or
 SAML's, by its **Protocol**. Long values (SAML metadata, a certificate) get a

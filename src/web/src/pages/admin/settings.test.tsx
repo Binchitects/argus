@@ -56,6 +56,28 @@ describe('settings', () => {
     expect(within(card).queryAllByRole('button')).toEqual([])
   })
 
+  it('shows each number and duration with its unit and limits, and a changed setting with its default', async () => {
+    const d = data()
+    const chat = d.groups.find((g) => g.title === 'Chat')!
+    chat.settings.push(
+      s({ key: 'Auth:IdleTimeout', label: 'Sign out after idle', type: 'duration', scope: 'apprestart', unit: 'minutes', min: 5, max: 1440, value: '02:00:00', default: '01:00:00', source: 'saved' }),
+      s({ key: 'Chat:MaxPasteChars', label: 'Longest paste', unit: 'characters', min: 0, max: 500000, value: '9000', default: '6000', source: 'environment' }),
+    )
+    fakeApi(admin, { 'GET /api/admin/config': () => ({ json: d }) })
+    renderApp('/admin/settings')
+    const idle = await screen.findByLabelText('Sign out after idle')
+    expect(idle).toHaveValue('120')
+    const row = (field: HTMLElement) => field.closest('.grid.content-start') as HTMLElement
+    expect(row(idle)).toHaveTextContent('minutes5–1440')
+    expect(within(row(idle)).getByText('60 minutes')).toBeInTheDocument()
+    expect(row(idle)).toHaveTextContent('The default: 60 minutes.')
+    const paste = screen.getByLabelText('Longest paste')
+    expect(row(paste)).toHaveTextContent('characters0–500000')
+    expect(row(paste)).toHaveTextContent('Set by the environment. The default: 6000 characters.')
+    // One left at its default says only that.
+    expect(row(screen.getByLabelText('Tool calls per answer'))).toHaveTextContent('1–32The default.')
+  })
+
   it('saves only what changed, with durations in the API’s form, and says when each applies', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/config': () => ({ json: data() }),
