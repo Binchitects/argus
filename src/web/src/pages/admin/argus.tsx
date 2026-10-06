@@ -43,6 +43,8 @@ interface IndexStatus {
     returncode: number | null
     tail: string[]
     trigger: string | null
+    /** The repositories of the run; null for a pass over every one. */
+    repos?: string[] | null
     allow_partial?: boolean
     repos_error?: string
     progress?: IndexProgress | null
@@ -58,7 +60,7 @@ function passWords(p: IndexProgress): string {
   if (p.stage === 'finishing') return p.what === 'embeddings' ? 'Every repository done: embedding new symbols for meaning search.' : 'Every repository done: linking includes across repositories.'
   if (!p.repo) return 'Asking GitLab for the repositories…'
   const files = p.total ? `, ${p.done ?? 0} of ${p.total} changed files` : ''
-  return `Repository ${p.position} of ${p.repos}: ${p.repo} (${p.branch})${files}.`
+  return `Repository ${p.position} of ${p.repos}: ${p.repo}${p.branch ? ` (${p.branch})` : ''}${files}.`
 }
 
 export function IndexingPage() {
@@ -89,7 +91,9 @@ export function IndexingPage() {
     )
   const { job, index: idx } = st.data
   const running = job.state === 'running'
-  const trigger = { schedule: 'the schedule', webhook: 'a GitLab push or merge', manual: 'an admin' }[job.trigger ?? ''] ?? job.trigger
+  const trigger =
+    { schedule: 'the schedule', webhook: 'a GitLab push or merge', manual: 'an admin', 'repo-schedule': "the repositories' own schedules", queued: 'what waited for the run before' }[job.trigger ?? ''] ??
+    job.trigger
   return (
     <>
       <PageHeader title="Indexing" description="Argus's index of your GitLab: what it holds, how current it is, and runs on demand." />
@@ -145,7 +149,7 @@ export function IndexingPage() {
             )}
             <output className="block text-sm text-muted-foreground">
               {running
-                ? `Running since ${agoSeconds(job.started)}, started by ${trigger}, for ${job.branches.join(', ') || 'default branches'}.`
+                ? `Running since ${agoSeconds(job.started)}, started by ${trigger}, for ${job.repos?.length ? (job.repos.length === 1 ? job.repos[0] : `${job.repos.length} repositories`) : job.branches.join(', ') || 'default branches'}.`
                 : job.finished
                   ? `Last run finished ${agoSeconds(job.finished)}: exit ${job.returncode}, ${indexExit[String(job.returncode)] ?? 'an unrecognised exit code'}.`
                   : 'No run since Argus started.'}
@@ -157,7 +161,7 @@ export function IndexingPage() {
         </Card>
         <ScheduleCard />
         <WebhookCard />
-        <RepositoriesCard running={running} progress={job.progress ?? null} pending={st.data.pending} gitlabUrl={gitlabUrl} />
+        <RepositoriesCard gitlabUrl={gitlabUrl} />
       </div>
     </>
   )
