@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, sep } from 'node:path'
 import { lexer, type Token } from 'marked'
 import { describe, expect, it } from 'vitest'
 import { canRead, manualDocs, notInTheManual, parseDoc, plainText, resolveLink, searchManual } from './manual'
@@ -28,7 +28,11 @@ function links(text: string): string[] {
 
 describe('the manual', () => {
   it('holds every page of docs/ that people and admins need, and says which it leaves out', () => {
-    const files = [...readdirSync(docsDir).filter((f) => f.endsWith('.md')), ...readdirSync(`${docsDir}argus`).filter((f) => f.endsWith('.md')).map((f) => `argus/${f}`)]
+    // Every folder, as deep as it goes; measurements/ (results, not pages) is not in the web's image either (.dockerignore).
+    const files = readdirSync(docsDir, { recursive: true, encoding: 'utf8' })
+      .map((f) => f.split(sep).join('/'))
+      .filter((f) => f.endsWith('.md') && !f.startsWith('measurements/'))
+    expect(files).toEqual(expect.arrayContaining(['chat.md', 'argus/overview.md', 'argus/standalone/operations.md']))
     const placed = new Set([...manualDocs.map((d) => d.file), ...notInTheManual])
     expect(files.filter((f) => !placed.has(f)), 'a new page under docs/: add it to the manual or to notInTheManual').toEqual([])
     expect(manualDocs.map((d) => d.file).filter((f) => notInTheManual.includes(f))).toEqual([])

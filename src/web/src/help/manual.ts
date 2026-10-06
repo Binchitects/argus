@@ -101,8 +101,17 @@ export const manualGroups: ManualGroup[] = [
   },
 ]
 
-/** Pages of docs/ for the people who build the app, kept out of the manual. */
-export const notInTheManual = ['README.md', 'development.md', 'testing.md', 'plan.md', 'argus/roadmap.md']
+/** Pages of docs/ kept out of the manual: the developers', and Argus run alone, without this platform. */
+export const notInTheManual = [
+  'README.md',
+  'development.md',
+  'testing.md',
+  'plan.md',
+  'argus/roadmap.md',
+  'argus/standalone/architecture.md',
+  'argus/standalone/configuration.md',
+  'argus/standalone/operations.md',
+]
 
 export const manualDocs: ManualDoc[] = manualGroups.flatMap((g) => g.docs)
 

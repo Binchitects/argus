@@ -18,9 +18,10 @@ files, which anyone who can reach the web can fetch without signing in (as the
 pages are on GitHub). Keep nothing confidential in `docs/`: no internal host
 names, passwords or private procedures.
 
-A new page here is placed on purpose: in the manual
-(`src/web/src/help/manual.ts`), or among the developers' pages it leaves out;
-a test fails until it is.
+A new page here, in any folder, is placed on purpose: in the manual
+(`src/web/src/help/manual.ts`), or among the pages it leaves out (the
+developers', and Argus run alone); a test fails until it is. Only
+`measurements/` is left out whole: it holds results, not pages.
 
 ## Running the platform
 
