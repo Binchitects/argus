@@ -6,6 +6,7 @@ const paths: Record<string, string> = {
   people: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 10a7 7 0 0 1 14 0m1-10a3 3 0 1 0 0-6m2 16a6 6 0 0 0-3-5",
   indexing: "M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5",
   explore: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zm5-2 5 5",
+  repos: "M6 3v12m0 0a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm12-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 0a9 9 0 0 1-9 9",
   packs: "M5 4h14v16H5zm4 0v16m-4-8h4",
   theme: "M12 3a9 9 0 1 0 0 18V3z M12 3a9 9 0 0 1 0 18",
   plus: "M12 5v14M5 12h14",

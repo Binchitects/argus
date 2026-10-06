@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router";
 import { api, relTime, type IndexStatus } from "../../api";
 import { useAsync } from "../../components/useAsync";
 
@@ -80,7 +81,10 @@ export default function Indexing() {
       )}
       {s && s.repos.length > 0 && (
         <div className="card">
-          <h2>Repositories ({s.index.repos ?? s.repos.length} refs, {s.index.symbols?.toLocaleString() ?? "?"} symbols)</h2>
+          <div className="row between">
+            <h2>Repositories ({s.index.repos ?? s.repos.length} refs, {s.index.symbols?.toLocaleString() ?? "?"} symbols)</h2>
+            <Link to="/manage/repositories">Find, filter and change them, with their schedules and logs</Link>
+          </div>
           <table data-testid="repo-table">
             <thead><tr><th>Repository</th><th>Branch</th><th>Last indexed</th><th>Result</th></tr></thead>
             <tbody>

@@ -118,7 +118,10 @@ export default function Chat() {
       });
   }, [id, navigate]);
 
-  useEffect(() => bottom.current?.scrollIntoView({ block: "end" }), [turns]);
+  // A statement, not a value: Chrome's scrollIntoView now returns a promise, which React would take for a clean-up.
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ block: "end" });
+  }, [turns]);
 
   async function send() {
     const text = draft.trim();

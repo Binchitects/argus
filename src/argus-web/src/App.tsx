@@ -7,6 +7,7 @@ import Settings from "./pages/Settings";
 import Overview from "./pages/admin/Overview";
 import People from "./pages/admin/People";
 import Indexing from "./pages/admin/Indexing";
+import Repositories from "./pages/admin/Repositories";
 import Explore from "./pages/admin/Explore";
 import Packs from "./pages/admin/Packs";
 import type { ReactNode } from "react";
@@ -36,6 +37,7 @@ function Routed() {
         <Route path="manage" element={<RequireUser admin><Overview /></RequireUser>} />
         <Route path="manage/people" element={<RequireUser admin><People /></RequireUser>} />
         <Route path="manage/indexing" element={<RequireUser admin><Indexing /></RequireUser>} />
+        <Route path="manage/repositories" element={<RequireUser admin><Repositories /></RequireUser>} />
         <Route path="manage/explore" element={<RequireUser admin><Explore /></RequireUser>} />
         <Route path="manage/packs" element={<RequireUser admin><Packs /></RequireUser>} />
       </Route>

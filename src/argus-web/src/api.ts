@@ -36,6 +36,7 @@ export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {}),
   patch: <T>(path: string, body: unknown) => request<T>("PATCH", path, body),
+  put: <T>(path: string, body: unknown) => request<T>("PUT", path, body),
   del: <T>(path: string) => request<T>("DELETE", path),
 };
 
@@ -181,6 +182,62 @@ export interface IndexStatus {
   pending: string[];
 }
 
+/** Where the run going now is with one repository. */
+export interface RepoProgress {
+  state: "queued" | "fetching" | "files" | "symbols" | "embedding" | "done" | "failed";
+  branch?: string | null;
+  done?: number | null;
+  total?: number | null;
+  outcome?: string | null;
+  message?: string | null;
+}
+
+export type RepoState = "indexing" | "queued" | "failed" | "stale" | "indexed" | "never" | "off";
+
+/** A repository GitLab lists, what is chosen for it, and how its index is. */
+export interface Repo {
+  gitlab_id: number;
+  repo: string;
+  name: string;
+  group: string;
+  default_branch: string;
+  included: boolean;
+  branches: string[];
+  listed: boolean;
+  language: string | null;
+  schedule: string;
+  schedule_words: string;
+  schedule_kind: string;
+  next_run_at: number | null;
+  last_run_at: number | null;
+  state: RepoState;
+  problem: string | null;
+  progress: RepoProgress | null;
+  indexed: { branch: string; sha: string | null; message: string | null; files: number; symbols: number; error: string | null; stale: boolean }[];
+}
+
+export interface ReposView {
+  new_repos: "include" | "exclude";
+  schedule: { default: string; words: string; time_zone: string; zone_problem: string | null; pass_interval: number; next_pass_at: number | null };
+  listed_at: number | null;
+  running: boolean;
+  pending: string[];
+  repos: Repo[];
+  found?: { new: number; moved: number; set_aside: number };
+}
+
+export interface BatchResult {
+  action: string;
+  results: { gitlab_id: number; repo: string | null; ok: boolean; message: string }[];
+}
+
+export interface LogLine {
+  run: number;
+  at: number;
+  level: "info" | "warning" | "error";
+  text: string;
+}
+
 export interface Pack {
   name: string;
   version: string;
@@ -227,6 +284,16 @@ export function relTime(ts: number | null | undefined): string {
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
+}
+
+/** A time to come: "in 5m", "in 3h", "in 2d"; "now" once it is due. */
+export function inTime(ts: number | null | undefined): string {
+  if (!ts) return "—";
+  const s = ts - Date.now() / 1000;
+  if (s < 60) return "now";
+  if (s < 3600) return `in ${Math.round(s / 60)}m`;
+  if (s < 86400) return `in ${Math.round(s / 3600)}h`;
+  return `in ${Math.round(s / 86400)}d`;
 }
 
 export function money(v: number | null | undefined): string {

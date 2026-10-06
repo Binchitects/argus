@@ -12,6 +12,7 @@ const adminLinks = [
   { to: "/manage", label: "Overview", icon: "overview", end: true },
   { to: "/manage/people", label: "People", icon: "people" },
   { to: "/manage/indexing", label: "Indexing", icon: "indexing" },
+  { to: "/manage/repositories", label: "Repositories", icon: "repos" },
   { to: "/manage/explore", label: "Explore", icon: "explore" },
   { to: "/manage/packs", label: "Knowledge packs", icon: "packs" },
 ];
