@@ -255,3 +255,24 @@ pre.log { max-height: 280px; background: #111418; color: #d6dae0; font-size: 12p
   .conversations { display: none; }
   .page { padding: 20px 16px; }
 }
+
+/* ---- help ---------------------------------------------------------------------- */
+.help-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  width: min(380px, 100vw);
+  overflow: auto;
+  padding: 20px;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px rgba(16, 24, 40, 0.12);
+}
+.help-panel h2 { font-size: 16px; }
+.help-panel h3, .help-page h3 { font-size: 13.5px; margin: 16px 0 4px; }
+.help-panel ol, .help-page ol { margin: 0; padding-left: 20px; }
+.help-parts { display: grid; gap: 10px; margin: 12px 0 0; }
+.help-parts dt { font-weight: 600; }
+.help-parts dd { margin: 0; }

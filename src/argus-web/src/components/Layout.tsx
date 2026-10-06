@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useAuth } from "../auth";
 import { applyTheme, currentTheme, type Theme } from "../theme";
+import { HelpPanel } from "./Help";
 import Icon from "./Icon";
 
 const userLinks = [
@@ -20,6 +21,8 @@ export default function Layout() {
   const { me, logout } = useAuth();
   const navigate = useNavigate();
   const [theme, setTheme] = useState<Theme>(currentTheme());
+  const [helpOpen, setHelpOpen] = useState(false);
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
   useEffect(() => applyTheme(theme), [theme]);
   const next: Record<Theme, Theme> = { auto: "light", light: "dark", dark: "auto" };
   const user = me!.user;
@@ -48,6 +51,9 @@ export default function Layout() {
           </>
         )}
         <div className="spacer" />
+        <button className="item ghost" onClick={() => setHelpOpen((o) => !o)} aria-expanded={helpOpen} title="Help for this page">
+          <Icon name="help" /> Help
+        </button>
         <button className="item ghost" onClick={() => setTheme(next[theme])} title="Switch theme">
           <Icon name="theme" /> Theme: {theme}
         </button>
@@ -75,6 +81,7 @@ export default function Layout() {
       <main className="main">
         <Outlet />
       </main>
+      {helpOpen && <HelpPanel onClose={closeHelp} />}
     </div>
   );
 }

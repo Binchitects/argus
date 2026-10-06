@@ -293,4 +293,21 @@ test.describe.serial("Argus", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.screenshot({ path: join(shots(), "10-overview-dark.png"), fullPage: true });
   });
+
+  test("help: each page has its own, it follows from page to page, and /help has them all", async ({ page }) => {
+    await signIn(page, ADMIN.username, ADMIN.password);
+    await page.getByRole("button", { name: "Help", exact: true }).click();
+    const panel = page.getByTestId("help-panel");
+    await expect(panel.getByRole("heading", { name: "Help: Chat" })).toBeVisible();
+    const pages = ["Settings & keys", "Overview", "People", "Indexing", "Explore", "Knowledge packs"];
+    for (const name of pages) {
+      await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name }).click();
+      await expect(panel.getByRole("heading", { name: `Help: ${name}` })).toBeVisible();
+    }
+    await panel.getByRole("link", { name: "Every page's help" }).click();
+    await expect(page.getByRole("heading", { name: "Help", exact: true, level: 1 })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("heading", { name: "Knowledge packs", level: 2 })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+  });
 });

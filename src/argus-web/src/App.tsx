@@ -9,6 +9,8 @@ import People from "./pages/admin/People";
 import Indexing from "./pages/admin/Indexing";
 import Explore from "./pages/admin/Explore";
 import Packs from "./pages/admin/Packs";
+import HelpPage from "./components/Help";
+import { inLayout, type ArgusRoute } from "./help";
 import type { ReactNode } from "react";
 
 function RequireUser({ children, admin = false }: { children: ReactNode; admin?: boolean }) {
@@ -19,10 +21,11 @@ function RequireUser({ children, admin = false }: { children: ReactNode; admin?:
   return <>{children}</>;
 }
 
+// Each path is an ArgusRoute: help.ts has the help for it, or this does not compile.
 function Routed() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
+      <Route path={"/login" satisfies ArgusRoute} element={<Login />} />
       <Route
         element={
           <RequireUser>
@@ -31,13 +34,14 @@ function Routed() {
         }
       >
         <Route index element={<Chat />} />
-        <Route path="chat/:id" element={<Chat />} />
-        <Route path="settings" element={<Settings />} />
-        <Route path="manage" element={<RequireUser admin><Overview /></RequireUser>} />
-        <Route path="manage/people" element={<RequireUser admin><People /></RequireUser>} />
-        <Route path="manage/indexing" element={<RequireUser admin><Indexing /></RequireUser>} />
-        <Route path="manage/explore" element={<RequireUser admin><Explore /></RequireUser>} />
-        <Route path="manage/packs" element={<RequireUser admin><Packs /></RequireUser>} />
+        <Route path={inLayout("/chat/:id")} element={<Chat />} />
+        <Route path={inLayout("/settings")} element={<Settings />} />
+        <Route path={inLayout("/help")} element={<HelpPage />} />
+        <Route path={inLayout("/manage")} element={<RequireUser admin><Overview /></RequireUser>} />
+        <Route path={inLayout("/manage/people")} element={<RequireUser admin><People /></RequireUser>} />
+        <Route path={inLayout("/manage/indexing")} element={<RequireUser admin><Indexing /></RequireUser>} />
+        <Route path={inLayout("/manage/explore")} element={<RequireUser admin><Explore /></RequireUser>} />
+        <Route path={inLayout("/manage/packs")} element={<RequireUser admin><Packs /></RequireUser>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
