@@ -16,7 +16,6 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
-import { Tooltip } from '@/components/ui/tooltip'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CompanySignInPanel } from './company-sign-in'
@@ -141,7 +140,12 @@ export function SettingsPage() {
                   <span className="truncate">{g.title}</span>
                   <span className="flex items-center gap-1.5 text-xs tabular-nums">
                     {unsavedIn(g.title) > 0 && <span className="size-1.5 rounded-full bg-primary" aria-label="unsaved changes" />}
-                    {changed > 0 && <span title="changed from .env or the default">{changed}</span>}
+                    {changed > 0 && (
+                      <span title="changed from .env or the default">
+                        {changed}
+                        <span className="sr-only"> changed</span>
+                      </span>
+                    )}
                   </span>
                 </Link>
               )
@@ -229,9 +233,10 @@ function groupNote(settings: SettingView[]): string {
   return 'Each setting says when it applies.'
 }
 
-const scopeBadge: Record<SettingView['scope'], { icon: typeof Zap; text: string; tip: string }> = {
-  live: { icon: Zap, text: 'At once', tip: 'Applies as soon as it is saved.' },
-  apprestart: { icon: RotateCw, text: 'Restart', tip: 'Read when the app starts: restart it to apply (a few seconds).' },
+// What each says is on the page, not in a tooltip: every setting explains itself in plain view.
+const scopeBadge: Record<SettingView['scope'], { icon: typeof Zap; text: string; note?: string }> = {
+  live: { icon: Zap, text: 'Applies at once' },
+  apprestart: { icon: RotateCw, text: 'After a restart', note: 'Read when the app starts: save, then restart the app (a few seconds).' },
 }
 
 function SettingRow({ s, value, error, onChange }: { s: SettingView; value: string; error?: string; onChange: (v: string) => void }) {
@@ -248,30 +253,29 @@ function SettingRow({ s, value, error, onChange }: { s: SettingView; value: stri
           <Label htmlFor={id} className="text-sm font-medium">
             {s.label}
           </Label>
-          <Tooltip content={scope.tip}>
-            <button type="button" className="inline-flex rounded outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`${scope.text}: ${scope.tip}`}>
-              <Badge variant="outline" className="text-muted-foreground">
-                <scope.icon /> {scope.text}
-              </Badge>
-            </button>
-          </Tooltip>
+          <Badge variant="outline" className="text-muted-foreground">
+            <scope.icon /> {scope.text}
+          </Badge>
           {s.source === 'saved' && <Badge>Changed</Badge>}
           {s.restartPending && (
             <Badge variant="warning">
               <RotateCw /> Needs restart
             </Badge>
           )}
-          {s.dangerous && (
-            <Tooltip content="A wrong value can stop a service from starting.">
-              <button type="button" className="inline-flex rounded outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label="Careful: a wrong value can stop a service from starting">
-                <AlertTriangle className="size-3.5 text-warning" aria-hidden="true" />
-              </button>
-            </Tooltip>
-          )}
         </div>
         <p id={`${id}-help`} className="mt-1 text-sm text-muted-foreground">
           {s.help}
-          {s.impact && <span className="block text-xs">{s.impact}</span>}
+          {/* A space before each line: read as one description, the sentences stay apart. */}
+          {s.impact && <> <span className="block text-xs">{s.impact}</span></>}
+          {scope.note && <> <span className="block text-xs">{scope.note}</span></>}
+          {s.dangerous && (
+            <>
+              {' '}
+              <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-warning-ink">
+                <AlertTriangle className="size-3.5 shrink-0 text-warning" aria-hidden="true" /> Careful: a wrong value can stop a service from starting.
+              </span>
+            </>
+          )}
         </p>
         <code className="mt-1 block font-mono text-[0.6875rem] text-muted-foreground">{s.key}</code>
       </div>

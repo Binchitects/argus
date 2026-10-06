@@ -41,6 +41,21 @@ function data(over: Partial<SettingsData> = {}): SettingsData {
 }
 
 describe('settings', () => {
+  it('explains every setting in plain view, not only on hover: what it does, when it applies, and what is risky', async () => {
+    fakeApi(admin, { 'GET /api/admin/config': () => ({ json: data() }) })
+    renderApp('/admin/settings#model')
+    const models = await screen.findByLabelText('Models loaded at once')
+    const levels = screen.getByLabelText('Thinking levels offered')
+    // Each field's explanation is on the page and is its description, for screen readers too.
+    expect(models).toHaveAccessibleDescription('Rounds of tool use. Read when the app starts: save, then restart the app (a few seconds).')
+    expect(levels).toHaveAccessibleDescription('Rounds of tool use. Careful: a wrong value can stop a service from starting.')
+    const card = screen.getByRole('region', { name: 'Model' })
+    expect(within(card).getByText('After a restart')).toBeVisible()
+    expect(within(card).getByText('Applies at once')).toBeVisible()
+    // Nothing left that says more only on hover.
+    expect(within(card).queryAllByRole('button')).toEqual([])
+  })
+
   it('saves only what changed, with durations in the API’s form, and says when each applies', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/config': () => ({ json: data() }),
