@@ -55,7 +55,10 @@ optionally the GitLab username an administrator linked. A session is a random
 token in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` over HTTPS), stored
 only as its SHA-256. Any change made with a session must carry the
 `X-Argus-Request` header, which a cross-site form cannot set. Failed sign-ins
-are throttled per name and per address; successful ones never are.
+are throttled per name and per address; successful ones never are. Behind the
+sign-in form, Argus's logo gives way to its eyes, which open across the screen,
+look about and close back into it (a still logo when the device asks for
+reduced motion); it is drawn in the page itself, nothing is fetched for it.
 
 **What a person may see in the code** is decided by GitLab, not by this app.
 Their email (or linked GitLab username) is matched to a GitLab account with the
