@@ -350,6 +350,12 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   - **archived**: it leaves the list for **Archived chats** at the bottom, and
     comes back by itself when you write in it (or with **Unarchive**);
   - **deleted**, with its files, except files a fork still uses.
+- **Folding the list.** Each group of the chat list (Assistants, Today,
+  Yesterday, Previous 7 days, a month...) folds under its heading, which then
+  counts its chats. On a wide screen **Collapse chat list** (beside **New
+  chat**) folds the whole list to a narrow rail with **New chat** and the
+  search, for more room. Both are remembered for you on that browser. A search
+  shows its matches in folded groups too.
 - **Fork from an answer.** **Fork from here** under an answer starts a new
   chat that ends with that answer, to try another direction without losing
   this one.
