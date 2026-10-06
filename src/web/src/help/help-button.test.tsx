@@ -1,11 +1,20 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { admin, fakeApi, member, renderApp } from '@/test/utils'
+import { besideQuery } from './help-button'
 
+/** On a narrower screen (jsdom's, by default) the help opens over the page. */
 async function openHelp() {
   await userEvent.click(await screen.findByRole('button', { name: 'Help for this page' }))
   return screen.findByRole('dialog')
+}
+
+/** A screen wide enough for the help to sit beside the page. */
+function wideScreen() {
+  vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query: string) => ({ matches: query === besideQuery, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList,
+  )
 }
 
 describe('the help panel', () => {
@@ -21,16 +30,59 @@ describe('the help panel', () => {
     expect(within(panel).getByRole('link', { name: 'Every page explained, in the manual' })).toHaveAttribute('href', '/help/pages#people')
   })
 
-  it('stays open while you work, follows you to the next page, and closes with Esc', async () => {
+  it('opens over the page on a narrower screen, and Esc gives focus back to the ?', async () => {
     fakeApi(member)
     renderApp('/prompts')
     const panel = await openHelp()
     expect(await within(panel).findByRole('heading', { name: 'Prompts' })).toBeInTheDocument()
-    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Assistants' }))
-    expect(await within(panel).findByRole('heading', { name: 'Assistants' })).toBeInTheDocument()
-    expect(screen.getByRole('dialog')).toBe(panel)
+    await waitFor(() => expect(panel).toContainElement(document.activeElement as HTMLElement))
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Help for this page' })).toHaveFocus()
+  })
+
+  it('sits beside the page on a wide screen: the page makes room, and it follows you while you work', async () => {
+    wideScreen()
+    fakeApi(member)
+    renderApp('/prompts')
+    const button = await screen.findByRole('button', { name: 'Help for this page' })
+    await userEvent.click(button)
+    const panel = await screen.findByRole('complementary', { name: 'Help' })
+    expect(await within(panel).findByRole('heading', { name: 'Prompts' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(panel).toHaveFocus()
+    // A column of the page's row, beside the sidebar and the page: nothing of the page is under it.
+    expect(panel.parentElement).toBe(screen.getByRole('complementary', { name: 'Sidebar' }).parentElement)
+    expect(screen.getByRole('main')).not.toContainElement(panel)
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Assistants' }))
+    expect(await within(panel).findByRole('heading', { name: 'Assistants' })).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Help' })).toBe(panel)
+    // Working in the page keeps focus there: the panel takes it only as it opens.
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Assistants' })).toHaveFocus()
+    // The ? closes it again.
+    await userEvent.click(button)
+    expect(screen.queryByRole('complementary', { name: 'Help' })).not.toBeInTheDocument()
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('beside the page, an Esc in the page is the page\'s; Esc in the panel closes it', async () => {
+    wideScreen()
+    fakeApi(member)
+    renderApp('/help')
+    const button = await screen.findByRole('button', { name: 'Help for this page' })
+    await userEvent.click(button)
+    const panel = await screen.findByRole('complementary', { name: 'Help' })
+    expect(await within(panel).findByRole('heading', { name: 'Manual' })).toBeInTheDocument()
+    const search = screen.getByRole('searchbox', { name: 'Search the manual' })
+    await userEvent.type(search, 'key')
+    await userEvent.keyboard('{Escape}')
+    expect(screen.getByRole('complementary', { name: 'Help' })).toBe(panel)
+    await userEvent.click(within(panel).getByRole('heading', { name: 'Manual' }))
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('complementary', { name: 'Help' })).not.toBeInTheDocument()
+    // Focus was in the panel: it goes back to the ?.
+    expect(button).toHaveFocus()
   })
 
   it('names the group of Settings the address points at', async () => {

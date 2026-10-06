@@ -106,6 +106,10 @@ export const notInTheManual = ['README.md', 'development.md', 'testing.md', 'pla
 
 export const manualDocs: ManualDoc[] = manualGroups.flatMap((g) => g.docs)
 
+/**
+ * Whether the manual lists a page for this person. It only tidies the manual: every page is in
+ * the web's files, which load without a sign-in, so docs/ holds nothing confidential (docs/README.md).
+ */
 export function canRead(d: Pick<ManualDoc, 'audience'>, isAdmin: boolean): boolean {
   return d.audience === 'everyone' || isAdmin
 }

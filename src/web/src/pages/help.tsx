@@ -18,7 +18,7 @@ type Group = { title: string; pages: Page[] }
 /**
  * The manual (/help): the docs people and admins need, built into the web, with contents,
  * search across every page, and anchors; links between pages stay in the app. An admin's
- * pages show to admins only.
+ * pages are listed to admins only (a tidier manual, not access control: see canRead).
  */
 export function ManualPage() {
   const me = useOutletContext<Me>()
@@ -99,6 +99,7 @@ export function ManualPage() {
                 ))}
               </SelectContent>
             </Select>
+            {page && !q && <SectionPicker page={page} />}
           </div>
           {q ? (
             <Results q={q} pages={pages} />
@@ -117,10 +118,15 @@ export function ManualPage() {
   )
 }
 
-/** A page's sections, under its name in the contents. The page of page help lists its pages. */
-function Sections({ page }: { page: Page }) {
+/** A page's sections: its level-2 headings; the page of page help lists its pages. */
+function sectionsOf(page: Page) {
   const level = page.id === PAGES_ID ? 3 : 2
-  const headings = parseDoc(page.text).headings.filter((h) => h.level === level)
+  return parseDoc(page.text).headings.filter((h) => h.level === level)
+}
+
+/** A page's sections, under its name in the contents. */
+function Sections({ page }: { page: Page }) {
+  const headings = sectionsOf(page)
   if (!headings.length) return null
   return (
     <ul className="my-1 ml-3 grid gap-0.5 border-l pl-2" aria-label={`Sections of ${page.title}`}>
@@ -132,6 +138,34 @@ function Sections({ page }: { page: Page }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+/** On a narrower screen, where the contents is a list of pages: the open page's sections. */
+function SectionPicker({ page }: { page: Page }) {
+  const navigate = useNavigate()
+  const { hash } = useLocation()
+  const headings = useMemo(() => sectionsOf(page), [page])
+  if (!headings.length) return null
+  let anchor = hash.slice(1)
+  try {
+    anchor = decodeURIComponent(anchor)
+  } catch {
+    // a malformed address: its anchor as written
+  }
+  return (
+    <Select value={headings.some((h) => h.id === anchor) ? anchor : ''} onValueChange={(v) => navigate(`/help/${page.id}#${v}`)}>
+      <SelectTrigger aria-label={`Section of ${page.title}`} className="mt-2 w-full">
+        <SelectValue placeholder="Go to a section" />
+      </SelectTrigger>
+      <SelectContent>
+        {headings.map((h) => (
+          <SelectItem key={h.id} value={h.id}>
+            {h.text}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 

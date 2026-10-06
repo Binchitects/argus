@@ -153,7 +153,8 @@ python3 scripts/audit-dashboards.py 6h  # every dashboard panel's queries
 
 ## Images
 
-Both .NET images build from the repository root:
+All three images build from the repository root (the web reads `docs/` for
+its manual):
 
 ```bash
 docker build -f src/Llm.Api/Dockerfile -t llmservice-app .

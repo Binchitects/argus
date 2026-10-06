@@ -51,7 +51,7 @@ export const topics = {
       { name: 'Manual', text: 'At the foot of the sidebar and in your account menu: this manual, with search.' },
       { name: 'Version and Source', text: 'Under the sidebar: the version you use, and a link to its source.' },
       { name: 'Search (Ctrl K)', text: 'Goes to any page or runs a command (a theme, sign out). Type part of a name.' },
-      { name: '?', text: 'Help for the page you are on: this panel. It stays open while you work on the page.' },
+      { name: '?', text: 'Help for the page you are on: this panel. On a wide screen it sits beside the page, which makes room for it, and stays open while you work and move between pages. On a smaller screen it opens over the page.' },
       { name: 'The bell', text: 'Your news: answers that finished while you were away, scheduled tasks, your credit, and for admins the alerts. **Desktop notifications** at its foot say the same on your desktop.' },
       { name: 'Your account menu', text: 'Your picture at the top right: **Your account**, **Theme**, **Width**, **Manual**, **Get help** when your admins set a contact, **Install the app** when the browser offers it, and **Sign out**.' },
     ],
@@ -265,11 +265,11 @@ export const topics = {
     about: 'How to use the app, and how to run it. The ? at the top of every page opens the help for that page.',
     parts: [
       { name: 'Search the manual', text: 'Finds every section that has all your words, best first. A result opens the page at that section.' },
-      { name: 'Contents', text: 'The pages of the manual, in groups. The page you read lists its sections below its name.' },
+      { name: 'Contents', text: 'The pages of the manual, in groups. The page you read lists its sections below its name. On a smaller screen, pick the page, then the section, from the two lists at the top.' },
       { name: 'Every page, explained', text: 'The help of every page of the app in one place: what it is for, its parts, and the common tasks.' },
       { name: 'Links', text: 'Links between pages stay in the app. A file of the repository that is not in the manual shows as its name.' },
     ],
-    tasks: [{ title: 'Find how to do something', steps: ['Type a few words in **Search the manual** (such as "api key" or "credit").', 'Open the best result.', 'Copy the address to send someone straight to that section.'] }],
+    tasks: [{ title: 'Find how to do something', steps: ['Type a few words in **Search the manual** (such as "api key" or "credit").', 'Open the best result.', 'Copy the address to send someone straight to that section. A section picked from the contents has its own address too.'] }],
   },
 
   login: {

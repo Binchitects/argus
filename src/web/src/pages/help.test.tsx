@@ -37,6 +37,24 @@ describe('the manual', () => {
     expect(await screen.findByRole('heading', { name: 'Retention, legal hold and exports' })).toHaveAttribute('id', 'retention-legal-hold-and-exports')
   })
 
+  it('on a narrower screen, picks a page and then one of its sections, whose address can be shared', async () => {
+    fakeApi(member)
+    const { router } = renderApp('/help/chat')
+    await screen.findByRole('article', { name: 'Chat' })
+    const section = screen.getByRole('combobox', { name: 'Section of Chat' })
+    expect(section).toHaveTextContent('Go to a section')
+    await userEvent.click(section)
+    await userEvent.click(await screen.findByRole('option', { name: 'Memory' }))
+    await waitFor(() => expect(router.state.location.hash).toBe('#memory'))
+    expect(router.state.location.pathname).toBe('/help/chat')
+    expect(screen.getByRole('combobox', { name: 'Section of Chat' })).toHaveTextContent('Memory')
+    // The page of page help lists its pages.
+    await userEvent.click(screen.getByRole('combobox', { name: 'Page of the manual' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Every page, explained' }))
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Section of Every page, explained' }))
+    expect(await screen.findByRole('option', { name: 'Prompts' })).toBeInTheDocument()
+  })
+
   it('says when nothing matches', async () => {
     fakeApi(member)
     renderApp('/help?q=zzqqxx')

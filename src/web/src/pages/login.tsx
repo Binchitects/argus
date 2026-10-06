@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { HelpButton } from '@/help/help-button'
+import { HelpButton, HelpPanel } from '@/help/help-button'
 import { api, errorMessage, infoQuery, meQuery, supportHref } from '@/lib/api'
 
 type Answer = { status: 'ok'; redirect: string } | { status: '2fa' }
@@ -56,12 +56,14 @@ export function LoginPage() {
   const [step, setStep] = useState<'password' | '2fa'>('password')
   const [remember, setRemember] = useState(false)
   const name = info.data?.name ?? 'Argus Arena'
+  const [helpOpen, setHelpOpen] = useState(false)
   useEffect(() => {
     document.title = `Sign in · ${name}`
   }, [name])
 
   return (
-    <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+    // The help, when open on a wide screen, is a third column.
+    <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_auto]">
       <aside className="relative hidden overflow-hidden bg-[oklch(0.25_0.06_260)] p-10 text-white lg:flex lg:flex-col">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,oklch(0.56_0.16_255/0.55),transparent_55%),radial-gradient(circle_at_80%_90%,oklch(0.55_0.13_200/0.35),transparent_50%)]" aria-hidden="true" />
         <div className="relative flex items-center gap-2.5 text-lg font-semibold">
@@ -73,7 +75,7 @@ export function LoginPage() {
         </div>
       </aside>
       <main className="relative flex items-center justify-center p-6 sm:p-10">
-        <HelpButton className="absolute top-4 right-4" />
+        <HelpButton open={helpOpen} onOpenChange={setHelpOpen} className="absolute top-4 right-4" />
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 text-lg font-semibold lg:hidden">
             <img src="/favicon.svg" alt="" className="size-8 rounded-md" /> {name}
@@ -86,6 +88,7 @@ export function LoginPage() {
           {info.data?.supportContact && <Support contact={info.data.supportContact} />}
         </div>
       </main>
+      <HelpPanel open={helpOpen} onOpenChange={setHelpOpen} />
     </div>
   )
 }

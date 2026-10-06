@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
-import { HelpButton } from '@/help/help-button'
+import { HelpButton, HelpPanel } from '@/help/help-button'
 import { infoQuery, meQuery, type AppInfo, type Me } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
@@ -44,6 +44,7 @@ function SignedIn({ me }: { me: Me }) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const sections = visibleNavigation(me.isAdmin)
   const name = info.data?.name ?? 'Argus Arena'
 
@@ -126,7 +127,7 @@ function SignedIn({ me }: { me: Me }) {
               <span className="hidden sm:inline">Search…</span>
               <Kbd className="ml-auto hidden sm:inline-flex">Ctrl K</Kbd>
             </Button>
-            <HelpButton />
+            <HelpButton open={helpOpen} onOpenChange={setHelpOpen} />
             <NotificationBell />
             <UserMenu me={me} />
           </div>
@@ -141,6 +142,7 @@ function SignedIn({ me }: { me: Me }) {
           )}
         </main>
       </div>
+      <HelpPanel open={helpOpen} onOpenChange={setHelpOpen} />
       <CommandMenu open={paletteOpen} onOpenChange={setPaletteOpen} me={me} />
     </div>
   )

@@ -25,7 +25,8 @@ for (const [path, name] of opens) {
     const button = page.getByRole('button', { name, exact: typeof name === 'string' }).first()
     await expect(button).toBeEnabled({ timeout: 20_000 })
     await button.click()
-    const opened = page.locator('[role="dialog"], [role="alertdialog"]').last()
+    // The help sits beside the page on a wide screen, and opens over it on a smaller one.
+    const opened = page.locator('[role="dialog"], [role="alertdialog"], aside#help-panel').last()
     await expect(opened).toBeVisible()
     await expect.poll(() => opened.evaluate((el) => el.contains(document.activeElement))).toBe(true)
     await expectAccessible(page, info, `${path}-${String(name)}`)

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { BookOpen, LifeBuoy } from 'lucide-react'
+import type { ElementType } from 'react'
 import { Link, useLocation } from 'react-router'
 import { ScrollRegion } from '@/components/app/scroll-region'
 import { SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -29,22 +30,27 @@ function Parts({ parts, current }: { parts: (HelpPart & { id?: string })[]; curr
   )
 }
 
-/** The help of the page on screen: what it is for, its parts, how to do the common tasks. */
-export function HelpBody({ onNavigate }: { onNavigate: () => void }) {
+/**
+ * The help of the page on screen: what it is for, its parts, how to do the common tasks.
+ * `dialog`: in a sheet, whose title and description name it; beside the page, plain headings.
+ */
+export function HelpBody({ dialog, onNavigate }: { dialog: boolean; onNavigate: () => void }) {
   const { pathname, hash } = useLocation()
   const me = useQuery(meQuery).data
   const support = useQuery(infoQuery).data?.supportContact
   const supportLink = support ? supportHref(support) : null
   const { id, topic, section } = helpFor(pathname, hash, me?.isAdmin ?? false)
   const heading = 'text-xs font-semibold tracking-wider text-muted-foreground uppercase'
+  const Title: ElementType = dialog ? SheetTitle : 'h2'
+  const About: ElementType = dialog ? SheetDescription : 'p'
   return (
     <>
       <SheetHeader>
         <p className={heading}>Help</p>
-        <SheetTitle className="text-lg">{topic.title}</SheetTitle>
-        <SheetDescription>
+        <Title className="text-lg font-semibold">{topic.title}</Title>
+        <About className="text-sm text-muted-foreground">
           <Inline text={topic.about} />
-        </SheetDescription>
+        </About>
       </SheetHeader>
       <ScrollRegion label={`Help: ${topic.title}`} className="grid flex-1 content-start gap-6 p-5 text-sm">
         {section && (
