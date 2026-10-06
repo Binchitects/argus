@@ -118,7 +118,10 @@ export default function Chat() {
       });
   }, [id, navigate]);
 
-  useEffect(() => bottom.current?.scrollIntoView({ block: "end" }), [turns]);
+  // In braces: Chrome 154's scrollIntoView returns a promise, which React would call as the clean-up.
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ block: "end" });
+  }, [turns]);
 
   async function send() {
     const text = draft.trim();
