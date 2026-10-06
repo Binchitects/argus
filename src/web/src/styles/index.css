@@ -266,6 +266,55 @@
   }
 }
 
+/* ------------------------------------------------------------------ sign-in --
+ * Behind the sign-in form (pages/eyes-backdrop.tsx): a pale blue by day, the
+ * logo's navy at night, and eyes drawn from the logo's own. They move by
+ * script-made animations of transform and opacity only (pages/eyes.ts), which the
+ * browser runs on its own: nothing is laid out or painted again while they play.
+ */
+.eyes-backdrop {
+  --eyes-bg: oklch(0.965 0.014 255);
+  --eyes-lid: oklch(0.3 0.07 262);
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 22% 30%, color-mix(in oklch, var(--primary) 16%, transparent), transparent 55%),
+    radial-gradient(circle at 85% 90%, oklch(0.7 0.12 200 / 0.16), transparent 50%),
+    var(--eyes-bg);
+}
+.dark .eyes-backdrop {
+  --eyes-bg: oklch(0.2 0.05 262);
+  --eyes-lid: oklch(0.13 0.04 262);
+}
+/* The logo waits for its turn to show it; with motion off it simply stays. */
+@media (prefers-reduced-motion: no-preference) {
+  .eyes-logo {
+    opacity: 0;
+  }
+}
+.watch-eye {
+  position: absolute;
+  aspect-ratio: 472 / 242;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.watch-eye-lid,
+.watch-eye-iris,
+.watch-eye svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.watch-eye-lid > svg path {
+  stroke: var(--eyes-lid);
+  stroke-width: 16;
+}
+
 /* ------------------------------------------------------------------ answers --
  * A model's answer: readable line length and rhythm, tables that scroll inside
  * themselves, inline code distinct from prose.

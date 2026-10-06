@@ -34,7 +34,9 @@ and the gateway use them inside the stack's network, and they never leave it.
 code for people who turned on two-factor sign-in; or **Sign in with ...**, the
 company's identity provider, when it is set up ([below](#company-sign-in-oidc)).
 The session cookie is scoped to the domain, so it covers every `*.DOMAIN`
-service at once.
+service at once. Behind the form the Argus logo gives way to its hundred eyes,
+which open across the screen, look about and close back into it, over and over
+(a still logo when the device asks for reduced motion).
 
 ### 2. OIDC: apps with their own sign-in screen
 

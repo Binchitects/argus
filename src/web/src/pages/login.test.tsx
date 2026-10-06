@@ -1,7 +1,8 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeApi, renderApp } from '@/test/utils'
+import { CYCLE, eyeCap } from './eyes'
 
 const assign = vi.fn()
 beforeEach(() => {
@@ -88,5 +89,64 @@ describe('company sign-in', () => {
     renderApp('/login?error=company_not_allowed&rd=%2Fchat')
     expect(await screen.findByRole('alert')).toHaveTextContent('Your company account is not allowed to sign in here. Ask an admin.')
     expect(await screen.findByRole('link', { name: 'Sign in with Okta' })).toHaveAttribute('href', '/api/auth/company/start?rd=%2Fchat')
+  })
+})
+
+describe('behind the form', () => {
+  // jsdom has no Web Animations: each animation started is recorded instead.
+  let started: { el: Element; options: KeyframeAnimationOptions; animation: { startTime: number | null; cancel: () => void } }[] = []
+  beforeEach(() => {
+    started = []
+    Element.prototype.animate = function (this: Element, _frames: Keyframe[] | PropertyIndexedKeyframes | null, options?: number | KeyframeAnimationOptions) {
+      const animation = { startTime: null, cancel: vi.fn() }
+      started.push({ el: this, options: options as KeyframeAnimationOptions, animation })
+      return animation as unknown as Animation
+    }
+  })
+  afterEach(() => {
+    delete (Element.prototype as Partial<Element>).animate
+    vi.unstubAllGlobals()
+  })
+
+  it('the logo appears, then its eyes fill the screen, all in step, and none of it is in the way', async () => {
+    fakeApi(null)
+    renderApp('/login')
+    const name = await screen.findByLabelText('Username or email')
+    const backdrop = document.querySelector('.eyes-backdrop')!
+    expect(backdrop).toHaveAttribute('aria-hidden', 'true')
+    await waitFor(() => expect(backdrop.querySelectorAll('.watch-eye').length).toBeGreaterThan(20))
+    expect(backdrop.querySelectorAll('.watch-eye').length).toBeLessThanOrEqual(eyeCap(window.innerWidth))
+
+    const logo = document.querySelector('img.eyes-logo')!
+    expect(logo).toHaveAttribute('src', '/favicon.svg')
+    await waitFor(() => expect(started.some((s) => s.el === logo)).toBe(true))
+    const eyes = backdrop.querySelectorAll('.watch-eye').length
+    // One turn for the logo and every eye, started at the same moment: they keep in step.
+    const turns = started.filter((s) => s.options.duration === CYCLE)
+    expect(turns.map((s) => s.el)).toEqual(expect.arrayContaining([logo, ...backdrop.querySelectorAll('.watch-eye')]))
+    expect(turns).toHaveLength(eyes + 1)
+    for (const s of turns) expect(s.options.iterations).toBe(Infinity)
+    expect(new Set(turns.map((s) => s.animation.startTime)).size).toBe(1)
+    // Each eye blinks and looks about, on its own time.
+    expect(started.filter((s) => s.el.classList.contains('watch-eye-lid'))).toHaveLength(eyes)
+    expect(started.filter((s) => s.el.classList.contains('watch-eye-iris'))).toHaveLength(eyes)
+    expect(new Set(started.filter((s) => s.el.classList.contains('watch-eye-lid')).map((s) => s.options.duration)).size).toBeGreaterThan(eyes / 2)
+
+    // The form is not behind it, and works as ever.
+    expect(backdrop.contains(name)).toBe(false)
+    expect(name.closest('[data-keep-clear]')).not.toBeNull()
+    await userEvent.type(name, 'ada')
+    expect(name).toHaveValue('ada')
+  })
+
+  it('with reduced motion, only the logo, still', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList)
+    fakeApi(null)
+    renderApp('/login')
+    await screen.findByLabelText('Username or email')
+    expect(document.querySelector('img.eyes-logo')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(document.querySelectorAll('.watch-eye')).toHaveLength(0)
+    expect(started).toEqual([])
   })
 })

@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Building2, KeyRound, LifeBuoy, ShieldCheck } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useSearchParams } from 'react-router'
 import { z } from 'zod'
@@ -12,6 +12,7 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api, errorMessage, infoQuery, meQuery, supportHref } from '@/lib/api'
+import { EyesBackdrop } from './eyes-backdrop'
 
 type Answer = { status: 'ok'; redirect: string } | { status: '2fa' }
 
@@ -55,27 +56,29 @@ export function LoginPage() {
   const [step, setStep] = useState<'password' | '2fa'>('password')
   const [remember, setRemember] = useState(false)
   const name = info.data?.name ?? 'Argus Arena'
+  const logo = useRef<HTMLImageElement>(null)
   useEffect(() => {
     document.title = `Sign in · ${name}`
   }, [name])
 
+  // The eyes behind keep off everything marked data-keep-clear: the name, the words, the form.
   return (
-    <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-      <aside className="relative hidden overflow-hidden bg-[oklch(0.25_0.06_260)] p-10 text-white lg:flex lg:flex-col">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,oklch(0.56_0.16_255/0.55),transparent_55%),radial-gradient(circle_at_80%_90%,oklch(0.55_0.13_200/0.35),transparent_50%)]" aria-hidden="true" />
-        <div className="relative flex items-center gap-2.5 text-lg font-semibold">
-          <img src="/favicon.svg" alt="" className="size-8 rounded-md" /> {name}
+    <div className="relative isolate flex min-h-dvh flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+      <EyesBackdrop logo={logo} />
+      <aside className="flex flex-col items-center px-6 pt-8 lg:p-10">
+        <div className="flex flex-col items-center gap-3 lg:flex-1 lg:justify-center">
+          <img ref={logo} src="/favicon.svg" alt="" className="eyes-logo size-24 drop-shadow-xl sm:size-28 lg:size-44" />
+          <p data-keep-clear className="text-lg font-semibold lg:text-xl">
+            {name}
+          </p>
         </div>
-        <div className="relative mt-auto max-w-md">
+        <div data-keep-clear className="hidden max-w-md self-start lg:block">
           {info.data?.signInHeadline && <p className="text-2xl leading-snug font-semibold">{info.data.signInHeadline}</p>}
-          <p className="mt-3 text-white/70">One sign-in for the chat, the dashboards and every tool that trusts it.</p>
+          <p className="mt-3 text-muted-foreground">One sign-in for the chat, the dashboards and every tool that trusts it.</p>
         </div>
       </aside>
-      <main className="flex items-center justify-center p-6 sm:p-10">
-        <div className="w-full max-w-sm">
-          <div className="mb-8 flex items-center gap-2.5 text-lg font-semibold lg:hidden">
-            <img src="/favicon.svg" alt="" className="size-8 rounded-md" /> {name}
-          </div>
+      <main className="flex flex-1 items-center justify-center px-4 pt-6 pb-10 sm:p-10">
+        <div data-keep-clear className="w-full max-w-sm rounded-xl border bg-card p-6 text-card-foreground shadow-xl sm:p-8">
           {step === 'password' ? (
             <PasswordStep redirect={redirect} company={company.data?.label ?? null} companyError={companyError} onTwoFactor={(r) => { setRemember(r); setStep('2fa') }} />
           ) : (
