@@ -352,10 +352,12 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   - **deleted**, with its files, except files a fork still uses.
 - **Folding the list.** Each group of the chat list (Assistants, Today,
   Yesterday, Previous 7 days, a month...) folds under its heading, which then
-  counts its chats. On a wide screen **Collapse chat list** (beside **New
-  chat**) folds the whole list to a narrow rail with **New chat** and the
-  search, for more room. Both are remembered for you on that browser. A search
-  shows its matches in folded groups too.
+  counts what it holds: its chats, or your assistants. The chat (or assistant)
+  you have open stays in sight under a folded heading. On a wide screen
+  **Collapse chat list** (left of **New chat**) folds the whole list to a
+  narrow rail with **New chat** and the search, for more room; the same button
+  opens it again. Both are remembered for you on that browser. A search shows
+  its matches in folded groups too.
 - **Fork from an answer.** **Fork from here** under an answer starts a new
   chat that ends with that answer, to try another direction without losing
   this one.
