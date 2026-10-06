@@ -51,6 +51,8 @@ public sealed class TalkTests(AppFixture app)
         Assert.Contains("filename=speech.webm", sent, StringComparison.Ordinal);
         Assert.Contains("audio/webm", sent, StringComparison.Ordinal);
         Assert.Contains(Llm.Api.Models.MediaModels.SpeechToText, sent, StringComparison.Ordinal);
+        // Asked with its length (verbose_json): the gateway prices a transcription by it.
+        Assert.Matches(@"name=""?response_format""?\r\n(?:[^\r\n]+\r\n)*\r\nverbose_json\r\n", sent);
     }
 
     [Fact]

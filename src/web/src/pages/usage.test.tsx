@@ -21,7 +21,7 @@ const prompts: PromptListData = {
     row({ id: 'r2', at: '2026-10-05T11:00:00Z', source: 'api', kind: 'picture', model: 'FLUX.2-klein-4B', key: 'laptop', prompt: 0, cached: 0, completion: 0, cost: 0.01 }),
     row({ id: 'a3', at: '2026-10-04T09:00:00Z', chatId: 'c2', title: 'Old question', cost: 0, unpriced: true }),
   ],
-  totals: { prompts: 3, prompt: 2000, cached: 800, completion: 400, cost: 0.010288, unpriced: 1 },
+  totals: { prompts: 3, prompt: 2000, cached: 800, completion: 400, cost: 0.010288, unpriced: 1, blind: 0 },
   capped: false,
   models: ['FLUX.2-klein-4B', 'Qwen3.8-Flash-Next'],
   problem: null,
@@ -60,6 +60,29 @@ describe('usage: each prompt and what it cost', () => {
     await userEvent.click(screen.getByRole('radio', { name: 'API keys' }))
     await waitFor(() => expect(calls.some((c) => c.path.startsWith('/api/usage/prompts?') && new URLSearchParams(c.path.split('?')[1]).get('source') === 'api')).toBe(true))
     expect(calls.some((c) => c.path.startsWith('/api/admin/usage'))).toBe(false)
+  })
+
+  it('a comparison not voted on yet shows its side for its model, and its cost waits for the vote', async () => {
+    fakeApi(member, {
+      'GET /api/usage/me': () => ({ json: mine }),
+      'GET /api/usage/prompts': () => ({
+        json: {
+          ...prompts,
+          rows: [
+            row({ id: 'b1', model: 'Model A', cost: null, chatId: 'c3', title: 'Which sort?' }),
+            row({ id: 'b2', at: '2026-10-05T12:01:00Z', model: 'Model B', cost: null, chatId: 'c3', title: 'Which sort?' }),
+          ],
+          totals: { prompts: 2, prompt: 2000, cached: 800, completion: 400, cost: 0, unpriced: 0, blind: 2 },
+          models: [],
+        },
+      }),
+    })
+    renderApp('/usage')
+    const table = await screen.findByRole('table', { name: 'prompts' })
+    await within(table).findAllByText('Which sort?')
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows.map((r) => r.textContent)).toEqual([expect.stringMatching(/Which sort\?.*Model B.*after the vote/), expect.stringMatching(/Which sort\?.*Model A.*after the vote/)])
+    expect(screen.getByText('2 comparison answers counted after the vote')).toBeInTheDocument()
   })
 
   it("an admin sees everyone's prompts by person and group, with who asked and never a chat's title", async () => {

@@ -75,10 +75,10 @@ public static class RemoteServerEndpoints
     }
 
     private static async Task<IResult> AddAsync(RemoteServerRequest body, AppDbContext db, RemoteServerClient client, RemoteHealth health, ModelCatalog catalog,
-        ChatModels chatModels, KeyAccessWatcher keys, Audit audit, CancellationToken ct)
+        ChatModels chatModels, KeyAccessWatcher keys, PriceBook prices, Audit audit, CancellationToken ct)
     {
         var server = new RemoteServer { Name = "", BaseUrl = "" };
-        if (await ApplyAsync(server, body, db, client, ct) is { } problem)
+        if (await ApplyAsync(server, body, db, client, prices, ct) is { } problem)
         {
             return problem;
         }
@@ -98,13 +98,13 @@ public static class RemoteServerEndpoints
     }
 
     private static async Task<IResult> UpdateAsync(Guid id, RemoteServerRequest body, AppDbContext db, RemoteServerClient client, RemoteHealth health, ModelCatalog catalog,
-        ChatModels chatModels, KeyAccessWatcher keys, Audit audit, CancellationToken ct)
+        ChatModels chatModels, KeyAccessWatcher keys, PriceBook prices, Audit audit, CancellationToken ct)
     {
         if (await db.RemoteServers.SingleOrDefaultAsync(s => s.Id == id, ct) is not { } server)
         {
             return Results.NotFound();
         }
-        if (await ApplyAsync(server, body, db, client, ct) is { } problem)
+        if (await ApplyAsync(server, body, db, client, prices, ct) is { } problem)
         {
             return problem;
         }
@@ -128,7 +128,7 @@ public static class RemoteServerEndpoints
     }
 
     /// <summary>Checks and applies a request over the server's values.</summary>
-    private static async Task<IResult?> ApplyAsync(RemoteServer server, RemoteServerRequest body, AppDbContext db, RemoteServerClient client, CancellationToken ct)
+    private static async Task<IResult?> ApplyAsync(RemoteServer server, RemoteServerRequest body, AppDbContext db, RemoteServerClient client, PriceBook prices, CancellationToken ct)
     {
         var name = (body.Name ?? server.Name).Trim();
         if (name.Length is 0 or > 100)
@@ -172,9 +172,9 @@ public static class RemoteServerEndpoints
             {
                 return AuthEndpoints.Problem(400, "models", $"{as_}: the context is 1,024 to {ModelAdvisor.MaxContext:N0} tokens, and the longest answer at most the context.");
             }
-            if (m.InputPerMtok < 0 || m.CachedInputPerMtok < 0 || m.OutputPerMtok < 0)
+            if (TokenPrice.Check(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, prices.Defaults) is { } price)
             {
-                return AuthEndpoints.Problem(400, "models", $"{as_}: prices cannot be negative.");
+                return AuthEndpoints.Problem(400, "models", $"{as_}: {char.ToLowerInvariant(price[0])}{price[1..]}");
             }
             if (m.Parallel is < 1 or > 256)
             {

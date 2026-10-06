@@ -255,6 +255,11 @@ export function ModelForm({
   const errors: Record<string, string> = {}
   for (const p of a?.problems ?? []) if (p.error && !errors[p.field]) errors[p.field] = p.message
   for (const k of numeric) if (form[k].trim() !== '' && !Number.isFinite(Number(form[k]))) errors[k] = 'Enter a number.'
+  for (const k of ['inputPerMtok', 'cachedInputPerMtok', 'outputPerMtok'] as const) if (!errors[k] && Number(form[k]) < 0) errors[k] = 'Prices cannot be negative.'
+  // Cached input is never above input: the one typed, else the default when it is known (the API checks it too).
+  const inputPrice = form.inputPerMtok.trim() !== '' ? Number(form.inputPerMtok) : saved?.price && !saved.price.own.input ? saved.price.input : null
+  if (!errors.cachedInputPerMtok && form.cachedInputPerMtok.trim() !== '' && inputPrice !== null && Number(form.cachedInputPerMtok) > inputPrice)
+    errors.cachedInputPerMtok = `Never above input (${inputPrice}).`
   const limits = a?.limits
   const profile = file?.profile
 
@@ -592,13 +597,13 @@ export function ModelForm({
 
             <Section title="Prices" description="In dollars per million tokens: what each answer and API request with it costs. Empty: the default for every model (Settings → Prices).">
               <div className="grid gap-4 sm:grid-cols-3">
-                <Field label="Input" hint="Prompt tokens the model reads.">
+                <Field label="Input" error={errors.inputPerMtok} hint="Prompt tokens the model reads.">
                   <Input inputMode="decimal" value={form.inputPerMtok} placeholder={defaultPrice('input')} onChange={(e) => set('inputPerMtok', e.target.value)} />
                 </Field>
-                <Field label="Cached input" hint="Prompt tokens read from the engine's cache; never above input.">
+                <Field label="Cached input" error={errors.cachedInputPerMtok} hint="Prompt tokens read from the engine's cache; never above input.">
                   <Input inputMode="decimal" value={form.cachedInputPerMtok} placeholder={defaultPrice('cachedInput')} onChange={(e) => set('cachedInputPerMtok', e.target.value)} />
                 </Field>
-                <Field label="Output" hint="Tokens it writes, thinking included.">
+                <Field label="Output" error={errors.outputPerMtok} hint="Tokens it writes, thinking included.">
                   <Input inputMode="decimal" value={form.outputPerMtok} placeholder={defaultPrice('output')} onChange={(e) => set('outputPerMtok', e.target.value)} />
                 </Field>
               </div>

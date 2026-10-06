@@ -175,8 +175,20 @@ const typed = (m: RemoteModel): Pick['prices'] => ({
   outputPerMtok: m.outputPerMtok?.toString() ?? '',
 })
 
-/** A typed price: empty for the default, else a number (the API refuses a negative one). */
-const price = (text: string) => (text.trim() === '' || Number.isNaN(Number(text)) ? null : Number(text))
+/** What is wrong with a typed price, if anything (empty is the default). The API checks the same, with the default input too. */
+function priceError(prices: Pick['prices'], k: (typeof priceKeys)[number]): string | undefined {
+  const text = prices[k].trim()
+  if (text === '') return undefined
+  const n = Number(text)
+  if (!Number.isFinite(n)) return 'Enter a number.'
+  if (n < 0) return 'Prices cannot be negative.'
+  const input = Number(prices.inputPerMtok)
+  if (k === 'cachedInputPerMtok' && prices.inputPerMtok.trim() !== '' && Number.isFinite(input) && n > input) return 'Never above input.'
+  return undefined
+}
+
+/** A typed price: empty for the default, else the number (one with an error blocks the save). */
+const price = (text: string) => (text.trim() === '' ? null : Number(text))
 
 function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () => void }) {
   const queryClient = useQueryClient()
@@ -225,6 +237,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
   })
   const set = (i: number, change: Partial<Pick>) => setPicks((now) => now.map((p, j) => (j === i ? { ...p, ...change } : p)))
   const chosen = picks.filter((p) => p.on).length
+  const invalid = picks.some((p) => p.on && priceKeys.some((k) => priceError(p.prices, k)))
   return (
     <form
       className="grid gap-4"
@@ -285,7 +298,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
                   {priceKeys.map((k) => {
                     const label = k === 'inputPerMtok' ? 'Input, $ per 1M tokens' : k === 'cachedInputPerMtok' ? 'Cached input, $ per 1M' : 'Output, $ per 1M tokens'
                     return (
-                      <Field key={k} label={label} hint={k === 'inputPerMtok' ? 'Empty: the default (Settings → Prices)' : undefined}>
+                      <Field key={k} label={label} error={priceError(p.prices, k)} hint={k === 'inputPerMtok' ? 'Empty: the default (Settings → Prices)' : undefined}>
                         <Input
                           inputMode="decimal"
                           value={p.prices[k]}
@@ -314,7 +327,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
         <Button type="button" variant="outline" onClick={onDone}>
           Cancel
         </Button>
-        <Button type="submit" loading={save.isPending} disabled={chosen === 0 || !name || !baseUrl}>
+        <Button type="submit" loading={save.isPending} disabled={chosen === 0 || !name || !baseUrl || invalid}>
           {saved ? 'Save' : 'Add server'}
         </Button>
       </DialogFooter>

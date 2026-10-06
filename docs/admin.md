@@ -349,7 +349,9 @@ Every model has a price, so every request has a cost:
   from its cache: the start of a conversation it has seen, sent again with
   every answer) and **output** (what it writes, thinking included). Each one
   left empty is the default. Cached input is never priced above the model's
-  input. The models list shows each model's prices, and which are defaults.
+  input: a price above it (its own, else the default) is refused on save, and
+  one a lower default input later puts above it costs what input does. The
+  models list shows each model's prices, and which are defaults.
 - **The defaults**, for every model without its own: Settings → **Prices**
   ([settings.md](settings.md#prices)), $0.20, $0.02 and $0.80 per million
   tokens out of the box.
@@ -374,8 +376,10 @@ the days, count, then **Recalculate**: requests in the gateway's request log
 (what usage, credit, chargeback and the dashboards count) and the parts of chat
 answers (what each answer shows) are worked out again at today's prices.
 **Only costs booked as free** (on by default) leaves the others as they are; off,
-every cost in the range is worked out again. A picture counts as one (the log
-keeps no count); speech and transcriptions in the log cannot be priced again
+every cost in the range is worked out again. A picture request booked as free
+counts as one picture; one with a cost keeps it either way, since the log does
+not say how many pictures it made (an API key can ask for several at once).
+Speech and transcriptions in the log cannot be priced again
 (their length is not kept), nor pictures, video and speech whose files were
 deleted since. Each recalculation is audited (`usage.recalculate`, with the
 counts and totals); the gateway's own running totals (a key's spend in LiteLLM's
@@ -394,7 +398,8 @@ hit rate, output, cost, cost per 1M tokens, per person and over time.
 days) with who asked, when, the model, tokens in, cached and out, and its cost;
 by person, group, model, and chat or API keys. It shows no chat's title, only
 who, when, which model, tokens and cost. Totals count every prompt the filters
-match; the table holds the newest 1,000 and sorts by any column.
+match; the table holds the newest 1,000 and sorts by any column. An admin's own
+comparisons stay blind to them here until they vote, as below.
 
 **Mine** (everyone) is the same numbers for the signed-in person only: requests,
 input cache miss, input cache hit (and what share of input it is), output, cost,
@@ -407,6 +412,9 @@ an API key (from the gateway's request log). The chat's own small steps around
 the answers (titles, summaries, the safeguards' check, transcribing a file) are
 in the totals above, not in the list. An answer from before costs were kept is
 marked with `*`: its cost leaves those parts out until an admin recalculates.
+An answer of a comparison (Compare) not voted on yet stays blind, as in the
+chat: its model is "Model A" or "Model B", its cost waits for the vote (and is
+out of the cost total until then), and the model filter does not find it.
 
 ### Dashboards
 

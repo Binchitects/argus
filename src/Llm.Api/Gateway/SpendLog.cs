@@ -66,9 +66,10 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
 
     /// <summary>
     /// The requests of a time range at today's prices: chat completions by their tokens (cached ones at
-    /// the cached price), pictures one each (the app asks for one; the log keeps no count), clips by
-    /// their length. <paramref name="onlyFree"/>: only those booked at no cost. Applied, each changed
-    /// row is written; otherwise only counted.
+    /// the cached price), clips by their length, and pictures booked as free at one picture each. The
+    /// log keeps no count of pictures: a request with a cost may have asked for several (an API key's
+    /// n), so its cost is kept even when every cost is worked out again. <paramref name="onlyFree"/>:
+    /// only those booked at no cost. Applied, each changed row is written; otherwise only counted.
     /// </summary>
     public async Task<SpendChange> RepriceAsync(DateTimeOffset from, DateTimeOffset to, bool onlyFree, IReadOnlyDictionary<string, TokenPrice> models, PriceOptions defaults,
         bool apply, CancellationToken ct)
@@ -80,7 +81,7 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
             ), r as (
               select s.request_id, s.spend::numeric as old,
                 case
-                  when s.call_type in ('aimage_generation', 'image_generation') then @image
+                  when s.call_type in ('aimage_generation', 'image_generation') then case when coalesce(s.spend, 0) = 0 then @image else s.spend::numeric end
                   when s.call_type = '{VideoCall}' and jsonb_typeof(s.metadata->'video_seconds') = 'number' then (s.metadata->>'video_seconds')::numeric * @video
                   when s.call_type in ('aspeech', 'speech', 'atranscription', 'transcription', '{VideoCall}') then null
                   else (greatest(coalesce(s.prompt_tokens, 0) - least({UsageEndpoints.Cached}, coalesce(s.prompt_tokens, 0)), 0) * coalesce(p.i, @di)

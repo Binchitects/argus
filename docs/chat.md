@@ -886,7 +886,8 @@ the same prices, so it books the same. An answer from before costs were kept
 shows `≈`: its cost worked out at today's prices, until an admin recalculates.
 A comparison's two answers show their cost once you have voted, like their
 models: the prices would tell them apart. **Usage & cost → Your prompts** lists
-every answer and API request with its tokens and cost
+every answer and API request with its tokens and cost (a comparison's answers
+as "Model A" and "Model B", without cost, until you vote)
 ([admin.md](admin.md#usage--cost)).
 
 What a person has spent is what the gateway's request log puts to them, over

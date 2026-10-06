@@ -119,6 +119,16 @@ describe('admin models', () => {
     // The memory, as the form changes.
     expect(await within(dialog).findByRole('region', { name: 'Memory' })).toHaveTextContent(/All of it on the GPU/)
 
+    // A price that is not a number, or cached input above input, is said at its field, and the model cannot be added.
+    await userEvent.type(within(dialog).getByLabelText('Output'), '0,5')
+    expect(within(dialog).getByText('Enter a number.')).toBeInTheDocument()
+    await userEvent.type(within(dialog).getByLabelText('Input'), '0.1')
+    await userEvent.type(within(dialog).getByLabelText('Cached input'), '0.5')
+    expect(within(dialog).getByText('Never above input (0.1).')).toBeInTheDocument()
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Add model' })).toBeDisabled())
+    for (const field of ['Output', 'Cached input', 'Input']) await userEvent.clear(within(dialog).getByLabelText(field))
+    expect(within(dialog).queryByText('Enter a number.')).not.toBeInTheDocument()
+
     // Past its training: the field says why, and it cannot be added.
     await userEvent.clear(within(dialog).getByLabelText('Context (tokens)'))
     await userEvent.type(within(dialog).getByLabelText('Context (tokens)'), '500000')
@@ -238,7 +248,18 @@ describe('admin models', () => {
     await userEvent.type(within(dialog).getByLabelText('Requests at once for org/Big-Remote'), '4')
     // Its own prices, typed as decimals; one left empty is the default (Settings → Prices).
     await userEvent.type(within(dialog).getByLabelText('Input, $ per 1M tokens for org/Big-Remote'), '0.45')
-    await userEvent.type(within(dialog).getByLabelText('Output, $ per 1M tokens for org/Big-Remote'), '1.8')
+    // One that is not a number, or cached input above input, is said at its field and cannot be saved (not saved as the default).
+    const output = within(dialog).getByLabelText('Output, $ per 1M tokens for org/Big-Remote')
+    await userEvent.type(output, '0,5')
+    expect(within(dialog).getByText('Enter a number.')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Add server' })).toBeDisabled()
+    await userEvent.clear(output)
+    const cached = within(dialog).getByLabelText('Cached input, $ per 1M for org/Big-Remote')
+    await userEvent.type(cached, '0.9')
+    expect(within(dialog).getByText('Never above input.')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Add server' })).toBeDisabled()
+    await userEvent.clear(cached)
+    await userEvent.type(output, '1.8')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add server' }))
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/servers')?.body).toEqual({

@@ -69,6 +69,10 @@ export function RecalculatePanel() {
           Requests booked before a model had a price (or before cached input had one) cost nothing, or too little. Work them out again at today's prices: requests at the gateway (what
           usage, credit and the dashboards count) and the parts of chat answers (what each answer shows). Count first; nothing changes until you recalculate. It never runs by itself.
         </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          A picture request at the gateway booked as free counts as one picture. One that has a cost keeps it, even with "Only costs booked as free" off: the gateway's log does not say how
+          many pictures it made.
+        </p>
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <Label className="grid gap-1 text-xs font-normal">

@@ -56,6 +56,15 @@ public sealed class TokenCostTests(AppFixture app)
         Assert.Equal(new TokenPrice(0.20m, 0.10m, 2m), TokenPrice.Of(null, 0.10m, 2m, defaults));
         // A free model's cached input is free too: the default is never above the model's input.
         Assert.Equal(new TokenPrice(0m, 0m, 0.80m), TokenPrice.Of(0m, null, null, defaults));
+        // Nor its own: one a lower default input later puts above the input costs what input does.
+        Assert.Equal(new TokenPrice(0.10m, 0.10m, 0.80m), TokenPrice.Of(0.10m, 0.50m, null, defaults));
+        Assert.Equal(new TokenPrice(0.20m, 0.20m, 0.80m), TokenPrice.Of(null, 0.30m, null, defaults));
+        // And it is refused when saved: above its own input, or above the default it takes.
+        Assert.Null(TokenPrice.Check(0.10m, 0.10m, 1m, defaults));
+        Assert.Null(TokenPrice.Check(null, null, null, defaults));
+        Assert.Equal("Cached input cannot cost more than input (0.1).", TokenPrice.Check(0.10m, 0.50m, null, defaults));
+        Assert.Equal("Cached input cannot cost more than input (0.2, the default).", TokenPrice.Check(null, 0.30m, null, defaults));
+        Assert.Equal("Prices cannot be negative.", TokenPrice.Check(null, null, -1m, defaults));
 
         // 1,000 prompt tokens, 400 from the cache, 200 written: the cached ones at the cached price.
         Assert.Equal((600 * 0.20m + 400 * 0.02m + 200 * 0.80m) / 1_000_000m, TokenPrice.Of(null, null, null, defaults).Cost(1000, 400, 200));
@@ -91,6 +100,22 @@ public sealed class TokenCostTests(AppFixture app)
         Assert.Equal(0.2e-6m, Param("small", "input_cost_per_token"));
         Assert.Equal(0.01e-6m, Param("small", "cache_read_input_token_cost"));
         Assert.Equal(0.8e-6m, Param("small", "output_cost_per_token"));
+        // Cached input above input (its own, or the default it takes) is refused.
+        var server = (await admin.JsonAsync(await admin.GetAsync("/api/admin/servers"))).EnumerateArray().Single().GetProperty("id").GetGuid();
+        var above = await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/servers/{server}", UriKind.Relative), new
+        {
+            models = new object[] { new { remote = "big-remote", name = "big", context = 65536, inputPerMtok = 0.1m, cachedInputPerMtok = 0.5m } },
+        });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, above);
+        Assert.Contains("big: cached input cannot cost more than input (0.1)", await above.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        var aboveDefault = await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/servers/{server}", UriKind.Relative), new
+        {
+            models = new object[] { new { remote = "small-remote", name = "small", context = 32768, cachedInputPerMtok = 0.3m } },
+        });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, aboveDefault);
+        Assert.Contains("(0.2, the default)", await aboveDefault.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(0.02e-6m, Param("big", "cache_read_input_token_cost"));
+
         // The page shows each model's price, and which are its own.
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "small");
         Assert.Equal(0.8m, row.GetProperty("price").GetProperty("output").GetDecimal());
@@ -206,6 +231,147 @@ public sealed class TokenCostTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_comparison_not_voted_on_yet_stays_blind_in_the_prompt_lists()
+    {
+        const string main = "Qwen3.8-Flash-Next";
+        const string other = "Other-Model";
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel(other, 32768, 4096, Vision: false, Tools: true, Thinking: true, null, null, null));
+        await using var f = app.Create(app.ConnectionStringFor("blind_" + Guid.NewGuid().ToString("N")[..8]), gateway);
+        var (b, personId, _) = await PersonAsync(f);
+        async Task<Guid> CompareAsync(TestBrowser who)
+        {
+            var chat = (await who.JsonAsync(await who.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+            var res = await who.PostAsync($"/api/chat/conversations/{chat}/compare", new { content = "Which sort is stable?" });
+            await StatusAssert.Is(HttpStatusCode.OK, res);
+            await res.Content.ReadAsStringAsync();
+            return chat;
+        }
+        var compared = await CompareAsync(b);
+        var raw = await (await b.GetAsync($"/api/usage/prompts?{Now}")).Content.ReadAsStringAsync();
+
+        // Before the vote: "Model A" and "Model B", no cost (the prices would tell them apart), out of the cost total.
+        var mine = JsonDocument.Parse(raw).RootElement;
+        var rows = mine.GetProperty("rows").EnumerateArray().ToList();
+        Assert.Equal(["Model A", "Model B"], rows.Select(r => r.GetProperty("model").GetString()).Order());
+        Assert.All(rows, r => Assert.Equal(JsonValueKind.Null, r.GetProperty("cost").ValueKind));
+        Assert.DoesNotContain(main, raw, StringComparison.Ordinal);
+        Assert.DoesNotContain(other, raw, StringComparison.Ordinal);
+        Assert.Equal(2, mine.GetProperty("totals").GetProperty("prompts").GetInt64());
+        Assert.Equal(2, mine.GetProperty("totals").GetProperty("blind").GetInt64());
+        Assert.Equal(0m, mine.GetProperty("totals").GetProperty("cost").GetDecimal());
+        // Their tokens show, as in the chat.
+        Assert.Equal(200, mine.GetProperty("totals").GetProperty("prompt").GetInt64());
+        // Not found by their models, nor offered to filter by.
+        Assert.Empty(mine.GetProperty("models").EnumerateArray());
+        foreach (var model in new[] { main, other })
+        {
+            Assert.Empty((await b.JsonAsync(await b.GetAsync($"/api/usage/prompts?{Now}&model={model}"))).GetProperty("rows").EnumerateArray());
+        }
+
+        // An admin sees the person's models and costs (the vote is not theirs); their own comparison stays blind to them.
+        var admin = await AdminAsync(f);
+        var theirs = (await admin.JsonAsync(await admin.GetAsync($"/api/admin/usage/prompts?{Now}&person={personId}"))).GetProperty("rows").EnumerateArray().ToList();
+        Assert.Equal([other, main], theirs.Select(r => r.GetProperty("model").GetString()).Order());
+        Assert.All(theirs, r => Assert.Equal(Round, r.GetProperty("cost").GetDecimal()));
+        var adminId = (await admin.JsonAsync(await admin.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        await CompareAsync(admin);
+        var own = await admin.JsonAsync(await admin.GetAsync($"/api/admin/usage/prompts?{Now}&person={adminId}"));
+        Assert.Equal(["Model A", "Model B"], own.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("model").GetString()).Order());
+        Assert.Equal(2, own.GetProperty("totals").GetProperty("blind").GetInt64());
+
+        // Voted: the models and their costs.
+        var arena = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{compared}"))).GetProperty("arenas")[0].GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.OK, await b.PostAsync($"/api/chat/arena/{arena}/vote", new { vote = "a" }));
+        var after = await b.JsonAsync(await b.GetAsync($"/api/usage/prompts?{Now}"));
+        var shown = after.GetProperty("rows").EnumerateArray().ToList();
+        Assert.Equal([other, main], shown.Select(r => r.GetProperty("model").GetString()).Order());
+        Assert.All(shown, r => Assert.Equal(Round, r.GetProperty("cost").GetDecimal()));
+        Assert.Equal(2 * Round, after.GetProperty("totals").GetProperty("cost").GetDecimal());
+        Assert.Equal(0, after.GetProperty("totals").GetProperty("blind").GetInt64());
+        Assert.Single((await b.JsonAsync(await b.GetAsync($"/api/usage/prompts?{Now}&model={other}"))).GetProperty("rows").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task A_video_clip_is_booked_in_the_gateways_log_for_the_person_and_priced_again_by_its_length()
+    {
+        var video = new FakeVideo();
+        await using var f = app.Create(app.ConnectionStringFor("video_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Modules:videogen"] = "true" },
+            services => services.AddHttpClient(Llm.Api.Chat.Tools.VideoTool.Client).ConfigurePrimaryHttpMessageHandler(() => video)
+                .Services.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => video));
+        var (b, _, email) = await PersonAsync(f);
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { tools = new[] { "video" } }))).GetProperty("id").GetGuid();
+        var script = JsonSerializer.Serialize(new object[][] { [new { name = "generate_video", arguments = new { prompt = "A fox running", seconds = 2 } }] });
+        var events = await SendAsync(b, chat, $"Film a fox [script {script}]");
+
+        // Two seconds at $0.05: on the call, and in the answer's cost.
+        var made = events.Single(e => e.GetProperty("type").GetString() == "tool_result");
+        Assert.False(made.GetProperty("isError").GetBoolean(), made.GetProperty("text").GetString());
+        Assert.Equal(0.10m, made.GetProperty("cost").GetDecimal());
+        var answer = (await b.JsonAsync(await b.GetAsync($"/api/usage/prompts?{Now}&source=chat"))).GetProperty("rows").EnumerateArray().Single();
+        Assert.Equal(0.10m + 2 * Round, answer.GetProperty("cost").GetDecimal());
+
+        // Booked in the gateway's log as the chat's request for the person, with its length.
+        DateTime start;
+        string request;
+        await using (var conn = new NpgsqlConnection(app.LitellmConnectionString))
+        {
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand("""
+                select request_id, call_type, metadata->>'user_api_key_alias', spend::numeric, (metadata->>'video_seconds')::numeric, model, model_group, "startTime"
+                from "LiteLLM_SpendLogs" where end_user = @email
+                """, conn);
+            cmd.Parameters.AddWithValue("email", email);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            request = reader.GetString(0);
+            Assert.Equal(SpendLog.VideoCall, reader.GetString(1));
+            Assert.Equal(Llm.Api.Chat.ChatKey.Alias, reader.GetString(2));
+            Assert.Equal(0.10m, Math.Round(reader.GetDecimal(3), 12));
+            Assert.Equal(2m, reader.GetDecimal(4));
+            Assert.Equal(MediaModels.VideoModel, reader.GetString(5));
+            Assert.Equal(MediaModels.VideoModel, reader.GetString(6));
+            start = reader.GetDateTime(7);
+            Assert.False(await reader.ReadAsync());
+        }
+        // It is the chat's (in the answer above), not a request of the person's API keys.
+        Assert.Empty((await b.JsonAsync(await b.GetAsync($"/api/usage/prompts?{Now}&source=api"))).GetProperty("rows").EnumerateArray());
+
+        // A new price per second: worked out again from its length (the clip's own millisecond, which no other test's request shares).
+        var admin = await AdminAsync(f);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new
+        {
+            changes = new object[] { new { key = "Prices:PerVideoSecond", value = "0.08" } },
+        }));
+        var from = new DateTimeOffset(DateTime.SpecifyKind(start, DateTimeKind.Utc));
+        var again = await admin.JsonAsync(await admin.PostAsync("/api/admin/usage/recalculate", new { from, to = from.AddMilliseconds(1), onlyFree = false, apply = true }));
+        Assert.Equal(1, again.GetProperty("requests").GetProperty("rows").GetInt32());
+        Assert.Equal(0.10m, again.GetProperty("requests").GetProperty("before").GetDecimal());
+        Assert.Equal(0.16m, again.GetProperty("requests").GetProperty("after").GetDecimal());
+        Assert.Equal(0.16m, await SpendAsync(request));
+    }
+
+    /// <summary>The video server: a clip's job done at the first look, and the server up for the media control.</summary>
+    private sealed class FakeVideo : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.RequestUri!.AbsolutePath switch
+            {
+                "/v1/models" => """{"data":[]}""",
+                "/sdcpp/v1/vid_gen" => """{"poll_url":"/sdcpp/v1/jobs/1"}""",
+                _ => new System.Text.Json.Nodes.JsonObject
+                {
+                    ["status"] = "completed",
+                    ["result"] = new System.Text.Json.Nodes.JsonObject { ["b64_json"] = Convert.ToBase64String([0x1A, 0x45, 0xDF, 0xA3]), ["mime_type"] = "video/webm" },
+                }.ToJsonString(),
+            };
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") });
+        }
+    }
+
+    [Fact]
     public async Task Past_costs_are_worked_out_again_at_todays_prices_only_when_asked_and_audited()
     {
         // A window no other test uses: the gateway's database is shared.
@@ -224,7 +390,8 @@ public sealed class TokenCostTests(AppFixture app)
                    ('{"user_api_key_user_id":"' || @p || '","user_api_key_alias":"tool"}')::jsonb, '', 'success'),
                   (@m || '-3', 'aspeech', 'k', 0, 0, 0, 0, '2023-05-01 12:00', '2023-05-01 12:00', 'openai/kokoro', 'kokoro', '{}', '', 'success'),
                   (@m || '-4', 'acompletion', 'k', 0.5, 110, 100, 10, '2023-05-01 13:00', '2023-05-01 13:00', 'openai/' || @m, @m, '{}', '', 'success'),
-                  (@m || '-5', '', 'k', 0, 0, 0, 0, '2023-05-01 14:00', '2023-05-01 14:00', @m, '', '{}', '', 'failure');
+                  (@m || '-5', '', 'k', 0, 0, 0, 0, '2023-05-01 14:00', '2023-05-01 14:00', @m, '', '{}', '', 'failure'),
+                  (@m || '-6', 'aimage_generation', 'k', 0.04, 0, 0, 0, '2023-05-01 15:00', '2023-05-01 15:00', 'openai/sd-cpp-local', 'FLUX.2-klein-4B', '{}', '', 'success');
                 """, conn);
             seed.Parameters.AddWithValue("m", model);
             seed.Parameters.AddWithValue("p", person);
@@ -297,11 +464,14 @@ public sealed class TokenCostTests(AppFixture app)
             var audited = await db.AuditEvents.AsNoTracking().SingleAsync(e => e.Action == "usage.recalculate");
             Assert.Contains("2 requests", audited.Detail, StringComparison.Ordinal);
         }
-        // Done once: nothing is left to change. Every cost, not only the free ones, prices the one booked at 0.5 again.
+        // Done once: nothing is left to change. Every cost, not only the free ones, prices the one booked at 0.5 again;
+        // not the pictures booked with a cost (four for an API key, say: the log keeps no count).
         Assert.Equal(0, (await RunAsync(apply: false)).GetProperty("requests").GetProperty("rows").GetInt32());
-        var every = await RunAsync(apply: false, onlyFree: false);
+        var every = await RunAsync(apply: true, onlyFree: false);
         Assert.Equal(1, every.GetProperty("requests").GetProperty("rows").GetInt32());
         Assert.Equal((100 * 0.20m + 10 * 0.80m) / 1_000_000m, every.GetProperty("requests").GetProperty("after").GetDecimal());
+        Assert.Equal(0.04m, await SpendAsync(model + "-6"));
+        Assert.Equal(0.01m, await SpendAsync(model + "-2"));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/usage/recalculate", new { from = to, to = from }));
     }
 

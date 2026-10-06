@@ -24,11 +24,13 @@ export interface PromptRow {
   source: 'chat' | 'api'
   /** What it made: chat, picture, speech, transcription or video. */
   kind: string
+  /** "Model A" or "Model B" for an answer of a comparison not voted on yet. */
   model: string | null
   prompt: number
   cached: number
   completion: number
-  cost: number
+  /** Null for such an answer until the vote: the prices would tell its model. */
+  cost: number | null
   /** Parts of it ran before costs were kept: its cost leaves them out. */
   unpriced: boolean
   chatId?: string | null
@@ -40,8 +42,8 @@ export interface PromptRow {
 
 export interface PromptListData {
   rows: PromptRow[]
-  /** Every prompt the filters match, not only the rows sent. */
-  totals: { prompts: number; prompt: number; cached: number; completion: number; cost: number; unpriced: number }
+  /** Every prompt the filters match, not only the rows sent; the cost without the answers of comparisons not voted on yet (blind). */
+  totals: { prompts: number; prompt: number; cached: number; completion: number; cost: number; unpriced: number; blind: number }
   capped: boolean
   models: string[]
   problem: string | null
@@ -116,10 +118,14 @@ function columns(mine: boolean): ColumnDef<PromptRow>[] {
     tokens('Out', 'completion'),
     {
       id: 'cost',
-      accessorFn: (r) => r.cost,
+      accessorFn: (r) => r.cost ?? 0,
       header: ({ column }) => <SortHeader column={column} title="Cost" />,
       cell: ({ row: { original: r } }) =>
-        r.unpriced ? (
+        r.cost === null ? (
+          <span className="text-muted-foreground" title="A comparison: its cost shows once you vote, like its model">
+            after the vote
+          </span>
+        ) : r.unpriced ? (
           <span className="tabular-nums text-muted-foreground" title="Parts of it ran before costs were kept: an admin can work them out (Settings → Prices)">
             {money(r.cost)} *
           </span>
@@ -128,6 +134,15 @@ function columns(mine: boolean): ColumnDef<PromptRow>[] {
         ),
     },
   ]
+}
+
+/** What the cost total leaves out: parts from before costs were kept, and comparisons not voted on yet. */
+function costHint(t: PromptListData['totals']) {
+  const notes = [
+    t.unpriced ? `${formatValue(t.unpriced)} with parts from before costs were kept` : null,
+    t.blind ? `${formatValue(t.blind)} comparison ${t.blind === 1 ? 'answer' : 'answers'} counted after the vote` : null,
+  ].filter(Boolean)
+  return notes.length ? notes.join('; ') : undefined
 }
 
 /** A time range for everyone's prompts: one ending now, or between two days. */
@@ -255,7 +270,7 @@ export function PromptList({ everyone = false, from: fixedFrom }: { everyone?: b
           <Stat icon={Database} label="In" value={formatValue(t.prompt)} />
           <Stat icon={DatabaseZap} label="Cached" value={formatValue(t.cached)} hint={t.prompt ? `${formatValue((100 * t.cached) / t.prompt, 'percent')} of in` : undefined} />
           <Stat icon={MessageSquareText} label="Out" value={formatValue(t.completion)} />
-          <Stat icon={Coins} label="Cost" value={money(t.cost)} hint={t.unpriced ? `${formatValue(t.unpriced)} with parts from before costs were kept` : undefined} />
+          <Stat icon={Coins} label="Cost" value={money(t.cost)} hint={costHint(t)} />
         </StatGrid>
       )}
       {d?.capped && (

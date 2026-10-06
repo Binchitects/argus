@@ -1,3 +1,4 @@
+using System.Globalization;
 using Llm.Api.Models;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
@@ -41,12 +42,23 @@ public sealed record TokenPrice(decimal Input, decimal CachedInput, decimal Outp
         return ((Math.Max(prompt, 0) - hit) * Input + hit * CachedInput + Math.Max(completion, 0) * Output) / 1_000_000m;
     }
 
-    /// <summary>A model's own prices, and the defaults for those it does not set. Cached input is never priced above its input.</summary>
+    /// <summary>
+    /// A model's own prices, and the defaults for those it does not set. Cached input is never priced
+    /// above its input: a model's own is refused when saved, and one a later default would put above
+    /// it (a lower default input) is held to the input.
+    /// </summary>
     public static TokenPrice Of(decimal? input, decimal? cached, decimal? output, PriceOptions defaults)
     {
         var i = input ?? defaults.InputPerMtok;
-        return new(i, cached ?? Math.Min(defaults.CachedInputPerMtok, i), output ?? defaults.OutputPerMtok);
+        return new(i, Math.Min(cached ?? defaults.CachedInputPerMtok, i), output ?? defaults.OutputPerMtok);
     }
+
+    /// <summary>Why a model's own prices cannot be saved, or null: none below zero, cached input not above input (its own, else the default).</summary>
+    public static string? Check(decimal? input, decimal? cached, decimal? output, PriceOptions defaults) =>
+        input < 0 || cached < 0 || output < 0 ? "Prices cannot be negative."
+        : cached is { } c && c > (input ?? defaults.InputPerMtok)
+            ? $"Cached input cannot cost more than input ({(input ?? defaults.InputPerMtok).ToString("0.######", CultureInfo.InvariantCulture)}{(input is null ? ", the default" : "")})."
+        : null;
 }
 
 /// <summary>

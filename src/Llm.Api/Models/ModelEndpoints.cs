@@ -174,7 +174,7 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> AddAsync(LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, HardwareProbe hardware,
-        ChatModels gatewayModels, IOptions<EngineOptions> engine, EngineWatcher watcher, Audit audit, CancellationToken ct)
+        ChatModels gatewayModels, IOptions<EngineOptions> engine, EngineWatcher watcher, PriceBook prices, Audit audit, CancellationToken ct)
     {
         if (!engine.Value.Enabled)
         {
@@ -192,7 +192,7 @@ public static class ModelEndpoints
             return AuthEndpoints.Problem(409, "exists", $"There is already a model named {name}.");
         }
         var model = new LocalModel { Name = name, File = "" };
-        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct));
+        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults);
         if (problem is not null)
         {
             return problem;
@@ -204,13 +204,13 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> UpdateAsync(string name, LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, HardwareProbe hardware,
-        EngineWatcher watcher, Audit audit, CancellationToken ct)
+        EngineWatcher watcher, PriceBook prices, Audit audit, CancellationToken ct)
     {
         if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } model)
         {
             return Results.NotFound();
         }
-        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct));
+        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults);
         if (problem is not null)
         {
             return problem;
@@ -479,16 +479,12 @@ public static class ModelEndpoints
     /// language model, and every setting inside what that model and this machine allow. The
     /// warnings (slower, not wrong) come back to show.
     /// </summary>
-    private static (IResult? Problem, string? Warning) Apply(LocalModel m, LocalModelRequest body, ModelLibrary library, Hardware? hardware)
+    private static (IResult? Problem, string? Warning) Apply(LocalModel m, LocalModelRequest body, ModelLibrary library, Hardware? hardware, PriceOptions prices)
     {
         var file = (body.File ?? m.File).Trim();
         if (file.Length == 0 || file.StartsWith('/') || !file.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) || library.Find(file) is not { } entry)
         {
             return (AuthEndpoints.Problem(400, "file", "Choose a GGUF file from the model library."), null);
-        }
-        if ((body.InputPerMtok ?? 0) < 0 || (body.CachedInputPerMtok ?? 0) < 0 || (body.OutputPerMtok ?? 0) < 0)
-        {
-            return (AuthEndpoints.Problem(400, "price", "Prices cannot be negative."), null);
         }
         if (ModelCatalog.CheckExtra(body.ExtraPreset ?? m.ExtraPreset) is { } bad)
         {
@@ -505,6 +501,11 @@ public static class ModelEndpoints
         }
         var draft = Copy(m);
         Merge(draft, body, file);
+        // Its prices as they will be: a value kept, set or emptied (the default).
+        if (TokenPrice.Check(draft.InputPerMtok, draft.CachedInputPerMtok, draft.OutputPerMtok, prices) is { } price)
+        {
+            return (AuthEndpoints.Problem(400, "price", price), null);
+        }
         var advice = ModelAdvisor.Advise(draft, entry, library.List(), hardware);
         if (advice.FirstError is { } error)
         {
