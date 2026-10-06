@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { HelpButton } from '@/help/help-button'
 import { api, errorMessage, infoQuery, meQuery, supportHref } from '@/lib/api'
 
 type Answer = { status: 'ok'; redirect: string } | { status: '2fa' }
@@ -71,7 +72,8 @@ export function LoginPage() {
           <p className="mt-3 text-white/70">One sign-in for the chat, the dashboards and every tool that trusts it.</p>
         </div>
       </aside>
-      <main className="flex items-center justify-center p-6 sm:p-10">
+      <main className="relative flex items-center justify-center p-6 sm:p-10">
+        <HelpButton className="absolute top-4 right-4" />
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 text-lg font-semibold lg:hidden">
             <img src="/favicon.svg" alt="" className="size-8 rounded-md" /> {name}

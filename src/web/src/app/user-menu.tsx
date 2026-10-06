@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Columns2, Download, LifeBuoy, LogOut, Maximize2, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
+import { BookOpen, Columns2, Download, LifeBuoy, LogOut, Maximize2, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Avatar } from '@/components/ui/avatar'
 import {
@@ -42,6 +42,9 @@ export function UserMenu({ me }: { me: Me }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => navigate('/account')}>
           <UserRound /> Your account
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => navigate('/help')}>
+          <BookOpen /> Manual
         </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>

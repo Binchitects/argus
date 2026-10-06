@@ -2,16 +2,20 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig, searchForWorkspaceRoot } from 'vite'
 
 // `npm run dev` serves the UI on :5173 and forwards the API to a running stack
 // (API_URL, default https://llm.localhost), the way Traefik does in production.
 const api = process.env.API_URL ?? 'https://llm.localhost'
 const proxy = { target: api, changeOrigin: true, secure: false }
 
+// The manual (src/help/manual.ts) builds the repository's docs/ into the page. In the web image
+// they are copied to /docs, which ../../docs from /web names too (src/web/Dockerfile).
+const docs = fileURLToPath(new URL('../../docs', import.meta.url))
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)), '@docs': docs } },
   build: {
     minify: process.env.NO_MINIFY ? false : 'oxc',
     // Never inline assets as data: URLs: the CSP allows fonts and images from this origin.
@@ -32,6 +36,7 @@ export default defineConfig({
   },
   server: {
     proxy: { '/api': proxy, '/connect': proxy, '/.well-known': proxy, '^/mcp$': proxy, '/scim': proxy },
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), docs] },
   },
   test: {
     environment: 'jsdom',

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ChevronsLeft, ChevronsRight, CodeXml, Menu, Search } from 'lucide-react'
+import { BookOpen, ChevronsLeft, ChevronsRight, CodeXml, Menu, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useMatch, useMatches, useNavigate, useResolvedPath } from 'react-router'
 import { NotificationBell } from '@/components/app/notifications'
@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
+import { HelpButton } from '@/help/help-button'
 import { infoQuery, meQuery, type AppInfo, type Me } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
@@ -48,7 +49,7 @@ function SignedIn({ me }: { me: Me }) {
 
   const location = useLocation()
   const fullBleed = useMatches().some((m) => (m.handle as { fullBleed?: boolean } | undefined)?.fullBleed)
-  const pageTitle = findNavItem(location.pathname)?.title
+  const pageTitle = findNavItem(location.pathname)?.title ?? (isManual(location.pathname) ? 'Manual' : undefined)
   useEffect(() => {
     // The chat names its tab after the conversation itself.
     if (fullBleed) return
@@ -91,6 +92,7 @@ function SignedIn({ me }: { me: Me }) {
           <Brand name={name} collapsed={collapsed} />
           <SidebarNav sections={sections} collapsed={collapsed} />
           <div className="border-t border-sidebar-border p-2">
+            <ManualLink collapsed={collapsed} />
             <Button variant="ghost" size={collapsed ? 'icon-sm' : 'sm'} className={cn('text-muted-foreground', !collapsed && 'w-full justify-start')} onClick={toggle} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
               {collapsed ? <ChevronsRight /> : <><ChevronsLeft /> Collapse</>}
             </Button>
@@ -105,11 +107,10 @@ function SignedIn({ me }: { me: Me }) {
           <SheetDescription className="sr-only">Pages of {name}</SheetDescription>
           <Brand name={name} collapsed={false} />
           <SidebarNav sections={sections} collapsed={false} onNavigate={() => setMobileOpen(false)} />
-          {info.data && (
-            <div className="border-t border-sidebar-border p-2">
-              <VersionSource info={info.data} collapsed={false} />
-            </div>
-          )}
+          <div className="border-t border-sidebar-border p-2">
+            <ManualLink collapsed={false} onNavigate={() => setMobileOpen(false)} />
+            {info.data && <VersionSource info={info.data} collapsed={false} />}
+          </div>
         </SheetContent>
       </Sheet>
 
@@ -125,6 +126,7 @@ function SignedIn({ me }: { me: Me }) {
               <span className="hidden sm:inline">Search…</span>
               <Kbd className="ml-auto hidden sm:inline-flex">Ctrl K</Kbd>
             </Button>
+            <HelpButton />
             <NotificationBell />
             <UserMenu me={me} />
           </div>
@@ -171,6 +173,35 @@ function VersionSource({ info, collapsed }: { info: AppInfo; collapsed: boolean 
         </>
       )}
     </p>
+  )
+}
+
+const isManual = (pathname: string) => pathname === '/help' || pathname.startsWith('/help/')
+
+/** The manual, at the foot of the sidebar: a line, or an icon in the collapsed sidebar. */
+function ManualLink({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
+  const { pathname } = useLocation()
+  const link = (
+    <Link
+      to="/help"
+      onClick={onNavigate}
+      aria-current={isManual(pathname) ? 'page' : undefined}
+      aria-label={collapsed ? 'Manual' : undefined}
+      className={cn(
+        'mb-1 flex h-8 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-foreground',
+        collapsed && 'mx-auto size-8 justify-center px-0',
+      )}
+    >
+      <BookOpen className="size-4 shrink-0" aria-hidden="true" />
+      {!collapsed && 'Manual'}
+    </Link>
+  )
+  return collapsed ? (
+    <Tooltip content="Manual" side="right">
+      {link}
+    </Tooltip>
+  ) : (
+    link
   )
 }
 
@@ -239,7 +270,7 @@ function Breadcrumbs() {
   const { pathname } = useLocation()
   const item = findNavItem(pathname)
   const section = item && visibleNavigation(true).find((s) => s.items.includes(item))
-  const title = pathname === '/account' ? 'Your account' : pathname === '/design' ? 'Design system' : item?.title
+  const title = pathname === '/account' ? 'Your account' : pathname === '/design' ? 'Design system' : isManual(pathname) ? 'Manual' : item?.title
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
       <ol className="flex items-center gap-1.5 truncate text-sm text-muted-foreground">

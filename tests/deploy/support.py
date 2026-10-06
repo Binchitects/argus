@@ -21,7 +21,7 @@ services:
     image: traefik:v3.6.7
     container_name: traefik
   web:
-    build: ../src/web
+    build: { context: .., dockerfile: src/web/Dockerfile }
     container_name: web
   app:
     build: { context: .., dockerfile: src/Llm.Api/Dockerfile }

@@ -14,6 +14,7 @@ const opens: [string, string | RegExp][] = [
   ['/chat', 'Chat settings'],
   ['/chat', /^Tools/],
   ['/', 'Search and commands'],
+  ['/admin/settings', 'Help for this page'],
 ]
 
 for (const [path, name] of opens) {
@@ -49,7 +50,7 @@ test('the skip link takes the keyboard past the navigation to the page', async (
   expect(await page.evaluate(() => !!document.activeElement?.closest('main'))).toBe(true)
 })
 
-const pages = ['/', '/account', '/setup', '/chat', '/tasks', '/usage', '/admin', '/admin/people', '/admin/groups', '/admin/tools', '/admin/sign-in', '/admin/models', '/admin/model',
+const pages = ['/', '/account', '/setup', '/chat', '/tasks', '/usage', '/help', '/help/chat', '/help/admin', '/admin', '/admin/people', '/admin/groups', '/admin/tools', '/admin/sign-in', '/admin/models', '/admin/model',
   '/admin/settings', '/admin/audit', '/admin/indexing', '/admin/packs', '/admin/explore', '/admin/monitoring', '/admin/dashboards', '/admin/dashboards/stack-health',
   ...(noObserve ? [] : ['/admin/logs', '/admin/alerts'])]
 

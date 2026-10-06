@@ -108,7 +108,7 @@ jobs:
       - name: Build the images
         run: |
           docker build -t llm-app:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} -f src/Llm.Api/Dockerfile .
-          docker build -t llm-web:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} src/web
+          docker build -t llm-web:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} -f src/web/Dockerfile .
       - name: Start Postgres, the app, the web and Traefik
         run: |
           echo "127.0.0.1 llm.localhost" | sudo tee -a /etc/hosts

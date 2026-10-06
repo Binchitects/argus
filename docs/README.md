@@ -1,5 +1,18 @@
 # Documentation
 
+The pages people and admins need are also in the app, as its **manual**
+(`https://DOMAIN/help`, **Manual** at the foot of the sidebar and in the
+account menu): built into the web when it is built, with contents, search
+across every page, anchors, and links between pages that stay in the app. An
+admin's pages show to admins only. The **?** at the top of every page opens
+that page's help beside it: what the page is for, what each part does, and the
+common tasks step by step (`src/web/src/help/topics.ts`). Argus's own app has
+a lighter version: **Help** in its sidebar, and `/help`.
+
+A new page here is placed on purpose: in the manual
+(`src/web/src/help/manual.ts`), or among the developers' pages it leaves out;
+a test fails until it is.
+
 ## Running the platform
 
 | page | what it covers |

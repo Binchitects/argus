@@ -158,7 +158,7 @@ Both .NET images build from the repository root:
 ```bash
 docker build -f src/Llm.Api/Dockerfile -t llmservice-app .
 docker build -f src/Argus/Dockerfile --target server -t argus .
-docker build -t llmservice-web src/web
+docker build -f src/web/Dockerfile -t llmservice-web .
 ```
 
 The Argus image runs its xUnit suite during the build and fails with it; the

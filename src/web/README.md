@@ -13,11 +13,14 @@ src/
   pages/            one file per page; pages/chat/ is the chat (tree, live stream, markdown, files)
   code-arena/       Code Arena's web interface (code-arena web): the chat's components around its API,
                     built on its own (vite.code-arena.config.ts) into src/CodeArena/web, not part of npm run build
+  help/             the manual (/help: docs/ built into the page, searched here) and each
+                    page's help (the ? in the top bar): topics.ts, and route-help.ts for which page has which
   lib/              API client, theme, formatting, command-palette matching
   styles/index.css  design tokens (light and dark) and base styles
 e2e/                Playwright: desktop and phone, both themes, axe accessibility
 ci/                 Traefik config for the CI browser run
-Dockerfile          build -> Alpine + nginx (non-root, read-only root)
+Dockerfile          build -> Alpine + nginx (non-root, read-only root); built from the
+                    repository root, for the manual reads docs/
 nginx.conf          security headers, caching, SPA fallback, /healthz
 ```
 
