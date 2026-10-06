@@ -16,7 +16,7 @@ public static class SettingsEndpoints
 
         g.MapGet("", async (SettingsService settings, CancellationToken ct) => Results.Ok(await settings.ViewAsync(ct)));
 
-        g.MapPut("", async (SettingsSave body, SettingsService settings, CancellationToken ct) =>
+        g.MapPut("", async (SettingsSave body, SettingsService settings, IServiceProvider services, CancellationToken ct) =>
         {
             if (body.Changes is not { Count: > 0 })
             {
@@ -25,6 +25,10 @@ public static class SettingsEndpoints
             try
             {
                 await settings.SaveAsync(body.Changes, ct);
+                if (body.Changes.Any(c => c.Key.StartsWith("Prices:", StringComparison.Ordinal)))
+                {
+                    await Gateway.PriceBook.RegisterAsync(services, ct);
+                }
                 return Results.Ok(await settings.ViewAsync(ct));
             }
             catch (SettingsValidationException ex)

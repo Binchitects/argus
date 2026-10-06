@@ -62,6 +62,7 @@ public sealed partial class ChatService(
     Memories memories,
     IOptionsMonitor<ChatOptions> chat,
     Knowledge.Retrieval retrieval,
+    PriceBook prices,
     IServiceScopeFactory scopes,
     ILogger<ChatService> logger)
 {
@@ -131,6 +132,7 @@ public sealed partial class ChatService(
                 ConversationId = conversation.Id, ParentId = question.Id, Role = "assistant", Sequence = sequence, Model = modelName,
                 Status = MessageStatus.Failed, Error = refusal,
             };
+            refused.AnswerId = refused.Id;
             db.ChatMessages.Add(refused);
             conversation.CurrentLeafId = refused.Id;
             await emit(new { type = "assistant", id = refused.Id, parentId = question.Id, model = modelName });
@@ -237,10 +239,15 @@ public sealed partial class ChatService(
         var parent = question.Id;
         // Deep research with sub-agents: the rounds in which the answer delegated (ResearchDelegations).
         var delegations = 0;
+        // Each round's cost at the model's prices now (the gateway was given the same); every round and tool call names the answer.
+        var price = await prices.ForAsync(modelName, ct);
+        Guid? answerId = null;
 
         for (var round = 0; ; round++)
         {
             var msg = new ChatMessage { ConversationId = conversation.Id, ParentId = parent, Role = "assistant", Sequence = ++next, Model = modelName };
+            answerId ??= msg.Id;
+            msg.AnswerId = answerId;
             db.ChatMessages.Add(msg);
             conversation.CurrentLeafId = msg.Id;
             await emit(new { type = "assistant", id = msg.Id, parentId = parent, model = modelName });
@@ -344,6 +351,7 @@ public sealed partial class ChatService(
                             break;
                         case UsageReport u:
                             (msg.PromptTokens, msg.CachedTokens, msg.CompletionTokens) = (u.Prompt, u.Cached, u.Completion);
+                            msg.Cost = price.Cost(u.Prompt, u.Cached, u.Completion);
                             break;
                     }
                     if (cut)
@@ -382,7 +390,7 @@ public sealed partial class ChatService(
             Keep(MessageStatus.Complete);
             await emit(new
             {
-                type = "usage", prompt = msg.PromptTokens, cached = msg.CachedTokens, completion = msg.CompletionTokens,
+                type = "usage", prompt = msg.PromptTokens, cached = msg.CachedTokens, completion = msg.CompletionTokens, cost = msg.Cost,
                 thinkingMs = msg.ThinkingMs, durationMs = msg.DurationMs, context = filled,
             });
 
@@ -491,6 +499,9 @@ public sealed partial class ChatService(
                     DurationMs = (int)took.Elapsed.TotalMilliseconds,
                     AttachmentsJson = outcome.Files is { Count: > 0 } made ? JsonSerializer.Serialize(made.Select(f => f.Id)) : null,
                     DetailsJson = outcome.Details?.ToJsonString(),
+                    // What the call spent: its pictures, video or speech, or its sub-agents' tokens.
+                    AnswerId = answerId, Cost = outcome.Cost,
+                    PromptTokens = outcome.Usage?.Prompt, CachedTokens = outcome.Usage?.Cached, CompletionTokens = outcome.Usage?.Completion,
                 };
                 db.ChatMessages.Add(result);
                 conversation.CurrentLeafId = result.Id;
@@ -499,7 +510,7 @@ public sealed partial class ChatService(
                 messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = safeguards.Untrusted(name, text) });
                 await emit(new
                 {
-                    type = "tool_result", id, messageId = result.Id, name, text, isError, declined, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs,
+                    type = "tool_result", id, messageId = result.Id, name, text, isError, declined, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs, cost = result.Cost,
                     details = outcome.Details,
                     attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType, original = f.Kind != "image" && f.Data != null }),
                 });
@@ -732,7 +743,7 @@ public sealed partial class ChatService(
         var atOnce = Math.Max(1, gate.EngineSlots > 0 ? Math.Min(chat.CurrentValue.AgentsAtOnce, gate.EngineSlots) : chat.CurrentValue.AgentsAtOnce);
         using var turns = new SemaphoreSlim(atOnce);
         var done = 0;
-        async Task<(JsonObject Result, JsonObject Shown, List<ChatAttachment> Files)> RunAsync(AgentTask part, int index)
+        async Task<(JsonObject Result, JsonObject Shown, List<ChatAttachment> Files, AgentRun Run)> RunAsync(AgentTask part, int index)
         {
             Task Say(object e) => callId is null ? Task.CompletedTask : kit.Emit(e);
             await turns.WaitAsync(ct);
@@ -764,7 +775,7 @@ public sealed partial class ChatService(
                     ["steps"] = new JsonArray([.. run.Steps]), ["error"] = run.Error, ["ms"] = ms, ["model"] = kit.Model, ["usage"] = usage.DeepClone(),
                     ["speed"] = run.Timing.ToJson(),
                 };
-                return (result, shown, run.Files);
+                return (result, shown, run.Files, run);
             }
             finally
             {
@@ -778,6 +789,9 @@ public sealed partial class ChatService(
             Files: [.. outcomes.SelectMany(o => o.Files)])
         {
             Details = new JsonObject { ["agents"] = new JsonArray([.. outcomes.Select(o => (JsonNode)o.Shown)]) },
+            // The call carries its sub-agents' tokens and cost: the answer's cost counts them.
+            Usage = new UsageReport(outcomes.Sum(o => o.Run.Usage.Prompt), outcomes.Sum(o => o.Run.Usage.Cached), outcomes.Sum(o => o.Run.Usage.Completion)),
+            Cost = outcomes.Sum(o => o.Run.Cost),
         };
     }
 
@@ -785,7 +799,11 @@ public sealed partial class ChatService(
     private sealed record AgentStep(string Event, string? Text = null, JsonObject? Call = null, bool? IsError = null, JsonArray? Files = null);
 
     /// <summary>What a sub-agent did: its last words, its thinking, its tool calls (each with its result), and why it stopped short, if so; what it made, the tokens it used, and the model's time.</summary>
-    private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error, List<ChatAttachment> Files, UsageReport Usage, TimingTotal Timing);
+    private sealed record AgentRun(string Text, string Reasoning, List<JsonNode> Steps, string? Error, List<ChatAttachment> Files, UsageReport Usage, TimingTotal Timing)
+    {
+        /// <summary>Its tokens at its model's prices, and the pictures, video or speech its tools made.</summary>
+        public decimal Cost { get; init; }
+    }
 
     /// <summary>One sub-agent: its own little answer loop, kept out of the chat (only its result goes to the model).</summary>
     private async Task<AgentRun> AgentAsync(AgentTask part, AgentKit kit, Dictionary<string, IToolRun> own, OnDemandTools demand, Func<string, Task> say,
@@ -806,6 +824,10 @@ public sealed partial class ChatService(
         // Every round's tokens: the answer's cost counts its sub-agents' too. And its time, for the answer's trace.
         var used = new UsageReport(0, 0, 0);
         var timed = new TimingTotal();
+        var price = await prices.ForAsync(kit.Model, ct);
+        // What its tools spent (pictures, video, speech).
+        var spent = 0m;
+        decimal Cost() => price.Cost(used.Prompt, used.Cached, used.Completion) + spent;
         for (var round = 0; ; round++)
         {
             var request = new JsonObject
@@ -858,12 +880,12 @@ public sealed partial class ChatService(
             }
             catch (ChatGatewayException ex)
             {
-                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message, made, used, timed);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message, made, used, timed) { Cost = Cost() };
             }
             timed.Add(timing, roundUsage?.Prompt, roundUsage?.Cached, roundUsage?.Completion);
             if (pending.Count == 0)
             {
-                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null, made, used, timed);
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null, made, used, timed) { Cost = Cost() };
             }
             var toolCalls = new JsonArray([.. pending.Select(kv => (JsonNode)new JsonObject
             {
@@ -902,6 +924,7 @@ public sealed partial class ChatService(
                         var outcome = await target.CallAsync(name, Arguments(raw), ct);
                         await AuditPluginAsync(kit.Runs.TryGetValue(name, out var chosen) ? chosen.Choice.Tool : null, name, outcome, kit.User, false);
                         (result, isError) = (outcome.Text, outcome.IsError);
+                        spent += outcome.Cost ?? 0;
                         if (outcome.Files is { Count: > 0 } got)
                         {
                             made.AddRange(got);

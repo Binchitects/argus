@@ -12,6 +12,7 @@ public static class SettingsCatalog
     private const string CompanySignIn = "Company sign-in";
     private const string Chat = "Chat";
     private const string Model = "Model";
+    private const string PricesGroup = "Prices";
     private const string Argus = "Argus (GitLab)";
     private const string Tools = "Python and web";
     private const string PluginsGroup = "Plugins";
@@ -171,6 +172,23 @@ public static class SettingsCatalog
             { Default = "1", Min = 1, Max = 8, Optional = false, Impact = "The engine restarts and reloads its models: chat and the API pause for a few minutes." },
         new("ModelHours:TimeZone", Model, "Time zone of working hours", "The clock the models' working hours follow (Admin → Models → Working hours): an IANA name such as Europe/Berlin, Asia/Tehran or America/New_York.", SettingType.Text, SettingScope.Live)
             { Default = "UTC", Pattern = @"^(UTC|[A-Za-z]+(/[A-Za-z0-9_+\-]+){1,2})$", PatternHelp = "An IANA time zone, e.g. Europe/Berlin, or UTC." },
+
+        // ---------------------------------------------------------------- prices, live (the gateway learns them at once) --
+        new("Prices:InputPerMtok", PricesGroup, "Input, per million tokens", "What a chat model without its own prices (Admin → Models) costs for each million tokens of the prompt the model reads: the conversation, files, tool results. The defaults are about what hosted services charge for a small open model; set your own.", SettingType.Number, SettingScope.Live)
+            { Default = "0.20", Unit = "$ per 1M tokens", Min = 0, Max = 1000, Optional = false },
+        new("Prices:CachedInputPerMtok", PricesGroup, "Cached input, per million tokens", "Prompt tokens the engine reads from its cache: the start of a conversation it has seen, sent again with each answer. They cost the engine little. A model's cached input is never priced above its input.", SettingType.Number, SettingScope.Live)
+            { Default = "0.02", Unit = "$ per 1M tokens", Min = 0, Max = 1000, Optional = false },
+        new("Prices:OutputPerMtok", PricesGroup, "Output, per million tokens", "Tokens the model writes, its thinking included.", SettingType.Number, SettingScope.Live)
+            { Default = "0.80", Unit = "$ per 1M tokens", Min = 0, Max = 1000, Optional = false },
+        new("Prices:PerImage", PricesGroup, "A picture", "Each picture the picture model draws, for the chat or an API key.", SettingType.Number, SettingScope.Live)
+            { Default = "0.01", Unit = "$ per picture", Min = 0, Max = 100, Optional = false },
+        new("Prices:PerVideoSecond", PricesGroup, "A second of video", "Each second of a clip the video model makes.", SettingType.Number, SettingScope.Live)
+            { Default = "0.05", Unit = "$ per second", Min = 0, Max = 100, Optional = false },
+        new("Prices:PerAudioMinute", PricesGroup, "A minute of sound turned into text", "Speech to text: a recording or a video's sound track for a model that cannot hear, Talk, an API key's transcriptions. Priced by the sound's length, when the speech server says it (the chat always asks for it).", SettingType.Number, SettingScope.Live)
+            { Default = "0.006", Unit = "$ per minute", Min = 0, Max = 100, Optional = false },
+        new("Prices:PerThousandCharacters", PricesGroup, "1,000 characters read aloud", "Text to speech: Read aloud, the Speech tool, Talk's answers, an API key's speech.", SettingType.Number, SettingScope.Live)
+            { Default = "0.015", Unit = "$ per 1,000 characters", Min = 0, Max = 100, Optional = false },
+
         new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
 

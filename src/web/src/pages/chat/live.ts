@@ -134,7 +134,11 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     }
     case 'usage': {
       const a = lastAssistant()
-      if (a) Object.assign(a, { promptTokens: e.prompt, cachedTokens: e.cached, completionTokens: e.completion, thinkingMs: e.thinkingMs ?? a.thinkingMs, durationMs: e.durationMs, context: e.context ?? a.context })
+      if (a)
+        Object.assign(a, {
+          promptTokens: e.prompt, cachedTokens: e.cached, completionTokens: e.completion, cost: e.cost ?? null, thinkingMs: e.thinkingMs ?? a.thinkingMs, durationMs: e.durationMs,
+          context: e.context ?? a.context,
+        })
       return { ...state, messages, thinkingSince: null }
     }
     case 'tool_call': {
@@ -154,7 +158,7 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       const parent = state.leaf
       put(messages, {
         ...blank(e.messageId, 'tool', parent, e.text), toolCallId: e.id, toolName: e.name, noAccess: e.noAccess, durationMs: e.durationMs,
-        status: e.declined ? 'declined' : e.isError ? 'failed' : 'complete', attachments: e.attachments ?? [], details: e.details ?? null,
+        status: e.declined ? 'declined' : e.isError ? 'failed' : 'complete', attachments: e.attachments ?? [], details: e.details ?? null, cost: e.cost ?? null,
       })
       return { ...state, messages, leaf: e.messageId, waiting: (state.waiting ?? []).filter((w) => w !== e.id) }
     }

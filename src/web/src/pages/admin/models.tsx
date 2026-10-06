@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
+import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { ModelForm, type SavedModel } from './model-form'
@@ -43,6 +44,18 @@ interface ModelRow extends SavedModel {
   kept?: boolean
   /** Kept loaded now: pinned, or by the working hours in force. */
   keptNow?: boolean
+  /** A picture, video or speech model's price (Settings → Prices). */
+  unitPrice?: { unit: string; amount: number }
+}
+
+/** "$0.20 in · $0.02 cached · $0.80 out per 1M tokens (the defaults)", or a media model's "$0.01 per picture". */
+function priceLine(m: Pick<ModelRow, 'price' | 'unitPrice'>): string | null {
+  if (m.unitPrice) return `${money(m.unitPrice.amount)} per ${m.unitPrice.unit} (Settings → Prices)`
+  const p = m.price
+  if (!p) return null
+  const own = p.own.input || p.own.cachedInput || p.own.output
+  const all = p.own.input && p.own.cachedInput && p.own.output
+  return `${money(p.input)} in · ${money(p.cachedInput)} cached · ${money(p.output)} out per 1M tokens${all ? '' : own ? ' (some from the defaults)' : ' (the defaults)'}`
 }
 
 interface Plan {
@@ -328,6 +341,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
                 (image ? 'An image model' : 'Served by the gateway')}
           </CardDescription>
           {m.profile && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary(m.profile)}</p>}
+          {priceLine(m) && <p className="mt-1 text-xs text-muted-foreground tabular-nums">{priceLine(m)}</p>}
         </div>
         <Status status={m.status} />
       </CardHeader>

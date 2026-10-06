@@ -110,7 +110,17 @@ export interface SavedModel {
   thinking?: boolean
   tools?: boolean
   inputPerMtok?: number | null
+  cachedInputPerMtok?: number | null
   outputPerMtok?: number | null
+  /** What it costs now, per million tokens: its own prices, else the defaults (own says which it sets). */
+  price?: ModelPrice
+}
+
+export interface ModelPrice {
+  input: number
+  cachedInput: number
+  output: number
+  own: { input: boolean; cachedInput: boolean; output: boolean }
 }
 
 /** The longest answer when none is set, as the API registers it at the gateway: half the context, at most 32,768. */
@@ -157,12 +167,13 @@ function initial(saved: SavedModel | null) {
     thinking: saved?.thinking ?? true,
     tools: saved?.tools ?? true,
     inputPerMtok: s(saved?.inputPerMtok),
+    cachedInputPerMtok: s(saved?.cachedInputPerMtok),
     outputPerMtok: s(saved?.outputPerMtok),
   }
 }
 
-const numeric = ['context', 'maxOutput', 'gpuLayers', 'cpuMoe', 'parallel', 'draftMax', 'temperature', 'topP', 'topK', 'minP', 'presencePenalty', 'inputPerMtok', 'outputPerMtok'] as const
-const clearable = ['devices', 'maxOutput', 'ubatch', 'draftHead', 'temperature', 'topP', 'topK', 'minP', 'presencePenalty', 'inputPerMtok', 'outputPerMtok'] as const
+const numeric = ['context', 'maxOutput', 'gpuLayers', 'cpuMoe', 'parallel', 'draftMax', 'temperature', 'topP', 'topK', 'minP', 'presencePenalty', 'inputPerMtok', 'cachedInputPerMtok', 'outputPerMtok'] as const
+const clearable = ['devices', 'maxOutput', 'ubatch', 'draftHead', 'temperature', 'topP', 'topK', 'minP', 'presencePenalty', 'inputPerMtok', 'cachedInputPerMtok', 'outputPerMtok'] as const
 
 /** What the API takes, from the form; an emptied field is named in "clear" (a missing one is left as it was). */
 function body(form: FormState) {
@@ -192,6 +203,7 @@ function body(form: FormState) {
     thinking: form.thinking,
     tools: form.tools,
     inputPerMtok: n(form.inputPerMtok),
+    cachedInputPerMtok: n(form.cachedInputPerMtok),
     outputPerMtok: n(form.outputPerMtok),
     clear: clearable.filter((k) => form[k].trim() === ''),
   }
@@ -225,6 +237,8 @@ export function ModelForm({
   const files = library.data ?? []
   const file = files.find((f) => f.path === form.file)
   const language = file?.profile.kind === 'language'
+  // An empty price is the default: shown as it is now, for a model whose price it is.
+  const defaultPrice = (k: 'input' | 'cachedInput' | 'output') => (saved?.price && !saved.price.own[k] ? `${saved.price[k]} (the default)` : 'the default')
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }))
 
   const request = useMemo(() => body(form), [form])
@@ -576,14 +590,19 @@ export function ModelForm({
               {errors.sampling && <p className="text-xs font-medium text-destructive">{errors.sampling}</p>}
             </Section>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Price in, per 1M tokens" hint="Empty: the gateway's defaults.">
-                <Input inputMode="decimal" value={form.inputPerMtok} onChange={(e) => set('inputPerMtok', e.target.value)} />
-              </Field>
-              <Field label="Price out, per 1M tokens">
-                <Input inputMode="decimal" value={form.outputPerMtok} onChange={(e) => set('outputPerMtok', e.target.value)} />
-              </Field>
-            </div>
+            <Section title="Prices" description="In dollars per million tokens: what each answer and API request with it costs. Empty: the default for every model (Settings → Prices).">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field label="Input" hint="Prompt tokens the model reads.">
+                  <Input inputMode="decimal" value={form.inputPerMtok} placeholder={defaultPrice('input')} onChange={(e) => set('inputPerMtok', e.target.value)} />
+                </Field>
+                <Field label="Cached input" hint="Prompt tokens read from the engine's cache; never above input.">
+                  <Input inputMode="decimal" value={form.cachedInputPerMtok} placeholder={defaultPrice('cachedInput')} onChange={(e) => set('cachedInputPerMtok', e.target.value)} />
+                </Field>
+                <Field label="Output" hint="Tokens it writes, thinking included.">
+                  <Input inputMode="decimal" value={form.outputPerMtok} placeholder={defaultPrice('output')} onChange={(e) => set('outputPerMtok', e.target.value)} />
+                </Field>
+              </div>
+            </Section>
             <Field label="More engine options" error={errors.extra} hint="One per line, key = value, with llama-server's long option names, e.g. flash-attn = on. Names this engine does not know are refused: they would stop it.">
               <Textarea rows={3} className="font-mono text-xs" value={form.extraPreset} onChange={(e) => set('extraPreset', e.target.value)} />
             </Field>

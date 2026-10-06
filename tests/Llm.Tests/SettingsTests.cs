@@ -288,6 +288,16 @@ public sealed partial class SettingsTests(AppFixture app)
             ["Chat:DefaultThinking"] = chat.DefaultThinking,
             ["Engine:ModelsMax"] = new Llm.Api.Models.EngineOptions().ModelsMax.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
+        var prices = new Llm.Api.Gateway.PriceOptions();
+        foreach (var (key, price) in new Dictionary<string, decimal>
+        {
+            ["Prices:InputPerMtok"] = prices.InputPerMtok, ["Prices:CachedInputPerMtok"] = prices.CachedInputPerMtok, ["Prices:OutputPerMtok"] = prices.OutputPerMtok,
+            ["Prices:PerImage"] = prices.PerImage, ["Prices:PerVideoSecond"] = prices.PerVideoSecond, ["Prices:PerAudioMinute"] = prices.PerAudioMinute,
+            ["Prices:PerThousandCharacters"] = prices.PerThousandCharacters,
+        })
+        {
+            expected[key] = price.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
         foreach (var (key, value) in expected)
         {
             Assert.Equal(value, SettingsCatalog.ByKey[key].Default);

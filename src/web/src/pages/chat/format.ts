@@ -19,7 +19,7 @@ export function toolTitle(name: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
-/** The tokens an answer used, its sub-agents' with them, and what that cost at its models' prices (null: no price known). */
+/** The tokens an answer used, its sub-agents' with them, and what that cost (null: no price known). */
 export interface AnswerUsage {
   prompt: number
   cached: number
@@ -27,32 +27,45 @@ export interface AnswerUsage {
   /** The sub-agents' share of the tokens above. */
   agents: { prompt: number; cached: number; completion: number }
   cost: number | null
+  /** Some of the cost is worked out at today's prices: parts of the answer ran before costs were kept. */
+  estimated: boolean
 }
 
 /**
- * What an answer used and cost: each model call's tokens at its model's prices, the
- * answer's own and its sub-agents' (kept with their delegate call). The gateway bills
- * the same calls at the same prices, so this is what the usage pages show for it.
+ * What an answer used and cost: its rounds' tokens and its sub-agents' (kept with their
+ * delegate call), and the cost each part kept when it ran (its tokens at the model's prices,
+ * cached input at its own; the pictures, video or speech a tool made). A part from before
+ * costs were kept is worked out at its model's prices now. The usage pages list the same.
  */
 export function answerUsage(messages: Message[], config: ChatConfig): AnswerUsage {
-  const u: AnswerUsage = { prompt: 0, cached: 0, completion: 0, agents: { prompt: 0, cached: 0, completion: 0 }, cost: null }
-  const add = (model: string | null | undefined, prompt: number, cached: number, completion: number) => {
-    u.prompt += prompt
-    u.cached += cached
-    u.completion += completion
+  const u: AnswerUsage = { prompt: 0, cached: 0, completion: 0, agents: { prompt: 0, cached: 0, completion: 0 }, cost: null, estimated: false }
+  const add = (cost: number) => (u.cost = (u.cost ?? 0) + cost)
+  const estimate = (model: string | null | undefined, prompt: number, cached: number, completion: number) => {
     const p = config.models.find((x) => x.name === model)?.prices
     if (!p || p.input === null || p.output === null) return
-    u.cost = (u.cost ?? 0) + ((prompt - cached) * p.input + cached * (p.cachedInput ?? p.input) + completion * p.output) / 1_000_000
+    u.estimated = true
+    add(((prompt - cached) * p.input + cached * (p.cachedInput ?? p.input) + completion * p.output) / 1_000_000)
   }
   for (const m of messages) {
-    if (m.role === 'assistant' && m.promptTokens !== null) add(m.model, m.promptTokens, m.cachedTokens ?? 0, m.completionTokens ?? 0)
-    for (const a of m.role === 'tool' ? (m.details?.agents ?? []) : []) {
-      if (!a.usage) continue
-      add(a.model, a.usage.prompt, a.usage.cached, a.usage.completion)
-      u.agents.prompt += a.usage.prompt
-      u.agents.cached += a.usage.cached
-      u.agents.completion += a.usage.completion
+    if (m.role === 'assistant' && m.promptTokens !== null) {
+      u.prompt += m.promptTokens
+      u.cached += m.cachedTokens ?? 0
+      u.completion += m.completionTokens ?? 0
+      if (m.cost !== null && m.cost !== undefined) add(m.cost)
+      else estimate(m.model, m.promptTokens, m.cachedTokens ?? 0, m.completionTokens ?? 0)
     }
+    if (m.role !== 'tool') continue
+    const agents = (m.details?.agents ?? []).filter((a) => a.usage)
+    for (const a of agents) {
+      u.prompt += a.usage!.prompt
+      u.cached += a.usage!.cached
+      u.completion += a.usage!.completion
+      u.agents.prompt += a.usage!.prompt
+      u.agents.cached += a.usage!.cached
+      u.agents.completion += a.usage!.completion
+    }
+    if (m.cost !== null && m.cost !== undefined) add(m.cost)
+    else for (const a of agents) estimate(a.model, a.usage!.prompt, a.usage!.cached, a.usage!.completion)
   }
   return u
 }

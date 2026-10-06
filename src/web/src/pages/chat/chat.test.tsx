@@ -78,12 +78,12 @@ const answer = [
   { type: 'reasoning', text: 'Let me think.' },
   { type: 'thought', ms: 2300 },
   { type: 'content', text: 'Hi! Here is code:\n\n```python title="hello.py"\nprint("hi")\n```' },
-  { type: 'usage', prompt: 1000, cached: 400, completion: 200, thinkingMs: 2300, durationMs: 5000 },
+  { type: 'usage', prompt: 1000, cached: 400, completion: 200, cost: 0.000288, thinkingMs: 2300, durationMs: 5000 },
   { type: 'done', id: 'a1' },
 ]
 const answered = [
   msg('q1', null, 'user', { content: 'hello there' }),
-  msg('a1', 'q1', 'assistant', { content: 'Hi! Here is code:\n\n```python title="hello.py"\nprint("hi")\n```', reasoning: 'Let me think.', thinkingMs: 2300, durationMs: 5000, model: 'Main-Model', promptTokens: 1000, cachedTokens: 400, completionTokens: 200 }),
+  msg('a1', 'q1', 'assistant', { content: 'Hi! Here is code:\n\n```python title="hello.py"\nprint("hi")\n```', reasoning: 'Let me think.', thinkingMs: 2300, durationMs: 5000, model: 'Main-Model', promptTokens: 1000, cachedTokens: 400, completionTokens: 200, cost: 0.000288 }),
 ]
 
 describe('chat', () => {
@@ -99,9 +99,16 @@ describe('chat', () => {
     const a = await screen.findByRole('region', { name: 'Answer' })
     expect(await within(a).findByText('Thought for 2.3 s')).toBeInTheDocument()
     expect(within(a).getByText(/Here is code/)).toBeInTheDocument()
-    // Tokens and cost from the model's prices: (600*0.2 + 400*0.02 + 200*0.8) / 1e6.
-    expect(within(a).getByText(/1 K in · 200 out/)).toBeInTheDocument()
+    // Tokens in, cached and out, and the cost the answer kept as it ran: (600*0.2 + 400*0.02 + 200*0.8) / 1e6.
+    expect(within(a).getByText(/1 K in · 400 cached · 200 out/)).toBeInTheDocument()
     expect(within(a).getByText('· $0.000288')).toBeInTheDocument()
+  })
+
+  it("an answer from before costs were kept shows its cost at today's prices, marked as worked out", async () => {
+    backend({ start: conversation({ messages: [answered[0]!, { ...answered[1]!, cost: null }], currentLeafId: 'a1' }) })
+    renderApp('/chat/c1')
+    const a = await screen.findByRole('region', { name: 'Answer' })
+    expect(await within(a).findByText('· ≈ $0.000288')).toHaveAttribute('title', "Partly at today's prices: it ran before costs were kept")
   })
 
   it('a chat that chose no model shows the one that answers: the default, not the first listed', async () => {

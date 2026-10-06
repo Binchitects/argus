@@ -34,6 +34,8 @@ public static class ChatForks
                 Content = m.Content, Reasoning = m.Reasoning, ToolCallsJson = m.ToolCallsJson, ToolCallId = m.ToolCallId, ToolName = m.ToolName,
                 AttachmentsJson = Mapped(m.AttachmentsJson, files), DetailsJson = Mapped(m.DetailsJson, files), ContextJson = m.ContextJson, CutShort = m.CutShort, Model = m.Model,
                 PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens, CompletionTokens = m.CompletionTokens, ThinkingMs = m.ThinkingMs, DurationMs = m.DurationMs,
+                // What it cost, shown as it was; not its answer: it ran once, and is one prompt in usage.
+                Cost = m.Cost,
                 Status = m.Status, Error = m.Error, Summary = m.Summary, CreatedAt = m.CreatedAt,
             };
             copies[m.Id] = copy.Id;

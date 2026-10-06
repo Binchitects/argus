@@ -15,8 +15,12 @@ public static class UsageEndpoints
     public const string Person =
         """coalesce(nullif(s."user",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)')""";
 
-    private const string Cached =
+    /// <summary>A request's prompt tokens the engine read from its cache, as LiteLLM keeps them.</summary>
+    public const string Cached =
         """coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0)""";
+
+    /// <summary>A request's model, by the name people know it by (the deployment's model is the engine's id).</summary>
+    public const string Model = """coalesce(nullif(s.model_group,''), s.model)""";
 
     public const string From = """ from "LiteLLM_SpendLogs" s left join "LiteLLM_VerificationToken" v on v.token = s.api_key """;
 
@@ -60,7 +64,7 @@ public static class UsageEndpoints
                 group by 1 order by 1
                 """, p, ct);
             var byModel = await sql.QueryAsync($"""
-                select s.model as model, count(*) as requests, coalesce(sum(s.total_tokens),0) as tokens, coalesce(sum(s.spend),0) as cost
+                select {Model} as model, count(*) as requests, coalesce(sum(s.total_tokens),0) as tokens, coalesce(sum(s.spend),0) as cost
                 {From}{where}
                 group by 1 order by cost desc
                 """, p, ct);

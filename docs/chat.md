@@ -336,8 +336,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     and you get a note saying so.
   - SVG is never treated as an image, because it can carry script.
 - **Answers.** Markdown with tables and maths (KaTeX), links that open safely
-  in a new tab, and the model, time, tokens and cost under each answer. Model
-  output is sanitised: HTML in an answer never runs.
+  in a new tab, and the model, time, tokens (in, cached, out) and cost under
+  each answer, for everyone. Model output is sanitised: HTML in an answer never
+  runs.
 - **History.** Chats are grouped by date and can be searched. The first
   question becomes the title and the browser tab's name; with a model for
   small steps, it writes a short title from the question while the answer is
@@ -874,8 +875,19 @@ So that everyone gets their turn:
 
 The chat talks to LiteLLM with its own service key (alias `chat`). Each request
 names the person, so spend is theirs (surface **Chat** under Usage & cost), and
-their credit applies. The cost under each answer comes from the model's prices
-at the gateway, its sub-agents' calls included.
+their credit applies.
+
+Under each answer: its tokens in, cached and out, and what it cost. The cost is
+kept as each part runs, at the model's prices then (its own, else Settings →
+Prices; [admin.md](admin.md#prices)), cached input at its own price: every
+round, the pictures, video and speech its tools made, and its sub-agents'
+rounds (kept on their delegate call, with their tokens). The gateway is given
+the same prices, so it books the same. An answer from before costs were kept
+shows `≈`: its cost worked out at today's prices, until an admin recalculates.
+A comparison's two answers show their cost once you have voted, like their
+models: the prices would tell them apart. **Usage & cost → Your prompts** lists
+every answer and API request with its tokens and cost
+([admin.md](admin.md#usage--cost)).
 
 What a person has spent is what the gateway's request log puts to them, over
 every path (chat, API keys, agents), by the same rule as the usage dashboards;

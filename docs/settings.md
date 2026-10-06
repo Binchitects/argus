@@ -25,6 +25,29 @@ Each setting has a badge that says when it applies:
 A value saved here wins over one the environment gives. The page shows the
 value it overrides, and **Back to the environment's value** removes the saved one.
 
+## Prices
+
+**Settings → Prices** holds what a chat model costs when it has no price of
+its own (Admin → Models), and what pictures, video and speech cost. Each is in
+dollars; a change applies at once, and the gateway is given the new prices when
+it is saved.
+
+| Setting | Default | What it prices |
+|---|---|---|
+| Input, per million tokens | 0.20 | the prompt the model reads |
+| Cached input, per million tokens | 0.02 | prompt tokens the engine reads from its cache; never above a model's input |
+| Output, per million tokens | 0.80 | what the model writes, thinking included |
+| A picture | 0.01 | each picture the picture model draws |
+| A second of video | 0.05 | each second of a clip |
+| A minute of sound turned into text | 0.006 | speech to text, by the sound's length |
+| 1,000 characters read aloud | 0.015 | text to speech |
+
+The defaults are about what hosted services charge for a small open model; set
+your own. A new price counts from the moment it is saved: what was booked
+before keeps the price it had. Below the prices, **Recalculate past costs**
+works out the costs of chosen days again at today's prices, on request
+([admin.md](admin.md#prices)).
+
 ## The source link
 
 **Settings → Branding → Where the source is** is linked as **Source** beside

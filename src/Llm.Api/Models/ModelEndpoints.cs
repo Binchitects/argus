@@ -15,7 +15,8 @@ namespace Llm.Api.Models;
 public sealed record LocalModelRequest(
     string? Name, string? File, string? Projector, int? Context, int? MaxOutput, string? Placement, int? GpuLayers, int? CpuMoe, string? KvType, int? Parallel,
     int? Ubatch, bool? Mtp, string? DraftHead, int? DraftMax, bool? Yarn, double? Temperature, double? TopP, int? TopK, double? MinP, double? PresencePenalty,
-    string? ExtraPreset, bool? Thinking, bool? Tools, decimal? InputPerMtok, decimal? OutputPerMtok, string[]? Clear = null, string? Devices = null)
+    string? ExtraPreset, bool? Thinking, bool? Tools, decimal? InputPerMtok, decimal? OutputPerMtok, string[]? Clear = null, string? Devices = null,
+    decimal? CachedInputPerMtok = null)
 {
     /// <summary>A value to empty: a missing one is left as it is.</summary>
     public bool Clears(string field) => Clear?.Contains(field, StringComparer.OrdinalIgnoreCase) == true;
@@ -52,9 +53,23 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
-        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, CancellationToken ct)
+        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, PriceBook prices, CancellationToken ct)
     {
         var e = engine.Value;
+        // What each costs: its own prices, else the defaults (Settings → Prices); own says which it sets.
+        var defaults = prices.Defaults;
+        object Price(decimal? input, decimal? cached, decimal? output)
+        {
+            var p = TokenPrice.Of(input, cached, output, defaults);
+            return new { p.Input, cachedInput = p.CachedInput, p.Output, own = new { input = input is not null, cachedInput = cached is not null, output = output is not null } };
+        }
+        object MediaPrice(string name) => PriceBook.UnitOf(name) switch
+        {
+            "image" => new { unit = "picture", amount = defaults.PerImage },
+            "second" => new { unit = "second of video", amount = defaults.PerVideoSecond },
+            "minute" => new { unit = "minute of sound", amount = defaults.PerAudioMinute },
+            _ => new { unit = "1,000 characters", amount = defaults.PerThousandCharacters },
+        };
         var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
         var local = await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct);
         var rules = await db.ModelAccess.AsNoTracking().ToDictionaryAsync(r => r.Model, ct);
@@ -80,7 +95,7 @@ public static class ModelEndpoints
                 status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null), kept = pinned.Contains(m.Name), keptNow = kept.Contains(m.Name), m.Devices,
                 file = m.File, m.Projector, context = m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
                 m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
-                m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.OutputPerMtok,
+                m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, price = Price(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok),
                 vision = m.Projector is { Length: > 0 }, atGateway = At(m.Name) is not null, access = Access(m.Name),
                 profile = files.GetValueOrDefault(m.File),
             });
@@ -94,6 +109,7 @@ public static class ModelEndpoints
                 {
                     name = m.Name, source = "remote", server = s.Name, remote = m.Remote, mode = "chat", status = (string?)null, context = m.Context,
                     maxOutput = m.MaxOutput, vision = m.Vision, atGateway = At(m.Name) is not null, access = Access(m.Name),
+                    price = Price(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok),
                 });
             }
         }
@@ -104,6 +120,7 @@ public static class ModelEndpoints
             {
                 name = x.Model.Name, source = "media", mode = x.Model.Mode, server = x.Model.Server, status = x.Now, enabled = x.State.Enabled, kept = x.State.Kept,
                 keptNow = x.State.Kept, vision = false, atGateway = At(x.Model.Name) is not null, access = Access(x.Model.Name),
+                unitPrice = MediaPrice(x.Model.Name),
             });
         }
         var onServers = servers.SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
@@ -469,7 +486,7 @@ public static class ModelEndpoints
         {
             return (AuthEndpoints.Problem(400, "file", "Choose a GGUF file from the model library."), null);
         }
-        if ((body.InputPerMtok ?? 0) < 0 || (body.OutputPerMtok ?? 0) < 0)
+        if ((body.InputPerMtok ?? 0) < 0 || (body.CachedInputPerMtok ?? 0) < 0 || (body.OutputPerMtok ?? 0) < 0)
         {
             return (AuthEndpoints.Problem(400, "price", "Prices cannot be negative."), null);
         }
@@ -503,7 +520,7 @@ public static class ModelEndpoints
         Name = m.Name, File = m.File, Projector = m.Projector, Context = m.Context, MaxOutput = m.MaxOutput, Placement = m.Placement, GpuLayers = m.GpuLayers,
         CpuMoe = m.CpuMoe, KvType = m.KvType, Parallel = m.Parallel, Ubatch = m.Ubatch, Mtp = m.Mtp, DraftHead = m.DraftHead, DraftMax = m.DraftMax, Yarn = m.Yarn,
         Temperature = m.Temperature, TopP = m.TopP, TopK = m.TopK, MinP = m.MinP, PresencePenalty = m.PresencePenalty, ExtraPreset = m.ExtraPreset,
-        Thinking = m.Thinking, Tools = m.Tools, InputPerMtok = m.InputPerMtok, OutputPerMtok = m.OutputPerMtok, Devices = m.Devices,
+        Thinking = m.Thinking, Tools = m.Tools, InputPerMtok = m.InputPerMtok, CachedInputPerMtok = m.CachedInputPerMtok, OutputPerMtok = m.OutputPerMtok, Devices = m.Devices,
     };
 
     /// <summary>The request's values over the model's: a missing value is kept, one named in "clear" emptied.</summary>
@@ -535,6 +552,7 @@ public static class ModelEndpoints
         m.Thinking = body.Thinking ?? m.Thinking;
         m.Tools = body.Tools ?? m.Tools;
         m.InputPerMtok = body.Clears("inputPerMtok") ? null : body.InputPerMtok ?? m.InputPerMtok;
+        m.CachedInputPerMtok = body.Clears("cachedInputPerMtok") ? null : body.CachedInputPerMtok ?? m.CachedInputPerMtok;
         m.OutputPerMtok = body.Clears("outputPerMtok") ? null : body.OutputPerMtok ?? m.OutputPerMtok;
     }
 }
