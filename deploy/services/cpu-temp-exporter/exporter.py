@@ -26,8 +26,12 @@ Providers, in order of preference:
   lhm     LibreHardwareMonitor's JSON web server, for Windows hosts. LHM ships
           a signed kernel driver to read Intel DTS / AMD SMU, which is the only
           way to get true core temperature on Windows.
-  acpi    ACPI thermal zones, last resort, reported with source="acpi" so a
-          panel can show that it is probably ambient rather than CPU.
+  acpi    Thermal zones, last resort, and only those that are the CPU's
+          (x86_pkg_temp, cpu..., soc...), reported with source="acpi".
+
+Every series is a temperature of the CPU itself, because the dashboards take
+the hottest and the average of all of them: a board, a wifi card or a core's
+distance to its throttle point would pass for a core.
 
 Environment:
     LHM_URL          default http://host.docker.internal:8085/data.json
@@ -54,6 +58,15 @@ TIMEOUT = float(os.environ.get("SCRAPE_TIMEOUT", "4"))
 # drive, a chipset or a fan controller, and must not be labelled "CPU".
 CPU_CHIPS = ("coretemp", "k10temp", "zenpower", "cpu_thermal", "k8temp")
 
+# Thermal zones that are the CPU: Intel's package sensor, an ARM SoC's cpu zone,
+# Intel DTT's TCPU. acpitz, a wifi card, the chipset or a battery are not.
+CPU_ZONES = re.compile(r"x86_pkg_temp|cpu|soc", re.IGNORECASE)
+
+# LibreHardwareMonitor sensors in degrees that are not a reading: how far a core
+# is below its throttle point ("CPU Core #1 Distance to TjMax", 100 minus the
+# core), and LHM's own max and average of the cores, which would count them twice.
+NOT_A_READING = re.compile(r"distance to tjmax|\b(?:max|average)\b", re.IGNORECASE)
+
 
 def _read(path: str) -> str | None:
     try:
@@ -63,10 +76,10 @@ def _read(path: str) -> str | None:
         return None
 
 
-def from_hwmon() -> list[tuple[str, float]]:
+def from_hwmon(root: str = "/sys/class/hwmon") -> list[tuple[str, float]]:
     """Linux: /sys/class/hwmon/hwmonN/{name,tempN_input,tempN_label}."""
     out: list[tuple[str, float]] = []
-    for base in sorted(glob.glob("/sys/class/hwmon/hwmon*")):
+    for base in sorted(glob.glob(f"{root}/hwmon*")):
         chip = (_read(f"{base}/name") or "").lower()
         if not any(c in chip for c in CPU_CHIPS):
             continue
@@ -87,30 +100,39 @@ def from_hwmon() -> list[tuple[str, float]]:
     return out
 
 
-def _walk_lhm(node: dict, path: str = "") -> list[tuple[str, float]]:
-    """LibreHardwareMonitor's /data.json is a tree of {Text, Value, Children}."""
-    found: list[tuple[str, float]] = []
+def _lhm_sensors(node: dict, path: tuple[str, ...] = (), on_cpu: bool = False) -> list[tuple[tuple[str, ...], float, bool]]:
+    """Every degree reading in LibreHardwareMonitor's /data.json, a tree of
+    {Text, Value, ImageURL, SensorId, Children}: the names down to it (a name
+    may hold a slash, "Core (Tctl/Tdie)"), its value, and whether it sits under
+    the CPU itself rather than the board."""
+    found: list[tuple[tuple[str, ...], float, bool]] = []
     text = (node.get("Text") or "").strip()
-    here = f"{path}/{text}" if text else path
+    here = path + (text,) if text else path
+    on_cpu = (on_cpu or str(node.get("ImageURL") or "").endswith("cpu.png")
+              or str(node.get("SensorId") or "").startswith(("/intelcpu/", "/amdcpu/")))
     value = node.get("Value")
     if isinstance(value, str) and "°C" in value:
-        # Values arrive as "46.0 °C"; a CPU node anywhere up the path qualifies it.
+        # Values arrive as "46.0 °C".
         m = re.search(r"(-?\d+(?:[.,]\d+)?)", value)
-        if m and "cpu" in here.lower():
-            try:
-                # The full LHM path is unusable as a legend -- it reads
-                # "Sensor/HOSTNAME/MSI MPG Z690 CARBON WIFI (MS-7D30)/Nuvoton
-                # NCT6687D/Temperatures/CPU". Keep the chip and the sensor, so
-                # a board sensor is still distinguishable from the package.
-                parts = [x for x in here.strip("/").split("/") if x]
-                short = "/".join(parts[-3:-1] + parts[-1:]) if len(parts) >= 3 else here
-                short = short.replace("Temperatures/", "")
-                found.append((short, float(m.group(1).replace(",", "."))))
-            except ValueError:
-                pass
+        if m:
+            found.append((here, float(m.group(1).replace(",", ".")), on_cpu))
     for child in node.get("Children") or []:
-        found.extend(_walk_lhm(child, here))
+        found.extend(_lhm_sensors(child, here, on_cpu))
     return found
+
+
+def _walk_lhm(node: dict) -> list[tuple[str, float]]:
+    """The CPU's temperatures in LHM's tree: the CPU's own sensors (cores,
+    package, dies) or, when LHM shows none, a board sensor named CPU (the
+    socket, read by the Super I/O chip). A distance to TjMax and LHM's own max
+    and average of the cores are not readings and are left out."""
+    readings = [(p, v, cpu) for p, v, cpu in _lhm_sensors(node) if p and not NOT_A_READING.search(p[-1])]
+    picked = [(p, v) for p, v, cpu in readings if cpu] or [(p, v) for p, v, _ in readings if "cpu" in p[-1].lower()]
+    # The full LHM path is unusable as a legend -- it reads
+    # "Sensor/HOSTNAME/MSI MPG Z690 CARBON WIFI (MS-7D30)/Nuvoton
+    # NCT6687D/Temperatures/CPU". Keep the chip and the sensor, so
+    # a board sensor is still distinguishable from the package.
+    return [("/".join(x for x in p[-3:] if x != "Temperatures"), v) for p, v in picked]
 
 
 def from_lhm() -> list[tuple[str, float]]:
@@ -122,11 +144,15 @@ def from_lhm() -> list[tuple[str, float]]:
     return _walk_lhm(data)
 
 
-def from_acpi() -> list[tuple[str, float]]:
-    """Last resort. Often an ambient/board sensor rather than the CPU, which is
-    why it is labelled source="acpi" instead of being silently mixed in."""
+def from_acpi(root: str = "/sys/class/thermal") -> list[tuple[str, float]]:
+    """Last resort, labelled source="acpi": the thermal zones that are the CPU.
+    acpitz is often a board sensor that never moves, and a wifi card or the
+    chipset would pass for the hottest core."""
     out: list[tuple[str, float]] = []
-    for zone in sorted(glob.glob("/sys/class/thermal/thermal_zone*")):
+    for zone in sorted(glob.glob(f"{root}/thermal_zone*")):
+        kind = _read(f"{zone}/type") or ""
+        if not CPU_ZONES.search(kind):
+            continue
         raw = _read(f"{zone}/temp")
         if raw is None:
             continue
@@ -135,7 +161,6 @@ def from_acpi() -> list[tuple[str, float]]:
         except ValueError:
             continue
         if 0.0 < celsius < 150.0:
-            kind = _read(f"{zone}/type") or os.path.basename(zone)
             out.append((kind, celsius))
     return out
 
@@ -143,10 +168,21 @@ def from_acpi() -> list[tuple[str, float]]:
 PROVIDERS = (("hwmon", from_hwmon), ("lhm", from_lhm), ("acpi", from_acpi))
 
 
+def _without_offset_tctl(readings: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """AMD's Tctl is the fan-control value: on the first Ryzens and Threadrippers
+    it sits 10-27 C above the die, which they also report as Tdie. When a Tdie
+    is there, a Tctl that is not also the Tdie ("Core (Tctl/Tdie)") goes."""
+    tctl = re.compile(r"\bTctl\b")
+    tdie = re.compile(r"\bTdie\b")
+    if not any(tdie.search(n) and not tctl.search(n) for n, _ in readings):
+        return readings
+    return [(n, v) for n, v in readings if not tctl.search(n) or tdie.search(n)]
+
+
 def collect() -> tuple[str, list[tuple[str, float]]]:
     for name, fn in PROVIDERS:
         try:
-            readings = fn()
+            readings = _without_offset_tctl(fn())
         except Exception:        # noqa: BLE001
             readings = []
         if readings:

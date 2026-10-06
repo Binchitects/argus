@@ -28,7 +28,21 @@ which one answered:
 |---|---|---|
 | `hwmon` | Linux `/sys/class/hwmon` | coretemp (Intel) / k10temp (AMD). Real DTS. Works with no setup -- a container's `/sys` already is the host's. |
 | `lhm` | LibreHardwareMonitor's JSON server | Windows. LHM ships the kernel driver that reads Intel DTS. |
-| `acpi` | `/sys/class/thermal` | Last resort, labelled `source="acpi"` so a panel can show it is probably ambient. |
+| `acpi` | `/sys/class/thermal` | Last resort, labelled `source="acpi"`, and only the zones that are the CPU: `x86_pkg_temp`, `cpu...`, `soc...`. |
+
+Every series it reports is a temperature of the CPU itself, because the
+dashboards take the hottest and the average of all of them. So it leaves out:
+
+- LHM's **Distance to TjMax** sensors (how far a core is below its throttle
+  point, about 100 minus the core) and LHM's own **Core Max** and **Core
+  Average**, which would count the cores twice.
+- The board's `CPU` sensor (its Super I/O chip's, such as `Nuvoton
+  NCT6687D/CPU`) whenever LHM shows the CPU's own sensors. It stands in only
+  when the CPU's are missing.
+- AMD's `Tctl` when the chip also reports `Tdie`: on the first Ryzens and
+  Threadrippers Tctl runs 10-27 C above the die, for the fans.
+- Thermal zones that are not the CPU: `acpitz` (the board, see above), a wifi
+  card, the chipset, a battery.
 
 Metrics:
 
