@@ -368,6 +368,24 @@ the turns took 14, 20, 25 and 31 seconds, growing with the chat. 77% of the
 prompt tokens came from the cache instead of 72%, and the prompts took 356
 seconds to read instead of 428.
 
+#### A model bigger than RAM and the GPU
+
+A model larger than the GPU's memory and RAM together still loads: llama.cpp
+maps its file, and the parts that do not fit are read from disk again each
+time they are needed. Answers then start slowly and unevenly, and RAM looks
+idle in `free` while it is full of the model's file (buff/cache). Measured
+here: Qwen3.8-Flash-Next at IQ4_XS is 94 GB, against 61 GB of RAM and 21 GB
+of GPU memory in use; its prompts read at 96 tokens a second for a short one
+and 290 for a long one, and a first round after an idle spell took 13.7 s for
+832 tokens. The same model at IQ3_XXS is 64 GB and fits. Two things help:
+
+- A quantization that fits the GPU and RAM together, with room left for the
+  other services: the model form and Admin → Models say when one does not.
+- `ENGINE_RAM_PROTECT` in `.env` ([configuration.md](configuration.md#env)):
+  RAM the host keeps for the engine under memory pressure (cgroup
+  `memory.low`), so its pages stay in RAM instead of other files' taking
+  their place. It is never a limit, and nothing is killed for it.
+
 ### Quality
 
 Two things feed it, both from the chat ([chat.md](chat.md)):

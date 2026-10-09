@@ -158,6 +158,14 @@ services:
       - engine:/presets:ro
     ulimits: { memlock: -1 }
     shm_size: 2gb
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+          # RAM the host keeps for the engine under memory pressure (cgroup memory.low, never a hard limit):
+          # the model's layers and experts held in RAM stay there instead of being read from disk again after
+          # an idle spell (a first answer that seems stuck). 0: none.
+          memory: ${ENGINE_RAM_PROTECT:-0}
 
   # Embeddings for Argus and the app's company knowledge, on the CPU. The app fetches the file into MODELS_DIR/embed.
   embed:

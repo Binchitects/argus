@@ -342,7 +342,7 @@ public sealed partial class ChatService(
                 request["max_tokens"] = maxTokens;
             }
             // A model that does not think gets no thinking switches: its template may not know them (Qwen3-Omni's answers nothing).
-            if (model?.Thinking != false && ThinkingPresets.TemplateKwargs(overrides.Hurry?.Asked == true ? "off" : thinking) is { } kwargs)
+            if (model?.Thinking != false && ThinkingPresets.TemplateKwargs(overrides.Hurry?.Asked == true ? "off" : round > 0 ? ThinkingPresets.Between(thinking, chat.CurrentValue) : thinking) is { } kwargs)
             {
                 request["chat_template_kwargs"] = kwargs;
             }

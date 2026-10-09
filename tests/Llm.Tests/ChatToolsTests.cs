@@ -105,6 +105,31 @@ public sealed class ChatToolsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task The_round_after_a_tools_result_thinks_at_the_level_set_for_it_never_above_the_chats()
+    {
+        var (b, _, _) = await PersonAsync(app.Factory);
+        var id = await NewChatAsync(b, new { useArgus = false, thinking = "xhigh" });
+        var marker = "between-" + Guid.NewGuid().ToString("N")[..8];
+        await SendAsync(b, id, $$"""{{marker}} [call calculate {"expression":"1+1"}]""");
+        var asks = app.Model.Requests.Select(r => r.Body)
+            .Where(r => r["tools"] is not null && r["messages"]!.AsArray().Any(m => m!["content"]?.ToString().Contains(marker, StringComparison.Ordinal) == true)).ToList();
+        Assert.Equal(2, asks.Count);
+        Assert.Equal("xhigh", asks[0]["chat_template_kwargs"]!["reasoning_effort"]!.GetValue<string>());
+        // After the calculator's result: Chat:ThinkingBetweenTools (low).
+        Assert.Equal("low", asks[1]["chat_template_kwargs"]!["reasoning_effort"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData("xhigh", "low", "low")]
+    [InlineData("low", "medium", "low")]
+    [InlineData("off", "low", "off")]
+    [InlineData("medium", "off", "off")]
+    [InlineData("xhigh", "same", "xhigh")]
+    [InlineData("xhigh", "nonsense", "xhigh")]
+    public void Thinking_between_tool_calls_is_never_above_the_chats(string chat, string between, string expected) =>
+        Assert.Equal(expected, ThinkingPresets.Between(chat, new ChatOptions { ThinkingBetweenTools = between }));
+
+    [Fact]
     public async Task The_calculator_and_the_clock_answer_for_the_model()
     {
         var (b, _, _) = await PersonAsync(app.Factory);

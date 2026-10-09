@@ -35,6 +35,7 @@ Three places, each with one job:
 | `APP_REPLICAS` | optional, with `scale.yml`: how many app replicas run behind Traefik (2) ([deployment.md](deployment.md#scale-out)) |
 | `COMPOSE_PROFILES` | optional: `laya` runs Laya, the one module off by default ([deployment.md](deployment.md#laya)) |
 | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | optional: power caps, kept applied |
+| `ENGINE_RAM_PROTECT` | optional: RAM the host keeps for the engine under memory pressure (`40g`; cgroup `memory.low`, never a limit, so nothing is killed for it): the model's layers and experts held in RAM stay there instead of being read from disk again after an idle spell. About the RAM part of the model new chats use, and well under the host's RAM. Empty or 0: none ([admin.md](admin.md#a-model-bigger-than-ram-and-the-gpu)) |
 | `XDG_RUNTIME_DIR` | Podman only, from your shell (not `.env`): where Promtail finds the Podman socket |
 
 Everything else is set in the app, not here: Admin → Settings (the company

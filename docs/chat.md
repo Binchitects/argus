@@ -1040,7 +1040,12 @@ The chat's limits are under Admin → Settings → Chat ([settings.md](settings.
 | Arena leaderboard for everyone | on | everyone sees the leaderboard of Compare's votes; off: admins only (Admin → Quality) |
 
 The thinking levels (`THINKING_PRESETS`) and **Model for sub-agents and small
-steps** are under Settings → Model. Everyone's language, voices, reading speed
+steps** are under Settings → Model. So is **Thinking between tool calls**
+(`low` as installed): how hard the model thinks in the rounds after a tool's
+result, where it reads the result and calls the next tool or answers. It is
+never above the chat's own level; `same` keeps the chat's. Thinking is the
+wait between two tool calls: measured on Qwen3.8-Flash-Next here, a round
+started 2.2 s after the tool's result and thought 3 s before it wrote. Everyone's language, voices, reading speed
 and reading aloud in Talk are under Settings → Speech, until each person
 chooses their own ([Your voice](#your-voice)).
 **GitLab address for links** (Settings → Argus, applies at once) is where

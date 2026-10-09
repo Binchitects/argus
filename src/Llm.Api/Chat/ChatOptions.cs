@@ -51,6 +51,12 @@ public sealed class ChatOptions
     /// <summary>How hard the model thinks when a chat does not choose.</summary>
     public string DefaultThinking { get; set; } = "medium";
 
+    /// <summary>
+    /// How hard the model thinks in the rounds after a tool's result, when it only reads it and calls the next
+    /// tool or answers: one of the levels, never above the chat's own; "same": as the chat's.
+    /// </summary>
+    public string ThinkingBetweenTools { get; set; } = "low";
+
     /// <summary>Longest an answer waits in line before it gives up.</summary>
     public TimeSpan QueueTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
@@ -74,6 +80,24 @@ public static class ThinkingPresets
             .Select(item => item.Split(':', 2, StringSplitOptions.TrimEntries))
             .Where(p => p[0].Length > 0)
             .Select(p => new ThinkingPreset(p[0].ToLowerInvariant(), p.Length > 1 && p[1].Length > 0 ? p[1] : p[0]))];
+
+    /// <summary>
+    /// The thinking for a round after a tool's result: <see cref="ChatOptions.ThinkingBetweenTools"/>, never above the
+    /// chat's own (the levels as <see cref="ChatOptions.ThinkingPresets"/> lists them, hardest first); the chat's own
+    /// when either is not a level there, or the setting says "same".
+    /// </summary>
+    public static string? Between(string? chat, ChatOptions o)
+    {
+        var between = o.ThinkingBetweenTools?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(between) || between == "same" || chat is null)
+        {
+            return chat;
+        }
+        var levels = Parse(o.ThinkingPresets).Select(p => p.Level).ToList();
+        int Rank(string level) => level == "off" ? int.MaxValue : levels.IndexOf(level);
+        var (mine, theirs) = (Rank(chat), Rank(between));
+        return mine < 0 || theirs < 0 ? chat : theirs > mine ? between : chat;
+    }
 
     /// <summary>
     /// What reaches the model's chat template. A top-level reasoning_effort is dropped
