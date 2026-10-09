@@ -159,7 +159,7 @@ public static class SettingsCatalog
             { Default = "01:00:00", Unit = "minutes", Min = 1, Max = 1440, Optional = false },
         new("Quality:PublicLeaderboard", Chat, "Arena leaderboard for everyone", "Everyone sees the leaderboard of the company's models on its own questions, made from the votes of Compare in the chat. Off: admins only (Admin → Quality).", SettingType.Boolean, SettingScope.Live)
             { Default = "true", Optional = false },
-        new("Chat:DefaultModel", Model, "Model new chats use", "A chat model's name, or auto for Auto (offered while a model for small steps is set). Empty: the first kept loaded (Admin → Models).", SettingType.Text, SettingScope.Live)
+        new("Chat:DefaultModel", Model, "Model new chats use", "A chat model's name, or auto for Auto (offered while a model for small steps is set). Empty: the first kept loaded (Admin → Models); with none kept, the first loaded, which stays the one while it is loaded. With 2 or more models at once, this model never makes room for another, and loads again should an API key's request have the engine unload it.", SettingType.Text, SettingScope.Live)
             { Max = 100 },
         new("Chat:SmallModel", Model, "Model for sub-agents and small steps", "A small, fast chat model for the many short steps: sub-agents, chat titles, compaction summaries, the safeguards' check, and Auto, which it brings to the chat's model menu (it answers easy questions itself and hands the rest on). It never thinks for them. Keep it loaded beside the big model (Admin → Models), or the first steps wait for it to load (once loaded it stays). Empty: each step uses the answer's own model.", SettingType.Text, SettingScope.Live)
             { Max = 100 },

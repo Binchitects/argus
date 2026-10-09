@@ -7,7 +7,7 @@ export interface ChatModel {
   thinking: boolean
   /** False for an engine model that is not loaded now. */
   loaded: boolean
-  /** Not loaded, but loads when asked for (the engine has a place beside the models kept loaded): its first answer waits. */
+  /** Not loaded, but loads when asked for (the engine has a place beside the models that never make room: those kept loaded, the one new chats use, the one for small steps): its first answer waits. */
   onRequest?: boolean
   prices: { input: number | null; cachedInput: number | null; output: number | null }
 }

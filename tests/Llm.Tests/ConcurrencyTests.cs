@@ -840,6 +840,33 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task With_none_set_new_chats_stay_on_the_model_they_were_getting_when_one_the_list_puts_first_loads()
+    {
+        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:DefaultModel"] = "" }, parallel: 1, keep: [], others: [("tiny-a", 1)]);
+        var state = f.Services.GetRequiredService<EngineState>();
+        await EventuallyAsync(() => state.Default == Big, "the big model is the one new chats get");
+        // The gateway lists tiny-a first; then someone has it loaded.
+        var gateway = (FakeGateway)f.Services.GetRequiredService<Llm.Api.Gateway.ILiteLlm>();
+        lock (gateway.Models)
+        {
+            var first = gateway.Models.Single(m => m.Name == "tiny-a");
+            gateway.Models.Remove(first);
+            gateway.Models.Insert(0, first);
+        }
+        f.Services.GetRequiredService<ChatModels>().Forget();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));
+        await EventuallyAsync(() => state.StatusOf("tiny-a") == "loaded" && state.Spare.SequenceEqual(["tiny-a"]), "tiny-a loaded, and it may make room");
+
+        // A chat that chose no model is still answered by the big one, which stays held.
+        Assert.Equal(Big, state.Default);
+        var b = await PersonAsync(f);
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { thinking = "off", tools = Array.Empty<string>() }))).GetProperty("id").GetGuid();
+        var events = await AskAsync(b, chat, "which model?");
+        Assert.Equal(Big, events.First(e => e.GetProperty("type").GetString() == "assistant").GetProperty("model").GetString());
+    }
+
+    [Fact]
     public async Task The_model_new_chats_use_comes_back_after_an_API_keys_request_had_the_engine_unload_it()
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);
