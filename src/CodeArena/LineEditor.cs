@@ -19,8 +19,14 @@ internal interface IKeyboard
     /// <summary>The terminal's height, in rows: the cursor cannot go back above the top one.</summary>
     int Height { get; }
 
-    /// <summary>Ctrl+C comes as a key (it clears the line) until disposed; otherwise it stops the turn.</summary>
+    /// <summary>
+    /// Ctrl+C comes as a key (it clears the line) until disposed; otherwise it stops the turn. On Linux and macOS
+    /// Ctrl+Z comes as a key then too, instead of stopping the program.
+    /// </summary>
     IDisposable CaptureCtrlC();
+
+    /// <summary>Stops the program as Ctrl+Z does in a shell, and returns once it goes on (fg); null where programs are not stopped so (Windows).</summary>
+    Action? Suspend { get; }
 }
 
 /// <summary>
@@ -31,7 +37,8 @@ internal interface IKeyboard
 /// history as it was. A line ending in \ goes on to the next, as Enter does in a
 /// paste; in a message of several lines ↑ and ↓ move between them first, a
 /// recalled one's too. A message taller than the screen shows the rows round
-/// the caret, and the whole of it once sent.
+/// the caret, and the whole of it once sent. Ctrl+Z stops the program, as at a
+/// shell's prompt, and the prompt is drawn again, as it was, when it goes on.
 /// </summary>
 internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func<IReadOnlyList<string>> history)
 {
@@ -54,7 +61,7 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
     private string _draft = "";
     private bool _afterReturn;
 
-    private enum Outcome { None, Render, Send, End, Interrupt }
+    private enum Outcome { None, Render, Send, End, Interrupt, Suspend }
 
     /// <summary>Ctrl+C on an empty prompt: true to read on (a hint was given), false to leave.</summary>
     public Func<bool>? Interrupted { get; init; }
@@ -71,37 +78,56 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
         _entries = [.. history().Reverse().Distinct().Reverse()];
         _at = _entries.Count;
         _draft = "";
-        using var capture = keys.CaptureCtrlC();
-        Render();
-        while (true)
+        IDisposable? capture = keys.CaptureCtrlC();
+        try
         {
-            if (keys.ReadKey() is not { } key)
+            Render();
+            while (true)
             {
-                Finish();
-                return null;
-            }
-            switch (Handle(key))
-            {
-                case Outcome.Send:
-                    Finish();
-                    return _text.ToString();
-                case Outcome.End:
+                if (keys.ReadKey() is not { } key)
+                {
                     Finish();
                     return null;
-                case Outcome.Interrupt:
-                    Finish();
-                    if (Interrupted?.Invoke() != true)
-                    {
+                }
+                switch (Handle(key))
+                {
+                    case Outcome.Send:
+                        Finish();
+                        return _text.ToString();
+                    case Outcome.End:
+                        Finish();
                         return null;
-                    }
-                    Fresh();
-                    Render();
-                    break;
-                // Half a character (the rest comes next), or a paste: drawn once it is all in.
-                case Outcome.Render when !keys.KeyAvailable && !(_caret > 0 && char.IsHighSurrogate(_text[_caret - 1])):
-                    Render();
-                    break;
+                    case Outcome.Interrupt:
+                        Finish();
+                        if (Interrupted?.Invoke() != true)
+                        {
+                            return null;
+                        }
+                        Fresh();
+                        Render();
+                        break;
+                    case Outcome.Suspend:
+                        // The line stays, the shell's word under it; the keys are signals again until the program goes on and draws it again.
+                        var caret = _caret;
+                        Finish();
+                        capture.Dispose();
+                        capture = null;
+                        keys.Suspend!();
+                        capture = keys.CaptureCtrlC();
+                        _caret = caret;
+                        Fresh();
+                        Render();
+                        break;
+                    // Half a character (the rest comes next), or a paste: drawn once it is all in.
+                    case Outcome.Render when !keys.KeyAvailable && !(_caret > 0 && char.IsHighSurrogate(_text[_caret - 1])):
+                        Render();
+                        break;
+                }
             }
+        }
+        finally
+        {
+            capture?.Dispose();
         }
     }
 
@@ -214,6 +240,8 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
                 _caret = 0;
                 _at = _entries.Count;
                 return Outcome.Render;
+            case 'z' when keys.Suspend is not null:
+                return Outcome.Suspend;
             case not '\0':
                 return Outcome.None;
         }

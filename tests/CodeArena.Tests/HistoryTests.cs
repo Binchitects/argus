@@ -20,6 +20,7 @@ internal sealed class ScriptedKeys : IKeyboard
     public bool Pasting { get; set; }
     public bool KeyAvailable => _keys.Count > 0 && (Pasting || (_read != 0 && _keys.Peek().Paste == _read));
     public int Captured { get; private set; }
+    public Action? Suspend { get; set; }
 
     public ConsoleKeyInfo? ReadKey()
     {
@@ -331,6 +332,36 @@ public sealed class HistoryTests : IDisposable
         Assert.Null(editor.Read("› ", "… "));
         // Keys run out: the end of input.
         Assert.Null(editor.Read("› ", "… "));
+    }
+
+    [Fact]
+    public void Ctrl_z_stops_the_program_with_its_keys_signals_again_and_draws_the_prompt_as_it_was_when_it_goes_on()
+    {
+        var keys = new ScriptedKeys();
+        var output = new StringWriter();
+        var editor = new LineEditor(keys, output, () => []);
+        var stopped = new List<(int Captured, string Screen)>();
+        keys.Suspend = () =>
+        {
+            var screen = new Screen(80);
+            screen.Feed(output.ToString());
+            stopped.Add((keys.Captured, screen.Current));
+            output.Write("[1]+  Stopped\r\n$ fg\r\n");
+        };
+        keys.Type("fix the").Left().Left().Left().Ctrl('z').Type("X").Enter();
+        Assert.Equal("fix Xthe", editor.Read("› ", "… "));
+        // While stopped, Ctrl+C and Ctrl+Z were the terminal's again; the line was left whole, the cursor under it.
+        Assert.Equal([(0, "")], stopped);
+        var screen = new Screen(80);
+        screen.Feed(output.ToString());
+        Assert.Equal(["› fix the", "[1]+  Stopped", "$ fg", "› fix Xthe"], screen.Lines);
+        Assert.Equal(0, keys.Captured);
+
+        // Where programs are not stopped so (Windows), Ctrl+Z types nothing.
+        keys.Suspend = null;
+        keys.Type("a").Ctrl('z').Type("b").Enter();
+        Assert.Equal("ab", editor.Read("› ", "… "));
+        Assert.Single(stopped);
     }
 
     [Fact]

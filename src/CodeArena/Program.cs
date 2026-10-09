@@ -150,11 +150,30 @@ internal static class ConsoleSetup
             return new Restore(() => Console.TreatControlCAsInput = before);
         }
 
+        public Action? Suspend => OperatingSystem.IsWindows() ? null : Stop;
+
+        /// <summary>
+        /// SIGTSTP to the process group, as the terminal sends it for Ctrl+Z (a script that started the program stops
+        /// with it, so the shell gets the terminal back), and to this thread, which stops at once: back here on fg.
+        /// </summary>
+        private static void Stop()
+        {
+            var tstp = OperatingSystem.IsLinux() ? 20 : 18;
+            _ = kill(0, tstp);
+            _ = raise(tstp);
+        }
+
         private sealed class Restore(Action undo) : IDisposable
         {
             public void Dispose() => undo();
         }
     }
+
+    [DllImport("libc")]
+    private static extern int kill(int pid, int signal);
+
+    [DllImport("libc")]
+    private static extern int raise(int signal);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetStdHandle(int which);

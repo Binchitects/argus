@@ -114,7 +114,9 @@ under it: a diff for an edit, the last lines of a command's output, a count for
 a search. Each turn ends with its tokens and the share read from the cache
 (`12.4k in (81% cached) · 310 out · 3 requests`). **Ctrl+C** stops the turn and
 keeps what was said; at the prompt it clears what is typed, and on an empty
-prompt twice leaves. A line ending in `\` goes on to the next.
+prompt twice leaves. **Ctrl+Z** at the prompt stops code-arena, as in a shell:
+`fg` brings it back, with what you were typing (not on Windows). A line ending
+in `\` goes on to the next.
 
 The prompt is edited in place, as a shell's is: ← and → (with Ctrl or Alt, a
 word), Home and End (Ctrl+A, Ctrl+E), Backspace and Delete, Ctrl+U and Ctrl+K
