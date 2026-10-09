@@ -101,10 +101,13 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 - **What you sent before (↑).** As in Claude's apps: with the box empty, or
   the caret on its first line, **↑** brings back your last message in this
   chat, then older ones; when this chat has none left, your messages in your
-  other chats (archived ones too), newest first, each text once. **↓** goes
-  back toward the newest, and past it to what you were typing, kept as it was;
-  **Esc** goes straight back to it. **Enter** sends the message again, as a
-  new one; editing it changes a copy, never the message it came from. Only its
+  other chats (archived ones too), newest first, each text once. A scheduled
+  task's runs are not among them (an event's text rides in their questions),
+  nor what a fork copied from the chat it came from: someone else's questions,
+  or yours, still in that chat. **↓** goes back toward the newest, and past
+  it to what you were typing, kept as it was; **Esc** goes straight back to it.
+  **Enter** sends the message again, as a new one; editing it changes a copy,
+  never the message it came from. Only its
   words come back, not its files. In anything of several lines, a draft or a
   message brought back, ↑ and ↓ move between its lines first, and go on from
   its first or last line. A message of one line brought back steps on with
@@ -1066,7 +1069,9 @@ use and edit one); a new chat takes `assistantId`.
   checks on names and groups, and a plugin's `/triage` installed with it, for
   whoever may use its tool, and removed with it. And ↑'s history: one's own
   messages across chats, newest first, a page at a time, archived chats' too,
-  a deleted chat's and pasted documents left out, and nobody else's.
+  a deleted chat's and pasted documents left out, and nobody else's: not a
+  triggered task's run, nor a shared chat's questions copied into a fork (what
+  is written in the fork after counts).
   Also ratings (kept, changed, taken back, answers and known reasons only, the
   owner only), the quality page's numbers per model and assistant, a shared chat
   read by an admin and audited, and closed again; arena mode (both models
