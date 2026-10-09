@@ -103,7 +103,7 @@ public static class ModelEndpoints
                 vision = m.Projector is { Length: > 0 }, atGateway = At(m.Name) is not null, access = Access(m.Name),
                 profile = files.GetValueOrDefault(m.File),
                 // What its token cache keeps, and the RAM it takes.
-                cache = TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name)),
+                cache = TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name), engine.Value.SessionCacheGb),
             });
         }
         foreach (var s in servers)

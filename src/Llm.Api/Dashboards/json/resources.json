@@ -89,7 +89,7 @@
     },
     {
       "type": "gauge",
-      "title": "Memory used",
+      "title": "Memory used by programs",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -141,7 +141,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "description": "Memory that programs hold and the system cannot take back (100% minus MemAvailable). The models' files that the engine maps sit in the page cache, not here: Memory below shows it. When a model is bigger than RAM and the GPU, that page cache is full and the model is read from disk as it runs (Admin -> Models)."
     },
     {
       "type": "gauge",
@@ -535,7 +536,7 @@
         {
           "refId": "B",
           "expr": "node_memory_Cached_bytes",
-          "legendFormat": "cached"
+          "legendFormat": "page cache (the models’ files, and others)"
         },
         {
           "refId": "C",

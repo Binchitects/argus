@@ -18,7 +18,8 @@ namespace Llm.Api.Models;
 /// <param name="Checkpoints">Checkpoints a slot keeps (hybrid and recurrent models); null for others.</param>
 /// <param name="CheckpointBytes">The RAM one checkpoint takes, from the file's profile; null when unknown.</param>
 /// <param name="RamBytes">The RAM every slot's checkpoints take at most, together.</param>
-public sealed record TokenCache(int Slots, int? SideSlot, bool Pinned, bool KeepsIdle, int? Checkpoints, long? CheckpointBytes, long? RamBytes)
+/// <param name="SessionBytes">The RAM kept for the conversations that lost their slot (cache-ram), at most; 0: none; null: llama.cpp's own.</param>
+public sealed record TokenCache(int Slots, int? SideSlot, bool Pinned, bool KeepsIdle, int? Checkpoints, long? CheckpointBytes, long? RamBytes, long? SessionBytes = null)
 {
     /// <summary>Checkpoints a slot keeps unless the model's extra lines say otherwise (llama.cpp's own is 32).</summary>
     public const int DefaultCheckpoints = 4;
@@ -27,7 +28,7 @@ public sealed record TokenCache(int Slots, int? SideSlot, bool Pinned, bool Keep
     public static bool Checkpointed(ModelProfile? profile) => profile?.Attention is "hybrid" or "recurrent";
 
     /// <summary>The cache of a model added here; <paramref name="pooled"/>: it has copies on other GPU servers.</summary>
-    public static TokenCache Of(LocalModel m, ModelProfile? profile, bool pooled)
+    public static TokenCache Of(LocalModel m, ModelProfile? profile, bool pooled, int? sessionCacheGb = null)
     {
         var slots = Math.Max(1, m.Parallel);
         var own = ModelCatalog.ExtraValues(m.ExtraPreset);
@@ -39,7 +40,9 @@ public sealed record TokenCache(int Slots, int? SideSlot, bool Pinned, bool Keep
                 ? Math.Max(0, n) : DefaultCheckpoints)
             : null;
         long? each = checkpoints is not null && profile!.RecurrentBytesPerSlot > 0 ? profile.RecurrentBytesPerSlot : null;
+        long? sessions = own.TryGetValue("cache-ram", out var ram) && long.TryParse(ram, NumberStyles.Integer, CultureInfo.InvariantCulture, out var mib)
+            ? Math.Max(0, mib) << 20 : sessionCacheGb is { } gb ? (long)Math.Max(0, gb) << 30 : null;
         return new TokenCache(slots, pooled ? null : SlotTable.SideSlot(slots), !pooled && slots >= 2, keepsIdle, checkpoints, each,
-            each is { } b ? b * checkpoints!.Value * slots : null);
+            each is { } b ? b * checkpoints!.Value * slots : null, sessions);
     }
 }

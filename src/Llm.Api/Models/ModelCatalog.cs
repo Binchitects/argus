@@ -361,7 +361,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     }
 
     /// <summary>A model's section of the engine's presets: the settings of its kind, and only what the engine should not decide itself.</summary>
-    public static string Preset(LocalModel m, string library, int? threads = null, ModelProfile? profile = null)
+    public static string Preset(LocalModel m, string library, int? threads = null, ModelProfile? profile = null, int? sessionCacheGb = null)
     {
         var sb = new StringBuilder();
         var inv = CultureInfo.InvariantCulture;
@@ -459,6 +459,13 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             sb.Append(CultureInfo.InvariantCulture, $"ctx-checkpoints = {TokenCache.DefaultCheckpoints}\n");
         }
+        // A conversation that lost its slot to another is kept in RAM, its checkpoints too, and comes back from there
+        // (measured: six long chats taking turns over four slots read 57-63% of each prompt from the cache, about all
+        // there was to read). Engine:SessionCacheGb sizes it; the extra lines may set their own.
+        if (sessionCacheGb is { } gb && !own.ContainsKey("cache-ram"))
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"cache-ram = {Math.Max(0, gb) * 1024}\n");
+        }
         foreach (var raw in (m.ExtraPreset ?? "").Split('\n'))
         {
             var line = raw.Trim();
@@ -488,7 +495,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         // Each file's profile: its attention decides the checkpoints, its training the YaRN stretch.
         var profiles = models.Count > 0 ? library.List().ToDictionary(e => e.File.Path, e => e.Profile, StringComparer.Ordinal) : [];
         var text = "# Written by the app (Admin -> Models). The engine restarts when this changes.\n\n" +
-            string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File))));
+            string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File), options.Value.SessionCacheGb)));
         Write(PresetsFile, text);
     }
 

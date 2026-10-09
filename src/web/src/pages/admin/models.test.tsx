@@ -112,6 +112,9 @@ describe('admin models', () => {
     expect(cacheLine({ ...c, slots: 1, pinned: false })).toBe('Token cache: 1 slot: conversations take turns in it')
     expect(cacheLine({ ...c, slots: 4, pinned: false })).toBe('Token cache: 4 slots; the gateway shares requests among its copies, so a conversation does not keep one')
     expect(cacheLine({ ...c, keepsIdle: false, checkpoints: 8 })).toBe('Token cache: 2 slots, each keeping a conversation · idle slots are emptied at each new request · 8 checkpoints a slot, in RAM')
+
+    expect(cacheLine({ ...c, sessionBytes: 8 * 1024 ** 3 })).toBe('Token cache: 2 slots, each keeping a conversation · chats that lose their slot wait in RAM, up to 8.0 GiB')
+    expect(cacheLine({ ...c, sessionBytes: 0 })).toBe('Token cache: 2 slots, each keeping a conversation · chats that lose their slot are read again in full')
   })
 
   it('a model is added from the library, starting from what fits its kind and the machine', async () => {

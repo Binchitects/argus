@@ -20,6 +20,21 @@ public sealed class PromptCacheTests
     }
 
     [Fact]
+    public void Chats_that_lose_their_slot_wait_in_the_RAM_the_setting_gives_unless_a_models_extra_lines_say_otherwise()
+    {
+        var model = new LocalModel { Name = "a", File = "a/A.gguf", Parallel = 4 };
+        Assert.Contains("cache-ram = 8192\n", ModelCatalog.Preset(model, "/library", sessionCacheGb: 8), StringComparison.Ordinal);
+        Assert.Contains("cache-ram = 0\n", ModelCatalog.Preset(model, "/library", sessionCacheGb: 0), StringComparison.Ordinal);
+        Assert.DoesNotContain("cache-ram", ModelCatalog.Preset(model, "/library"), StringComparison.Ordinal);
+        var own = new LocalModel { Name = "a", File = "a/A.gguf", Parallel = 4, ExtraPreset = "cache-ram = 2048" };
+        var preset = ModelCatalog.Preset(own, "/library", sessionCacheGb: 8);
+        Assert.Contains("cache-ram = 2048\n", preset, StringComparison.Ordinal);
+        Assert.DoesNotContain("cache-ram = 8192", preset, StringComparison.Ordinal);
+        Assert.Equal(8L << 30, TokenCache.Of(model, null, pooled: false, sessionCacheGb: 8).SessionBytes);
+        Assert.Equal(2048L << 20, TokenCache.Of(own, null, pooled: false, sessionCacheGb: 8).SessionBytes);
+    }
+
+    [Fact]
     public void The_last_round_keeps_the_tools_but_switches_calling_them_off_and_says_so()
     {
         var tools = new JsonArray(new JsonObject { ["type"] = "function", ["function"] = new JsonObject { ["name"] = "web_search" } });

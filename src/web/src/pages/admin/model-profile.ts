@@ -81,6 +81,8 @@ export interface TokenCache {
   checkpoints: number | null
   checkpointBytes: number | null
   ramBytes: number | null
+  /** The RAM kept for the conversations that lost their slot (the prompt cache), at most; 0: none; null: the engine's own. */
+  sessionBytes?: number | null
 }
 
 /** One line for a model's card: "4 slots, each keeping a conversation; small steps go to the last first · 4 checkpoints a slot of 112 MiB: 1.8 GB of RAM". */
@@ -101,6 +103,8 @@ export function cacheLine(c: TokenCache): string {
         ? `${c.checkpoints} checkpoints a slot of ${bytes(c.checkpointBytes)}: up to ${bytes(c.ramBytes)} of RAM`
         : `${c.checkpoints} checkpoints a slot, in RAM`,
     )
+  if (c.sessionBytes === 0) parts.push('chats that lose their slot are read again in full')
+  else if (c.sessionBytes != null) parts.push(`chats that lose their slot wait in RAM, up to ${bytes(c.sessionBytes)}`)
   return parts.join(' · ')
 }
 

@@ -232,8 +232,9 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
         var presets = await File.ReadAllTextAsync(Path.Combine(Config, "models.ini"));
         Assert.Contains("[tiny-b]\nmodel = /library/tiny/Tiny-4B-Q4_K_M.gguf\nmmproj = /library/tiny/mmproj-Tiny-F16.gguf\nctx-size = 16384\nparallel = 2\nkv-unified = true\n", presets, StringComparison.Ordinal);
-        // Idle slots keep their conversation's prompt; the extra lines' own cache-reuse stands.
-        Assert.Contains("fit = on\nthreads = 12\njinja = true\nmetrics = true\nno-cache-idle-slots = true\nflash-attn = on\ncache-reuse = 256\n", presets, StringComparison.Ordinal);
+        // Idle slots keep their conversation's prompt, chats that lose their slot wait in 8 GB of RAM (Engine:SessionCacheGb);
+        // the extra lines' own cache-reuse stands.
+        Assert.Contains("fit = on\nthreads = 12\njinja = true\nmetrics = true\nno-cache-idle-slots = true\ncache-ram = 8192\nflash-attn = on\ncache-reuse = 256\n", presets, StringComparison.Ordinal);
         Assert.DoesNotContain("a note", presets, StringComparison.Ordinal);
         var added = Assert.Single(gateway.Managed.Values);
         Assert.Equal("tiny-b", added.Name);

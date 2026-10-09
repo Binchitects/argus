@@ -374,6 +374,17 @@ the app asks again until the model loads, for ten minutes. A **Load** also
 ends an earlier **Unload**, so the model new chats use loads again by itself
 afterwards.
 
+**Chats that lose their slot** to another wait in RAM (llama.cpp's prompt
+cache, with their checkpoints) and come back from there: measured with six long
+chats taking turns over four slots, 57-63% of each prompt came from the cache,
+about all there was to read, thinking on or off. **Settings → Model → RAM for
+chats that lost their slot** sizes it per loaded model (8 GB as installed:
+about a dozen long chats of a hybrid model, 0.6 GB each); the model card says
+it. RAM it takes is not there for the models' files, so on a host whose model
+does not fit RAM and the GPU, keep it small. The Resources dashboard's
+**Memory used by programs** leaves out the page cache that holds the models'
+files: **Memory** below it shows both.
+
 #### A model bigger than RAM and the GPU
 
 A model larger than the GPU's memory and RAM together still loads: llama.cpp

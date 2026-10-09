@@ -37,6 +37,12 @@ public sealed class EngineOptions
     /// unloading it for everyone.
     /// </summary>
     public int ModelsMax { get; set; } = 2;
+
+    /// <summary>
+    /// RAM each loaded model keeps for the conversations that lost their slot to another (llama.cpp's cache-ram), in GB:
+    /// one coming back reads from there what it had, not its whole history again. 8 as llama.cpp's own; 0: none.
+    /// </summary>
+    public int SessionCacheGb { get; set; } = 8;
 }
 
 /// <summary>A model in the engine's list, and whether it is loaded.</summary>
