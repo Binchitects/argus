@@ -76,8 +76,8 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     }
 
     /// <summary>
-    /// The answers each model runs at once, by name (the engine watcher keeps it: its slots, less the one
-    /// kept for side requests; see <see cref="SlotTable"/>). A model not named has no limit of its own.
+    /// The answers each model runs at once, by name (the engine watcher keeps it: its slots, and those of its
+    /// copies on other GPU servers). A model not named has no limit of its own.
     /// </summary>
     public void SetPlaces(IReadOnlyDictionary<string, int> places)
     {

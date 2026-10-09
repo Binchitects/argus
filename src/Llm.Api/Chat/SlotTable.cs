@@ -6,12 +6,14 @@ namespace Llm.Api.Chat;
 /// while that slot still holds it and is idle: only the new turn is read. Otherwise it takes the
 /// idle slot used least recently, which holds another conversation's start, so the shared system
 /// prompt is read from there. A busy slot is never chosen: with none idle, the request goes without
-/// a slot and the engine gives it the first that frees. Side requests (titles, the safeguards'
-/// check, compaction summaries, Auto's choice) keep to the last slot of a model with 3 or more, so
-/// they never push a conversation out of its slot nor take an answer's place; with fewer, the
-/// engine places them. A model with one slot, or with copies on other GPU servers (the gateway
-/// chooses the copy), gets no slot from here. With several replicas each keeps its own table (and
-/// asks the engine which slots are busy before choosing).
+/// a slot and the engine gives it the first that frees. Every slot serves answers (a model runs as
+/// many at once as it has slots); on a model with 3 or more, side requests (titles, the safeguards'
+/// check, compaction summaries, Auto's choice) go to the last, which conversations take only when
+/// all the others are busy, so side requests seldom push a conversation out of its slot. While that
+/// slot is busy, a side request takes another idle one (one no conversation holds first) rather
+/// than wait behind it; with fewer slots, the engine places them. A model with one slot, or with
+/// copies on other GPU servers (the gateway chooses the copy), gets no slot from here. With several
+/// replicas each keeps its own table, and goes by what the engine says of its slots (<see cref="Seen"/>).
 /// </summary>
 public sealed class SlotTable(TimeProvider clock)
 {
@@ -19,7 +21,7 @@ public sealed class SlotTable(TimeProvider clock)
     private readonly Dictionary<string, Model> _models = new(StringComparer.Ordinal);
     private HashSet<string> _loaded = new(StringComparer.Ordinal);
 
-    /// <summary>A model's slots: who each holds, when each was last used, and whether it is answering now.</summary>
+    /// <summary>A model's slots: who each holds, when each was last taken or given back, and whether it is answering now.</summary>
     private sealed class Model(int count)
     {
         public int Count { get; } = count;
@@ -27,6 +29,13 @@ public sealed class SlotTable(TimeProvider clock)
         public long[] Used { get; } = new long[count];
         public int[] Busy { get; } = new int[count];
     }
+
+    /// <summary>
+    /// A model's slots as the engine said (llama-server's /slots): how many it has, which were answering, and when it
+    /// was asked (a <see cref="TimeProvider.GetTimestamp"/>). A slot busy then that this table has neither taken nor
+    /// given back since was busy with a request not sent from here (an API key's, another replica's).
+    /// </summary>
+    public sealed record Seen(int Count, IReadOnlySet<int> Busy, long Asked);
 
     /// <summary>A slot taken for one request (or none: <see cref="Slot"/> null); give it back by disposing it.</summary>
     public sealed class Lease(SlotTable table, string? model, int? slot) : IDisposable
@@ -45,11 +54,8 @@ public sealed class SlotTable(TimeProvider clock)
         }
     }
 
-    /// <summary>The slot kept for side requests: the last, on a model with 3 or more; else none.</summary>
+    /// <summary>The slot side requests go to first: the last, on a model with 3 or more; else none (the engine places them).</summary>
     public static int? SideSlot(int slots) => slots >= 3 ? slots - 1 : null;
-
-    /// <summary>The answers a model of this many slots runs at once: all but the side requests' slot.</summary>
-    public static int Places(int slots) => SideSlot(slots) is null ? slots : slots - 1;
 
     /// <summary>
     /// The models whose slots are chosen here (those on this engine alone), with their slots. A model
@@ -93,12 +99,28 @@ public sealed class SlotTable(TimeProvider clock)
         }
     }
 
+    /// <summary>Whether a slot is chosen here for a request to <paramref name="model"/>: a conversation's turn from 2 slots, a side request from 3.</summary>
+    public bool Chooses(string model, bool side)
+    {
+        var count = Count(model);
+        return side ? SideSlot(count) is not null : count >= 2;
+    }
+
+    /// <summary>Whether a request sent from here is answering on <paramref name="model"/> now (in a slot chosen here).</summary>
+    public bool Answering(string model)
+    {
+        lock (_lock)
+        {
+            return _models.GetValueOrDefault(model)?.Busy.Any(b => b > 0) == true;
+        }
+    }
+
     /// <summary>
     /// A slot for one request to <paramref name="model"/>: for <paramref name="conversation"/>'s turn, or a side
-    /// request when it is null. <paramref name="busyElsewhere"/>: slots the engine says are busy with requests
-    /// not sent from here (API keys, another replica).
+    /// request when it is null. <paramref name="seen"/>: what the engine said of the model's slots, lately; null: go
+    /// by this table alone.
     /// </summary>
-    public Lease Take(string? model, Guid? conversation, IReadOnlySet<int>? busyElsewhere = null)
+    public Lease Take(string? model, Guid? conversation, Seen? seen = null)
     {
         lock (_lock)
         {
@@ -107,18 +129,33 @@ public sealed class SlotTable(TimeProvider clock)
                 return new Lease(this, model, null);
             }
             var side = SideSlot(m.Count);
+            // Idle: nothing from here answers in it, the engine has it, and it was not busy with another's request when asked.
+            bool Idle(int i) => m.Busy[i] == 0 && (seen is null || (i < seen.Count && !(seen.Busy.Contains(i) && m.Used[i] < seen.Asked)));
             int? slot;
             if (conversation is not { } c)
             {
-                // A side request: its own slot, waiting there for the one before; none on a model of two slots.
-                slot = side;
+                if (side is not { } own)
+                {
+                    // Two slots, both for conversations: the engine places it.
+                    return new Lease(this, model, null);
+                }
+                // Its own slot; while that is busy (a long summary, an answer that took it), another idle one rather
+                // than wait behind it: one no conversation holds first, then the one used least recently.
+                slot = Idle(own) ? own
+                    : Enumerable.Range(0, m.Count).Where(Idle).OrderBy(i => m.Holder[i] is null ? 0 : 1).ThenBy(i => m.Used[i]).Cast<int?>().FirstOrDefault();
+                if (slot is { } s)
+                {
+                    // What a conversation kept there is gone.
+                    m.Holder[s] = null;
+                }
             }
             else
             {
-                bool Idle(int i) => i != side && m.Busy[i] == 0 && busyElsewhere?.Contains(i) != true;
                 var own = Array.IndexOf(m.Holder, c);
+                // Its own slot; else the least recently used idle one but the side requests'; that one only when all else is busy.
                 slot = own >= 0 && Idle(own) ? own
-                    : Enumerable.Range(0, m.Count).Where(Idle).OrderBy(i => m.Used[i]).Cast<int?>().FirstOrDefault();
+                    : Enumerable.Range(0, m.Count).Where(i => i != side && Idle(i)).OrderBy(i => m.Used[i]).Cast<int?>().FirstOrDefault()
+                    ?? (side is { } last && Idle(last) ? last : null);
                 if (slot is { } s && own != s)
                 {
                     if (own >= 0)

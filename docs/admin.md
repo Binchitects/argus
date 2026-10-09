@@ -60,12 +60,16 @@ would be with them.
   when it starts; without it, the `.env` model is kept.
 - **Loaded on request.** While a place is left beside the kept models, any other
   model loads when someone asks for it: a chat, an API key, a coding agent. Its
-  first answer waits while it loads. At the limit, the app first unloads a
-  model that is not kept loaded and is idle (the smallest first: it loads again
-  quickest), so the big model everyone uses stays. When none is idle, the
-  engine waits until the model used least recently is (an answer is never
-  cut) and unloads it; when that is a kept one, it comes back, and the one not
-  kept makes room. In the chat such a model reads **Loads when asked**.
+  first answer waits while it loads. At the limit, the app first unloads an
+  idle model that may make room (the smallest first: it loads again quickest).
+  One kept loaded, the one new chats use (Settings, or the working hours'),
+  and one bigger than the model asked for never makes room, so the big model
+  everyone is on stays. When none is idle, the chat's answer waits up to a
+  minute for one, then says the engine is full; the app never leaves the choice
+  to the engine, which would unload the model used least recently, whichever
+  it is. An API key's request for such a model does go to the engine, which
+  then unloads the one used least recently; when that is a kept one, it comes
+  back. In the chat such a model reads **Loads when asked**.
   When every place is kept, no other model loads on request, and the chat says
   so. A change of the kept list that flips this restarts llama-server (the kept
   models load again, one after another).
@@ -93,9 +97,13 @@ would be with them.
   the questions waiting for the big model had the engine stop SmolLM2 the
   moment it started for its own questions; it answered them, and was killed
   and marked failed. The app tries a model that failed again after a minute,
-  then after 2, 4, 8, 16 and at most 30 minutes, kept or asked for in the chat;
-  meanwhile the chat says it could not be loaded just now. A model that loads
-  is known to be fine again.
+  then after 2, 4, 8, 16 and at most 30 minutes, once each time: a kept one
+  is loaded again by the app, any other by the next question asked of it (the
+  questions of the next half minute go too, while it loads, unless it is seen
+  failing again). Meanwhile the chat says it could not be loaded just now, and
+  its card says from when it is tried again; **Load** tries at once (should it
+  fail, the next wait is the longer one). A model that loads is known to be
+  fine again.
 - **The model for small steps** (Settings → Model → **Model for sub-agents
   and small steps**) does the many short steps around an answer: sub-agents,
   chat titles, compaction summaries, the safeguards' check, and Auto in the
@@ -252,16 +260,23 @@ only what is new. A model has as many slots as its **Answers at once**.
   passes on), while that slot is idle. A new conversation takes the slot used
   least recently: it holds another chat's start, so the system prompt and the
   tools (the same for everyone, thousands of tokens) come from the cache too. A
-  busy slot is never chosen: the app asks the engine first, so API keys' and
-  other replicas' requests count. With none idle, the turn goes without a slot
-  and the engine gives it the first that frees. A model with one slot, or with
-  copies on other GPU servers (the gateway picks the copy), is left to the
-  engine.
-- **Side requests have their own slot.** From 3 slots, the last is kept for
-  chat titles, the safeguards' check, compaction summaries and Auto's choice:
-  they never push a conversation out of its slot, and they wait there in turn.
-  The model runs one answer fewer at once for it (4 slots: 3 answers). With 1
-  or 2 slots, the engine places them.
+  busy slot is never chosen: the app goes by what the engine said of its slots
+  within the last second, so API keys' and other replicas' requests count, or
+  asks it and waits half a second for its word. While the engine reads a long
+  prompt it may not answer for seconds: then what it said within the last 5
+  seconds goes, else the turn goes without a slot (the engine gives it an idle
+  one). With none idle, the turn goes without a slot and the engine gives it
+  the first that frees. A model with one slot, or with copies on other GPU
+  servers (the gateway picks the copy), is left to the engine.
+- **Every slot serves answers**: a model runs as many answers at once as it
+  has slots (4 slots: 4 answers).
+- **Side requests go to the last slot first.** From 3 slots, chat titles, the
+  safeguards' check, compaction summaries and Auto's choice go to the last
+  slot, which conversations take only when all the others are busy, so they
+  seldom push a conversation out of its slot. While it is busy (a long
+  summary, an API key's request, an answer), a side request takes another idle
+  slot, one no conversation holds first, rather than wait behind it. With 1 or
+  2 slots, the engine places them.
 - **A sub-agent keeps a slot too**, as a conversation does: each of its steps
   reads only what its last tool call added. An answer runs no more sub-agents
   at once than its model runs answers (and **Sub-agents at once**).
@@ -281,8 +296,9 @@ only what is new. A model has as many slots as its **Answers at once**.
 - The model's **More engine options** can set each of these otherwise
   (`cache-idle-slots = true`, `ctx-checkpoints = 8`, `cache-reuse = 0`).
 - **Its card says what the cache keeps and costs**, for example "Token cache:
-  4 slots: 3 keep a conversation each, 1 for small steps (titles, checks,
-  summaries) · 4 checkpoints a slot of 112.2 MiB: up to 1.8 GiB of RAM".
+  4 slots, each keeping a conversation; small steps (titles, checks,
+  summaries) go to the last first · 4 checkpoints a slot of 112.2 MiB: up to
+  1.8 GiB of RAM".
 
 **What it costs**, measured with Qwen3.8-Flash-Next (hybrid, 4 slots) on an
 RTX 3090:
@@ -290,7 +306,7 @@ RTX 3090:
 | What | Cost |
 |---|---|
 | RAM for checkpoints | 4 a slot × 112.6 MiB = 450 MiB a slot, 1.8 GiB for 4 slots (32 a slot: 3.6 GiB a slot) |
-| GPU memory for one more slot | about 113 MiB, its recurrent state: 20.3 GiB at 2 slots, 20.5 at 4, 20.9 at 8. The context's cache is shared by the slots, so it does not grow |
+| GPU memory for one more slot | about 113 MiB, its recurrent state (worked out from the file; the context's cache is shared by the slots, so it does not grow). Measured: 21.0 GiB in use at 4 slots, the same as at 2 |
 | RAM for the prompt cache | up to 8 GiB (llama.cpp's `cache-ram`), as before |
 | Price | Cached input tokens are charged at the model's cached price. A model added here registers none, so the gateway charges them nothing (measured: 3,912 cached tokens cost $0), and so does the cost under an answer in the chat. At Flash-Next's 0.20 in and 0.80 out per Mtok, 1,000 turns of 10,000 prompt tokens cost $2.00 of input without the cache; with 77% from the cache (each conversation in its slot), $0.46: $1.54 saved. At a cached price of a tenth (0.02), $0.61: $1.39 saved. Output is the same either way. |
 

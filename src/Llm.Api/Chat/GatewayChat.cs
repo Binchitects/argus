@@ -23,15 +23,15 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 /// <summary>
 /// Streams a chat completion from LiteLLM and turns its SSE lines into events. A request to a model
 /// of this engine goes to the slot the <see cref="SlotTable"/> chooses (id_slot, which the gateway
-/// passes on): a conversation's turn to the slot that holds its start, a side request to its own
-/// (<see cref="EngineRoute"/>, which also makes room for a model that is not loaded).
+/// passes on): a conversation's turn to the slot that holds its start, a side request to the last
+/// slot first (<see cref="EngineRoute"/>, which also makes room for a model that is not loaded).
 /// </summary>
 public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route)
 {
     /// <summary>The person a request is for, as LiteLLM attributes spend (its user_header_mappings).</summary>
     public const string UserEmailHeader = "X-LLM-User-Email";
 
-    /// <summary>A side request (a title, the safeguards' check, a summary, Auto's choice): it keeps off the conversations' slots.</summary>
+    /// <summary>A side request (a title, the safeguards' check, a summary, Auto's choice): it goes to the side requests' slot first (SlotTable).</summary>
     public IAsyncEnumerable<StreamEvent> StreamAsync(JsonObject request, string personEmail, CancellationToken ct) => StreamAsync(request, personEmail, null, ct);
 
     /// <summary>

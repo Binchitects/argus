@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Chat;
@@ -202,17 +203,21 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public void Each_model_has_the_places_of_its_slots_less_the_side_one_or_of_all_its_copies()
+    public void Each_model_has_the_places_of_all_its_slots_or_of_all_its_copies()
     {
         var (places, slots) = EngineWatcher.Capacity(
             [("big", 4), ("two", 2), ("one", 1), ("pooled", 2), ("vague", 2)],
             [("pooled", 4), ("vague", null), ("far", 8), ("far", 8), ("cloudy", null)]);
-        Assert.Equal(new Dictionary<string, int> { ["big"] = 3, ["two"] = 2, ["one"] = 1, ["pooled"] = 6, ["far"] = 16 }, places);
+        // Parallel times copies: every slot serves answers, the side requests' one too (4 slots: 4 answers at once).
+        Assert.Equal(new Dictionary<string, int> { ["big"] = 4, ["two"] = 2, ["one"] = 1, ["pooled"] = 6, ["far"] = 16 }, places);
         // Slots are chosen only for a model on this engine alone: the gateway picks among copies.
         Assert.Equal(new Dictionary<string, int> { ["big"] = 4, ["two"] = 2, ["one"] = 1 }, slots);
     }
 
     private static readonly IReadOnlySet<string> Loaded = new HashSet<string> { "m", "two", "one", "other" };
+
+    /// <summary>What the engine says of a model's slots now: how many it has, and which answer requests not sent from the table.</summary>
+    private static SlotTable.Seen Engine(int count, params int[] busy) => new(count, busy.ToHashSet(), TimeProvider.System.GetTimestamp());
 
     private static SlotTable Table()
     {
@@ -226,9 +231,9 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     {
         var table = Table();
         var (a, b, c, d) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        int? Turn(Guid who, IReadOnlySet<int>? busy = null)
+        int? Turn(Guid who)
         {
-            using var lease = table.Take("m", who, busy);
+            using var lease = table.Take("m", who);
             return lease.Slot;
         }
         Assert.Equal(0, Turn(a));
@@ -253,33 +258,60 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
             Assert.Equal(0, held.Slot);
             using var other = table.Take("m", b);
             Assert.Equal(1, other.Slot);
-            // Slot 2 is busy with a request the table did not send (an API key's): none is idle.
-            using var none = table.Take("m", c, new HashSet<int> { 2 });
+            // Slot 2 is busy with a request the table did not send (an API key's): the side requests' slot is the
+            // only one idle, and an answer takes it rather than wait (every slot serves answers).
+            using var last = table.Take("m", c, Engine(4, 2));
+            Assert.Equal(3, last.Slot);
+            // None is idle: the engine gives it the first that frees.
+            using var none = table.Take("m", d, Engine(4, 2));
             Assert.Null(none.Slot);
         }
-        // A's slot is busy elsewhere: A goes to another idle one.
-        using (var moved = table.Take("m", a, new HashSet<int> { 0 }))
+        // A's slot is busy elsewhere: A goes to another idle one, not the side requests' while others are idle.
+        using (var moved = table.Take("m", a, Engine(4, 0)))
         {
             Assert.NotEqual(0, moved.Slot);
             Assert.NotEqual(3, moved.Slot);
         }
-        using var fresh = table.Take("m", d);
-        Assert.NotNull(fresh.Slot);
+        // Busy when the engine was asked, and taken and given back here since: what it saw was the table's own request.
+        var seen = Engine(4, 0, 1, 2);
+        table.Take("m", b).Dispose();
+        using (var back = table.Take("m", b, seen))
+        {
+            Assert.Equal(1, back.Slot);
+        }
+        // A slot the engine does not have (its slots were raised, it has not restarted) is never chosen.
+        Assert.Null(table.Take("m", Guid.NewGuid(), Engine(1, 0)).Slot);
     }
 
     [Fact]
-    public void Side_requests_keep_to_their_own_slot_from_three_slots_and_one_slot_models_get_none()
+    public void Side_requests_go_to_their_slot_first_and_while_it_is_busy_to_another_idle_one()
     {
         var table = Table();
-        using (var title = table.Take("m", null))
+        var (a, b) = (Guid.NewGuid(), Guid.NewGuid());
+        table.Take("m", a).Dispose();
+        table.Take("m", b).Dispose();
+        using (var summary = table.Take("m", null))
         using (var check = table.Take("m", null))
+        using (var title = table.Take("m", null))
         {
-            // Both wait there in turn at the engine: never in a conversation's slot.
-            Assert.Equal(3, title.Slot);
-            Assert.Equal(3, check.Slot);
-            using var answer = table.Take("m", Guid.NewGuid());
-            Assert.Equal(0, answer.Slot);
+            // A long summary holds the side requests' slot: the safeguards' check does not wait behind it, it takes
+            // an idle slot no conversation holds; the title then the one used least recently (A's, not B's).
+            Assert.Equal(3, summary.Slot);
+            Assert.Equal(2, check.Slot);
+            Assert.Equal(0, title.Slot);
+            using var answer = table.Take("m", b);
+            Assert.Equal(1, answer.Slot);
+            // None idle: the engine places it.
+            Assert.Null(table.Take("m", null).Slot);
         }
+        // The side requests' slot busy with an API key's request: another idle one.
+        using (var elsewhere = table.Take("m", null, Engine(4, 3)))
+        {
+            Assert.NotNull(elsewhere.Slot);
+            Assert.NotEqual(3, elsewhere.Slot);
+        }
+        // B kept its slot.
+        Assert.Equal(1, table.Take("m", b).Slot);
         Assert.Equal(2, table.Take("other", null).Slot);
         // Two slots: both for conversations, side requests go where the engine puts them.
         Assert.Null(table.Take("two", null).Slot);
@@ -288,8 +320,6 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.Null(table.Take("one", null).Slot);
         Assert.Null(table.Take("unknown", Guid.NewGuid()).Slot);
         Assert.Null(table.Take(null, Guid.NewGuid()).Slot);
-        Assert.Equal(3, SlotTable.Places(4));
-        Assert.Equal(2, SlotTable.Places(2));
     }
 
     [Fact]
@@ -363,14 +393,15 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
 
     /// <summary>
     /// Its own app, database and engine files: the engine on, holding 2 models at once, with Qwen3.8-Flash-Next (a hybrid
-    /// model) added here with 4 slots and kept loaded, and the <paramref name="others"/> (each file bigger than the one before).
-    /// <paramref name="more"/>: settings of the test's own (a null value leaves the setting out).
+    /// model, the biggest file) added here with 4 slots and kept loaded (unless <paramref name="keep"/> says otherwise), and the
+    /// <paramref name="others"/> (each file bigger than the one before). <paramref name="more"/>: settings of the test's own (a
+    /// null value leaves the setting out).
     /// </summary>
     private WebApplicationFactory<Program> NewApp(IDictionary<string, string?>? more = null, int parallel = 4, MovableClock? clock = null,
-        params (string Name, int Parallel)[] others)
+        string[]? keep = null, params (string Name, int Parallel)[] others)
     {
         var library = Path.Combine(_dir, "library");
-        GgufFile.Language("qwen35", name: "Flash", layers: 8, interval: 4)
+        GgufFile.Language("qwen35", name: "Flash", layers: 8, interval: 4, layerBytes: 1 << 16)
             .U32("qwen35.ssm.state_size", 128).U32("qwen35.ssm.inner_size", 1024).U32("qwen35.ssm.group_count", 4).U32("qwen35.ssm.conv_kernel", 4)
             .Write(Path.Combine(library, "flash", "Flash-Q4_K_M.gguf"));
         for (var i = 0; i < others.Length; i++)
@@ -378,7 +409,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
             GgufFile.Language("qwen3", name: others[i].Name, layerBytes: 4096L << i).Write(Path.Combine(library, others[i].Name, "Tiny-Q4_K_M.gguf"));
         }
         Directory.CreateDirectory(Config);
-        File.WriteAllText(Path.Combine(Config, "keep"), Big + "\n");
+        File.WriteAllText(Path.Combine(Config, "keep"), string.Concat((keep ?? [Big]).Select(k => k + "\n")));
         app.Engine.Reset(Path.Combine(Config, "models.ini"));
         app.Engine.Max = 2;
         var f = Start(app.ConnectionStringFor("slots_" + Guid.NewGuid().ToString("N")[..8]), more, clock);
@@ -464,6 +495,13 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         return request["id_slot"]?.GetValue<int>();
     }
 
+    /// <summary>Longer than the app takes what the engine said of a model's slots as it is (EngineRoute: a second).</summary>
+    private static Task SaidAgoAsync() => Task.Delay(1200);
+
+    /// <summary>Whether the title of the chat whose first message carries <paramref name="marker"/> was asked.</summary>
+    private bool Titled(string marker) => app.Model.Requests.Any(r => r.Body.ToJsonString().Contains(marker, StringComparison.Ordinal)
+        && r.Body["messages"]![0]!["content"]!.ToJsonString().Contains("You name conversations", StringComparison.Ordinal));
+
     [Fact]
     public async Task Each_turn_goes_back_to_its_conversations_slot_side_requests_to_their_own_and_never_to_a_busy_one()
     {
@@ -479,8 +517,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         var (one, two) = (await ChatAsync(b, Big), await ChatAsync(b, Big));
         var tag = Guid.NewGuid().ToString("N")[..6];
         Assert.Contains(await AskAsync(b, one, $"[{tag}-a1] Hello there"), e => e.GetProperty("type").GetString() == "done");
-        await EventuallyAsync(() => app.Model.Requests.Any(r => r.Body.ToJsonString().Contains($"{tag}-a1", StringComparison.Ordinal)
-            && r.Body["messages"]![0]!["content"]!.ToJsonString().Contains("You name conversations", StringComparison.Ordinal)), "the title was asked");
+        await EventuallyAsync(() => Titled($"{tag}-a1"), "the title was asked");
         Assert.Equal(0, SlotOf($"{tag}-a1"));
         Assert.Equal(3, SlotOf($"{tag}-a1", title: true));
         await AskAsync(b, two, $"[{tag}-b1] Another chat");
@@ -490,22 +527,57 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
 
         // Slot 0 is busy with an API key's request: the turn goes to an idle one, and stays there.
         app.Engine.BusySlots[Big] = [0];
+        await SaidAgoAsync();
         await AskAsync(b, one, $"[{tag}-a3] Once more");
         Assert.Equal(2, SlotOf($"{tag}-a3"));
         app.Engine.BusySlots.Clear();
         await AskAsync(b, one, $"[{tag}-a4] And the last");
         Assert.Equal(2, SlotOf($"{tag}-a4"));
 
+        // The side requests' slot is busy (an API key's long request, or a long summary): a title does not wait
+        // behind it at the engine, it takes another idle slot.
+        app.Engine.BusySlots[Big] = [3];
+        await SaidAgoAsync();
+        var four = await ChatAsync(b, Big);
+        Assert.Contains(await AskAsync(b, four, $"[{tag}-d1] A fourth chat"), e => e.GetProperty("type").GetString() == "done");
+        await EventuallyAsync(() => Titled($"{tag}-d1"), "the fourth title was asked");
+        Assert.InRange(SlotOf($"{tag}-d1", title: true)!.Value, 0, 2);
+        Assert.InRange(SlotOf($"{tag}-d1")!.Value, 0, 2);
+        app.Engine.BusySlots.Clear();
+
         // Its slots were just raised to 4, and the engine still has its old 2 until it restarts: no request goes
         // to a slot it does not have (it would wait there for ever), the side requests' included.
         app.Engine.SlotCounts[Big] = 2;
+        await SaidAgoAsync();
         var three = await ChatAsync(b, Big);
         Assert.Contains(await AskAsync(b, three, $"[{tag}-c1] A third chat"), e => e.GetProperty("type").GetString() == "done");
-        await EventuallyAsync(() => app.Model.Requests.Any(r => r.Body.ToJsonString().Contains($"{tag}-c1", StringComparison.Ordinal)
-            && r.Body["messages"]![0]!["content"]!.ToJsonString().Contains("You name conversations", StringComparison.Ordinal)), "the third title was asked");
-        Assert.Null(SlotOf($"{tag}-c1", title: true));
+        await EventuallyAsync(() => Titled($"{tag}-c1"), "the third title was asked");
+        Assert.True(SlotOf($"{tag}-c1", title: true) is null or < 2);
         Assert.InRange(SlotOf($"{tag}-c1")!.Value, 0, 1);
         app.Engine.SlotCounts.Clear();
+        await SaidAgoAsync();
+
+        // The engine reads a long prompt and does not say which slots are busy for seconds: the turn does not wait for
+        // its word (half a second at most), and goes back to its slot by what it said a moment ago.
+        await SaidAgoAsync();
+        var usual = System.Diagnostics.Stopwatch.StartNew();
+        await AskAsync(b, one, $"[{tag}-a5] Before the long prompt");
+        usual.Stop();
+        var before = SlotOf($"{tag}-a5");
+        Assert.NotNull(before);
+        await SaidAgoAsync();
+        app.Engine.SlotsDelay = TimeSpan.FromSeconds(6);
+        try
+        {
+            var took = System.Diagnostics.Stopwatch.StartNew();
+            Assert.Contains(await AskAsync(b, one, $"[{tag}-a6] While it reads"), e => e.GetProperty("type").GetString() == "done");
+            Assert.True(took.Elapsed < usual.Elapsed + TimeSpan.FromSeconds(1.3), $"the turn waited {took.Elapsed - usual.Elapsed} more for the engine's word on its slots");
+            Assert.Equal(before, SlotOf($"{tag}-a6"));
+        }
+        finally
+        {
+            app.Engine.SlotsDelay = TimeSpan.Zero;
+        }
 
         // Admin → Models says what the cache keeps and costs.
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
@@ -518,7 +590,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public async Task Each_sub_agent_keeps_a_slot_of_its_own_for_its_steps_never_the_side_one()
+    public async Task Each_sub_agent_keeps_a_slot_of_its_own_for_its_steps_off_the_side_one()
     {
         await using var f = NewApp(new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-slot-tests" });
         var slots = f.Services.GetRequiredService<SlotTable>();
@@ -546,7 +618,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.Equal(2, sum.Count);
         Assert.Single(sum.Distinct());
         var colour = Assert.Single(SlotsOf($"{tag}-colour"));
-        // Never the side requests' slot (3).
+        // Not the side requests' slot (3) while others are idle.
         Assert.All(sum.Append(colour), s => Assert.InRange(s!.Value, 0, 2));
     }
 
@@ -596,32 +668,46 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public void A_model_marked_failed_is_tried_again_after_a_minute_then_less_and_less_often()
+    public void A_model_marked_failed_is_tried_again_after_a_minute_then_less_and_less_often_once_each_time()
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);
         var state = new EngineState(clock);
         state.Set([new EngineModel("small", "failed"), new EngineModel("big", "loaded")]);
         Assert.False(state.MayRetry("small"));
+        Assert.False(state.MayAsk("small"));
         Assert.False(state.MayRetry("big"));
         clock.Now += TimeSpan.FromMinutes(1);
         Assert.True(state.MayRetry("small"));
+        Assert.True(state.MayAsk("small"));
 
-        // Tried (twice at once: one try): the requests of the next half minute go too, as the engine loads it.
+        // Tried (twice at once: one try). The watcher does not load it again before its next wait is over, however
+        // often it looks; people's requests of the next half minute go too, as the engine loads it.
         state.Tried("small");
         state.Tried("small");
-        clock.Now += TimeSpan.FromSeconds(20);
-        Assert.True(state.MayRetry("small"));
-        // It failed again: two minutes from the try, then four.
-        clock.Now += TimeSpan.FromSeconds(20);
         Assert.False(state.MayRetry("small"));
-        clock.Now += TimeSpan.FromSeconds(80);
+        clock.Now += TimeSpan.FromSeconds(3);
+        // Still failed 3 seconds after the try: the engine has not begun yet, it is part of the try.
+        state.Set([new EngineModel("small", "failed")]);
+        Assert.True(state.MayAsk("small"));
+        Assert.False(state.MayRetry("small"));
+        // Still failed 6 seconds after: the try failed, and the requests that follow wait for the next one.
+        clock.Now += TimeSpan.FromSeconds(3);
+        state.Set([new EngineModel("small", "failed")]);
+        Assert.False(state.MayAsk("small"));
+        Assert.False(state.MayRetry("small"));
+        // Two minutes from the try, then four.
+        clock.Now += TimeSpan.FromSeconds(110);
+        Assert.False(state.MayRetry("small"));
+        clock.Now += TimeSpan.FromSeconds(4);
         Assert.True(state.MayRetry("small"));
         state.Tried("small");
+        clock.Now += TimeSpan.FromSeconds(31);
+        Assert.False(state.MayAsk("small"));
         clock.Now += TimeSpan.FromMinutes(3);
         Assert.False(state.MayRetry("small"));
         clock.Now += TimeSpan.FromMinutes(1);
         Assert.True(state.MayRetry("small"));
-        Assert.Equal(TimeSpan.FromMinutes(30), EngineState.Wait(9));
+        Assert.Equal([1d, 2, 4, 8, 16, 30, 30], Enumerable.Range(1, 7).Select(n => EngineState.Wait(n).TotalMinutes));
 
         // Once it loads, all is forgotten: a new failure waits a minute again.
         state.Set([new EngineModel("small", "loaded")]);
@@ -640,10 +726,26 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.Empty(EngineWatcher.SpareOf(["big"], ["big"], sizes));
     }
 
+    /// <summary>Asks <paramref name="text"/> while the engine is full and no model that may make room is idle: the answer waits
+    /// for room (EngineRoute.RoomWait); once the app has looked for an idle one, the clock passes the wait.</summary>
+    private async Task<List<JsonElement>> AskWhileFullAsync(TestBrowser b, Guid chat, string text, MovableClock clock, string busy)
+    {
+        var asked = app.Engine.Calls.Count(c => c.Path == "/slots" && c.Model == busy);
+        var answer = AskAsync(b, chat, text);
+        await EventuallyAsync(() => app.Engine.Calls.Count(c => c.Path == "/slots" && c.Model == busy) > asked + 1, $"the app looked whether {busy} is idle, twice");
+        Assert.False(answer.IsCompleted);
+        clock.Now += EngineRoute.RoomWait + TimeSpan.FromSeconds(1);
+        return await answer.WaitAsync(TimeSpan.FromSeconds(20));
+    }
+
+    private static bool Full(List<JsonElement> events, string model) => events.Any(e => e.GetProperty("type").GetString() == "error"
+        && e.GetProperty("message").GetString()!.StartsWith($"{model} cannot be loaded now: the engine holds all the models it may", StringComparison.Ordinal));
+
     [Fact]
     public async Task A_model_asked_for_at_the_engines_limit_unloads_an_idle_one_not_kept_never_the_big_one()
     {
-        await using var f = NewApp(new Dictionary<string, string?> { ["Engine:ModelsMax"] = "3" }, parallel: 1, others: [("tiny-a", 1), ("tiny-b", 1), ("tiny-c", 1)]);
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        await using var f = NewApp(new Dictionary<string, string?> { ["Engine:ModelsMax"] = "3" }, parallel: 1, clock: clock, others: [("tiny-a", 1), ("tiny-b", 1), ("tiny-c", 1)]);
         app.Engine.Max = 3;
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         // Two models asked for (API keys, say) beside the big one kept loaded: the engine is full.
@@ -654,11 +756,13 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         var b = await PersonAsync(f);
         var chat = await ChatAsync(b, "tiny-c");
 
-        // Both busy (an API key's requests): none makes room here, and the big one is never asked to.
+        // Both busy (an API key's requests): none makes room, the big one is never asked to, and the request is not
+        // left to the engine (it would unload the model used least recently, whichever): the answer waits, then says so.
         app.Engine.BusySlots["tiny-a"] = [0];
         app.Engine.BusySlots["tiny-b"] = [0];
-        Assert.Contains(await AskAsync(b, chat, "first"), e => e.GetProperty("type").GetString() == "done");
+        Assert.True(Full(await AskWhileFullAsync(b, chat, "first", clock, "tiny-a"), "tiny-c"));
         Assert.DoesNotContain(app.Engine.Calls, c => c.Path == "/models/unload");
+        Assert.DoesNotContain(app.Model.Requests, r => r.Body["model"]?.GetValue<string>() == "tiny-c");
 
         // Idle now: the smallest makes room, once.
         app.Engine.BusySlots.Clear();
@@ -670,7 +774,44 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public async Task A_model_that_failed_to_load_is_tried_again_after_its_wait_asked_for_or_kept()
+    public async Task With_nothing_kept_the_big_model_idle_never_makes_room_for_a_smaller_one()
+    {
+        // As the live install: no model kept loaded and none set for new chats, two at once.
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:DefaultModel"] = "" }, parallel: 1, clock: clock, keep: [],
+            others: [("tiny-a", 1), ("tiny-b", 1)]);
+        app.Engine.Max = 2;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));
+        var state = f.Services.GetRequiredService<EngineState>();
+        // The big model may make room, being neither kept nor the default, but only for a model at least as big.
+        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-a", Big]), "the watcher knows which may make room, the smallest first");
+        var b = await PersonAsync(f);
+        var chat = await ChatAsync(b, "tiny-b");
+
+        // The small model answers someone (an API key); the big one is idle between two turns. The app does not unload
+        // the big one for the smaller tiny-b, and does not send the request to the full engine either.
+        app.Engine.BusySlots["tiny-a"] = [0];
+        Assert.True(Full(await AskWhileFullAsync(b, chat, "first", clock, "tiny-a"), "tiny-b"));
+        Assert.DoesNotContain(app.Engine.Calls, c => c.Path == "/models/unload");
+        Assert.Equal("loaded", app.Engine.StatusOf(Big));
+        Assert.DoesNotContain(app.Model.Requests, r => r.Body["model"]?.GetValue<string>() == "tiny-b");
+
+        // The small model is idle again: it makes room, and the big one stays.
+        app.Engine.BusySlots.Clear();
+        Assert.Contains(await AskAsync(b, chat, "second"), e => e.GetProperty("type").GetString() == "done");
+        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-a"));
+        Assert.Equal("loaded", app.Engine.StatusOf(Big));
+
+        // The model new chats use never makes room, not even for a bigger one.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
+            new { changes = new[] { new { key = "Chat:DefaultModel", value = (string?)Big, reset = false } } }));
+        f.Services.GetRequiredService<EngineWatcher>().Wake();
+        await EventuallyAsync(() => !state.Spare.Contains(Big), "the default model may not make room");
+    }
+
+    [Fact]
+    public async Task A_model_that_failed_to_load_is_tried_again_after_its_wait_once_asked_for_or_kept()
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);
         await using var f = NewApp(parallel: 1, clock: clock, others: [("tiny-small", 1)]);
@@ -690,18 +831,45 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         clock.Now += TimeSpan.FromMinutes(1);
         Assert.Contains(await AskAsync(b, chat, "hello again"), e => e.GetProperty("type").GetString() == "done");
 
-        // The big model, kept loaded, unloaded by the engine and then killed the same way: loaded again after its wait.
+        // The big model, kept loaded, unloaded by the engine and then killed the same way: still broken, it is loaded
+        // again once after each wait (1 minute, then 2), never every few seconds in between.
         app.Engine.Broken.Add(Big);
         await f.Services.GetRequiredService<EngineClient>().UnloadAsync(Big);
         var watcher = f.Services.GetRequiredService<EngineWatcher>();
         watcher.Wake();
         await EventuallyAsync(() => app.Engine.StatusOf(Big) == "failed" && state.StatusOf(Big) == "failed", "its load failed");
         var loads = app.Engine.LoadsOf(Big);
-        watcher.Wake();
-        await Task.Delay(1500);
+        // Its card says when it is tried again.
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == Big);
+        Assert.Equal("failed", row.GetProperty("status").GetString());
+        Assert.Equal(clock.Now + TimeSpan.FromMinutes(1), row.GetProperty("retryAt").GetDateTimeOffset());
+        async Task LooksAsync()
+        {
+            // Several of the watcher's rounds, each seeing it failed.
+            for (var i = 0; i < 4; i++)
+            {
+                watcher.Wake();
+                await Task.Delay(400);
+            }
+        }
+        await LooksAsync();
         Assert.Equal(loads, app.Engine.LoadsOf(Big));
-        app.Engine.Broken.Clear();
         clock.Now += TimeSpan.FromMinutes(1);
+        watcher.Wake();
+        await EventuallyAsync(() => app.Engine.LoadsOf(Big) == loads + 1, "tried again after a minute");
+        await LooksAsync();
+        clock.Now += TimeSpan.FromSeconds(20);
+        await LooksAsync();
+        clock.Now += TimeSpan.FromSeconds(50);
+        await LooksAsync();
+        Assert.Equal(loads + 1, app.Engine.LoadsOf(Big));
+        clock.Now += TimeSpan.FromSeconds(55);
+        watcher.Wake();
+        await EventuallyAsync(() => app.Engine.LoadsOf(Big) == loads + 2, "tried again two minutes after the try before");
+        await LooksAsync();
+        Assert.Equal(loads + 2, app.Engine.LoadsOf(Big));
+        app.Engine.Broken.Clear();
+        clock.Now += TimeSpan.FromMinutes(4);
         watcher.Wake();
         await EventuallyAsync(() => app.Engine.StatusOf(Big) == "loaded", "the big model loaded again");
     }
@@ -727,7 +895,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         await using var second = Start(database, new Dictionary<string, string?> { ["Engine:ModelsMax"] = null });
         var gate = second.Services.GetRequiredService<AnswerGate>();
         await EventuallyAsync(() => File.Exists(max) && File.ReadAllText(max) == "1\n", "the admin's one model at a time stands");
-        await EventuallyAsync(() => gate.PlacesOf(Big) == 3 && gate.PlacesOf("tiny-small") == 2, "each model's places");
+        await EventuallyAsync(() => gate.PlacesOf(Big) == 4 && gate.PlacesOf("tiny-small") == 2, "each model's places");
         // Answers at once, everyone, still holds all models together: the line is the whole chat's.
         using var one = await gate.EnterAsync(Guid.NewGuid(), Big, Nothing, default);
         var told = new Told();

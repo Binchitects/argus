@@ -7,12 +7,12 @@ namespace Llm.Api.Models;
 /// <summary>
 /// What a model's token cache keeps and costs (Admin → Models, on its card). Its slots (parallel) each
 /// hold a conversation's prompt, so the next turn reads only what is new (the app sends each turn back to
-/// its slot, SlotTable); from 3 slots, the last is kept for side requests. An idle slot keeps what it
+/// its slot, SlotTable); from 3 slots, side requests go to the last first. An idle slot keeps what it
 /// holds (no-cache-idle-slots). A hybrid or recurrent model also keeps checkpoints of its state in RAM,
 /// to go back to a shorter prompt (the turn before an edit, a retry): each is about its recurrent state.
 /// </summary>
 /// <param name="Slots">Its slots: the answers and side requests it serves at once.</param>
-/// <param name="SideSlot">The slot kept for side requests, or null (fewer than 3 slots, or the gateway picks among copies).</param>
+/// <param name="SideSlot">The slot side requests go to first (conversations take it last), or null (fewer than 3 slots, or the gateway picks among copies).</param>
 /// <param name="Pinned">Whether conversations keep their slot: on this engine alone, with 2 slots or more.</param>
 /// <param name="KeepsIdle">Whether an idle slot keeps its prompt (else llama.cpp moves it to RAM and empties it at the next request).</param>
 /// <param name="Checkpoints">Checkpoints a slot keeps (hybrid and recurrent models); null for others.</param>

@@ -21,7 +21,7 @@ public sealed partial class EngineWatcher : BackgroundService
 {
     private const string WakeTopic = "engine:wake";
     private readonly SemaphoreSlim _wake = new(0);
-    /// <summary>The loaded and kept models <see cref="EngineState.Spare"/> was worked out for.</summary>
+    /// <summary>The loaded, kept and default models <see cref="EngineState.Spare"/> was worked out for.</summary>
     private string? _spareFor;
     private readonly IServiceScopeFactory scopes;
     private readonly EngineClient engine;
@@ -157,8 +157,10 @@ public sealed partial class EngineWatcher : BackgroundService
                     chatModels.Forget();
                     loaded = now;
                 }
-                // What each model serves at once: its line's places, and the slots conversations keep; and which may make room.
-                await CapacityAsync(scope.ServiceProvider, true, names, catalog.Kept(), stoppingToken);
+                // What each model serves at once: its line's places, and the slots conversations keep; and which may make room
+                // (never a kept one, nor the one new chats use: the big model everyone is on).
+                await CapacityAsync(scope.ServiceProvider, true, names,
+                    [.. catalog.Kept(), .. new[] { chatModels.DefaultName, hours.Window?.DefaultModel }.OfType<string>()], stoppingToken);
             }
             catch (EngineException ex)
             {
@@ -195,9 +197,9 @@ public sealed partial class EngineWatcher : BackgroundService
 
     /// <summary>
     /// What each chat model serves at once, for the answers' lines (AnswerGate) and the engine's slots
-    /// (SlotTable): a model of this engine alone, its parallel slots, less the one kept for side requests;
-    /// a model with copies on other GPU servers, the slots of all its copies (the gateway spreads the
-    /// requests among them), unless a copy does not say how many it serves; any other, no limit.
+    /// (SlotTable): a model of this engine alone, its parallel slots; a model with copies on other GPU
+    /// servers, the slots of all its copies (the gateway spreads the requests among them), unless a copy
+    /// does not say how many it serves; any other, no limit.
     /// </summary>
     public static (Dictionary<string, int> Places, Dictionary<string, int> Slots) Capacity(IEnumerable<(string Name, int Parallel)> local, IEnumerable<(string Name, int? Parallel)> remote)
     {
@@ -209,7 +211,7 @@ public sealed partial class EngineWatcher : BackgroundService
             if (!copies.Remove(name, out var elsewhere))
             {
                 slots[name] = here;
-                places[name] = SlotTable.Places(here);
+                places[name] = here;
             }
             else if (elsewhere.All(p => p > 0))
             {
@@ -225,14 +227,15 @@ public sealed partial class EngineWatcher : BackgroundService
 
     /// <summary>
     /// The loaded models that may make room for another (EngineRoute), the quickest to load again first: not
-    /// kept loaded, smallest file first (a model the app did not add, the .env one, last).
+    /// <paramref name="kept"/> (kept loaded, or the chat's default), smallest file first (a model the app did not
+    /// add, the .env one, last).
     /// </summary>
     public static IReadOnlyList<string> SpareOf(IEnumerable<string> loaded, IReadOnlyCollection<string> kept, IReadOnlyDictionary<string, long> sizes) =>
         [.. loaded.Where(n => !kept.Contains(n)).OrderBy(n => sizes.TryGetValue(n, out var size) ? size : long.MaxValue).ThenBy(n => n, StringComparer.Ordinal)];
 
     /// <summary>
     /// Each model's places and slots from the database, on every replica (each keeps its own lines and table),
-    /// and the loaded models that may make room for another.
+    /// and the loaded models that may make room for another (<paramref name="kept"/>: those that never do).
     /// </summary>
     private async Task CapacityAsync(IServiceProvider services, bool onEngine, IReadOnlyList<string> loaded, IReadOnlyCollection<string> kept, CancellationToken ct)
     {
@@ -242,13 +245,15 @@ public sealed partial class EngineWatcher : BackgroundService
         var (places, slots) = Capacity(models.Select(m => (m.Name, m.Parallel)), remote);
         gate.SetPlaces(places);
         slotTable.SetModels(slots, loaded.ToHashSet(StringComparer.Ordinal));
-        // Read again only when what is loaded or kept changed: the library's files are listed for their sizes.
-        var spareFor = string.Join(',', loaded.Order(StringComparer.Ordinal)) + "|" + string.Join(',', kept.Order(StringComparer.Ordinal));
+        // Read again only when the models, what is loaded or what is kept changed: the library's files are listed for their sizes.
+        var spareFor = string.Join(',', loaded.Order(StringComparer.Ordinal)) + "|" + string.Join(',', kept.Order(StringComparer.Ordinal)) + "|"
+            + string.Join(',', models.Select(m => m.Name + "=" + m.File).Order(StringComparer.Ordinal));
         if (onEngine && spareFor != _spareFor)
         {
             var files = services.GetRequiredService<ModelLibrary>().List().ToDictionary(e => e.File.Path, e => e.File.Size, StringComparer.Ordinal);
-            state.Spare = SpareOf(loaded, kept,
-                models.Where(m => files.ContainsKey(m.File)).ToDictionary(m => m.Name, m => files[m.File], StringComparer.Ordinal));
+            var sizes = models.Where(m => files.ContainsKey(m.File)).ToDictionary(m => m.Name, m => files[m.File], StringComparer.Ordinal);
+            state.Sizes = sizes;
+            state.Spare = SpareOf(loaded, kept, sizes);
             _spareFor = spareFor;
         }
     }

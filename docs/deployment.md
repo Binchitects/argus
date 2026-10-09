@@ -241,10 +241,10 @@ What to know:
   model's places (its slots, divided among the replicas, rounded up; and of
   **Settings → Chat → Answers at once, everyone** when set).
 - Each replica keeps its own table of which conversation holds which engine
-  slot. Before it sends a turn, it asks the engine which slots are busy, so it
-  never sends one to a slot another replica (or an API key) is using; a
-  conversation whose turns reach both replicas may lose its slot now and then
-  (its turn is read whole once).
+  slot. It goes by what the engine said of its slots within the last second
+  (or asks it), so it never sends a turn to a slot another replica (or an API
+  key) is using; a conversation whose turns reach both replicas may lose its
+  slot now and then (its turn is read whole once).
 - A scheduled task runs once, whichever replica its event reaches.
 
 **More GPU servers**: add them under **Admin → Models → Other GPU servers**

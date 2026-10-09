@@ -41,6 +41,8 @@ interface ModelRow extends SavedModel {
   profile?: ModelProfile | null
   /** A model added here: what its token cache keeps, and the RAM it takes. */
   cache?: TokenCache | null
+  /** Failed to load: when it is tried again by itself. */
+  retryAt?: string | null
   /** Pinned to keep loaded: loaded at start, and again whenever it is not (outside working hours). */
   kept?: boolean
   /** Kept loaded now: pinned, or by the working hours in force. */
@@ -352,7 +354,9 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
               the engine's warnings and errors
             </Link>
             , or <code className="text-xs">docker compose logs llamacpp</code> on the host. An incomplete download, a file this llama.cpp cannot read, or too
-            little GPU memory are the usual causes. It is not tried again until you load it.
+            little GPU memory are the usual causes; a model stopped while it still loaded, to make room for another, ends this way too, with nothing wrong.
+            It is tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes (kept loaded, by the app; else at the next question for
+            it){m.retryAt ? `: next from ${new Date(m.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Loading it tries at once.
           </Alert>
         )}
         {media && (

@@ -80,6 +80,8 @@ public static class ModelEndpoints
                 name = m.Name, source = "local", mode = "chat",
                 // Not in the engine's list although it answered: not read yet (it restarts), or its preset refused.
                 status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null), kept = pinned.Contains(m.Name), keptNow = kept.Contains(m.Name), m.Devices,
+                // Failed to load: when it is tried again.
+                retryAt = state.NextTry(m.Name),
                 file = m.File, m.Projector, context = m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
                 m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
                 m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.OutputPerMtok,
@@ -269,6 +271,11 @@ public static class ModelEndpoints
         if (!kept.Contains(name) && kept.Count >= options.Value.ModelsMax)
         {
             return AuthEndpoints.Problem(409, "full", FullMessage(kept.Count, options.Value.ModelsMax));
+        }
+        if (state.StatusOf(name) == "failed")
+        {
+            // A try of a model that failed to load: should it fail again, the next try by itself waits longer.
+            state.Tried(name);
         }
         try
         {

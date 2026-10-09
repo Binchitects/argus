@@ -55,7 +55,19 @@ public sealed partial class AnswerJobs
                     }
                     job.Emit(Arena.Blind(node, match.ModelA, match.ModelB)!);
                 }
-                await chat.AnswerAsync(user, conversation, question, new AnswerOverrides(model, Hurry: job.Hurry, Line: (m, token) => PlaceAsync(job, m, blind: true, token)), EmitAsync, ct);
+                async Task<IDisposable> LineAsync(string m, CancellationToken token)
+                {
+                    try
+                    {
+                        return await PlaceAsync(job, m, blind: true, token);
+                    }
+                    catch (AnswerGate.TooLongException ex)
+                    {
+                        // A wait that gave up names the busy model: blind, as every other event of the arena.
+                        throw new AnswerGate.TooLongException(Arena.Blind(ex.Message, match.ModelA, match.ModelB));
+                    }
+                }
+                await chat.AnswerAsync(user, conversation, question, new AnswerOverrides(model, Hurry: job.Hurry, Line: LineAsync), EmitAsync, ct);
                 if (side == "a")
                 {
                     endA = conversation.CurrentLeafId;

@@ -99,7 +99,7 @@ describe('admin models', () => {
     renderApp('/admin/models')
     const big = (await screen.findByRole('heading', { name: /Big-Model/ })).closest('section')!
     expect(
-      within(big).getByText('Token cache: 4 slots: 3 keep a conversation each, 1 for small steps (titles, checks, summaries) · 4 checkpoints a slot of 112.2 MiB: up to 1.8 GiB of RAM'),
+      within(big).getByText('Token cache: 4 slots, each keeping a conversation; small steps (titles, checks, summaries) go to the last first · 4 checkpoints a slot of 112.2 MiB: up to 1.8 GiB of RAM'),
     ).toBeInTheDocument()
     // A model without a cache line (a gateway one) shows none.
     const image = screen.getByRole('heading', { name: /flux-image/ }).closest('section')!
@@ -293,13 +293,21 @@ describe('admin models', () => {
     expect(within(card).getByText(/org\/Big-Remote on GPU box/)).toBeInTheDocument()
   })
 
-  it('a model that could not load says so, and where to find why', async () => {
+  it('a model that could not load says so, where to find why, and when it is tried again', async () => {
     const v = view()
-    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: v.models.map((m) => (m.name === 'Small-Model' ? { ...m, status: 'failed' } : m)) } }) })
+    const retryAt = '2026-09-25T10:04:00Z'
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { ...v, models: v.models.map((m) => (m.name === 'Small-Model' ? { ...m, status: 'failed', retryAt } : m)) } }),
+    })
     renderApp('/admin/models')
     const small = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
     expect(within(small).getByText('Could not load')).toBeInTheDocument()
-    expect(within(small).getByRole('alert')).toHaveTextContent(/docker compose logs llamacpp/)
+    const alert = within(small).getByRole('alert')
+    expect(alert).toHaveTextContent(/docker compose logs llamacpp/)
+    // Not for good: tried again by itself, less and less often, and the card says from when.
+    expect(alert).toHaveTextContent(/tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes/)
+    expect(alert).toHaveTextContent(`next from ${new Date(retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
+    expect(alert).not.toHaveTextContent(/not tried again/)
     expect(within(small).getByRole('button', { name: /Load/ })).toBeEnabled()
   })
 

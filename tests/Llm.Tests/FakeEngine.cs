@@ -32,6 +32,9 @@ public sealed class FakeEngine : HttpMessageHandler
 
     /// <summary>Slots a model has other than its preset says (the preset changed, the engine has not restarted yet).</summary>
     public Dictionary<string, int> SlotCounts { get; } = [];
+
+    /// <summary>How long /slots takes to answer: llama-server answers between two batches, so while it reads a long prompt, seconds.</summary>
+    public TimeSpan SlotsDelay { get; set; }
     public List<(string Method, string Path, string? Model)> Calls { get; } = [];
 
     public void Reset(string? presetsFile)
@@ -46,6 +49,7 @@ public sealed class FakeEngine : HttpMessageHandler
             Broken.Clear();
             BusySlots.Clear();
             SlotCounts.Clear();
+            SlotsDelay = TimeSpan.Zero;
             Max = 1;
         }
         PresetsFile = presetsFile;
@@ -106,6 +110,10 @@ public sealed class FakeEngine : HttpMessageHandler
             return Json(HttpStatusCode.Unauthorized, """{"error":{"message":"Invalid API Key"}}""");
         }
         var path = request.RequestUri!.AbsolutePath;
+        if (path == "/slots" && SlotsDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(SlotsDelay, cancellationToken);
+        }
         var model = request.Content is null
             ? System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["model"]
             : JsonNode.Parse(await request.Content.ReadAsStringAsync(cancellationToken))?["model"]?.GetValue<string>();

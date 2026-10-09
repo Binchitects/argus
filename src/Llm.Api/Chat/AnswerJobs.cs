@@ -287,7 +287,7 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
 
     /// <summary>
     /// Compacts the branch down to <paramref name="leafId"/> in the background. The summary is a side request: it takes
-    /// no place in line, and keeps off the conversations' slots (SlotTable).
+    /// no place in line, and goes to the side requests' slot first (SlotTable).
     /// </summary>
     public void StartCompaction(Job job, Guid leafId)
     {

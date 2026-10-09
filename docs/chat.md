@@ -797,10 +797,9 @@ in Admin → Models, and its copies on other GPU servers). So that everyone gets
 their turn:
 
 - **In the chat**, each model has its own line: it runs as many answers at
-  once as it serves (from 3 slots, one less: that slot is kept for titles, the
-  safeguards' check and summaries), so someone on a small model
-  never waits behind people on the big one. A person has one answer running
-  at a time, on any model (Settings → Chat → Answers at once, per person).
+  once as it serves, so someone on a small model never waits behind people on
+  the big one. A person has one answer running at a time, on any model
+  (Settings → Chat → Answers at once, per person).
   **Answers at once, everyone** can also limit all models together (0, the
   default: no limit beyond each model's own). Who waits sees which model is
   busy and how many answers are ahead of them ("Qwen3.8-Flash-Next is busy:

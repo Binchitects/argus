@@ -86,9 +86,11 @@ serves at once, so people on one model never wait for another's). Each turn
 goes to the engine slot that holds its conversation's start (`SlotTable`, sent
 as `id_slot`, which LiteLLM passes on), so the engine reads only the new turn
 (a sub-agent keeps a slot the same way); side requests (titles, the
-safeguards' check, summaries, Auto's choice) keep to a slot of their own. A
-model that is not loaded while the engine is full gets room from an idle model
-that is not kept loaded (`EngineRoute`), never from the kept big one.
+safeguards' check, summaries, Auto's choice) go to the last slot first, and to
+another idle one while it is busy. A model that is not loaded while the engine
+is full gets room from an idle model that is not kept loaded, not the one new
+chats use and no bigger (`EngineRoute`); with none idle, the chat says the
+engine is full rather than have it unload the big model.
 
 **Sound and video in.** On upload the app has the sandbox's ffmpeg make an MP3
 of a sound, and a video's frames and sound track. A model that hears gets the

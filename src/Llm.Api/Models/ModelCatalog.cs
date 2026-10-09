@@ -24,21 +24,33 @@ namespace Llm.Api.Models;
 /// </summary>
 public sealed class EngineState(TimeProvider clock)
 {
+    /// <summary>After a try, people's requests for the model go too for this long (the engine is loading it).</summary>
+    private static readonly TimeSpan Grace = TimeSpan.FromSeconds(30);
+
+    /// <summary>A try still seen failed this long after it began has failed (the engine had the request at once).</summary>
+    private static readonly TimeSpan Settle = TimeSpan.FromSeconds(5);
+
     private volatile Snapshot _now = new([], null, null);
     private readonly ConcurrentDictionary<string, Failure> _failed = new(StringComparer.Ordinal);
 
     public sealed record Snapshot(IReadOnlyList<EngineModel> Models, string? Error, DateTimeOffset? At);
 
-    /// <summary>A model the router marked failed: how many tries failed, since when it waits, and when it was last tried.</summary>
-    private sealed record Failure(int Count, DateTimeOffset Since, DateTimeOffset? Tried);
+    /// <summary>
+    /// A model the router marked failed: how many times it failed, since when it waits (its last try, or when it was
+    /// first seen failed), and until when people's requests go too after a try (null: none, or that try failed).
+    /// </summary>
+    private sealed record Failure(int Count, DateTimeOffset Since, DateTimeOffset? Until);
 
     public Snapshot Now => _now;
 
     /// <summary>
-    /// Loaded models that may make room for another, the quickest to load again first: those not kept
-    /// loaded, smallest file first (the watcher keeps it). A kept one never makes room for a request.
+    /// Loaded models that may make room for another, the quickest to load again first: those not kept loaded and
+    /// not the chat's default, smallest file first (the watcher keeps it). A kept or default one never makes room.
     /// </summary>
     public IReadOnlyList<string> Spare { get; set; } = [];
+
+    /// <summary>The file size of each model added here, by name (the watcher keeps it): a model makes room only for one at least as big.</summary>
+    public IReadOnlyDictionary<string, long> Sizes { get; set; } = new Dictionary<string, long>();
 
     public void Set(IReadOnlyList<EngineModel> models)
     {
@@ -47,7 +59,12 @@ public sealed class EngineState(TimeProvider clock)
         {
             if (m.Status == "failed")
             {
-                _failed.TryAdd(m.Name, new Failure(1, now, null));
+                if (!_failed.TryAdd(m.Name, new Failure(1, now, null)) && _failed.TryGetValue(m.Name, out var f)
+                    && f.Until is { } until && now < until && now - f.Since >= Settle)
+                {
+                    // Failed again after its try: the requests that follow wait for the next try.
+                    _failed.TryUpdate(m.Name, f with { Until = null }, f);
+                }
             }
             else if (m.Status == "loaded")
             {
@@ -58,11 +75,11 @@ public sealed class EngineState(TimeProvider clock)
     }
 
     /// <summary>
-    /// Whether a model the router marked failed is tried again now. Failed is not always broken: the router
-    /// kills a model that does not stop within 10 seconds of being told to (one stopped while it loads, to make
-    /// room for another, goes on loading and answering), and marks it failed. So it is tried again after a
-    /// minute, then after twice as long at each failure, up to 30 minutes; for half a minute after a try, the
-    /// requests that come meanwhile go too (the engine is loading it).
+    /// Whether a model the router marked failed is tried again now (the watcher loads a kept one then). Failed is
+    /// not always broken: the router kills a model that does not stop within 10 seconds of being told to (one
+    /// stopped while it loads, to make room for another, goes on loading and answering), and marks it failed. So
+    /// it is tried again after a minute, then after twice as long at each failure, up to 30 minutes: once each
+    /// time, never every few seconds.
     /// </summary>
     public bool MayRetry(string model)
     {
@@ -70,17 +87,31 @@ public sealed class EngineState(TimeProvider clock)
         {
             return false;
         }
-        var now = clock.GetUtcNow();
-        return now - f.Since >= Wait(f.Count) || (f.Tried is { } at && now - at < TimeSpan.FromSeconds(30));
+        return clock.GetUtcNow() - f.Since >= Wait(f.Count);
     }
 
-    /// <summary>A failed model is tried again: should it fail again, the next wait is twice as long.</summary>
+    /// <summary>
+    /// Whether a person's request for a model the router marked failed goes to the engine (which loads it again):
+    /// once its wait is over (<see cref="MayRetry"/>), and for half a minute after a try, while the engine loads it,
+    /// unless that try is seen failed meanwhile.
+    /// </summary>
+    public bool MayAsk(string model) =>
+        MayRetry(model) || (StatusOf(model) == "failed" && _failed.TryGetValue(model, out var f) && f.Until is { } until && clock.GetUtcNow() < until);
+
+    /// <summary>
+    /// A failed model is tried again (a request for it is sent, or the watcher loads it): should it fail again, the
+    /// next wait is twice as long. Requests within half a minute of a try are part of that try.
+    /// </summary>
     public void Tried(string model)
     {
         var now = clock.GetUtcNow();
-        _failed.AddOrUpdate(model, _ => new Failure(1, now, now),
-            (_, f) => f.Tried is { } at && now - at < TimeSpan.FromSeconds(30) ? f : new Failure(f.Count + 1, now, now));
+        _failed.AddOrUpdate(model, _ => new Failure(2, now, now + Grace),
+            (_, f) => f.Until is { } until && now < until ? f : new Failure(f.Count + 1, now, now + Grace));
     }
+
+    /// <summary>When a model the router marked failed is next tried again (its wait is over then); null when it is not failed.</summary>
+    public DateTimeOffset? NextTry(string model) =>
+        StatusOf(model) == "failed" && _failed.TryGetValue(model, out var f) ? f.Since + Wait(f.Count) : null;
 
     /// <summary>The wait before a model that failed this many times is tried again: 1, 2, 4, 8, 16, then 30 minutes.</summary>
     public static TimeSpan Wait(int failures) => TimeSpan.FromMinutes(Math.Min(30, 1 << Math.Clamp(failures - 1, 0, 5)));
@@ -547,11 +578,11 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
 
     /// <summary>
     /// An engine model that is not loaded but loads when asked for: the engine has a place
-    /// besides the models kept loaded (one not kept, idle, makes room: EngineRoute). One that
-    /// failed to load does too once its wait is over (EngineState.MayRetry).
+    /// besides the models kept loaded (one not kept, idle and no bigger, makes room: EngineRoute).
+    /// One that failed to load does too once its wait is over (EngineState.MayAsk).
     /// </summary>
     public bool OnRequest(string model, IReadOnlySet<string> onEngine) =>
-        onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" || engine.MayRetry(model))
+        onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" || engine.MayAsk(model))
         && catalog.Kept().Count < options.Value.ModelsMax;
 
     /// <summary>Whether a model can answer: loaded, or loaded on request.</summary>
@@ -594,11 +625,6 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
                 : engine.StatusOf(model) == "failed"
                     ? $"{model} could not be loaded just now. Choose another model, or try again in a few minutes; an admin can see why under Admin → Models."
                     : $"{model} is not loaded right now, and the engine has no place for it beside the models kept loaded. An admin can load it under Admin → Models, or choose another model.";
-        }
-        if (onEngine.Contains(model) && engine.StatusOf(model) == "failed")
-        {
-            // Its wait is over: this request has the engine load it again.
-            engine.Tried(model);
         }
         // One credit over the chat and API keys, and the groups' credit.
         return await credit.RefusalAsync(user, ct);

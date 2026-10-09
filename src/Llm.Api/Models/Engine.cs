@@ -70,13 +70,14 @@ public sealed class EngineClient(HttpClient http, IOptions<EngineOptions> option
 
     /// <summary>
     /// A loaded model's slots as the engine has them (llama-server's /slots): how many, and which are
-    /// answering now. Null when the engine does not say within two seconds (not reachable, the
-    /// endpoint off): the caller goes by what it knows itself.
+    /// answering now. llama-server answers between two batches of its work, so while it reads a long
+    /// prompt this can take seconds. Null when the engine does not say within <paramref name="patience"/>
+    /// (not reachable, the endpoint off, or too busy): the caller goes by what it knows itself.
     /// </summary>
-    public async Task<(int Count, IReadOnlySet<int> Busy)?> SlotsAsync(string model, CancellationToken ct = default)
+    public async Task<(int Count, IReadOnlySet<int> Busy)?> SlotsAsync(string model, TimeSpan patience, CancellationToken ct = default)
     {
         using var quick = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        quick.CancelAfter(TimeSpan.FromSeconds(2));
+        quick.CancelAfter(patience);
         try
         {
             if (await SendAsync(HttpMethod.Get, "/slots?model=" + Uri.EscapeDataString(model), null, quick.Token) is not JsonArray slots)

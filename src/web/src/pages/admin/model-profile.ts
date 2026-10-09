@@ -71,7 +71,7 @@ export function params(n: number | null | undefined): string | null {
 export interface TokenCache {
   /** Its slots: the answers and side requests it serves at once. */
   slots: number
-  /** The slot kept for side requests (titles, checks, summaries, sub-agents), from 3 slots; null: none. */
+  /** The slot side requests (titles, checks, summaries) go to first, from 3 slots; conversations take it last. Null: none. */
   sideSlot: number | null
   /** Each conversation keeps its slot (on this engine alone, with 2 or more). */
   pinned: boolean
@@ -83,7 +83,7 @@ export interface TokenCache {
   ramBytes: number | null
 }
 
-/** One line for a model's card: "4 slots: 3 keep a conversation each, 1 for small steps · 4 checkpoints a slot of 112 MiB: 1.8 GB of RAM". */
+/** One line for a model's card: "4 slots, each keeping a conversation; small steps go to the last first · 4 checkpoints a slot of 112 MiB: 1.8 GB of RAM". */
 export function cacheLine(c: TokenCache): string {
   const slots =
     c.slots === 1
@@ -91,7 +91,7 @@ export function cacheLine(c: TokenCache): string {
       : !c.pinned
         ? `${c.slots} slots; the gateway shares requests among its copies, so a conversation does not keep one`
         : c.sideSlot != null
-          ? `${c.slots} slots: ${c.slots - 1} keep a conversation each, 1 for small steps (titles, checks, summaries)`
+          ? `${c.slots} slots, each keeping a conversation; small steps (titles, checks, summaries) go to the last first`
           : `${c.slots} slots, each keeping a conversation`
   const parts = [`Token cache: ${slots}`]
   if (!c.keepsIdle) parts.push('idle slots are emptied at each new request')
