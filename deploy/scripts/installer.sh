@@ -92,7 +92,15 @@ usage() { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$SEL
 
 abspath() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "${1#./}" ;; esac; }
 human() { awk -v b="${1:-0}" 'BEGIN { split("B KB MB GB TB", u); i = 1; while (b >= 1024 && i < 5) { b /= 1024; i++ } printf (i == 1 ? "%d %s" : "%.1f %s"), b, u[i] }'; }
-env_get() { grep -E "^$1=" "${2:-$DEPLOY/.env}" 2>/dev/null | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
+# .env as compose reads it: "export KEY=", spaces around =, quotes; the last line for a key wins.
+env_get() {
+  sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=[[:space:]]*//p" "${2:-$DEPLOY/.env}" 2>/dev/null | tail -n1 \
+    | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\\(.*\\)'\$/\\1/"
+}
+env_keys() {   # env_keys FILE [nonempty]: the keys set in an env file
+  local v='.*'; [[ ${2:-} == nonempty ]] && v='[[:space:]]*[^[:space:]].*'
+  sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=$v\$/\2/p" "$1" 2>/dev/null
+}
 # A value that is never printed or logged.
 is_secret() { [[ "$1" =~ (PASSWORD|KEY|TOKEN|SECRET) ]]; }
 gen_secret() { openssl rand -hex 32 2>/dev/null || od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
@@ -654,7 +662,7 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
   local env="$DEPLOY/.env" example="$BUNDLE/deploy/.env.example" key def val tmp msg unused=()
   local -a add=()
   local -A have=() known=() req=()
-  while IFS= read -r key; do have["$key"]=1; done < <(sed -n -E 's/^([A-Z][A-Z0-9_]*)=.*/\1/p' "$env")
+  while IFS= read -r key; do have["$key"]=1; done < <(env_keys "$env")
   while IFS= read -r key; do req["$key"]=1; done < <(required_keys "$BUNDLE/deploy")
   while IFS=$'\t' read -r key def; do
     [[ -n "$key" && -z "${have[$key]:-}" ]] || continue
@@ -687,7 +695,7 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
   while IFS= read -r key; do
     [[ -n "${known[$key]:-}" || "$key" == COMPOSE_* || "$key" == BACKUP_* ]] && continue
     unused+=("$key")
-  done < <(sed -n -E 's/^([A-Z][A-Z0-9_]*)=.*/\1/p' "$env" | sort -u)
+  done < <(env_keys "$env" | sort -u)
   [[ ${#unused[@]} -gt 0 ]] && note ".env: not read by $BVERSION, kept: ${unused[*]}"
   return 0
 }
@@ -1363,7 +1371,7 @@ cmd_repair() {
   [[ -f "$DEPLOY/.env" ]] || { bad ".env is missing: its secrets open the data; restore it (scripts/backup.sh --restore --with-config, or by hand)"; problems=$((problems + 1)); }
   local -A have=()
   if [[ -f "$DEPLOY/.env" ]]; then
-    while IFS= read -r f; do have["$f"]=1; done < <(sed -n -E 's/^([A-Z][A-Z0-9_]*)=.+$/\1/p' "$DEPLOY/.env")
+    while IFS= read -r f; do have["$f"]=1; done < <(env_keys "$DEPLOY/.env" nonempty)
     for f in $(required_keys "$DEPLOY"); do [[ -n "${have[$f]:-}" ]] || { bad ".env has no value for $f, which the stack needs (never changed without asking: set it, or restore .env)"; problems=$((problems + 1)); }; done
   fi
 

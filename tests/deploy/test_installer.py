@@ -589,14 +589,15 @@ class InstallerTests(unittest.TestCase):
     def test_An_app_that_answers_a_few_seconds_late_is_waited_for(self):
         """Traefik reaches a recreated container a little after compose calls it healthy."""
         deploy = self.old_install(version_file=True)
+        # Written as compose also reads them.
         with open(deploy / ".env", "a") as f:
-            f.write("NEW_SETTING=off\nNEW_KEY=mine\n")
+            f.write("export NEW_SETTING=off\nNEW_KEY = mine\n")
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "20s", extra={"FAKE_CURL_LATE": "2"})
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("ok     app: 9.9.9 (its own /api/info)", r.stdout)
         # .env had every key already: none added, the values kept.
         self.assertIn("  .env: 0 key(s) added\n", r.stdout)
-        self.assertTrue((deploy / ".env").read_text().endswith("NEW_SETTING=off\nNEW_KEY=mine\n"))
+        self.assertTrue((deploy / ".env").read_text().endswith("export NEW_SETTING=off\nNEW_KEY = mine\n"))
         Path(str(self.r.s.log) + ".info-asks").unlink(missing_ok=True)
 
     def test_A_failed_upgrade_rolls_back_files_images_and_data(self):
