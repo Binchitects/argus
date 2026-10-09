@@ -26,7 +26,7 @@ spec:
             # The gateway's; the app makes its own.
             - { name: POSTGRES_DB, value: litellm }
             - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
-          readinessProbe: { exec: { command: [pg_isready, -U, arena] }, periodSeconds: 10 }
+          readinessProbe: { exec: { command: [pg_isready, -U, arena, -d, litellm] }, periodSeconds: 10 }
           resources: {{- toYaml .Values.postgresql.resources | nindent 12 }}
           volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
   volumeClaimTemplates:

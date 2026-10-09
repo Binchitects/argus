@@ -112,7 +112,7 @@ services:
       # The gateway's; the app makes its own.
       POSTGRES_DB: litellm
     volumes: [postgres:/var/lib/postgresql/data]
-    healthcheck: { test: [CMD, pg_isready, -U, arena], interval: 10s }
+    healthcheck: { test: [CMD, pg_isready, -U, arena, -d, litellm], interval: 10s }
 
   litellm:
     <<: *service

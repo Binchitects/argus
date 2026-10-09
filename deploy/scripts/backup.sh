@@ -192,7 +192,7 @@ if [[ $ACTION == restore ]]; then
     docker run --rm --network none -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
     docker compose up -d postgres >/dev/null 2>&1 || die "postgres did not start"
     # Through compose: the project's own postgres, whatever the project is called.
-    for _ in $(seq 1 60); do docker compose exec -T postgres pg_isready -U "$PG_USER" >/dev/null 2>&1 && break; sleep 2; done
+    for _ in $(seq 1 60); do docker compose exec -T postgres pg_isready -U "$PG_USER" -d litellm >/dev/null 2>&1 && break; sleep 2; done
     sleep 3
     zcat "$FROM/postgres.sql.gz" | docker compose exec -T postgres psql -q -U "$PG_USER" -d postgres >/dev/null 2>"$FROM/.restore-psql.log" \
       || say "  psql reported errors; see $FROM/.restore-psql.log"
@@ -238,7 +238,7 @@ say "  $(find "$OUT/config" -type f | wc -l) files (.env, $(ls "$OUT/config/comp
 
 # ---- 2. gateway database -------------------------------------------------------
 say "==> postgres"
-if docker exec postgres pg_isready -U "$PG_USER" >/dev/null 2>&1; then
+if docker exec postgres pg_isready -U "$PG_USER" -d litellm >/dev/null 2>&1; then
   if docker exec postgres pg_dumpall -U "$PG_USER" --clean --if-exists | gzip -6 > "$OUT/postgres.sql.gz" \
      && zcat "$OUT/postgres.sql.gz" | tail -n 5 | grep -q "PostgreSQL database cluster dump complete"; then
     say "  postgres.sql.gz $(du -h "$OUT/postgres.sql.gz" | cut -f1) (pg_dumpall)"
