@@ -38,6 +38,9 @@ public sealed class FakeModel : HttpMessageHandler
     /// <summary>Picture requests (the image tool), as sent.</summary>
     public ConcurrentQueue<JsonObject> ImageRequests { get; } = new();
 
+    /// <summary>Runs before a picture is answered (its prompt): a test holds a slow picture there.</summary>
+    public Func<string, Task>? BeforeImage { get; set; }
+
     /// <summary>Models the gateway does not know yet, once each: the first request for one is refused as LiteLLM does.</summary>
     public ConcurrentDictionary<string, bool> UnknownOnce { get; } = new();
 
@@ -73,6 +76,10 @@ public sealed class FakeModel : HttpMessageHandler
         if (request.RequestUri!.AbsolutePath.EndsWith("/images/generations", StringComparison.Ordinal))
         {
             ImageRequests.Enqueue(body);
+            if (BeforeImage is { } before)
+            {
+                await before(body["prompt"]?.GetValue<string>() ?? "");
+            }
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(new JsonObject { ["created"] = 1, ["data"] = new JsonArray(new JsonObject { ["b64_json"] = Convert.ToBase64String(Png) }) }.ToJsonString(), Encoding.UTF8, "application/json"),

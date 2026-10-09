@@ -216,25 +216,29 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
     /// <summary>The log's times are UTC without a zone: compared as they are, its index on startTime serves.</summary>
     private static DateTime Logged(DateTimeOffset at) => DateTime.SpecifyKind(at.UtcDateTime, DateTimeKind.Unspecified);
 
-    /// <summary>The person's Arena MCP calls of <see cref="ModelTools"/> that ended since then (the audit log has each one when it ends).</summary>
+    /// <summary>
+    /// The person's Arena MCP calls of <see cref="ModelTools"/> that started since then and have ended
+    /// (the audit log has each one when it ends, at the time it started).
+    /// </summary>
     private Task<int> ModelCallsSinceAsync(Guid user, DateTimeOffset since, CancellationToken ct) =>
         db.AuditEvents.AsNoTracking().CountAsync(a => a.Action == "mcp.call" && a.ActorId == user && a.At >= since && ModelTools.Contains(a.Target!), ct);
 
     /// <summary>
-    /// Before an Arena MCP call of a tool that reaches a model: whether the person's requests a
-    /// minute leave room for it. It counts what their keys sent in the last minute (the gateway's
-    /// log), their Arena MCP model calls that ended in it (the audit log, one for every replica)
-    /// and those running now on this replica. Room: a slot (none without a limit) to dispose of once
-    /// the call is audited. No room: why. Tokens a minute does not apply: pictures, speech and video
-    /// have no tokens, as the gateway counts them.
+    /// Before an Arena MCP call of a tool that reaches a model, started now: whether the person's
+    /// requests a minute leave room for it. Each request counts in the minute it started, as the
+    /// gateway counts them, however long it runs: what their keys sent in the last minute (the
+    /// gateway's log), their Arena MCP model calls that started in it and have ended (the audit log,
+    /// one for every replica), and those that started in it and run now on this replica. Room: a slot
+    /// (none without a limit) to dispose of once the call is audited. No room: why. Tokens a minute
+    /// does not apply: pictures, speech and video have no tokens, as the gateway counts them.
     /// </summary>
-    public async Task<(IDisposable? Slot, string? Refusal)> StartModelCallAsync(AppUser user, CancellationToken ct)
+    public async Task<(IDisposable? Slot, string? Refusal)> StartModelCallAsync(AppUser user, DateTimeOffset started, CancellationToken ct)
     {
         if ((await ForAsync(user, ct)).RequestsPerMinute.Value is not { } most)
         {
             return (null, null);
         }
-        var counted = await ModelCallsSinceAsync(user.Id, clock.GetUtcNow().AddMinutes(-1), ct);
+        var counted = await ModelCallsSinceAsync(user.Id, started.AddMinutes(-1), ct);
         try
         {
             counted += (int)(await MinuteAsync([.. (await gateway.KeysAsync(user.Email!, ct)).Select(k => k.Token)], ct)).Requests;
@@ -243,7 +247,7 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
         {
             // The gateway or its log cannot be read now: what the app counted itself still holds.
         }
-        if (running.TryStart(user.Id, now => counted + now < most) is { } slot)
+        if (running.TryStart(user.Id, started, now => counted + now < most) is { } slot)
         {
             return (slot, null);
         }
@@ -279,10 +283,11 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
         }
         if (use is not null)
         {
-            // Arena MCP's pictures, speech and video count against requests a minute too, and their refusals are in the audit log.
+            // Arena MCP's pictures, speech and video count against requests a minute too (those that run now on this replica as well),
+            // and their refusals are in the audit log.
             var now = clock.GetUtcNow();
             var day = now.AddDays(-1);
-            var mcp = await ModelCallsSinceAsync(user.Id, now.AddMinutes(-1), ct);
+            var mcp = await ModelCallsSinceAsync(user.Id, now.AddMinutes(-1), ct) + running.Running(user.Id, now);
             var refused = await db.AuditEvents.AsNoTracking().Where(a => a.Action == McpRefused && a.ActorId == user.Id && a.At >= day).Select(a => a.At).ToListAsync(ct);
             var requests = use.Refused.FirstOrDefault(r => r.Limit == "requests");
             use = use with
@@ -308,50 +313,60 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
 }
 
 /// <summary>
-/// Arena MCP's calls that reach a model, running now on this replica, by person: they count against
-/// the person's requests a minute until the audit log has them, so calls started at once are
-/// counted too.
+/// Arena MCP's calls that reach a model, running now on this replica, by person, with when each
+/// started: until the audit log has them, they count against the person's requests a minute in the
+/// minute they started (so calls started at once are counted too), and not after it, however long
+/// they run.
 /// </summary>
 public sealed class ModelCalls
 {
-    private readonly Dictionary<Guid, int> _running = [];
+    private readonly Dictionary<Guid, List<DateTimeOffset>> _running = [];
 
-    /// <summary>A slot for one more call when <paramref name="may"/> allows it, given how many of theirs run now; null when not.</summary>
-    public IDisposable? TryStart(Guid user, Func<int, bool> may)
+    /// <summary>
+    /// A slot for one more call, started at <paramref name="at"/>, when <paramref name="may"/> allows it
+    /// given how many of theirs run now that started in the minute before; null when not.
+    /// </summary>
+    public IDisposable? TryStart(Guid user, DateTimeOffset at, Func<int, bool> may)
     {
         lock (_running)
         {
-            var now = _running.GetValueOrDefault(user);
-            if (!may(now))
+            if (!may(Counted(user, at)))
             {
                 return null;
             }
-            _running[user] = now + 1;
-            return new Slot(this, user);
+            if (!_running.TryGetValue(user, out var started))
+            {
+                _running[user] = started = [];
+            }
+            started.Add(at);
+            return new Slot(this, user, at);
         }
     }
 
-    /// <summary>How many of the person's calls run now.</summary>
-    public int Running(Guid user)
+    /// <summary>How many of the person's calls run now that started in the minute before <paramref name="at"/>.</summary>
+    public int Running(Guid user, DateTimeOffset at)
     {
         lock (_running)
         {
-            return _running.GetValueOrDefault(user);
+            return Counted(user, at);
         }
     }
 
-    private void End(Guid user)
+    private int Counted(Guid user, DateTimeOffset at) =>
+        _running.TryGetValue(user, out var started) ? started.Count(s => s >= at.AddMinutes(-1)) : 0;
+
+    private void End(Guid user, DateTimeOffset at)
     {
         lock (_running)
         {
-            if (--_running[user] <= 0)
+            if (_running.TryGetValue(user, out var started) && started.Remove(at) && started.Count == 0)
             {
                 _running.Remove(user);
             }
         }
     }
 
-    private sealed class Slot(ModelCalls calls, Guid user) : IDisposable
+    private sealed class Slot(ModelCalls calls, Guid user, DateTimeOffset at) : IDisposable
     {
         private int _ended;
 
@@ -359,7 +374,7 @@ public sealed class ModelCalls
         {
             if (Interlocked.Exchange(ref _ended, 1) == 0)
             {
-                calls.End(user);
+                calls.End(user, at);
             }
         }
     }

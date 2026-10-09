@@ -429,18 +429,79 @@ public sealed class RateLimitTests(AppFixture app)
     {
         var calls = new ModelCalls();
         var p = Guid.NewGuid();
-        var first = calls.TryStart(p, n => n < 2);
-        var second = calls.TryStart(p, n => n < 2);
+        var now = DateTimeOffset.UtcNow;
+        var first = calls.TryStart(p, now, n => n < 2);
+        var second = calls.TryStart(p, now, n => n < 2);
         Assert.NotNull(first);
         Assert.NotNull(second);
-        Assert.Null(calls.TryStart(p, n => n < 2));
+        Assert.Null(calls.TryStart(p, now, n => n < 2));
         // Someone else's are their own.
-        Assert.NotNull(calls.TryStart(Guid.NewGuid(), n => n < 1));
+        Assert.NotNull(calls.TryStart(Guid.NewGuid(), now, n => n < 1));
         second!.Dispose();
         second.Dispose();
-        Assert.Equal(1, calls.Running(p));
-        Assert.NotNull(calls.TryStart(p, n => n < 2));
+        Assert.Equal(1, calls.Running(p, now));
+        Assert.NotNull(calls.TryStart(p, now, n => n < 2));
         first!.Dispose();
+    }
+
+    [Fact]
+    public void A_running_call_counts_in_the_minute_it_started_not_for_as_long_as_it_runs()
+    {
+        var calls = new ModelCalls();
+        var p = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow;
+        // One a minute: a video starts...
+        using var video = calls.TryStart(p, start, n => n < 1);
+        Assert.NotNull(video);
+        Assert.Null(calls.TryStart(p, start.AddSeconds(59), n => n < 1));
+        // ...and still runs a minute later, but its minute is over: a picture may start.
+        Assert.Equal(0, calls.Running(p, start.AddSeconds(61)));
+        using var picture = calls.TryStart(p, start.AddSeconds(61), n => n < 1);
+        Assert.NotNull(picture);
+        Assert.Equal(1, calls.Running(p, start.AddSeconds(62)));
+    }
+
+    [Fact]
+    public async Task A_slow_Arena_MCP_call_counts_in_the_minute_it_started_while_it_runs_and_once_it_is_audited()
+    {
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("FLUX.2-klein-4B", null, null, false, false, false, null, null, null, Mode: "image_generation"));
+        // Whole seconds: the audit log keeps microseconds.
+        var clock = new MovableClock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var f = app.Create(app.ConnectionStringFor("ratesslow_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+            new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-rate-tests" }, s => s.AddSingleton<TimeProvider>(clock));
+        var admin = await AdminAsync(f);
+        var p = await PersonAsync(admin);
+        await LimitsAsync(admin, p.Id, 1, null);
+        var picture = new { prompt = "A red fox in the snow" };
+        var hold = new Hold();
+        app.Model.BeforeImage = hold.For("A slow fox");
+        try
+        {
+            // One a minute: a slow picture starts, and while its minute lasts nothing else may.
+            var start = clock.Now;
+            var slow = McpCallAsync(f, p.Key, "generate_image", new { prompt = "A slow fox" });
+            await hold.Held;
+            Assert.True((await McpCallAsync(f, p.Key, "generate_image", picture)).IsError);
+
+            // A minute after it started it still runs, but no longer counts: the gateway counts a request once, when it starts.
+            clock.Now = start.AddSeconds(61);
+            Assert.False((await McpCallAsync(f, p.Key, "generate_image", picture)).IsError);
+
+            // It ends when that minute is over too, and is audited at its start: it does not count again.
+            clock.Now = start.AddSeconds(122);
+            hold.Release();
+            Assert.False((await slow).IsError);
+            Assert.False((await McpCallAsync(f, p.Key, "generate_image", picture)).IsError);
+            var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray()
+                .Where(e => e.GetProperty("action").GetString() == "mcp.call" && e.GetProperty("actor").GetString() == p.Name).ToList();
+            Assert.Equal([start, start.AddSeconds(61), start.AddSeconds(122)], audit.Select(e => e.GetProperty("at").GetDateTimeOffset()).Order());
+        }
+        finally
+        {
+            app.Model.BeforeImage = null;
+            hold.Release();
+        }
     }
 
     [Fact]

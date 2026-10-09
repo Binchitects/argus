@@ -81,11 +81,12 @@ Other clients (streamable HTTP):
   account. Pictures and speech go through the gateway on the person's credit;
   pictures and video count against their pictures a day (Settings →
   Safeguards). Pictures, speech and video count against their key's requests
-  a minute too, when an admin sets one: past it the call is an error saying so,
-  audited as `mcp.rate_limited` ([admin.md](admin.md#rate-limits-for-api-keys)).
+  a minute too, when an admin sets one, each in the minute it started however
+  long it runs: past it the call is an error saying so, audited as
+  `mcp.rate_limited` ([admin.md](admin.md#rate-limits-for-api-keys)).
 - **Every call is audited**: `mcp.call`, with the tool (a built-in's id, or the
-  plugin's or server's name), the function, and whether it worked. A call the
-  client stops is audited too.
+  plugin's or server's name), the function, and whether it worked, entered when
+  it ends at the time it started. A call the client stops is audited too.
 - **Refused**: 401 with no key, a key the gateway does not know, a blocked key,
   or a disabled person (the body says which); 503 when the gateway cannot be
   asked; 404 when Arena MCP is off.

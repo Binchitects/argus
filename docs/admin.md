@@ -382,11 +382,15 @@ them.
   tools that reach a model (pictures, speech, video) make their requests with
   the chat's own key, so the gateway cannot count them. The app counts them
   instead, against the person's requests a minute: what their keys sent in the
-  last minute, their Arena MCP pictures, speech and video that ended in it
-  (the audit log) and those running now. Past the limit, the tool call is an
-  error saying which limit, audited as `mcp.rate_limited`; their key's card
-  counts these calls and refusals too, the Refused by rate limits panel does
-  not (it reads the gateway's log). Tokens a minute and requests at once do
+  last minute, and their Arena MCP pictures, speech and video that started in
+  it (those that ended from the audit log, which has each call at its start;
+  those running now on the replica that took the call). Each counts in the
+  minute it started, as the gateway counts a request, however long it runs: a
+  five-minute video holds back one request, for one minute. Past the limit,
+  the tool call is an error saying which limit, audited as
+  `mcp.rate_limited`; their key's card counts these calls and refusals too,
+  the Refused by rate limits panel does not (it reads the gateway's log).
+  Tokens a minute and requests at once do
   not apply to these tools: they have no tokens, and the chat's own limits for
   pictures and videos hold. Arena MCP's other tools reach no model.
 - **What people see**: their key's card (Your account, and Connect your tools)
