@@ -363,6 +363,47 @@ public sealed class ArenaMcpTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_plugin_with_each_persons_own_sign_in_slow_to_open_does_not_hold_the_agents_connection_either()
+    {
+        // A plugin's server was started after the others, one after another, each waited for up to a minute.
+        await using var f = NewApp(settings: new() { ["Mcp:ListWaitSeconds"] = "2" });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        using var buffer = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        await using (var w = new StreamWriter(zip.CreateEntry("desk/plugin.yaml").Open()))
+        {
+            await w.WriteAsync("name: desk\nversion: 1.0.0\ntitle: Desk\ntools: { mcp: \"https://tools.example.test/mcp\" }\nauth: { per_person: api_key, header: X-Api-Key, value: \"{token}\" }\n");
+        }
+        var installed = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install", new { zip = Convert.ToBase64String(buffer.ToArray()) }));
+        var toolId = installed.GetProperty("toolId").GetString()!;
+        var (person, _, _, key) = await PersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.NoContent,
+            await person.Http.PutAsJsonAsync(new Uri($"/api/account/connections/{Uri.EscapeDataString(toolId)}", UriKind.Relative), new { secret = FakeMcp.ApiKey }));
+        var hold = new TaskCompletionSource();
+        app.Mcp.Hold = hold;
+        try
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var (_, init, _) = await RpcAsync(Agent(f, key), "initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "test", version = "1" } });
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"initialize took {clock.Elapsed.TotalSeconds:0.0} s");
+            Assert.Contains("Desk (it did not answer within 2 seconds)", init.GetProperty("result").GetProperty("instructions").GetString(), StringComparison.Ordinal);
+            var names = (await RpcAsync(Agent(f, key), "tools/list")).Answer.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
+            Assert.Contains("calculate", names);
+            Assert.Contains("find_symbol", names);
+            Assert.DoesNotContain("desk__echo", names);
+        }
+        finally
+        {
+            app.Mcp.Hold = null;
+            hold.TrySetResult();
+        }
+        // Answering again, it is listed, signed in as the person.
+        var (_, again, _) = await RpcAsync(Agent(f, key), "initialize", new { protocolVersion = "2025-06-18" });
+        Assert.DoesNotContain("Desk (", again.GetProperty("result").GetProperty("instructions").GetString(), StringComparison.Ordinal);
+        Assert.Contains("desk__echo", (await RpcAsync(Agent(f, key), "tools/list")).Answer.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()));
+    }
+
+    [Fact]
     public async Task A_client_cancels_a_running_call_and_it_stops()
     {
         await using var f = NewApp();

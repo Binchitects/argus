@@ -57,10 +57,18 @@ public sealed partial class McpTools(
     private static bool Remote(IChatTool tool) => tool is ArgusTool or McpServerTool { Server.PersonAuth: null };
 
     /// <summary>
+    /// A plugin with a sign-in of each person's own: reading it uses the request's database context
+    /// (and may renew it with the plugin's provider), so it is read with the others' one after
+    /// another; an MCP server's connection then runs beside the remote ones.
+    /// </summary>
+    private static bool SignsIn(IChatTool tool) => tool is IServerTool { Server.PersonAuth: not null };
+
+    /// <summary>
     /// Every served tool started, its functions listed; kept a minute unless <paramref name="fresh"/>.
-    /// The remote ones start together and are waited for <see cref="McpOptions.ListWaitSeconds"/> at
-    /// most: one slower is listed as not available now (and the list kept only briefly), so a slow or
-    /// dead server never holds an agent's connection.
+    /// The remote ones and the plugins with a sign-in of the person's start together, first, and are
+    /// waited for <see cref="McpOptions.ListWaitSeconds"/> at most, all together: one slower is listed
+    /// as not available now (and the list kept only briefly), so a slow or dead server never holds an
+    /// agent's connection.
     /// </summary>
     public async Task<McpCatalog> CatalogAsync(AppUser user, bool fresh, CancellationToken ct)
     {
@@ -77,11 +85,23 @@ public sealed partial class McpTools(
         var wait = TimeSpan.FromSeconds(Math.Max(1, options.CurrentValue.ListWaitSeconds));
         using var waiting = CancellationTokenSource.CreateLinkedTokenSource(ct);
         waiting.CancelAfter(wait);
-        var remote = served.Where(c => Remote(c.Tool)).ToDictionary(c => c.Tool.Id, c => StartAsync(c, context, wait, waiting.Token, ct));
+        var early = served.Where(c => Remote(c.Tool)).ToDictionary(c => c.Tool.Id, c => AttemptAsync(c, t => c.Tool.StartAsync(context, t), wait, waiting.Token, ct));
+        foreach (var choice in served.Where(c => SignsIn(c.Tool)))
+        {
+            if (choice.Tool is McpServerTool server)
+            {
+                var (connect, failure) = await AttemptAsync(choice, t => server.SignInAsync(context, t), wait, waiting.Token, ct);
+                early[choice.Tool.Id] = connect is null ? Task.FromResult<(IToolRun?, string?)>((null, failure)) : AttemptAsync(choice, connect, wait, waiting.Token, ct);
+            }
+            else
+            {
+                early[choice.Tool.Id] = Task.FromResult(await AttemptAsync(choice, t => choice.Tool.StartAsync(context, t), wait, waiting.Token, ct));
+            }
+        }
         var slow = false;
         foreach (var choice in served)
         {
-            var (run, failure) = remote.TryGetValue(choice.Tool.Id, out var started) ? await started : await StartAsync(choice, context, wait, ct, ct);
+            var (run, failure) = early.TryGetValue(choice.Tool.Id, out var started) ? await started : await AttemptAsync(choice, t => choice.Tool.StartAsync(context, t), wait, ct, ct);
             if (run is null)
             {
                 unavailable.Add($"{choice.Tool.Title} ({failure})");
@@ -109,12 +129,13 @@ public sealed partial class McpTools(
 
     private static string Slow(TimeSpan wait) => $"it did not answer within {Mcp.Describe(wait)}";
 
-    /// <summary>A tool started, or why not. <paramref name="limit"/> is the wait for it; <paramref name="ct"/> the request's.</summary>
-    private async Task<(IToolRun? Run, string? Failure)> StartAsync(ToolChoice choice, ToolContext context, TimeSpan wait, CancellationToken limit, CancellationToken ct)
+    /// <summary>A tool started (or its start begun: a sign-in read), or why not. <paramref name="limit"/> is the wait for it; <paramref name="ct"/> the request's.</summary>
+    private async Task<(T? Value, string? Failure)> AttemptAsync<T>(ToolChoice choice, Func<CancellationToken, Task<T>> start, TimeSpan wait, CancellationToken limit, CancellationToken ct)
+        where T : class
     {
         try
         {
-            return (await choice.Tool.StartAsync(context, limit), null);
+            return (await start(limit), null);
         }
         catch (McpException ex)
         {
