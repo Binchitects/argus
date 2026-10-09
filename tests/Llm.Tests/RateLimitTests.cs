@@ -382,7 +382,7 @@ public sealed class RateLimitTests(AppFixture app)
         Assert.False((await McpCallAsync(f, p.Key, "generate_image", picture)).IsError);
         var (text, isError) = await McpCallAsync(f, p.Key, "generate_image", picture);
         Assert.True(isError);
-        Assert.StartsWith("Your API key reached its limit of 2 requests a minute; pictures, speech and video made through Arena MCP count too.", text, StringComparison.Ordinal);
+        Assert.StartsWith("Your API key reached its limit of 2 requests a minute; pictures, speech, video and deep research started through Arena MCP count too.", text, StringComparison.Ordinal);
         Assert.False((await McpCallAsync(f, p.Key, "calculate", new { expression = "1 + 1" })).IsError);
         var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().ToList();
         var refusal = Assert.Single(audit, e => e.GetProperty("action").GetString() == RateLimits.McpRefused);
@@ -422,6 +422,14 @@ public sealed class RateLimitTests(AppFixture app)
         {
             Assert.False((await McpCallAsync(f, r.Key, "generate_image", picture)).IsError);
         }
+    }
+
+    [Fact]
+    public void Each_deep_research_an_agent_starts_at_Arena_MCP_counts_as_a_request()
+    {
+        // Deep research (the "research" tool) runs as a chat of the person's own, with the chat's key, which carries no limit:
+        // its start is counted against the person's requests a minute, as pictures, speech and video are.
+        Assert.Equal(["image", "speech", "video", "research"], RateLimits.ModelTools);
     }
 
     [Fact]

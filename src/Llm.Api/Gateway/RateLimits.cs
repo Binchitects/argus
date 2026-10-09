@@ -55,11 +55,13 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
     ModelCalls running, Audit audit, ILogger<RateLimits> logger)
 {
     /// <summary>
-    /// The chat's tools that reach a model (pictures, speech, video). Through Arena MCP they go with
-    /// the chat's own key (video with none), so the gateway cannot count them against the person's
-    /// key: the app counts them against its requests a minute (<see cref="StartModelCallAsync"/>).
+    /// The chat's tools that reach a model: pictures, speech, video, and deep research ("research",
+    /// which Arena MCP runs as a chat of the person's own). Through Arena MCP they go with the chat's
+    /// own key (video with none), so the gateway cannot count them against the person's key: the app
+    /// counts each call as one request of theirs a minute (<see cref="StartModelCallAsync"/>). The
+    /// requests a deep research run makes are the chat's: the research a day and the fair line hold them.
     /// </summary>
-    public static readonly string[] ModelTools = ["image", "speech", "video"];
+    public static readonly string[] ModelTools = ["image", "speech", "video", "research"];
 
     /// <summary>The audit log's word for an Arena MCP call refused for the person's requests a minute.</summary>
     public const string McpRefused = "mcp.rate_limited";
@@ -311,7 +313,8 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
     /// gateway's log), their Arena MCP model calls that started in it and have ended (the audit log,
     /// one for every replica), and those that started in it and run now on this replica. Room: a slot
     /// (none without a limit) to dispose of once the call is audited. No room: why. Tokens a minute
-    /// does not apply: pictures, speech and video have no tokens, as the gateway counts them.
+    /// does not apply: pictures, speech and video have no tokens, as the gateway counts them, and a deep
+    /// research run's are the chat's.
     /// </summary>
     public async Task<(IDisposable? Slot, string? Refusal)> StartModelCallAsync(AppUser user, DateTimeOffset started, CancellationToken ct)
     {
@@ -332,8 +335,8 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
         {
             return (slot, null);
         }
-        return (null, $"Your API key reached its limit of {(most == 1 ? "1 request" : $"{most.ToString(CultureInfo.InvariantCulture)} requests")} a minute; pictures, speech and video made " +
-            "through Arena MCP count too. Try again in a minute. Your account → API key shows your limits and what you used.");
+        return (null, $"Your API key reached its limit of {(most == 1 ? "1 request" : $"{most.ToString(CultureInfo.InvariantCulture)} requests")} a minute; pictures, speech, video and deep research " +
+            "started through Arena MCP count too. Try again in a minute. Your account → API key shows your limits and what you used.");
     }
 
     /// <summary>The log's times are UTC without a zone.</summary>
@@ -364,7 +367,7 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
         }
         if (use is not null)
         {
-            // Arena MCP's pictures, speech and video count against requests a minute too (those that run now on this replica as well),
+            // Arena MCP's pictures, speech, video and deep research count against requests a minute too (those that run now on this replica as well),
             // and their refusals are in the audit log.
             var now = clock.GetUtcNow();
             var day = now.AddDays(-1);

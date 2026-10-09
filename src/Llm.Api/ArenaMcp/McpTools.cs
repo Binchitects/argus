@@ -105,14 +105,14 @@ public sealed partial class McpTools(
     /// </summary>
     public async Task<ToolResult?> CallAsync(AppUser user, string function, JsonObject arguments, Func<McpProgress, Task>? progress, CancellationToken ct)
     {
-        // A call counts, and is audited, at its start: the gateway counts a request when it starts too.
-        var started = clock.GetUtcNow();
         var context = Context(user, progress);
         var (owner, failure) = await OwnerAsync(user, await ServedAsync(user, ct), function, context, ct);
         if (owner is not { } found)
         {
             return failure is null ? null : new ToolResult(failure, IsError: true);
         }
+        // A call counts, and is audited, at its start: the gateway counts a request when it starts too.
+        var started = clock.GetUtcNow();
         IDisposable? slot = null;
         if (Gateway.RateLimits.ModelTools.Contains(found.Choice.Tool.Id))
         {
