@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Llm.Api.Chat;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -397,6 +398,39 @@ public sealed class ChatTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.GetAsync("/api/chat/search?q=pine&in=everywhere"));
         // A % or _ is a letter here, not a wildcard.
         Assert.Empty(await FindAsync(b, "q=pi%25le"));
+    }
+
+    [Fact]
+    public async Task History_is_ones_own_messages_across_chats_newest_first_a_page_at_a_time()
+    {
+        var (b, _) = await PersonAsync();
+        var (other, _) = await PersonAsync();
+        var first = await NewChatAsync(b, new { useArgus = false });
+        var second = await NewChatAsync(b, new { useArgus = false });
+        await SendAsync(b, first, "one");
+        await SendAsync(b, second, "two");
+        await SendAsync(b, first, "three");
+        await SendAsync(b, second, new string('x', ChatEndpoints.HistoryMaxChars + 1));
+        Assert.Contains((await ConversationAsync(b, second)).GetProperty("messages").EnumerateArray(), m => m.GetProperty("content").GetString()!.Length > ChatEndpoints.HistoryMaxChars);
+        await SendAsync(other, await NewChatAsync(other, new { useArgus = false }), "not mine");
+        async Task<List<(string Text, DateTimeOffset At)>> HistoryAsync(TestBrowser who, string query = "") =>
+            [.. (await who.JsonAsync(await who.GetAsync($"/api/chat/history{query}"))).EnumerateArray()
+                .Select(m => (m.GetProperty("text").GetString()!, m.GetProperty("at").GetDateTimeOffset()))];
+
+        // A pasted document is left out; the other person's are never there.
+        var all = await HistoryAsync(b);
+        Assert.Equal(["three", "two", "one"], all.Select(m => m.Text));
+        var page = await HistoryAsync(b, "?limit=2");
+        Assert.Equal(["three", "two"], page.Select(m => m.Text));
+        Assert.Equal(["one"], (await HistoryAsync(b, $"?limit=2&before={Uri.EscapeDataString(page[^1].At.ToString("O"))}")).Select(m => m.Text));
+        Assert.Equal(["not mine"], (await HistoryAsync(other)).Select(m => m.Text));
+
+        // An archived chat's count; a deleted one's are gone.
+        await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{second}", UriKind.Relative), new { archived = true });
+        Assert.Equal(["three", "two", "one"], (await HistoryAsync(b)).Select(m => m.Text));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.DeleteAsync(new Uri($"/api/chat/conversations/{second}", UriKind.Relative)));
+        Assert.Equal(["three", "one"], (await HistoryAsync(b)).Select(m => m.Text));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await new TestBrowser(app.Factory).GetAsync("/api/chat/history"));
     }
 
     [Fact]

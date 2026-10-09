@@ -1,13 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pause, Play, RefreshCw } from 'lucide-react'
 import { useEffect, useState, type CSSProperties } from 'react'
+import { useSearchParams } from 'react-router'
 import { QueryError } from '@/components/app/query-state'
 import { RangeSelect } from '@/components/app/range-select'
-import { Segmented } from '@/components/app/segmented'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
-import { presets, refreshMs, resolve, type TimeRange } from '@/lib/time'
+import { dashboardRange, dashboardRangeOptions, fromRangeKey, rangeKey, refreshMs } from '@/lib/time'
 import { PanelView } from './panel'
 import type { DashboardDef, PanelDef } from './types'
 import { Variables, type Chosen } from './variables'
@@ -16,10 +16,12 @@ import { Variables, type Chosen } from './variables'
  * A provisioned dashboard, drawn by the app: Grafana's 24-column grid on wide
  * screens, one panel per row on a phone; Grafana rows become section headings.
  * Live dashboards (a refresh in their file) refresh themselves, and can pause.
+ * The time range is the last hour unless the file says another; one chosen goes
+ * in the address (Grafana's from and to), so a link opens the same view.
  */
 export function DashboardView({ uid }: { uid: string }) {
   const def = useQuery({ queryKey: ['dashboard', uid], queryFn: ({ signal }) => api<DashboardDef>(`/api/dashboards/${uid}`, { signal }) })
-  const [range, setRange] = useState<TimeRange | null>(null)
+  const [params, setParams] = useSearchParams()
   const [vars, setVars] = useState<Chosen>({})
   const [tick, setTick] = useState(0)
   const [paused, setPaused] = useState(false)
@@ -35,24 +37,24 @@ export function DashboardView({ uid }: { uid: string }) {
   if (def.isPending) return <Skeleton className="h-96" />
   if (def.error) return <QueryError error={def.error} retry={() => def.refetch()} />
   const d = def.data
-  const current = range ?? { from: d.time?.from ?? 'now-30d', to: d.time?.to ?? 'now' }
+  const current = dashboardRange(params, d.time)
   const sections = split(d.panels)
-  // Minutes to a month for live metrics; days to months for usage.
-  const live = resolve('now').getTime() - resolve(d.time?.from ?? 'now-30d').getTime() < 2 * 86_400_000
+  const choose = (key: string) =>
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p)
+        const r = fromRangeKey(key)
+        next.set('from', r.from)
+        next.set('to', r.to)
+        return next
+      },
+      { replace: true },
+    )
 
   return (
     <div className="grid gap-6">
       <div className="flex min-w-0 flex-wrap items-end gap-2">
-        {live ? (
-          <RangeSelect value={current.to === 'now' ? current.from : ''} onChange={(from) => setRange({ from, to: 'now' })} />
-        ) : (
-          <Segmented
-            label="Time range"
-            value={current.to === 'now' && presets.some((p) => p.from === current.from) ? current.from : ''}
-            onChange={(from) => setRange({ from, to: 'now' })}
-            options={presets.map((p) => ({ value: p.from, label: p.label.replace('Last ', '') }))}
-          />
-        )}
+        <RangeSelect value={rangeKey(current)} onChange={choose} options={dashboardRangeOptions(current)} className="h-9 w-auto min-w-44" />
         <Button
           variant="outline"
           size="sm"

@@ -451,12 +451,21 @@ CPU count beside it. No file names one machine's drives, CPU, GPU or core
 count: a test checks that, and checks every Prometheus query with the stack's
 own `promtool`.
 
+Every dashboard opens on the last hour: each file's `time` is `now-1h` to
+`now`, and a file without one (one of your own) gets the same. **Time range**
+offers five minutes to 90 days; the range chosen goes in the address as
+Grafana's `from` and `to` (`?from=now-6h&to=now`), so a link opens the same
+view, and a link with a range of its own (`now-30m`, or two times) opens on
+it. A range the app cannot read is the last hour. Usage → **Everyone** is a
+dashboard too; **Mine** and **Everyone's prompts** keep their own ranges.
+
 Live dashboards (those with a refresh in their file) refresh themselves, and
 can pause. Edit a dashboard file and the next request uses it: the app reads
 the files on every request.
 
-`scripts/audit-dashboards.py` runs every panel's queries in the app and reports
-errors, empty panels, null values and percentages out of range:
+`scripts/audit-dashboards.py` runs every panel's queries in the app (over the
+last hour, as the pages open, or the window given) and reports errors, empty
+panels, null values and percentages out of range:
 
 ```bash
 python3 scripts/audit-dashboards.py 6h

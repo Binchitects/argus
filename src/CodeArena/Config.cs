@@ -9,6 +9,8 @@ internal sealed class AppPaths(string configDir, string dataDir)
     public string DataDir { get; } = dataDir;
     public string ConfigFile => Path.Combine(ConfigDir, "config.json");
     public string SessionsDir => Path.Combine(DataDir, "sessions");
+    /// <summary>What was sent in each folder, a file per folder (the prompt's ↑).</summary>
+    public string HistoryDir => Path.Combine(DataDir, "history");
     /// <summary>The person's own instructions for every project.</summary>
     public string UserInstructions => Path.Combine(ConfigDir, "ARENA.md");
 

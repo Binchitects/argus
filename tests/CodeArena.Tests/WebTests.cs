@@ -308,6 +308,22 @@ public sealed partial class WebTests : IDisposable
     }
 
     [Fact]
+    public async Task The_chats_history_is_what_this_folder_sent_in_the_terminal_and_the_page_newest_first()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = req => Reply.Say($"answer to {FakeGateway.Last(req)}");
+        Assert.Equal(0, await h.Run("from the terminal\n/help\n/clear\n/exit\n", "chat"));
+        await using var web = await WebRun.StartAsync(h);
+        await (await web.SendAsync("from the page")).RestAsync();
+        await (await web.SendAsync("from the terminal")).RestAsync();
+
+        // The terminal's own commands are left out: the page cannot run them. /clear it can.
+        var history = (await web.GetJsonAsync("/api/history")).AsArray().Select(e => e!["text"]!.GetValue<string>());
+        Assert.Equal(["from the terminal", "from the page", "/clear"], history);
+        Assert.Equal(["from the terminal", "/help", "/clear", "from the page", "from the terminal"], new InputHistory(h.Paths.HistoryDir, h.Work).Entries());
+    }
+
+    [Fact]
     public async Task Mode_model_and_thinking_changes_reach_the_next_request()
     {
         using var h = new Harness(_gateway, _mcp);

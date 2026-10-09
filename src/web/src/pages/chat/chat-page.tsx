@@ -20,6 +20,7 @@ import { answerNews } from './format'
 import { ChatHeader } from './header'
 import { reduce, stopped, withQuestion, type LiveState } from './live'
 import { QuestionRail } from './question-rail'
+import { useOlderMessages } from './recall'
 import { toolsOn } from './tools'
 import { ToolsPicker } from './tools-picker'
 import { ChatList } from './sidebar'
@@ -201,6 +202,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const tree = useMemo(() => new ChatTree(view.messages), [view.messages])
   const path = useMemo(() => tree.path(view.leaf), [tree, view.leaf])
   const turns = toTurns(path)
+  // ↑ in the box: this chat's questions, newest first, then the person's in their other chats.
+  const sentHere = useMemo(() => path.flatMap((m) => (m.role === 'user' ? [m.content] : [])).reverse(), [path])
+  const older = useOlderMessages()
+  const history = { here: sentHere, older }
   const files = useMemo(() => collectFiles(path, view.agents), [path, view.agents])
   const model = chatModel(config, settings.model)
   const toolsOnHere = toolsOn(config.tools, settings.tools)
@@ -809,7 +814,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   </Alert>
                 )}
                 <TalkBar state={talk.state} onEnd={talk.end} />
-                <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} compare={comparePicker} talk={talkButton} autoFocus big />
+                <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} compare={comparePicker} talk={talkButton} history={history} autoFocus big />
                 <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
                   {(starters ?? (config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
                     <button
@@ -965,6 +970,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   tools={toolsPicker}
                   context={context}
                   onCompact={canCompact ? () => void compact() : undefined}
+                  history={history}
                   autoFocus
                 />
               </div>

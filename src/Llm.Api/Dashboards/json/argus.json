@@ -11,7 +11,7 @@
   "editable": true,
   "refresh": "30s",
   "time": {
-    "from": "now-24h",
+    "from": "now-1h",
     "to": "now"
   },
   "description": "Argus tool calls and refusals, from the JSON audit lines Argus prints (argus/auditlog.py), shipped by Promtail to Loki. The sqlite audit table remains the record.",

@@ -43,6 +43,8 @@ internal sealed class CliEnv
     public bool OutTerminal { get; init; }
     public bool ErrTerminal { get; init; }
     public Func<string, string?>? ReadSecret { get; init; }
+    /// <summary>The terminal key by key, for the prompt's line editor (arrows, history); null: lines as they come.</summary>
+    public IKeyboard? Keys { get; init; }
     public CancelKey Cancel { get; } = new();
     /// <summary>The web interface's page; null: the one built into the program.</summary>
     public WebAssets? Web { get; init; }

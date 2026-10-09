@@ -93,6 +93,7 @@ export const keys: [keys: string, what: string][] = [
   [`${modKey}+Shift+F`, 'Search the files'],
   [`${modKey}+Shift+E`, 'The Explorer'],
   ['Ctrl+`', 'Show or hide the terminal'],
+  ['↑ / ↓', 'In the chat\'s box: what you sent before in this folder (the terminal\'s too); Esc goes back to what you were typing'],
 ]
 
 /**

@@ -90,6 +90,8 @@ The agent in this terminal instead
   $exe chat                    a conversation here (/help lists the commands)
   $exe "why is the build red?" a conversation that starts with this
   $exe -p "list the TODOs"     answer once, print the answer, exit
+  At its prompt the up arrow brings back what you sent in this folder, and
+  Esc goes back to what you were typing.
 
 Licence
   Copyright (C) 2026 Binchitects and contributors. There is no warranty.

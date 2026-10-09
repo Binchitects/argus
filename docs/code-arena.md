@@ -63,6 +63,7 @@ the key; `code-arena models` lists the models the key may use.
 |---|---|---|
 | settings (`config.json`, `ARENA.md`) | `~/.config/code-arena/` (or `$XDG_CONFIG_HOME`) | `%APPDATA%\code-arena\` |
 | sessions | `~/.local/share/code-arena/sessions/` (or `$XDG_DATA_HOME`) | `%LOCALAPPDATA%\code-arena\sessions\` |
+| what was sent in each folder (↑) | `~/.local/share/code-arena/history/` | `%LOCALAPPDATA%\code-arena\history\` |
 | the IDE's layout and theme (`ide.json`) | `~/.local/share/code-arena/` | `%LOCALAPPDATA%\code-arena\` |
 
 `CODE_ARENA_HOME` puts both under one folder (`config/` and `data/`), for a
@@ -112,8 +113,24 @@ before it. Each tool call is a line (`● edit_file src/app.py`), with its resul
 under it: a diff for an edit, the last lines of a command's output, a count for
 a search. Each turn ends with its tokens and the share read from the cache
 (`12.4k in (81% cached) · 310 out · 3 requests`). **Ctrl+C** stops the turn and
-keeps what was said; at the prompt, twice leaves. A line ending in `\` goes on
-to the next.
+keeps what was said; at the prompt it clears what is typed, and on an empty
+prompt twice leaves. A line ending in `\` goes on to the next.
+
+The prompt is edited in place, as a shell's is: ← and → (with Ctrl or Alt, a
+word), Home and End (Ctrl+A, Ctrl+E), Backspace and Delete, Ctrl+U and Ctrl+K
+(to the start or the end of the line), Ctrl+W (the word before), Ctrl+L (clears
+the screen). **↑** brings back what you sent in this folder, newest first,
+in this run and the ones before (as a shell keeps its history); **↓** goes
+back toward the newest and past it to what you were typing, kept; **Esc**
+goes straight back to it. **Enter** sends the message brought back as a new
+one; editing it changes a copy. In a message of several lines, ↑ and ↓ move
+between its lines first; one brought back and left as it is steps on at
+once. Enter in a paste, and Alt+Enter, start a new line instead of sending.
+The history is a file per folder in the data folder (JSON Lines, 0600, cut
+back to the last 1,000 messages at 2,000), shared with the IDE's chat in the
+same folder: a message sent in one is there in the other. Lines read from a
+pipe, and `/exit`, are not kept. Without a terminal both ways (a pipe, or
+`TERM=dumb`) the prompt reads plain lines, as before.
 
 `-p` (one-shot) prints only the answer on stdout, the progress on stderr, and
 cannot ask: edits and commands are refused unless the mode allows them
@@ -199,8 +216,11 @@ The page is laid out as VS Code is, in Argus Arena's design system:
 - **chat**: the agent's chat on the right: the model and thinking pickers,
   Sessions and Hide at its top; the thread with a card for each tool call and
   a diff under each edit, the approval card (**Allow**, **Always for this
-  session**, **Deny**), Stop, the mode, `/compact` and `/clear`. The Chat
-  activity lists this folder's sessions.
+  session**, **Deny**), Stop, the mode, `/compact` and `/clear`. **↑** in its
+  box brings back this session's messages, then what this folder sent
+  before (in the terminal too), as in Arena's chat; **↓** and **Esc** go
+  back to what you were typing. The Chat activity lists this folder's
+  sessions.
 - **status bar**: the git branch, the agent's changes and the terminal on the
   left; the cursor's line and column, the file's language, the mode, the
   model and `code-arena <version>` (About: the version, the licence, the
@@ -325,6 +345,7 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/terminals` `{cols, rows}` | opens one; 409 `too_many` past ten |
 | `POST /api/terminals/close` `{id}` | ends its shell and forgets it |
 | `GET /api/terminals/socket?id=ID` | the terminal's WebSocket |
+| `GET /api/history` | what this folder sent, newest first, each text once (500 at most): `[{text}]`, without the terminal's own commands (`/help`, `/model`, …; `/compact` and `/clear` stay) |
 | `GET /api/preferences` | the page's own preferences (`layout`, `theme`), as it saved them; `{}` at first |
 | `POST /api/preferences` `{key: value}` | keeps these keys, merged over the others (`null` forgets one); 413 `too_large` past 16 KB |
 

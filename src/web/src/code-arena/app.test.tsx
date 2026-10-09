@@ -245,6 +245,25 @@ describe('Code Arena in the browser', () => {
     await waitFor(() => expect(within(list).getByRole('button', { name: 'First question' })).toHaveAttribute('aria-current', 'page'))
   })
 
+  it("brings back with ↑ this session's messages, then what this folder sent before, and comes back to the draft", async () => {
+    const session: CodeSession = { id: 's2', messages: [msg('m0', 'user', { content: 'Run the tests' }), msg('m1', 'assistant', { content: 'They pass.', model: 'model-a' })], diffs: {}, busy: false }
+    const { calls } = backend({ session, extra: { 'GET /api/history': () => ({ json: [{ text: 'Run the tests' }, { text: 'Fix the build\nand say why' }] }) } })
+    renderCode()
+    expect(await screen.findByText('They pass.')).toBeInTheDocument()
+    const box = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await userEvent.type(box, 'half')
+    await userEvent.keyboard('{ArrowUp}')
+    expect(box).toHaveValue('Run the tests')
+    expect(calls.some((c) => c.path === '/api/history')).toBe(false)
+    // This session has no more: the folder's, the terminal's included, each once.
+    await userEvent.keyboard('{ArrowUp}')
+    await waitFor(() => expect(box).toHaveValue('Fix the build\nand say why'))
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}')
+    expect(box).toHaveValue('half')
+    await userEvent.keyboard('{ArrowUp}{Escape}')
+    expect(box).toHaveValue('half')
+  })
+
   it('says so when the page holds the key of an earlier run', async () => {
     fakeApi(null, { 'GET /api/state': () => ({ status: 401, json: { status: 'unauthorized', error: 'Open the address' } }), 'GET /api/chat/config': () => ({ status: 401 }) })
     renderCode()
