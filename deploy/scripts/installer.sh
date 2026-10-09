@@ -729,7 +729,8 @@ write_override() {   # write_override plan|do SERVICES...
   {
     echo "# Written by installer.sh ($BVERSION) for this host. Yours to change: upgrades and repairs keep it."
     echo "services:"
-    for svc in "$@"; do echo "  $svc: { profiles: [off] }"; done
+    # !override: a module with a profile of its own (Laya) would otherwise still run when asked for.
+    for svc in "$@"; do echo "  $svc: { profiles: !override [off] }"; done
     if [[ $NO_GITLAB -eq 1 ]]; then
       echo "  # Argus waits for a GitLab: put GITLAB_URL and GITLAB_TOKEN in .env, take out the argus line above, then up -d."
     fi

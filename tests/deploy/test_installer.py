@@ -41,7 +41,7 @@ def git(repo: Path, *args: str) -> None:
 class Release:
     """A repository with v5.2.0 tagged and 9.9.9 at HEAD, its images in a fake store, and its bundle."""
 
-    def __init__(self, *make_args: str):
+    def __init__(self, *make_args: str, services: str = SERVICES):
         self.s = s = Sandbox(curl=True)
         self.repo = s.repo
         s.write("docker-compose.yml", COMPOSE_OLD)
@@ -78,7 +78,7 @@ class Release:
         # The third-party images, and the release's own as compose built them (latest).
         refs = THIRD_PARTY + ["arena-app:latest", "arena-web:latest", "arena-argus:latest", "arena-laya:latest"]
         self.state.write_text(json.dumps({"images": {r: f"{i:064x}" for i, r in enumerate(refs, start=1)}}))
-        s.env = {"FAKE_STATE": str(self.state), "FAKE_SERVICES": SERVICES,
+        s.env = {"FAKE_STATE": str(self.state), "FAKE_SERVICES": services,
                  "FAKE_COMPOSE_VOLUMES": "postgres\nengine\nargus\n"}
         self.dist = self.repo / "dist"
         self.made = s.run("make-installer.sh", *make_args)
@@ -186,6 +186,34 @@ class BundleTests(unittest.TestCase):
         self.assertNotIn("arena-app:9.9.9", images)
         self.assertIn("arena-app:latest", images)
         self.assertFalse(any(c[1:2] == ["pull"] for c in self.r.calls()))
+
+
+class LeaveOutTests(unittest.TestCase):
+    """A bundle for hosts without some services: their images stay out, Laya's (a profile of its own) too."""
+
+    @classmethod
+    def setUpClass(cls):
+        # On the packing host every service is there, Laya when its profile is asked for.
+        cls.r = Release("--leave-out", "laya,llamacpp", services=SERVICES + "llamacpp\nlaya\n")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.r.s.cleanup()
+
+    def test_Left_out_services_have_no_image_in_the_bundle(self):
+        self.assertEqual(self.r.made.returncode, 0, self.r.made.stdout + self.r.made.stderr)
+        b = self.r.unpack()
+        release = dict(line.split("\t") for line in (b / "images" / "RELEASE").read_text().splitlines())
+        self.assertEqual(sorted(release), ["app", "argus", "web"])
+        refs = [line.split("\t")[0] for line in (b / "images" / "IMAGES").read_text().splitlines()]
+        self.assertFalse([ref for ref in refs if "laya" in ref or "llama.cpp" in ref], refs)
+        self.assertIn("left-out: laya llamacpp\n", (b / "MANIFEST").read_text())
+
+    def test_A_dry_run_finds_the_images_as_they_are_before_they_are_tagged(self):
+        r = self.r.s.run("make-installer.sh", "--dry-run", "--version", "9.9.10", "--leave-out", "laya,llamacpp")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("arena-app", r.stdout)
+        self.assertNotIn("NOT ON THIS HOST", r.stdout)
 
 
 class MakeInstallerArgumentTests(unittest.TestCase):
@@ -442,7 +470,7 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(values["GATEWAY_KEY"].startswith("sk-"))
         self.assertIn("not printed, as this run has no terminal", r.stdout)
         override = (deploy / "docker-compose.override.yml").read_text()
-        self.assertIn("  llamacpp: { profiles: [off] }", override)
+        self.assertIn("  llamacpp: { profiles: !override [off] }", override)
         self.assertNotIn("imagegen", override)  # not a service of this release
         self.assertIn('HF_HUB_OFFLINE: "1"', override)
         self.assertTrue((deploy / "certs" / "tls.crt").is_file())
@@ -471,7 +499,7 @@ class InstallerTests(unittest.TestCase):
     def test_Without_a_GitLab_Argus_is_left_out_and_said_so(self):
         r = self.install(gitlab=False)
         override = (self.dir / "deploy" / "docker-compose.override.yml").read_text()
-        self.assertIn("  argus: { profiles: [off] }", override)
+        self.assertIn("  argus: { profiles: !override [off] }", override)
         self.assertIn("Argus is left out", r.stdout)
         self.assertNotIn("argus", [c["service"] for c in self.containers()])
         r = self.r.run("install", "--dir", str(self.r.s.dir / "x"), "--yes", "--project", "other", "--gitlab-url", "https://gitlab.test")

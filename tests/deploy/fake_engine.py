@@ -255,6 +255,12 @@ def profiles_of(text: str) -> list[str]:
     return [x.strip() for x in text.split("profiles:", 1)[1].split("[", 1)[1].split("]", 1)[0].split(",") if x.strip()]
 
 
+def merge_profiles(have: list[str], text: str) -> list[str]:
+    """As compose merges a later file's profiles: added to the earlier ones, unless !override."""
+    new = profiles_of(text)
+    return new if "!override" in text.split("profiles:", 1)[1] else have + [p for p in new if p not in have]
+
+
 def compose_model(args: list[str], project: str, everything: bool = False) -> dict[str, dict]:
     """service -> {image, build, profiles} of the active services in the compose files compose would read."""
     files = [args[i + 1] for i, a in enumerate(args) if a == "-f"]
@@ -284,7 +290,7 @@ def compose_model(args: list[str], project: str, everything: bool = False) -> di
                 if "image:" in rest:
                     entry["image"] = rest.split("image:", 1)[1].split("}")[0].strip().strip('"')
                 if "profiles:" in rest:
-                    entry["profiles"] = profiles_of(rest)
+                    entry["profiles"] = merge_profiles(entry["profiles"], rest)
             elif svc and line.startswith("    ") and not line.startswith("     "):
                 key, _, value = line.strip().partition(":")
                 if key == "image":
@@ -292,11 +298,12 @@ def compose_model(args: list[str], project: str, everything: bool = False) -> di
                 elif key == "build":
                     model[svc]["build"] = True
                 elif key == "profiles":
-                    model[svc]["profiles"] = profiles_of(line)
+                    model[svc]["profiles"] = merge_profiles(model[svc]["profiles"], line)
     if everything:
         return model
     on = set(x for x in os.environ.get("COMPOSE_PROFILES", "").split(",") if x)
-    return {k: v for k, v in model.items() if not v["profiles"] or (set(v["profiles"]) & on and "off" not in v["profiles"])}
+    # A service runs when it has no profile, or one of its profiles is asked for.
+    return {k: v for k, v in model.items() if not v["profiles"] or set(v["profiles"]) & on}
 
 
 def service_image(model: dict[str, dict], svc: str, project: str) -> str:
