@@ -9,7 +9,11 @@
 #   --models-dir DIR  the model library (default: MODELS_DIR in .env, else ./models)
 #   --into DIR        load: where deploy/ goes (default ./arena, so ./arena/deploy)
 #   --podman          Podman's images and volumes in place of Docker's
+#   --stage DIR       pack: the bundle's files in DIR/arena-airgap, not a tar (make-installer.sh)
 #   --dry-run         the plan; nothing is written, loaded or run
+#
+# COMPOSE_FILE, when set, names the compose files (Podman too); else docker-compose.yml,
+# with podman.yml for Podman, and docker-compose.override.yml when there is one.
 #
 # A bundle is one tar holding arena-airgap/:
 #   MANIFEST         format, version, commit, when, the engine, MODEL for .env
@@ -74,7 +78,7 @@ case "$ACTION" in
   "") usage_error "say pack or load" ;;
   *) usage_error "unknown action: $ACTION" ;;
 esac
-ENGINE=docker; WITH_MODELS=0; DRY=0; INTO=""; MODELS_ARG=""; TARGET=""
+ENGINE=docker; WITH_MODELS=0; DRY=0; INTO=""; MODELS_ARG=""; TARGET=""; STAGE_ARG=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --models) WITH_MODELS=1 ;;
@@ -82,12 +86,21 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY=1 ;;
     --into) [[ $# -gt 1 ]] || usage_error "--into needs a directory"; INTO="$2"; shift ;;
     --models-dir) [[ $# -gt 1 ]] || usage_error "--models-dir needs a directory"; MODELS_ARG="$2"; shift ;;
+    --stage) [[ $# -gt 1 ]] || usage_error "--stage needs a directory"; STAGE_ARG="$2"; shift ;;
     -h|--help) usage ;;
     -*) usage_error "unknown option: $1" ;;
     *) [[ -z "$TARGET" ]] || usage_error "one bundle at a time"; TARGET="$1" ;;
   esac
   shift
 done
+if [[ -n "$STAGE_ARG" ]]; then
+  [[ $ACTION == pack ]] || usage_error "--stage is for pack"
+  [[ -z "$TARGET" ]] || usage_error "--stage writes a folder, not $TARGET"
+  [[ -d "$STAGE_ARG" ]] || usage_error "no folder $STAGE_ARG"
+  [[ -e "$STAGE_ARG/arena-airgap" ]] && usage_error "$STAGE_ARG/arena-airgap is there already"
+  # Only for the plan's and the messages' sake: nothing is written there.
+  TARGET="$STAGE_ARG/arena-airgap.tar"
+fi
 [[ -n "$TARGET" ]] || usage_error "$ACTION needs a bundle: $ACTION ... FILE.tar"
 [[ "$TARGET" == *.tar ]] || usage_error "the bundle is a .tar: $TARGET"
 [[ $ACTION == pack && -n "$INTO" ]] && usage_error "--into is for load"
@@ -129,9 +142,11 @@ if [[ $ACTION == pack ]]; then
   # The secrets only fill the file in: an image never depends on them.
   list_images() {
     local -a cmd envf=()
-    if [[ $ENGINE == podman ]]; then
+    if [[ $ENGINE == podman && -z "${COMPOSE_FILE:-}" ]]; then
       cmd=(podman compose -f docker-compose.yml -f podman.yml)
       [[ -f docker-compose.override.yml ]] && cmd+=(-f docker-compose.override.yml)
+    elif [[ $ENGINE == podman ]]; then
+      cmd=(podman compose)
     else
       cmd=(docker compose)
     fi
@@ -209,7 +224,7 @@ if [[ $ACTION == pack ]]; then
   mapfile -t FILES < <(deploy_files)
 
   if [[ $DRY -eq 1 ]]; then
-    say "Would pack $OUT (dry run: nothing is written)"
+    say "Would pack ${STAGE_ARG:+into }$([[ -n "$STAGE_ARG" ]] && echo "$STAGE_ARG/arena-airgap" || echo "$OUT") (dry run: nothing is written)"
     say "  images (${#IMAGES[@]}), each saved with $ENGINE save:"
     for ref in "${IMAGES[@]}"; do
       if "$ENGINE" image inspect "$ref" >/dev/null 2>&1; then say "    $ref"; else say "    $ref   NOT ON THIS HOST: build or pull it first"; fi
@@ -222,11 +237,15 @@ if [[ $ACTION == pack ]]; then
     exit 0
   fi
 
-  STAGE="$(mktemp -d "$(dirname "$OUT")/.airgap-pack.XXXXXX")" || die "cannot make a work folder beside $OUT"
-  trap 'rm -rf "$STAGE"' EXIT
+  if [[ -n "$STAGE_ARG" ]]; then
+    STAGE="$(cd "$STAGE_ARG" && pwd)"
+  else
+    STAGE="$(mktemp -d "$(dirname "$OUT")/.airgap-pack.XXXXXX")" || die "cannot make a work folder beside $OUT"
+    trap 'rm -rf "$STAGE"' EXIT
+  fi
   B="$STAGE/$TOP"
   mkdir -p "$B/images" "$B/deploy" "$B/models" "$B/audio" || die "cannot write in $STAGE"
-  say "airgap: packing $OUT"
+  if [[ -n "$STAGE_ARG" ]]; then say "airgap: packing into $B"; else say "airgap: packing $OUT"; fi
 
   say "==> images"
   : > "$B/images/IMAGES"
@@ -295,6 +314,10 @@ if [[ $ACTION == pack ]]; then
   } > "$B/MANIFEST"
   (cd "$B" && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs -d '\n' sha256sum > SHA256SUMS) || die "checksums failed"
   verify_bundle "$B" || die "the bundle does not verify"
+  if [[ -n "$STAGE_ARG" ]]; then
+    say "==> $B ($(du -sh "$B" | cut -f1))"
+    exit 0
+  fi
 
   say "==> $OUT"
   # MANIFEST first: load --dry-run reads it without reading the whole bundle.
