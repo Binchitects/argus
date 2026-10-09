@@ -6,7 +6,12 @@ namespace CodeArena;
 /// <summary>A session put together: the config, the gateway and its models, the tools (local and MCP), the agent.</summary>
 internal sealed partial class Runtime : IAsyncDisposable
 {
-    private readonly List<McpClient> _servers = [];
+    /// <summary>How long a session waits, as it starts, for its MCP servers' first answers: the rest join in the background.</summary>
+    public static TimeSpan StartWait { get; set; } = TimeSpan.FromSeconds(3);
+
+    private readonly List<ServerLink> _links = [];
+    private readonly object _serversGate = new();
+    private IReadOnlyList<(string Server, string Text)> _instructions = [];
 
     private Runtime(Config config, Ui ui, CliEnv env, HttpClient http, GatewayClient gateway)
     {
@@ -33,9 +38,19 @@ internal sealed partial class Runtime : IAsyncDisposable
     public Spend Total { get; } = new();
     /// <summary>The turn running now, so a sub-agent's tokens count in it.</summary>
     public Spend? Turn { get; set; }
+    /// <summary>The commands running with no time limit, and those that ended.</summary>
+    public CommandJobs Jobs { get; } = new();
+    /// <summary>When the session compacts itself.</summary>
+    public Compaction Compaction { get; } = new();
+    /// <summary>The session's MCP servers: Arena's, Argus's and the person's own, each connected in the background.</summary>
+    public IReadOnlyList<ServerLink> Links => _links;
     /// <summary>Whether Arena's MCP endpoint answered.</summary>
-    public bool ArenaConnected { get; private set; }
-    public IReadOnlyList<McpClient> Servers => _servers;
+    public bool ArenaConnected => _links.Any(l => l.Name == ArenaName && l.State == LinkState.Connected);
+    /// <summary>Told when a server connects or is lost (on a background thread): the terminal says so at its next prompt, the IDE's page reads it.</summary>
+    public Action<ServerLink>? ServersChanged { get; set; }
+
+    public const string ArenaName = "arena";
+    public const string ArgusName = "argus";
 
     /// <summary>Thrown for what stops a session before it starts, with what to do about it.</summary>
     public sealed class StartException(string message) : Exception(message);
@@ -66,32 +81,68 @@ internal sealed partial class Runtime : IAsyncDisposable
             throw new StartException(e.Message);
         }
         var rt = new Runtime(config, ui, env, http, new GatewayClient(http, config.GatewayUrl, config.ApiKey));
-        await rt.InitAsync(o, ct);
+        try
+        {
+            await rt.InitAsync(o, ct);
+        }
+        catch
+        {
+            await rt.DisposeAsync();
+            throw;
+        }
         return rt;
     }
 
     private async Task InitAsync(Options o, CancellationToken ct)
     {
         Workspace = new Workspace(Env.Cwd, Config.AllowedPaths.Concat(o.AddDirs));
+        var mode = Modes.Parse(o.Mode ?? Config.Mode);
+        if ((o.Mode ?? Config.Mode) is { } m && mode is null)
+        {
+            throw new StartException($"There is no mode {m}. The modes: {string.Join(", ", Modes.Names)}.");
+        }
+        if (Compaction.Set(o.CompactAt ?? Config.CompactAt, o.CompactTarget ?? Config.CompactTarget) is { } wrong)
+        {
+            throw new StartException($"Compaction: {wrong} (--compact-at, --compact-to, or compactAt and compactTarget in {Env.Paths.ConfigFile})");
+        }
+        Permissions = new Permissions(Ui, mode ?? Mode.Ask);
+        // The terminal watches the commands with no time limit: their output as it comes, and how they ended.
+        var printer = new JobPrinter(Ui);
+        Jobs.Started += printer.Started;
+        Jobs.Output += printer.Output;
+        Jobs.Ended += printer.Ended;
+        var tools = LocalTools.All(Config.Shell);
+        tools.Add(LocalTools.SubAgentTool());
+        Tools = new ToolBox(tools);
+
+        // The servers connect in the background; the session starts when the gateway has said which models there are.
         var models = Gateway.ModelsAsync(ct);
-        var arena = Config.ArenaTools && Config.ArenaMcpUrl is { } mcpUrl ? ConnectArenaAsync(mcpUrl, ct) : Task.FromResult<McpClient?>(null);
-        var own = Config.McpServers.Where(s => !s.Disabled).Select(s => ConnectOwnAsync(s, ct)).ToList();
+        AddLinks();
+        var arena = _links.FirstOrDefault(l => l.Name == ArenaName);
+        // A command waits for Arena's first answer, so Laya looks at it whenever Arena offers decide.
+        Permissions.GuardReady = arena?.FirstTry ?? Task.CompletedTask;
+        foreach (var link in _links)
+        {
+            link.Start();
+        }
         try
         {
             Models = await models;
         }
         catch (Exception e) when (e is HttpRequestException or GatewayException or TaskCanceledException && !ct.IsCancellationRequested)
         {
-            await Task.WhenAll(own.Cast<Task>().Append(arena));
-            foreach (var t in own.Select(t => t.Result).Append(arena.Result).OfType<McpClient>())
-            {
-                await t.DisposeAsync();
-            }
             throw new StartException(e.Message);
         }
         if (Models.Count == 0)
         {
             throw new StartException("The gateway lists no models for your key. Ask your admin which models you may use.");
+        }
+        // A few seconds more for the servers (a run that cannot wait for them later, -p, gives them their whole handshake).
+        var firstTries = Task.WhenAll(_links.Select(l => l.FirstTry));
+        await Task.WhenAny(firstTries, Task.Delay(o.Print ? TimeSpan.FromSeconds(25) : StartWait, ct));
+        foreach (var link in _links.Where(l => l.State == LinkState.Connecting))
+        {
+            Ui.Info($"{link.Title}'s tools are still connecting: they join the session when they answer.");
         }
 
         // A resumed session keeps its history, model and to-do list.
@@ -115,17 +166,16 @@ internal sealed partial class Runtime : IAsyncDisposable
             }
         }
 
-        var arenaClient = await arena;
         var wanted = o.Model ?? resumed?.Model ?? Config.Model;
-        var info = Models.FirstOrDefault(m => m.Id == wanted);
+        var info = Models.FirstOrDefault(x => x.Id == wanted);
         if (info is null)
         {
             if (o.Model is not null)
             {
-                throw new StartException($"The gateway has no model {o.Model}. Yours: {string.Join(", ", Models.Select(m => m.Id))}");
+                throw new StartException($"The gateway has no model {o.Model}. Yours: {string.Join(", ", Models.Select(x => x.Id))}");
             }
             // No model of its own: the one a new chat in Arena starts with, as Arena MCP says, else the gateway's first.
-            var fallback = Models.FirstOrDefault(m => m.Id == arenaClient?.DefaultModel) ?? Models[0];
+            var fallback = Models.FirstOrDefault(x => x.Id == arena?.Client?.DefaultModel) ?? Models[0];
             if (wanted is not null)
             {
                 Ui.Warn($"{wanted} is not offered any more: using {fallback.Id}.");
@@ -133,52 +183,6 @@ internal sealed partial class Runtime : IAsyncDisposable
             info = fallback;
         }
         Model = new ModelState { Info = info, Thinking = o.Thinking ?? Config.Thinking, ContextOverride = Config.Context };
-
-        var mode = Modes.Parse(o.Mode ?? Config.Mode);
-        if ((o.Mode ?? Config.Mode) is { } m && mode is null)
-        {
-            throw new StartException($"There is no mode {m}. The modes: {string.Join(", ", Modes.Names)}.");
-        }
-        Permissions = new Permissions(Ui, mode ?? Mode.Ask);
-
-        var tools = LocalTools.All(Config.Shell);
-        tools.Add(LocalTools.SubAgentTool());
-        var instructions = new List<(string, string)>();
-        if (arenaClient is not null)
-        {
-            ArenaConnected = true;
-            _servers.Add(arenaClient);
-            foreach (var t in arenaClient.Tools)
-            {
-                var name = t.Str("name")!;
-                // Arena decides who may call what; a tool it marks as changing things still asks here first.
-                var changes = t["annotations"].Bool("destructiveHint") == true && t["annotations"].Bool("readOnlyHint") != true;
-                tools.Add(Remote(arenaClient, t, tools.Any(x => x.Name == name) ? "arena_" + name : name, trusted: !changes, changesNothing: !changes));
-            }
-            if (arenaClient.Instructions is { } text)
-            {
-                instructions.Add(("Arena", text));
-            }
-            Permissions.Guard = LayaGuard.For(arenaClient, Workspace, Ui);
-        }
-        foreach (var task in own)
-        {
-            if (await task is not { } client)
-            {
-                continue;
-            }
-            _servers.Add(client);
-            var server = Config.McpServers.First(s => s.Name == client.Name);
-            foreach (var t in client.Tools)
-            {
-                tools.Add(Remote(client, t, OwnToolName(client.Name, t.Str("name")!), server.Trust, t["annotations"].Bool("readOnlyHint") == true));
-            }
-            if (client.Instructions is { } text)
-            {
-                instructions.Add((client.Name, text));
-            }
-        }
-        Tools = new ToolBox(tools);
 
         var inputs = new SystemPrompt.Inputs
         {
@@ -188,10 +192,10 @@ internal sealed partial class Runtime : IAsyncDisposable
             Model = () => Model.Name,
             Shell = Config.Shell,
             ArenaUrl = Config.Url,
-            ServerInstructions = instructions,
-            HasArenaTools = ArenaConnected,
+            ServerInstructions = () => Volatile.Read(ref _instructions),
+            HasArenaTools = () => ArenaConnected,
         };
-        Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell };
+        Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Jobs = Jobs };
         Agent = new Agent
         {
             Gateway = Gateway,
@@ -203,13 +207,9 @@ internal sealed partial class Runtime : IAsyncDisposable
             SystemPrompt = () => SystemPrompt.Build(inputs),
             Total = Total,
             Stream = !Ui.Quiet,
+            Compaction = Compaction,
         };
         Context.SubAgent = (description, prompt, token) => RunSubAgentAsync(inputs, description, prompt, token);
-        if (Permissions.Guard is { } guard)
-        {
-            // Its one warning reaches the IDE's page too, as the agent's own do.
-            guard.Notify = text => Agent.Events?.Notice(text);
-        }
 
         if (resumed is not null && resumedFile is not null)
         {
@@ -230,6 +230,195 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         Agent.Session = Session;
         Context.TodosChanged = todos => Session.Todos(todos);
+    }
+
+    /// <summary>
+    /// The session's servers, each in the background: Arena's MCP endpoint and Argus's (with the
+    /// person's key, unless the config turns them off), then the person's own.
+    /// </summary>
+    private void AddLinks()
+    {
+        var auth = new Dictionary<string, string> { ["Authorization"] = "Bearer " + Config.ApiKey };
+        if (Config.ArenaTools && Config.ArenaMcpUrl is { } arenaUrl)
+        {
+            Link(new ServerLink(ArenaName, "Arena", arenaUrl, ct => McpClient.ConnectAsync(ArenaName, new HttpMcpTransport(Http, arenaUrl, auth), ct)));
+        }
+        if (Config.ArgusTools && Config.ArgusMcpUrl is { } argusUrl)
+        {
+            Link(new ServerLink(ArgusName, "Argus", argusUrl, ct => McpClient.ConnectAsync(ArgusName, new HttpMcpTransport(Http, argusUrl, auth), ct)));
+        }
+        foreach (var server in Config.McpServers.Where(s => !s.Disabled))
+        {
+            if (server.Url is not { Length: > 0 } && server.Command is not { Length: > 0 })
+            {
+                Ui.Warn($"MCP server {server.Name} has neither a command nor a url: skipped.");
+                continue;
+            }
+            Link(new ServerLink(server.Name, server.Name, server.Url ?? server.Command, ct =>
+            {
+                IMcpTransport transport = server.Url is { Length: > 0 } url
+                    ? new HttpMcpTransport(Http, url, server.Headers.ToDictionary(h => h.Key, h => StdioMcpTransport.Expand(h.Value)))
+                    : StdioMcpTransport.Start(server, Workspace.Root);
+                return McpClient.ConnectAsync(server.Name, transport, ct);
+            }));
+        }
+    }
+
+    private void Link(ServerLink link)
+    {
+        link.Changed = OnServerChanged;
+        _links.Add(link);
+    }
+
+    /// <summary>A server connected (its tools and instructions join), or was lost (they go); said in the terminal once per change.</summary>
+    private void OnServerChanged(ServerLink link, McpClient? client, McpClient? gone)
+    {
+        lock (_serversGate)
+        {
+            Tools.Update(all => Place(all, link, client));
+            var notes = Volatile.Read(ref _instructions).Where(i => i.Server != link.Title).ToList();
+            if (client?.Instructions is { Length: > 0 } text)
+            {
+                notes.Add((link.Title, text));
+            }
+            Volatile.Write(ref _instructions, notes);
+            if (link.Name == ArenaName)
+            {
+                Permissions.Guard = LayaGuard.For(client, Workspace, Ui);
+                if (Permissions.Guard is { } guard)
+                {
+                    // Its one warning reaches the IDE's page too, as the agent's own do.
+                    guard.Notify = said => Agent?.Events?.Notice(said);
+                }
+            }
+        }
+        Said(link, client, gone);
+        ServersChanged?.Invoke(link);
+    }
+
+    /// <summary>
+    /// The tools with this server's as they are now. Arena's: renamed arena_… where a local tool has
+    /// the name. Argus's: those Arena serves already (its Argus tools) are left to Arena. The person's
+    /// own: mcp__server__tool.
+    /// </summary>
+    private IEnumerable<ToolDef> Place(IReadOnlyList<ToolDef> all, ServerLink link, McpClient? client)
+    {
+        var kept = all.Where(t => t.Server != link.Name).ToList();
+        if (client is null)
+        {
+            return kept;
+        }
+        var added = new List<ToolDef>();
+        var server = Config.McpServers.FirstOrDefault(s => s.Name == link.Name);
+        foreach (var t in client.Tools)
+        {
+            var name = t.Str("name")!;
+            ToolDef tool;
+            if (server is not null && link.Name is not (ArenaName or ArgusName))
+            {
+                tool = Remote(client, t, OwnToolName(client.Name, name), server.Trust, t["annotations"].Bool("readOnlyHint") == true, link);
+            }
+            else
+            {
+                if (link.Name == ArgusName && kept.Any(x => x.Server == ArenaName && x.RemoteName == name))
+                {
+                    continue;
+                }
+                // Arena (and Argus) decide who may call what; a tool marked as changing things still asks here first.
+                var changes = t["annotations"].Bool("destructiveHint") == true && t["annotations"].Bool("readOnlyHint") != true;
+                var local = kept.Any(x => x.Server is null && x.Name == name);
+                tool = Remote(client, t, local ? $"{link.Name}_{name}" : name, trusted: !changes, changesNothing: !changes, link);
+            }
+            added.Add(tool);
+        }
+        if (link.Name == ArenaName)
+        {
+            // Arena serves Argus's tools too, once: its own copy is the one kept.
+            var served = added.Select(t => t.RemoteName).ToHashSet(StringComparer.Ordinal);
+            kept.RemoveAll(t => t.Server == ArgusName && served.Contains(t.RemoteName));
+        }
+        return kept.Concat(added);
+    }
+
+    /// <summary>
+    /// What the terminal says of a change: when a server connects after the session started, and
+    /// once when it fails (again when it was connected and is lost), not at every try.
+    /// </summary>
+    private void Said(ServerLink link, McpClient? client, McpClient? gone)
+    {
+        lock (_said)
+        {
+            if (client is not null)
+            {
+                _said.Remove(link.Name);
+                if (Agent is not null)
+                {
+                    Notice(false, $"{link.Title}'s tools connected: {Tools.All.Count(t => t.Server == link.Name)}.");
+                }
+                return;
+            }
+            if (!_said.Add(link.Name) && gone is null)
+            {
+                return;
+            }
+        }
+        var again = link.NextTry is { } next ? $" Tried again at {next.ToLocalTime():HH:mm:ss} (/mcp retry tries now)." : "";
+        if (link.State == LinkState.Unavailable)
+        {
+            Notice(false, link.Name switch
+            {
+                ArenaName => $"Arena's tools are not available here (no MCP endpoint at {link.Url}): carrying on with the local tools.",
+                ArgusName => $"Argus's tools are not available here (no MCP endpoint at {link.Url}).",
+                _ => $"MCP server {link.Name} has no MCP endpoint at {link.Url}.",
+            });
+            return;
+        }
+        Notice(true, link.Name switch
+        {
+            ArenaName => $"Arena's tools did not connect: {link.Error} Carrying on with the local tools meanwhile.{again}",
+            ArgusName => $"Argus's tools did not connect: {link.Error}{again}",
+            _ => $"MCP server {link.Name} did not connect: {link.Error}{again}",
+        });
+    }
+
+    // The servers whose failure was said, until they connect.
+    private readonly HashSet<string> _said = [];
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(bool Warn, string Text)> _later = new();
+
+    /// <summary>The terminal is waiting for the person to type: what servers say waits for the next line (<see cref="SayLater"/>).</summary>
+    public bool AtPrompt { get; set; }
+
+    private void Notice(bool warn, string text)
+    {
+        if (AtPrompt)
+        {
+            _later.Enqueue((warn, text));
+            return;
+        }
+        if (warn)
+        {
+            Ui.Warn(text);
+        }
+        else
+        {
+            Ui.Info(text);
+        }
+    }
+
+    /// <summary>What the servers said while the terminal waited at its prompt.</summary>
+    public void SayLater()
+    {
+        while (_later.TryDequeue(out var said))
+        {
+            if (said.Warn)
+            {
+                Ui.Warn(said.Text);
+            }
+            else
+            {
+                Ui.Info(said.Text);
+            }
+        }
     }
 
     /// <summary>A new, empty session (/clear): the same tools and model.</summary>
@@ -263,6 +452,46 @@ internal sealed partial class Runtime : IAsyncDisposable
         Session.Model(info.Id);
     }
 
+    /// <summary>
+    /// Sets when the session compacts (percent of the window; null keeps the current) and keeps it in
+    /// config.json for the next sessions; null when done, else why not.
+    /// </summary>
+    public string? SetCompaction(int? at, int? target)
+    {
+        if (Compaction.Set(at, target) is { } wrong)
+        {
+            return wrong;
+        }
+        try
+        {
+            // The file as it is (not with this run's environment overrides), with the two values changed.
+            var file = Config.Load(Env.Paths.ConfigFile);
+            file.CompactAt = Compaction.At == Compaction.DefaultAt ? null : Compaction.At;
+            file.CompactTarget = Compaction.Target == Compaction.DefaultTarget ? null : Compaction.Target;
+            file.Save(Env.Paths.ConfigFile);
+            Config.CompactAt = file.CompactAt;
+            Config.CompactTarget = file.CompactTarget;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Ui.Warn($"Set for this session, but not saved: {e.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>"Arena: 14 tools", "Argus: its tools come through Arena", "Argus: not connected (…)".</summary>
+    public string Describe(ServerLink link)
+    {
+        if (link.State == LinkState.Connected)
+        {
+            var count = Tools.All.Count(t => t.Server == link.Name);
+            return count == 0 && link.Client?.Tools.Count > 0
+                ? $"{link.Title}: connected, its tools come through Arena"
+                : $"{link.Title}: {count} tool{(count == 1 ? "" : "s")}";
+        }
+        return link.Describe() + (link.State == LinkState.Failed && link.Error is { } error ? $" ({Fmt.OneLine(error, 120)})" : "");
+    }
+
     private async Task<string> RunSubAgentAsync(SystemPrompt.Inputs inputs, string description, string prompt, CancellationToken ct)
     {
         var sub = new Agent
@@ -278,66 +507,14 @@ internal sealed partial class Runtime : IAsyncDisposable
             Depth = 1,
             Stream = false,
             MaxSteps = 60,
+            Compaction = Compaction,
         };
         var report = await sub.RunAsync(prompt, Turn ?? new Spend(), ct);
         return report.Trim().Length > 0 ? report : $"The sub-agent ({description}) returned no report.";
     }
 
-    private async Task<McpClient?> ConnectArenaAsync(string url, CancellationToken ct)
-    {
-        try
-        {
-            var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + Config.ApiKey };
-            return await McpClient.ConnectAsync("arena", new HttpMcpTransport(Http, url, headers), ct);
-        }
-        catch (McpUnavailableException)
-        {
-            Ui.Info($"Arena's tools are not available here (no MCP endpoint at {url}): carrying on with the local tools.");
-        }
-        catch (McpException e)
-        {
-            Ui.Warn($"Arena's tools did not connect: {e.Message} Carrying on with the local tools.");
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            Ui.Warn($"Arena's tools did not answer in time ({url}): carrying on with the local tools.");
-        }
-        return null;
-    }
-
-    private async Task<McpClient?> ConnectOwnAsync(McpServerConfig server, CancellationToken ct)
-    {
-        try
-        {
-            IMcpTransport transport;
-            if (server.Url is { Length: > 0 } url)
-            {
-                transport = new HttpMcpTransport(Http, url, server.Headers.ToDictionary(h => h.Key, h => StdioMcpTransport.Expand(h.Value)));
-            }
-            else if (server.Command is { Length: > 0 })
-            {
-                transport = StdioMcpTransport.Start(server, Workspace.Root);
-            }
-            else
-            {
-                Ui.Warn($"MCP server {server.Name} has neither a command nor a url: skipped.");
-                return null;
-            }
-            return await McpClient.ConnectAsync(server.Name, transport, ct);
-        }
-        catch (McpException e)
-        {
-            Ui.Warn($"MCP server {server.Name} did not connect: {e.Message}");
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            Ui.Warn($"MCP server {server.Name} did not answer in time.");
-        }
-        return null;
-    }
-
-    /// <summary>An MCP tool as the model sees it, calling the server when run.</summary>
-    public static ToolDef Remote(McpClient client, JsonObject tool, string name, bool trusted, bool changesNothing)
+    /// <summary>An MCP tool as the model sees it, calling the server when run; a call that finds the server gone has it connect again.</summary>
+    public static ToolDef Remote(McpClient client, JsonObject tool, string name, bool trusted, bool changesNothing, ServerLink? link = null)
     {
         var remoteName = tool.Str("name")!;
         var schema = tool["inputSchema"] is JsonObject s ? s.Clone() : new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() };
@@ -348,6 +525,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         return new ToolDef
         {
             Name = name,
+            RemoteName = remoteName,
             Description = tool.Str("description") ?? tool.Str("title") ?? remoteName,
             Parameters = schema,
             Kind = ToolKind.Remote,
@@ -357,8 +535,16 @@ internal sealed partial class Runtime : IAsyncDisposable
             Summary = a => Fmt.OneLine(Json.Line(a), 100),
             Run = async (args, _, ct) =>
             {
-                var result = await client.CallAsync(remoteName, args, ct);
-                return new ToolResult(result.Text, result.IsError);
+                try
+                {
+                    var result = await client.CallAsync(remoteName, args, ct);
+                    return new ToolResult(result.Text, result.IsError);
+                }
+                catch (McpException e) when (e.Lost && link is not null)
+                {
+                    link.Lost(e.Message);
+                    throw;
+                }
             },
         };
     }
@@ -375,9 +561,10 @@ internal sealed partial class Runtime : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var server in _servers)
+        Jobs.StopAll("code-arena stopped");
+        foreach (var link in _links)
         {
-            await server.DisposeAsync();
+            await link.DisposeAsync();
         }
         Http.Dispose();
     }

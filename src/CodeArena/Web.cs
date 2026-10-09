@@ -99,6 +99,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private long _stepStarted;
     private long _thinkingStarted;
     private int? _thinkingMs;
+    // How full the window was when no turn ran: the history is not read while a turn changes it.
+    private long _lastUsed;
+    // The commands with no time limit: their output to the page, a few times a second, at most MaxJobOutput each.
+    private const int MaxJobOutput = 256 * 1024;
+    private readonly Dictionary<int, (StringBuilder Pending, long Sent, bool Flushing)> _jobOutput = [];
 
     private WebApp(Runtime rt, WebAssets assets, HttpServer server)
     {
@@ -125,6 +130,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         var app = new WebApp(rt, assets, new HttpServer(port));
         rt.Agent.Events = app;
         rt.Permissions.Asker = app.AskAsync;
+        rt.Jobs.Started += app.JobStarted;
+        rt.Jobs.Output += app.JobOutput;
+        rt.Jobs.Ended += app.JobEnded;
         app._server.OnError = e => rt.Ui.Error($"The web interface: {e.Message}");
         app._server.Start(app.HandleAsync);
         return app;
@@ -357,6 +365,29 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/settings"):
                 await SettingsAsync(req, res, ct);
                 return;
+            case ("POST", "/api/servers/retry"):
+                var server = req.Json()?.Str("name");
+                var links = _rt.Links.Where(l => server is null ? l.State != LinkState.Connected : l.Name == server).ToList();
+                if (server is not null && links.Count == 0)
+                {
+                    await res.ErrorAsync(404, "not_found", $"There is no server {server}.", ct);
+                    return;
+                }
+                foreach (var link in links)
+                {
+                    link.Retry();
+                }
+                await res.JsonAsync(200, State(), ct);
+                return;
+            case ("POST", "/api/jobs/stop"):
+                if (_rt.Jobs.Find(req.Json()?.Int("id") ?? 0) is not { } stopping)
+                {
+                    await res.ErrorAsync(404, "not_found", "There is no such job.", ct);
+                    return;
+                }
+                stopping.Stop("by the person, in the IDE");
+                await res.NoContentAsync(ct);
+                return;
             case ("POST", "/api/sessions/new"):
                 await SwitchAsync(res, null, ct);
                 return;
@@ -406,6 +437,25 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["branch"] = git is null ? null : SystemPrompt.GitBranch(git),
             ["model"] = _rt.Model.Name,
             ["context"] = _rt.Model.Context,
+            // How full the window is (about), and when the session compacts itself: the status bar and the settings show them.
+            ["contextUsed"] = Current() is null ? _lastUsed = _rt.Agent.Estimate() : _lastUsed,
+            ["compactAt"] = _rt.Compaction.At,
+            ["compactTarget"] = _rt.Compaction.Target,
+            ["servers"] = new JsonArray([.. _rt.Links.Select(l => (JsonNode)new JsonObject
+            {
+                ["name"] = l.Name,
+                ["title"] = l.Title,
+                ["url"] = l.Url,
+                ["state"] = l.State.ToString().ToLowerInvariant(),
+                ["tools"] = _rt.Tools.All.Count(t => t.Server == l.Name),
+                ["status"] = _rt.Describe(l),
+                ["error"] = l.State == LinkState.Connected ? null : l.Error,
+                ["nextTry"] = l.NextTry is { } next ? new DateTimeOffset(next, TimeSpan.Zero).ToString("o") : null,
+            })]),
+            ["jobs"] = new JsonArray([.. _rt.Jobs.All.Select(j => (JsonNode)new JsonObject
+            {
+                ["id"] = j.Id, ["command"] = j.Command, ["running"] = j.Running, ["status"] = j.Status(),
+            })]),
             ["thinking"] = _rt.Model.Thinking,
             ["mode"] = _rt.Permissions.Mode.Name(),
             ["modes"] = new JsonArray([.. Modes.Names.Select(n => (JsonNode)new JsonObject { ["name"] = n, ["description"] = Modes.Parse(n)!.Value.Describe() })]),
@@ -701,6 +751,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", $"Thinking is one of: default, {string.Join(", ", ModelState.Levels)}.", ct);
             return;
         }
+        // When the session compacts itself: kept in config.json, as /compact-at keeps it.
+        if ((body.ContainsKey("compactAt") || body.ContainsKey("compactTarget"))
+            && _rt.SetCompaction(body.Int("compactAt"), body.Int("compactTarget")) is { } wrong)
+        {
+            await res.ErrorAsync(400, "invalid", wrong, ct);
+            return;
+        }
         if (mode is { } newMode)
         {
             _rt.Permissions.Mode = newMode;
@@ -870,6 +927,68 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     void IAgentEvents.Notice(string text) => Emit(new JsonObject { ["type"] = "notice", ["kind"] = "warning", ["text"] = text });
 
+    // ------------------------------------------------- commands with no time limit
+
+    private void JobStarted(CommandJob job) =>
+        Emit(new JsonObject { ["type"] = "job", ["job"] = job.Id, ["command"] = job.Command, ["running"] = true, ["status"] = job.Status() });
+
+    /// <summary>A job's output, gathered for a quarter of a second at a time: the page gets a few events a second, not one per write.</summary>
+    private void JobOutput(CommandJob job, string text)
+    {
+        lock (_jobOutput)
+        {
+            (StringBuilder Pending, long Sent, bool Flushing) state = _jobOutput.TryGetValue(job.Id, out var s) ? s : (new StringBuilder(), 0L, false);
+            if (state.Sent + state.Pending.Length >= MaxJobOutput)
+            {
+                return;
+            }
+            state.Pending.Append(text);
+            if (!state.Flushing)
+            {
+                state.Flushing = true;
+                _ = Task.Delay(250).ContinueWith(_ => FlushJob(job.Id), TaskScheduler.Default);
+            }
+            _jobOutput[job.Id] = state;
+        }
+    }
+
+    private void FlushJob(int id)
+    {
+        string text;
+        lock (_jobOutput)
+        {
+            if (!_jobOutput.TryGetValue(id, out var state))
+            {
+                return;
+            }
+            text = state.Pending.ToString();
+            state.Pending.Clear();
+            var sent = state.Sent + text.Length;
+            if (sent >= MaxJobOutput)
+            {
+                text += "\n… (more output: the agent reads the latest with command_output)\n";
+            }
+            _jobOutput[id] = (state.Pending, sent, false);
+        }
+        if (text.Length > 0)
+        {
+            Emit(new JsonObject { ["type"] = "job_output", ["job"] = id, ["text"] = text });
+        }
+    }
+
+    private void JobEnded(CommandJob job)
+    {
+        FlushJob(job.Id);
+        lock (_jobOutput)
+        {
+            _jobOutput.Remove(job.Id);
+        }
+        Emit(new JsonObject
+        {
+            ["type"] = "job_end", ["job"] = job.Id, ["running"] = false, ["status"] = job.Status(), ["exitCode"] = job.ExitCode, ["stopped"] = job.StoppedBy is not null,
+        });
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (Current() is { } job)
@@ -881,6 +1000,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         await _server.DisposeAsync();
         _rt.Agent.Events = null;
         _rt.Permissions.Asker = null;
+        _rt.Jobs.Started -= JobStarted;
+        _rt.Jobs.Output -= JobOutput;
+        _rt.Jobs.Ended -= JobEnded;
         if (_rt.Agent.Messages.Count == 0)
         {
             TryDelete(_rt.Session.File);

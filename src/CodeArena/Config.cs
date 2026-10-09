@@ -88,6 +88,14 @@ internal sealed class Config
     public string? McpUrl { get; set; }
     /// <summary>Whether to use Arena's tools (its MCP endpoint) at all.</summary>
     public bool ArenaTools { get; set; } = true;
+    /// <summary>Argus's MCP endpoint, when it is not at https://argus.DOMAIN/mcp.</summary>
+    public string? ArgusUrl { get; set; }
+    /// <summary>Whether to connect to Argus's own MCP endpoint (with the same key) besides Arena's.</summary>
+    public bool ArgusTools { get; set; } = true;
+    /// <summary>The share of the model's window (in percent) at which the session compacts itself; null: <see cref="Compaction.DefaultAt"/>.</summary>
+    public int? CompactAt { get; set; }
+    /// <summary>The share of the window (in percent) the recent part may keep whole when it compacts; null: <see cref="Compaction.DefaultTarget"/>.</summary>
+    public int? CompactTarget { get; set; }
     public string? ApiKey { get; set; }
     /// <summary>A CA certificate file (PEM) to trust besides the system's.</summary>
     public string? Ca { get; set; }
@@ -109,6 +117,19 @@ internal sealed class Config
 
     /// <summary>https://DOMAIN/mcp, or the address given.</summary>
     public string? ArenaMcpUrl => McpUrl is { Length: > 0 } m ? m : Url is { Length: > 0 } u ? u.TrimEnd('/') + "/mcp" : null;
+
+    /// <summary>https://argus.DOMAIN/mcp, or the address given; null for an Arena reached by an IP address or as localhost, which has no such name.</summary>
+    public string? ArgusMcpUrl => ArgusUrl is { Length: > 0 } a ? a : DeriveArgus(Url);
+
+    public static string? DeriveArgus(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u) || u.HostNameType != UriHostNameType.Dns
+            || u.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        return new UriBuilder(u) { Host = "argus." + u.Host, Path = "/mcp" }.Uri.ToString();
+    }
 
     /// <summary>Code Arena's page of the Arena's manual, https://DOMAIN/help/code-arena: the IDE's help links to it.</summary>
     public string? ManualUrl => Url is { Length: > 0 } u ? u.TrimEnd('/') + "/help/code-arena" : null;
@@ -149,6 +170,10 @@ internal sealed class Config
         config.Gateway = raw.Str("gateway");
         config.McpUrl = raw.Str("mcpUrl");
         config.ArenaTools = raw.Bool("arenaTools") ?? true;
+        config.ArgusUrl = raw.Str("argusUrl");
+        config.ArgusTools = raw.Bool("argusTools") ?? true;
+        config.CompactAt = raw.Int("compactAt");
+        config.CompactTarget = raw.Int("compactTarget");
         config.ApiKey = raw.Str("apiKey");
         config.Ca = raw.Str("ca");
         config.Model = raw.Str("model");
@@ -164,9 +189,13 @@ internal sealed class Config
         return config;
     }
 
-    /// <summary>Overrides from the environment: ARENA_URL, ARENA_API_KEY, ARENA_GATEWAY_URL, ARENA_MCP_URL, ARENA_MODEL.</summary>
+    /// <summary>Overrides from the environment: ARENA_URL, ARENA_API_KEY, ARENA_GATEWAY_URL, ARENA_MCP_URL, ARENA_ARGUS_URL, ARENA_MODEL.</summary>
     public void ApplyEnvironment(Func<string, string?> env)
     {
+        if (env("ARENA_ARGUS_URL") is { Length: > 0 } argus)
+        {
+            ArgusUrl = argus;
+        }
         if (env("ARENA_URL") is { Length: > 0 } url)
         {
             Url = NormalizeUrl(url);
@@ -208,6 +237,10 @@ internal sealed class Config
         Set("gateway", Gateway);
         Set("mcpUrl", McpUrl);
         Set("arenaTools", ArenaTools ? null : false);
+        Set("argusUrl", ArgusUrl);
+        Set("argusTools", ArgusTools ? null : false);
+        Set("compactAt", CompactAt);
+        Set("compactTarget", CompactTarget);
         Set("apiKey", ApiKey);
         Set("ca", Ca);
         Set("model", Model);

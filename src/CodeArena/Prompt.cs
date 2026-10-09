@@ -17,9 +17,10 @@ internal static class SystemPrompt
         public required Func<string> Model { get; init; }
         public string? Shell { get; init; }
         public string? ArenaUrl { get; init; }
-        /// <summary>The MCP servers' instructions, by server.</summary>
-        public List<(string Server, string Text)> ServerInstructions { get; init; } = [];
-        public bool HasArenaTools { get; init; }
+        /// <summary>The MCP servers' instructions, by server: those connected at the moment.</summary>
+        public Func<IReadOnlyList<(string Server, string Text)>> ServerInstructions { get; init; } = () => [];
+        /// <summary>Whether Arena's tools are connected at the moment (they connect in the background).</summary>
+        public Func<bool> HasArenaTools { get; init; } = () => false;
     }
 
     /// <summary>The main agent's prompt; a sub-agent's (subAgent) says it reports back and only reads.</summary>
@@ -44,7 +45,7 @@ internal static class SystemPrompt
         }
         sb.Append($"""
             You are Code Arena, a coding agent in the person's terminal, working for them on their own machine through their company's Argus Arena{(x.ArenaUrl is null ? "" : $" ({x.ArenaUrl})")}.
-            You read and change code in the working directory, run commands, and {(x.HasArenaTools ? "use Arena's tools (web search and pages, Python in Arena's sandbox, the company's code index, its knowledge and plugins, as the person)" : "work with the local tools only (Arena's tools are not available in this session)")}.
+            You read and change code in the working directory, run commands, and {(x.HasArenaTools() ? "use Arena's tools (web search and pages, Python in Arena's sandbox, the company's code index, its knowledge and plugins, as the person)" : "work with the tools you are given (Arena's tools are not available in this session)")}.
 
             How to work:
             - Look before you change: read the files you will edit; find code with grep and glob rather than guessing paths.
@@ -73,7 +74,7 @@ internal static class SystemPrompt
         {
             sb.Append($"\n# {title}\n\n{text.Trim()}\n");
         }
-        foreach (var (server, text) in x.ServerInstructions.Where(s => s.Text.Trim().Length > 0))
+        foreach (var (server, text) in x.ServerInstructions().Where(s => s.Text.Trim().Length > 0))
         {
             sb.Append($"\n# Instructions from the {server} tools\n\n{Cut(text.Trim())}\n");
         }

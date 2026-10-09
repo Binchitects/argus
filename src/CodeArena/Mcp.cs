@@ -10,6 +10,8 @@ namespace CodeArena;
 internal class McpException(string message, int? code = null) : Exception(message)
 {
     public int? Code { get; } = code;
+    /// <summary>The server could not be reached, or went away mid-answer (not an answer of its own): worth connecting again.</summary>
+    public bool Lost { get; init; }
 }
 
 /// <summary>There is no MCP endpoint at the address (404, 405, or a web page answered).</summary>
@@ -177,7 +179,7 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
             catch (Exception e) when (e is IOException or HttpRequestException)
             {
                 // The connection dropped while the answer was read (the server went away, a proxy cut it).
-                throw new McpException($"{url} dropped the connection while answering {method}: {e.Message}");
+                throw new McpException($"{url} dropped the connection while answering {method}: {e.Message}") { Lost = true };
             }
         }
     }
@@ -279,7 +281,7 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
         }
         catch (HttpRequestException e)
         {
-            throw new McpException(Net.Explain(e, url));
+            throw new McpException(Net.Explain(e, url)) { Lost = true };
         }
     }
 
@@ -455,7 +457,7 @@ internal sealed class StdioMcpTransport : IMcpTransport
         }
         catch (IOException)
         {
-            throw new McpException("The server is not running" + StderrTail());
+            throw new McpException("The server is not running" + StderrTail()) { Lost = true };
         }
         finally
         {
@@ -502,7 +504,7 @@ internal sealed class StdioMcpTransport : IMcpTransport
         }
         foreach (var waiting in _pending.Values)
         {
-            waiting.TrySetException(new McpException("The server exited" + StderrTail()));
+            waiting.TrySetException(new McpException("The server exited" + StderrTail()) { Lost = true });
         }
     }
 

@@ -252,6 +252,12 @@ public sealed class FakeMcp : FakeServer
     public string? DefaultModel { get; set; }
     /// <summary>No endpoint: 404 for everything.</summary>
     public bool Missing { get; set; }
+    /// <summary>Not 0: every request answered with this status (503: the server is down behind its proxy).</summary>
+    public int Status { get; set; }
+    /// <summary>While set, initialize waits for it: a server slow to answer, or one that never does.</summary>
+    public TaskCompletionSource? Hold { get; set; }
+    /// <summary>The tools it lists instead of Arena's three (web_search, read_file, create_issue): Argus's, say.</summary>
+    public JsonArray? ToolList { get; set; }
     public string Url => BaseUrl + "/mcp";
 
     public List<(string Method, string? Session)> Calls
@@ -270,6 +276,11 @@ public sealed class FakeMcp : FakeServer
         if (Missing || ctx.Request.Url!.AbsolutePath != "/mcp")
         {
             ctx.Response.StatusCode = 404;
+            return;
+        }
+        if (Status != 0)
+        {
+            ctx.Response.StatusCode = Status;
             return;
         }
         if (ctx.Request.Headers["Authorization"] != "Bearer " + FakeGateway.Key)
@@ -293,6 +304,10 @@ public sealed class FakeMcp : FakeServer
             ctx.Response.StatusCode = 202;
             return;
         }
+        if (method == "initialize" && Hold is { } hold)
+        {
+            await hold.Task.WaitAsync(ct);
+        }
         JsonNode result = method switch
         {
             "initialize" => new JsonObject
@@ -303,6 +318,7 @@ public sealed class FakeMcp : FakeServer
                 ["instructions"] = "Arena: search the web with web_search before answering about recent events.",
                 ["_meta"] = DefaultModel is null ? null : new JsonObject { ["arena/defaultModel"] = DefaultModel },
             },
+            "tools/list" when ToolList is not null => new JsonObject { ["tools"] = ToolList.DeepClone() },
             "tools/list" => new JsonObject
             {
                 ["tools"] = new JsonArray(

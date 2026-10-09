@@ -16,7 +16,11 @@ internal sealed class Repl(Runtime rt)
         ("/tools", "the tools this session has"),
         ("/todo", "the to-do list"),
         ("/compact", "summarize the conversation to free the model's window"),
+        ("/compact-at [% [%]]", "show or set when it compacts itself (80% of the window) and what it keeps (25%)"),
+        ("/context", "how full the model's window is"),
         ("/cost", "tokens spent, and how full the window is"),
+        ("/mcp [retry]", "Arena's, Argus's and your MCP servers: connected or not; retry tries now"),
+        ("/jobs", "the commands running with no time limit"),
         ("/clear", "start a new session (this one stays saved)"),
         ("/resume [id]", "switch to a saved session"),
         ("/exit", "leave (also Ctrl+D, or Ctrl+C twice)"),
@@ -28,7 +32,26 @@ internal sealed class Repl(Runtime rt)
         var pending = first;
         while (!ct.IsCancellationRequested)
         {
-            var input = pending ?? ReadInput();
+            rt.SayLater();
+            string? input;
+            if (pending is null)
+            {
+                // What the servers say while the person types waits for the line: it would break into what they write.
+                rt.AtPrompt = true;
+                try
+                {
+                    input = ReadInput();
+                }
+                finally
+                {
+                    rt.AtPrompt = false;
+                }
+                rt.SayLater();
+            }
+            else
+            {
+                input = pending;
+            }
             pending = null;
             if (input is null)
             {
@@ -67,7 +90,9 @@ internal sealed class Repl(Runtime rt)
     private void Banner()
     {
         var local = rt.Tools.All.Count(t => t.Server is null);
-        var groups = rt.Tools.All.Where(t => t.Server is not null).GroupBy(t => t.Server!).Select(g => $"{g.Count()} from {(g.Key == "arena" ? "Arena" : g.Key)}");
+        var groups = rt.Links.Select(l => l.State == LinkState.Connected
+            ? $"{rt.Tools.All.Count(t => t.Server == l.Name)} from {l.Title}"
+            : $"{l.Title} {(l.State == LinkState.Connecting ? "connecting" : "not connected")}");
         var git = SystemPrompt.GitRoot(rt.Workspace.Root) is { } root && SystemPrompt.GitBranch(root) is { } branch ? $" ({branch})" : "";
         Ui.Line($"{Ui.Bold("Code Arena")} {Ui.Dim(Cli.Version)}");
         Ui.Line($"  {Ui.Dim("model ")}  {rt.Model.Name} {Ui.Dim($"({Fmt.Tokens(rt.Model.Context)} tokens{(rt.Model.Info.Thinking ? $", thinking {rt.Model.Thinking ?? "default"}" : "")})")}");
@@ -136,8 +161,15 @@ internal sealed class Repl(Runtime rt)
         }
         if (turn.Requests > 0)
         {
-            Ui.Info(turn.Describe(Ui));
+            Ui.Info(turn.Describe(Ui) + " · " + ContextUse());
         }
+    }
+
+    /// <summary>"context 18.2k / 131k (14%), compacts at 80%".</summary>
+    private string ContextUse()
+    {
+        var used = rt.Agent.Estimate();
+        return $"context {Fmt.Tokens(used)} / {Fmt.Tokens(rt.Model.Context)} ({100.0 * used / rt.Model.Context:0}%), compacts at {rt.Compaction.At}%";
     }
 
     /// <summary>Runs a slash command; false to leave.</summary>
@@ -200,7 +232,7 @@ internal sealed class Repl(Runtime rt)
                 var width = rt.Tools.All.Max(t => t.Name.Length);
                 foreach (var group in rt.Tools.All.GroupBy(t => t.Server))
                 {
-                    Ui.Line(Ui.Bold(group.Key switch { null => "Local", "arena" => "Arena", var s => s }));
+                    Ui.Line(Ui.Bold(group.Key is null ? "Local" : rt.Links.FirstOrDefault(l => l.Name == group.Key)?.Title ?? group.Key));
                     foreach (var t in group)
                     {
                         var mark = t.Kind switch
@@ -253,7 +285,59 @@ internal sealed class Repl(Runtime rt)
             case "/cost":
                 Ui.Line($"This session: {rt.Total.Describe(Ui)}");
                 var used = rt.Agent.Estimate();
-                Ui.Line($"The window: about {Fmt.Tokens(used)} of {Fmt.Tokens(rt.Model.Context)} tokens ({100.0 * used / rt.Model.Context:0}%); compacts itself at 80%.");
+                Ui.Line($"The window: about {Fmt.Tokens(used)} of {Fmt.Tokens(rt.Model.Context)} tokens ({100.0 * used / rt.Model.Context:0}%); {rt.Compaction.Describe()}.");
+                break;
+            case "/context":
+                Ui.Line(ContextUse() + $", keeping the recent part within {rt.Compaction.Target}%.");
+                break;
+            case "/compact-at":
+                CompactAt(arg);
+                break;
+            case "/mcp":
+                if (arg.StartsWith("retry", StringComparison.OrdinalIgnoreCase))
+                {
+                    var which = arg[5..].Trim();
+                    var links = rt.Links.Where(l => which.Length == 0 ? l.State != LinkState.Connected : l.Name.Equals(which, StringComparison.OrdinalIgnoreCase) || l.Title.Equals(which, StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (links.Count == 0)
+                    {
+                        Ui.Info(which.Length == 0 ? "Every server is connected." : $"There is no server {which}: /mcp lists them.");
+                    }
+                    foreach (var link in links)
+                    {
+                        link.Retry();
+                        Ui.Info($"Trying {link.Title} again: it says when it is connected.");
+                    }
+                    break;
+                }
+                if (rt.Links.Count == 0)
+                {
+                    Ui.Info("No MCP servers: Arena's and Argus's are off in config.json (arenaTools, argusTools), and none of your own is set up (mcpServers).");
+                }
+                foreach (var link in rt.Links)
+                {
+                    var mark = link.State switch
+                    {
+                        LinkState.Connected => Ui.Green("●"),
+                        LinkState.Connecting => Ui.Yellow("◌"),
+                        LinkState.Unavailable => Ui.Dim("○"),
+                        _ => Ui.Red("●"),
+                    };
+                    Ui.Line($"  {mark} {rt.Describe(link)} {Ui.Dim(link.Url ?? "")}");
+                }
+                if (rt.Links.Any(l => l.State != LinkState.Connected))
+                {
+                    Ui.Info("/mcp retry tries those not connected now (or /mcp retry NAME). Turn Arena's or Argus's off with \"arenaTools\": false or \"argusTools\": false in config.json.");
+                }
+                break;
+            case "/jobs":
+                if (rt.Jobs.All.Count == 0)
+                {
+                    Ui.Info("No commands with no time limit in this session.");
+                }
+                foreach (var job in rt.Jobs.All)
+                {
+                    Ui.Line($"  job {job.Id}  {Fmt.OneLine(job.Command, 70)}  {Ui.Dim(job.Status())}");
+                }
                 break;
             case "/clear":
                 var previous = rt.Session.Id;
@@ -281,6 +365,39 @@ internal sealed class Repl(Runtime rt)
                 break;
         }
         return true;
+    }
+
+    /// <summary>/compact-at: shows when the session compacts; "70" sets the threshold, "70 30" what is kept too, "default" both back.</summary>
+    private void CompactAt(string arg)
+    {
+        if (arg.Length == 0)
+        {
+            Ui.Line($"It {rt.Compaction.Describe()}. " + ContextUse() + ".");
+            Ui.Info("Set with /compact-at 70 (the threshold) or /compact-at 70 30 (and what is kept); /compact-at default for 80 and 25. Kept in config.json.");
+            return;
+        }
+        var words = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        int? at, target;
+        if (words is ["default"])
+        {
+            (at, target) = (Compaction.DefaultAt, Compaction.DefaultTarget);
+        }
+        else
+        {
+            at = Compaction.Percent(words[0]);
+            target = words.Length > 1 ? Compaction.Percent(words[1]) : null;
+            if (at is null || (words.Length > 1 && target is null) || words.Length > 2)
+            {
+                Ui.Error("Give it as a share of the window: /compact-at 70, or /compact-at 70 30.");
+                return;
+            }
+        }
+        if (rt.SetCompaction(at, target) is { } wrong)
+        {
+            Ui.Error(wrong);
+            return;
+        }
+        Ui.Line($"It {rt.Compaction.Describe()} (kept in config.json).");
     }
 
     private void ChooseModel(string arg)

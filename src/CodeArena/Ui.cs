@@ -306,6 +306,11 @@ internal static class Fmt
         return sb.ToString().TrimEnd('\n');
     }
 
+    /// <summary>"41s", "3m 12s", "2h 05m".</summary>
+    public static string Duration(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes:00}m"
+        : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes}m {t.Seconds:00}s"
+        : $"{Math.Max(0, (int)t.TotalSeconds)}s";
+
     /// <summary>12,345 → "12.3k".</summary>
     public static string Tokens(long n) => n switch
     {

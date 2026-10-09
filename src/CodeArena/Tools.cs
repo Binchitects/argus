@@ -38,12 +38,16 @@ internal sealed class ToolDef
     public ToolKind Kind { get; init; }
     /// <summary>The MCP server it comes from ("arena" for Arena's own), or null for a local tool.</summary>
     public string? Server { get; init; }
+    /// <summary>Its name at its MCP server (Name may be renamed: arena_read_file, mcp__server__tool).</summary>
+    public string? RemoteName { get; init; }
     /// <summary>A remote tool that runs without asking: Arena's own, or one of a server the person trusts.</summary>
     public bool Trusted { get; init; }
     /// <summary>A remote tool that changes nothing (MCP readOnlyHint; Arena's, unless it says otherwise): for plan mode and sub-agents.</summary>
     public bool ChangesNothing { get; init; }
     /// <summary>The call in a few words for the terminal (a path, a pattern, a command).</summary>
     public Func<JsonObject, string>? Summary { get; init; }
+    /// <summary>Asks the person in every mode, yolo too (stopping a command they let run with no time limit).</summary>
+    public bool AlwaysAsks { get; init; }
 
     public JsonObject Spec() => new()
     {
@@ -62,6 +66,8 @@ internal sealed class ToolContext
     public required Ui Ui { get; init; }
     /// <summary>The shell for run_shell, when the config names one.</summary>
     public string? Shell { get; init; }
+    /// <summary>The commands run with no time limit; null where none may run (a sub-agent).</summary>
+    public CommandJobs? Jobs { get; init; }
     public List<TodoItem> Todos { get; set; } = [];
     /// <summary>Runs a sub-agent (description, prompt) and returns its report.</summary>
     public Func<string, string, CancellationToken, Task<string>>? SubAgent { get; set; }
@@ -130,6 +136,12 @@ internal sealed class Permissions(Ui ui, Mode mode)
     /// <summary>Laya's look at commands (LayaGuard.cs), when Arena MCP offers decide.</summary>
     public LayaGuard? Guard { get; set; }
 
+    /// <summary>
+    /// Done once Arena's tools have had their first try at connecting (in the background): a command
+    /// waits for it, so Laya looks at it whenever Arena offers decide, as when the session waited for Arena.
+    /// </summary>
+    public Task GuardReady { get; set; } = Task.CompletedTask;
+
     /// <summary>Null when the call may run; otherwise why not, for the model.</summary>
     public async Task<string?> CheckAsync(ToolDef tool, JsonObject args, CancellationToken ct, string? callId = null)
     {
@@ -137,15 +149,21 @@ internal sealed class Permissions(Ui ui, Mode mode)
         {
             return $"Plan mode is read-only: {tool.Name} is not allowed. Finish the plan; the person switches the mode (/mode) to carry it out.";
         }
-        var ask = tool.Kind switch
+        // A command with no time limit asks where commands ask (ask, auto-edit); yolo runs it, watched, and the person can stop it.
+        var unlimited = tool.Kind == ToolKind.Shell && args.Bool("no_time_limit") == true;
+        var ask = tool.AlwaysAsks || tool.Kind switch
         {
             ToolKind.Read or ToolKind.Agent => false,
             ToolKind.Remote when tool.Trusted || tool.ReadOnly => false,
             ToolKind.Edit => Mode == Mode.Ask,
             _ => Mode != Mode.Yolo,
         };
+        if (tool.Kind == ToolKind.Shell && !tool.AlwaysAsks)
+        {
+            await GuardReady.WaitAsync(ct);
+        }
         // A command Laya flags asks whatever the mode; its probabilities show whenever a command asks.
-        var risk = tool.Kind == ToolKind.Shell && Guard is { } guard ? await guard.AssessAsync(args.Str("command"), ct) : null;
+        var risk = tool.Kind == ToolKind.Shell && !tool.AlwaysAsks && Guard is { } guard ? await guard.AssessAsync(args.Str("command"), ct) : null;
         var flagged = risk?.High == true;
         if (!ask && !flagged)
         {
@@ -154,9 +172,12 @@ internal sealed class Permissions(Ui ui, Mode mode)
         var (key, always) = tool.Kind switch
         {
             ToolKind.Edit => ("edit", "for file edits"),
-            ToolKind.Shell when CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => ("shell:" + prefix, $"for `{prefix} …`"),
+            ToolKind.Shell when !tool.AlwaysAsks && CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => unlimited
+                ? ("shell-unlimited:" + prefix, $"for `{prefix} …` with no time limit")
+                : ("shell:" + prefix, $"for `{prefix} …`"),
             _ => ("tool:" + tool.Name, $"for {tool.Name}"),
         };
+        var label = unlimited ? $"{tool.Name} with no time limit" : tool.Name;
         // "Always" covers the commands Laya finds as it found this one: said to an unflagged one, not one it flags or could
         // not read all of; said to a flagged one, the next flagged one; said to one it could not read all of, the next such.
         var remembered = risk?.Risky == true ? "laya:" + key : risk?.Unread is not null ? "unread:" + key : key;
@@ -169,12 +190,12 @@ internal sealed class Permissions(Ui ui, Mode mode)
             }
             if (Asker is null && !ui.CanAsk)
             {
-                return flagged ? LayaGuard.CannotAsk(tool.Name, risk!) : $"{tool.Name} needs the person's approval, and this run cannot ask. " +
+                return flagged ? LayaGuard.CannotAsk(tool.Name, risk!) : $"{label} needs the person's approval, and this run cannot ask. " +
                        "Say what you would have done; the person can run again with --mode auto-edit (edits) or --mode yolo (everything).";
             }
             var answer = Asker is { } asker
                 ? await asker(new ApprovalQuestion(callId ?? "", tool, args, always) { Risk = LayaGuard.Note(risk, ask) }, ct)
-                : ui.Ask(LayaGuard.Question(tool.Name, risk, ask), always);
+                : ui.Ask(LayaGuard.Question(label, risk, ask), always);
             switch (answer)
             {
                 case Approval.Always:
@@ -201,10 +222,17 @@ internal sealed class Permissions(Ui ui, Mode mode)
     }
 }
 
-/// <summary>The tools of a session: local ones, Arena's, the person's MCP servers', and the sub-agent.</summary>
+/// <summary>
+/// The tools of a session: local ones, Arena's, Argus's, the person's MCP servers', and the sub-agent.
+/// A server's tools join when it connects and go when it is lost (from a background thread): each
+/// read is of the list as it was at that moment.
+/// </summary>
 internal sealed class ToolBox(IEnumerable<ToolDef> tools)
 {
-    public List<ToolDef> All { get; } = [.. tools];
+    private readonly object _gate = new();
+    private IReadOnlyList<ToolDef> _all = [.. tools];
+
+    public IReadOnlyList<ToolDef> All => Volatile.Read(ref _all);
 
     /// <summary>What the model is offered: everything, or in plan mode only what changes nothing.</summary>
     public IEnumerable<ToolDef> Offered(Mode mode) => mode == Mode.Plan ? All.Where(t => t.ReadOnly || t.Kind == ToolKind.Agent) : All;
@@ -213,4 +241,13 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
 
     /// <summary>A sub-agent's: reading tools only, and no sub-agents of its own.</summary>
     public ToolBox ForSubAgent() => new(All.Where(t => t.ReadOnly));
+
+    /// <summary>Changes the list as one step: what <paramref name="change"/> makes of the current one.</summary>
+    public void Update(Func<IReadOnlyList<ToolDef>, IEnumerable<ToolDef>> change)
+    {
+        lock (_gate)
+        {
+            Volatile.Write(ref _all, [.. change(_all)]);
+        }
+    }
 }
