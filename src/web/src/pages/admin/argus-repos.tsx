@@ -332,7 +332,7 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
     },
     {
       id: 'schedule',
-      accessorFn: (r) => r.next_run_at ?? (r.schedule_kind === 'pass' && r.included ? (passNext ?? Number.MAX_SAFE_INTEGER - 1) : Number.MAX_SAFE_INTEGER),
+      accessorFn: (r) => r.next_run_at ?? (r.schedule_kind === 'pass' && r.included && r.listed ? (passNext ?? Number.MAX_SAFE_INTEGER - 1) : Number.MAX_SAFE_INTEGER),
       header: ({ column }) => <SortHeader column={column} title="Schedule" />,
       cell: ({ row: { original: r } }) => <ScheduleCell r={r} passNext={passNext} />,
     },
@@ -695,7 +695,8 @@ const dueNow = (seconds: number) => seconds * 1000 - Date.now() < 60_000
 
 /** The schedule it runs on, and when it next runs and last ran. */
 function ScheduleCell({ r, passNext }: { r: RepoRow; passNext: number | null }) {
-  const next = !r.included
+  // One GitLab no longer lists is not run, by its schedule or a pass: it cannot be fetched.
+  const next = !r.included || !r.listed
     ? null
     : r.next_run_at
       ? dueNow(r.next_run_at)

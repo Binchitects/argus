@@ -387,6 +387,12 @@ public sealed class ServerTests : IDisposable
         // GitLab no longer lists grp/gone.
         Choices.Record(_ix.Conn, [P(11, "grp/alpha"), P(12, "grp/hidden")], now + 10);
         long Rows(long id) => Convert.ToInt64(Sql.Scalar(_ix.Conn, "SELECT COUNT(*) FROM repos WHERE gitlab_id = ?", id));
+        // Its schedule never runs one GitLab no longer lists (it cannot be fetched), so no next run is shown for it.
+        Choices.SetSchedule(_ix.Conn, 12, "hours:1", now);
+        Choices.SetSchedule(_ix.Conn, 14, "hours:1", now);
+        var before = (await AdminGet("/admin/repos")).Body;
+        Assert.NotNull(Repo(before, 12)["next_run_at"]);
+        Assert.Null(Repo(before, 14)["next_run_at"]);
         var jobs = _app.Services.GetRequiredService<Jobs>();
         using var release = new ManualResetEventSlim();
         jobs.Runner = (_, _) =>

@@ -115,7 +115,9 @@ public static partial class ArgusServer
                 ["language"] = langs.Select(l => l.Str("lang")).FirstOrDefault(l => l is not ("markdown" or "text")) is { } main
                     ? LanguageNames.GetValueOrDefault(main, main) : null,
                 ["schedule"] = c.Schedule, ["schedule_words"] = schedule.Words, ["schedule_kind"] = schedule.Kind.ToString().ToLowerInvariant(),
-                ["next_run_at"] = Choices.NextRun(c, schedule, zone, lastRun, now)?.ToUnixTimeSeconds() is { } next ? Math.Max(next, now) : null,
+                // One GitLab no longer lists is not run by its schedule: it cannot be fetched.
+                ["next_run_at"] = Choices.Listed(c, listedAt) && Choices.NextRun(c, schedule, zone, lastRun, now)?.ToUnixTimeSeconds() is { } next
+                    ? Math.Max(next, now) : null,
                 ["last_run_at"] = lastRun,
                 ["state"] = StateOf(c, branches, progress, pending.Contains(c.Path)),
                 ["problem"] = problem,

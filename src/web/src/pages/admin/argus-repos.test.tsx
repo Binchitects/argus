@@ -199,6 +199,15 @@ describe('admin indexing: repositories', () => {
     expect(await screen.findByRole('dialog', { name: 'Schedule changed' })).toBeInTheDocument()
   })
 
+  it('shows no next run for a repository GitLab no longer lists, as it cannot be fetched', async () => {
+    fakeApi(admin, routes({ 'GET /api/admin/argus/repos': () => view([repo(1, 'team-a/eal-core'), repo(5, 'team-c/moved', { listed: false })]) }))
+    renderApp('/admin/indexing')
+    const c = await card()
+    await within(c).findByText('moved')
+    expect(within(rowOf(c, 'team-a/eal-core')).getByText(/next pass in 10 minutes/)).toBeInTheDocument()
+    expect(within(rowOf(c, 'team-c/moved')).queryByText(/next pass/)).not.toBeInTheDocument()
+  })
+
   it("sets the schedule for all, and one repository's own, and reads its log", async () => {
     const calls = fakeApi(admin, routes({
       'PUT /api/admin/argus/repos/settings': () => ({ json: { status: 'saved' } }),
