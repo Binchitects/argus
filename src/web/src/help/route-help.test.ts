@@ -63,6 +63,14 @@ describe('help for every page', () => {
     expect(helpFor('/admin/settings', '#%E0', true).section).toBeNull()
   })
 
+  it('names the company directory\'s buttons and checks as its pages show them', () => {
+    const pages = ['pages/admin/directory-panel.tsx', 'pages/admin/sign-in.tsx', 'app/nav.ts'].map((f) => readFileSync(resolve(process.cwd(), 'src', f), 'utf8')).join('\n')
+    const help = [topics.settings.sections['company-directory-ldap'].text, ...topics['sign-in'].parts.map((p) => p.text), ...topics['sign-in'].tasks.flatMap((t) => t.steps)]
+    const named = help.flatMap((t) => [...t.matchAll(/\*\*(.+?)\*\*/g)].map((m) => m[1]))
+    expect(named).toEqual(expect.arrayContaining(['Test the settings', "Try a person's sign-in", 'Try it']))
+    expect(named.filter((n) => !pages.includes(n))).toEqual([])
+  })
+
   it('has help for every dashboard, by its address', () => {
     const dir = resolve(process.cwd(), '../Llm.Api/Dashboards/json')
     const uids = readdirSync(dir).map((f) => (JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) as { uid: string }).uid)

@@ -129,7 +129,7 @@ export function DirectoryChecks({ draft }: { draft: Record<string, string> }) {
           <PlugZap /> Test the settings
         </Button>
         <span className="text-sm text-muted-foreground">
-          Tries the values above, saved or not: the server, its certificate, the service account, where people are and the groups. A blank password field uses the saved password, but only with the saved server and service account.
+          Tries the values above, saved or not: the server, its certificate, the service account, where people are and the groups. A blank password field uses the saved password, but only with the saved server and service account, over a connection as safe as the saved one.
         </span>
       </div>
       {test.data && <CheckResult result={test.data} />}
@@ -142,7 +142,7 @@ export function DirectoryChecks({ draft }: { draft: Record<string, string> }) {
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
             Checks a username and password the way signing in does, with the values above, and shows who they would be here, or exactly why they could not sign in. Nothing is
-            saved or changed, and the password is neither kept nor logged; the try is in the audit log.
+            saved or changed, and the password is neither kept nor logged; the try is in the audit log. A wrong password counts as a wrong sign-in does.
           </p>
         </div>
         <form
