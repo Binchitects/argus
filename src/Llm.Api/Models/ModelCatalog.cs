@@ -151,6 +151,7 @@ public sealed class EngineState(TimeProvider clock)
     /// </summary>
     public DateTimeOffset? LoadedSince(string model) => _loaded.TryGetValue(model, out var since) ? since : null;
 
+    /// <summary>What the engine said of its models (the watcher's look), the models the app told to unload unloaded while it lists them loaded.</summary>
     /// <param name="asked">When the engine was asked (<see cref="Asking"/>).</param>
     public void Set(IReadOnlyList<EngineModel> engine, long asked)
     {
