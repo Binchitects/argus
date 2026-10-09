@@ -57,7 +57,7 @@ describe('admin tools', () => {
     const card = (await screen.findByRole('heading', { name: /Deep research/ })).closest('section')!
     expect(card.querySelector('svg.lucide-telescope')).not.toBeNull()
     expect(within(card).getByRole('switch', { name: /Ask before each run/ })).toBeChecked()
-    expect(within(card).getByText(/Pressing Deep research is the person asking/)).toBeInTheDocument()
+    expect(within(card).getByText(/deep research runs only through this tool/)).toBeInTheDocument()
     expect(within(card).getByRole('switch', { name: /The model may start it in new chats/ })).toBeChecked()
     // The others keep theirs.
     const calculator = screen.getByRole('heading', { name: /Calculator/ }).closest('section')!

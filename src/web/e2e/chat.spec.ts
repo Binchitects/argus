@@ -950,9 +950,10 @@ test.describe('tools', () => {
     try {
       await page.goto('/chat')
       await thinking(page, 'No thinking')
-      await page.getByRole('button', { name: 'Deep research' }).click()
-      await ask(page, 'What do asyncio.gather and asyncio.TaskGroup each do in Python, and when should I use which? Use only docs.python.org pages.')
+      // Deep research is a tool: the model starts it, and asks first.
+      await ask(page, 'Do a deep research: what do asyncio.gather and asyncio.TaskGroup each do in Python, and when should I use which? Use only docs.python.org pages.')
       const answer = page.getByRole('region', { name: 'Answer' }).last()
+      await answer.getByRole('button', { name: 'Allow', exact: true }).click({ timeout: 300_000 })
       await expect(answer.locator('.tool-name', { hasText: 'Sub-agents' }).first()).toBeVisible({ timeout: 300_000 })
       const agents = answer.getByRole('list', { name: 'Sub-agents' })
       await expect(agents.getByRole('listitem').nth(1)).toBeVisible()

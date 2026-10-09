@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, Telescope, X } from 'lucide-react'
+import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
-import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import { fillPrompt, promptsQuery, slashItems, slashQuery, variablesOf, type PromptItem, type SlashItem } from '@/lib/prompts'
@@ -45,9 +44,6 @@ export function Composer({
   onQueue,
   onSendNow,
   onUnqueue,
-  research,
-  onResearch,
-  researchOff,
   compare,
   talk,
   history,
@@ -70,12 +66,7 @@ export function Composer({
   onQueue?: (text: string) => Promise<boolean>
   onSendNow?: (key: string) => void
   onUnqueue?: (key: string) => void
-  /** Deep research for the next message: sub-agents search the web, and the answer is a sourced report. Without onResearch (not given to the person), no switch. */
-  research?: boolean
-  onResearch?: (on: boolean) => void
-  /** Why deep research cannot go with the next message now: the switch shows it, and cannot be pressed. */
-  researchOff?: string
-  /** Compare (arena mode): the next question to two models, beside Deep research. */
+  /** Compare (arena mode): the next question to two models. */
   compare?: ReactNode
   /** The Talk button: a voice conversation. */
   talk?: ReactNode
@@ -83,7 +74,6 @@ export function Composer({
   history?: RecallSource
 }) {
   const [text, setText] = useState('')
-  const researchOffId = useId()
   const area = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
 
@@ -300,7 +290,7 @@ export function Composer({
             uploads.add(e.clipboardData.files)
           }
         }}
-        placeholder={streaming && onQueue ? 'Queue a message…' : research ? 'What should be researched?' : 'Message, or / for a prompt'}
+        placeholder={streaming && onQueue ? 'Queue a message…' : 'Message, or / for a prompt'}
         aria-label="Message"
         // oxlint-disable-next-line jsx-a11y/no-autofocus -- the chat's whole purpose is this box
         autoFocus={autoFocus}
@@ -316,32 +306,6 @@ export function Composer({
         <VoiceButton onRecorded={(f) => uploads.add([f])} />
         {talk}
         {tools}
-        {onResearch && (
-          <>
-            <Tooltip content={researchOff ?? 'Deep research: a plan, sub-agents that search the web, and a report with its sources. It takes minutes.'}>
-              <Button
-                type="button"
-                variant={research ? 'secondary' : 'ghost'}
-                size="sm"
-                className={cn('h-8 gap-1.5 rounded-full px-2.5', research && 'text-primary-ink', researchOff && 'cursor-not-allowed text-muted-foreground')}
-                aria-pressed={!!research}
-                // Not disabled: a disabled button shows no tooltip, and the tooltip says why. A tap (phones show
-                // no tooltip) says it too.
-                aria-disabled={researchOff ? true : undefined}
-                aria-describedby={researchOff ? researchOffId : undefined}
-                aria-label="Deep research"
-                onClick={() => (researchOff ? toast(researchOff, { id: 'research-off' }) : onResearch(!research))}
-              >
-                <Telescope /> <span className="hidden sm:inline">Deep research</span>
-              </Button>
-            </Tooltip>
-            {researchOff && (
-              <span id={researchOffId} className="sr-only">
-                {researchOff}
-              </span>
-            )}
-          </>
-        )}
         {compare}
         <span className="hidden text-xs text-muted-foreground xl:inline">Enter to send · Shift+Enter for a new line</span>
         <span className="ml-auto" />

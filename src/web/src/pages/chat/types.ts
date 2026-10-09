@@ -300,7 +300,6 @@ export interface QueuedMessage {
   id: string
   content: string
   attachments: Attachment[]
-  research: boolean
   createdAt: string
 }
 

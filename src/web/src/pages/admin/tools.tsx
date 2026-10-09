@@ -69,8 +69,8 @@ const defaultWords: SwitchWords = {
 /** For a tool where "a call" says it badly. */
 const switchWords: Record<string, SwitchWords> = {
   research: {
-    onByDefault: ['The model may start it in new chats', 'People can still turn that on or off in each chat. Deep research in the message box is there either way.'],
-    askFirst: ['Ask before each run', 'When the model starts one itself, the chat asks the person first. Pressing Deep research is the person asking.'],
+    onByDefault: ['The model may start it in new chats', 'People can still turn it on or off in each chat, in its Tools menu: deep research runs only through this tool.'],
+    askFirst: ['Ask before each run', 'When the model starts one, the chat asks the person first, and it runs only if they allow it.'],
   },
 }
 

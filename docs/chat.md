@@ -66,7 +66,11 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     it at once. Up to 10 wait per chat. Each is checked as a sent message is
     (the safeguards), when it is queued. Messages still waiting when the app
     restarts go once it is back.
-- **Deep research.** **Deep research** in the composer, for the next message:
+- **Deep research.** A tool, **Deep research** in the chat's **Tools** menu
+  (there is no separate button): while it is on in a chat (it is in new chats
+  unless an admin changes that), the model starts it (`deep_research`) when you
+  ask for deep research or a question wants a thorough, sourced report. The
+  call asks you first (**Allow**), unless an admin turned that off. Allowed,
   the web and sub-agents are on for that answer, and the model plans the
   research questions and gives each to a sub-agent, which searches the web
   and reads the best pages. It may send the gaps to sub-agents once more, then
@@ -81,28 +85,15 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   4 parts done), filling gaps (1 of 2 parts done), writing the report.
   - **Who has it.** Deep research is a tool admins give to people like any
     other (Admin → Tools → **Deep research**: everyone, admins or chosen
-    groups; on for everyone until an admin changes it). The button is there
-    only for those who may use it; a message asking for it from anyone else is
-    refused, and one queued before an admin took it away is answered plainly,
-    saying so. When an admin takes it away from someone who had it, the button
-    goes and a note says why, once: at once while the chat is open, or the
-    next time they open it on that browser. The button is greyed out, and says
-    why (its tooltip, or a tap on a phone), when it cannot go with the next
-    message: the chat's model calls no tools, or **Compare** is on.
-  - **Started by the model.** Deep research is also one of the chat's tools
-    (**Tools**). While it is on in a chat (it is in new chats unless an admin
-    changes that), the model may start one itself (`deep_research`) when a
-    question wants a thorough, sourced report. The call asks you first
-    (**Allow**), unless an admin turned that off. Allowed, the answer becomes
-    deep research from there, as with the button: the web and sub-agents join
-    it, its steps are said in the call's result, and the line under the answer
-    shows the step. It counts in the deep research a day. Sub-agents never
-    start one, and an answer that is deep research already is not offered it,
-    nor are **Compare**'s two answers (deep research is one model's report).
-    While it asks first, it is not offered where nobody can press **Allow**: a
-    [scheduled task](#scheduled-tasks)'s run and a chat bot's thread
-    ([integrations.md](integrations.md#chat-bots)). With asking turned off,
-    they may start one too.
+    groups; on for everyone until an admin changes it). Only those who may use
+    it see it in **Tools**. It counts in the deep research a day. Sub-agents
+    never start one, and an answer that is deep research already is not
+    offered it, nor are **Compare**'s two answers (deep research is one
+    model's report), nor a model that calls no tools.
+  - **Where nobody can allow it.** While it asks first, it is not offered
+    where nobody can press **Allow**: a [scheduled task](#scheduled-tasks)'s
+    run and a chat bot's thread ([integrations.md](integrations.md#chat-bots)).
+    With asking turned off, they may start one too.
   - **For your agent.** [Arena MCP](mcp.md) serves `deep_research` to your
     own agent: it runs in a new chat of yours ("Deep research: …"), and the
     agent gets the report.
@@ -772,8 +763,8 @@ you: a morning digest, a weekly report on a repository with Argus.
   a new chat would use), as any answer: in turn with everyone else's, against
   your credit. Nobody is in the run's chat to press **Allow**, so the model is
   not offered **Deep research** while it asks first (Admin → Tools); to have
-  a task research, an admin turns that off, or you ask in the chat with the
-  **Deep research** button. It is a new chat, titled with the task and the
+  a task research, an admin turns that off, or you ask for it in a chat. It
+  is a new chat, titled with the task and the
   time, or with **One chat for every run**, the same chat carried on, so each
   run reads the ones before ("what changed since yesterday").
 - **Delivered** under the bell in the header (a toast too, when the page is
@@ -1132,9 +1123,9 @@ use and edit one); a new chat takes `assistantId`.
 | No **Python** in the Tools menu | the sandbox is not running | `docker compose ps sandbox`; `scripts/sandbox-check.py` says whether it is sound |
 | No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `COMPOSE_PROFILES=laya` in `.env`, then `docker compose up -d laya`; Admin → Models shows the downloads |
 | No **Web** in the Tools menu | it is off (the default), or no site is allowed | Admin → Tools → Web on, and Settings → Python and web → Sites the chat may open |
-| No **Deep research** in the message box | an admin has not given deep research to you | Admin → Tools → Deep research: who may use it |
+| No **Deep research** in the chat's **Tools** | an admin has not given deep research to you | Admin → Tools → Deep research: who may use it |
 | **Deep research** is greyed out | the chat's model calls no tools, or **Compare** is on (its tooltip, or a tap, says which) | choose a model that calls tools, or turn Compare off |
-| A scheduled task or a bot never starts deep research | it asks first, and nobody is there to allow it | Admin → Tools → Deep research → **Ask before each run** off, or use the button in the chat |
+| A scheduled task or a bot never starts deep research | it asks first, and nobody is there to allow it | Admin → Tools → Deep research → **Ask before each run** off, or ask for it in a chat |
 | "… is not one of the sites the chat may open" | the page's site is not allowed | allow it in Settings → Python and web, or `*` for any public site |
 
 ## How it is tested
