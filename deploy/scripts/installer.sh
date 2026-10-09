@@ -14,7 +14,8 @@
 #   upgrade   an installation of 5.2.0 or newer: a backup first, then the new images and files
 #             (.env, overrides, certificates and backups kept; new .env keys added and listed),
 #             started and checked. On a failure it rolls back by itself: the files, the images
-#             and the data from the backup. --rollback goes back to before the last upgrade.
+#             and the data from the backup. --rollback goes back to before the last upgrade
+#             (the data as it is now kept in a backup first).
 #   repair    checks the installation against the bundle and puts right what is wrong:
 #             missing or changed files, missing images, volumes' owners, stopped or unhealthy
 #             containers; each finding is reported with what was done
@@ -49,9 +50,10 @@
 #   --hosts              the stack's names in /etc/hosts (scripts/setup-hosts.sh; needs root)
 #   --skip-requirements  go on when a requirement is not met
 # remove:
-#   --purge              also the data: the volumes, deploy/ with .env and certificates, the
-#                        backups, and the models when they are inside DIR. It asks for the word
-#                        PURGE (unattended: --confirm PURGE) and offers a last backup first
+#   --purge              also the data: the volumes, deploy/ with .env and certificates, what
+#                        the installer wrote beside it, the backups, and the models when they are
+#                        inside DIR (packs/ stays). It asks for the word PURGE (unattended:
+#                        --confirm PURGE) and offers a last backup first
 #   --final-backup DIR   that last backup, into DIR, which is not removed
 #
 # Exit codes:
