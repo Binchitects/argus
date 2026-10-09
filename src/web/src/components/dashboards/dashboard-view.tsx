@@ -17,7 +17,9 @@ import { Variables, type Chosen } from './variables'
  * screens, one panel per row on a phone; Grafana rows become section headings.
  * Live dashboards (a refresh in their file) refresh themselves, and can pause.
  * The time range is the last hour unless the file says another; one chosen goes
- * in the address (Grafana's from and to), so a link opens the same view.
+ * in the address (Grafana's from and to), so a link opens the same view. Its
+ * menu is as wide as its label, but no wider than the page: a long one is cut
+ * short.
  */
 export function DashboardView({ uid }: { uid: string }) {
   const def = useQuery({ queryKey: ['dashboard', uid], queryFn: ({ signal }) => api<DashboardDef>(`/api/dashboards/${uid}`, { signal }) })
@@ -54,7 +56,7 @@ export function DashboardView({ uid }: { uid: string }) {
   return (
     <div className="grid gap-6">
       <div className="flex min-w-0 flex-wrap items-end gap-2">
-        <RangeSelect value={rangeKey(current)} onChange={choose} options={dashboardRangeOptions(current)} className="h-9 w-auto min-w-44" />
+        <RangeSelect value={rangeKey(current)} onChange={choose} options={dashboardRangeOptions(current)} className="h-9 w-auto max-w-full min-w-44" />
         <Button
           variant="outline"
           size="sm"

@@ -101,10 +101,11 @@ function caretRows(el: HTMLTextAreaElement, at: number): { first: boolean; last:
  * first line (an empty box too), ↑ puts the message sent before in the box, then
  * older ones (this chat's, then the person's others); ↓ goes back toward the
  * newest and finally to what was being typed, kept. Esc goes straight back to
- * it. A message recalled and left as it was steps on at once; once the caret
- * moves into it or it is edited (a copy: sent, it is a new message), ↑ and ↓
- * move between its lines first. Keys with Shift, Ctrl, Alt or ⌘, a selection,
- * and keys that compose (an IME) are left to the box.
+ * it. In several lines, a recalled message's too, ↑ and ↓ move between them
+ * first. A recalled line that wraps steps on at once, until the caret moves
+ * into it or it is edited (a copy: sent, it is a new message). Keys with Shift,
+ * Ctrl, Alt or ⌘, a selection, and keys that compose (an IME) are left to the
+ * box.
  */
 export function useRecall({
   area,
@@ -160,8 +161,8 @@ export function useRecall({
     }
     if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || el.selectionStart !== el.selectionEnd) return false
     const caret = el.selectionStart
-    // A message recalled, untouched, the caret where it was put: the arrows step on at once.
-    const untouched = at >= 0 && el.value === list[at] && caret === el.value.length
+    // A message of one line recalled, untouched, the caret where it was put: the arrows step on at once, wrapped or not.
+    const untouched = at >= 0 && el.value === list[at] && caret === el.value.length && !el.value.includes('\n')
     if (e.key === 'ArrowUp') {
       // Nothing older: the box's own Up (the caret to the start).
       if (!waiting && at + 1 >= list.length && (!older || older.done)) return false

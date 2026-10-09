@@ -123,9 +123,11 @@ the screen). **↑** brings back what you sent in this folder, newest first,
 in this run and the ones before (as a shell keeps its history); **↓** goes
 back toward the newest and past it to what you were typing, kept; **Esc**
 goes straight back to it. **Enter** sends the message brought back as a new
-one; editing it changes a copy. In a message of several lines, ↑ and ↓ move
-between its lines first; one brought back and left as it is steps on at
-once. Enter in a paste, and Alt+Enter, start a new line instead of sending.
+one; editing it changes a copy. In a message of several lines, one brought
+back too, ↑ and ↓ move between its lines first. Enter in a paste, and
+Alt+Enter, start a new line instead of sending. A message taller than the
+terminal shows the lines round the caret while you edit it, and all of it
+once sent.
 The history is a file per folder in the data folder (JSON Lines, 0600, cut
 back to the last 1,000 messages at 2,000), shared with the IDE's chat in the
 same folder: a message sent in one is there in the other. Lines read from a

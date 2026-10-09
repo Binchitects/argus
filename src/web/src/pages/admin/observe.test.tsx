@@ -193,6 +193,22 @@ describe('dashboards', () => {
     await waitFor(() => expect(asked('day')).toBe(30))
   })
 
+  it('a link’s range that does not end now shows its times, the day once, in a menu no wider than the page', async () => {
+    fakeApi(admin, {
+      'GET /api/dashboards/plain': () => ({ json: { uid: 'plain', title: 'plain', panels: [] } }),
+    })
+    const from = new Date(2025, 9, 9, 10, 53).getTime()
+    renderApp(`/admin/dashboards/plain?from=${from}&to=${from + 3_600_000}`)
+    const range = await screen.findByRole('combobox', { name: 'Time range' })
+    const day = new Date(from).toLocaleDateString(undefined, { dateStyle: 'medium' })
+    expect(range.textContent?.split(day).length).toBe(2)
+    expect(range).toHaveTextContent(`to ${new Date(from + 3_600_000).toLocaleTimeString(undefined, { timeStyle: 'short' })}`)
+    // As wide as its label up to the page's width; the label is the span the menu cuts short with an ellipsis.
+    expect(range).toHaveClass('w-auto', 'max-w-full')
+    expect(range.firstElementChild?.tagName).toBe('SPAN')
+    expect(range.className).toContain('[&>span]:truncate')
+  })
+
   it('a range in the address that cannot be read is the last hour', async () => {
     fakeApi(admin, {
       'GET /api/dashboards/plain': () => ({ json: { uid: 'plain', title: 'plain', panels: [] } }),

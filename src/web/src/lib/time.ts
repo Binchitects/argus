@@ -102,18 +102,21 @@ export function intervalFor(from: Date, to: Date, points: number): number {
 
 const unitNames: Record<string, string> = { s: 'second', m: 'minute', h: 'hour', d: 'day', w: 'week', M: 'month', y: 'year' }
 
-/** "Last hour", "Last 30 minutes", or the two times of a range that does not end now. */
+/** "Last hour", "Last 30 minutes", or the two times of a range that does not end now (the day once when both are on it). */
 export function rangeLabel(r: TimeRange): string {
   const named = [...presets, ...dashboardPresets].find((p) => p.from === r.from && r.to === 'now')?.label
   if (named) return named
   const m = /^now-(\d+)([smhdwMy])$/.exec(r.from)
   if (m && r.to === 'now') return `Last ${m[1] === '1' ? '' : `${m[1]} `}${unitNames[m[2]!]}${m[1] === '1' ? '' : 's'}`
-  const show = (t: string) => {
+  const when = (t: string) => {
     try {
-      return t === 'now' ? 'now' : resolve(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+      return t === 'now' ? null : resolve(t)
     } catch {
-      return t
+      return null
     }
   }
-  return `${show(r.from)} to ${show(r.to)}`
+  const [from, to] = [when(r.from), when(r.to)]
+  const show = (d: Date | null, t: string) => d?.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) ?? t
+  if (from && to && from.toDateString() === to.toDateString()) return `${show(from, r.from)} to ${to.toLocaleTimeString(undefined, { timeStyle: 'short' })}`
+  return `${show(from, r.from)} to ${show(to, r.to)}`
 }

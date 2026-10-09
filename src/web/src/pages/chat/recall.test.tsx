@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { PromptLibrary } from '@/lib/prompts'
 import { fakeApi, member, renderApp } from '@/test/utils'
 import { blank } from './live'
@@ -160,7 +160,7 @@ describe('↑ in the message box', () => {
     expect(el).toHaveValue('line one\nline two')
   })
 
-  it('a message of several lines brought back steps on at once; once the caret moves into it, its lines come first', async () => {
+  it('a message of several lines brought back: Up and Down move between its lines first, then step on', async () => {
     const [q1, a1, , a2] = conversation.messages
     const many: Conversation = { ...conversation, messages: [q1!, a1!, msg('q2', 'a1', 'user', 'top line\nbottom line'), a2!] }
     fakeApi(member, {
@@ -172,17 +172,45 @@ describe('↑ in the message box', () => {
     const el = await box()
     await userEvent.keyboard('{ArrowUp}')
     expect(el).toHaveValue('top line\nbottom line')
-    await userEvent.keyboard('{ArrowUp}')
+    expect(el.selectionStart).toBe(20)
+    // The caret at the end of its last line: Up is the box's own (the browser moves the caret to the line above).
+    expect(fireEvent.keyDown(el, { key: 'ArrowUp' })).toBe(true)
+    expect(el).toHaveValue('top line\nbottom line')
+    // On its first line, Up brings back the one before.
+    el.setSelectionRange(2, 2)
+    expect(fireEvent.keyDown(el, { key: 'ArrowUp' })).toBe(false)
     expect(el).toHaveValue('first question')
+    // Down comes back to it, the caret at its end; on its first line Down is the box's own, on its last it goes on to the draft.
     await userEvent.keyboard('{ArrowDown}')
     expect(el).toHaveValue('top line\nbottom line')
-    // The caret moved into its last line: Up is the box's own until the first line.
-    el.setSelectionRange(15, 15)
-    fireEvent.keyDown(el, { key: 'ArrowUp' })
-    expect(el).toHaveValue('top line\nbottom line')
     el.setSelectionRange(2, 2)
-    fireEvent.keyDown(el, { key: 'ArrowUp' })
-    expect(el).toHaveValue('first question')
+    expect(fireEvent.keyDown(el, { key: 'ArrowDown' })).toBe(true)
+    expect(el).toHaveValue('top line\nbottom line')
+    el.setSelectionRange(15, 15)
+    expect(fireEvent.keyDown(el, { key: 'ArrowDown' })).toBe(false)
+    expect(el).toHaveValue('')
+  })
+
+  it('a message of one line brought back steps on at once, even where the box wraps it', async () => {
+    backend()
+    const el = await box()
+    await userEvent.keyboard('{ArrowUp}')
+    expect(el).toHaveValue('second question')
+    // Drawn in two rows (a narrow box): measured, the caret and the end are on the second, below the start.
+    const rows = vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.tagName === 'SPAN' && this !== this.parentElement?.firstElementChild ? 20 : 0
+    })
+    try {
+      // The caret at its end, on the second row: the next Up still steps on.
+      await userEvent.keyboard('{ArrowUp}')
+      expect(el).toHaveValue('first question')
+      // Once the caret moves into it, Up is the box's own until its first row.
+      el.setSelectionRange(10, 10)
+      expect(fireEvent.keyDown(el, { key: 'ArrowUp' })).toBe(true)
+      expect(el).toHaveValue('first question')
+    } finally {
+      rows.mockRestore()
+    }
   })
 
   it('leaves keys that compose text, and arrows with Shift, Ctrl, Alt or ⌘, to the box', async () => {

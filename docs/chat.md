@@ -105,15 +105,16 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   back toward the newest, and past it to what you were typing, kept as it was;
   **Esc** goes straight back to it. **Enter** sends the message again, as a
   new one; editing it changes a copy, never the message it came from. Only its
-  words come back, not its files. A message brought back and left as it is
-  steps on with the next ↑ at once; once you move the caret into it or edit
-  it, ↑ and ↓ move between its lines first, as they do in anything of several
-  lines (a long line wrapped counts as several). The `/` menu keeps its own
-  arrows while it is open, and a message brought back that starts with `/`
-  does not open it. Keys with Shift, Ctrl, Alt or ⌘, a selection, and typing
-  that composes (an input method) are the box's own. Messages over 32,000
-  characters (a pasted document) stay in their chat. Phones have no arrow
-  keys: nothing changes there.
+  words come back, not its files. In anything of several lines, a draft or a
+  message brought back, ↑ and ↓ move between its lines first, and go on from
+  its first or last line. A message of one line brought back steps on with
+  the next ↑ at once, even when the box wraps it; once you move the caret
+  into it or edit it, ↑ and ↓ move between its rows first. The `/` menu
+  keeps its own arrows while it is open, and a message brought back that
+  starts with `/` does not open it. Keys with Shift, Ctrl, Alt or ⌘, a
+  selection, and typing that composes (an input method) are the box's own.
+  Messages over 32,000 characters (a pasted document) stay in their chat.
+  Phones have no arrow keys: nothing changes there.
 - **Rating answers.** Thumbs up or down under each answer. Down asks why:
   wrong, incomplete, too long, unsafe, ignored instructions or other, and a
   few words if you like. One rating per answer; rate again to change it, or
@@ -1112,8 +1113,9 @@ use and edit one); a new chat takes `assistantId`.
     other chats (asked for only then, each text once), back down to the draft
     kept, Esc to it, a message brought back sent as a new one and edited as a
     copy, the `/` menu keeping its arrows (and not opened by a message
-    brought back), lines of a draft or of a message brought back first, and
-    keys that compose or carry Shift, Ctrl, Alt or ⌘ left to the box
+    brought back), lines of a draft or of a message brought back first (a
+    line brought back that the box wraps stepping on at once), and keys that
+    compose or carry Shift, Ctrl, Alt or ⌘ left to the box
   - the list's fork, archive, Archived view and unarchive; fork from an
     answer; the question rail; the archived notice
   - Auto in the model menu, its note under an answer (the small model's, or
