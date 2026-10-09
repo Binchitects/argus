@@ -20,8 +20,10 @@ namespace Llm.Api.Chat;
 /// <param name="Again">Said with the question for this answer only: answer again shorter or longer (AnswerLengths.Again), or answer in spoken sentences (Talk.Note).</param>
 /// <param name="Titled">The chat's first question: the model for small steps writes its title beside the answer (ChatTitles).</param>
 /// <param name="QueuedMs">How long the answer waited in line (AnswerGate) before it started, for its trace.</param>
+/// <param name="Unattended">Nobody watches the answer (a bot's thread, a scheduled task): a tool that would wait for the person's Allow is not offered.</param>
+/// <param name="Compare">One of Compare's two answers: the model starts no deep research (that is one model's report).</param>
 public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false, string? Again = null, bool Titled = false,
-    int? QueuedMs = null);
+    int? QueuedMs = null, bool Unattended = false, bool Compare = false);
 
 /// <summary>
 /// "Answer now" (as in ChatGPT and Gemini): the person asked the answer to stop thinking.
@@ -193,8 +195,11 @@ public sealed partial class ChatService(
         }
         if (model?.Tools != false)
         {
-            // The model starts no deep research while this answer is one, nor while Auto's small model answers.
-            var chosen = ToolRegistry.Chosen(conversation.Tools, allowed).Where(t => t.Tool.Id != ResearchTool.ToolId || !(research || route is { Small: true })).ToList();
+            // The model starts no deep research while this answer is one, while Auto's small model answers, in Compare (deep research is
+            // one model's report), nor, while it asks first, in an answer nobody watches: nobody would press Allow, and it would wait.
+            var chosen = ToolRegistry.Chosen(conversation.Tools, allowed)
+                .Where(t => t.Tool.Id != ResearchTool.ToolId || !(research || route is { Small: true } || overrides.Compare || (overrides.Unattended && t.Setting.AskFirst)))
+                .ToList();
             if (research)
             {
                 // Deep research needs the web and sub-agents, for this answer, when the person may use them.

@@ -74,9 +74,9 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
             return await EndAsync(run, "skipped", "Its chat was still answering the run before.", ct);
         }
         job.Emit(new { type = "question", id = question.Id, parentId = question.ParentId });
-        // The task's own notification says how it went (and its email, webhook).
+        // The task's own notification says how it went (and its email, webhook). Nobody watches it in the chat, to allow a call.
         job.Notify = false;
-        jobs.Start(job, question.Id, new AnswerOverrides());
+        jobs.Start(job, question.Id, new AnswerOverrides(Unattended: true));
         await job.Running.WaitAsync(ct);
 
         // What was answered: the last words of the answer, or why there are none.

@@ -138,7 +138,8 @@ public sealed partial class McpTools(
     /// <summary>
     /// The tool with the function, started. As listed when the list is still kept; otherwise an
     /// admin's server or API by its prefix, else the built-in tools, Argus last (it is a network
-    /// round trip, they are not).
+    /// round trip, they are not). Deep research has one function: only a call of it may hear why
+    /// it cannot run, not a name it does not have.
     /// </summary>
     private async Task<((ToolChoice Choice, IToolRun Run)? Owner, string? Failure)> OwnerAsync(AppUser user, IReadOnlyList<ToolChoice> served, string function,
         ToolContext context, CancellationToken ct)
@@ -148,7 +149,7 @@ public sealed partial class McpTools(
             :
             [
                 .. served.Where(t => t.Tool is IServerTool s && function.StartsWith(s.Slug + "__", StringComparison.Ordinal)),
-                .. served.Where(t => t.Tool is not IServerTool && t.Tool.Id != "argus"),
+                .. served.Where(t => t.Tool is not IServerTool && t.Tool.Id != "argus" && (t.Tool.Id != ResearchTool.ToolId || function == ResearchTool.Function)),
                 .. served.Where(t => t.Tool.Id == "argus"),
             ];
         string? failure = null;
