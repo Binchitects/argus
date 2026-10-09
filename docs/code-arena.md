@@ -136,7 +136,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/context` | how full the model's window is |
 | `/cost` | tokens spent, and how full the model's window is |
 | `/mcp [retry [name]]` | Arena's, Argus's and your MCP servers: connected or not and why; `retry` tries those not connected now |
-| `/jobs` | the commands run with no time limit, running or ended |
+| `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N |
 | `/clear` | a new session (the last stays saved) |
 | `/resume [id]` | switch to a saved session |
 | `/exit` | leave (also Ctrl+D) |
@@ -351,7 +351,8 @@ sends keys as `{"type":"input","data":"…"}` (text) or as binary messages, and
 Arena's chat's shapes; `/api/settings` also takes `compactAt` and
 `compactTarget` (400 `invalid` with the bounds), and a turn's stream adds
 `{"type":"job", job, command, running, status}`, `{"type":"job_output", job,
-text}` (a few times a second, the first 256 KB of each command) and
+text}` (a few times a second, for as long as the command runs; a page that
+comes back during the turn is sent the last 64 KB of each) and
 `{"type":"job_end", job, status, exitCode, stopped}` for its commands with no
 time limit.
 
@@ -478,7 +479,13 @@ once. `/mcp` (or **MCP servers** in the IDE's status bar) shows each one,
 connected or not and why; `/mcp retry` (**Try again**) tries now. When the
 Arena has no MCP endpoint at all, or no Argus beside it (`argus.DOMAIN` does
 not resolve, or has no MCP endpoint), the session says so once, quietly, and
-carries on. `"arenaTools": false` and `"argusTools": false` in
+carries on. A server that fails in any other way is said and tried again
+the same way; nothing waits for it for ever (a command waits for Arena's
+first answer, for Laya, 20 seconds at most). An address that is not an http
+or https one (`"mcpUrl"`, `"argusUrl"`, `"gateway"` or their variables: a
+port out of range, a space, `ftp://`) stops the session as it starts, saying
+where to fix it; an MCP server of your own at such an address is skipped and
+said. `"arenaTools": false` and `"argusTools": false` in
 `config.json` turn them off. `code-arena login` tries both and says what it
 found.
 
@@ -493,12 +500,18 @@ or wait with `command_output`; the turn does not end while one it started
 runs, and when one ends the model is told, as a `command_output` result, its
 exit code and the end of its output (the last 8,000 characters; the last
 256 KB are kept for `command_output`). Several run at once. A time limit given
-with it does not apply.
+with it does not apply. When the turn fails while one runs (the gateway or
+the model's server down), the command is not stopped: the turn says so and
+keeps watching it until it ends, and the model is told how it ended with the
+person's next message.
 
 Only the person stops one: **Ctrl+C** in the terminal stops the turn and the
-commands it started, **Stop** in the IDE stops the turn or one command, and
-the model's `stop_command` asks the person first in every mode. Ordinary
-commands keep their limit (120 s by default, at most 600).
+commands it started, `/jobs stop N` stops one, **Stop** in the IDE stops the
+turn or one command (a command running that no turn on the page shows, after
+a reload, is listed from the session's state with its **Stop**), and the
+model's `stop_command` asks the person first in every mode, every time: it
+offers no **always**. Ordinary commands keep their limit (120 s by default, at
+most 600).
 
 Running a command with no time limit asks where commands ask: in `ask` and
 `auto-edit` the question says "with no time limit", and **always** said to

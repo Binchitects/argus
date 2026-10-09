@@ -70,7 +70,7 @@ export const tasks: HelpTask[] = [
     title: 'Ask the agent for a change',
     steps: [
       'Type what you want in the chat\'s box, on the right, and press Enter.',
-      'When it asks before an edit or a command, read it, then press **Allow**, **Always for this session** or **Deny**.',
+      'When it asks before an edit or a command, read it, then press **Allow**, **Always for this session** or **Deny** (stopping a command it runs with no time limit asks every time: there is no **Always**).',
       'What it changed shows under **Agent changes** and in the open tabs.',
     ],
   },
@@ -87,7 +87,7 @@ export const tasks: HelpTask[] = [
   { title: 'Go back to an earlier session', steps: ['Press **Chat** in the activity bar.', 'Click the session; **New session** starts another.'] },
   {
     title: 'Change when the conversation is compacted',
-    steps: ['Click how full the window is, in the status bar (tokens used / the model\'s).', 'Set **Compact at** and what the recent part keeps, in percent of the window.', 'Press **Save**: the next sessions use it too.'],
+    steps: ['Click how full the window is, in the status bar (tokens used / the model\'s; the gauge on a phone).', 'Set **Compact at** and what the recent part keeps, in percent of the window.', 'Press **Save**: the next sessions use it too.'],
   },
   {
     title: 'Stop a long command the agent runs',
