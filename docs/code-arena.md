@@ -600,6 +600,29 @@ target down with it), so a compaction does not start the next one. The use of
 the window shows after each turn in the terminal (`/context` at any time) and
 in the IDE's status bar.
 
+## Its commits
+
+In a git repository, each turn that ends commits the files it changed, with
+Code Arena as the commit's **author** and the person (their own git settings)
+as the **committer**, so `git log --format='%an | %cn %s'` tells what the
+harness wrote from what the person did. The commit's first line is the
+request's first line; its body quotes the request and names the model and the
+session (`Code-Arena-Model:`, `Code-Arena-Session:`). A `git commit` the model
+runs itself has Code Arena as its author too.
+
+Only what the turn changed goes in. A file that already held the person's own
+uncommitted changes when the turn began is left for them (the turn says
+which), and so is whatever else they had changed or staged. A turn that is
+stopped or fails leaves its changes uncommitted, and the next turn that ends
+commits them. Nothing is committed during a merge, rebase, cherry-pick or
+revert. The repository's hooks run as for any commit; one that refuses, or one
+that waits more than two minutes, leaves the changes uncommitted, and the turn
+says why.
+
+`"autoCommit": false` in `config.json` turns the turn's commits off;
+`"commitName"` and `"commitEmail"` change the author (Code Arena,
+`code-arena@` the Arena's host, as installed).
+
 ## The person's own MCP servers
 
 Under `"mcpServers"` in `config.json`, in the shape Claude Code and others use:
@@ -628,7 +651,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
 
 ## Building it (admins)

@@ -157,6 +157,10 @@ internal sealed class Agent
     /// (<c>/jobs stop N</c>), until the wait it is given is done; null shows a spinner instead.
     /// </summary>
     public Func<Task, Task>? Listen { get; set; }
+    /// <summary>Commits each turn's changes under this name (the main conversation only); null: no commits.</summary>
+    public CommitIdentity? CommitAs { get; set; }
+    /// <summary>The files turns changed but did not commit (stopped or failed), with their content then: still the harness's next turn.</summary>
+    private Dictionary<string, string?> _uncommitted = new(StringComparer.Ordinal);
 
     private bool _parallelCalls = true;
     private long _knownTokens;
@@ -184,11 +188,15 @@ internal sealed class Agent
     /// </summary>
     public async Task<string> RunAsync(string input, Spend turn, CancellationToken ct)
     {
+        var before = await SnapshotAsync(ct);
+        var done = false;
         try
         {
             var answer = await TurnAsync(input, turn, ct);
             // Out of steps with a command still running: the turn ends when it does (the model hears of it next turn).
             await WaitForAllJobsAsync(ct);
+            done = true;
+            await CommitAsync(before, input);
             return answer;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested && Context.Jobs is { } jobs)
@@ -211,6 +219,66 @@ internal sealed class Agent
                 throw;
             }
             throw;
+        }
+        finally
+        {
+            if (!done)
+            {
+                await KeepUncommittedAsync(before);
+            }
+        }
+    }
+
+    /// <summary>The repository as the turn begins, the files earlier turns left uncommitted counted as the harness's; null: no commits.</summary>
+    private async Task<TurnCommits.Snapshot?> SnapshotAsync(CancellationToken ct)
+    {
+        if (CommitAs is null || Depth > 0 || await TurnCommits.TakeAsync(Context.Workspace.Root, ct) is not { } snapshot)
+        {
+            return null;
+        }
+        var dirty = snapshot.Dirty.Where(kv => !(_uncommitted.TryGetValue(kv.Key, out var ours) && ours == kv.Value)).ToDictionary(StringComparer.Ordinal);
+        return snapshot with { Dirty = dirty };
+    }
+
+    /// <summary>Commits what the turn changed under Code Arena's name, and says so; a turn that did not end keeps its files for the next.</summary>
+    private async Task CommitAsync(TurnCommits.Snapshot? before, string input)
+    {
+        if (before is null || CommitAs is null)
+        {
+            return;
+        }
+        try
+        {
+            if (await TurnCommits.CommitAsync(before, input, CommitAs, Model.Name, Session?.Id, CancellationToken.None) is { } commit)
+            {
+                if (commit.Hash is not null)
+                {
+                    _uncommitted.Clear();
+                }
+                else if (commit.Problem is not null)
+                {
+                    await KeepUncommittedAsync(before);
+                }
+                var text = commit.Describe();
+                Ui.Info(text);
+                Events?.Notice(text);
+            }
+        }
+        catch (Exception e) when (e is IOException or InvalidOperationException)
+        {
+            Warn($"The turn's changes are not committed: {Fmt.OneLine(e.Message, 200)}");
+        }
+    }
+
+    /// <summary>A turn stopped or failed: what it changed stays uncommitted, and still counts as the harness's at the next turn.</summary>
+    private async Task KeepUncommittedAsync(TurnCommits.Snapshot? before)
+    {
+        if (before is not null && await TurnCommits.ChangedAsync(before, CancellationToken.None) is { } changed)
+        {
+            foreach (var (path, hash) in changed)
+            {
+                _uncommitted[path] = hash;
+            }
         }
     }
 

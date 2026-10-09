@@ -778,6 +778,9 @@ internal static class Proc
 {
     public sealed record Result(int ExitCode, string Output, bool TimedOut);
 
+    /// <summary>The name the agent's commands commit under (set as Code Arena starts): its commits are told apart from the person's.</summary>
+    public static CommitIdentity? Author { get; set; }
+
     /// <summary>The environment every command the agent runs gets: no pagers or prompts, and never the person's key.</summary>
     public static void Prepare(ProcessStartInfo psi)
     {
@@ -785,6 +788,7 @@ internal static class Proc
         psi.Environment["PAGER"] = "cat";
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
         psi.Environment["CODE_ARENA"] = "1";
+        Author?.Apply(psi.Environment);
         // The person's key stays with Code Arena, not with the commands the model runs.
         psi.Environment.Remove("ARENA_API_KEY");
     }

@@ -120,6 +120,79 @@ public sealed class AgentTests : IDisposable
     }
 
     [Fact]
+    public async Task Each_turn_commits_what_it_changed_as_Code_Arena_and_leaves_the_persons_own_changes()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        Git(h.Work, "init", "-q", "-b", "main");
+        Git(h.Work, "config", "user.name", "Pat Person");
+        Git(h.Work, "config", "user.email", "pat@example.test");
+        Git(h.Work, "config", "commit.gpgsign", "false");
+        h.Write("a.txt", "old\n");
+        h.Write("mine.txt", "one\n");
+        Git(h.Work, "add", ".");
+        Git(h.Work, "commit", "-q", "-m", "first");
+        // The person's work in progress, before the turn: a change of their own, and a file staged.
+        h.Write("mine.txt", "one\ntwo (mine)\n");
+        h.Write("staged.txt", "staged by Pat\n");
+        Git(h.Work, "add", "staged.txt");
+
+        _gateway.Answer = req => FakeGateway.Last(req) switch
+        {
+            _ when !FakeGateway.HasToolResults(req) => Reply.Call(
+                ("edit_file", """{"path":"a.txt","old_string":"old","new_string":"new"}"""),
+                ("write_file", """{"path":"src/added.txt","content":"added\n"}"""),
+                ("edit_file", """{"path":"mine.txt","old_string":"one","new_string":"ONE"}""")),
+            _ => Reply.Say("done"),
+        };
+        Assert.Equal(0, await h.Run("", "-p", "Rename old to new\nand add a file", "--mode", "auto-edit"));
+
+        Assert.Equal("Code Arena <code-arena@localhost>|Pat Person <pat@example.test>|Rename old to new", Git(h.Work, "log", "-1", "--format=%an <%ae>|%cn <%ce>|%s").Trim());
+        Assert.Equal(["a.txt", "src/added.txt"], Git(h.Work, "show", "--name-only", "--format=", "HEAD").Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        var body = Git(h.Work, "log", "-1", "--format=%b");
+        Assert.Contains("> Rename old to new\n> and add a file", body);
+        Assert.Contains("Code-Arena-Session: ", body);
+        // The person's own changes stay theirs: the file they had changed, and what they had staged.
+        Assert.Contains(" M mine.txt", Git(h.Work, "status", "--porcelain"));
+        Assert.Contains("A  staged.txt", Git(h.Work, "status", "--porcelain"));
+        Assert.Contains("Not committed, as they held your own changes before this turn: mine.txt.", h.Out + h.Err);
+
+        // A commit the model makes itself is Code Arena's too.
+        _gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("ok") : Reply.Call(("run_shell", """{"command":"git commit -q --allow-empty -m by-the-model"}"""));
+        Assert.Equal(0, await h.Run("", "-p", "commit", "--mode", "yolo"));
+        Assert.Equal("Code Arena|Pat Person|by-the-model", Git(h.Work, "log", "-1", "--format=%an|%cn|%s").Trim());
+    }
+
+    [Fact]
+    public async Task With_autoCommit_off_nothing_is_committed()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        Git(h.Work, "init", "-q", "-b", "main");
+        Git(h.Work, "config", "user.name", "Pat Person");
+        Git(h.Work, "config", "user.email", "pat@example.test");
+        h.Write("a.txt", "old\n");
+        Git(h.Work, "add", ".");
+        Git(h.Work, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "first");
+        _gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("ok") : Reply.Call(("edit_file", """{"path":"a.txt","old_string":"old","new_string":"new"}"""));
+        Assert.Equal(0, await h.Run("", "-p", "change it", "--mode", "auto-edit"));
+        Assert.Equal("first", Git(h.Work, "log", "-1", "--format=%s").Trim());
+        Assert.Contains(" M a.txt", Git(h.Work, "status", "--porcelain"));
+    }
+
+    private static string Git(string dir, params string[] args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("git") { WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var arg in args)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+        using var git = System.Diagnostics.Process.Start(psi)!;
+        var output = git.StandardOutput.ReadToEndAsync();
+        var error = git.StandardError.ReadToEndAsync();
+        Assert.True(git.WaitForExit(30_000), $"git {string.Join(' ', args)} did not end");
+        return output.Result + error.Result;
+    }
+
+    [Fact]
     public async Task Interactive_turns_ask_before_an_edit_and_the_slash_commands_work()
     {
         using var h = new Harness(_gateway, _mcp);

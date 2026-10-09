@@ -204,8 +204,12 @@ internal sealed partial class Runtime : IAsyncDisposable
             HasArenaTools = () => ArenaConnected,
         };
         Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Jobs = Jobs };
+        // Whatever the agent commits is by Code Arena (its author), the person staying the committer.
+        var harness = CommitIdentity.From(Config);
+        Proc.Author = harness;
         Agent = new Agent
         {
+            CommitAs = Config.AutoCommit ? harness : null,
             Gateway = Gateway,
             Tools = Tools,
             Permissions = Permissions,
