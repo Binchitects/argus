@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useAuth } from "../auth";
 import { TopicBody } from "../components/Help";
+import Eyes from "../components/Eyes";
 import Icon from "../components/Icon";
 import { help } from "../help";
 
@@ -12,6 +13,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const logo = useRef<HTMLSpanElement>(null);
   if (me) return <Navigate to="/" replace />;
 
   async function submit(e: FormEvent) {
@@ -28,12 +30,13 @@ export default function Login() {
     }
   }
 
+  // The logo, then its eyes, play behind the form; they keep off it (data-keep-clear).
   return (
-    <div className="center-screen">
-      <form className="card login" onSubmit={submit} aria-label="Sign in">
-        <div className="brand big">
-          <span className="logo"><Icon name="logo" size={22} /></span> Argus
-        </div>
+    <div className="login-screen">
+      <Eyes logo={logo} />
+      <span ref={logo} className="logo hero eyes-logo"><Icon name="logo" size={50} /></span>
+      <form className="card login" onSubmit={submit} aria-label="Sign in" data-keep-clear>
+        <div className="brand big">Argus</div>
         <p className="dim">Your team's models, code and documentation, in one place.</p>
         {error && <div className="msg bad" role="alert">{error}</div>}
         <label>
