@@ -123,9 +123,34 @@ key stops working within about six minutes (Argus's five and the app's one), a
 disabled person within five. When the app cannot be asked, Argus says so and
 keeps nothing.
 
+**Connecting never waits for GitLab.** The key check (or the chat's
+credential) is all a request waits for: `initialize`, `tools/list` and the
+documentation tools answer at once. The person's repositories are resolved
+apart, from their GitLab membership: started in the background as they
+connect, and waited for only by the first tool that reads code. The member
+lists of the indexed projects are fetched at most eight at a time for everyone
+together, on one connection pool, each once for everyone asking at the same
+moment; the answer is kept ten
+minutes, then served while a fresh one is fetched (for an hour at most while
+GitLab cannot answer). What is kept is the GitLab projects the person may
+read, matched to Argus's repositories at each request: a repository taken out
+of Argus takes its access with it, and one indexed since is checked at the
+person's next request. With GitLab down, an agent still connects, the
+documentation tools work, and a code tool says why it cannot answer.
+
+Before 5.3, every request (connecting too) resolved them first, one project
+after another: with 200 projects and a GitLab answering in 200 ms, connecting
+took 40 seconds, longer than Claude Code (30 s), Qwen Code and Code Arena wait,
+so they gave up on Argus; and a GitLab that could not answer refused the
+connection with a `401`, as if the key were wrong.
+Measured through Traefik: `initialize` 42.0 s before, 5 ms after (the first
+code tool 3.3 s, while the 201 member lists come in); four agents at once
+asked GitLab 804 times before, 201 after.
+
 A **standalone Argus** (no `ARGUS_KEY_CHECK_URL`) keeps the old way: each
 caller presents their own GitLab personal access token, and that token decides
-which repositories they may see.
+which repositories they may see. The token is checked with GitLab when it
+connects: that is its sign-in.
 
 `ARGUS_GITLAB_TOKEN` in `.env` is the **privileged service token**. It is used
 for indexing and for reading each person's membership, never handed to a
@@ -751,6 +776,8 @@ from the command line.
 |---|---|
 | `401` on every MCP call | No bearer token; an API key the app refused (unknown, blocked, expired, or a disabled person); a GitLab token sent to the platform's Argus (it takes the API key); or, standalone, an expired GitLab PAT |
 | `401` "Cannot check your API key right now" | Argus cannot reach the app at `ARGUS_KEY_CHECK_URL`, or `ARGUS_CHAT_CLIENT_TOKEN` is not the app's `ARGUS_KEY` (Argus's log names the answer) |
+| A code tool says GitLab access cannot be verified, the documentation tools work | GitLab does not answer for the service token, and nothing recent is kept for the person: their repositories are asked again on the next code tool (Argus's log: `could not resolve a person's repositories`) |
+| An agent gives up connecting (Claude Code, Qwen Code, Code Arena) | Argus older than 5.3 with a large or slow GitLab: it resolved every project's members before answering `initialize`. Upgrade; Code Arena connects in the background meanwhile |
 | Host-validation error | Proxy hostname missing from `--allowed-host` |
 | Container unhealthy for ~90 s at boot | Normal — the first request opens every pack |
 | Empty `repo_map`, no symbols | Index is empty; run the indexer (Admin → Indexing) |

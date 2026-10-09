@@ -189,7 +189,7 @@ mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/`,
       },
     ],
     check: () => ({ text: 'Check it answers:', file: 'shell', code: `code-arena -p "${OK}"` }),
-    argus: "Nothing to add: Code Arena reaches Argus through Arena's own tools, as you, with the code you may read.",
+    argus: "Nothing to add: once signed in, Code Arena connects to Argus by itself, beside Arena's own tools, as you, with the code you may read. It connects in the background, so a slow Argus never holds it up; /mcp shows whether it is connected.",
   },
   {
     id: 'claude',

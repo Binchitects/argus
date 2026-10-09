@@ -112,7 +112,8 @@ In the terminal, the answer streams as it is written; the model's thinking is sh
 before it. Each tool call is a line (`● edit_file src/app.py`), with its result
 under it: a diff for an edit, the last lines of a command's output, a count for
 a search. Each turn ends with its tokens and the share read from the cache
-(`12.4k in (81% cached) · 310 out · 3 requests`). **Ctrl+C** stops the turn and
+(`12.4k in (81% cached) · 310 out · 3 requests`) and how full the model's
+window is (`context 18.2k / 131k (14%), compacts at 80%`). **Ctrl+C** stops the turn and
 keeps what was said; at the prompt it clears what is typed, and on an empty
 prompt twice leaves. **Ctrl+Z** at the prompt stops code-arena, as in a shell:
 `fg` brings it back, with what you were typing (not on Windows). A line ending
@@ -152,7 +153,11 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/tools` | the tools of the session, and which ask |
 | `/todo` | the to-do list |
 | `/compact` | summarize the conversation now |
+| `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `default` for 80 and 25 |
+| `/context` | how full the model's window is |
 | `/cost` | tokens spent, and how full the model's window is |
+| `/mcp [retry [name]]` | Arena's, Argus's and your MCP servers: connected or not and why; `retry` tries those not connected now |
+| `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N (typed while the turn waits for them) |
 | `/clear` | a new session (the last stays saved) |
 | `/resume [id]` | switch to a saved session |
 | `/exit` | leave (also Ctrl+D) |
@@ -220,15 +225,21 @@ The page is laid out as VS Code is, in Argus Arena's design system:
 - **chat**: the agent's chat on the right: the model and thinking pickers,
   Sessions and Hide at its top; the thread with a card for each tool call and
   a diff under each edit, the approval card (**Allow**, **Always for this
-  session**, **Deny**), Stop, the mode, `/compact` and `/clear`. **↑** in its
-  box brings back this session's messages, then what this folder sent
-  before (in the terminal too), as in Arena's chat; **↓** and **Esc** go
-  back to what you were typing. The Chat activity lists this folder's
-  sessions.
-- **status bar**: the git branch, the agent's changes and the terminal on the
-  left; the cursor's line and column, the file's language, the mode, the
-  model and `code-arena <version>` (About: the version, the licence, the
-  folder and the Source link) on the right.
+  session**, **Deny**), Stop, the mode, `/compact` and `/clear`. A command
+  the agent runs with no time limit shows above the box while it runs: the
+  end of its output as it comes, how it ended, and **Stop**. **↑** in its box brings back this session's messages, then
+  what this folder sent before (in the terminal too), as in Arena's chat;
+  **↓** and **Esc** go back to what you were typing. The Chat activity lists
+  this folder's sessions.
+- **status bar**: the git branch, the agent's changes, the terminal and the
+  number of commands running with no time limit on the left; the cursor's
+  line and column, the file's language, the MCP servers (connected of all:
+  **MCP servers** lists them, why one is not connected and when it is tried
+  next, with **Try again**), how full the model's window is (tokens used /
+  the model's: **Context** sets when the session compacts and what it keeps,
+  kept in `config.json`), the mode, the model and `code-arena <version>`
+  (About: the version, the licence, the folder and the Source link) on the
+  right.
 
 The side bar, the chat and the terminal panel are resized by dragging their
 edges (or with the arrow keys on the edge). Their sizes, which are shown and
@@ -332,7 +343,9 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status}]`) |
+| `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
+| `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
 | `GET /api/file?path=FILE` | `{path, size, version, text}`; `text` is null with `binary` or `tooLarge` (over 5 MB) |
@@ -359,7 +372,13 @@ the output as it comes, as binary messages (the terminal's bytes), and
 sends keys as `{"type":"input","data":"…"}` (text) or as binary messages, and
 `{"type":"resize","cols":N,"rows":N}`. The chat's calls (`/api/messages`,
 `/api/turn`, `/api/approvals`, `/api/settings`, `/api/sessions`, …) are
-Arena's chat's shapes.
+Arena's chat's shapes; `/api/settings` also takes `compactAt` and
+`compactTarget` (400 `invalid` with the bounds), and a turn's stream adds
+`{"type":"job", job, command, running, status}`, `{"type":"job_output", job,
+text}` (a few times a second, for as long as the command runs; a page that
+comes back during the turn is sent the last 64 KB of each) and
+`{"type":"job_end", job, status, exitCode, stopped}` for its commands with no
+time limit.
 
 ## Modes
 
@@ -453,7 +472,9 @@ On the person's machine:
 | `edit_file` | replaces an exact piece of a file; it must match once (or `replace_all`), whitespace included; an empty `old_string` makes a new file. Windows line endings are kept |
 | `list_dir`, `glob` | folders and file names (`**/*.cs`, `*.{ts,tsx}`); `.gitignore` is respected |
 | `grep` | file contents by regular expression, with context lines; binary and ignored files skipped, and those it cannot read, named pipes and links that lead outside |
-| `run_shell` | a command in bash (sh when missing; `cmd.exe` on Windows; `"shell"` in the file for another), 120 s by default, at most 600; long output is cut in the middle |
+| `run_shell` | a command in bash (sh when missing; `cmd.exe` on Windows; `"shell"` in the file for another), 120 s by default, at most 600; long output is cut in the middle. With `no_time_limit`, it runs in the background until it ends (below) |
+| `command_output` | the state and the latest output of a command run with no time limit; `wait` waits until it ends |
+| `stop_command` | stops a command run with no time limit; it always asks the person first, `yolo` too |
 | `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
 | `todo_write` | the to-do list the person sees (`/todo`) |
 | `task` | a sub-agent (below) |
@@ -462,9 +483,72 @@ On the person's machine:
 same tools as the chat, with the same rights and the same audit, as that
 person. They run without asking, except those Arena marks as changing
 something, which ask like a command. A tool named like a local one is offered
-as `arena_<name>`. When the Arena has no MCP endpoint, the session says so once
-and carries on with the local tools. Arena's own instructions to the model are
-passed on.
+as `arena_<name>`. Arena's own instructions to the model are passed on.
+
+**Argus's tools** come from `https://argus.DOMAIN/mcp` with the same key
+(`"argusUrl"` in the config file for another address; none for an Arena
+reached by an IP address or as `localhost`). Arena serves the person's Argus
+tools too: those it serves are offered once, as Arena's, and Argus's own copy
+is used while Arena is not connected. Argus's other tools join beside them.
+
+Both are on by default once signed in, and both connect **in the
+background**: a session starts when the gateway has listed the models, and
+waits a few seconds at most for its servers (`-p` waits up to 25 seconds, as
+it cannot wait later). A server that has not answered by then joins when it
+does, with its tools and its instructions, and the terminal says so. One that
+is down or refuses is said once, then tried again after 5 seconds and less
+often after that, up to every 5 minutes; a call that finds it gone (the
+connection dropped, or its proxy's 502, 503 or 504) has it connect again at
+once. `/mcp` (or **MCP servers** in the IDE's status bar) shows each one,
+connected or not and why; `/mcp retry` (**Try again**) tries now. When the
+Arena has no MCP endpoint at all, or no Argus beside it (`argus.DOMAIN` does
+not resolve, or has no MCP endpoint), the session says so once, quietly, and
+carries on. A server that fails in any other way is said and tried again
+the same way; nothing waits for it for ever (a command waits for Arena's
+first answer, for Laya, 20 seconds at most). An address that is not an http
+or https one (`"mcpUrl"`, `"argusUrl"`, `"gateway"` or their variables: a
+port out of range, a space, `ftp://`) stops the session as it starts, saying
+where to fix it; an MCP server of your own at such an address is skipped and
+said. `"arenaTools": false` and `"argusTools": false` in
+`config.json` turn them off. `code-arena login` tries both and says what it
+found.
+
+### Commands with no time limit
+
+A command that takes longer than `run_shell`'s limit (a full build, a long
+test suite, an install, a migration) runs with `no_time_limit`: in the
+background, with a watcher that shows its output as it comes (in the terminal
+under its job number, `│1 …`; in the IDE above the chat's box), however long
+it takes. In the terminal its lines never break into a question waiting for the
+person's answer or into the middle of the model's line: they wait, and follow. The model gets a job number at once and can go on with other work,
+or wait with `command_output`; the turn does not end while one it started
+runs, and when one ends the model is told, as a `command_output` result, its
+exit code and the end of its output (the last 8,000 characters; the last
+256 KB are kept for `command_output`). Several run at once. A time limit given
+with it does not apply. When the turn fails while one runs (the gateway or
+the model's server down), the command is not stopped: the turn says so and
+keeps watching it until it ends, and the model is told how it ended with the
+person's next message.
+
+Only the person stops one: **Ctrl+C** in the terminal stops the turn and the
+commands it started; while the turn waits for them, the terminal still reads
+what the person types: `/jobs` lists them and `/jobs stop N` stops one (the
+model is told how it ended and the turn goes on), and anything else is taken
+as the next message when the turn ends (not if they stop it). **Stop** in the
+IDE stops the turn or one command (a command running that no turn on the page shows, after
+a reload, is listed from the session's state with its **Stop**), and the
+model's `stop_command` asks the person first in every mode, every time: it
+offers no **always**. Ordinary commands keep their limit (120 s by default, at
+most 600).
+
+Running a command with no time limit asks where commands ask: in `ask` and
+`auto-edit` the question says "with no time limit", and **always** said to
+`npm test` does not cover `npm test` with no time limit (nor the other way
+round), so the person agrees to each kind of wait. `yolo` runs it without
+asking, as it runs every command: it is watched, shown, and stopped with
+Ctrl+C or Stop, so nothing runs out of the person's sight. Laya still looks at
+the command first (above). `-p` cannot ask, so outside `yolo` it is refused
+with a reason the model passes on. Sub-agents cannot start one.
 
 **Sub-agents** (`task`): the model hands a self-contained piece of research to
 a fresh conversation with only the reading tools (local and Arena's), which
@@ -493,11 +577,25 @@ as it happens, the model, the to-do list and the tokens. `--continue`,
 `--resume` and `/resume` read it back.
 
 The model's window comes from the gateway (`/v1/model/info`), or `"context"`
-in the config file when the gateway does not say (32,768 otherwise). Near 80%
-of it, the older part of the conversation is summarized by the model (the
-person's goals, decisions, files, commands and the state of the work) and the
-recent part kept whole. `/compact` does it at once. A tool's output longer
-than 40,000 characters (less for a small window) is cut in the middle.
+in the config file when the gateway does not say (32,768 otherwise). When the
+next request would pass the **threshold**, 80% of it by default, the older
+part of the conversation is summarized by the model (the person's goals,
+decisions, files, commands and the state of the work) and the recent part
+kept whole, within the **target**, 25% of the window by default. `/compact`
+does it at once. A tool's output longer than 40,000 characters (less for a
+small window) is cut in the middle.
+
+Set them with `/compact-at 70` (the threshold) or `/compact-at 70 30` (and the
+target), in the IDE's **Context** (the window's use in the status bar), or
+`"compactAt"` and `"compactTarget"` in `config.json`: `/compact-at` and the
+IDE keep them there for the next sessions, and `/compact-at default` goes back
+to 80 and 25. `--compact-at 70 --compact-to 30` sets them for one run. A share
+is written `70`, `70%` or `0.7` (in `config.json` too: `70`, `"70%"` or `0.7`;
+anything else stops the session with where it is). The threshold is from 20% to 95%, and the
+target from 5% to 10 points under the threshold (a lower threshold brings the
+target down with it), so a compaction does not start the next one. The use of
+the window shows after each turn in the terminal (`/context` at any time) and
+in the IDE's status bar.
 
 ## The person's own MCP servers
 
@@ -525,8 +623,10 @@ without starting it. On Windows, `npx` and other `.cmd` scripts need
 
 The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
-`"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"gateway"`,
-`"mcpUrl"`, `"ca"`.
+`"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
+(no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
+`"mcpUrl"`, `"ca"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
+for one run.
 
 ## Building it (admins)
 
@@ -597,6 +697,13 @@ hold.
 - **"Arena's tools are not available here"**: this Arena has no MCP endpoint
   (an older version), or a proxy in between does not pass `/mcp`. The session
   works with the local tools.
+- **"Arena's tools are still connecting"** or **"Argus's tools did not
+  connect"**: the server is slow or down. The session carries on without its
+  tools and tries again; `/mcp` says why and `/mcp retry` tries now. A refusal
+  gives the server's reason: for Argus, **"refused the credentials (401): …"**
+  names the key (make a new one and `code-arena login`) or says GitLab cannot
+  tell what you may read just now (Argus older than 5.3 refuses then; it
+  connects now and only its code tools wait for GitLab).
 - **An edit "was not found"**: the file changed since the model read it, or the
   model got the whitespace wrong. It reads the file again and retries.
 - **The window fills fast**: large tool outputs. `/cost` shows how full it is,

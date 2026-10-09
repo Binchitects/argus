@@ -248,7 +248,7 @@ afterEach(() => {
 })
 
 const state: CodeState = {
-  name: 'Code Arena', version: '5.2.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'feature/cart', model: 'model-a', context: 32768, thinking: null, mode: 'auto-edit',
+  name: 'Code Arena', version: '5.2.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'feature/cart', model: 'model-a', context: 32768, contextUsed: 4200, compactAt: 80, compactTarget: 25, servers: [], jobs: [], thinking: null, mode: 'auto-edit',
   modes: [
     { name: 'ask', description: 'edits and commands ask first' },
     { name: 'auto-edit', description: 'file edits run without asking; commands ask' },
@@ -670,6 +670,92 @@ describe('Code Arena, the IDE', () => {
     expect(about).toHaveTextContent('5.2.0')
     expect(about).toHaveTextContent('AGPL-3.0-only')
     expect(within(about).getByRole('link', { name: 'Source' })).toHaveAttribute('href', 'https://github.com/Binchitects/argus')
+  })
+
+  it("shows the window's use and sets when the session compacts, and the MCP servers with Try again, in the status bar", async () => {
+    const servers: CodeState['servers'] = [
+      { name: 'arena', title: 'Arena', url: 'https://llm.test/mcp', state: 'connected', tools: 14, status: 'Arena: 14 tools', error: null, nextTry: null },
+      { name: 'argus', title: 'Argus', url: 'https://argus.llm.test/mcp', state: 'failed', tools: 0, status: 'Argus: not connected, tried again at 10:41:07 (answered 503)', error: 'answered 503', nextTry: '2026-10-09T10:41:07Z' },
+    ]
+    let now = { ...state, servers }
+    const { calls } = backend({
+      'GET /api/state': () => ({ json: now }),
+      'POST /api/settings': (body) => {
+        const b = body as { compactAt?: number; compactTarget?: number }
+        if (b.compactAt === 99) return { status: 400, json: { status: 'invalid', error: 'The threshold is from 20% to 95% of the model\'s window.' } }
+        now = { ...now, ...b }
+        return { json: now }
+      },
+      'POST /api/servers/retry': () => {
+        now = { ...now, servers: [servers[0]!, { ...servers[1]!, state: 'connected', tools: 17, status: 'Argus: 17 tools', error: null, nextTry: null }] }
+        return { json: now }
+      },
+    })
+    renderIde()
+    const status = await screen.findByRole('contentinfo', { name: 'Status bar' })
+
+    // The servers: one of two connected, the other said with why.
+    await userEvent.click(within(status).getByRole('button', { name: 'MCP servers: Arena connected, Argus not connected' }))
+    let dialog = await screen.findByRole('dialog', { name: 'MCP servers' })
+    expect(within(dialog).getByText('Arena: 14 tools')).toBeInTheDocument()
+    expect(within(dialog).getByText('Argus: not connected, tried again at 10:41:07 (answered 503)')).toBeInTheDocument()
+    expect(within(dialog).getByText('https://argus.llm.test/mcp')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Try Argus again' }))
+    expect(calls.find((c) => c.path === '/api/servers/retry')?.body).toEqual({ name: 'argus' })
+    expect(await within(dialog).findByText('Argus: 17 tools')).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    expect(await within(status).findByRole('button', { name: 'MCP servers: Arena connected, Argus connected' })).toHaveTextContent('2/2')
+
+    // The window: tokens used of the model's, and when it compacts.
+    const context = within(status).getByRole('button', { name: 'Context: 4.2 K of 32.77 K tokens (13%), compacts at 80%' })
+    expect(context).toHaveTextContent('4.2 K / 32.77 K')
+    await userEvent.click(context)
+    dialog = await screen.findByRole('dialog', { name: 'Context' })
+    expect(within(dialog).getByText(/About 4\.2 K of 32\.77 K tokens in use \(13%\)/)).toBeInTheDocument()
+    const at = within(dialog).getByLabelText('Compact at (% of the window)')
+    const keep = within(dialog).getByLabelText('Keep the recent part within (%)')
+    expect(at).toHaveValue(80)
+    expect(keep).toHaveValue(25)
+    // Checked before it is sent: what is kept stays 10 points under the threshold.
+    await userEvent.clear(at)
+    await userEvent.type(at, '30')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('What is kept is from 5% to 20% (10 points under the threshold).')
+    expect(calls.some((c) => c.path === '/api/settings')).toBe(false)
+    await userEvent.clear(at)
+    await userEvent.type(at, '70')
+    await userEvent.clear(keep)
+    await userEvent.type(keep, '30')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(calls.find((c) => c.path === '/api/settings')?.body).toEqual({ compactAt: 70, compactTarget: 30 })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Context' })).not.toBeInTheDocument())
+    expect(within(status).getByRole('button', { name: /compacts at 70%$/ })).toBeInTheDocument()
+
+    // Defaults puts 80 and 25 back in the boxes.
+    await userEvent.click(within(status).getByRole('button', { name: /^Context:/ }))
+    dialog = await screen.findByRole('dialog', { name: 'Context' })
+    expect(within(dialog).getByLabelText('Compact at (% of the window)')).toHaveValue(70)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Defaults' }))
+    expect(within(dialog).getByLabelText('Compact at (% of the window)')).toHaveValue(80)
+    expect(within(dialog).getByLabelText('Keep the recent part within (%)')).toHaveValue(25)
+
+    // Closed without saving: what was typed (and a complaint about it) is gone at the next opening, the session's values back.
+    await userEvent.clear(within(dialog).getByLabelText('Compact at (% of the window)'))
+    await userEvent.type(within(dialog).getByLabelText('Compact at (% of the window)'), '30')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('What is kept is from 5% to 20%')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Context' })).not.toBeInTheDocument())
+    await userEvent.click(within(status).getByRole('button', { name: /^Context:/ }))
+    dialog = await screen.findByRole('dialog', { name: 'Context' })
+    expect(within(dialog).getByLabelText('Compact at (% of the window)')).toHaveValue(70)
+    expect(within(dialog).getByLabelText('Keep the recent part within (%)')).toHaveValue(30)
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+
+    // On a phone the numbers give way to the icons (the model and About keep their room); the names say them.
+    expect(within(status).getByText('4.2 K / 32.77 K')).toHaveClass('hidden', 'md:inline')
+    expect(within(status).getByText('2/2')).toHaveClass('hidden', 'md:inline')
   })
 
   it('reloads an open file the agent edits when nothing in it is unsaved, and leaves one with unsaved changes alone', async () => {

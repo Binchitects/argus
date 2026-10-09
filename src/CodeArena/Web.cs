@@ -99,6 +99,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private long _stepStarted;
     private long _thinkingStarted;
     private int? _thinkingMs;
+    // How full the window was when no turn ran: the history is not read while a turn changes it.
+    private long _lastUsed;
+    // The commands with no time limit: their output to the page as it comes, a few times a second, for as long as they run.
+    private readonly Dictionary<int, (StringBuilder Pending, bool Flushing)> _jobOutput = [];
 
     private WebApp(Runtime rt, WebAssets assets, HttpServer server)
     {
@@ -125,6 +129,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         var app = new WebApp(rt, assets, new HttpServer(port));
         rt.Agent.Events = app;
         rt.Permissions.Asker = app.AskAsync;
+        rt.Jobs.Started += app.JobStarted;
+        rt.Jobs.Output += app.JobOutput;
+        rt.Jobs.Ended += app.JobEnded;
         app._server.OnError = e => rt.Ui.Error($"The web interface: {e.Message}");
         app._server.Start(app.HandleAsync);
         return app;
@@ -360,6 +367,29 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/settings"):
                 await SettingsAsync(req, res, ct);
                 return;
+            case ("POST", "/api/servers/retry"):
+                var server = req.Json()?.Str("name");
+                var links = _rt.Links.Where(l => server is null ? l.State != LinkState.Connected : l.Name == server).ToList();
+                if (server is not null && links.Count == 0)
+                {
+                    await res.ErrorAsync(404, "not_found", $"There is no server {server}.", ct);
+                    return;
+                }
+                foreach (var link in links)
+                {
+                    link.Retry();
+                }
+                await res.JsonAsync(200, State(), ct);
+                return;
+            case ("POST", "/api/jobs/stop"):
+                if (_rt.Jobs.Find(req.Json()?.Int("id") ?? 0) is not { } stopping)
+                {
+                    await res.ErrorAsync(404, "not_found", "There is no such job.", ct);
+                    return;
+                }
+                stopping.Stop("by the person, in the IDE");
+                await res.NoContentAsync(ct);
+                return;
             case ("POST", "/api/sessions/new"):
                 await SwitchAsync(res, null, ct);
                 return;
@@ -409,6 +439,25 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["branch"] = git is null ? null : SystemPrompt.GitBranch(git),
             ["model"] = _rt.Model.Name,
             ["context"] = _rt.Model.Context,
+            // How full the window is (about), and when the session compacts itself: the status bar and the settings show them.
+            ["contextUsed"] = Current() is null ? _lastUsed = _rt.Agent.Estimate() : _lastUsed,
+            ["compactAt"] = _rt.Compaction.At,
+            ["compactTarget"] = _rt.Compaction.Target,
+            ["servers"] = new JsonArray([.. _rt.Links.Select(l => (JsonNode)new JsonObject
+            {
+                ["name"] = l.Name,
+                ["title"] = l.Title,
+                ["url"] = l.Url,
+                ["state"] = l.State.ToString().ToLowerInvariant(),
+                ["tools"] = _rt.Tools.All.Count(t => t.Server == l.Name),
+                ["status"] = _rt.Describe(l),
+                ["error"] = l.State == LinkState.Connected ? null : l.Error,
+                ["nextTry"] = l.NextTry is { } next ? new DateTimeOffset(next, TimeSpan.Zero).ToString("o") : null,
+            })]),
+            ["jobs"] = new JsonArray([.. _rt.Jobs.All.Select(j => (JsonNode)new JsonObject
+            {
+                ["id"] = j.Id, ["command"] = j.Command, ["running"] = j.Running, ["status"] = j.Status(),
+            })]),
             ["thinking"] = _rt.Model.Thinking,
             ["mode"] = _rt.Permissions.Mode.Name(),
             ["modes"] = new JsonArray([.. Modes.Names.Select(n => (JsonNode)new JsonObject { ["name"] = n, ["description"] = Modes.Parse(n)!.Value.Describe() })]),
@@ -419,7 +468,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             {
                 ["local"] = _rt.Tools.All.Count(t => t.Server is null),
                 ["servers"] = new JsonArray([.. _rt.Tools.All.Where(t => t.Server is not null).GroupBy(t => t.Server!)
-                    .Select(g => (JsonNode)new JsonObject { ["name"] = g.Key == "arena" ? "Arena" : g.Key, ["count"] = g.Count() })]),
+                    .Select(g => (JsonNode)new JsonObject { ["name"] = _rt.Links.FirstOrDefault(l => l.Name == g.Key)?.Title ?? g.Key, ["count"] = g.Count() })]),
             },
         };
     }
@@ -713,6 +762,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", $"Thinking is one of: default, {string.Join(", ", ModelState.Levels)}.", ct);
             return;
         }
+        // When the session compacts itself: kept in config.json, as /compact-at keeps it.
+        if ((body.ContainsKey("compactAt") || body.ContainsKey("compactTarget"))
+            && _rt.SetCompaction(body.Int("compactAt"), body.Int("compactTarget")) is { } wrong)
+        {
+            await res.ErrorAsync(400, "invalid", wrong, ct);
+            return;
+        }
         if (mode is { } newMode)
         {
             _rt.Permissions.Mode = newMode;
@@ -882,6 +938,66 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     void IAgentEvents.Notice(string text) => Emit(new JsonObject { ["type"] = "notice", ["kind"] = "warning", ["text"] = text });
 
+    // ------------------------------------------------- commands with no time limit
+
+    private void JobStarted(CommandJob job) =>
+        Emit(new JsonObject { ["type"] = "job", ["job"] = job.Id, ["command"] = job.Command, ["running"] = true, ["status"] = job.Status() });
+
+    /// <summary>
+    /// A job's output, gathered for a quarter of a second at a time: the page gets a few events a second, not one per
+    /// write, until the command ends. What comes faster than a page keeps (<see cref="Job.KeptOutput"/>) is sent as its end.
+    /// </summary>
+    private void JobOutput(CommandJob job, string text)
+    {
+        lock (_jobOutput)
+        {
+            (StringBuilder Pending, bool Flushing) state = _jobOutput.TryGetValue(job.Id, out var s) ? s : (new StringBuilder(), false);
+            state.Pending.Append(text);
+            if (state.Pending.Length > Job.KeptOutput * 2)
+            {
+                state.Pending.Remove(0, state.Pending.Length - Job.KeptOutput);
+            }
+            if (!state.Flushing)
+            {
+                state.Flushing = true;
+                _ = Task.Delay(250).ContinueWith(_ => FlushJob(job.Id), TaskScheduler.Default);
+            }
+            _jobOutput[job.Id] = state;
+        }
+    }
+
+    private void FlushJob(int id)
+    {
+        string text;
+        lock (_jobOutput)
+        {
+            if (!_jobOutput.TryGetValue(id, out var state))
+            {
+                return;
+            }
+            text = state.Pending.ToString();
+            state.Pending.Clear();
+            _jobOutput[id] = (state.Pending, false);
+        }
+        if (text.Length > 0)
+        {
+            Current()?.EmitOutput(id, text);
+        }
+    }
+
+    private void JobEnded(CommandJob job)
+    {
+        FlushJob(job.Id);
+        lock (_jobOutput)
+        {
+            _jobOutput.Remove(job.Id);
+        }
+        Emit(new JsonObject
+        {
+            ["type"] = "job_end", ["job"] = job.Id, ["running"] = false, ["status"] = job.Status(), ["exitCode"] = job.ExitCode, ["stopped"] = job.StoppedBy is not null,
+        });
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (Current() is { } job)
@@ -893,6 +1009,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         await _server.DisposeAsync();
         _rt.Agent.Events = null;
         _rt.Permissions.Asker = null;
+        _rt.Jobs.Started -= JobStarted;
+        _rt.Jobs.Output -= JobOutput;
+        _rt.Jobs.Ended -= JobEnded;
         if (_rt.Agent.Messages.Count == 0)
         {
             TryDelete(_rt.Session.File);
@@ -905,8 +1024,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// </summary>
     private sealed class Job(string kind)
     {
+        /// <summary>What a page keeps of a command's output, and so what a page that comes back is sent of it: the end.</summary>
+        public const int KeptOutput = 64 * 1024;
+
         private readonly object _gate = new();
-        private readonly List<string> _events = [];
+        // Each event as sent, or a command's output kept as one event (its end), in the place of its first piece.
+        private readonly List<object> _events = [];
+        private readonly Dictionary<int, OutputTail> _outputs = [];
         private readonly List<Channel<string>> _watchers = [];
         private bool _done;
 
@@ -924,6 +1048,32 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                     return;
                 }
                 _events.Add(line);
+                foreach (var w in _watchers)
+                {
+                    w.Writer.TryWrite(line);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A piece of a command's output: sent as it comes, however long the command runs; kept for a page that
+        /// comes back as the end of it only, so a command that writes for hours does not fill the memory.
+        /// </summary>
+        public void EmitOutput(int job, string text)
+        {
+            var line = Json.Line(new JsonObject { ["type"] = "job_output", ["job"] = job, ["text"] = text });
+            lock (_gate)
+            {
+                if (_done)
+                {
+                    return;
+                }
+                if (!_outputs.TryGetValue(job, out var tail))
+                {
+                    _outputs[job] = tail = new OutputTail(job);
+                    _events.Add(tail);
+                }
+                tail.Add(text);
                 foreach (var w in _watchers)
                 {
                     w.Writer.TryWrite(line);
@@ -951,7 +1101,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             {
                 foreach (var e in _events)
                 {
-                    channel.Writer.TryWrite(e);
+                    channel.Writer.TryWrite(e is OutputTail tail ? tail.Event() : (string)e);
                 }
                 if (_done)
                 {
@@ -963,6 +1113,34 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 }
             }
             return channel.Reader;
+        }
+
+        /// <summary>The end of a command's output so far, at most <see cref="KeptOutput"/>, with a line where the start was cut.</summary>
+        private sealed class OutputTail(int job)
+        {
+            private readonly StringBuilder _text = new();
+            private bool _cut;
+
+            public void Add(string text)
+            {
+                _text.Append(text);
+                if (_text.Length > KeptOutput * 2)
+                {
+                    _text.Remove(0, _text.Length - KeptOutput);
+                    _cut = true;
+                }
+            }
+
+            public string Event()
+            {
+                var text = _text.Length > KeptOutput ? _text.ToString(_text.Length - KeptOutput, KeptOutput) : _text.ToString();
+                return Json.Line(new JsonObject
+                {
+                    ["type"] = "job_output",
+                    ["job"] = job,
+                    ["text"] = _cut || _text.Length > KeptOutput ? "… (the start is not shown here: the agent reads the output with command_output)\n" + text : text,
+                });
+            }
         }
     }
 }

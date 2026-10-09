@@ -146,6 +146,8 @@ public static class SettingsCatalog
             { Max = 1000 },
         new("Mcp:Enabled", ArenaMcp, "Arena MCP", "Outside agents (Code Arena, Claude Code, Qwen Code, Continue) get each person's chat tools at https://DOMAIN/mcp, signed in with that person's API key: the tools they may use in the chat, run as them, each call audited (mcp.call).", SettingType.Boolean, SettingScope.Live)
             { Default = "true" },
+        new("Mcp:ListWaitSeconds", ArenaMcp, "Wait for a slow tool server", "Connecting an agent starts Argus and the MCP servers here together and waits this long at most: one slower is listed as not available now, with the reason, and asked again on the next list, so a slow or dead server never holds an agent.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "10", Min = 1, Max = 120, Unit = "seconds", Optional = false },
         new("Web:SearchUrl", Tools, "Search engine", "A SearXNG instance for the Web tool's search. Empty: the websearch profile's own when it is on; otherwise no search, only opening pages.", SettingType.Url, SettingScope.Live),
         new("Sandbox:TimeoutSeconds", Tools, "Longest Python run", "A run still going after this long is stopped, and the model told so.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "60", Min = 5, Max = 300, Unit = "seconds", Optional = false },

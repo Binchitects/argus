@@ -55,12 +55,12 @@ export const parts: Record<Part, PartHelp> = {
   },
   chat: {
     name: 'Chat with the agent',
-    text: 'Ask for an answer or a change. The model and its thinking are at the top; each tool the agent uses is a card, with the diff under each edit. **Stop** ends a turn. The mode under the box says what runs without asking: **Ask**, **Auto-edit**, **Plan** or **Yolo**.',
+    text: 'Ask for an answer or a change. The model and its thinking are at the top; each tool the agent uses is a card, with the diff under each edit. A command it runs with no time limit shows above the box with its output and **Stop**; the turn waits for it. **Stop** under the box ends a turn. The mode under the box says what runs without asking: **Ask**, **Auto-edit**, **Plan** or **Yolo**.',
     manual: 'modes',
   },
   status: {
     name: 'Status bar',
-    text: 'Along the bottom: the git branch, the agent\'s changes and the terminal on the left; the cursor\'s line and column, the file\'s language, the mode, the model and the version (About: the licence and the source) on the right.',
+    text: 'Along the bottom: the git branch, the agent\'s changes, the terminal and the commands running with no time limit on the left; the cursor\'s line and column, the file\'s language, the MCP servers (**Try again** for one not connected), how full the model\'s window is (**Context** sets when the session compacts), the mode, the model and the version (About: the licence and the source) on the right.',
     manual: 'the-ide',
   },
 }
@@ -70,7 +70,7 @@ export const tasks: HelpTask[] = [
     title: 'Ask the agent for a change',
     steps: [
       'Type what you want in the chat\'s box, on the right, and press Enter.',
-      'When it asks before an edit or a command, read it, then press **Allow**, **Always for this session** or **Deny**.',
+      'When it asks before an edit or a command, read it, then press **Allow**, **Always for this session** or **Deny** (stopping a command it runs with no time limit asks every time: there is no **Always**).',
       'What it changed shows under **Agent changes** and in the open tabs.',
     ],
   },
@@ -85,6 +85,18 @@ export const tasks: HelpTask[] = [
     steps: ['Open the mode under the chat\'s box.', '**Ask** asks before edits and commands, **Auto-edit** only before commands, **Plan** changes nothing, **Yolo** asks nothing: use it only in a folder you can throw away.'],
   },
   { title: 'Go back to an earlier session', steps: ['Press **Chat** in the activity bar.', 'Click the session; **New session** starts another.'] },
+  {
+    title: 'Change when the conversation is compacted',
+    steps: ['Click how full the window is, in the status bar (tokens used / the model\'s; the gauge on a phone).', 'Set **Compact at** and what the recent part keeps, in percent of the window.', 'Press **Save**: the next sessions use it too.'],
+  },
+  {
+    title: 'Stop a long command the agent runs',
+    steps: ['While it runs, its output shows above the chat\'s box.', 'Press **Stop** beside it: the agent is told it ended.'],
+  },
+  {
+    title: "Use Arena's and Argus's tools",
+    steps: ['They connect by themselves once you are signed in: the plug in the status bar counts those connected.', 'Click it to see why one is not, and press **Try again**.'],
+  },
 ]
 
 export const keys: [keys: string, what: string][] = [

@@ -106,16 +106,45 @@ internal static class LocalTools
         {
             Name = "run_shell",
             Kind = ToolKind.Shell,
-            Description = $"Run a shell command in the working directory ({ShellName(shell)}) and get its output (stdout and stderr together) and exit code. Each call starts fresh: cd does not carry over. Default timeout 120 s, at most 600. Not for reading or searching files: use read_file, grep and glob.",
+            Description = $"Run a shell command in the working directory ({ShellName(shell)}) and get its output (stdout and stderr together) and exit code. Each call starts fresh: cd does not carry over. Default timeout 120 s, at most 600. " +
+                          "A command that may take longer (a full build, a long test suite, an install, a migration) runs with no_time_limit: in the background, its output shown to the person, until it ends however long that takes; you are told when it ends, with its exit code and the end of its output. " +
+                          "Use no_time_limit only for what has to finish; never for a server or a watcher that does not end by itself. Not for reading or searching files: use read_file, grep and glob.",
             Parameters = Schema("""
                 {"type":"object","properties":{
                   "command":{"type":"string"},
-                  "timeout_seconds":{"type":"integer","description":"Stop it after this long (default 120, at most 600)."},
+                  "timeout_seconds":{"type":"integer","description":"Stop it after this long (default 120, at most 600). Not with no_time_limit."},
+                  "no_time_limit":{"type":"boolean","description":"Run it in the background with no time limit, watched until it ends. The person approves this first (except in yolo mode), and only they can stop it. You get a job number at once: go on with other work, or call command_output with wait to wait for it."},
                   "description":{"type":"string","description":"What it does, in a few words, for the person."}},
                  "required":["command"]}
                 """),
-            Summary = a => a.Str("command") ?? "",
+            Summary = a => (a.Bool("no_time_limit") == true ? "(no time limit) " : "") + (a.Str("command") ?? ""),
             Run = RunShell,
+        },
+        new()
+        {
+            Name = "command_output",
+            Kind = ToolKind.Read,
+            Description = "The state and the latest output of a command started with no_time_limit (by its job number). wait: true waits until it ends, however long; the person can stop the wait.",
+            Parameters = Schema("""
+                {"type":"object","properties":{
+                  "job":{"type":"integer","description":"The job number run_shell gave."},
+                  "wait":{"type":"boolean","description":"Wait until it ends (default: answer now)."}},
+                 "required":["job"]}
+                """),
+            Summary = a => $"job {a.Int("job")}" + (a.Bool("wait") == true ? " (waiting for it to end)" : ""),
+            Run = CommandOutput,
+        },
+        new()
+        {
+            Name = "stop_command",
+            Kind = ToolKind.Shell,
+            AlwaysAsks = true,
+            Description = "Stop a command started with no_time_limit, and what it started. Only when the person asked you to stop it: such a command runs until it ends, and the person is asked before it is stopped.",
+            Parameters = Schema("""
+                {"type":"object","properties":{"job":{"type":"integer","description":"The job number run_shell gave."}},"required":["job"]}
+                """),
+            Summary = a => $"job {a.Int("job")}",
+            Run = StopCommand,
         },
         new()
         {
@@ -496,10 +525,9 @@ internal static class LocalTools
         return File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
     }
 
-    private static async Task<ToolResult> RunShell(JsonObject a, ToolContext c, CancellationToken ct)
+    /// <summary>The shell running one command in the working directory.</summary>
+    private static ProcessStartInfo ShellCommand(string command, ToolContext c)
     {
-        var command = Required(a, "command");
-        var timeout = TimeSpan.FromSeconds(Math.Clamp(a.Int("timeout_seconds") ?? 120, 1, 600));
         var shell = ShellName(c.Shell);
         var psi = new ProcessStartInfo(shell) { WorkingDirectory = c.Workspace.Root };
         var name = Path.GetFileNameWithoutExtension(shell).ToLowerInvariant();
@@ -517,11 +545,62 @@ internal static class LocalTools
             }
             psi.ArgumentList.Add(command);
         }
-        var run = await Proc.RunAsync(psi, timeout, ct);
+        return psi;
+    }
+
+    private static async Task<ToolResult> RunShell(JsonObject a, ToolContext c, CancellationToken ct)
+    {
+        var command = Required(a, "command");
+        if (a.Bool("no_time_limit") == true)
+        {
+            if (c.Jobs is not { } jobs)
+            {
+                throw new ToolError("Commands with no time limit run only in the main conversation.");
+            }
+            var job = jobs.Start(command, ShellCommand(command, c));
+            return new ToolResult($"Started as job {job.Id}, with no time limit: it runs in the background and the person sees its output as it comes. " +
+                                  "You are told when it ends, with its exit code and the end of its output; the turn does not end before. " +
+                                  $"Meanwhile go on with other work, or call command_output with job {job.Id} (wait: true to wait for it).")
+            {
+                Display = c.Ui.Dim($"job {job.Id} started, no time limit · Ctrl+C stops it"),
+            };
+        }
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(a.Int("timeout_seconds") ?? 120, 1, 600));
+        var run = await Proc.RunAsync(ShellCommand(command, c), timeout, ct);
         var status = run.TimedOut ? $"timed out after {timeout.TotalSeconds:0} s (stopped)" : $"exit code {run.ExitCode}";
         var text = (run.Output.Length > 0 ? run.Output.TrimEnd() + "\n" : "(no output)\n") + $"[{status}]";
         var display = (run.Output.Length > 0 ? Fmt.Tail(run.Output.TrimEnd(), 8) + "\n" : "") + (run.ExitCode == 0 && !run.TimedOut ? c.Ui.Dim(status) : c.Ui.Red(status));
         return new ToolResult(text, run.ExitCode != 0 || run.TimedOut) { Display = display };
+    }
+
+    private static CommandJob Job(JsonObject a, ToolContext c) =>
+        c.Jobs?.Find(a.Int("job") ?? 0) ?? throw new ToolError($"There is no job {a.Int("job")}: the jobs are {(c.Jobs?.All.Count > 0 ? string.Join(", ", c.Jobs.All.Select(j => j.Id)) : "none")}.");
+
+    private static async Task<ToolResult> CommandOutput(JsonObject a, ToolContext c, CancellationToken ct)
+    {
+        var job = Job(a, c);
+        if (a.Bool("wait") == true && job.Running)
+        {
+            // No time limit: the person's Ctrl+C or Stop ends the wait (and the turn).
+            await job.Done.WaitAsync(ct);
+        }
+        if (!job.Running)
+        {
+            job.Reported = true;
+        }
+        var text = $"Job {job.Id} (`{Fmt.OneLine(job.Command, 200)}`): {job.Status()}.\n" + (job.Length > 0 ? job.Tail(20_000) : "No output yet.");
+        return new ToolResult(text, !job.Running && (job.ExitCode != 0 || job.StoppedBy is not null)) { Display = c.Ui.Dim($"job {job.Id}: {job.Status()}") };
+    }
+
+    private static Task<ToolResult> StopCommand(JsonObject a, ToolContext c, CancellationToken ct)
+    {
+        var job = Job(a, c);
+        if (!job.Running)
+        {
+            return Task.FromResult(new ToolResult($"Job {job.Id} has already ended: {job.Status()}."));
+        }
+        job.Stop("by the person, through stop_command");
+        return Task.FromResult(new ToolResult($"Job {job.Id} is being stopped; you are told when it has ended.") { Display = c.Ui.Dim($"job {job.Id} stopping") });
     }
 
     private static readonly HashSet<string> GitReading = ["status", "diff", "log", "show", "blame", "branch", "ls-files", "rev-parse", "shortlog", "describe"];
@@ -699,6 +778,17 @@ internal static class Proc
 {
     public sealed record Result(int ExitCode, string Output, bool TimedOut);
 
+    /// <summary>The environment every command the agent runs gets: no pagers or prompts, and never the person's key.</summary>
+    public static void Prepare(ProcessStartInfo psi)
+    {
+        psi.Environment["GIT_PAGER"] = "cat";
+        psi.Environment["PAGER"] = "cat";
+        psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        psi.Environment["CODE_ARENA"] = "1";
+        // The person's key stays with Code Arena, not with the commands the model runs.
+        psi.Environment.Remove("ARENA_API_KEY");
+    }
+
     public static async Task<Result> RunAsync(ProcessStartInfo psi, TimeSpan timeout, CancellationToken ct, int maxChars = 30_000)
     {
         psi.RedirectStandardOutput = true;
@@ -707,12 +797,7 @@ internal static class Proc
         psi.UseShellExecute = false;
         psi.StandardOutputEncoding = Encoding.UTF8;
         psi.StandardErrorEncoding = Encoding.UTF8;
-        psi.Environment["GIT_PAGER"] = "cat";
-        psi.Environment["PAGER"] = "cat";
-        psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        psi.Environment["CODE_ARENA"] = "1";
-        // The person's key stays with Code Arena, not with the commands the model runs.
-        psi.Environment.Remove("ARENA_API_KEY");
+        Prepare(psi);
         using var process = Process.Start(psi) ?? throw new ToolError($"Could not start {psi.FileName}.");
         process.StandardInput.Close();
         var output = new Bounded(maxChars);

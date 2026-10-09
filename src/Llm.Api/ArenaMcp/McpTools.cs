@@ -33,7 +33,7 @@ public sealed record McpCatalog(JsonArray Tools, string Instructions, IReadOnlyD
 /// </summary>
 public sealed partial class McpTools(
     ToolRegistry registry, AccessService access, Audit audit, AppDbContext db, IMemoryCache cache, McpResearch research,
-    IOptions<AuthOptions> auth, IOptionsMonitor<BrandingOptions> branding, Gateway.RateLimits rateLimits, TimeProvider clock, ILogger<McpTools> logger)
+    IOptions<AuthOptions> auth, IOptionsMonitor<BrandingOptions> branding, Gateway.RateLimits rateLimits, TimeProvider clock, IOptionsMonitor<McpOptions> options, ILogger<McpTools> logger)
 {
     /// <summary>Tools that only make sense inside a chat: its files, questions to the person, sub-agents.</summary>
     public static readonly string[] ChatOnly = ["files", "ask", "agents"];
@@ -51,7 +51,27 @@ public sealed partial class McpTools(
     public async Task<IReadOnlyList<ToolChoice>> ServedAsync(AppUser user, CancellationToken ct) =>
         [.. (await registry.ForAsync(await access.MembershipAsync(user, ct), ct)).Where(t => !ChatOnly.Contains(t.Tool.Id))];
 
-    /// <summary>Every served tool started, its functions listed; kept a minute unless <paramref name="fresh"/>.</summary>
+    /// <summary>
+    /// A tool whose start is only a network round trip, which may be slow or down (Argus, an admin's
+    /// MCP server without a per-person sign-in): started beside the others, not after them. The rest
+    /// start one after another, as they share the request's database context.
+    /// </summary>
+    private static bool Remote(IChatTool tool) => tool is ArgusTool or McpServerTool { Server.PersonAuth: null };
+
+    /// <summary>
+    /// A plugin with a sign-in of each person's own: reading it uses the request's database context
+    /// (and may renew it with the plugin's provider), so it is read with the others' one after
+    /// another; an MCP server's connection then runs beside the remote ones.
+    /// </summary>
+    private static bool SignsIn(IChatTool tool) => tool is IServerTool { Server.PersonAuth: not null };
+
+    /// <summary>
+    /// Every served tool started, its functions listed; kept a minute unless <paramref name="fresh"/>.
+    /// The remote ones and the plugins with a sign-in of the person's start together, first, and are
+    /// waited for <see cref="McpOptions.ListWaitSeconds"/> at most, all together: one slower is listed
+    /// as not available now (and the list kept only briefly), so a slow or dead server never holds an
+    /// agent's connection.
+    /// </summary>
     public async Task<McpCatalog> CatalogAsync(AppUser user, bool fresh, CancellationToken ct)
     {
         if (!fresh && cache.TryGetValue(CatalogKey(user), out McpCatalog? kept) && kept is not null)
@@ -64,22 +84,30 @@ public sealed partial class McpTools(
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
         var notes = new List<string>();
         var unavailable = new List<string>();
+        var wait = TimeSpan.FromSeconds(Math.Max(1, options.CurrentValue.ListWaitSeconds));
+        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        waiting.CancelAfter(wait);
+        var early = served.Where(c => Remote(c.Tool)).ToDictionary(c => c.Tool.Id, c => AttemptAsync(c, t => c.Tool.StartAsync(context, t), wait, waiting.Token, ct));
+        foreach (var choice in served.Where(c => SignsIn(c.Tool)))
+        {
+            if (choice.Tool is McpServerTool server)
+            {
+                var (connect, failure) = await AttemptAsync(choice, t => server.SignInAsync(context, t), wait, waiting.Token, ct);
+                early[choice.Tool.Id] = connect is null ? Task.FromResult<(IToolRun?, string?)>((null, failure)) : AttemptAsync(choice, connect, wait, waiting.Token, ct);
+            }
+            else
+            {
+                early[choice.Tool.Id] = Task.FromResult(await AttemptAsync(choice, t => choice.Tool.StartAsync(context, t), wait, waiting.Token, ct));
+            }
+        }
+        var slow = false;
         foreach (var choice in served)
         {
-            IToolRun run;
-            try
+            var (run, failure) = early.TryGetValue(choice.Tool.Id, out var started) ? await started : await AttemptAsync(choice, t => choice.Tool.StartAsync(context, t), wait, ct, ct);
+            if (run is null)
             {
-                run = await choice.Tool.StartAsync(context, ct);
-            }
-            catch (McpException ex)
-            {
-                unavailable.Add($"{choice.Tool.Title} ({ex.Message})");
-                continue;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                LogStartFailed(logger, choice.Tool.Id, ex);
-                unavailable.Add($"{choice.Tool.Title} (it failed to start)");
+                unavailable.Add($"{choice.Tool.Title} ({failure})");
+                slow |= failure == Slow(wait);
                 continue;
             }
             foreach (var f in run.Functions.OfType<JsonObject>())
@@ -96,8 +124,34 @@ public sealed partial class McpTools(
             }
         }
         var catalog = new McpCatalog(tools, Instructions(user, notes, unavailable), owners);
-        cache.Set(CatalogKey(user), catalog, Fresh);
+        // Without a slow one's tools, kept briefly: the next list asks it again.
+        cache.Set(CatalogKey(user), catalog, slow ? TimeSpan.FromSeconds(10) : Fresh);
         return catalog;
+    }
+
+    private static string Slow(TimeSpan wait) => $"it did not answer within {Mcp.Describe(wait)}";
+
+    /// <summary>A tool started (or its start begun: a sign-in read), or why not. <paramref name="limit"/> is the wait for it; <paramref name="ct"/> the request's.</summary>
+    private async Task<(T? Value, string? Failure)> AttemptAsync<T>(ToolChoice choice, Func<CancellationToken, Task<T>> start, TimeSpan wait, CancellationToken limit, CancellationToken ct)
+        where T : class
+    {
+        try
+        {
+            return (await start(limit), null);
+        }
+        catch (McpException ex)
+        {
+            return (null, ex.Message);
+        }
+        catch (OperationCanceledException) when (limit.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            return (null, Slow(wait));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogStartFailed(logger, choice.Tool.Id, ex);
+            return (null, "it failed to start");
+        }
     }
 
     /// <summary>

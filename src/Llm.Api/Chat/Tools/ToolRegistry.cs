@@ -105,9 +105,23 @@ public sealed partial class McpServerTool(McpServer server, HttpClient http, str
     /// <summary>Longest one call may take: the server's own limit, or the chat's.</summary>
     public TimeSpan CallTimeout => server.CallTimeoutMinutes is { } m ? TimeSpan.FromMinutes(m) : callTimeout;
 
-    public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
+    public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) =>
+        await StartAsync(context, await PersonHeadersAsync(server, dataKey, People, context, ct), ct);
+
+    /// <summary>
+    /// The person's sign-in read (from the database, renewed when it lapsed), and the rest of the
+    /// start, the connection, as a start of its own that needs no database: Arena MCP reads the
+    /// sign-ins one after another, then connects to the servers together.
+    /// </summary>
+    public async Task<Func<CancellationToken, Task<IToolRun>>> SignInAsync(ToolContext context, CancellationToken ct)
     {
-        var session = await ConnectAsync(await PersonHeadersAsync(server, dataKey, People, context, ct), CallTimeout, ct);
+        var headers = await PersonHeadersAsync(server, dataKey, People, context, ct);
+        return token => StartAsync(context, headers, token);
+    }
+
+    private async Task<IToolRun> StartAsync(ToolContext context, IReadOnlyDictionary<string, string> headers, CancellationToken ct)
+    {
+        var session = await ConnectAsync(headers, CallTimeout, ct);
         var prefix = Slug + "__";
         var functions = Mcp.ToOpenAiTools(await session.ToolsAsync(ct), name => prefix + name);
         return new LocalRun(functions, session.Instructions, async (function, args, token) =>

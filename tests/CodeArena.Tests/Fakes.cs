@@ -119,6 +119,8 @@ public sealed class FakeGateway : FakeServer
     public string[] Models { get; set; } = ["model-a", "model-b"];
     public int Context { get; set; } = 32768;
     public Func<JsonObject, Reply> Answer { get; set; } = _ => Reply.Say("Hello from the model.");
+    /// <summary>An HTTP status a chat request is answered with instead of an answer (a backend restarting: 500); 0 answers it.</summary>
+    public Func<JsonObject, int> Failure { get; set; } = _ => 0;
     /// <summary>Holds each answer until the request is cancelled (to test Ctrl+C).</summary>
     public bool Hang { get; set; }
     public TaskCompletionSource FirstRequest { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -172,6 +174,11 @@ public sealed class FakeGateway : FakeServer
             _requests.Add(request);
         }
         FirstRequest.TrySetResult();
+        if (Failure(request) is > 0 and var status)
+        {
+            await WriteJson(ctx, new JsonObject { ["error"] = new JsonObject { ["message"] = "The model's backend is restarting." } }, status);
+            return;
+        }
         if (Hang)
         {
             ctx.Response.ContentType = "text/event-stream";
@@ -252,7 +259,16 @@ public sealed class FakeMcp : FakeServer
     public string? DefaultModel { get; set; }
     /// <summary>No endpoint: 404 for everything.</summary>
     public bool Missing { get; set; }
+    /// <summary>Not 0: every request answered with this status (503: the server is down behind its proxy).</summary>
+    public int Status { get; set; }
+    /// <summary>While set, initialize waits for it: a server slow to answer, or one that never does.</summary>
+    public TaskCompletionSource? Hold { get; set; }
+    /// <summary>The tools it lists instead of Arena's three (web_search, read_file, create_issue): Argus's, say.</summary>
+    public JsonArray? ToolList { get; set; }
     public string Url => BaseUrl + "/mcp";
+    /// <summary>The sessions closed (DELETE), as a client that lets a connection go does.</summary>
+    public int Closed => Volatile.Read(ref _closed);
+    private int _closed;
 
     public List<(string Method, string? Session)> Calls
     {
@@ -272,6 +288,11 @@ public sealed class FakeMcp : FakeServer
             ctx.Response.StatusCode = 404;
             return;
         }
+        if (Status != 0)
+        {
+            ctx.Response.StatusCode = Status;
+            return;
+        }
         if (ctx.Request.Headers["Authorization"] != "Bearer " + FakeGateway.Key)
         {
             ctx.Response.StatusCode = 401;
@@ -279,6 +300,7 @@ public sealed class FakeMcp : FakeServer
         }
         if (ctx.Request.HttpMethod == "DELETE")
         {
+            Interlocked.Increment(ref _closed);
             ctx.Response.StatusCode = 204;
             return;
         }
@@ -293,6 +315,10 @@ public sealed class FakeMcp : FakeServer
             ctx.Response.StatusCode = 202;
             return;
         }
+        if (method == "initialize" && Hold is { } hold)
+        {
+            await hold.Task.WaitAsync(ct);
+        }
         JsonNode result = method switch
         {
             "initialize" => new JsonObject
@@ -303,6 +329,7 @@ public sealed class FakeMcp : FakeServer
                 ["instructions"] = "Arena: search the web with web_search before answering about recent events.",
                 ["_meta"] = DefaultModel is null ? null : new JsonObject { ["arena/defaultModel"] = DefaultModel },
             },
+            "tools/list" when ToolList is not null => new JsonObject { ["tools"] = ToolList.DeepClone() },
             "tools/list" => new JsonObject
             {
                 ["tools"] = new JsonArray(

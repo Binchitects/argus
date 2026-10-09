@@ -18,16 +18,47 @@ using ModelContextProtocol.Server;
 
 namespace Argus.Server;
 
-/// <summary>A principal that carries the resolved Argus identity through the MCP pipeline.</summary>
+/// <summary>
+/// Who is asking, as the gate established it: who they are, and the repositories they may read,
+/// resolved when a tool first needs them. Connecting, listing the tools and the documentation
+/// tools never wait for GitLab.
+/// </summary>
+public sealed class Caller
+{
+    readonly Lazy<Identity> _identity;
+
+    /// <param name="id">The same for every request of the person's: the MCP session's owner.</param>
+    public Caller(string id, string name, string? via, Func<Identity> resolve)
+    {
+        Id = id;
+        Name = name;
+        Via = via;
+        _identity = new(() => resolve() with { Via = via });
+    }
+
+    /// <summary>One whose repositories are known already (a GitLab token, which the gate checks with GitLab).</summary>
+    public Caller(Identity identity) : this(identity.UserId.ToString(System.Globalization.CultureInfo.InvariantCulture), identity.Username, identity.Via, () => identity)
+    {
+    }
+
+    public string Id { get; }
+    public string Name { get; }
+    public string? Via { get; }
+
+    /// <summary>The repositories they may read; <see cref="AclDenied"/> when that cannot be established.</summary>
+    public Identity Identity => _identity.Value;
+}
+
+/// <summary>A principal that carries the caller through the MCP pipeline.</summary>
 public sealed class ArgusPrincipal : ClaimsPrincipal
 {
-    public Identity ArgusIdentity { get; }
+    public Caller Caller { get; }
 
-    public ArgusPrincipal(Identity identity) : base(new ClaimsIdentity(
-        [new Claim(ClaimTypes.NameIdentifier, identity.UserId.ToString()), new Claim(ClaimTypes.Name, identity.Username)],
+    public ArgusPrincipal(Caller caller) : base(new ClaimsIdentity(
+        [new Claim(ClaimTypes.NameIdentifier, caller.Id), new Claim(ClaimTypes.Name, caller.Name)],
         authenticationType: "argus"))
     {
-        ArgusIdentity = identity;
+        Caller = caller;
     }
 }
 
@@ -149,11 +180,8 @@ public static partial class ArgusServer
         var gateway = Gateway.FromEnvironment();
         var directory = new Lazy<MemberDirectory>(() => new MemberDirectory(cfg.GitLab));
         var keys = ArenaKeys.FromEnvironment(ChatTokenEnv);
-        Identity IdentityFor(AppUser user)
-        {
-            using var conn = Db.Connect(cfg.Index.DbPath);
-            return People.ResolvePerson(conn, directory.Value, user.Email, user.GitlabUsername);
-        }
+        var access = PersonAccess.For(cfg.Index.DbPath, directory);
+        Identity IdentityFor(AppUser user) => access.Resolve(user.Email ?? "", user.GitlabUsername);
         var chat = new ChatService(tools, gateway, IdentityFor, appDbPath);
         var builder = WebApplication.CreateSlimBuilder(args ?? []);
         builder.Logging.ClearProviders();
@@ -184,7 +212,7 @@ public static partial class ArgusServer
 
         if (AppEnabled()) PlatformApi.MapWeb(app, WebRoot());
         app.Use(PlatformApi.Errors);
-        app.Use(async (ctx, next) => await Authenticate(ctx, next, cfg, directory, appDbPath, keys));
+        app.Use(async (ctx, next) => await Authenticate(ctx, next, cfg, access, appDbPath, keys));
         app.Use(async (ctx, next) =>
         {
             if (ctx.Request.Path.StartsWithSegments("/mcp") && !TransportSecurity(ctx, hosts, origins, out var status, out var message))
@@ -273,8 +301,23 @@ public static partial class ArgusServer
     static string WebRoot() =>
         Environment.GetEnvironmentVariable("ARGUS_WEB_ROOT") is { Length: > 0 } w ? w : Path.Combine(AppContext.BaseDirectory, "wwwroot");
 
+    /// <summary>
+    /// A person the gate knows (by the chat's credential, an Arena API key or an Argus key): connected
+    /// at once, their repositories resolved from GitLab in the background and waited for by the first
+    /// tool that reads code. Before, every request (initialize too) waited for GitLab: one user lookup
+    /// and one member list per indexed project, one after another, so connecting took minutes on a
+    /// large or slow GitLab and the coding agents gave up on it.
+    /// </summary>
+    static Caller Person(PersonAccess access, string email, string? username, string via)
+    {
+        email = PyStr.Strip(email);
+        if (email.Length == 0) throw new AclDenied("No email is known for this person, so access is denied.");
+        access.Warm(email, username);
+        return new Caller("person:" + email.ToLowerInvariant(), string.IsNullOrWhiteSpace(username) ? email : username, via, () => access.Resolve(email, username));
+    }
+
     /// <param name="keys">In the platform (ARGUS_KEY_CHECK_URL): Arena API keys checked with the app, and no GitLab tokens.</param>
-    static async Task Authenticate(HttpContext ctx, Func<Task> next, ArgusConfig cfg, Lazy<MemberDirectory> directory, string appDbPath, ArenaKeys? keys)
+    static async Task Authenticate(HttpContext ctx, Func<Task> next, ArgusConfig cfg, PersonAccess access, string appDbPath, ArenaKeys? keys)
     {
         var path = ctx.Request.Path.Value ?? "";
         PlatformApi.Identify(ctx, appDbPath);
@@ -311,18 +354,14 @@ public static partial class ArgusServer
             return;
         }
 
-        Identity identity;
+        Caller caller;
         string? via = null;
         try
         {
             if (user is not null && ctx.Items[PlatformApi.ViaItem] as string == "key")
             {
                 via = "argus_key";
-                identity = await Task.Run(() =>
-                {
-                    using var conn = Db.Connect(cfg.Index.DbPath);
-                    return People.ResolvePerson(conn, directory.Value, user.Email, user.GitlabUsername);
-                });
+                caller = Person(access, user.Email ?? "", user.GitlabUsername, via);
             }
             else
             {
@@ -345,12 +384,7 @@ public static partial class ArgusServer
                     if (email.Length == 0)
                         throw new AclDenied("The chat client did not say who is asking, so access is denied.");
                     via = "chat";
-                    identity = await Task.Run(() =>
-                    {
-                        using var conn = Db.Connect(cfg.Index.DbPath);
-                        return People.ResolvePerson(conn, directory.Value, email,
-                            People.UsernameForEmail(Environment.GetEnvironmentVariable(UsersFileEnv), email));
-                    });
+                    caller = Person(access, email, People.UsernameForEmail(Environment.GetEnvironmentVariable(UsersFileEnv), email), via);
                 }
                 else if (keys is not null)
                 {
@@ -358,20 +392,18 @@ public static partial class ArgusServer
                     via = "api_key";
                     if (!token.StartsWith(ArenaKeys.Prefix, StringComparison.Ordinal)) throw new AclDenied(ArenaKeys.ConnectWithKey);
                     var person = await keys.CheckAsync(token, ctx.RequestAborted);
-                    identity = await Task.Run(() =>
-                    {
-                        using var conn = Db.Connect(cfg.Index.DbPath);
-                        return People.ResolvePerson(conn, directory.Value, person.Email, person.Username);
-                    });
+                    caller = Person(access, person.Email, person.Username, via);
                 }
                 else
                 {
+                    // A GitLab token is checked with GitLab here: that is the authentication (cached, by its hash).
                     via = "gitlab_token";
-                    identity = await Task.Run(() =>
+                    var identity = await Task.Run(() =>
                     {
                         using var conn = Db.Connect(cfg.Index.DbPath);
                         return Acl.Resolve(conn, cfg.GitLab, token);
                     });
+                    caller = new Caller(identity with { Via = via });
                 }
             }
         }
@@ -381,11 +413,13 @@ public static partial class ArgusServer
             await Unauthorized(ctx, exc.Message);
             return;
         }
-        identity = identity with { Via = via };
-        ctx.Items["argus.identity"] = identity;
-        ctx.User = new ArgusPrincipal(identity);
+        ctx.Items[CallerItem] = caller;
+        ctx.User = new ArgusPrincipal(caller);
         await next();
     }
+
+    /// <summary>Where the gate leaves the <see cref="Caller"/> for the request.</summary>
+    public const string CallerItem = "argus.caller";
 
     // --- webhook ------------------------------------------------------------------------
 
@@ -728,10 +762,13 @@ public static class McpHandlers
         return ValueTask.FromResult(new ListToolsResult { Tools = list });
     }
 
+    static Caller? CurrentCaller(RequestContext<CallToolRequestParams> request) =>
+        _http?.HttpContext?.Items[ArgusServer.CallerItem] as Caller ?? (request.JsonRpcRequest.Context?.User as ArgusPrincipal)?.Caller;
+
+    /// <summary>The caller's repositories, resolved now if they were not yet (the first tool that reads code waits for GitLab).</summary>
     static Identity CurrentIdentity(RequestContext<CallToolRequestParams> request)
     {
-        if (_http?.HttpContext?.Items["argus.identity"] is Identity fromHttp) return fromHttp;
-        if (request.JsonRpcRequest.Context?.User is ArgusPrincipal p) return p.ArgusIdentity;
+        if (CurrentCaller(request) is { } caller) return caller.Identity;
         if (_http?.HttpContext is null && StdioIdentity is not null) return StdioIdentity;
         throw new ToolError(_http?.HttpContext is null
             ? "No authenticated identity is available; refusing to proceed."
@@ -748,6 +785,12 @@ public static class McpHandlers
             var args = ToolRuntime.Validate(spec, request.Params?.Arguments);
             var result = await Task.Run(() => T.Dispatch(name, args, () => CurrentIdentity(request)), ct);
             return ToolRuntime.Success(spec, result);
+        }
+        catch (AclDenied exc)
+        {
+            // Known at the gate, but their GitLab access could not be established: this call is refused, and said why.
+            AuditLog.Denied("access_unresolved", "/mcp", exc.Message, CurrentCaller(request)?.Via);
+            return ToolRuntime.Failure(name, exc.Message);
         }
         catch (ToolError exc) { return ToolRuntime.Failure(name, exc.Message); }
         catch (QueryError exc) { return ToolRuntime.Failure(name, exc.Message); }

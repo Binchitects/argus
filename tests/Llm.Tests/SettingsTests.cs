@@ -296,6 +296,7 @@ public sealed partial class SettingsTests(AppFixture app)
             // No rate limit for API keys until an admin sets one.
             ["Gateway:RequestsPerMinute"] = new Llm.Api.Gateway.RateLimitOptions().RequestsPerMinute.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["Gateway:TokensPerMinute"] = new Llm.Api.Gateway.RateLimitOptions().TokensPerMinute.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Mcp:ListWaitSeconds"] = new Llm.Api.ArenaMcp.McpOptions().ListWaitSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
         var prices = new Llm.Api.Gateway.PriceOptions();
         foreach (var (key, price) in new Dictionary<string, decimal>

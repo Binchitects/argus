@@ -59,16 +59,42 @@ public sealed class ArenaKeys
         return new ArenaKeys(url, credential);
     }
 
-    /// <summary>The key's person, or <see cref="AclDenied"/> with a reason the agent can act on.</summary>
+    /// <summary>The key's person, or <see cref="AclDenied"/> with a reason the agent can act on. Asked once for every request that brings the key at the same moment.</summary>
     public async Task<Person> CheckAsync(string key, CancellationToken ct = default)
     {
         var hash = Acl.Hash(key);
+        Task<Person?> asking;
         lock (_gate)
         {
             if (_cache.TryGetValue(hash, out var hit) && hit.Until > _now())
                 return hit.Person ?? throw new AclDenied(Refused);
+            if (!_asking.TryGetValue(hash, out asking!))
+            {
+                // Not tied to the first request: one that gives up does not fail the others waiting on the answer.
+                asking = AskAsync(key, hash);
+                _asking[hash] = asking;
+            }
         }
+        return await asking.WaitAsync(ct) ?? throw new AclDenied(Refused);
+    }
 
+    readonly Dictionary<string, Task<Person?>> _asking = new(StringComparer.Ordinal);
+
+    /// <summary>The app's answer for the key (null: refused), remembered; <see cref="AclDenied"/> when the app cannot say.</summary>
+    async Task<Person?> AskAsync(string key, string hash)
+    {
+        try
+        {
+            return await FetchAsync(key, hash);
+        }
+        finally
+        {
+            lock (_gate) _asking.Remove(hash);
+        }
+    }
+
+    async Task<Person?> FetchAsync(string key, string hash)
+    {
         using var request = new HttpRequestMessage(HttpMethod.Post, Url)
         {
             Content = new StringContent(new JsonObject { ["key"] = key }.ToJsonString(), Encoding.UTF8, "application/json"),
@@ -77,8 +103,8 @@ public sealed class ArenaKeys
         Person? person;
         try
         {
-            using var response = await _http.SendAsync(request, ct);
-            var text = await response.Content.ReadAsStringAsync(ct);
+            using var response = await _http.SendAsync(request);
+            var text = await response.Content.ReadAsStringAsync();
             // Refused keys say so ("invalid_key"); anything else (a wrong credential, the gateway down) is the app's trouble, not the key's.
             var status = response.StatusCode == HttpStatusCode.OK ? null : (JsonNode.Parse(text.Length > 0 ? text : "{}") as JsonObject)?["status"]?.ToString();
             if (response.StatusCode == HttpStatusCode.Unauthorized && status == "invalid_key")
@@ -115,6 +141,6 @@ public sealed class ArenaKeys
             }
             _cache[hash] = (now + (person is null ? RefusedSeconds : GoodSeconds), person);
         }
-        return person ?? throw new AclDenied(Refused);
+        return person;
     }
 }

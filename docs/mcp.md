@@ -71,7 +71,7 @@ Other clients (streamable HTTP):
 - **Notes for the agent** come with `initialize`: who the tools run as, each
   tool's own instructions (Argus's among them), and the tools that are not
   available now with the reason (a plugin whose account the person has not
-  connected yet, a server that is down).
+  connected yet, a server that is down or too slow to answer).
 - **Files a tool makes** (a picture, a sound, Python's output) come back as a
   link to `https://DOMAIN/api/chat/attachments/{id}/content`
   (`resource_link`), and pictures and sound up to 4 MB inline as well.
@@ -117,6 +117,16 @@ Other clients (streamable HTTP):
   nothing unasked, and there are no sessions to end. It is stateless: each
   request carries the key, a person's tool list is kept a minute, and the
   `Mcp-Session-Id` it gives is only a label.
+- **Connecting never waits long for a tool server.** `initialize` and
+  `tools/list` start the person's tools; those that are a network round trip
+  (Argus, an admin's MCP server, a plugin) start together, beside the others,
+  and are waited for 10 seconds at most (`Mcp:ListWaitSeconds`), all together.
+  A plugin with a sign-in of each person's own has it read first (and renewed
+  if it lapsed) within the same wait, then connects beside the rest. One slower is listed as not available now, with
+  that reason, and the list is then kept 10 seconds instead of a minute, so
+  the next list asks it again. Before 5.3 they started one after another and
+  each could hold the connection for a minute: a slow Argus made Claude Code
+  (30 s), Qwen Code and Code Arena give up on Arena MCP.
 - `tools/call` answers as server-sent events when the client accepts them: the
   tool's progress as it comes (when the client sent a `progressToken`; Argus
   and MCP servers report it), a comment line every 15 seconds while it runs
@@ -129,7 +139,9 @@ Other clients (streamable HTTP):
 
 **Settings → Arena MCP → Arena MCP** (`Mcp:Enabled`, on by default, applies
 at once). Off, `/mcp` and `/.well-known/mcp` answer 404 and Connect your tools
-leaves it out.
+leaves it out. **Wait for a slow tool server** (`Mcp:ListWaitSeconds`, 10
+seconds, applies at once) is how long connecting waits for Argus, the MCP
+servers and the plugins (above).
 
 Traefik sends `/mcp` on `DOMAIN` to the app, beside `/api`, `/connect` and
 `/.well-known` (`deploy/config/traefik/routes.yml`).
@@ -142,7 +154,9 @@ audited; no key, a wrong key, a blocked key and a disabled person refused, the
 gateway asked once for a while; a group's tool served only to its members, and
 a tool that asks first marked; an Argus call made as the person (their email at
 Argus); an admin's MCP server proxied with its progress; a call cancelled; a
-picture inline and as a link that `resources/read` reads and the person opens.
+picture inline and as a link that `resources/read` reads and the person opens;
+a server that never answers listed as not available within the wait, and
+asked again on the next list, a plugin with a person's own sign-in too.
 `tests/Llm.Tests/DeepResearchTests.cs` runs `deep_research` for an agent: a
 chat of the person's own does it, its steps come as progress and the report as
 the result; not served, saying why (in the agent's notes and on Connect your

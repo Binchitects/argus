@@ -17,6 +17,13 @@ namespace Llm.Api.ArenaMcp;
 public sealed class McpOptions
 {
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// How long connecting (initialize) and listing wait for the tools that are a network round
+    /// trip (Argus, admins' MCP servers): they start together, and one that has not answered by
+    /// then is listed as not available now, so an agent is never held by a slow or dead server.
+    /// </summary>
+    public int ListWaitSeconds { get; set; } = 10;
 }
 
 /// <summary>Calls running now, so a client's notifications/cancelled stops the one it means.</summary>

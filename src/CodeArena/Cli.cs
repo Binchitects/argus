@@ -19,6 +19,9 @@ internal sealed class Options
     public string? Model { get; set; }
     public string? Mode { get; set; }
     public string? Thinking { get; set; }
+    /// <summary>For this run: the share of the window (percent) at which the session compacts, and what it keeps.</summary>
+    public int? CompactAt { get; set; }
+    public int? CompactTarget { get; set; }
     public string? Ca { get; set; }
     public List<string> AddDirs { get; } = [];
     public string? Url { get; set; }
@@ -98,6 +101,8 @@ internal static partial class Cli
           -m, --model NAME           the model (see code-arena models)
               --mode MODE            ask (default), auto-edit, plan or yolo
               --thinking LEVEL       off, low, medium, high, xhigh, or default
+              --compact-at PERCENT   compact the conversation at this share of the model's window (default 80)
+              --compact-to PERCENT   and keep the recent part within this share (default 25)
               --add-dir DIR          let the tools use another folder too (repeatable)
               --ca FILE              trust this CA certificate (PEM) besides the system's
               --url URL              login: the Arena's address, https://DOMAIN
@@ -199,6 +204,12 @@ internal static partial class Cli
                 case "--thinking":
                     o.Thinking = Value() is var t && (t == "default" || ModelState.Levels.Contains(t)) ? (t == "default" ? null : t)
                         : throw new ArgumentException($"--thinking is one of: default, {string.Join(", ", ModelState.Levels)}.");
+                    break;
+                case "--compact-at":
+                    o.CompactAt = Compaction.Percent(Value()) ?? throw new ArgumentException("--compact-at is a share of the model's window: 70, 70% or 0.7.");
+                    break;
+                case "--compact-to":
+                    o.CompactTarget = Compaction.Percent(Value()) ?? throw new ArgumentException("--compact-to is a share of the model's window: 30, 30% or 0.3.");
                     break;
                 case "--ca":
                     o.Ca = Value();
@@ -367,6 +378,24 @@ internal static partial class Cli
                 catch (Exception e) when (e is McpException or OperationCanceledException && !ct.IsCancellationRequested)
                 {
                     ui.Warn($"Arena's tools did not connect: {e.Message}");
+                }
+            }
+            var argus = new Config { Url = url, ArgusUrl = config.ArgusUrl };
+            if (config.ArgusTools && argus.ArgusMcpUrl is { } argusUrl)
+            {
+                try
+                {
+                    await using var client = await McpClient.ConnectAsync("argus", new HttpMcpTransport(http, argusUrl,
+                        new Dictionary<string, string> { ["Authorization"] = "Bearer " + key }), ct);
+                    ui.Line($"{ui.Green("✓")} Argus's tools: {client.Tools.Count} ({string.Join(", ", client.Tools.Take(6).Select(t => t.Str("name")))}{(client.Tools.Count > 6 ? ", …" : "")}).");
+                }
+                catch (McpUnavailableException)
+                {
+                    ui.Info($"Argus's tools are not available on this Arena (no MCP endpoint at {argusUrl}).");
+                }
+                catch (Exception e) when (e is McpException or OperationCanceledException && !ct.IsCancellationRequested)
+                {
+                    ui.Warn($"Argus's tools did not connect: {(e is OperationCanceledException ? $"{argusUrl} did not answer in time." : e.Message)} Sessions try again in the background.");
                 }
             }
         }

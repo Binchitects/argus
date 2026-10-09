@@ -10,6 +10,10 @@ namespace CodeArena;
 internal class McpException(string message, int? code = null) : Exception(message)
 {
     public int? Code { get; } = code;
+    /// <summary>The server could not be reached, or went away mid-answer (not an answer of its own): worth connecting again.</summary>
+    public bool Lost { get; init; }
+    /// <summary>The name in its address does not resolve.</summary>
+    public bool NoSuchHost { get; init; }
 }
 
 /// <summary>There is no MCP endpoint at the address (404, 405, or a web page answered).</summary>
@@ -50,7 +54,10 @@ internal sealed class McpClient : IAsyncDisposable
     public string? ServerName { get; private set; }
     public List<JsonObject> Tools { get; private set; } = [];
 
-    /// <summary>Connects and lists the tools; the handshake has 20 seconds.</summary>
+    /// <summary>How long the handshake (initialize, then the tools listed) may take.</summary>
+    public static readonly TimeSpan Handshake = TimeSpan.FromSeconds(20);
+
+    /// <summary>Connects and lists the tools, within <see cref="Handshake"/>.</summary>
     public static async Task<McpClient> ConnectAsync(string name, IMcpTransport transport, CancellationToken ct)
     {
         var client = new McpClient(name, transport);
@@ -59,7 +66,7 @@ internal sealed class McpClient : IAsyncDisposable
             http.Reinitialize = client.InitializeAsync;
         }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(20));
+        deadline.CancelAfter(Handshake);
         try
         {
             await client.InitializeAsync(deadline.Token);
@@ -177,7 +184,7 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
             catch (Exception e) when (e is IOException or HttpRequestException)
             {
                 // The connection dropped while the answer was read (the server went away, a proxy cut it).
-                throw new McpException($"{url} dropped the connection while answering {method}: {e.Message}");
+                throw new McpException($"{url} dropped the connection while answering {method}: {e.Message}") { Lost = true };
             }
         }
     }
@@ -279,7 +286,7 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
         }
         catch (HttpRequestException e)
         {
-            throw new McpException(Net.Explain(e, url));
+            throw new McpException(Net.Explain(e, url)) { Lost = true, NoSuchHost = Net.NoSuchHost(e) };
         }
     }
 
@@ -293,15 +300,26 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
         }
         if (status is 401 or 403)
         {
-            throw new McpException($"{url} refused the credentials ({status}).", status);
+            // Its reason, when it gives one (Argus: the key is not valid, or GitLab cannot say what the person may read).
+            var why = Reason(await res.Content.ReadAsStringAsync(ct));
+            throw new McpException($"{url} refused the credentials ({status}){(why is null ? "." : $": {why}")}", status);
         }
         if (!res.IsSuccessStatusCode)
         {
             var body = await res.Content.ReadAsStringAsync(ct);
-            var detail = Json.ParseObject(body)?["error"].Str("message") ?? (body.Length > 300 ? body[..300] : body);
-            throw new McpException($"{url} answered {status}: {detail.Trim()}", status);
+            var detail = Reason(body) ?? (body.Length > 300 ? body[..300] : body);
+            // A proxy's 502, 503 or 504: the server behind it is down or does not answer.
+            throw new McpException($"{url} answered {status}: {detail.Trim()}", status) { Lost = status is 502 or 503 or 504 };
         }
     }
+
+    /// <summary>The error's words in a JSON body: {"error": "…"} or {"error": {"message": "…"}}.</summary>
+    private static string? Reason(string body) => Json.ParseObject(body)?["error"] switch
+    {
+        JsonValue v when v.TryGetValue<string>(out var text) => Fmt.OneLine(text, 300),
+        JsonObject o => o.Str("message") is { } message ? Fmt.OneLine(message, 300) : null,
+        _ => null,
+    };
 
     private static bool SameId(JsonNode? node, long id) => node is JsonValue && Json.Number(node) == id;
 
@@ -455,7 +473,7 @@ internal sealed class StdioMcpTransport : IMcpTransport
         }
         catch (IOException)
         {
-            throw new McpException("The server is not running" + StderrTail());
+            throw new McpException("The server is not running" + StderrTail()) { Lost = true };
         }
         finally
         {
@@ -502,7 +520,7 @@ internal sealed class StdioMcpTransport : IMcpTransport
         }
         foreach (var waiting in _pending.Values)
         {
-            waiting.TrySetException(new McpException("The server exited" + StderrTail()));
+            waiting.TrySetException(new McpException("The server exited" + StderrTail()) { Lost = true });
         }
     }
 
