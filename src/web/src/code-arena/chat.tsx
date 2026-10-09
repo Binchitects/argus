@@ -345,6 +345,7 @@ export function Thread({
 
   const empty = turns.length === 0
   const lastTurn = turns.length - 1
+  const jobBoxes = jobs.length > 0 && <Jobs jobs={jobs} onStopped={() => void queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })} />
   const composer = (big: boolean) => (
     <Composer
       streaming={streaming}
@@ -390,6 +391,7 @@ export function Thread({
                 {error}
               </Alert>
             )}
+            {jobBoxes}
             {composer(true)}
             <div className="stagger mt-4 grid gap-2 @3xl:grid-cols-3">
               {suggestions.map((s) => (
@@ -467,7 +469,7 @@ export function Thread({
                 <ArrowDown />
               </Button>
             )}
-            {jobs.length > 0 && <Jobs jobs={jobs} onStopped={() => void queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })} />}
+            {jobBoxes}
             {composer(false)}
           </div>
         </>

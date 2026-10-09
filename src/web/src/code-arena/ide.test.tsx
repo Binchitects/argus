@@ -738,6 +738,24 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Defaults' }))
     expect(within(dialog).getByLabelText('Compact at (% of the window)')).toHaveValue(80)
     expect(within(dialog).getByLabelText('Keep the recent part within (%)')).toHaveValue(25)
+
+    // Closed without saving: what was typed (and a complaint about it) is gone at the next opening, the session's values back.
+    await userEvent.clear(within(dialog).getByLabelText('Compact at (% of the window)'))
+    await userEvent.type(within(dialog).getByLabelText('Compact at (% of the window)'), '30')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('What is kept is from 5% to 20%')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Context' })).not.toBeInTheDocument())
+    await userEvent.click(within(status).getByRole('button', { name: /^Context:/ }))
+    dialog = await screen.findByRole('dialog', { name: 'Context' })
+    expect(within(dialog).getByLabelText('Compact at (% of the window)')).toHaveValue(70)
+    expect(within(dialog).getByLabelText('Keep the recent part within (%)')).toHaveValue(30)
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+
+    // On a phone the numbers give way to the icons (the model and About keep their room); the names say them.
+    expect(within(status).getByText('4.2 K / 32.77 K')).toHaveClass('hidden', 'md:inline')
+    expect(within(status).getByText('2/2')).toHaveClass('hidden', 'md:inline')
   })
 
   it('reloads an open file the agent edits when nothing in it is unsaved, and leaves one with unsaved changes alone', async () => {

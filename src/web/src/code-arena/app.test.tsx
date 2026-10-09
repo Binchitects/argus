@@ -168,6 +168,36 @@ describe('Code Arena in the browser', () => {
     expect(await screen.findByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 
+  it('offers no "Always" for stopping a command: the person is asked each time', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const { calls } = backend({
+      state: { mode: 'yolo' },
+      extra: {
+        'POST /api/messages': () => ({
+          events: [
+            { type: 'question', id: 'm0', parentId: null },
+            { type: 'assistant', id: 'm1', parentId: 'm0', model: 'model-a' },
+            { type: 'tool_call', id: 'c1', name: 'stop_command', arguments: '{"job":1}', tool: 'local' },
+            { type: 'approval', id: 'c1', name: 'stop_command', arguments: '{"job":1}', tool: 'local', title: 'stop_command', always: null },
+          ],
+          until: over,
+        }),
+      },
+    })
+    renderCode()
+    await ask('Stop the build')
+
+    const question = await screen.findByRole('alert')
+    expect(question).toHaveTextContent('Allow Stop command to run with these arguments?')
+    expect(question).not.toHaveTextContent('Always for this session')
+    expect(within(question).queryByRole('button', { name: 'Always for this session' })).not.toBeInTheDocument()
+    await userEvent.click(within(question).getByRole('button', { name: 'Allow' }))
+    expect(calls.find((c) => c.path === '/api/approvals')?.body).toEqual({ id: 'c1', answer: 'allow' })
+    end()
+    expect(await screen.findByRole('button', { name: 'Send' })).toBeInTheDocument()
+  })
+
   it('shows what Laya made of a command it asks about, even in yolo', async () => {
     let end!: () => void
     const over = new Promise<void>((r) => (end = r))
@@ -248,7 +278,7 @@ describe('Code Arena in the browser', () => {
   it('shows a command with no time limit as it runs: the end of its output, and Stop; the status bar counts it', async () => {
     let end!: () => void
     const over = new Promise<void>((r) => (end = r))
-    const { calls } = backend({
+    const { calls, now } = backend({
       state: { jobs: [{ id: 1, command: 'npm test', running: true, status: 'running for 3s' }] },
       extra: {
         'POST /api/messages': () => ({
@@ -270,9 +300,9 @@ describe('Code Arena in the browser', () => {
     await ask('Run the tests')
 
     const jobs = await screen.findByRole('region', { name: 'Commands with no time limit' })
+    await waitFor(() => expect(within(jobs).getByLabelText('Output of job 1')).toHaveTextContent(/PASS cart\.test\.ts\s+RUNS checkout\.test\.ts/))
     expect(within(jobs).getByText('npm test')).toBeInTheDocument()
     expect(within(jobs).getByText('running, no time limit')).toBeInTheDocument()
-    expect(within(jobs).getByLabelText('Output of job 1')).toHaveTextContent(/PASS cart\.test\.ts\s+RUNS checkout\.test\.ts/)
     const status = screen.getByRole('contentinfo', { name: 'Status bar' })
     expect(within(status).getByRole('button', { name: '1 command running with no time limit: show them in the chat' })).toBeInTheDocument()
 
@@ -283,7 +313,28 @@ describe('Code Arena in the browser', () => {
     await waitFor(() => expect(calls.find((c) => c.path === '/api/jobs/stop')?.body).toEqual({ id: 1 }))
     expect(within(jobs).getByRole('button', { name: 'Stop job 1' })).toBeDisabled()
 
+    now.state = { ...now.state, jobs: [{ id: 1, command: 'npm test', running: false, status: 'stopped (by the person, in the IDE) after 4s' }] }
     end()
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Commands with no time limit' })).not.toBeInTheDocument())
+  })
+
+  it('shows a command still running that no turn here watches, from the state, with its Stop', async () => {
+    const { calls, now } = backend({
+      state: { jobs: [{ id: 3, command: 'npm run build', running: true, status: 'running for 2m 10s' }] },
+      extra: {
+        'POST /api/jobs/stop': () => {
+          now.state = { ...now.state, jobs: [{ id: 3, command: 'npm run build', running: false, status: 'stopped (by the person, in the IDE) after 2m 12s' }] }
+          return { status: 204 }
+        },
+      },
+    })
+    renderCode()
+    const jobs = await screen.findByRole('region', { name: 'Commands with no time limit' })
+    expect(within(jobs).getByText('npm run build')).toBeInTheDocument()
+    expect(within(jobs).getByLabelText('Output of job 3')).toHaveTextContent('Its output is not streamed here: the agent reads it with command_output.')
+    await userEvent.click(within(jobs).getByRole('button', { name: 'Stop job 3' }))
+    expect(calls.find((c) => c.path === '/api/jobs/stop')?.body).toEqual({ id: 3 })
+    // The state read again: it has ended, and its box goes.
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Commands with no time limit' })).not.toBeInTheDocument())
   })
 
