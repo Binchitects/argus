@@ -61,15 +61,21 @@ would be with them.
 - **Loaded on request.** While a place is left beside the kept models, any other
   model loads when someone asks for it: a chat, an API key, a coding agent. Its
   first answer waits while it loads. At the limit, the app first unloads an
-  idle model that may make room (the smallest first: it loads again quickest).
-  One kept loaded, the one new chats use (Settings, or the working hours'),
-  and one bigger than the model asked for never makes room, so the big model
-  everyone is on stays. When none is idle, the chat's answer waits up to a
-  minute for one, then says the engine is full; the app never leaves the choice
-  to the engine, which would unload the model used least recently, whichever
-  it is. An API key's request for such a model does go to the engine, which
-  then unloads the one used least recently; when that is a kept one, it comes
-  back. In the chat such a model reads **Loads when asked**.
+  idle model that may make room, whatever its size (the smallest first: it
+  loads again quickest). Three never make room, so the models everyone relies
+  on stay: one kept loaded, the one new chats use (Settings, or the working
+  hours', else the first kept; with none of them, the one new chats have been
+  getting), and the model for small steps. When none that may is idle, the
+  request (an answer, a title, the safeguards' check) waits up to a minute for
+  one, then says the engine is full; when every loaded model is one of the
+  three, it says so at once, and the chat's menu does not offer the others.
+  The app never leaves the choice to the engine, which would unload the model
+  used least recently, whichever it is. An API key's request for such a model
+  does go to the engine, which then unloads the one used least recently: a
+  kept one comes back, and so does the one new chats use, once a model that
+  may make room has been idle for a minute (so an agent pausing between its
+  requests is not pushed out for it). After an admin's **Unload**, it stays
+  unloaded. In the chat such a model reads **Loads when asked**.
   When every place is kept, no other model loads on request, and the chat says
   so. A change of the kept list that flips this restarts llama-server (the kept
   models load again, one after another).
@@ -84,12 +90,18 @@ would be with them.
   placed by hand (layers and experts set on its form) needs all its memory free
   when it loads, so a big model that loads after a small one took its room
   fails. Keep the big model loaded (**Keep loaded**): it loads first when the
-  engine starts, and models asked for take what it left. With **Models loaded
-  at once** at 1, people on two models take turns: every switch unloads the
-  other's model (measured: Qwen3.8-Flash-Next reloads in 15 to 20 seconds from
-  the page cache, and its cached prompts are lost), a person on the small model
-  waits behind everyone on the big one, and a model asked for while the other
-  still loads can be stopped mid-load and read **Could not load**.
+  engine starts, and models asked for take what it left. With two at once and
+  a model for small steps set, it and the big model fill the engine: a third
+  model asked for has no place (raise **Models loaded at once** to 3 for one).
+  With
+  **Models loaded at once** at 1, people on two models take turns: only a kept
+  model stays, and any other loaded one, the one new chats use included, makes
+  room once idle. Every switch unloads the other's model (measured:
+  Qwen3.8-Flash-Next reloads in 15 to 20 seconds from the page cache, and its
+  cached prompts are lost), a person on the small model waits behind everyone
+  on the big one, and a model asked for while the other still loads can be
+  stopped mid-load and read **Could not load**. With a model kept loaded and
+  one at a time, no other model loads at all.
 - **Could not load** is not always a broken file. To make room, the engine
   tells the model to stop; one told so while it still loads goes on loading
   and answering, and the engine kills it 10 seconds later and marks it failed.
@@ -109,10 +121,15 @@ would be with them.
   chat titles, compaction summaries, the safeguards' check, and Auto in the
   chat's model menu. It is only fast when the engine holds it beside the big
   model: set **Models loaded at once** to 2 or more, and **Keep loaded** both.
-  Its card reads **Small steps**. The page, and the setting itself, warn while
-  it is not at the gateway, not kept loaded (each step would wait for it and
-  push another model out), or the engine holds one model at once (the two
-  would take turns, loading again for every step). On the GPU beside the big
+  Once loaded it stays (it never makes room for another). Its card reads
+  **Small steps**. The page, and the setting itself, warn while it is not at
+  the gateway, not kept loaded (until it loads, steps wait for it, and for an
+  idle model to make room when the engine is full), every place is kept for
+  other models (it cannot load, so each step uses the answer's own model), or
+  the engine holds one model at once (the two take turns, loading again for
+  every step). When the safeguards' check cannot have its model (the engine
+  stays full for a minute), the message is refused with a note to try again,
+  never let through unread; it is not a strike. On the GPU beside the big
   model it takes some of the big one's memory (for a mixture of experts, more
   experts in RAM); a model on another GPU server costs this engine nothing.
   Who may use it is set on its card as for any model: Auto is offered only to
@@ -307,7 +324,7 @@ RTX 3090:
 |---|---|
 | RAM for checkpoints | 4 a slot × 112.6 MiB = 450 MiB a slot, 1.8 GiB for 4 slots (32 a slot: 3.6 GiB a slot) |
 | GPU memory for one more slot | about 113 MiB, its recurrent state (worked out from the file; the context's cache is shared by the slots, so it does not grow). Measured: 21.0 GiB in use at 4 slots, the same as at 2 |
-| RAM for the prompt cache | up to 8 GiB (llama.cpp's `cache-ram`), as before |
+| RAM for the prompt cache | up to 8 GiB per loaded model (llama.cpp's `cache-ram`: each model is a llama-server process of its own), so 16 GiB with two loaded, the default now |
 | Price | Cached input tokens are charged at the model's cached price. A model added here registers none, so the gateway charges them nothing (measured: 3,912 cached tokens cost $0), and so does the cost under an answer in the chat. At Flash-Next's 0.20 in and 0.80 out per Mtok, 1,000 turns of 10,000 prompt tokens cost $2.00 of input without the cache; with 77% from the cache (each conversation in its slot), $0.46: $1.54 saved. At a cached price of a tenth (0.02), $0.61: $1.39 saved. Output is the same either way. |
 
 **What it gains**, measured on the same machine (4 chats taking turns, 5 turns

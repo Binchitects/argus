@@ -206,7 +206,7 @@ describe('admin models', () => {
   it('with every place kept, a model that is not kept cannot load', async () => {
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: view({ max: 1, onRequest: false }) }) })
     renderApp('/admin/models')
-    expect(await screen.findByText(/Every place is kept, so no other model loads on request/)).toBeInTheDocument()
+    expect(await screen.findByText(/Every place is kept loaded, or held by the model new chats use or the one for small steps, so no other model loads on request/)).toBeInTheDocument()
     const small = screen.getByRole('heading', { name: /Small-Model/ }).closest('section')!
     expect(within(small).getByRole('button', { name: /Load/ })).toBeDisabled()
     expect(within(small).getByText('Otherwise it loads only when an admin loads it.')).toBeInTheDocument()

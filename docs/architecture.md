@@ -88,9 +88,11 @@ as `id_slot`, which LiteLLM passes on), so the engine reads only the new turn
 (a sub-agent keeps a slot the same way); side requests (titles, the
 safeguards' check, summaries, Auto's choice) go to the last slot first, and to
 another idle one while it is busy. A model that is not loaded while the engine
-is full gets room from an idle model that is not kept loaded, not the one new
-chats use and no bigger (`EngineRoute`); with none idle, the chat says the
-engine is full rather than have it unload the big model.
+is full gets room from an idle model, whatever its size, that is not kept
+loaded, not the one new chats use and not the one for small steps
+(`EngineRoute`); with none idle, the request waits a minute, then says the
+engine is full rather than have it unload the big model. The watcher loads the
+model new chats use again when an API key's request had the engine unload it.
 
 **Sound and video in.** On upload the app has the sandbox's ffmpeg make an MP3
 of a sound, and a video's frames and sound track. A model that hears gets the

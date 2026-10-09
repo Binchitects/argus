@@ -606,11 +606,14 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
     /// </summary>
     public bool OnRequest(string model, IReadOnlySet<string> onEngine) =>
         onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" || engine.MayAsk(model))
-        && Holding().Count < options.Value.ModelsMax;
+        && PlaceLeft;
 
-    /// <summary>The places that never free: the models kept loaded, and the loaded ones that never make room.</summary>
-    private HashSet<string> Holding() =>
-        [.. catalog.Kept().Concat(engine.Held.Where(h => engine.StatusOf(h) is "loaded" or "loading"))];
+    /// <summary>
+    /// Whether the engine has a place for a model not loaded: the places that never free (the models kept loaded,
+    /// and the loaded ones that never make room) are fewer than it holds at once.
+    /// </summary>
+    public bool PlaceLeft =>
+        catalog.Kept().Concat(engine.Held.Where(h => engine.StatusOf(h) is "loaded" or "loading")).Distinct(StringComparer.Ordinal).Count() < options.Value.ModelsMax;
 
     /// <summary>Whether a model can answer: loaded, or loaded on request.</summary>
     public bool Ready(string model, IReadOnlySet<string> onEngine) => Loaded(model, onEngine) || OnRequest(model, onEngine);

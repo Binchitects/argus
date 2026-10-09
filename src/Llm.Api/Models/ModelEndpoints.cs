@@ -52,7 +52,7 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
-        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, CancellationToken ct)
+        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, ModelPolicy policy, CancellationToken ct)
     {
         var e = engine.Value;
         var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
@@ -121,8 +121,8 @@ public static class ModelEndpoints
             {
                 enabled = e.Enabled, error = now.Error, checkedAt = now.At, kept, pinned, max = e.ModelsMax,
                 hours = hoursNow.Window is { } window ? new { window.Id, window.Name, until = hoursNow.Until } : null,
-                // A place left besides the kept models: the others load when asked for (the least recently used unloads first).
-                onRequest = e.Enabled && kept.Count < e.ModelsMax,
+                // A place left besides the kept models and those that never make room: the others load when asked for.
+                onRequest = e.Enabled && policy.PlaceLeft,
                 loaded = now.Models.Where(m => m.Status == "loaded").Select(m => m.Name),
                 loading = now.Models.Where(m => m.Status == "loading").Select(m => m.Name),
                 gpus = hw?.Devices?.Select(g => new { g.Index, g.Name, g.Total }) ?? [],
