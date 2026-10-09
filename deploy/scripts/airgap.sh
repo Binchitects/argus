@@ -158,6 +158,8 @@ if [[ $ACTION == pack ]]; then
       find -L . \( "${prune[@]}" \) -prune -o -type f -print
       [[ -f certs/README.md ]] && echo ./certs/README.md
       [[ -f models/.gitkeep ]] && echo ./models/.gitkeep
+      # The empty backups folder: the app mounts it, so Docker never makes it root's.
+      [[ -f backups/.gitkeep ]] && echo ./backups/.gitkeep
     } | sed 's|^\./||' | awk -F/ '
       $NF == ".env" { next }
       $NF ~ /^\.env\./ && $NF != ".env.example" { next }

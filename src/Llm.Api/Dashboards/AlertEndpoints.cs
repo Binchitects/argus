@@ -34,6 +34,17 @@ public sealed class AlertmanagerClient(HttpClient http, IOptions<DashboardOption
         }).OrderBy(a => a.State == "active" ? 0 : 1).ThenBy(a => SeverityRank(a.Severity)).ThenByDescending(a => a.StartsAt)];
     }
 
+    /// <summary>Alerts the app raises itself (a disk past its share): resent while they last, ended by an end time in the past.</summary>
+    public async Task PushAsync(System.Text.Json.Nodes.JsonArray alerts, CancellationToken ct)
+    {
+        using var res = await http.PostAsync(new Uri(options.Value.AlertmanagerUrl.TrimEnd('/') + "/api/v2/alerts"),
+            new StringContent(alerts.ToJsonString(), System.Text.Encoding.UTF8, "application/json"), ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw new DatasourceException($"Alertmanager answered {(int)res.StatusCode}.");
+        }
+    }
+
     private static List<string> Strings(JsonElement o, string name) =>
         o.TryGetProperty(name, out var a) && a.ValueKind == JsonValueKind.Array ? [.. a.EnumerateArray().Select(x => x.GetString() ?? "")] : [];
 
@@ -57,12 +68,22 @@ public static partial class AlertEndpoints
     }
 
     /// <summary>Each source answers on its own: Alertmanager down still shows the rules, and the other way round.</summary>
-    private static async Task<IResult> NowAsync(AlertmanagerClient alertmanager, PromDatasource prom, CancellationToken ct)
+    private static async Task<IResult> NowAsync(AlertmanagerClient alertmanager, PromDatasource prom, Storage.StorageWatch storage,
+        Microsoft.Extensions.Options.IOptionsMonitor<Storage.StorageOptions> storageOptions, CancellationToken ct)
     {
         var firing = Try(() => alertmanager.AlertsAsync(ct), "Alertmanager");
         var rules = Try(() => prom.RulesAsync(ct), "Prometheus");
         var (active, alertmanagerError) = await firing;
         var (list, prometheusError) = await rules;
+        // The app's own rule beside Prometheus's: a disk past the share Settings → Storage sets.
+        if (list is not null)
+        {
+            var above = storage.Above;
+            list = [.. list, new AlertRule("The app's own", Storage.StorageWatch.AlertName, "warning", above.Count > 0 ? "firing" : "inactive", "ok", null,
+                $"A disk's used share ≥ {storageOptions.CurrentValue.AlertPercent}%, checked by the app every 5 minutes (Settings → Storage)", 0,
+                "A disk is fuller than Settings → Storage allows", "Raised by the app itself and given to Alertmanager; Admin → Storage shows what takes the room.",
+                above.Count, above.Count > 0 ? above.Values.Min() : null)];
+        }
         return Results.Ok(new { firing = active, rules = list, errors = new { alertmanager = alertmanagerError, prometheus = prometheusError } });
     }
 

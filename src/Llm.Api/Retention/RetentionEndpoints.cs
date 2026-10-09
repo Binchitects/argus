@@ -18,9 +18,13 @@ public static class RetentionEndpoints
         admin.MapPut("/legal-hold", HoldAsync);
         admin.MapGet("/export", AdminExportAsync);
         app.MapGet("/api/account/export", OwnExportAsync).RequireAuthorization();
-        // How long the person's chats are kept, for the account page.
-        app.MapGet("/api/account/data", async (ClaimsPrincipal p, UserManager<AppUser> users, Retention retention, CancellationToken ct) =>
-            Results.Ok(new { retentionDays = await retention.DaysForAsync((await users.GetUserAsync(p))!, ct) })).RequireAuthorization();
+        // How long the person's chats are kept, and what their files take of their room, for the account page.
+        app.MapGet("/api/account/data", async (ClaimsPrincipal p, UserManager<AppUser> users, Retention retention, Storage.StorageQuotas quotas, CancellationToken ct) =>
+        {
+            var me = (await users.GetUserAsync(p))!;
+            var (used, limit) = await quotas.OfAsync(me.Id, ct);
+            return Results.Ok(new { retentionDays = await retention.DaysForAsync(me, ct), files = new { bytes = used, limitBytes = limit } });
+        }).RequireAuthorization();
     }
 
     private static async Task<IResult> HoldAsync(Guid id, LegalHoldRequest body, PeopleService people, Retention retention, CancellationToken ct)

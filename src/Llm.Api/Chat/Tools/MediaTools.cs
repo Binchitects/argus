@@ -51,7 +51,7 @@ public static partial class Voices
 /// <summary>Short videos from the stack's video server (Wan2.2 TI2V 5B), kept as the person's files.</summary>
 /// <remarks>The video server is not behind the gateway: each clip is booked in the gateway's request log by the app, at its price per second.</remarks>
 public sealed partial class VideoTool(IHttpClientFactory http, Operations.Modules modules, AppDbContext db, Safeguards.Safeguards safeguards, MediaControl media,
-    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey) : IChatTool
+    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas) : IChatTool
 {
     public const string Client = "videogen";
     private const int Fps = 16;
@@ -83,6 +83,10 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
                 return new ToolResult("Say what the clip shows in 'prompt'.", IsError: true);
             }
             var seconds = Math.Clamp(args["seconds"] is JsonValue v && v.TryGetValue<int>(out var n) ? n : 3, 1, 5);
+            if (await quotas.ToolRefusalAsync(context.User.Id, "video", token) is { } full)
+            {
+                return new ToolResult(full, IsError: true);
+            }
             if (await safeguards.TakeImageAsync(context.User.Id, token) is { } limit)
             {
                 return new ToolResult(limit, IsError: true);

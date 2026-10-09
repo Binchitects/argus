@@ -5,7 +5,7 @@ import { topics, type HelpTopic, type ManualLink, type TopicId } from './topics'
 const order: { title: string; ids: TopicId[] }[] = [
   { title: 'Everywhere', ids: ['app', 'manual'] },
   { title: 'Workspace', ids: ['home', 'chat', 'assistants', 'assistant', 'shared', 'prompts', 'tasks', 'usage', 'leaderboard', 'setup', 'account', 'ask'] },
-  { title: 'Administration', ids: ['overview', 'people', 'person', 'groups', 'group', 'sign-in', 'models', 'tools', 'plugins', 'knowledge', 'settings', 'audit', 'quality'] },
+  { title: 'Administration', ids: ['overview', 'people', 'person', 'groups', 'group', 'sign-in', 'models', 'tools', 'plugins', 'knowledge', 'storage', 'settings', 'audit', 'quality'] },
   { title: 'Argus', ids: ['indexing', 'packs', 'explore'] },
   { title: 'Observe', ids: ['monitoring', 'dashboards', 'dashboard', 'logs', 'alerts', 'traces'] },
   { title: 'Other pages', ids: ['login', 'design'] },

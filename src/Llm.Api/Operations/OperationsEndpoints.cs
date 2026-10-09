@@ -216,7 +216,8 @@ public static class OperationsEndpoints
 
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
         IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
-        Dashboards.PromDatasource prom, TimeProvider clock, Replicas replicas, CancellationToken ct)
+        Dashboards.PromDatasource prom, TimeProvider clock, Replicas replicas, Storage.StorageDisks disks, IOptionsMonitor<Storage.StorageOptions> storage,
+        CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Count(u => !u.IsDisabled);
@@ -237,6 +238,7 @@ public static class OperationsEndpoints
 
         var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value, dashboards.Value);
         var certificate = Certificates.ReadAsync(prom, stack.Value, clock.GetUtcNow(), ct);
+        var space = disks.ListAsync(ct);
         JsonNode? index = null;
         string? indexError = null;
         if (argus.Enabled)
@@ -268,9 +270,22 @@ public static class OperationsEndpoints
             index = new { configured = argus.Enabled, summary = index, error = indexError },
             model = models.DefaultName,
             certificate = await certificate,
+            // The fullest disks, and which are past the share that raises the storage alert (Admin → Storage).
+            storage = await StorageAsync(space, storage.CurrentValue.AlertPercent),
             // The app's replicas on the database, and whether the one answering leads (runs the once-only background work).
             replicas = new { count = replicas.Count, leads = replicas.IsLeader, id = replicas.Id },
         });
+    }
+
+    private static async Task<object> StorageAsync(Task<(IReadOnlyList<Storage.Disk> Disks, string? Problem)> space, int threshold)
+    {
+        var (list, problem) = await space;
+        return new
+        {
+            alertPercent = threshold,
+            problem,
+            disks = list.Take(4).Select(d => new { d.Id, d.Name, d.Size, d.Free, d.Percent, above = d.Percent >= threshold, d.Holds }),
+        };
     }
 
     public static async Task<IReadOnlyList<Probe>> ProbeAllAsync(IHttpClientFactory factory, StackOptions s, ArgusOptions a, Dashboards.DashboardOptions d)

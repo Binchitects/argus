@@ -389,6 +389,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         });
         KnowledgeModel(builder);
         SamlModel(builder);
+        StorageModel(builder);
 
         builder.Entity<AuditEvent>(e =>
         {

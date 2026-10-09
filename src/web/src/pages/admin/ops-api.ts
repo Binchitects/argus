@@ -50,4 +50,6 @@ export interface Overview {
   certificate?: CertificateStatus | null
   /** The app's replicas on the database; leads: the one that answered runs the once-only background work. */
   replicas?: { count: number; leads: boolean; id: string }
+  /** The fullest disks, and which are past the share that raises the storage alert (Admin → Storage). */
+  storage?: { alertPercent: number; problem: string | null; disks: { id: string; name: string; size: number; free: number; percent: number; above: boolean; holds: string[] }[] }
 }

@@ -13,7 +13,8 @@ namespace Llm.Tests;
 /// </summary>
 public sealed class FakeObserve : HttpMessageHandler
 {
-    public sealed record Asked(string Path, NameValueCollection Args);
+    /// <param name="Body">What was posted, as sent (the alerts the app gives Alertmanager).</param>
+    public sealed record Asked(string Path, NameValueCollection Args, string? Body = null, string Method = "GET");
 
     public ConcurrentQueue<Asked> Requests { get; } = new();
 
@@ -46,11 +47,16 @@ public sealed class FakeObserve : HttpMessageHandler
     {
         var path = request.RequestUri!.AbsolutePath;
         var args = HttpUtility.ParseQueryString(request.RequestUri.Query);
+        string? posted = null;
         if (request.Content is not null)
         {
-            args.Add(HttpUtility.ParseQueryString(await request.Content.ReadAsStringAsync(cancellationToken)));
+            posted = await request.Content.ReadAsStringAsync(cancellationToken);
+            if (!posted.StartsWith('[') && !posted.StartsWith('{'))
+            {
+                args.Add(HttpUtility.ParseQueryString(posted));
+            }
         }
-        Requests.Enqueue(new Asked(path, args));
+        Requests.Enqueue(new Asked(path, args, posted, request.Method.Method));
         if (Down.ContainsKey(path))
         {
             throw new HttpRequestException("Connection refused");

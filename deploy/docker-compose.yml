@@ -97,6 +97,8 @@ services:
       - engine:/engine-config
       - directory:/directory
       - sandbox:/sandbox
+      # scripts/backup.sh's backups, for Admin -> Storage (their sizes, and the clean-up of old ones).
+      - ${BACKUP_DIR:-./backups}:/backups
     # The stack's network, and Laya's, which leads nowhere else.
     networks: [default, laya]
     # Not required: with an external Postgres this stack's is left out.

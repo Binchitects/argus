@@ -403,6 +403,24 @@ export const topics = {
     manual: { doc: 'knowledge', section: 'sources' },
   },
 
+  storage: {
+    title: 'Storage',
+    about: 'What takes room and where, how long it stays, and ways to free it: the chat\'s files to browse and delete, clean-ups, and each person\'s room. Nothing of a person on legal hold is ever deleted here.',
+    admin: true,
+    parts: [
+      { name: 'Where the room goes', text: 'The disks (the host\'s, and the folders the app mounts), how full each is and how fast it fills; then what takes room: each database and its largest tables, the chat\'s files, the model library, Argus, backups, logs and metrics, with their growth over 30 days. **How long things stay** lists the rules in force, and **What the app cannot see** what to look at on the host.' },
+      { name: 'Files', text: 'The chat\'s files and what the tools made: whose, which chat, from where, how big and when. Filter by person, kind, where from, whether a chat still has it, size and age. Each downloads (audited); ticked ones are deleted after you confirm.' },
+      { name: 'Clean-ups', text: 'Files in no chat, old pictures, videos and speech, files of deleted chats, leftovers on disk, old backups, and models nothing uses. **Preview** says what would go and the room it frees; **Clean up** asks first, and each run is audited.' },
+      { name: 'People', text: 'Each person\'s files against their room. **Room** gives someone their own (0: no limit), or the company\'s again.' },
+      { name: 'Measure again', text: 'Measures everything now. Folders are measured at most every two minutes, and the trends every six hours.' },
+    ],
+    tasks: [
+      { title: 'Free room on a full disk', steps: ['Look at **Where the room goes**: the disk says what of the stack is on it.', 'Open **Clean-ups** and press **Preview** on the ones that take most there.', 'Press **Clean up**, read what goes, and confirm.'] },
+      { title: 'Limit what each person keeps', steps: ['Open Settings → Storage and set **Room for each person\'s files**.', 'For someone who needs more, open **People** here and press **Room**.'] },
+    ],
+    manual: { doc: 'admin', section: 'storage' },
+  },
+
   'sign-in': {
     title: 'Sign-in',
     about: 'Who can sign in, and how: local accounts, the company directory, and company sign-in. The rules and limits are under Settings.',
@@ -468,6 +486,7 @@ export const topics = {
       safeguards: { name: 'Safeguards', text: 'What keeps the chat from misuse: limits per person, secrets in messages, blocked words, the model\'s check of each message, personal data, and what happens after refusals. A group can set its own under Groups.' },
       'company-knowledge': { name: 'Company knowledge', text: 'How often sources are read again, and how much of long files comes with each question.' },
       'data-retention': { name: 'Data retention', text: 'How long chats are kept before they are deleted with their files. A group can keep its own.' },
+      storage: { name: 'Storage', text: 'When a disk is too full (the alert), how much each person\'s files may take, and what the clean-ups under Admin → Storage take as old media and how many backups they keep.' },
       prices: { name: 'Prices', text: 'What a chat model costs when it has no price of its own under Admin → Models (input, cached input and output, per million tokens), and what pictures, video and speech cost. Every request gets its cost from these. **Recalculate past costs** prices requests recorded at no cost, for the dates you choose, after showing how many and the total.' },
       'api-keys': { name: 'API keys', text: 'The answer cache: repeated API requests answered from it, at no cost, and for how long.' },
       'chat-bots': { name: 'Chat bots', text: 'The Slack, Mattermost and Teams bots and email in: their secrets, channels, model and tools. The addresses to give each platform are below the settings.' },

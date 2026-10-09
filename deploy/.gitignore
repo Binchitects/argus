@@ -7,8 +7,11 @@
 models/*
 !models/.gitkeep
 
-# Volume backups contain .env and database dumps
-backups/
+# Volume backups contain .env and database dumps. The folder itself is kept:
+# the app mounts it (Admin -> Storage), and a folder Docker had to create
+# would be root's, which scripts/backup.sh run as you could not use.
+backups/*
+!backups/.gitkeep
 
 # Agent/session scratch and local tool state - not part of the stack
 .remember/

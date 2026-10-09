@@ -163,6 +163,21 @@ public sealed class LokiDatasource(HttpClient http, IOptions<DashboardOptions> o
         }
     }
 
+    /// <summary>Any other read of the API (the bytes written by stream), as JSON.</summary>
+    public async Task<JsonElement> GetAsync(string pathAndQuery, CancellationToken ct)
+    {
+        using var res = await http.GetAsync(Url(pathAndQuery), ct);
+        return await Json.ReadAsync(res, "Loki", ct);
+    }
+
+    /// <summary>A page Loki answers in plain text (its configuration, as YAML).</summary>
+    public async Task<string> TextAsync(string path, CancellationToken ct)
+    {
+        using var res = await http.GetAsync(Url(path), ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        return res.IsSuccessStatusCode ? text : throw new DatasourceException($"Loki answered {(int)res.StatusCode}.");
+    }
+
     public async Task<IReadOnlyList<string>> LabelValuesAsync(string label, string? stream, DateTimeOffset start, DateTimeOffset end, CancellationToken ct)
     {
         var q = $"/loki/api/v1/label/{Uri.EscapeDataString(label)}/values?start={start.ToUnixTimeMilliseconds()}000000&end={end.ToUnixTimeMilliseconds()}000000" +

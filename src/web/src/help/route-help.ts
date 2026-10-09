@@ -30,6 +30,7 @@ export const routeHelp: Record<string, TopicId> = {
   '/admin/tools': 'tools',
   '/admin/plugins': 'plugins',
   '/admin/knowledge': 'knowledge',
+  '/admin/storage': 'storage',
   '/admin/sign-in': 'sign-in',
   '/admin/models': 'models',
   '/admin/settings': 'settings',
