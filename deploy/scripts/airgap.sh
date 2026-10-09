@@ -183,7 +183,11 @@ if [[ $ACTION == pack ]]; then
 
   # A file the app writes into the engine volume (models.ini: the models it registered;
   # keep: those kept loaded), read through a container that is removed at once.
-  engine_file() { "$ENGINE" run --rm --network none -v "${PROJECT}_engine:/engine:ro" "$HELPER" cat "/engine/$1" 2>/dev/null; }
+  # Only when the volume is there: a run would make it.
+  engine_file() {
+    "$ENGINE" volume inspect "${PROJECT}_engine" >/dev/null 2>&1 || return 1
+    "$ENGINE" run --rm --network none -v "${PROJECT}_engine:/engine:ro" "$HELPER" cat "/engine/$1" 2>/dev/null
+  }
 
   # kind<TAB>path for each file of the library the stack reads, the chat models' from models.ini.
   library_files() {

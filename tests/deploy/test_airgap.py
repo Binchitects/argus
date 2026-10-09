@@ -63,7 +63,7 @@ class AirgapTests(unittest.TestCase):
         engine = s.dir / "engine"
         s.write("models.ini", INI, base=engine)
         s.write("keep", "Big\n", base=engine)
-        s.env = {"FAKE_IMAGES": IMAGES, "FAKE_ENGINE": str(engine), "FAKE_VOLUMES": "arena_audio"}
+        s.env = {"FAKE_IMAGES": IMAGES, "FAKE_ENGINE": str(engine), "FAKE_VOLUMES": "arena_audio\narena_engine"}
         self.out = s.dir / "out" / "arena-airgap.tar"
         self.out.parent.mkdir()
 
