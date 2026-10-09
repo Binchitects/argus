@@ -275,12 +275,8 @@ internal sealed partial class Runtime : IAsyncDisposable
     {
         lock (_serversGate)
         {
-            Tools.Update(all => Place(all, link, client));
-            var notes = Volatile.Read(ref _instructions).Where(i => i.Server != link.Title).ToList();
-            if (client?.Instructions is { Length: > 0 } text)
-            {
-                notes.Add((link.Title, text));
-            }
+            var (remote, notes) = Served();
+            Tools.Update(all => all.Where(t => t.Server is null).Concat(remote));
             Volatile.Write(ref _instructions, notes);
             if (link.Name == ArenaName)
             {
@@ -297,47 +293,49 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
 
     /// <summary>
-    /// The tools with this server's as they are now. Arena's: renamed arena_… where a local tool has
-    /// the name. Argus's: those Arena serves already (its Argus tools) are left to Arena. The person's
-    /// own: mcp__server__tool.
+    /// The servers' tools and instructions, from those connected now. Arena's: renamed arena_… where
+    /// a local tool has the name. Argus's: those Arena serves already (its Argus tools) are left to
+    /// Arena, and Argus's instructions with them; when Arena is not connected, Argus's own are used.
+    /// The person's own: mcp__server__tool.
     /// </summary>
-    private IEnumerable<ToolDef> Place(IReadOnlyList<ToolDef> all, ServerLink link, McpClient? client)
+    private (List<ToolDef> Tools, List<(string Server, string Text)> Notes) Served()
     {
-        var kept = all.Where(t => t.Server != link.Name).ToList();
-        if (client is null)
+        var local = Tools.All.Where(t => t.Server is null).Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+        var tools = new List<ToolDef>();
+        var notes = new List<(string Server, string Text)>();
+        foreach (var link in _links.OrderBy(l => l.Name == ArenaName ? 0 : 1))
         {
-            return kept;
-        }
-        var added = new List<ToolDef>();
-        var server = Config.McpServers.FirstOrDefault(s => s.Name == link.Name);
-        foreach (var t in client.Tools)
-        {
-            var name = t.Str("name")!;
-            ToolDef tool;
-            if (server is not null && link.Name is not (ArenaName or ArgusName))
+            if (link.Client is not { } client)
             {
-                tool = Remote(client, t, OwnToolName(client.Name, name), server.Trust, t["annotations"].Bool("readOnlyHint") == true, link);
+                continue;
             }
-            else
+            var own = link.Name is ArenaName or ArgusName ? null : Config.McpServers.FirstOrDefault(s => s.Name == link.Name);
+            var added = 0;
+            foreach (var t in client.Tools)
             {
-                if (link.Name == ArgusName && kept.Any(x => x.Server == ArenaName && x.RemoteName == name))
+                var name = t.Str("name")!;
+                if (own is not null)
+                {
+                    tools.Add(Remote(client, t, OwnToolName(client.Name, name), own.Trust, t["annotations"].Bool("readOnlyHint") == true, link));
+                }
+                else if (link.Name == ArgusName && tools.Any(x => x.Server == ArenaName && x.RemoteName == name))
                 {
                     continue;
                 }
-                // Arena (and Argus) decide who may call what; a tool marked as changing things still asks here first.
-                var changes = t["annotations"].Bool("destructiveHint") == true && t["annotations"].Bool("readOnlyHint") != true;
-                var local = kept.Any(x => x.Server is null && x.Name == name);
-                tool = Remote(client, t, local ? $"{link.Name}_{name}" : name, trusted: !changes, changesNothing: !changes, link);
+                else
+                {
+                    // Arena (and Argus) decide who may call what; a tool marked as changing things still asks here first.
+                    var changes = t["annotations"].Bool("destructiveHint") == true && t["annotations"].Bool("readOnlyHint") != true;
+                    tools.Add(Remote(client, t, local.Contains(name) ? $"{link.Name}_{name}" : name, trusted: !changes, changesNothing: !changes, link));
+                }
+                added++;
             }
-            added.Add(tool);
+            if (client.Instructions is { Length: > 0 } text && (added > 0 || client.Tools.Count == 0))
+            {
+                notes.Add((link.Title, text));
+            }
         }
-        if (link.Name == ArenaName)
-        {
-            // Arena serves Argus's tools too, once: its own copy is the one kept.
-            var served = added.Select(t => t.RemoteName).ToHashSet(StringComparer.Ordinal);
-            kept.RemoveAll(t => t.Server == ArgusName && served.Contains(t.RemoteName));
-        }
-        return kept.Concat(added);
+        return (tools, notes);
     }
 
     /// <summary>

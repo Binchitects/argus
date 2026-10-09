@@ -466,7 +466,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             {
                 ["local"] = _rt.Tools.All.Count(t => t.Server is null),
                 ["servers"] = new JsonArray([.. _rt.Tools.All.Where(t => t.Server is not null).GroupBy(t => t.Server!)
-                    .Select(g => (JsonNode)new JsonObject { ["name"] = g.Key == "arena" ? "Arena" : g.Key, ["count"] = g.Count() })]),
+                    .Select(g => (JsonNode)new JsonObject { ["name"] = _rt.Links.FirstOrDefault(l => l.Name == g.Key)?.Title ?? g.Key, ["count"] = g.Count() })]),
             },
         };
     }

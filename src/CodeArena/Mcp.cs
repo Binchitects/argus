@@ -295,15 +295,26 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
         }
         if (status is 401 or 403)
         {
-            throw new McpException($"{url} refused the credentials ({status}).", status);
+            // Its reason, when it gives one (Argus: the key is not valid, or GitLab cannot say what the person may read).
+            var why = Reason(await res.Content.ReadAsStringAsync(ct));
+            throw new McpException($"{url} refused the credentials ({status}){(why is null ? "." : $": {why}")}", status);
         }
         if (!res.IsSuccessStatusCode)
         {
             var body = await res.Content.ReadAsStringAsync(ct);
-            var detail = Json.ParseObject(body)?["error"].Str("message") ?? (body.Length > 300 ? body[..300] : body);
-            throw new McpException($"{url} answered {status}: {detail.Trim()}", status);
+            var detail = Reason(body) ?? (body.Length > 300 ? body[..300] : body);
+            // A proxy's 502, 503 or 504: the server behind it is down or does not answer.
+            throw new McpException($"{url} answered {status}: {detail.Trim()}", status) { Lost = status is 502 or 503 or 504 };
         }
     }
+
+    /// <summary>The error's words in a JSON body: {"error": "…"} or {"error": {"message": "…"}}.</summary>
+    private static string? Reason(string body) => Json.ParseObject(body)?["error"] switch
+    {
+        JsonValue v when v.TryGetValue<string>(out var text) => Fmt.OneLine(text, 300),
+        JsonObject o => o.Str("message") is { } message ? Fmt.OneLine(message, 300) : null,
+        _ => null,
+    };
 
     private static bool SameId(JsonNode? node, long id) => node is JsonValue && Json.Number(node) == id;
 
