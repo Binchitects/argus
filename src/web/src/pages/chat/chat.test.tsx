@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Me } from '@/lib/api'
 import type { AnswerTrace } from '@/pages/admin/traces-api'
+import { toast } from '@/components/ui/toaster'
 import { admin, fakeApi, member, renderApp } from '@/test/utils'
 import { blank } from './live'
 import type { ChatConfig, Conversation, Message } from './types'
@@ -34,6 +35,12 @@ const config: ChatConfig = {
   maxUploadBytes: 20 * 1024 * 1024,
   imageTypes: ['image/png'],
 }
+
+/** Deep research, for those an admin gave it to (Admin → Tools). */
+const researchTool = { id: 'research', title: 'Deep research', description: 'A plan, sub-agents that search the web, and a report.', icon: 'telescope', onByDefault: true, askFirst: true }
+
+/** The toasts on screen, in words. */
+const toasts = () => [...document.querySelectorAll('[data-sonner-toast]')].map((t) => t.textContent ?? '')
 
 const conversation = (over: Partial<Conversation> = {}): Conversation => ({
   id: 'c1', title: 'New chat', thinking: null, tools: ['argus', 'calculator'], useArgus: true, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
@@ -795,8 +802,83 @@ describe('chat', () => {
     await waitFor(() => expect(screen.queryByRole('list', { name: 'Queued messages' })).not.toBeInTheDocument())
   })
 
+  it('the deep research switch is there only for people an admin gave deep research to', async () => {
+    backend({})
+    renderApp('/chat')
+    expect(await screen.findByRole('button', { name: /^Tools/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Deep research' })).not.toBeInTheDocument()
+    cleanup()
+    backend({ config: { tools: [...config.tools, researchTool] } })
+    renderApp('/chat')
+    const toggle = await screen.findByRole('button', { name: 'Deep research' })
+    expect(toggle).not.toHaveAttribute('aria-disabled')
+    // It is one of the chat's tools too: on, the model may start one itself.
+    await userEvent.click(screen.getByRole('button', { name: /^Tools/ }))
+    expect(await screen.findByRole('switch', { name: /Deep research/ })).toBeInTheDocument()
+  })
+
+  it('the deep research switch goes when an admin takes it away, and says why to whoever had it', async () => {
+    toast.dismiss()
+    let tools = [...config.tools, researchTool]
+    backend({ extra: { 'GET /api/chat/config': () => ({ json: { ...config, tools } }) } })
+    const { client } = renderApp('/chat')
+    expect(await screen.findByRole('button', { name: 'Deep research' })).toBeInTheDocument()
+    expect(toasts()).toEqual([])
+
+    // Taken away while the page is open: the switch goes, and a note says why.
+    tools = config.tools
+    await client.invalidateQueries({ queryKey: ['chat', 'config'] })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Deep research' })).not.toBeInTheDocument())
+    await waitFor(() => expect(toasts()).toContainEqual(expect.stringMatching(/Deep research is no longer available to you.*An admin decides who may use it/)))
+
+    // Said once: the next visit is quiet.
+    cleanup()
+    // Toasts outlive the page in sonner's store: those said are done with.
+    toast.dismiss()
+    backend({})
+    renderApp('/chat')
+    expect(await screen.findByRole('button', { name: /^Tools/ })).toBeInTheDocument()
+    expect(toasts()).toEqual([])
+  })
+
+  it('someone who had deep research on this browser is told why it is gone the next time they open the chat', async () => {
+    toast.dismiss()
+    // Had it before (remembered for them on this browser), taken away since.
+    localStorage.setItem(`research-had:${member.id}`, '1')
+    backend({})
+    renderApp('/chat')
+    expect(await screen.findByRole('button', { name: /^Tools/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Deep research' })).not.toBeInTheDocument()
+    await waitFor(() => expect(toasts()).toContainEqual(expect.stringMatching(/Deep research is no longer available to you/)))
+    expect(localStorage.getItem(`research-had:${member.id}`)).toBeNull()
+    // Someone else's mark is not theirs.
+    cleanup()
+    // Toasts outlive the page in sonner's store: those said are done with.
+    toast.dismiss()
+    localStorage.setItem('research-had:someone-else', '1')
+    backend({})
+    renderApp('/chat')
+    expect(await screen.findByRole('button', { name: /^Tools/ })).toBeInTheDocument()
+    expect(toasts()).toEqual([])
+  })
+
+  it('the deep research switch says why it cannot go with the next message', async () => {
+    const calls = backend({ events: answer, saved: answered, config: { tools: [...config.tools, researchTool], models: [{ ...config.models[0]!, tools: false }, config.models[1]!] } })
+    renderApp('/chat')
+    const toggle = await screen.findByRole('button', { name: 'Deep research' })
+    expect(toggle).toHaveAttribute('aria-disabled', 'true')
+    expect(toggle).toHaveAccessibleDescription(/Main-Model cannot call tools, which deep research needs/)
+    // A tap says why too (a phone shows no tooltip), and turns nothing on.
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await waitFor(() => expect(toasts()).toContainEqual(expect.stringMatching(/Main-Model cannot call tools, which deep research needs/)))
+    await ask('Compare the codecs')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toMatchObject({ content: 'Compare the codecs' }))
+    expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).not.toHaveProperty('research')
+  })
+
   it('deep research goes with the message written with it on, then turns off', async () => {
-    const calls = backend({ events: answer, saved: answered })
+    const calls = backend({ events: answer, saved: answered, config: { tools: [...config.tools, researchTool] } })
     renderApp('/chat')
     const toggle = await screen.findByRole('button', { name: 'Deep research' })
     await userEvent.click(toggle)
@@ -821,6 +903,7 @@ describe('chat', () => {
         { type: 'agent', id: 'd1', index: 0, event: 'done', ms: 1000 },
       ],
       hang: true,
+      config: { tools: [...config.tools, researchTool] },
     })
     renderApp('/chat')
     await userEvent.click(await screen.findByRole('button', { name: 'Deep research' }))

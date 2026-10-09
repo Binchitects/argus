@@ -30,6 +30,7 @@ import { ArenaTurn, ComparePicker } from './arena'
 import { arenaView, type CompareChoice } from './quality'
 import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message, QueuedMessage } from './types'
 import { useUploads } from './uploads'
+import { useResearchGone } from './use-research-gone'
 import { AssistantView } from './assistant-view'
 import { ShareDialog } from './share-dialog'
 import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export'
@@ -450,9 +451,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   /** `talkTurn`: said in Talk, which hears the answer's events and its end, and reads it aloud. */
   const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn): Promise<boolean> => {
     const fromBox = files === undefined
-    // Deep research is for the message written with it on: off again once sent.
-    const deep = fromBox && research
-    if (deep) setResearch(false)
+    // Deep research is for the message written with it on: off again once sent (and it goes only while it can).
+    const deep = fromBox && research && canResearch && !researchOff
+    if (fromBox && research) setResearch(false)
     // Compare too: two models answer this message, side by side.
     const versus = fromBox ? compare : null
     if (versus) setCompare(null)
@@ -539,6 +540,16 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const [research, setResearch] = useState(false)
   const [compare, setCompare] = useState<CompareChoice | null>(null)
   const comparePicker = <ComparePicker models={config.models} value={compare} onChange={setCompare} />
+  // Deep research is a tool admins give to people (Admin → Tools): the switch is only theirs, and says why it cannot go with the next message.
+  const canResearch = config.tools.some((t) => t.id === 'research')
+  const researchOff = model?.tools === false
+    ? `${model.name} cannot call tools, which deep research needs: choose another model for it.`
+    : compare
+      ? 'Not with Compare: deep research is one model’s report. Turn Compare off for it.'
+      : undefined
+  const researchSwitch = canResearch ? { research: research && !researchOff, onResearch: setResearch, researchOff } : {}
+  // Taken away from someone who had it: the switch goes, and they are told why.
+  useResearchGone(me?.id, canResearch)
 
   // Written while an answer runs: each waits on the server (a reload, or another tab, still shows it)
   // and becomes the next question once the answer before is over, or at once with Send now (which
@@ -566,7 +577,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       return false
     }
     try {
-      const r = await queueMessage(chat, { content: text, attachments: uploads.attachments.map((a) => a.id), ...(research ? { research: true } : {}) })
+      const r = await queueMessage(chat, { content: text, attachments: uploads.attachments.map((a) => a.id), ...(research && canResearch && !researchOff ? { research: true } : {}) })
       setResearch(false)
       uploads.clear()
       setQueued(chat, r.queued)
@@ -575,6 +586,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       return true
     } catch (e) {
       toast.error(errorMessage(e, 'The message could not be queued. It is back in the box.'))
+      // Refused as deep research taken away meanwhile: the switch goes now.
+      if (e instanceof ApiError && e.status === 'research') void queryClient.invalidateQueries({ queryKey: configQuery.queryKey })
       return false
     }
   }
@@ -809,7 +822,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   </Alert>
                 )}
                 <TalkBar state={talk.state} onEnd={talk.end} />
-                <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} research={research} onResearch={setResearch} compare={comparePicker} talk={talkButton} autoFocus big />
+                <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} {...researchSwitch} compare={comparePicker} talk={talkButton} autoFocus big />
                 <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
                   {(starters ?? (config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
                     <button
@@ -956,8 +969,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   onQueue={enqueue}
                   onSendNow={(key) => void sendNow(key)}
                   onUnqueue={(key) => void unqueue(key)}
-                  research={research}
-                  onResearch={setResearch}
+                  {...researchSwitch}
                   compare={comparePicker}
                   onStop={() => void stop()}
                   uploads={uploads}

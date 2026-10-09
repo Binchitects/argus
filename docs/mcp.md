@@ -46,8 +46,21 @@ Other clients (streamable HTTP):
 - **The same functions**: Argus's (`find_symbol`, …), `run_python`, `web_search`,
   `fetch_page`, `generate_image`, `generate_video`, `speak`, `calculate`,
   `current_time`, `days_between`, `decide` (Laya, while its module runs:
-  [chat.md](chat.md#decide-laya)), and `server__function` for each MCP server,
-  API and plugin (`pets__list_pets`).
+  [chat.md](chat.md#decide-laya)), `deep_research` (below), and
+  `server__function` for each MCP server, API and plugin (`pets__list_pets`).
+- **Deep research** (`deep_research`, a `question`), for whoever may use it
+  (Admin → Tools → Deep research). It runs as in the chat, in a new chat of
+  the person's own titled "Deep research: …": in turn, with their default
+  model, tools and credit, its parts by sub-agents. It is checked as a message
+  sent with **Deep research** on (the safeguards, the deep research a day).
+  The agent hears the step as progress (waiting in line, planning the
+  research, its parts, a call waiting for the person, writing the report),
+  then gets the report with the chat's address, where the person reads its
+  parts. Cancelling the call stops it; the chat keeps what was done. It takes
+  minutes: give the client a long tool timeout. While **Web** asks before each
+  call, it is not served (nobody is in its chat to allow the web's calls), and
+  the notes for the agent say so, as does **Connect your tools** (it is not
+  listed among the tools served); the person starts it in the chat instead.
 - **Not served**: the chat's own tools. Reading files (a chat's files),
   questions to the person (`ask_user`) and sub-agents (`delegate`) have no chat
   here.
@@ -124,4 +137,9 @@ gateway asked once for a while; a group's tool served only to its members, and
 a tool that asks first marked; an Argus call made as the person (their email at
 Argus); an admin's MCP server proxied with its progress; a call cancelled; a
 picture inline and as a link that `resources/read` reads and the person opens.
+`tests/Llm.Tests/DeepResearchTests.cs` runs `deep_research` for an agent: a
+chat of the person's own does it, its steps come as progress and the report as
+the result; not served, saying why (in the agent's notes and on Connect your
+tools), while the web asks first, when an unknown function name is still "no
+tool named"; gone when the person may not use it.
 `src/web/src/pages/setup.test.tsx` checks the setups on Connect your tools.

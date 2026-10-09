@@ -86,7 +86,7 @@ export const topics = {
       { name: 'Canvas and Files', text: '**Canvas** opens documents and code that you and the model both edit. **Files** lists every file of the chat: what you attached, what Argus read, what the model wrote.' },
       { name: '⋯ (chat actions)', text: 'Fork, compact, share, move to an assistant, export, archive or delete this chat.' },
       { name: 'The answers', text: 'Under each answer: the model, time, tokens and cost; thumbs up or down; **Answer again** (also with another model, shorter or longer); **Fork from here**; read aloud. Arrows like 2 / 3 switch between versions of a question or an answer.' },
-      { name: 'The message box', text: 'The paperclip attaches files (or paste or drop them). **Tools** chooses what the model may use in this chat. **Deep research** and **Compare** apply to the next message. The microphone records a voice message; **Talk** is a voice conversation.' },
+      { name: 'The message box', text: 'The paperclip attaches files (or paste or drop them). **Tools** chooses what the model may use in this chat. **Deep research** (when an admin gave it to you) and **Compare** apply to the next message. The microphone records a voice message; **Talk** is a voice conversation.' },
       { name: 'Context', text: 'The gauge beside Send: how full the model\'s window is, and what fills it. **Compact now** summarizes older messages so the chat can go on lighter.' },
       { name: '/ in the box', text: 'At the start of a message, / finds a saved prompt (Workspace → Prompts) and fills in its blanks.' },
     ],
@@ -373,6 +373,7 @@ export const topics = {
     tasks: [
       { title: 'Add an MCP server', steps: ['Press **Add a server or API** and choose **MCP server**.', 'Give it a name, its address, and its key as a header if it needs one.', 'Test it, then save. Choose who may use it.'] },
       { title: 'Turn on the web for the chat', steps: ['Turn on **Web** here.', 'Allow sites under Settings → Python and web → **Sites the chat may open** (or * for any public site).'] },
+      { title: 'Choose who may use deep research', steps: ['Find **Deep research** here.', 'Choose who may use it: everyone, admins, or chosen groups. Only they see **Deep research** in the message box.', '**Ask before each run**: the model asks the person before it starts one itself.'] },
     ],
     manual: { doc: 'admin', section: 'admin' },
   },

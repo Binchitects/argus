@@ -57,7 +57,7 @@ public sealed partial class AnswerJobs
                     }
                     job.Emit(Arena.Blind(node, match.ModelA, match.ModelB)!);
                 }
-                await chat.AnswerAsync(user, conversation, question, new AnswerOverrides(model, Hurry: job.Hurry), EmitAsync, ct);
+                await chat.AnswerAsync(user, conversation, question, new AnswerOverrides(model, Hurry: job.Hurry, Compare: true), EmitAsync, ct);
                 if (side == "a")
                 {
                     endA = conversation.CurrentLeafId;

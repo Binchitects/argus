@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, Telescope, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import { fillPrompt, promptsQuery, slashItems, slashQuery, variablesOf, type PromptItem, type SlashItem } from '@/lib/prompts'
@@ -44,6 +45,7 @@ export function Composer({
   onUnqueue,
   research,
   onResearch,
+  researchOff,
   compare,
   talk,
 }: {
@@ -65,15 +67,18 @@ export function Composer({
   onQueue?: (text: string) => Promise<boolean>
   onSendNow?: (key: string) => void
   onUnqueue?: (key: string) => void
-  /** Deep research for the next message: sub-agents search the web, and the answer is a sourced report. */
+  /** Deep research for the next message: sub-agents search the web, and the answer is a sourced report. Without onResearch (not given to the person), no switch. */
   research?: boolean
   onResearch?: (on: boolean) => void
+  /** Why deep research cannot go with the next message now: the switch shows it, and cannot be pressed. */
+  researchOff?: string
   /** Compare (arena mode): the next question to two models, beside Deep research. */
   compare?: ReactNode
   /** The Talk button: a voice conversation. */
   talk?: ReactNode
 }) {
   const [text, setText] = useState('')
+  const researchOffId = useId()
   const area = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
 
@@ -303,19 +308,30 @@ export function Composer({
         {talk}
         {tools}
         {onResearch && (
-          <Tooltip content="Deep research: a plan, sub-agents that search the web, and a report with its sources. It takes minutes.">
-            <Button
-              type="button"
-              variant={research ? 'secondary' : 'ghost'}
-              size="sm"
-              className={cn('h-8 gap-1.5 rounded-full px-2.5', research && 'text-primary-ink')}
-              aria-pressed={!!research}
-              aria-label="Deep research"
-              onClick={() => onResearch(!research)}
-            >
-              <Telescope /> <span className="hidden sm:inline">Deep research</span>
-            </Button>
-          </Tooltip>
+          <>
+            <Tooltip content={researchOff ?? 'Deep research: a plan, sub-agents that search the web, and a report with its sources. It takes minutes.'}>
+              <Button
+                type="button"
+                variant={research ? 'secondary' : 'ghost'}
+                size="sm"
+                className={cn('h-8 gap-1.5 rounded-full px-2.5', research && 'text-primary-ink', researchOff && 'cursor-not-allowed text-muted-foreground')}
+                aria-pressed={!!research}
+                // Not disabled: a disabled button shows no tooltip, and the tooltip says why. A tap (phones show
+                // no tooltip) says it too.
+                aria-disabled={researchOff ? true : undefined}
+                aria-describedby={researchOff ? researchOffId : undefined}
+                aria-label="Deep research"
+                onClick={() => (researchOff ? toast(researchOff, { id: 'research-off' }) : onResearch(!research))}
+              >
+                <Telescope /> <span className="hidden sm:inline">Deep research</span>
+              </Button>
+            </Tooltip>
+            {researchOff && (
+              <span id={researchOffId} className="sr-only">
+                {researchOff}
+              </span>
+            )}
+          </>
         )}
         {compare}
         <span className="hidden text-xs text-muted-foreground xl:inline">Enter to send · Shift+Enter for a new line</span>

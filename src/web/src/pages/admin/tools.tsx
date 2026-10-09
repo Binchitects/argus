@@ -55,6 +55,25 @@ interface Setting {
   askFirst: boolean
 }
 
+/** A tool's two switches in words: the label, and what it means. */
+interface SwitchWords {
+  onByDefault: [string, string]
+  askFirst: [string, string]
+}
+
+const defaultWords: SwitchWords = {
+  onByDefault: ['On in new chats', 'People can still turn it on or off in each chat.'],
+  askFirst: ['Ask before each call', 'The chat shows what it wants to run and waits for Allow.'],
+}
+
+/** For a tool where "a call" says it badly. */
+const switchWords: Record<string, SwitchWords> = {
+  research: {
+    onByDefault: ['The model may start it in new chats', 'People can still turn that on or off in each chat. Deep research in the message box is there either way.'],
+    askFirst: ['Ask before each run', 'When the model starts one itself, the chat asks the person first. Pressing Deep research is the person asking.'],
+  },
+}
+
 const toolsQuery = {
   queryKey: ['admin', 'tools'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<ToolRow[]>('/api/admin/tools', { signal }),
@@ -102,6 +121,7 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
     onError: (e) => toast.error(errorMessage(e)),
   })
   const set = (change: Partial<Setting>) => save.mutate({ ...current, ...change })
+  const words = switchWords[tool.id] ?? defaultWords
   return (
     // Off: a quieter card, not faded text (faded grey text fails contrast).
     <Card className={tool.setting.enabled ? '' : 'border-dashed bg-muted/40 shadow-none'}>
@@ -152,15 +172,15 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
         <div className="grid gap-2">
           <Label className="flex items-center justify-between gap-3 font-normal">
             <span>
-              On in new chats
-              <span className="block text-xs text-muted-foreground">People can still turn it on or off in each chat.</span>
+              {words.onByDefault[0]}
+              <span className="block text-xs text-muted-foreground">{words.onByDefault[1]}</span>
             </span>
             <Switch checked={tool.setting.onByDefault} onCheckedChange={(onByDefault) => set({ onByDefault })} />
           </Label>
           <Label className="flex items-center justify-between gap-3 font-normal">
             <span>
-              Ask before each call
-              <span className="block text-xs text-muted-foreground">The chat shows what it wants to run and waits for Allow.</span>
+              {words.askFirst[0]}
+              <span className="block text-xs text-muted-foreground">{words.askFirst[1]}</span>
             </span>
             <Switch checked={tool.setting.askFirst} onCheckedChange={(askFirst) => set({ askFirst })} />
           </Label>

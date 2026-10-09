@@ -53,6 +53,15 @@ describe('deep research in words', () => {
     expect(researchStep([both, first, result('d2', [agent('done'), agent('done')]), gaps], {})).toBe('Filling gaps: 0 of 2 parts done')
   })
 
+  it('started by the model, the research is what comes after its call', () => {
+    const started = asking([{ id: 's1', name: 'deep_research', args: JSON.stringify({ question: 'Codecs' }) }])
+    const on = result('s1')
+    expect(researchStep([started, on], undefined)).toBe('Planning the research')
+    const delegating = { ...asking([{ id: 'd1', name: 'delegate', args: parts }]), id: 'a2' }
+    expect(researchStep([started, on, delegating], { d1: [agent('done')] })).toBe('Researching 4 parts: 1 of 4 parts done')
+    expect(researchStep([started, on, delegating, result('d1', [agent('done')]), blank('a3', 'assistant', 'r-d1', '# Report')], undefined)).toBe('Writing the report')
+  })
+
   it('without sub-agents, researches with the tools it has', () => {
     expect(researchStep([asking([{ id: 'w1', name: 'web_search' }])], undefined)).toBe('Researching: Web search')
   })

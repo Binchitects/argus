@@ -208,9 +208,9 @@ public sealed partial class BotConversation(AppDbContext db, UserManager<AppUser
             throw;
         }
         job.Emit(new { type = "question", id = message.Id, parentId = message.ParentId });
-        // The answer goes to the thread; the bell is not told.
+        // The answer goes to the thread; the bell is not told. Nobody watches it in the chat, to allow a call.
         job.Notify = false;
-        jobs.Start(job, message.Id, new AnswerOverrides());
+        jobs.Start(job, message.Id, new AnswerOverrides(Unattended: true));
         await job.Running.WaitAsync(ct);
 
         // What was answered: the words of the answer's last message, or why there are none.

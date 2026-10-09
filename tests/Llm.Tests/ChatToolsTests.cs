@@ -259,7 +259,7 @@ public sealed class ChatToolsTests(AppFixture app)
     public async Task A_chat_has_its_own_tools_among_those_the_person_may_use()
     {
         var (b, _, email) = await PersonAsync(app.Factory);
-        Assert.Equal(["argus", "calculator", "time", "files", "canvas", "ask", "agents", "memory"], await ToolsInConfigAsync(b));
+        Assert.Equal(["argus", "research", "calculator", "time", "files", "canvas", "ask", "agents", "memory"], await ToolsInConfigAsync(b));
         var id = await NewChatAsync(b, new { tools = new[] { "calculator" } });
         await SendAsync(b, id, "hello");
         Assert.Equal(["calculate"], FunctionsSentFor(email));

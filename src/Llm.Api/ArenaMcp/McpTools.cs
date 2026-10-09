@@ -30,7 +30,7 @@ public sealed record McpCatalog(JsonArray Tools, string Instructions, IReadOnlyD
 /// approval card here: it is marked destructive, and its description tells the client to ask.
 /// </summary>
 public sealed partial class McpTools(
-    ToolRegistry registry, AccessService access, Audit audit, AppDbContext db, IMemoryCache cache,
+    ToolRegistry registry, AccessService access, Audit audit, AppDbContext db, IMemoryCache cache, McpResearch research,
     IOptions<AuthOptions> auth, IOptionsMonitor<BrandingOptions> branding, ILogger<McpTools> logger)
 {
     /// <summary>Tools that only make sense inside a chat: its files, questions to the person, sub-agents.</summary>
@@ -56,12 +56,13 @@ public sealed partial class McpTools(
         {
             return kept;
         }
-        var context = Context(user, null);
+        var served = await ServedAsync(user, ct);
+        var context = Context(user, null, served);
         var tools = new JsonArray();
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
         var notes = new List<string>();
         var unavailable = new List<string>();
-        foreach (var choice in await ServedAsync(user, ct))
+        foreach (var choice in served)
         {
             IToolRun run;
             try
@@ -103,8 +104,9 @@ public sealed partial class McpTools(
     /// </summary>
     public async Task<ToolResult?> CallAsync(AppUser user, string function, JsonObject arguments, Func<McpProgress, Task>? progress, CancellationToken ct)
     {
-        var context = Context(user, progress);
-        var (owner, failure) = await OwnerAsync(user, await ServedAsync(user, ct), function, context, ct);
+        var served = await ServedAsync(user, ct);
+        var context = Context(user, progress, served);
+        var (owner, failure) = await OwnerAsync(user, served, function, context, ct);
         if (owner is not { } found)
         {
             return failure is null ? null : new ToolResult(failure, IsError: true);
@@ -136,7 +138,8 @@ public sealed partial class McpTools(
     /// <summary>
     /// The tool with the function, started. As listed when the list is still kept; otherwise an
     /// admin's server or API by its prefix, else the built-in tools, Argus last (it is a network
-    /// round trip, they are not).
+    /// round trip, they are not). Deep research has one function: only a call of it may hear why
+    /// it cannot run, not a name it does not have.
     /// </summary>
     private async Task<((ToolChoice Choice, IToolRun Run)? Owner, string? Failure)> OwnerAsync(AppUser user, IReadOnlyList<ToolChoice> served, string function,
         ToolContext context, CancellationToken ct)
@@ -146,7 +149,7 @@ public sealed partial class McpTools(
             :
             [
                 .. served.Where(t => t.Tool is IServerTool s && function.StartsWith(s.Slug + "__", StringComparison.Ordinal)),
-                .. served.Where(t => t.Tool is not IServerTool && t.Tool.Id != "argus"),
+                .. served.Where(t => t.Tool is not IServerTool && t.Tool.Id != "argus" && (t.Tool.Id != ResearchTool.ToolId || function == ResearchTool.Function)),
                 .. served.Where(t => t.Tool.Id == "argus"),
             ];
         string? failure = null;
@@ -242,10 +245,15 @@ public sealed partial class McpTools(
 
     /// <summary>
     /// What a tool needs to know about the call: the person, and where it reports how far it is. A
-    /// call here belongs to no chat: a chat of none, never saved (Python finds no files in it).
+    /// call here belongs to no chat: a chat of none, never saved (Python finds no files in it). Deep
+    /// research runs in a chat of its own (McpResearch), or says why it cannot here.
     /// </summary>
-    private static ToolContext Context(AppUser user, Func<McpProgress, Task>? progress) =>
-        new(user, user.Email!.ToLowerInvariant(), new Conversation { UserId = user.Id, Title = "Arena MCP" }, progress is null ? null : Reporter(progress));
+    private ToolContext Context(AppUser user, Func<McpProgress, Task>? progress, IReadOnlyList<ToolChoice> served) =>
+        new(user, user.Email!.ToLowerInvariant(), new Conversation { UserId = user.Id, Title = "Arena MCP" }, progress is null ? null : Reporter(progress))
+        {
+            Research = (question, token) => research.RunAsync(user, question, progress, token),
+            NoResearch = McpResearch.Refusal(served),
+        };
 
     /// <summary>The chat's progress reports (an event for the page), passed on as MCP progress.</summary>
     private static ToolProgress Reporter(Func<McpProgress, Task> progress) => new(e =>

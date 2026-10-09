@@ -23,11 +23,12 @@ interface ChatConfig {
   argus: boolean
 }
 
-/** Arena MCP for this person: whether it is on, its address, and the tools it serves them. */
+/** Arena MCP for this person: whether it is on, its address, the tools it serves them, and theirs it cannot serve now (with why). */
 interface McpInfo {
   enabled: boolean
   url: string
   tools: { id: string; title: string; askFirst: boolean }[]
+  notServed?: { id: string; title: string; why: string }[]
 }
 
 /** The certificate the site serves: whether a public CA vouches for it, else the one to trust (/api/downloads/certificate). */
@@ -326,6 +327,11 @@ function ArenaMcp({ info, os }: { info: McpInfo; os: System }) {
         ) : (
           <p className="text-sm text-muted-foreground">No tools are on for you at the moment.</p>
         )}
+        {info.notServed?.map((t) => (
+          <p key={t.id} className="text-sm text-muted-foreground">
+            <strong className="font-medium text-foreground">{t.title}</strong> is not served there now: {t.why}.
+          </p>
+        ))}
         {info.tools.some((t) => t.askFirst) && (
           <p className="text-sm text-muted-foreground">
             A tool that asks first in the chat is marked so your agent asks you before each call: let it ask, rather than trusting every tool.

@@ -67,6 +67,7 @@ public static class McpEndpoints
         services.AddMemoryCache();
         services.AddScoped<McpPeople>();
         services.AddScoped<McpTools>();
+        services.AddScoped<McpResearch>();
         services.AddScoped<McpPrompts>();
         services.AddSingleton<McpCalls>();
     }
@@ -98,18 +99,23 @@ public static class McpEndpoints
             documentation = auth.Value.Origin + "/setup",
         });
 
-    /// <summary>For the person's Connect your tools page: whether it is on, its address, and the tools it serves them.</summary>
+    /// <summary>
+    /// For the person's Connect your tools page: whether it is on, its address, the tools it serves them,
+    /// and theirs it cannot serve now, with why (deep research while the web asks before each call).
+    /// </summary>
     private static async Task<IResult> InfoAsync(ClaimsPrincipal p, UserManager<AppUser> users, McpTools tools, IOptionsMonitor<McpOptions> options, IOptions<AuthOptions> auth,
         CancellationToken ct)
     {
         var me = (await users.GetUserAsync(p))!;
         var enabled = options.CurrentValue.Enabled;
         var served = enabled ? await tools.ServedAsync(me, ct) : [];
+        var noResearch = McpResearch.Refusal(served);
         return Results.Ok(new
         {
             enabled,
             url = auth.Value.Origin + Path,
-            tools = served.Select(t => new { id = t.Tool.Id, title = t.Tool.Title, askFirst = t.Setting.AskFirst }),
+            tools = served.Where(t => noResearch is null || t.Tool.Id != ResearchTool.ToolId).Select(t => new { id = t.Tool.Id, title = t.Tool.Title, askFirst = t.Setting.AskFirst }),
+            notServed = served.Where(t => noResearch is not null && t.Tool.Id == ResearchTool.ToolId).Select(t => new { id = t.Tool.Id, title = t.Tool.Title, why = noResearch }),
         });
     }
 
