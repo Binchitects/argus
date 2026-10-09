@@ -589,7 +589,9 @@ sync_deploy() {   # sync_deploy install|upgrade|repair OLD_VERSION plan|do
     cur="$(sha_of "$DEPLOY/$f")"
     [[ "$cur" == "${NEW[$f]}" ]] && continue
     old="${OLD[$f]:-}"
-    if [[ $mode == install || ( -n "$old" && "$cur" == "$old" ) ]]; then
+    # As shipped before (or as this installer wrote it): replaced. Changed here: kept beside too,
+    # an install over a removed one's deploy/ as much as an upgrade.
+    if [[ -n "$old" && "$cur" == "$old" ]]; then
       n_upd=$((n_upd + 1))
       [[ $act == do ]] && did "updated $f" || would "update $f"
     else

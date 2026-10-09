@@ -814,8 +814,13 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.dir / "deploy" / ".env").is_file())
         r = self.r.run("remove", "--dir", str(self.dir), "--yes")
         self.assertEqual(r.returncode, 0, self.output(r))
-        # And back: install over it brings it up on the same data.
-        self.install()
+        # And back: install over it brings it up on the same data, and a file changed meanwhile
+        # is put back with the changed copy kept beside it.
+        (self.dir / "deploy" / "config" / "litellm.yaml").write_text("changed while it was removed\n")
+        r = self.install()
+        self.assertIn("updated config/litellm.yaml; the copy you had is kept as config/litellm.yaml.before-9.9.9", r.stdout)
+        self.assertEqual((self.dir / "deploy" / "config" / "litellm.yaml").read_text(), "model_list: []\n")
+        self.assertEqual((self.dir / "deploy" / "config" / "litellm.yaml.before-9.9.9").read_text(), "changed while it was removed\n")
 
     def test_Purge_asks_for_the_word_and_offers_a_last_backup(self):
         self.install()
