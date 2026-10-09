@@ -61,38 +61,54 @@ public static class Commands
 
     // --- index --------------------------------------------------------------------------
 
-    static (bool Unhealthy, string Outcome) IndexBranch(SqliteConnection conn, ArgusConfig cfg, Project project, string branch, string mirrorDir)
+    /// <summary>Who started a run, as a repository's log says it.</summary>
+    static string StartedBy(string? trigger, RepoSchedule? schedule) => trigger switch
+    {
+        "schedule" => "with the scheduled pass",
+        "repo-schedule" => $"by its schedule ({(schedule ?? RepoSchedule.WithPass).Words.ToLowerInvariant()})",
+        "webhook" => "by a push or merge in GitLab",
+        "manual" => "by an admin",
+        "queued" => "after the run before it",
+        _ => "from the command line",
+    };
+
+    static (bool Unhealthy, string Outcome) IndexBranch(SqliteConnection conn, ArgusConfig cfg, Project project, string branch, string mirrorDir, RepoLog log)
     {
         var label = branch == project.DefaultBranch ? project.PathWithNamespace : $"{project.PathWithNamespace}@{branch}";
         var repoId = Writes.UpsertRepo(conn, project.GitlabId, project.PathWithNamespace, project.DefaultBranch, project.HttpUrl, branch);
         var old = Sql.One(conn, "SELECT last_indexed_sha FROM repos WHERE id = ?", repoId)!.StrOrNull("last_indexed_sha");
         var started = NowF();
         IndexResult result;
+        string sha;
+        string? subject = null;
+        // The symbol reader changed since its last run: every file is read again.
+        var newReader = false;
         try
         {
-            var sha = Mirror.HeadSha(mirrorDir, branch);
+            sha = Mirror.HeadSha(mirrorDir, branch);
             if (sha == old && !Worker.ContractIsStale(conn, repoId))
             {
                 Writes.RecordRunState(conn, repoId, false, false, Now());
                 // Rows indexed before commits were described get their words now.
-                if (Sql.One(conn, "SELECT last_indexed_message FROM repos WHERE id = ?", repoId)!.StrOrNull("last_indexed_message") is null)
+                subject = Sql.One(conn, "SELECT last_indexed_message FROM repos WHERE id = ?", repoId)!.StrOrNull("last_indexed_message");
+                if (subject is null)
                 {
-                    var (subject, at) = Mirror.CommitInfo(mirrorDir, sha);
+                    (subject, var at) = Mirror.CommitInfo(mirrorDir, sha);
                     Writes.SetCommitInfo(conn, repoId, subject, at);
                 }
                 Out.WriteLine($"{label}: up to date");
                 AuditLog.IndexRepo(project.PathWithNamespace, branch, "up_to_date", Ms(started));
                 Progress.BranchDone(project.PathWithNamespace, branch, "up_to_date");
+                log.Say($"{branch}: up to date at {RepoLog.Commit(sha, subject)}; nothing new to read.");
                 return (false, "up_to_date");
             }
+            newReader = old is not null && Worker.ContractIsStale(conn, repoId);
             var tree = Mirror.SyncWorktree(cfg.Index, project.GitlabId, mirrorDir, sha, branch);
             result = Worker.IndexRepo(conn, cfg.Index, project, mirrorDir, tree, sha, old, repoId: repoId,
-                progress: (done, total) => Progress.Files(project.PathWithNamespace, branch, done, total));
-            if (!result.TimedOut && !result.SymbolsFailed)
-            {
-                var (subject, at) = Mirror.CommitInfo(mirrorDir, sha);
-                Writes.SetCommitInfo(conn, repoId, subject, at);
-            }
+                progress: (done, total) => Progress.Files(project.PathWithNamespace, branch, done, total),
+                symbols: files => Progress.Symbols(project.PathWithNamespace, branch, files));
+            (subject, var committed) = Mirror.CommitInfo(mirrorDir, sha);
+            if (!result.TimedOut && !result.SymbolsFailed) Writes.SetCommitInfo(conn, repoId, subject, committed);
         }
         catch (GitError exc)
         {
@@ -101,6 +117,7 @@ public static class Commands
             Err.WriteLine($"{label}: FAILED ({exc.Message})");
             AuditLog.IndexRepo(project.PathWithNamespace, branch, "failed", Ms(started), error: exc.Message);
             Progress.BranchDone(project.PathWithNamespace, branch, "failed");
+            log.Fail($"{branch}: git could not check it out: {exc.Message}. The next run tries again; if this repeats, check that the branch still exists in GitLab.");
             return (true, "failed");
         }
         catch (Exception exc)
@@ -111,28 +128,120 @@ public static class Commands
             Err.WriteLine($"{label}: FAILED ({repr})");
             AuditLog.IndexRepo(project.PathWithNamespace, branch, "failed", Ms(started), error: repr);
             Progress.BranchDone(project.PathWithNamespace, branch, "failed");
+            log.Fail($"{branch}: failed: {exc.Message}. The next run tries again; if this repeats, Argus's own log has the details ({exc.GetType().Name}).");
             return (true, "failed");
         }
+        var took = NowF() - started;
         var flags = (result.TimedOut ? " TIMED-OUT" : "") + (result.SymbolsFailed ? " SYMBOLS-FAILED" : "");
-        Out.WriteLine($"{label}: indexed={result.Indexed} deleted={result.Deleted} skipped={result.Skipped} errors={result.Errors}{flags} ({NowF() - started:0.0}s)");
+        Out.WriteLine($"{label}: indexed={result.Indexed} deleted={result.Deleted} skipped={result.Skipped} errors={result.Errors}{flags} ({took:0.0}s)");
         var outcome = result.TimedOut ? "timed_out" : result.SymbolsFailed ? "symbols_failed" : "ok";
         AuditLog.IndexRepo(project.PathWithNamespace, branch, outcome, Ms(started), result.Indexed, result.Deleted, result.Skipped,
             result.Errors, result.TimedOut, result.SymbolsFailed);
         Progress.BranchDone(project.PathWithNamespace, branch, outcome);
+
+        var what = result.FullReindex
+            ? old is null ? "read for the first time"
+            : newReader ? "read in full (this Argus reads symbols in a newer way than the last run)"
+            : "read in full (the commit indexed before is not in its history any more)"
+            :$"{RepoLog.Count(result.Considered, "file")} changed since {PyStr.Prefix(old!, 8)}";
+        var parts = new List<string> { $"{result.Indexed:N0} indexed" };
+        if (result.Deleted > 0) parts.Add($"{result.Deleted:N0} removed");
+        if (result.Skipped > 0) parts.Add($"{result.Skipped:N0} skipped (unchanged, not code, or too large)");
+        log.Say($"{branch}: at {RepoLog.Commit(sha, subject)}, {what}: {string.Join(", ", parts)} ({RepoLog.Took(took)}).");
+        if (result.SymbolsFailed)
+            log.Fail($"{branch}: its symbols could not be read: {result.SymbolsProblem ?? "the symbol reader failed"}. " +
+                     "Check that Universal Ctags is installed where Argus runs; the files are read again on the next run.");
+        else if (result.Errors > 0)
+            log.Warn($"{branch}: {RepoLog.Count(result.Errors, "file")} could not be read or stored; each is tried again on the next runs (up to " +
+                     $"{Writes.MaxRetryAttempts} times). `argus status` lists them with the reason; a path too long or a file nobody may read are the usual causes.");
+        if (result.TimedOut)
+            log.Warn($"{branch}: stopped after {RepoLog.Took(cfg.Index.RepoTimeBudgetSeconds)}, the time one repository may take; the next run goes on " +
+                     "from where this one stopped. If it keeps happening, raise index.repo_time_budget_seconds in Argus's configuration.");
         return (result.TimedOut || result.SymbolsFailed, outcome);
     }
 
-    static int PruneMissingBranches(SqliteConnection conn, Project project, List<string> keep)
+    static int PruneMissingBranches(SqliteConnection conn, Project project, List<string> keep, RepoLog? log = null)
     {
         var marks = keep.Count > 0 ? Sql.Marks(keep.Count) : "NULL";
-        var gone = Sql.QueryList(conn, $"SELECT id FROM repos WHERE gitlab_id = ? AND branch NOT IN ({marks})",
-            new object?[] { project.GitlabId }.Concat(keep).ToArray()).Select(r => r.Long("id")).ToList();
-        var n = Writes.DeleteRepos(conn, gone);
+        var gone = Sql.QueryList(conn, $"SELECT id, branch FROM repos WHERE gitlab_id = ? AND branch NOT IN ({marks})",
+            new object?[] { project.GitlabId }.Concat(keep).ToArray());
+        var n = Writes.DeleteRepos(conn, [.. gone.Select(r => r.Long("id"))]);
         if (n > 0) Out.WriteLine($"{project.PathWithNamespace}: dropped {n} branch(es) no longer indexed");
+        foreach (var r in gone) log?.Say($"{r.Str("branch")}: no longer chosen (or gone from GitLab), so its index was removed.");
         return n;
     }
 
-    public static int Index(ArgusConfig cfg, string? only, bool resetRetries = false, bool allowPartial = false)
+    /// <summary>Mirrors and checkouts of projects Argus no longer knows: what a repository found under a new id left behind.</summary>
+    static void PruneMirrors(IndexConfig index, SqliteConnection conn)
+    {
+        var known = Sql.Query(conn, "SELECT gitlab_id FROM repo_choices").Select(r => r.Long("gitlab_id")).ToHashSet();
+        void Prune(string dir, string suffix)
+        {
+            if (!Directory.Exists(dir)) return;
+            foreach (var path in Directory.EnumerateDirectories(dir))
+            {
+                var name = Path.GetFileName(path);
+                if (!name.EndsWith(suffix, StringComparison.Ordinal) || !long.TryParse(name[..^suffix.Length], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+                    || known.Contains(id)) continue;
+                try
+                {
+                    Directory.Delete(path, recursive: true);
+                    Out.WriteLine($"removed {path}: no repository Argus knows uses it any more");
+                }
+                catch (Exception exc) when (exc is IOException or UnauthorizedAccessException) { Err.WriteLine($"could not remove {path}: {exc.Message}"); }
+            }
+        }
+        Prune(index.MirrorsDir, ".git");
+        Prune(index.TreesDir, "");
+    }
+
+    /// <summary>
+    /// A repository's new symbols embedded for meaning search, within what is left of the pass's
+    /// share (ARGUS_EMBED_PER_PASS). Once the embedder fails, the rest of the pass does not ask it
+    /// again, and each repository's log says what waits.
+    /// </summary>
+    static int EmbedRepo(SqliteConnection conn, Project project, RepoLog log, ref long budget, ref string? problem)
+    {
+        var path = project.PathWithNamespace;
+        List<long> rows = [.. Sql.Query(conn, "SELECT id FROM repos WHERE gitlab_id = ?", project.GitlabId).Select(r => r.Long("id"))];
+        long waiting;
+        try { waiting = Semantic.PendingCount(conn, rows); }
+        catch (SqliteException) { return 0; }
+        if (waiting == 0) return 0;
+        if (problem is not null)
+        {
+            log.Warn($"{RepoLog.Count(waiting, "symbol")} wait to be embedded for meaning search ({problem}); semantic_search does not find them until a later run embeds them.");
+            return 0;
+        }
+        if (budget <= 0)
+        {
+            log.Say($"{RepoLog.Count(waiting, "symbol")} wait to be embedded for meaning search: this run's share (ARGUS_EMBED_PER_PASS) is used up, so a later run embeds them.");
+            return 0;
+        }
+        var started = NowF();
+        Progress.Embedding(path, 0, (int)Math.Min(waiting, budget));
+        try
+        {
+            var n = Semantic.BuildSymbolEmbeddings(conn, limit: budget, progress: (done, total) => Progress.Embedding(path, done, total), repoIds: rows);
+            budget -= n;
+            log.Say($"Embedded {RepoLog.Count(n, "new symbol")} for meaning search ({RepoLog.Took(NowF() - started)}).");
+            if (waiting > n)
+                log.Say($"{RepoLog.Count(waiting - n, "more symbol")} wait to be embedded: each run embeds at most {EmbedPerPass():N0} (ARGUS_EMBED_PER_PASS), so a later run goes on.");
+            return n;
+        }
+        catch (EmbeddingUnavailable exc) { problem = $"the embedding service did not answer: {exc.Message}"; }
+        catch (Exception exc) { problem = $"embedding failed: {exc.GetType().Name}: {exc.Message}"; }
+        log.Warn($"Its {RepoLog.Count(waiting, "new symbol")} could not be embedded for meaning search: {problem}. They are found by name as usual; " +
+                 "semantic_search finds them once a later run embeds them. Check the embedder (ARGUS_EMBED_URL).");
+        return 0;
+    }
+
+    /// <param name="only">These repositories (path_with_namespace); null: every one chosen.</param>
+    /// <param name="scheduled">A scheduled pass: only the repositories that go with the passes (by their schedule, or the default).</param>
+    /// <param name="triggers">Who started the run, for each repository's log (one for all, or one per repository of <paramref name="only"/>):
+    /// manual, schedule, repo-schedule, webhook; none from the command line.</param>
+    public static int Index(ArgusConfig cfg, IReadOnlyList<string>? only, bool resetRetries = false, bool allowPartial = false,
+        bool scheduled = false, IReadOnlyList<string>? triggers = null)
     {
         var started = NowF();
         int GiveUp(int code, string reason)
@@ -163,28 +272,49 @@ public static class Commands
         }
         using var conn = Db.Open(cfg.Index.DbPath);
         var projects = GitLab.ListProjects(cfg.GitLab);
-        // What GitLab lists is what admins choose from; what they left out leaves the index.
-        Choices.Record(conn, projects, Now());
-        var excluded = projects.Where(p => !Choices.Included(conn, p.GitlabId)).ToList();
+        // What GitLab lists is what admins choose from: each one found again by its id, or by its path
+        // when GitLab lists it under a new one, so it never becomes a second copy.
+        var listing = Choices.Record(conn, projects, Now(), GitLab.Instance(cfg.GitLab.Url));
+        if (listing.Moved > 0)
+            Out.WriteLine($"{listing.Moved} repository(ies) GitLab lists under a new id: kept, with their index and choices");
+        if (listing.SetAside > 0)
+            Out.WriteLine($"{listing.SetAside} repository(ies) set aside: their id belongs to another project in this GitLab");
+        PruneMirrors(cfg.Index, conn);
+        var choices = Choices.List(conn).ToDictionary(c => c.GitlabId);
+        // What they left out leaves the index.
+        var excluded = projects.Where(p => !(choices.TryGetValue(p.GitlabId, out var c) ? c.Included : Choices.NewReposIncluded(conn))).ToList();
         foreach (var p in excluded)
         {
-            if (Choices.Drop(conn, p.GitlabId) > 0) Out.WriteLine($"{p.PathWithNamespace}: not chosen for the index -- removed from it");
+            if (Choices.DropInSteps(conn, p.GitlabId) > 0) Out.WriteLine($"{p.PathWithNamespace}: not chosen for the index -- removed from it");
         }
         projects = projects.Except(excluded).ToList();
         if (only is not null)
         {
-            if (excluded.Any(p => p.PathWithNamespace == only)) Out.WriteLine($"repo '{only}' is not chosen for the index");
-            projects = projects.Where(p => p.PathWithNamespace == only).ToList();
+            var wanted = only.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in excluded.Where(p => wanted.Contains(p.PathWithNamespace))) Out.WriteLine($"repo '{p.PathWithNamespace}' is not chosen for the index");
+            projects = projects.Where(p => wanted.Contains(p.PathWithNamespace)).ToList();
+        }
+        var fallback = Choices.DefaultSchedule(conn);
+        RepoSchedule ScheduleOf(Project p) => choices.TryGetValue(p.GitlabId, out var c) ? Choices.Effective(c, fallback) : fallback;
+        if (scheduled)
+        {
+            var own = projects.Count(p => ScheduleOf(p).Kind != ScheduleKind.Pass);
+            projects = projects.Where(p => ScheduleOf(p).Kind == ScheduleKind.Pass).ToList();
+            if (own > 0) Out.WriteLine($"{own} repository(ies) on their own schedule (or off) left to it");
         }
         if (resetRetries)
         {
             if (only is not null)
             {
-                if (projects.Count == 0) Out.WriteLine($"repo '{only}' not found in projects from GitLab");
-                else
+                foreach (var name in only)
                 {
-                    var cleared = Sql.Exec(conn, "DELETE FROM retry_attempts WHERE repo_id IN (SELECT id FROM repos WHERE path_with_namespace = ?)", only);
-                    Out.WriteLine($"reset retry counters for '{only}' ({cleared} rows)");
+                    if (!projects.Any(p => string.Equals(p.PathWithNamespace, name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        Out.WriteLine($"repo '{name}' not found in projects from GitLab");
+                        continue;
+                    }
+                    var cleared = Sql.Exec(conn, "DELETE FROM retry_attempts WHERE repo_id IN (SELECT id FROM repos WHERE lower(path_with_namespace) = lower(?))", name);
+                    Out.WriteLine($"reset retry counters for '{name}' ({cleared} rows)");
                 }
             }
             else
@@ -198,22 +328,41 @@ public static class Commands
             Out.WriteLine("no repos matched");
             return GiveUp(0, "no_repos_matched");
         }
+        string? TriggerOf(Project p)
+        {
+            if (triggers is not { Count: > 0 }) return null;
+            if (triggers.Count == 1 || only is null || only.Count != triggers.Count) return triggers[0];
+            for (int i = 0; i < only.Count; i++)
+                if (string.Equals(only[i], p.PathWithNamespace, StringComparison.OrdinalIgnoreCase)) return triggers[i];
+            return triggers[0];
+        }
         AuditLog.IndexStart(cfg.Index.Branches, allowPartial, projects.Count);
-        Progress.Pass(projects.Count);
+        Progress.Pass([.. projects.Select(p => p.PathWithNamespace)]);
         var runStarted = NowF();
+        // A run is known by when it started, in milliseconds.
+        var run = (long)(runStarted * 1000);
+        var perPass = EmbedPerPass();
+        long budget = perPass > 0 ? perPass : long.MaxValue;
+        string? embedProblem = null;
         bool anyUnhealthy = false;
-        int failed = 0, upToDate = 0, empty = 0, position = 0;
+        int failed = 0, upToDate = 0, empty = 0, position = 0, embedded = 0;
         foreach (var project in projects)
         {
             position++;
+            var path = project.PathWithNamespace;
+            var log = new RepoLog(conn, project.GitlabId, run);
+            var repoStarted = NowF();
+            log.Say($"Run started {StartedBy(TriggerOf(project), ScheduleOf(project))}.");
+            Progress.Fetching(position, path);
             string mirrorDir;
             List<string> branches;
             try
             {
                 mirrorDir = Mirror.EnsureMirror(cfg.Index, project, project.HttpUrl, Credentials.GitPassword(cfg.GitLab), cfg.GitLab);
                 // The operator's branch patterns for every repository, and the admin's for this one.
-                IReadOnlyList<string> patterns = [.. cfg.Index.Branches, .. Choices.Find(conn, project.GitlabId)?.Branches ?? []];
+                IReadOnlyList<string> patterns = [.. cfg.Index.Branches, .. choices.GetValueOrDefault(project.GitlabId)?.Branches ?? []];
                 branches = Mirror.SelectBranches(Mirror.ListBranches(mirrorDir), patterns, project.DefaultBranch);
+                log.Say($"Fetched from GitLab ({RepoLog.Took(NowF() - repoStarted)}): {RepoLog.Count(branches.Count, "branch", "branches")} to index.");
             }
             catch (GitError exc)
             {
@@ -225,6 +374,10 @@ public static class Commands
                 failed++;
                 AuditLog.IndexRepo(project.PathWithNamespace, project.DefaultBranch, "mirror_failed", error: exc.Message);
                 Progress.BranchDone(project.PathWithNamespace, project.DefaultBranch, "failed");
+                log.Fail($"Could not fetch it from GitLab: {exc.Message}. Check that Argus's GitLab account can read this repository and that GitLab answers " +
+                         $"at {cfg.GitLab.Redacted()}; the next run tries again.");
+                Progress.RepoDone(path, "failed", $"Could not fetch it from GitLab: {exc.Message}");
+                RepoLog.Trim(conn, project.GitlabId);
                 continue;
             }
             if (branches.Count == 0)
@@ -232,18 +385,42 @@ public static class Commands
                 Out.WriteLine($"{project.PathWithNamespace}: no branches (empty repository) -- nothing to index");
                 AuditLog.IndexRepo(project.PathWithNamespace, project.DefaultBranch, "no_branches");
                 Progress.BranchDone(project.PathWithNamespace, project.DefaultBranch, "empty");
+                log.Say("It has no branches yet (an empty repository): nothing to index.");
+                log.Quiet();
+                Progress.RepoDone(path, "ok", "Empty: nothing to index.");
+                RepoLog.Trim(conn, project.GitlabId);
                 empty++;
                 continue;
             }
+            var outcomes = new List<string>();
             foreach (var branch in branches)
             {
                 Progress.Branch(position, project.PathWithNamespace, branch);
-                var (unhealthy, outcome) = IndexBranch(conn, cfg, project, branch, mirrorDir);
+                var (unhealthy, outcome) = IndexBranch(conn, cfg, project, branch, mirrorDir, log);
+                outcomes.Add(outcome);
                 if (unhealthy) anyUnhealthy = true;
                 if (outcome == "failed") failed++;
                 else if (outcome == "up_to_date") upToDate++;
             }
-            PruneMissingBranches(conn, project, branches);
+            var pruned = PruneMissingBranches(conn, project, branches, log);
+            var embeddedHere = EmbedRepo(conn, project, log, ref budget, ref embedProblem);
+            embedded += embeddedHere;
+
+            var updated = outcomes.Count(o => o is "ok" or "timed_out" or "symbols_failed");
+            var summary = outcomes.All(o => o == "up_to_date")
+                ? $"already up to date ({RepoLog.Count(branches.Count, "branch", "branches")})"
+                : $"{RepoLog.Count(branches.Count, "branch", "branches")}, {updated:N0} updated" +
+                  (outcomes.Count(o => o == "failed") is var f and > 0 ? $", {f:N0} failed" : "");
+            var repoOutcome = outcomes.Contains("failed") || log.Worst == RepoLog.Error ? "failed"
+                : log.Worst == RepoLog.Warning ? "warning"
+                : outcomes.All(o => o == "up_to_date") ? "up_to_date" : "ok";
+            var sentence = $"Done in {RepoLog.Took(NowF() - repoStarted)}: {summary}" +
+                           (repoOutcome == "failed" ? "; see the errors above." : repoOutcome == "warning" ? "; see the warnings above." : ".");
+            log.Write(repoOutcome switch { "failed" => RepoLog.Error, "warning" => RepoLog.Warning, _ => RepoLog.Info }, sentence);
+            // A run that found nothing new: only the latest such run is kept, so real changes and failures stay in the log.
+            if (repoOutcome == "up_to_date" && pruned == 0 && embeddedHere == 0) log.Quiet();
+            Progress.RepoDone(path, repoOutcome, sentence);
+            RepoLog.Trim(conn, project.GitlabId);
         }
         Dictionary<string, long> counts;
         int edges;
@@ -264,8 +441,10 @@ public static class Commands
         Out.WriteLine($"repo graph: {edges} cross-repo edges");
         if (empty > 0)
             Out.WriteLine($"repos: {projects.Count} seen, {empty} empty (nothing to index), {projects.Count - empty} indexed");
+        // What the repositories of this run left waiting (and other repositories' backlog), with what is left of the share.
         Progress.Finishing("embeddings");
-        var embedded = EmbedAfterIndex(cfg, EmbedPerPass() is var limit && limit > 0 ? limit : null);
+        if (embedProblem is null && budget > 0)
+            embedded += EmbedAfterIndex(cfg, budget == long.MaxValue ? null : budget);
         var rc = anyUnhealthy ? 1 : 0;
         AuditLog.IndexEnd(rc, Ms(runStarted), projects.Count, failed, upToDate, empty: empty, embedded: embedded);
         return rc;
@@ -279,13 +458,17 @@ public static class Commands
         _ => exc.GetType().Name,
     };
 
-    public static int IndexRepeatedly(ArgusConfig cfg, string? only, bool resetRetries, bool allowPartial, int interval, int? maxPasses = null)
+    /// <summary>
+    /// A scheduled pass every <paramref name="interval"/> seconds, as ARGUS_INDEX_INTERVAL runs them: a
+    /// repository with a schedule of its own, or off, is left to it (Argus's scheduler, in the process that serves).
+    /// </summary>
+    public static int IndexRepeatedly(ArgusConfig cfg, IReadOnlyList<string>? only, bool resetRetries, bool allowPartial, int interval, int? maxPasses = null)
     {
         int last = 0, passes = 0;
         while (maxPasses is null || passes < maxPasses)
         {
             var sw = Stopwatch.StartNew();
-            try { last = Index(cfg, only, resetRetries, allowPartial); }
+            try { last = Index(cfg, only, resetRetries, allowPartial, scheduled: true, triggers: ["schedule"]); }
             catch (Exception exc) when (exc is GitLabError or GitError or IOException)
             {
                 Err.WriteLine($"indexing pass failed: {exc.Message}");
@@ -572,6 +755,11 @@ public static class Commands
         var address = host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
         var scheme = tls ? "https" : "http";
         app.Urls.Add($"{scheme}://{address}:{port}");
+        // The repositories' own schedules (every N hours, daily, weekly) run in the process that serves.
+        var jobs = app.Services.GetRequiredService<Jobs>();
+        if (Jobs.SchedulerEnabled()) jobs.StartRepoScheduler();
+        // The index of a repository left out before a restart, not yet removed.
+        jobs.RemoveLeftOut();
         Out.WriteLine($"argus serving the app on {scheme}://{address}:{port}/ and MCP on {scheme}://{address}:{port}/mcp");
         Out.Flush();
         app.Run();

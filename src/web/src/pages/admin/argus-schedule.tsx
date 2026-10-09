@@ -48,7 +48,8 @@ function ScheduleForm({ saved, onSaved }: { saved: IndexSchedule; onSaved: () =>
       <CardHeader>
         <CardTitle>Schedule</CardTitle>
         <CardDescription>
-          When the index is brought up to date by itself. Each pass reads only what changed since the commit indexed last, for every chosen repository and branch.
+          When the index is brought up to date by itself. Each pass reads only what changed since the commit indexed last, for every chosen repository and branch that goes with
+          the passes; one with a schedule of its own (Repositories below) is left to it.
           {saved.nextRuns.length > 0 && ` Next: ${saved.nextRuns.map(when).join(' · ')} (${saved.timeZone}).`}
         </CardDescription>
       </CardHeader>

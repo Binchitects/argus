@@ -16,8 +16,9 @@ public sealed class ArgusIndexOptions
 /// <summary>
 /// Starts an Argus index pass on the schedule admins set under Indexing (checked every
 /// 30 seconds). A pass already running when one is due is left to finish: the next time
-/// comes round. Each pass is incremental (only what changed since the last commit indexed).
-/// With several replicas, only the one that leads starts it.
+/// comes round. Each pass is incremental (only what changed since the last commit indexed),
+/// and covers the repositories that go with the passes: Argus's own scheduler runs one with a
+/// schedule of its own. With several replicas, only the one that leads starts it.
 /// </summary>
 public sealed partial class ArgusIndexSchedule(IServiceScopeFactory scopes, IOptionsMonitor<ArgusIndexOptions> options, TimeProvider clock,
     Replicas replicas, ILogger<ArgusIndexSchedule> logger) : BackgroundService

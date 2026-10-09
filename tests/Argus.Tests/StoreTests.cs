@@ -14,7 +14,34 @@ public class StoreTests
         var version = Convert.ToInt32(Sql.Scalar(ix.Conn, "PRAGMA user_version"));
         Assert.Equal(Db.Migrations[^1].Version, version);
         Assert.Equal(version, Db.Migrate(ix.Conn));
-        Assert.Equal(16, Db.Migrations.Count);
+        Assert.Equal(18, Db.Migrations.Count);
+    }
+
+    [Fact]
+    public void A_repository_left_out_is_removed_a_few_files_at_a_time_with_everything_that_hangs_on_them()
+    {
+        using var ix = new TestIndex();
+        long Count(string sql, params object?[] args) => Convert.ToInt64(Sql.Scalar(ix.Conn, sql, args));
+        var main = ix.Repo(1, "g/big");
+        var dev = ix.Repo(1, "g/big", branch: "develop");
+        foreach (var row in new[] { main, dev })
+            for (int i = 0; i < 7; i++)
+                ix.Symbol(row, ix.File(row, $"src/f{i}.c", $"int BigThing{i}(void);\n"), $"BigThing{i}");
+        var other = ix.Repo(2, "g/other");
+        ix.Symbol(other, ix.File(other, "o.c", "int OtherThing(void);\n"), "OtherThing");
+        Writes.RecordError(ix.Conn, main, "src/f0.c", "read", "a test error", 1);
+
+        Assert.Equal(2, Choices.DropInSteps(ix.Conn, 1, filesPerStep: 3));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM repos WHERE gitlab_id = 1"));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM files WHERE repo_id IN (?, ?)", main, dev));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM symbols WHERE repo_id IN (?, ?)", main, dev));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM index_errors WHERE repo_id = ?", main));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM files_fts WHERE files_fts MATCH 'BigThing3'"));
+        Sql.Exec(ix.Conn, "INSERT INTO files_fts(files_fts) VALUES ('integrity-check')");
+        // Another repository is untouched.
+        Assert.Equal(1L, Count("SELECT COUNT(*) FROM files_fts WHERE files_fts MATCH 'OtherThing'"));
+        Assert.Single(Queries.FindSymbol([other], ix.Conn, "OtherThing"));
+        Assert.Equal(0, Choices.DropInSteps(ix.Conn, 1));
     }
 
     [Fact]
@@ -301,10 +328,13 @@ public class ChoicesTests
         Argus.Indexing.Progress.Write = lines.Add;
         try
         {
-            Argus.Indexing.Progress.Pass(2);
+            Argus.Indexing.Progress.Pass(["g/a", "g/b"]);
+            Argus.Indexing.Progress.Fetching(1, "g/a");
             Argus.Indexing.Progress.Branch(1, "g/a", "main");
             Argus.Indexing.Progress.Files("g/a", "main", 40, 160);
             Argus.Indexing.Progress.BranchDone("g/a", "main", "ok");
+            Argus.Indexing.Progress.RepoDone("g/a", "ok", "Done in 2.0 s: 1 branch, 1 updated.");
+            Argus.Indexing.Progress.Fetching(2, "g/b");
             Argus.Indexing.Progress.Branch(2, "g/b", "main");
             Argus.Indexing.Progress.Finishing("embeddings");
         }
@@ -324,5 +354,7 @@ public class ChoicesTests
         Assert.Equal("ok", p["outcomes"]!["g/a@main"]!.GetValue<string>());
         Assert.Equal("finishing", p["stage"]!.GetValue<string>());
         Assert.Equal("embeddings", p["what"]!.GetValue<string>());
+        Assert.Equal("done", p["by_repo"]!["g/a"]!["state"]!.GetValue<string>());
+        Assert.Equal("files", p["by_repo"]!["g/b"]!["state"]!.GetValue<string>());
     }
 }

@@ -124,6 +124,7 @@ export default async function globalSetup() {
   process.env.E2E_PACK = pack;
   process.env.E2E_PACK_SHA256 = createHash("sha256").update(readFileSync(pack)).digest("hex");
   process.env.E2E_GATEWAY_URL = gateway.url;
+  process.env.E2E_GITLAB_URL = gitlab.url;
   process.env.E2E_WORK = work;
 
   return async () => {

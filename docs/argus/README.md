@@ -486,15 +486,35 @@ staleness below the moment it finishes.
 With Argus's own timer, if the index is found stale or empty at startup the
 first pass runs after 30 seconds instead of waiting out a full interval.
 
+A repository can also have a schedule of its own (every N hours, daily, weekly,
+or off), run by Argus's own scheduler: see [Reindexing on a
+schedule](#reindexing-on-a-schedule).
+
 ### Choosing what is indexed
 
 **Admin → Indexing → Repositories** lists every repository the service account
-can see (each pass refreshes the list; **Refresh from GitLab** does at once):
+can see (each pass refreshes the list; **Refresh from GitLab** does at once). A
+standalone Argus has the same in its own app (**Repositories**) and its admin
+API (`/admin/repos`).
 
-- **Indexed** on or off per repository, or for several at once. Off takes it out
-  of the index at once, its files, symbols and text search with it (after the
-  pass running, if one is). **New repositories** says whether one GitLab lists for
-  the first time is indexed (by default, yes: as before).
+- **Finding them.** Search by name, path or group; narrow the list by state
+  (indexed, indexing, queued, failed, out of date, not indexed yet, left out,
+  and *not in GitLab* for one GitLab no longer lists), by group (its subgroups
+  too), by main language and by whether it is indexed. Each state shows its
+  count, and a click on it filters by it. Sort by name, by state (what needs a
+  look first) or by when it next runs.
+- **Several at once.** Tick some, or **Select all** that the search and filters
+  show, then **Update now**, **Index them**, **Leave them out**, **Schedule…**,
+  **Add branches…** or **Remove…**. Each asks first, then lists what came of
+  each repository in a sentence ("Updating now.", "Not indexed: choose it for
+  the index first."). Remove takes the index away and leaves the repository
+  out; one GitLab no longer lists is forgotten altogether. **Leave them out**
+  and **Remove…** answer at once: the indexes go in the background, one
+  repository at a time, and only once the run going ends when one is.
+- **Indexed** on or off per repository. Off takes it out of the index at once,
+  its files, symbols and text search with it (after the run going, if one is).
+  **New repositories** says whether one GitLab lists for the first time is
+  indexed (by default, yes: as before).
 - **Branches**: the default branch is always indexed; the dialog lists the
   repository's branches as GitLab has them, each with its latest commit, to tick
   more, and takes patterns (`release/*`) for branches to come. Each branch is an
@@ -504,16 +524,107 @@ can see (each pass refreshes the list; **Refresh from GitLab** does at once):
   subject line, when it was committed and last checked, its files and symbols,
   and whether it is current, out of date or failed.
 - **Update** brings one repository up to date from its latest commits now (only
-  what changed since the commit indexed is read again), or after the pass
-  running, queued like a push.
-- While a pass runs, **Index now** shows how far it is (a percentage over the
-  repositories, and of the one on now its changed files), and each repository's
-  row says **Indexing** with its percentage, or **Queued**. The index process
-  reports this as `@progress` lines on stdout, which the server keeps out of
-  the run log.
+  what changed since the commit indexed is read again), or after the run going.
 
-The choices live in the index database (`repo_choices`, migration 016), so a
-standalone Argus has them too (`/admin/repos`).
+The choices live in the index database (`repo_choices`), so a standalone Argus
+has them too. Its admin API, for scripts (the admin token, or an admin's session):
+
+| Call | What it does |
+|---|---|
+| `GET /admin/repos` | every repository: its state, live progress, schedule (with its next and last run), group, languages and indexed branches; the schedule for all and its time zone |
+| `POST /admin/repos/discover` | ask GitLab now; says how many were new and how many were found under a new id |
+| `PATCH /admin/repos/{id}` | `included`, `branches`, `schedule` (`""` follows the schedule for all) |
+| `POST /admin/repos/batch` | `{"ids": [...], "action": "include" \| "exclude" \| "reindex" \| "schedule" \| "add_branches" \| "remove", "schedule": ..., "branches": [...]}`; answers each repository's outcome |
+| `PUT /admin/repos/settings` | `new_repos` (`include` or `exclude`), `schedule` (the schedule for all), `schedule_tz` (an IANA zone) |
+| `GET /admin/repos/{id}/log?runs=5` | its last runs and as many of the changes admins made, oldest line first, and where the run going is with it |
+
+A schedule is written `pass`, `off`, `hours:6`, `daily:02:30` or `weekly:1:02:30`
+(the day from 1 for Monday to 7 for Sunday).
+
+### One repository, whatever token lists it
+
+A repository is its project in one GitLab: the id GitLab gives it, for as long
+as it is that project. Argus finds each project of a listing by that id when it
+is the same project (GitLab's creation time for it says so, or, before that is
+known, the same GitLab), and otherwise by its path, which GitLab compares
+without case. So:
+
+- **A new token, or another account,** sees the same projects under the same
+  ids: nothing changes.
+- **A GitLab set up anew** (a test instance brought up again, a server moved by
+  export and import) lists the same paths under new ids: each repository moves
+  to its new id with its choices, schedule, index and log, and nothing is read
+  again that has not changed. The mirrors under the old ids are removed.
+- **A renamed project** keeps its id, and its row takes the new name; a new
+  project at the old path is another repository.
+- **An id another GitLab gives to another project** never inherits an index:
+  the row there is set aside, kept as one GitLab no longer lists, until removed.
+
+Until v5.2.0 the id alone was the identity, so bringing Argus up again with
+another token on a GitLab set up anew made a second copy of every repository:
+the old one was never listed again, never updated, stale for good (its alert
+never cleared), and kept its whole index. Upgrading merges those copies once
+(migration 017): per path, the copy GitLab listed last is the repository; it
+is in the index when any copy was (a copy turned off only to hide the
+duplicate, or a new one the **New repositories** policy left out, never takes
+the other copy's index away), with the branches of every copy that was in; per
+branch the newest good index stays (indexed at a commit, most recently) and the
+other copies go with their files, symbols, vectors and text search; permissions
+cached per token are read again.
+
+### Reindexing on a schedule
+
+Each repository is brought up to date by itself on **the schedule for all**, or
+on one of its own (**Schedule…**, for one or many):
+
+| Schedule | What it does |
+|---|---|
+| With each scheduled pass | the default, as before: every pass the app's **Schedule** starts (every 15 minutes until changed), or `ARGUS_INDEX_INTERVAL` on a standalone Argus |
+| Every N hours (1 to 168) | N hours after its last check, whatever started that |
+| Every day at a time | at that time, in the time zone set with the schedule for all |
+| Once a week | on that day, at that time |
+| Off | only on a push or merge, and when someone asks |
+
+Argus's own scheduler, in the process that serves, looks every 30 seconds and
+starts the repositories that are due, together as one run; a scheduled pass
+(and each pass of `argus index --interval`) leaves a repository on its own
+schedule (or off) to it. A repository not indexed yet (new in GitLab, or chosen
+again after it was left out) runs at once, whatever its schedule, and its
+schedule counts from then; one GitLab no longer lists is not run by its
+schedule, as it cannot be fetched. A time that went by while Argus was down
+runs once when it is back, not once per time missed. The list shows each one's
+schedule, when it next runs and when it last ran.
+Staleness, and the `ArgusIndexStale` alert, allow for the schedule: a
+repository updated daily is not stale an hour after its run, and one that is
+off is never stale by age. `ARGUS_INDEX_SCHEDULER=off` stops the scheduler (an
+Argus that only serves).
+
+No repository is ever indexed twice at once: there is one index run at a time,
+and a repository asked for while one goes (a push, an **Update**, its schedule)
+waits, once however often asked, and everything that waited runs together as one
+run when it ends.
+
+### Where a run is, and each repository's log
+
+While a run goes, each repository's row says where it is: **queued**, fetching
+from GitLab, reading files on a branch (*x of y*, with a bar), reading symbols,
+embedding its new symbols for meaning search (*x of y*), then done, or failed
+with why. **Index now** keeps the run as a whole: a percentage over the
+repositories and the run log. The index process reports this as `@progress`
+lines on stdout, which the server keeps out of the run log.
+
+Each repository keeps a log (**Log**, `GET /admin/repos/{id}/log`) of its last
+20 runs that did something (read files, failed or warned), the latest run that
+found nothing new (so a day of passes with nothing new never pushes a morning's
+failure out), and, apart, the last 20 changes admins made. One sentence a line,
+with its time, saying who started the run, how long the fetch took, what each
+branch read ("main: at 1a2b3c4d ("Fix the decoder"), 14 files changed since
+9f8e7d6c: 12 indexed, 2 skipped … (8.1 s)"), what it embedded, how it ended,
+and what admins changed. Warnings
+and errors say what to do: a file that could not be read is tried again up to
+three times, a repository that ran out of time goes on where it stopped next
+time (or raise `index.repo_time_budget_seconds`), a fetch GitLab refused means
+the account cannot read it.
 
 ### Indexing on push and merge
 
@@ -555,15 +666,13 @@ Leaking it lets somebody cause an index pass; leaking the admin token lets them
 read the estate. A standalone Argus can still take it from
 `ARGUS_WEBHOOK_TOKEN`; the environment's value then wins, and the page says so.
 
-A push that arrives while a pass is running is **queued**, not dropped — on a
+A push that arrives while a run is going is **queued**, not dropped — on a
 busy estate that is the normal case, and dropping it would mean the change waits
 for the next poll, which is exactly the latency the webhook exists to remove.
-The queue drains one repository per finished pass, so the passes never contend
-for the same SQLite write lock, and the same repository asked for twice is
-queued once. Past 25 queued repositories the backlog collapses into a single
-full pass, because indexing everything once is cheaper than working through the
-list. The Indexing page shows the queue, and each pass says whether a person,
-the schedule or a webhook started it.
+Everything queued runs together as one run when the run going ends, so runs
+never contend for the same SQLite write lock, and the same repository asked for
+twice is queued once. The Indexing page shows the queue, and each run (and each
+repository's log) says whether a person, a schedule or a webhook started it.
 
 Deliveries Argus has no use for are still **acknowledged** — a tag push, an
 issue, a branch deletion, a merge request not yet merged. GitLab treats a non-2xx as a failed delivery, retries

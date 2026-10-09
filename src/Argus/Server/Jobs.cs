@@ -3,28 +3,36 @@ using System.Text.Json.Nodes;
 using Argus.Access;
 using Argus.Configuration;
 using Argus.Packs;
+using Argus.Store;
 using Argus.Util;
 
 namespace Argus.Server;
 
 /// <summary>
 /// Background work the server runs on the operator's behalf: one index run at
-/// a time as a child `argus index`
-/// process, webhook pushes queued behind it, the interval scheduler, and pack
-/// install/update/remove.
+/// a time as a child `argus index` process, repositories queued behind it (pushes,
+/// an admin's Update, their schedules) and run together when it ends, the pass
+/// timer, the repositories' own schedules, removing the index of repositories
+/// left out, and pack install/update/remove.
 /// </summary>
 public sealed class Jobs(ArgusConfig cfg)
 {
     public const int DefaultIndexInterval = 0;
     public const int FirstPassGrace = 30;
+    /// <summary>How often the repositories' own schedules are looked at, in seconds.</summary>
+    public const int ScheduleTick = 30;
+    /// <summary>Repositories that may wait behind a run; more are refused (each is run once, however often asked).</summary>
+    public const int QueueLimit = 5000;
 
     readonly Lock _indexLock = new();
     readonly JsonObject _index = new()
     {
         ["state"] = "idle", ["branches"] = new JsonArray(), ["started"] = null, ["finished"] = null,
-        ["returncode"] = null, ["tail"] = new JsonArray(), ["trigger"] = null, ["pending"] = new JsonArray(), ["pending_full"] = false,
-        ["progress"] = null,
+        ["returncode"] = null, ["tail"] = new JsonArray(), ["trigger"] = null, ["pending"] = new JsonArray(),
+        ["progress"] = null, ["repos"] = null,
     };
+    /// <summary>Who asked for each waiting repository: webhook, manual, repo-schedule.</summary>
+    readonly Dictionary<string, string> _pendingTriggers = new(StringComparer.Ordinal);
 
     readonly Lock _packLock = new();
     readonly JsonObject _pack = new()
@@ -38,6 +46,10 @@ public sealed class Jobs(ArgusConfig cfg)
     public static int IndexInterval() =>
         int.TryParse(Environment.GetEnvironmentVariable("ARGUS_INDEX_INTERVAL"), out var v) ? v : DefaultIndexInterval;
 
+    /// <summary>ARGUS_INDEX_SCHEDULER=off: the repositories' own schedules are not run (tests, or an Argus that only serves).</summary>
+    public static bool SchedulerEnabled() =>
+        !string.Equals((Environment.GetEnvironmentVariable("ARGUS_INDEX_SCHEDULER") ?? "").Trim(), "off", StringComparison.OrdinalIgnoreCase);
+
     public static string PackIndexUrl() => (Environment.GetEnvironmentVariable("ARGUS_PACK_INDEX_URL") ?? "").Trim();
 
     string CfgPath => cfg.SourcePath ?? Environment.GetEnvironmentVariable("ARGUS_CONFIG") ?? "/etc/argus/config.yaml";
@@ -45,74 +57,135 @@ public sealed class Jobs(ArgusConfig cfg)
     public JsonObject IndexJobSnapshot() { lock (_indexLock) return (JsonObject)_index.DeepClone(); }
     public JsonNode? IndexStarted() { lock (_indexLock) return _index["started"]?.DeepClone(); }
 
+    /// <summary>When the pass timer (ARGUS_INDEX_INTERVAL) starts its next pass; null when it is off.</summary>
+    public double? NextPassAt { get; private set; }
+
     static JsonArray Strings(IEnumerable<string> items) => new(items.Select(s => (JsonNode?)s).ToArray());
 
-    void MarkRunning(IEnumerable<string> branches, bool allowPartial, string trigger)
+    /// <param name="repos">The repositories of the run; null: every one chosen (or, scheduled, every one that goes with the passes).</param>
+    void MarkRunning(IEnumerable<string> branches, bool allowPartial, string trigger, IReadOnlyList<string>? repos)
     {
         _index["state"] = "running";
         _index["branches"] = Strings(branches);
         _index["allow_partial"] = allowPartial;
         _index["trigger"] = trigger;
+        _index["repos"] = repos is null ? null : Strings(repos);
         _index["started"] = Now();
         _index["finished"] = null;
         _index["returncode"] = null;
         _index["tail"] = new JsonArray();
-        _index["progress"] = new JsonObject { ["repos"] = 0, ["position"] = 0, ["stage"] = "starting", ["outcomes"] = new JsonObject() };
+        var byRepo = new JsonObject();
+        foreach (var r in repos ?? []) byRepo[r] = new JsonObject { ["state"] = "queued" };
+        _index["progress"] = new JsonObject
+        {
+            ["repos"] = repos?.Count ?? 0, ["position"] = 0, ["stage"] = "starting", ["outcomes"] = new JsonObject(), ["by_repo"] = byRepo,
+        };
     }
 
     bool Running => _index["state"]?.ToString() == "running";
 
     /// <summary>
-    /// A step the index process reported (Indexing.Progress): the pass's size, the branch
-    /// it is on and how many of its files are done, each branch's outcome, the last steps.
+    /// A step the index process reported (Indexing.Progress): the pass's size, the repository
+    /// and branch it is on and how far, each branch's and repository's outcome.
     /// </summary>
     void OnProgress(string json)
     {
         JsonObject? step;
         try { step = JsonNode.Parse(json) as JsonObject; }
         catch (System.Text.Json.JsonException) { return; }
-        if (step is not null && _index["progress"] is JsonObject p) Step(p, step);
+        if (step is not null && _index["progress"] is JsonObject p) Step(p, step, Now());
     }
 
-    /// <summary>One reported step folded into the run's progress.</summary>
-    public static void Step(JsonObject p, JsonObject step)
+    /// <summary>
+    /// One reported step folded into the run's progress: the pass as a whole (repos, position,
+    /// repo, branch, done, total, stage) and each repository in it (by_repo: its state, branch,
+    /// done of total, when it started and finished, and how it ended).
+    /// </summary>
+    public static void Step(JsonObject p, JsonObject step, double now = 0)
     {
         var stage = step["stage"]?.ToString();
+        var name = step["repo"]?.ToString();
+        if (p["by_repo"] is not JsonObject byRepo) p["by_repo"] = byRepo = new JsonObject();
+        JsonObject Repo()
+        {
+            if (byRepo[name!] is JsonObject r) return r;
+            var made = new JsonObject { ["state"] = "queued" };
+            byRepo[name!] = made;
+            return made;
+        }
+        void Set(JsonObject r, string state, JsonNode? done = null, JsonNode? total = null)
+        {
+            r["state"] = state;
+            r["done"] = done?.DeepClone();
+            r["total"] = total?.DeepClone();
+        }
         switch (stage)
         {
             case "pass":
                 p["repos"] = step["repos"]?.DeepClone();
+                foreach (var n in (step["names"] as JsonArray ?? []).Select(n => n?.ToString()).OfType<string>())
+                    if (byRepo[n] is null) byRepo[n] = new JsonObject { ["state"] = "queued" };
                 break;
-            case "branch":
+            case "fetching" when name is not null:
                 p["position"] = step["position"]?.DeepClone();
-                p["repo"] = step["repo"]?.DeepClone();
+                p["repo"] = name;
+                p["branch"] = null;
+                p["done"] = 0;
+                p["total"] = null;
+                var started = Repo();
+                Set(started, "fetching");
+                started["branch"] = null;
+                started["started"] = now;
+                break;
+            case "branch" when name is not null:
+                p["position"] = step["position"]?.DeepClone();
+                p["repo"] = name;
                 p["branch"] = step["branch"]?.DeepClone();
                 p["done"] = 0;
                 p["total"] = null;
+                var onBranch = Repo();
+                Set(onBranch, "files", JsonValue.Create(0));
+                onBranch["branch"] = step["branch"]?.DeepClone();
+                onBranch["started"] ??= now;
                 break;
-            case "files":
+            case "files" when name is not null:
                 p["done"] = step["done"]?.DeepClone();
                 p["total"] = step["total"]?.DeepClone();
+                Set(Repo(), "files", step["done"], step["total"]);
                 break;
-            case "branch_done":
-                if (p["outcomes"] is JsonObject outcomes) outcomes[$"{step["repo"]}@{step["branch"]}"] = step["outcome"]?.DeepClone();
+            case "symbols" when name is not null:
+                Set(Repo(), "symbols", null, step["total"]);
+                break;
+            case "branch_done" when name is not null:
+                if (p["outcomes"] is JsonObject outcomes) outcomes[$"{name}@{step["branch"]}"] = step["outcome"]?.DeepClone();
+                break;
+            case "embedding" when name is not null:
+                Set(Repo(), "embedding", step["done"], step["total"]);
+                break;
+            case "repo_done" when name is not null:
+                var ended = Repo();
+                var outcome = step["outcome"]?.ToString();
+                Set(ended, outcome == "failed" ? "failed" : "done");
+                ended["outcome"] = outcome;
+                ended["message"] = step["message"]?.DeepClone();
+                ended["finished"] = now;
                 break;
             case "finishing":
                 p["what"] = step["what"]?.DeepClone();
                 break;
         }
-        p["stage"] = stage;
+        if (stage is "pass" or "fetching" or "branch" or "files" or "branch_done" or "finishing") p["stage"] = stage;
     }
 
-    /// <param name="trigger">manual, schedule (the app's), webhook: shown with the run.</param>
+    /// <param name="trigger">manual, schedule (the app's or the pass timer: only the repositories that go with the passes), webhook: shown with the run.</param>
     public bool StartIndex(IReadOnlyList<string> branches, bool allowPartial, string trigger)
     {
         lock (_indexLock)
         {
             if (Running) return false;
-            MarkRunning(branches, allowPartial, trigger);
+            MarkRunning(branches, allowPartial, trigger, null);
         }
-        new Thread(() => RunIndex(branches, allowPartial, null)) { IsBackground = true, Name = "argus-index" }.Start();
+        new Thread(() => RunIndex(branches, allowPartial, null, trigger == "schedule", trigger, null)) { IsBackground = true, Name = "argus-index" }.Start();
         return true;
     }
 
@@ -137,12 +210,59 @@ public sealed class Jobs(ArgusConfig cfg)
             AuditLog.IndexScheduled(interval, delay, fresh ? null : "the index is not current");
             while (true)
             {
+                NextPassAt = Now() + delay;
                 Thread.Sleep(TimeSpan.FromSeconds(delay));
                 delay = interval;
                 if (!StartIndex([], false, "schedule"))
                     AuditLog.IndexScheduled(interval, skipped: "a run is already in progress");
             }
         }) { IsBackground = true, Name = "argus-scheduler" }.Start();
+    }
+
+    /// <summary>Runs each repository's own schedule (every N hours, daily, weekly): looked at every <see cref="ScheduleTick"/> seconds.</summary>
+    public void StartRepoScheduler()
+    {
+        new Thread(() =>
+        {
+            while (true)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(ScheduleTick));
+                try { RunDue(DateTimeOffset.UtcNow.ToUnixTimeSeconds()); }
+                catch (Exception exc) { Console.Error.WriteLine($"the repositories' schedules could not be run: {exc.GetType().Name}: {exc.Message}"); }
+            }
+        }) { IsBackground = true, Name = "argus-repo-scheduler" }.Start();
+    }
+
+    /// <summary>
+    /// Starts, or queues behind the run going, every repository whose schedule is due. One being
+    /// indexed or waiting already is not asked for twice: its schedule counts from now.
+    /// </summary>
+    public IReadOnlyList<string> RunDue(long now)
+    {
+        List<RepoChoice> due;
+        using (var conn = Db.Open(cfg.Index.DbPath))
+        {
+            due = Choices.Due(conn, now);
+            if (due.Count == 0) return [];
+            Choices.MarkScheduled(conn, [.. due.Select(c => c.GitlabId)], now);
+        }
+        var busy = Busy();
+        var start = due.Select(c => c.Path).Where(p => !busy.Contains(p)).ToList();
+        if (start.Count > 0) EnqueueRepos(start, "repo-schedule");
+        return start;
+    }
+
+    /// <summary>The repositories being indexed now (the run's own, still to come) or waiting for their turn.</summary>
+    HashSet<string> Busy()
+    {
+        lock (_indexLock)
+        {
+            var busy = (_index["pending"] as JsonArray ?? []).Select(n => n!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+            if (Running && (_index["progress"] as JsonObject)?["by_repo"] is JsonObject byRepo)
+                foreach (var (name, state) in byRepo)
+                    if (state?["state"]?.ToString() is not ("done" or "failed")) busy.Add(name);
+            return busy;
+        }
     }
 
     /// <summary>How to launch this same program as a child: the apphost, or `dotnet argus.dll`.</summary>
@@ -155,19 +275,48 @@ public sealed class Jobs(ArgusConfig cfg)
         return [exe];
     }
 
-    void RunIndex(IReadOnlyList<string> branches, bool allowPartial, string? only)
+    /// <summary>The child's command line: a pass, or these repositories, each with who asked for it.</summary>
+    public List<string> IndexCommand(IReadOnlyList<string> branches, bool allowPartial, IReadOnlyList<string>? only, bool scheduled, string trigger,
+        IReadOnlyDictionary<string, string>? triggers)
     {
         var argv = SelfCommand();
         argv.AddRange(["index", "--config", CfgPath]);
         foreach (var b in branches) argv.AddRange(["--branch", b]);
-        if (only is not null) argv.AddRange(["--repo", only]);
+        foreach (var r in only ?? []) argv.AddRange(["--repo", r]);
+        if (only is { Count: > 0 } && triggers is not null)
+            foreach (var r in only) argv.AddRange(["--trigger", triggers.GetValueOrDefault(r, trigger)]);
+        else argv.AddRange(["--trigger", trigger]);
+        if (scheduled) argv.Add("--scheduled");
         if (allowPartial) argv.Add("--allow-partial-enumeration");
+        return argv;
+    }
+
+    /// <summary>Tests run the child here instead: its command line, and where its output lines go; the exit code back.</summary>
+    public Func<IReadOnlyList<string>, Action<string?>, int>? Runner { get; set; }
+
+    static int RunChild(IReadOnlyList<string> argv, Action<string?> onLine)
+    {
+        var psi = new ProcessStartInfo(argv[0]) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var a in argv.Skip(1)) psi.ArgumentList.Add(a);
+        using var proc = Process.Start(psi)!;
+        proc.OutputDataReceived += (_, e) => onLine(e.Data);
+        proc.ErrorDataReceived += (_, e) => onLine(e.Data);
+        proc.BeginOutputReadLine();
+        proc.BeginErrorReadLine();
+        proc.WaitForExit();
+        return proc.ExitCode;
+    }
+
+    void RunIndex(IReadOnlyList<string> branches, bool allowPartial, IReadOnlyList<string>? only, bool scheduled, string trigger,
+        IReadOnlyDictionary<string, string>? triggers)
+    {
+        var argv = IndexCommand(branches, allowPartial, only, scheduled, trigger, triggers);
+        // An index being removed finishes first: the run never waits on its write lock. (The run is
+        // marked as going, so no other removal starts.)
+        lock (_dropping) { }
         int rc;
         try
         {
-            var psi = new ProcessStartInfo(argv[0]) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-            foreach (var a in argv.Skip(1)) psi.ArgumentList.Add(a);
-            using var proc = Process.Start(psi)!;
             var tail = new List<string>();
             void OnLine(string? line)
             {
@@ -187,12 +336,7 @@ public sealed class Jobs(ArgusConfig cfg)
                 Console.Out.WriteLine(clean);
                 Console.Out.Flush();
             }
-            proc.OutputDataReceived += (_, e) => OnLine(e.Data);
-            proc.ErrorDataReceived += (_, e) => OnLine(e.Data);
-            proc.BeginOutputReadLine();
-            proc.BeginErrorReadLine();
-            proc.WaitForExit();
-            rc = proc.ExitCode;
+            rc = (Runner ?? RunChild)(argv, OnLine);
         }
         catch (Exception exc)
         {
@@ -204,63 +348,168 @@ public sealed class Jobs(ArgusConfig cfg)
             _index["state"] = "idle";
             _index["finished"] = Now();
             _index["returncode"] = rc;
+            // A repository the run never reached (it stopped early): no longer "queued".
+            if ((_index["progress"] as JsonObject)?["by_repo"] is JsonObject byRepo)
+                foreach (var (_, state) in byRepo)
+                    if (state is JsonObject s && s["state"]?.ToString() is not ("done" or "failed"))
+                    {
+                        s["state"] = "failed";
+                        s["outcome"] = "failed";
+                        s["message"] ??= rc == 0 ? "The run ended before it." : $"The run stopped before it (exit {rc}): the run log says why.";
+                    }
         }
+        // What was left out while it ran leaves the index now.
+        RemoveLeftOut();
         DrainPending();
     }
 
+    /// <summary>Everything that waited for the run that just ended, as one run.</summary>
     void DrainPending()
     {
-        string? only;
-        int remaining;
+        List<string> only;
+        Dictionary<string, string> triggers;
+        string trigger;
         lock (_indexLock)
         {
             if (Running) return;
-            bool full = _index["pending_full"]?.GetValue<bool>() ?? false;
-            var pending = (_index["pending"] as JsonArray ?? []).Select(n => n!.GetValue<string>()).ToList();
-            if (!full && pending.Count == 0) return;
+            only = (_index["pending"] as JsonArray ?? []).Select(n => n!.GetValue<string>()).ToList();
+            if (only.Count == 0) return;
+            triggers = new Dictionary<string, string>(_pendingTriggers, StringComparer.Ordinal);
             _index["pending"] = new JsonArray();
-            _index["pending_full"] = false;
-            only = null;
-            if (!full) { only = pending[0]; pending.RemoveAt(0); }
-            if (pending.Count > 0) _index["pending"] = Strings(pending);
-            remaining = pending.Count;
-            MarkRunning([], false, _index["pending_trigger"]?.ToString() ?? "webhook");
+            _pendingTriggers.Clear();
+            trigger = triggers.Values.Distinct().Count() == 1 ? triggers.Values.First() : "queued";
+            MarkRunning([], false, trigger, only);
         }
-        AuditLog.IndexWebhook(only ?? "*", queued: remaining);
-        new Thread(() => RunIndex([], false, only)) { IsBackground = true, Name = "argus-index" }.Start();
+        AuditLog.IndexWebhook(only.Count == 1 ? only[0] : $"{only.Count} repositories", started: true);
+        new Thread(() => RunIndex([], false, only, false, trigger, triggers)) { IsBackground = true, Name = "argus-index" }.Start();
     }
 
-    /// <summary>A push arrived: start it, queue it behind the running pass, or collapse an overfull queue.</summary>
+    /// <summary>A push arrived: start it, or queue it behind the running pass.</summary>
     public JsonObject EnqueueWebhook(string repo) => EnqueueRepo(repo, "webhook");
 
     /// <summary>One repository to bring up to date (a push, or an admin's Update): started now, or queued behind the running pass.</summary>
     public JsonObject EnqueueRepo(string repo, string trigger)
     {
+        var outcome = EnqueueRepos([repo], trigger);
+        var status = outcome[repo] ?? "queued";
+        int queued;
+        lock (_indexLock) queued = (_index["pending"] as JsonArray)?.Count ?? 0;
+        return new JsonObject { ["status"] = status, ["repo"] = repo, ["queued"] = status == "started" ? 0 : queued };
+    }
+
+    /// <summary>
+    /// Repositories to bring up to date: started now as one run, or queued behind the run going
+    /// (all that wait run together when it ends). Each one's outcome: started, queued,
+    /// already_queued, or refused (the queue is full).
+    /// </summary>
+    public Dictionary<string, string> EnqueueRepos(IReadOnlyList<string> repos, string trigger)
+    {
+        var outcome = new Dictionary<string, string>(StringComparer.Ordinal);
+        var distinct = repos.Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList();
         lock (_indexLock)
         {
             if (Running)
             {
                 var pending = (_index["pending"] as JsonArray ?? []).Select(n => n!.GetValue<string>()).ToList();
-                if (pending.Contains(repo))
-                    return new JsonObject { ["status"] = "already_queued", ["repo"] = repo, ["queued"] = pending.Count };
-                pending.Add(repo);
-                if (pending.Count > ArgusServer.WebhookQueueLimit)
+                foreach (var repo in distinct)
                 {
-                    _index["pending"] = new JsonArray();
-                    _index["pending_full"] = true;
-                    AuditLog.IndexWebhook(repo, collapsed: pending.Count);
-                    return new JsonObject { ["status"] = "collapsed_to_full_pass", ["repo"] = repo, ["queued"] = 0 };
+                    if (pending.Contains(repo)) { outcome[repo] = "already_queued"; continue; }
+                    if (pending.Count >= QueueLimit) { outcome[repo] = "refused"; continue; }
+                    pending.Add(repo);
+                    _pendingTriggers[repo] = trigger;
+                    outcome[repo] = "queued";
+                    AuditLog.IndexWebhook(repo, queued: pending.Count);
                 }
                 _index["pending"] = Strings(pending);
-                _index["pending_trigger"] = trigger;
-                AuditLog.IndexWebhook(repo, queued: pending.Count);
-                return new JsonObject { ["status"] = "queued", ["repo"] = repo, ["queued"] = pending.Count };
+                return outcome;
             }
-            MarkRunning([], false, trigger);
+            if (distinct.Count == 0) return outcome;
+            MarkRunning([], false, trigger, distinct);
         }
-        AuditLog.IndexWebhook(repo, started: true);
-        new Thread(() => RunIndex([], false, repo)) { IsBackground = true, Name = "argus-index" }.Start();
-        return new JsonObject { ["status"] = "started", ["repo"] = repo, ["queued"] = 0 };
+        foreach (var repo in distinct) outcome[repo] = "started";
+        AuditLog.IndexWebhook(distinct.Count == 1 ? distinct[0] : $"{distinct.Count} repositories", started: true);
+        new Thread(() => RunIndex([], false, distinct, false, trigger, null)) { IsBackground = true, Name = "argus-index" }.Start();
+        return outcome;
+    }
+
+    // --- removals -------------------------------------------------------------------------
+
+    /// <summary>Held while one repository's index is removed: a run starts only once it is gone.</summary>
+    readonly Lock _dropping = new();
+    readonly Lock _removalLock = new();
+    /// <summary>Repositories GitLab no longer lists that an admin removed: forgotten once their index is gone.</summary>
+    readonly HashSet<long> _forget = [];
+    readonly AutoResetEvent _removalsWanted = new(false);
+    bool _removerStarted;
+
+    /// <summary>
+    /// Removes the index of every repository left out of it, in the background: one repository at a
+    /// time, never while a run writes (then when it ends). A batch of hundreds answers at once rather
+    /// than waiting for every file, symbol and vector to go. <paramref name="forget"/>: repositories
+    /// GitLab no longer lists, whose row and log go too once their index is gone.
+    /// </summary>
+    public void RemoveLeftOut(IEnumerable<long>? forget = null)
+    {
+        lock (_removalLock)
+        {
+            foreach (var id in forget ?? []) _forget.Add(id);
+            if (!_removerStarted)
+            {
+                _removerStarted = true;
+                new Thread(() =>
+                {
+                    while (true)
+                    {
+                        _removalsWanted.WaitOne();
+                        try { RemoveLeftOutNow(); }
+                        catch (Exception exc) { Console.Error.WriteLine($"the index of repositories left out could not be removed: {exc.GetType().Name}: {exc.Message}"); }
+                    }
+                }) { IsBackground = true, Name = "argus-removals" }.Start();
+            }
+        }
+        _removalsWanted.Set();
+    }
+
+    /// <summary>
+    /// The removals themselves: each repository left out that still has an index, until none is left
+    /// or a run starts (its end calls again); then the ones to forget. How many repositories' indexes went.
+    /// </summary>
+    public int RemoveLeftOutNow()
+    {
+        var removed = 0;
+        // No index yet: nothing to remove (and none is made here).
+        if (!File.Exists(cfg.Index.DbPath)) return removed;
+        using var conn = Db.Open(cfg.Index.DbPath);
+        bool Busy() { lock (_indexLock) return Running; }
+        while (true)
+        {
+            lock (_dropping)
+            {
+                if (Busy()) return removed;
+                if (Sql.Scalar(conn, "SELECT r.gitlab_id FROM repos r JOIN repo_choices c ON c.gitlab_id = r.gitlab_id WHERE c.included = 0 LIMIT 1") is not long id)
+                    break;
+                bool forgotten;
+                lock (_removalLock) forgotten = _forget.Contains(id);
+                Choices.DropInSteps(conn, id);
+                if (!forgotten) RepoLog.Note(conn, id, "Its files and symbols were removed from the index.");
+                removed++;
+            }
+        }
+        lock (_dropping)
+        {
+            if (Busy()) return removed;
+            List<long> forget;
+            lock (_removalLock)
+            {
+                forget = [.. _forget];
+                _forget.Clear();
+            }
+            var listedAt = Choices.ListedAt(conn);
+            // Unless an admin chose it again, or GitLab lists it again, meanwhile.
+            foreach (var id in forget)
+                if (Choices.Find(conn, id) is { Included: false } c && !Choices.Listed(c, listedAt)) Choices.Forget(conn, id);
+        }
+        return removed;
     }
 
     // --- packs ----------------------------------------------------------------------------

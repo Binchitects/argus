@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { passPercent, repoProgress, type IndexProgress } from './argus-progress'
+import { isWorking, passPercent, progressPercent, progressWords, type IndexProgress } from './argus-progress'
 
 const p = (over: Partial<IndexProgress>): IndexProgress => ({ repos: 4, position: 1, stage: 'branch', outcomes: {}, ...over })
 
@@ -11,12 +11,17 @@ describe("an index pass's progress", () => {
     expect(passPercent(p({ position: 4, stage: 'finishing' }))).toBe(99)
   })
 
-  it('says for each repository whether it is being indexed, queued or done', () => {
-    const now = p({ repo: 'g/a', branch: 'main', stage: 'files', done: 30, total: 120, outcomes: { 'g/b@main': 'ok' } })
-    expect(repoProgress('g/a', true, now, [])).toEqual({ state: 'indexing', branch: 'main', percent: 25 })
-    expect(repoProgress('g/b', true, now, [])).toEqual({ state: 'done' })
-    expect(repoProgress('g/c', true, now, ['g/c'])).toEqual({ state: 'queued' })
-    expect(repoProgress('g/d', true, now, [])).toBeNull()
-    expect(repoProgress('g/a', false, now, [])).toBeNull()
+  it('says for each repository where it is, in words, and how far its step is', () => {
+    expect(progressWords({ state: 'queued' })).toBe('Waiting for its turn')
+    expect(progressWords({ state: 'fetching' })).toBe('Fetching from GitLab…')
+    expect(progressWords({ state: 'files', branch: 'main', done: 30, total: 1200 })).toBe('Reading files on main: 30 of 1,200')
+    expect(progressPercent({ state: 'files', branch: 'main', done: 30, total: 120 })).toBe(25)
+    expect(progressWords({ state: 'symbols', branch: 'v2', total: 1 })).toBe('Reading symbols on v2 from 1 file…')
+    expect(progressPercent({ state: 'symbols', branch: 'v2', total: 1 })).toBeNull()
+    expect(progressWords({ state: 'embedding', done: 64, total: 200 })).toBe('Embedding for meaning search: 64 of 200')
+    expect(progressWords({ state: 'failed', message: 'Could not fetch it from GitLab: 403.' })).toBe('Could not fetch it from GitLab: 403.')
+    expect(isWorking({ state: 'symbols' })).toBe(true)
+    expect(isWorking({ state: 'queued' })).toBe(false)
+    expect(isWorking(null)).toBe(false)
   })
 })

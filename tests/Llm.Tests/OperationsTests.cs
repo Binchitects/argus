@@ -247,6 +247,37 @@ public sealed class OperationsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Repositories_are_changed_many_at_once_given_schedules_and_their_log_is_read()
+    {
+        var admin = await Admin();
+        var res = await admin.PostAsync("/api/admin/argus/repos/batch", new { ids = new[] { 7, 8 }, action = "schedule", schedule = " daily:02:30 " });
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        Assert.False((await admin.JsonAsync(res)).GetProperty("results")[1].GetProperty("ok").GetBoolean());
+        var call = app.Argus.Calls.Last(c => c.PathAndQuery == "/admin/repos/batch").Body!.Value;
+        Assert.Equal("schedule", call.GetProperty("action").GetString());
+        Assert.Equal([7L, 8L], call.GetProperty("ids").EnumerateArray().Select(i => i.GetInt64()));
+        Assert.Equal("daily:02:30", call.GetProperty("schedule").GetString());
+
+        // Back to the default for all; the default itself, in a time zone.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/argus/repos/7", UriKind.Relative), new { schedule = "" }));
+        Assert.Equal("", app.Argus.Calls.Last(c => c.PathAndQuery == "/admin/repos/7").Body!.Value.GetProperty("schedule").GetString());
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/argus/repos/settings", UriKind.Relative), new { schedule = "hours:6", timeZone = "Europe/Berlin" }));
+        var settings = app.Argus.Calls.Last(c => c.PathAndQuery == "/admin/repos/settings").Body!.Value;
+        Assert.Equal("hours:6", settings.GetProperty("schedule").GetString());
+        Assert.Equal("Europe/Berlin", settings.GetProperty("schedule_tz").GetString());
+        Assert.False(settings.TryGetProperty("new_repos", out _));
+
+        var log = await admin.JsonAsync(await admin.GetAsync("/api/admin/argus/repos/7/log?runs=50"));
+        Assert.Equal("Run started by an admin.", log.GetProperty("lines")[0].GetProperty("text").GetString());
+        Assert.Contains(app.Argus.Calls, c => c.PathAndQuery == "/admin/repos/7/log?runs=20");
+
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=20"))).EnumerateArray().ToList();
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "argus.repos_batch" && e.GetProperty("target").GetString() == "schedule"
+            && e.GetProperty("detail").GetString() == "1 of 2 repositories; schedule: daily:02:30");
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "argus.repo_choice" && e.GetProperty("detail").GetString() == "schedule: default");
+    }
+
+    [Fact]
     public async Task The_index_schedule_is_set_in_words_checked_and_shows_its_next_passes()
     {
         var admin = await Admin();

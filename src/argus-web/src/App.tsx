@@ -7,6 +7,7 @@ import Settings from "./pages/Settings";
 import Overview from "./pages/admin/Overview";
 import People from "./pages/admin/People";
 import Indexing from "./pages/admin/Indexing";
+import Repositories from "./pages/admin/Repositories";
 import Explore from "./pages/admin/Explore";
 import Packs from "./pages/admin/Packs";
 import HelpPage from "./components/Help";
@@ -34,6 +35,7 @@ const pages: Record<Exclude<ArgusRoute, "/login">, { element: ReactNode; admin?:
   "/manage": { element: <Overview />, admin: true },
   "/manage/people": { element: <People />, admin: true },
   "/manage/indexing": { element: <Indexing />, admin: true },
+  "/manage/repositories": { element: <Repositories />, admin: true },
   "/manage/explore": { element: <Explore />, admin: true },
   "/manage/packs": { element: <Packs />, admin: true },
 };

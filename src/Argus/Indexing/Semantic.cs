@@ -59,16 +59,16 @@ public static class Semantic
         return string.Join(" -- ", parts.Where(p => p.Length > 0));
     }
 
+    /// <param name="repoIds">Only these index rows' symbols (one repository's branches); null: every one.</param>
     public static int BuildSymbolEmbeddings(SqliteConnection conn, Func<IReadOnlyList<string>, List<double[]>>? embedFn = null,
-        long? limit = null, Action<int, int>? progress = null)
+        long? limit = null, Action<int, int>? progress = null, IReadOnlyList<long>? repoIds = null)
     {
         embedFn ??= texts => Embed.EmbedBatch(texts);
         var model = Embed.Model;
         var dim = Embed.Dim;
         EnsureVecTables(conn);
         PruneOrphans(conn);
-        var sql = Candidates + (limit is > 0 ? " LIMIT ?" : "");
-        object?[] args = limit is > 0 ? [model, (long)dim, EmbedTextVersion, limit.Value] : [model, (long)dim, EmbedTextVersion];
+        var (sql, args) = CandidatesFor(repoIds, limit);
         var rows = Sql.QueryList(conn, sql, args);
         if (rows.Count == 0) return 0;
 
@@ -100,6 +100,30 @@ public static class Semantic
             progress?.Invoke(done, rows.Count);
         }
         return done;
+    }
+
+    static (string Sql, object?[] Args) CandidatesFor(IReadOnlyList<long>? repoIds, long? limit)
+    {
+        var sql = Candidates;
+        var args = new List<object?> { Embed.Model, (long)Embed.Dim, EmbedTextVersion };
+        if (repoIds is not null)
+        {
+            sql += repoIds.Count == 0 ? " AND 0" : $" AND s.repo_id IN ({Sql.Marks(repoIds.Count)})";
+            args.AddRange(repoIds.Cast<object?>());
+        }
+        if (limit is > 0)
+        {
+            sql += " LIMIT ?";
+            args.Add(limit.Value);
+        }
+        return (sql, [.. args]);
+    }
+
+    /// <summary>How many symbols wait for a vector (of these index rows; of every one, for null).</summary>
+    public static long PendingCount(SqliteConnection conn, IReadOnlyList<long>? repoIds = null)
+    {
+        var (sql, args) = CandidatesFor(repoIds, null);
+        return Convert.ToInt64(Sql.Scalar(conn, $"SELECT COUNT(*) FROM ({sql})", args));
     }
 
     /// <summary>Drop vectors whose symbol row is gone (vec0 tables have no cascade).</summary>

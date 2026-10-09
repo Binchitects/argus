@@ -25,9 +25,11 @@ public static class Program
         "embed" => new ArgSpec($"{Prog} embed").Opt("--config", required: true)
             .Opt("--limit", "Embed at most this many symbols, then stop. For a first run on a large corpus, to see the rate before committing to hours."),
         "index" => new ArgSpec($"{Prog} index").Opt("--config", required: true)
-            .Opt("--repo", "Index only this path_with_namespace")
+            .Many("--repo", "Index only this path_with_namespace. Repeatable.")
+            .Flag("--scheduled", "A scheduled pass: only the repositories that go with the passes (not those on a schedule of their own, or off).")
+            .Many("--trigger", "Who asked, for each repository's log: manual, schedule, repo-schedule, webhook. Once for all, or once per --repo, in order.")
             .Flag("--allow-partial-enumeration", "Index even when the service token cannot see every repository.")
-            .Opt("--interval", "Keep running, starting a new pass every SECONDS.", metavar: "SECONDS")
+            .Opt("--interval", "Keep running: a scheduled pass every SECONDS (a repository on a schedule of its own, or off, is left to it).", metavar: "SECONDS")
             .Many("--branch", "Index this branch in every repo, in addition to each default branch. Repeatable, and a glob.", metavar: "GLOB")
             .Flag("--reset-retries", "Clear retry counters before indexing (manual recovery only; do not use on a schedule)"),
         "backup" => new ArgSpec($"{Prog} backup").Opt("--config", required: true).Opt("--out", "Directory to write the snapshot into", required: true),
@@ -196,8 +198,9 @@ public static class Program
                     if (a.List("branch") is { Count: > 0 } branches) cfg = cfg with { Index = cfg.Index with { Branches = branches } };
                     var interval = a.Int("interval") ?? 0;
                     if (interval > 0)
-                        return Cli.Commands.IndexRepeatedly(cfg, a.Get("repo"), a.Flag("reset_retries"), a.Flag("allow_partial_enumeration"), interval);
-                    return Cli.Commands.Index(cfg, a.Get("repo"), a.Flag("reset_retries"), a.Flag("allow_partial_enumeration"));
+                        return Cli.Commands.IndexRepeatedly(cfg, a.List("repo"), a.Flag("reset_retries"), a.Flag("allow_partial_enumeration"), interval);
+                    return Cli.Commands.Index(cfg, a.List("repo"), a.Flag("reset_retries"), a.Flag("allow_partial_enumeration"),
+                        a.Flag("scheduled"), a.List("trigger"));
                 case "embed":
                     return Cli.Commands.EmbedCommand(cfg, a.Int("limit"));
                 case "serve":

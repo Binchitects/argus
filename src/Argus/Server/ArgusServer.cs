@@ -65,7 +65,6 @@ public static partial class ArgusServer
     public const string ChatEmailHeader = "x-llm-user-email";
     public const string UsersFileEnv = "ARGUS_USERS_FILE";
     static readonly string[] ProxyHeaders = ["x-forwarded-for", "x-forwarded-host", "x-real-ip"];
-    public const int WebhookQueueLimit = 25;
     public const string DeniedAtGateTool = "<auth_denied>";
     public static readonly string[] DefaultAllowedHosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"];
 

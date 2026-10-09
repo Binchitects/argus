@@ -125,11 +125,11 @@ public static class AuditLog
             ["empty"] = empty, ["embedded"] = embedded, ["reason"] = reason,
         });
 
-    public static void IndexWebhook(string repo, bool started = false, int queued = 0, int collapsed = 0)
+    /// <summary>Repositories asked for one by one (a push, an Update, their schedule): started, or queued behind the run going.</summary>
+    public static void IndexWebhook(string repo, bool started = false, int queued = 0)
     {
         var fields = new JsonObject { ["event"] = "index_webhook", ["repo"] = repo };
         if (started) fields["outcome"] = "started";
-        else if (collapsed != 0) { fields["outcome"] = "collapsed"; fields["collapsed_from"] = collapsed; }
         else { fields["outcome"] = "queued"; fields["queued"] = queued; }
         Emit(fields);
     }

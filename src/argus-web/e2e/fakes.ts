@@ -38,6 +38,11 @@ export async function fakeGitLab(reposDir: string, users: GitLabUser[], projects
   const root = resolve(reposDir);
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
+    // The GitLab set up anew (a test instance brought up again): the same repositories under new ids.
+    if (url.pathname === "/_e2e/renumber" && req.method === "POST") {
+      for (const p of projects) p.id += 1000;
+      return json(res, 200, { ids: projects.map((p) => p.id) });
+    }
     if (!url.pathname.startsWith("/api/v4/")) {
       const target = resolve(root, "." + decodeURIComponent(url.pathname));
       try {

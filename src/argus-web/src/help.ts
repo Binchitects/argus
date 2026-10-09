@@ -12,7 +12,7 @@ export interface Topic {
 }
 
 /** Every route of App.tsx. Each needs its help below: the record's type says so. */
-export type ArgusRoute = "/login" | "/" | "/chat/:id" | "/settings" | "/help" | "/manage" | "/manage/people" | "/manage/indexing" | "/manage/explore" | "/manage/packs";
+export type ArgusRoute = "/login" | "/" | "/chat/:id" | "/settings" | "/help" | "/manage" | "/manage/people" | "/manage/indexing" | "/manage/repositories" | "/manage/explore" | "/manage/packs";
 
 export const help: Record<ArgusRoute, Topic> = {
   "/login": {
@@ -92,6 +92,19 @@ export const help: Record<ArgusRoute, Topic> = {
       ["Repositories", "Each repository and branch, when it was last indexed, and how it went."],
     ],
     tasks: [{ title: "Bring the index up to date", steps: ["Press Index all repositories.", "Follow the run here; a repository that failed says why."] }],
+  },
+  "/manage/repositories": {
+    title: "Repositories",
+    about: "Every repository the index holds, one row each whatever token listed it: find them, follow their indexing, and change many at once.",
+    admin: true,
+    parts: [
+      ["Search and filters", "Find repositories by name, path or group, and filter by state (indexed, indexing, failed, never, stale), group, language and whether they are on."],
+      ["Progress", "Each repository's own progress while it is indexed: queued, fetching, reading files, symbols, embedding, done or failed with why."],
+      ["Log", "A repository's log in plain sentences: what was done, how long it took, and what to do about a warning or an error."],
+      ["Schedule", "When each repository is indexed again by itself: off, every few hours, daily or weekly; the default for all is on the Indexing page."],
+      ["Change several", "Select repositories (or every one the filters show), then turn them on or off, index them now, change their schedule, or remove them. Each one's result is shown."],
+    ],
+    tasks: [{ title: "Reindex the failed ones", steps: ["Filter by Failed.", "Select all.", "Press Index now, and follow each one's progress."] }],
   },
   "/manage/explore": {
     title: "Explore",

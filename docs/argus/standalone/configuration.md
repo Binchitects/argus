@@ -81,7 +81,8 @@ one-liner in [`deploy/argus-standalone/README.md`](../../../deploy/argus-standal
 | `ARGUS_GITLAB_AUTH`, `ARGUS_GITLAB_USERNAME`, `ARGUS_GITLAB_PASSWORD` | — | password mode, only if no token can be issued; a username wins over a token unless `ARGUS_GITLAB_AUTH=token` |
 | `ARGUS_GITLAB_CA_CERT` | — | a private CA for GitLab, as a path inside the container |
 | `ARGUS_GITLAB_VERIFY` | — | `false` disables certificate checks (last resort) |
-| `ARGUS_INDEX_INTERVAL` | `900` | seconds between index passes; `0` = only on demand |
+| `ARGUS_INDEX_INTERVAL` | `900` | seconds between index passes; `0` = only on demand. A repository with a schedule of its own (Repositories → Schedule) is left to it |
+| `ARGUS_INDEX_SCHEDULER` | on | `off` stops running the repositories' own schedules (every N hours, daily, weekly) |
 | `ARGUS_INDEX_STALE_AFTER` | `3600` | seconds without a pass before a repository is reported stale |
 | `ARGUS_WEBHOOK_TOKEN` | empty | GitLab push webhook secret for `/hook/gitlab`; empty = no webhook route |
 | `ARGUS_PACK_INDEX_URL` | empty | a published pack index, for *Update all packs* |
