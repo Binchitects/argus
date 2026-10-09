@@ -367,8 +367,8 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
         }
         if (use is not null)
         {
-            // Arena MCP's pictures, speech, video and deep research count against requests a minute too (those that run now on this replica as well),
-            // and their refusals are in the audit log.
+            // Arena MCP's pictures, speech, video and deep research count against requests a minute too (with a limit, those that run
+            // now on this replica as well), and their refusals are in the audit log.
             var now = clock.GetUtcNow();
             var day = now.AddDays(-1);
             var mcp = await ModelCallsSinceAsync(user.Id, now.AddMinutes(-1), ct) + running.Running(user.Id, now);
