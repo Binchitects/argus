@@ -13,11 +13,12 @@ namespace Llm.Api.Gateway;
 
 /// <summary>
 /// Speech with API keys, by way of the app: Traefik sends gateway.DOMAIN's /v1/audio/speech and /v1/audio/transcriptions
-/// here while the app is up, and straight to LiteLLM otherwise. Text to speech that names no voice is read in the key's
-/// person's voice for its text's language (Your account → Voice), at their speed when it names none; one that names no
-/// model either gets that voice's model. Speech to text that names no language is written down in the language the
-/// person speaks, when they chose one. Nothing is read before the key says whose request it is, and sound is never held:
-/// everything goes on to LiteLLM with the caller's own key, which the gateway checks, and streams back.
+/// here while the app is up, and straight to LiteLLM otherwise; the Helm chart's ingress sends them here always, with no
+/// fallback. Text to speech that names no voice is read in the key's person's voice for its text's language (Your
+/// account → Voice), at their speed when it names none; one that names no model either gets that voice's model. Speech
+/// to text that names no language is written down in the language the person speaks, when they chose one. Nothing is
+/// read before the key says whose request it is, and sound is never held: everything goes on to LiteLLM with the
+/// caller's own key, which the gateway checks, and streams back.
 /// </summary>
 public static class KeySpeech
 {

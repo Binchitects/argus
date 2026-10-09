@@ -82,15 +82,23 @@ until it is offered again.
 
 They apply to read aloud, Talk, the Speech tool, and API keys' speech at
 `gateway.DOMAIN`: `/v1/audio/speech` that names no voice and
-`/v1/audio/transcriptions` that names no language. Traefik sends those
-requests (POST) by the app, which fills in the key's person's voice or
-language and passes them on to LiteLLM with the same key (straight to LiteLLM
-while the app is down). The app reads nothing of a request before its key
+`/v1/audio/transcriptions` that names no language. Those requests go by the
+app, which fills in the key's person's voice or language and passes them on to
+LiteLLM with the same key. The app reads nothing of a request before its key
 says whose it is, and holds no sound: the person's language goes first in the
 form and the sound streams on behind it (a language the request names comes
-later, and LiteLLM keeps it). A browser's preflight goes to LiteLLM, which
-answers it. An installation upgraded from v5.2.0 starts with these defaults
-for everyone: the voices it used before.
+later, and LiteLLM keeps it).
+
+- **Compose**: Traefik sends them (POST) by the app while its health check
+  passes, and straight to LiteLLM while the app is down. A browser's preflight
+  goes to LiteLLM, which answers it.
+- **Helm**: the ingress sends them (every method; the app passes a preflight on
+  to LiteLLM) to the app, with no fallback: while no app pod is ready, they
+  fail (502 or 503) and the rest of `gateway.DOMAIN` keeps working
+  ([deployment.md](deployment.md#helm)).
+
+An installation upgraded from v5.2.0 starts with these defaults for everyone:
+the voices it used before.
 
 ## What cannot be changed here, and why
 

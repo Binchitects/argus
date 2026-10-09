@@ -276,8 +276,14 @@ them or name an `existingSecret`. The model library and the app's files are
 shared by several pods: on more than one node they need ReadWriteMany storage
 (`persistence.sharedStorageClass`). The ingress turns on cookie affinity for
 NGINX and a sticky cookie for Traefik; another controller needs its own.
-`gateway.DOMAIN` goes straight to the gateway: the answer cache for API keys
-needs Traefik's health-checked route (compose), so it does not answer here.
+`gateway.DOMAIN` goes straight to the gateway, but for API keys' speech:
+`/v1/audio/speech`, `/v1/audio/transcriptions`, and the same without `/v1`
+(every method) go to the app, which fills in the key's person's voice and
+language and passes them on to LiteLLM. An Ingress has no failover: while no
+app pod is ready (rolling, crashed, scaled to zero), those four paths fail
+(502 or 503), where compose's Traefik sends them straight to LiteLLM. The
+answer cache for API keys needs Traefik's health-checked route (compose), so it
+does not answer here.
 External Postgres: `postgresql.enabled=false` and `externalDatabase`. Logs reach
 Loki only with a log agent of the cluster's (promtail, or another), and the
 host exporters (node, GPU, CPU temperature, power caps) are left to the

@@ -837,4 +837,27 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Contains("\"/v1/audio/speech\" \"/audio/speech\" \"/v1/audio/transcriptions\" \"/audio/transcriptions\"", ingress, StringComparison.Ordinal);
         Assert.Equal(["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions"], KeySpeech.Paths);
     }
+
+    [Fact]
+    public void The_docs_say_the_chart_sends_keys_speech_to_the_app_with_no_fallback()
+    {
+        var docs = Path.Combine(AppFixture.PluginsPath, "..", "docs");
+        static string Section(string page, string heading)
+        {
+            var start = page.IndexOf("\n" + heading + "\n", StringComparison.Ordinal);
+            Assert.True(start >= 0, heading);
+            var end = page.IndexOf("\n## ", start + heading.Length + 1, StringComparison.Ordinal);
+            return page[start..(end < 0 ? page.Length : end)];
+        }
+        // The ingress has no failover: the operator must read that speech fails while no app pod is ready.
+        var helm = Section(File.ReadAllText(Path.Combine(docs, "deployment.md")), "## Helm");
+        Assert.DoesNotContain("`gateway.DOMAIN` goes straight to the gateway:", helm, StringComparison.Ordinal);
+        Assert.Contains("`/v1/audio/speech`, `/v1/audio/transcriptions`, and the same without `/v1`", helm, StringComparison.Ordinal);
+        Assert.Contains("An Ingress has no failover", helm, StringComparison.Ordinal);
+        var speech = Section(File.ReadAllText(Path.Combine(docs, "settings.md")), "## Speech: everyone's until they choose");
+        Assert.Contains("- **Compose**: Traefik sends them (POST) by the app while its health check\n  passes, and straight to LiteLLM while the app is down.", speech, StringComparison.Ordinal);
+        Assert.Contains("- **Helm**: the ingress sends them", speech, StringComparison.Ordinal);
+        Assert.Contains("with no fallback", speech, StringComparison.Ordinal);
+        Assert.DoesNotContain("(straight to LiteLLM\nwhile the app is down)", speech, StringComparison.Ordinal);
+    }
 }
