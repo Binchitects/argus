@@ -31,7 +31,8 @@
 #   --project NAME       the compose project (default: COMPOSE_PROJECT_NAME in .env, else arena)
 #   --yes                no questions, the defaults: for unattended runs
 #   --dry-run            the plan; nothing is written, loaded, started or removed
-#   --log FILE           the log (default DIR/.arena-install/logs/COMMAND-TIME.log)
+#   --log FILE           the log (default DIR/.arena-install/logs/COMMAND-TIME.log; status and
+#                        verify keep one only beside an installation; a dry run, none)
 #   --timeout MIN        how long to wait for the stack to be healthy, in minutes (default 15;
 #                        30s: seconds)
 # install:
@@ -370,11 +371,14 @@ version_source() {
 
 # ===================================================================== logging
 LOG="" TEE_PID=""
-start_log() {
+start_log() {   # start_log [soft]: soft, a log that cannot be written is left out (status, verify)
   [[ $DRY -eq 1 ]] && return 0
   LOG="${LOG_ARG:-$STATE/logs/$CMD-$(date +%Y%m%d-%H%M%S).log}"
   LOG="$(abspath "$LOG")"
-  (umask 077; mkdir -p "$(dirname "$LOG")" && : >> "$LOG") || die "cannot write the log $LOG"
+  if ! (umask 077; mkdir -p "$(dirname "$LOG")" && : >> "$LOG") 2>/dev/null; then
+    [[ ${1:-} == soft ]] && { LOG=""; return 0; }
+    die "cannot write the log $LOG"
+  fi
   [[ -d "$STATE" ]] && chmod 700 "$STATE" "$STATE/logs" 2>/dev/null
   # fd 3: the terminal alone, for what a person must see once and no log may keep.
   exec 3>&1 4>&2
@@ -1057,6 +1061,8 @@ snapshot_deploy() {
   local rel
   for rel in "${BACKUP_DIR#"$DEPLOY"/}" "${MODELS_DIR#"$DEPLOY"/}"; do [[ "$rel" != /* ]] && ex+=("--exclude=./$rel"); done
   (umask 077; tar -cpf "$SNAP/deploy.tar" "${ex[@]}" -C "$DEPLOY" .) || die "keeping a copy of $DEPLOY for a rollback failed (disk full?)"
+  # VERSION beside deploy/ says which release this is: the upgrade writes the new one there.
+  rm -f "$SNAP/VERSION"; [[ -f "$DIR/VERSION" ]] && cp -p "$DIR/VERSION" "$SNAP/VERSION"
   ok "a copy of $DEPLOY for a rollback ($(human "$(stat -c %s "$SNAP/deploy.tar")"))"
 }
 # Back to FROM: its files, its images, and (once the new version had started) the data
@@ -1067,6 +1073,7 @@ rollback() {   # rollback STARTED -> 0 when FROM runs again
   dc_down --remove-orphans
   if [[ -f "$SNAP/added" ]]; then while IFS= read -r f; do [[ -n "$f" ]] && rm -f "$DEPLOY/$f"; done < "$SNAP/added"; fi
   tar -xpf "$SNAP/deploy.tar" -C "$DEPLOY" || { bad "putting $DEPLOY back from $SNAP/deploy.tar failed"; return 1; }
+  if [[ -f "$SNAP/VERSION" ]]; then cp -p "$SNAP/VERSION" "$DIR/VERSION"; else rm -f "$DIR/VERSION"; fi
   ok "$DEPLOY as it was (with its .env)"
   while IFS=$'\t' read -r ref id tag; do
     [[ -n "$ref" ]] || continue
@@ -1399,7 +1406,7 @@ project_volumes() {
   } | sed '/^$/d' | sort -u | grep "^${PROJECT}_" || true
 }
 cmd_remove() {
-  local ids other list vols f own=0
+  local ids other list vols f n own=0
   # A folder this installer made, and not a git checkout: purge may take it whole.
   [[ -f "$STATE/MANIFEST" && ! -e "$DIR/.git" ]] && own=1
   if [[ ! -f "$DEPLOY/docker-compose.yml" && ! -d "$STATE" ]]; then say "Nothing installed in $DIR: nothing to remove."; return 0; fi
@@ -1468,7 +1475,11 @@ cmd_remove() {
     [[ -n "$f" ]] || continue
     if [[ $what == remove ]]; then
       [[ -n "$(image_id "$f")" ]] || continue
-      E image rm "$f" >/dev/null 2>&1 && did "removed $f" || note "could not remove $f (in use?)"
+      # Podman may hold the name twice, under localhost/ (as the installer tagged it) and
+      # docker.io/library/ (as it was loaded): the one it finds first goes, then the other.
+      n=0
+      while [[ -n "$(image_id "$f")" && $n -lt 3 ]] && E image rm "$f" >/dev/null 2>&1; do n=$((n + 1)); done
+      if [[ -z "$(image_id "$f")" ]]; then did "removed $f"; else note "could not remove $f (in use?)"; fi
     else note "kept $f: $why"; fi
   done <<<"$list"
   state_set status removed
@@ -1501,6 +1512,8 @@ cmd_remove() {
 cmd_status() {
   local iv svc name st health img ref problems=0 v root free left
   [[ -f "$DEPLOY/docker-compose.yml" ]] || { say "Nothing installed in $DIR."; [[ -n "$BUNDLE" ]] && say "The bundle: Argus Arena $BVERSION ($(bundle_get commit))."; return 1; }
+  # A log beside the installation's others, when it can be written (status changes nothing).
+  [[ -n "$LOG_ARG" || -d "$STATE/logs" ]] && start_log soft
   read_settings
   iv="$(installed_version)"
   say "Argus Arena in $DIR ($ENGINE, project $PROJECT)"
@@ -1544,6 +1557,7 @@ cmd_status() {
 # ======================================================================== verify
 cmd_verify() {
   local failed=0
+  [[ -n "$LOG_ARG" || -d "$STATE/logs" ]] && start_log soft
   if [[ -n "$BUNDLE" ]]; then
     if [[ -n "$RUNFILE" && -f "$RUNFILE.sha256" ]]; then
       step "$(basename "$RUNFILE") against $(basename "$RUNFILE").sha256"

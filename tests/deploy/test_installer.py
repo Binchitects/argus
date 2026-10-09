@@ -570,6 +570,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((deploy / "config" / "dropped.yml").read_text(), "old: 1\n")
         self.assertFalse((deploy / "config" / "added.yml").exists())
         self.assertFalse((deploy / "config" / "edited.yml.before-9.9.9").exists())
+        # 5.2.0 had no VERSION beside deploy/; the upgrade's is gone again.
+        self.assertFalse((self.dir / "VERSION").exists())
         # The old images, and the data of the backup (restored by backup.sh, after keeping what the failed one left).
         app = next(c for c in self.containers() if c["service"] == "app")
         self.assertEqual(app["image_id"], old_app)
@@ -606,6 +608,14 @@ class InstallerTests(unittest.TestCase):
         # Docker is only asked whether it runs the project (it does not: the engine is Podman).
         self.assertFalse([c for c in self.r.calls() if c[0] == "docker" and c[1] not in ("info", "ps")])
         self.assertIn("Upgraded from 5.2.0 to 9.9.9", r.stdout)
+        # Podman held the release's names twice: the new under localhost/, 5.2.0's as it was loaded.
+        images = self.r.store()["images"]
+        self.assertIn("localhost/arena-app:latest", images)
+        self.assertIn("arena-app:latest", images)
+        r = self.r.run("remove", "--dir", str(self.dir), "--yes", extra=podman)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        left = [ref for ref in self.r.store()["images"] if "arena-" in ref]
+        self.assertEqual(left, [], r.stdout)
 
     def test_Upgrade_refuses_a_bundle_without_an_image_the_host_runs(self):
         self.old_install(version_file=True)
@@ -730,6 +740,7 @@ class InstallerTests(unittest.TestCase):
         r = self.r.run("status", "--dir", str(self.dir), via_run=True)
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("installed: 9.9.9 (this installer's record)", r.stdout)
+        self.assertIn("installed: 9.9.9", "".join(p.read_text() for p in (self.dir / ".arena-install" / "logs").glob("status-*.log")))
         self.assertIn("(says 9.9.9)", r.stdout)
         self.assertIn("Every service is up.", r.stdout)
         store = self.r.store()

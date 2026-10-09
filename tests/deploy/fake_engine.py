@@ -21,7 +21,8 @@ makes, one per service of FAKE_SERVICES. Compose's images are read from the
 compose files (COMPOSE_FILE, -f, else docker-compose.yml and its override): a
 service's image:, else PROJECT-service when it builds. A container is healthy
 unless its image was loaded from a reference in FAKE_UNHEALTHY; the services in
-FAKE_DOWN keep restarting.
+FAKE_DOWN keep restarting. As podman, a short name tagged lands under localhost/,
+and a short name is looked for there first, as Podman does.
 """
 from __future__ import annotations
 
@@ -61,6 +62,27 @@ def norm(ref: str) -> str:
     return ref if ":" in name or "@" in ref else ref + ":latest"
 
 
+PODMAN = os.path.basename(sys.argv[0]) == "podman"
+
+
+def is_short(ref: str) -> bool:
+    """A name with no registry in it (offtest-app, grafana/loki:3.4.1)."""
+    first = ref.split("/", 1)[0]
+    return "/" not in ref or ("." not in first and ":" not in first and first != "localhost")
+
+
+def store_key(ref: str) -> str:
+    """Where a reference is kept: Podman keeps its own localhost/ names apart."""
+    if PODMAN and ref.startswith("localhost/"):
+        return "localhost/" + norm(ref)
+    return norm(ref)
+
+
+def keys(ref: str) -> list[str]:
+    """The names a reference may mean, the first found wins: Podman looks under localhost/ first."""
+    return (["localhost/" + norm(ref)] if PODMAN and is_short(ref) else []) + [store_key(ref)]
+
+
 class Store:
     def __init__(self, path: str):
         self.path = path
@@ -76,10 +98,14 @@ class Store:
         with open(self.path, "w") as f:
             json.dump(self.s, f, indent=1)
 
+    def name(self, ref: str) -> str | None:
+        """The name in the store a reference finds."""
+        return next((k for k in keys(ref) if k in self.s["images"]), None)
+
     def image(self, ref: str) -> str | None:
+        if self.name(ref):
+            return self.s["images"][self.name(ref)]
         ref = norm(ref)
-        if ref in self.s["images"]:
-            return self.s["images"][ref]
         if ref.startswith("sha256:") or len(ref.split(":")[0]) == 64:
             want = ref.split(":")[-1] if ref.startswith("sha256:") else ref.split(":")[0]
             return want if want in self.s["images"].values() else None
@@ -114,7 +140,7 @@ def stateful(args: list[str]) -> int | None:
             raw = gzip.decompress(raw)
         ref = raw.decode().split()[2]
         image_id = hashlib.sha256(raw).hexdigest()
-        s["images"][norm(ref)] = image_id
+        s["images"][store_key(ref)] = image_id
         s["origins"][image_id] = norm(ref)
         st.save()
         print(f"Loaded image: {ref}")
@@ -130,12 +156,13 @@ def stateful(args: list[str]) -> int | None:
         if not image_id:
             print(f"Error: No such image: {args[1]}", file=sys.stderr)
             return 1
-        s["images"][norm(args[2])] = image_id
+        # podman tag puts a short name under localhost/.
+        s["images"]["localhost/" + norm(args[2]) if PODMAN and is_short(args[2]) else store_key(args[2])] = image_id
         st.save()
         return 0
     if args[:2] in (["image", "rm"], ["rmi"]) or args[0] == "rmi":
-        ref = norm(args[-1])
-        if ref not in s["images"]:
+        ref = st.name(args[-1])
+        if ref is None:
             return 1
         image_id = s["images"][ref]
         others = [r for r, i in s["images"].items() if i == image_id and r != ref]
