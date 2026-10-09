@@ -17,6 +17,7 @@ import { reduceEach } from './reduce'
 import type { Column, PanelData, PanelDef } from './types'
 import type { Chosen } from './variables'
 import { thresholdColor, tone } from './colors'
+import { ems, fitting } from './fit'
 import { Gauge, Sparkline } from './visuals'
 
 /** level: its title's heading level (3 under a row's heading, 2 when the panel has none above it). */
@@ -38,12 +39,15 @@ export function PanelView({ uid, panel, range, tick, vars = {}, level = 3 }: { u
 function Frame({ panel, action, children, className, compact, level = 3 }: { panel: PanelDef; action?: ReactNode; children: ReactNode; className?: string; compact?: boolean; level?: 2 | 3 }) {
   const Heading = level === 2 ? 'h2' : 'h3'
   return (
-    <section data-panel className={cn('flex h-full min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs', className)} aria-label={panel.title}>
+    <section data-panel className={cn('@container flex h-full min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs', className)} aria-label={panel.title}>
       {(panel.title || action) && (
         <header className="flex min-h-7 items-start justify-between gap-2">
           <Heading className={cn('flex min-w-0 items-start gap-1.5 font-semibold', compact ? 'text-xs text-muted-foreground' : 'text-sm')}>
-            {/* A stat's title wraps to two lines rather than losing its end in a narrow cell. */}
-            <span className={compact ? 'line-clamp-2' : 'truncate'}>{panel.title}</span>
+            {/* A stat's title wraps to two lines rather than losing its end in a narrow cell; a word too long for
+                the cell breaks rather than being clipped with no "…". Whole on hover either way. */}
+            <span className={compact ? 'line-clamp-2 break-words' : 'truncate'} title={panel.title}>
+              {panel.title}
+            </span>
             {panel.description && (
               <Tooltip content={panel.description}>
                 <button type="button" className="mt-0.5 shrink-0 rounded text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`About ${panel.title}`}>
@@ -124,43 +128,82 @@ function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; pan
       } else if (panel.type === 'gauge') {
         const min = defaults?.min ?? 0
         const max = defaults?.max ?? (unit === 'percentunit' ? 1 : 100)
-        body = (
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-2">
-            {values.slice(0, 8).map((v) => (
-              <div key={v.name} className="grid justify-items-center">
-                <Gauge value={v.value} min={min} max={max} steps={steps} unit={unit} decimals={decimals} label={values.length > 1 ? v.name : (panel.title ?? v.name)} />
-                {values.length > 1 && <p className="max-w-full truncate text-xs text-muted-foreground">{v.name}</p>}
+        // A gauge per series (a GPU each). Several are drawn small, as many to a line as fit, and past two
+        // they scroll at a chart's height as a stat's values do: a machine with many GPUs keeps its row one height.
+        const several = values.length > 1
+        const em = Math.max(...values.map((v) => ems(formatValue(v.value, unit, decimals))))
+        const gauges = (
+          <div className={cn('grid gap-2', several && 'grid-cols-[repeat(auto-fit,minmax(min(4.5rem,100%),1fr))]')}>
+            {values.map((v) => (
+              <div key={v.name} className="grid min-w-0 justify-items-center">
+                <Gauge value={v.value} min={min} max={max} steps={steps} unit={unit} decimals={decimals} label={several ? v.name : (panel.title ?? v.name)} small={several} em={em} />
+                {several && (
+                  <p className="line-clamp-2 max-w-full text-center text-xs break-words text-muted-foreground" title={v.name}>
+                    {v.name}
+                  </p>
+                )}
               </div>
             ))}
           </div>
         )
+        body =
+          values.length > 2 ? (
+            <ScrollRegion label={`${panel.title ?? 'Panel'}, every value`} className="lg:max-h-65">
+              {gauges}
+            </ScrollRegion>
+          ) : (
+            gauges
+          )
       } else {
-        body = (
-          <div className={cn('grid gap-3', values.length > 1 && 'grid-cols-[repeat(auto-fit,minmax(7rem,1fr))]')}>
-            {values.slice(0, 12).map((v) => {
+        // A value per series. Many of them (a sensor per core) must not make the row taller than a chart
+        // beside it: past two they drop their sparklines, and on a wide screen the list scrolls at a chart's height.
+        const many = values.length > 2
+        const text = (v: (typeof values)[number]) => (v.value === null ? (defaults?.noValue ?? '—') : formatValue(v.value, unit, decimals))
+        const em = Math.max(...values.map((v) => ems(text(v))))
+        const list = (
+          <div className={cn('grid gap-3', values.length > 1 && 'grid-cols-[repeat(auto-fit,minmax(min(7rem,100%),1fr))]')}>
+            {values.map((v) => {
               const t = tone(fixed ?? thresholdColor(v.value, steps))
               const background = panel.options?.colorMode === 'background' && t
               return (
-                <div key={v.name} className={cn('grid min-w-0 gap-1 rounded-lg', background && `${t.fill} px-3 py-2`)}>
-                  {values.length > 1 && <p className="truncate text-xs text-muted-foreground">{v.name}</p>}
+                // Its own width for the value to fit (@container): a column narrower than the number shrinks the number,
+                // and every value of the panel by as much, so they stay one size.
+                <div key={v.name} className={cn('grid min-w-0 gap-1 rounded-lg @container', background && `${t.fill} px-3 py-2`)}>
+                  {/* Two lines before it is cut, and whole on hover: a narrow cell keeps more than the start of a name. */}
+                  {values.length > 1 && (
+                    <p className="line-clamp-2 text-xs break-words text-muted-foreground" title={v.name}>
+                      {v.name}
+                    </p>
+                  )}
                   <div
-                    className={cn('text-2xl font-semibold tracking-tight whitespace-nowrap tabular-nums xl:text-[1.75rem]', panel.options?.colorMode !== 'none' && t?.ink)}
+                    className={cn(
+                      'text-[length:min(1.5rem,var(--fit))] leading-[1.333] font-semibold tracking-tight whitespace-nowrap tabular-nums xl:text-[length:min(1.75rem,var(--fit))]',
+                      panel.options?.colorMode !== 'none' && t?.ink,
+                    )}
+                    style={fitting(em, '100cqi')}
                     aria-label={values.length > 1 ? `${panel.title}: ${v.name}` : panel.title}
                   >
-                    {v.value === null ? (defaults?.noValue ?? '—') : formatValue(v.value, unit, decimals)}
+                    {text(v)}
                   </div>
-                  {panel.options?.graphMode === 'area' && v.points.length > 1 && <Sparkline points={v.points} className={t?.ink ?? 'text-primary'} />}
+                  {!many && panel.options?.graphMode === 'area' && v.points.length > 1 && <Sparkline points={v.points} className={t?.ink ?? 'text-primary'} />}
                 </div>
               )
             })}
           </div>
+        )
+        body = many ? (
+          <ScrollRegion label={`${panel.title ?? 'Panel'}, every value`} className="lg:max-h-65">
+            {list}
+          </ScrollRegion>
+        ) : (
+          list
         )
       }
     } else if (isChart) {
       const series = results.flatMap((r) => r.series ?? [])
       const custom = panel.fieldConfig?.defaults?.custom
       body = !series.length ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">No data in this time range.</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">{defaults?.noValue ?? 'No data in this time range.'}</p>
       ) : asTable ? (
         <SeriesTable series={series} unit={unit} />
       ) : (
@@ -189,9 +232,12 @@ function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; pan
       className={isStat ? 'justify-between' : undefined}
       action={
         isChart && hasSeries && !error ? (
-          <Button variant="ghost" size="sm" className="h-7 text-muted-foreground" onClick={() => setAsTable(!asTable)}>
-            {asTable ? <TrendingUp /> : <Table2 />} {asTable ? 'Show chart' : 'Show as table'}
-          </Button>
+          // In a narrow panel only its icon, so the title beside it is not cut short.
+          <Tooltip content={asTable ? 'Show chart' : 'Show as table'}>
+            <Button variant="ghost" size="sm" className="h-7 text-muted-foreground" onClick={() => setAsTable(!asTable)} aria-label={asTable ? 'Show chart' : 'Show as table'}>
+              {asTable ? <TrendingUp /> : <Table2 />} <span className="hidden @sm:inline">{asTable ? 'Show chart' : 'Show as table'}</span>
+            </Button>
+          </Tooltip>
         ) : undefined
       }
     >

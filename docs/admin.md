@@ -418,8 +418,9 @@ out of the cost total until then), and the model filter does not find it.
 
 ### Dashboards
 
-The dashboards are files in Grafana's JSON format, in `deploy/config/dashboards/`,
-and the app draws them itself. Each panel's query runs on the app's server:
+The dashboards are files in Grafana's JSON format, in `src/Llm.Api/Dashboards/json/`
+(built into the app's image, so an upgrade brings the new ones), and the app draws
+them itself. Each panel's query runs on the app's server:
 
 - **PostgreSQL** (the usage panels read the gateway's spend tables): Grafana's
   macros are reproduced (`$__timeFilter`, `$__timeGroupAlias`, `$__interval`,
@@ -434,6 +435,21 @@ and the app draws them itself. Each panel's query runs on the app's server:
 - The browser asks for "panel N of dashboard X over this range, with these
   variables" and gets data back. It never sends or receives a query, and a
   variable's value is only ever one of its options.
+
+The machine dashboards show whatever machine they run on, as it reports itself:
+a drive is named by its device, then the model it reports (`node_nvme_info`), as
+in `nvme1 · Samsung SSD 990 PRO 2TB`, or by its device alone when it reports no
+model; the device comes first so two drives of one model stay apart in a narrow
+cell. On a machine with more than one GPU, each is named by the index
+nvidia-smi gives it and the model it reports (`nvidia_smi_gpu_info`), as in
+`GPU 1 · GeForce RTX 3090`; with one GPU the names stay short (`temp`, `draw`).
+The CPU temperature is the hottest sensor and the average of all of them
+however many cores there are, and **CPU temperature per sensor** (Resources,
+under the temperatures) has a line for each, across the whole width so it
+never stretches a panel beside it. The load average has the machine's logical
+CPU count beside it. No file names one machine's drives, CPU, GPU or core
+count: a test checks that, and checks every Prometheus query with the stack's
+own `promtool`.
 
 Live dashboards (those with a refresh in their file) refresh themselves, and
 can pause. Edit a dashboard file and the next request uses it: the app reads
@@ -451,6 +467,22 @@ python3 scripts/audit-dashboards.py 6h
 One value axis per chart. Colours come in a fixed order, checked for
 colour-vision deficiency against the light and dark backgrounds; a series keeps
 its colour by name. At most eight series are drawn: the seven largest, and the
-rest summed as "Other". Every chart has a legend when it has more than one
-series, a tooltip, and **Show as table**. The time axis always spans the chosen
-range.
+rest summed as "Other", or averaged where a sum means nothing (temperatures,
+percentages, clock speeds and durations, unless the chart is stacked). Every
+chart has a legend when it has more than one series, a tooltip, and **Show as
+table**, which lists every series, the folded ones too; in a narrow panel that
+button is only its icon, so the title beside it is not cut short. The legend is
+one line: two names always fit on it, a longer name cut short (whole on hover
+and in the tooltip), and more page. The time axis always spans the chosen range.
+Temperatures, power, clock speeds and disk or network rates carry their unit
+(°C, W, GHz, MB/s).
+
+A stat shows a value per series. Past two it leaves out their sparklines, and on
+a wide screen it scrolls rather than grow taller than a chart: a row of panels
+stays one height whatever the machine reports. A name takes two lines before it
+is cut short, and shows whole on hover. A gauge per series (a GPU each) is drawn
+small when there are several, and past two they scroll the same way. Values sit
+side by side only where the panel has room for them, else one under the other;
+a value too wide for its panel (a small panel on a window of 1024 to 1280
+pixels) is drawn smaller rather than past the panel's edge, and a gauge's ring
+and number shrink together. A panel's values stay one size.

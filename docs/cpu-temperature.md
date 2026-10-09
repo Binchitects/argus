@@ -28,7 +28,34 @@ which one answered:
 |---|---|---|
 | `hwmon` | Linux `/sys/class/hwmon` | coretemp (Intel) / k10temp (AMD). Real DTS. Works with no setup -- a container's `/sys` already is the host's. |
 | `lhm` | LibreHardwareMonitor's JSON server | Windows. LHM ships the kernel driver that reads Intel DTS. |
-| `acpi` | `/sys/class/thermal` | Last resort, labelled `source="acpi"` so a panel can show it is probably ambient. |
+| `acpi` | `/sys/class/thermal` | Last resort, labelled `source="acpi"`, and only the zones that are the CPU: `x86_pkg_temp`, `cpu...`, `soc...`. |
+
+Every series it reports is a temperature of the CPU itself, because the
+dashboards take the hottest and the average of all of them. So it leaves out:
+
+- LHM's **Distance to TjMax** sensors (how far a core is below its throttle
+  point, about 100 minus the core) and LHM's own **Core Max** and **Core
+  Average**, which would count the cores twice.
+- The board's `CPU` sensor (its Super I/O chip's, such as `Nuvoton
+  NCT6687D/CPU`) whenever LHM shows the CPU's own sensors. It stands in only
+  when the CPU's are missing.
+- AMD's `Tctl` when the chip also reports `Tdie`: on the first Ryzens and
+  Threadrippers Tctl runs 10-27 C above the die, for the fans.
+- Thermal zones that are not the CPU: `acpitz` (the board, see above), a wifi
+  card, the chipset, a battery.
+
+Every series has a name of its own. On a machine with two CPUs both sockets'
+chips are `coretemp` (or `k10temp`), and each numbers its cores from 0. Two
+series with one name would reach Prometheus as one, and half the cores would
+be lost. So a name that repeats takes its place among its namesakes:
+
+- hwmon: `coretemp.0/Core 0` and `coretemp.1/Core 0`, in the order of the
+  chips' devices, which stays the same across reboots.
+- LHM: two CPUs of one model become `Intel Xeon Gold 6230 #1/CPU Core #1` and
+  `Intel Xeon Gold 6230 #2/CPU Core #1`, numbered as LHM numbers cores.
+- acpi: two sockets' package zones become `x86_pkg_temp.0` and `x86_pkg_temp.1`.
+
+A machine with one CPU keeps the names it had.
 
 Metrics:
 
@@ -40,8 +67,16 @@ cpu_temperature_source_info{source="lhm"} 1
 ```
 
 `cpu_temperature_available` exists so that **no sensor** and **a sensor reading
-27.85** cannot look the same. When it is 0 the dashboard panel says "No CPU
-sensor available on this host" rather than plotting nothing and looking broken.
+27.85** cannot look the same. When there is no sensor the dashboard panels say
+"No CPU sensor" rather than plotting nothing and looking broken.
+
+The dashboards (Resources, Stack Performance) draw two lines, the hottest sensor
+and the average of all of them, beside other panels: an Intel CPU reports one
+sensor per core and one for the package, so a line each there would make the
+chart, and the row it sits in, grow with the core count. A gap between the two
+lines is one core or one die running hot. To see which, **CPU temperature per
+sensor** on Resources has a line per sensor across the whole width (the seven
+hottest, the rest averaged as Other; **Show as table** lists every sensor).
 
 ## Linux
 

@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import { ems } from '@/components/dashboards/fit'
+import { formatValue } from '@/lib/format'
 import { admin, fakeApi, member, renderApp } from '@/test/utils'
 
 const line = (nanos: string, container: string, text: string, level?: string) => ({
@@ -37,6 +39,117 @@ describe('dashboards', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Container' }))
     await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'web' }))
     await waitFor(() => expect(calls.filter((c) => c.path.endsWith('/query')).at(-1)?.body).toMatchObject({ vars: { container: ['web'] } }))
+  })
+
+  it('keeps a stat with a value per sensor as short as a chart, and an empty chart says its own no-value text', async () => {
+    const series = (names: string[]) => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, error: null, series: names.map((name, i) => ({ name, points: [[1, 40 + i], [2, 41 + i]] })) }] } })
+    const panel = (key: number, type: string, title: string, defaults = {}) => ({ key, type, title, gridPos: { x: key * 4, y: 0, w: 4, h: 7 }, supported: true, datasources: ['prometheus'], options: { graphMode: 'area' }, fieldConfig: { defaults } })
+    fakeApi(admin, {
+      'GET /api/dashboards/host': () => ({ json: { uid: 'host', title: 'Host', time: { from: 'now-1h', to: 'now' }, panels: [panel(0, 'stat', 'Sensors', { unit: 'celsius' }), panel(1, 'stat', 'Drives'), panel(2, 'timeseries', 'Drives over time', { noValue: 'No NVMe drive' })] } }),
+      'POST /api/dashboards/host/panels/0/query': () => series(Array.from({ length: 20 }, (_, i) => `Core ${i}`)),
+      'POST /api/dashboards/host/panels/1/query': () => series(['nvme0 · Samsung SSD 990 PRO 2TB', 'nvme1 · Samsung SSD 990 PRO 2TB']),
+      'POST /api/dashboards/host/panels/2/query': () => series([]),
+    })
+    renderApp('/admin/dashboards/host')
+
+    // Twenty values, every one of them, without sparklines, in a box that scrolls past a chart's height on a wide screen.
+    const box = await screen.findByRole('region', { name: 'Sensors, every value' })
+    expect(within(box).getAllByLabelText(/^Sensors: Core \d+$/)).toHaveLength(20)
+    expect(box).toHaveClass('lg:max-h-65')
+    expect(box.querySelector('svg')).toBeNull()
+    // Two keep their sparklines and need no box. A name wraps to two lines before it is cut, and is whole on hover.
+    const drives = screen.getByRole('region', { name: 'Drives' })
+    expect(within(drives).queryByRole('region')).toBeNull()
+    expect(drives.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(2)
+    const name = within(drives).getByText('nvme1 · Samsung SSD 990 PRO 2TB')
+    expect(name).toHaveAttribute('title', 'nvme1 · Samsung SSD 990 PRO 2TB')
+    expect(name).toHaveClass('line-clamp-2')
+    expect(name).not.toHaveClass('truncate')
+    expect(await screen.findByText('No NVMe drive')).toBeInTheDocument()
+  })
+
+  it('draws a gauge per GPU small, every one of them, and past two in a box as short as a chart', async () => {
+    const series = (names: string[]) => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, error: null, series: names.map((name, i) => ({ name, points: [[1, 40 + i]] })) }] } })
+    const gauge = (key: number, title: string) => ({ key, type: 'gauge', title, gridPos: { x: key * 4, y: 0, w: 4, h: 5 }, supported: true, datasources: ['prometheus'], fieldConfig: { defaults: { unit: 'celsius' } } })
+    const gpus = (n: number) => Array.from({ length: n }, (_, i) => `GPU ${i} · GeForce RTX 3090`)
+    fakeApi(admin, {
+      'GET /api/dashboards/gpus': () => ({ json: { uid: 'gpus', title: 'GPUs', time: { from: 'now-1h', to: 'now' }, panels: [gauge(0, 'One'), gauge(1, 'Two'), gauge(2, 'Ten')] } }),
+      'POST /api/dashboards/gpus/panels/0/query': () => series(['{uuid="u1"}']),
+      'POST /api/dashboards/gpus/panels/1/query': () => series(gpus(2)),
+      'POST /api/dashboards/gpus/panels/2/query': () => series(gpus(10)),
+    })
+    renderApp('/admin/dashboards/gpus')
+
+    // One GPU: one full-size gauge named by its panel.
+    const one = await screen.findByRole('region', { name: 'One' })
+    expect(await within(one).findByRole('figure', { name: /^One: 40/ })).toHaveClass('max-w-[130px]')
+    // Two: small, side by side where they fit, each named whole on hover, and no box.
+    const two = screen.getByRole('region', { name: 'Two' })
+    expect(within(two).queryByRole('region')).toBeNull()
+    const second = await within(two).findByRole('figure', { name: /^GPU 1 · GeForce RTX 3090: 41/ })
+    expect(second).toHaveClass('max-w-[93px]')
+    expect(within(two).getByText('GPU 1 · GeForce RTX 3090')).toHaveAttribute('title', 'GPU 1 · GeForce RTX 3090')
+    // Ten: every one, in a box that scrolls past a chart's height on a wide screen.
+    const box = await screen.findByRole('region', { name: 'Ten, every value' })
+    expect(box).toHaveClass('lg:max-h-65')
+    expect(within(box).getAllByRole('figure')).toHaveLength(10)
+  })
+
+  it("fits a value to its own cell rather than running past the panel, and sizes a panel's values alike", async () => {
+    const values = (pairs: [string, number][]) => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, error: null, series: pairs.map(([name, v]) => ({ name, points: [[1, v]] })) }] } })
+    const panel = (key: number, type: string, title: string, unit: string) => ({ key, type, title, gridPos: { x: key * 4, y: 0, w: 4, h: 7 }, supported: true, datasources: ['prometheus'], fieldConfig: { defaults: { unit } } })
+    fakeApi(admin, {
+      'GET /api/dashboards/fit': () => ({ json: { uid: 'fit', title: 'Fit', time: { from: 'now-1h', to: 'now' }, panels: [panel(0, 'stat', 'Power', 'watt'), panel(1, 'gauge', 'Heat', 'celsius'), panel(2, 'stat', 'Drives', 'celsius')] } }),
+      'POST /api/dashboards/fit/panels/0/query': () => values([['draw', 35], ['limit', 150]]),
+      'POST /api/dashboards/fit/panels/1/query': () => values([['GPU 0', 52], ['GPU 1', 48.4]]),
+      'POST /api/dashboards/fit/panels/2/query': () => values(Array.from({ length: 6 }, (_, i): [string, number] => [`nvme${i} · WD_BLACK SN850X 1000GB`, 50 + i])),
+    })
+    renderApp('/admin/dashboards/fit')
+
+    // Two values: columns of 7rem only where the cell has that much, else one under the other, never wider than it.
+    // Each value fits its own column (a container), at the size the widest of them needs, up to the usual size.
+    const power = await screen.findByRole('region', { name: 'Power' })
+    const shown = await within(power).findAllByLabelText(/^Power: /)
+    expect(shown.map((v) => v.textContent)).toEqual(['35 W', '150 W'])
+    expect(shown[0]!.closest('.grid.gap-3')).toHaveClass('grid-cols-[repeat(auto-fit,minmax(min(7rem,100%),1fr))]')
+    for (const v of shown) {
+      expect(v.parentElement).toHaveClass('@container')
+      expect(v).toHaveClass('text-[length:min(1.5rem,var(--fit))]', 'xl:text-[length:min(1.75rem,var(--fit))]', 'whitespace-nowrap')
+      expect(v.style.getPropertyValue('--fit')).toBe(`calc(100cqi / ${ems('150 W').toFixed(2)})`)
+    }
+    // Many: the same, in the box that scrolls up and down; nothing in it is wider than the cell, so it never scrolls sideways.
+    const drives = await screen.findByRole('region', { name: 'Drives, every value' })
+    expect(drives.firstElementChild).toHaveClass('grid-cols-[repeat(auto-fit,minmax(min(7rem,100%),1fr))]')
+    expect(within(drives).getAllByLabelText(/^Drives: nvme\d/)).toHaveLength(6)
+
+    // Gauges: each ring is its cell's width up to its full size, and its caption keeps inside the ring's ends
+    // (0.62 of it), every caption of the panel at one size.
+    const heat = screen.getByRole('region', { name: 'Heat' })
+    const figures = await within(heat).findAllByRole('figure')
+    expect(figures[0]!.parentElement!.parentElement).toHaveClass('grid-cols-[repeat(auto-fit,minmax(min(4.5rem,100%),1fr))]')
+    const widest = Math.max(ems(formatValue(52, 'celsius')), ems(formatValue(48.4, 'celsius')))
+    for (const f of figures) {
+      expect(f).toHaveClass('@container', 'w-full', 'aspect-[100/78]')
+      expect(f.querySelector('figcaption')!.style.getPropertyValue('--fit')).toBe(`calc(100cqi * 0.62 / ${widest.toFixed(2)})`)
+    }
+  })
+
+  it('shows a chart as a table from a button that is only its icon in a narrow panel, and keeps a cut title whole on hover', async () => {
+    const title = 'NVMe temperature over time, every drive'
+    fakeApi(admin, {
+      'GET /api/dashboards/drives': () => ({ json: { uid: 'drives', title: 'Drives', time: { from: 'now-1h', to: 'now' }, panels: [{ key: 0, type: 'timeseries', title, gridPos: { x: 0, y: 0, w: 8, h: 8 }, supported: true, datasources: ['prometheus'], fieldConfig: { defaults: { unit: 'celsius' } } }] } }),
+      'POST /api/dashboards/drives/panels/0/query': () => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, error: null, series: [{ name: 'nvme0 · Drive A', points: [[1, 40]] }, { name: 'nvme1 · Drive B', points: [[1, 50]] }] }] } }),
+    })
+    renderApp('/admin/dashboards/drives')
+
+    const panel = await screen.findByRole('region', { name: title })
+    expect(panel).toHaveClass('@container')
+    expect(within(panel).getByText(title)).toHaveAttribute('title', title)
+    const button = await within(panel).findByRole('button', { name: 'Show as table' })
+    expect(within(button).getByText('Show as table')).toHaveClass('hidden', '@sm:inline')
+    await userEvent.click(button)
+    expect(await within(panel).findByText('nvme1 · Drive B')).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Show chart' })).toBeInTheDocument()
   })
 
   it('is for admins only', async () => {

@@ -33,6 +33,23 @@ describe('formatValue (Grafana units)', () => {
     expect(formatValue(0.25, 's')).toBe('250 ms')
     expect(formatValue(null)).toBe('—')
   })
+
+  it('names a reading of the machine in its unit, not as a bare or "billion" number', () => {
+    expect(formatValue(53, 'celsius')).toBe('53 °C')
+    expect(formatValue(49.29, 'celsius')).toBe('49.3 °C')
+    expect(formatValue(59.04, 'celsius', 1)).toBe('59.0 °C')
+    expect(formatValue(35.2, 'watt')).toBe('35 W')
+    expect(formatValue(1500, 'watt')).toBe('1.50 kW')
+    expect(formatValue(2.1e9, 'hertz')).toBe('2.1 GHz')
+    expect(formatValue(9_751_000_000, 'hertz')).toBe('9.75 GHz')
+    expect(formatValue(500e6, 'hertz')).toBe('500 MHz')
+    expect(formatValue(0, 'hertz')).toBe('0 Hz')
+    expect(formatValue(4700, 'rotmhz')).toBe('4.7 GHz')
+    expect(formatValue(450e6, 'Bps')).toBe('450 MB/s')
+    expect(formatValue(-1500, 'Bps')).toBe('-1.5 kB/s')
+    expect(formatValue(12, 'Bps')).toBe('12 B/s')
+    expect(formatValue(100e6, 'Bps', 0)).toBe('100 MB/s')
+  })
 })
 
 describe('support contact', () => {

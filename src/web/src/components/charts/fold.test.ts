@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { formatValue } from '@/lib/format'
-import { alignForStack, foldSeries } from './fold'
+import { alignForStack, foldBy, foldSeries } from './fold'
 
 describe('foldSeries', () => {
   const s = (name: string, v: number) => ({ name, points: [[1000, v], [2000, v]] })
@@ -15,6 +15,21 @@ describe('foldSeries', () => {
     const out = foldSeries(many)
     expect(out.map((x) => x.name)).toEqual(['p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'Other (3)'])
     expect(out[7].points).toEqual([[1000, 6], [2000, 6]]) // p0+p1+p2 = 1+2+3
+  })
+
+  it('averages the rest instead where a sum means nothing, over the series that have each point', () => {
+    const cores = Array.from({ length: 24 }, (_, i) => s(`core ${i}`, 40 + i)) // core 23 hottest
+    const out = foldSeries(cores, 8, 'mean')
+    expect(out.map((x) => x.name)).toEqual(['core 17', 'core 18', 'core 19', 'core 20', 'core 21', 'core 22', 'core 23', 'Other (17, average)'])
+    expect(out[7].points).toEqual([[1000, 48], [2000, 48]]) // 40..56 averaged, not 816 °C
+    const gappy = [...cores.slice(0, 8), { name: 'core 8', points: [[1000, 10]] }]
+    expect(foldSeries(gappy, 8, 'mean')[7].points).toEqual([[1000, 25], [2000, 40]]) // (40+10)/2, then 40 alone
+  })
+
+  it('averages temperatures, shares, clocks and durations, unless they are stacked', () => {
+    for (const unit of ['celsius', 'percent', 'percentunit', 'hertz', 'rotmhz', 's', 'ms']) expect(foldBy(unit)).toBe('mean')
+    for (const unit of ['bytes', 'Bps', 'short', 'none', 'currencyUSD', 'watt', undefined]) expect(foldBy(unit)).toBe('sum')
+    expect(foldBy('percent', true)).toBe('sum')
   })
 })
 

@@ -165,8 +165,9 @@ public static partial class Interpolation
         if (!string.IsNullOrWhiteSpace(format) && format != "__auto")
         {
             // A format that comes out empty (its labels missing) gives way to the default, as in Grafana.
-            var named = LegendRef().Replace(format, m => labels.TryGetValue(m.Groups[1].Value, out var v) ? v : "");
-            if (!string.IsNullOrWhiteSpace(named))
+            // A missing label leaves no space behind: "temp {{gpu}}" on a machine with one GPU is "temp".
+            var named = LegendRef().Replace(format, m => labels.TryGetValue(m.Groups[1].Value, out var v) ? v : "").Trim();
+            if (named.Length > 0)
             {
                 return named;
             }
