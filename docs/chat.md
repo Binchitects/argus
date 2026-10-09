@@ -975,6 +975,8 @@ use and edit one); a new chat takes `assistantId`.
 | "Auto is not available to you" | Auto needs a model for small steps that you may use | choose a model; an admin sets the small model and who may use it (Admin → Models) |
 | An Auto answer says "The model for small steps is not available to you now" | the small model is not yours to use, or cannot load now | nothing: the main model answered. An admin can keep it loaded (Admin → Models) |
 | "… is not loaded right now" | the chat's model is not the one the engine has loaded | choose a loaded model, or ask an admin to load it (Admin → Models) |
+| "… cannot be loaded now: the engine holds all the models it may" (in the chat, or an API call's error) | the engine is full, and the models in it are answering others, or each is kept loaded or used by everyone (the model new chats use, the one for small steps) | choose a model that is loaded, or try again in a few minutes; an admin can raise Models loaded at once (Settings → Model) |
+| "This message was not sent: the safeguards could not read it first" | the safeguards' check could not have its model: the engine stayed full for a minute | send it again in a moment; it is not counted against you |
 | "Waiting for your turn: N answers ahead of you" | the model is serving others; your answer is in line | nothing: it starts on its own. A group with a higher priority goes first (Admin → Groups). An admin can change the limits (Settings → Chat) |
 | "The model has been busy for 10 minutes" | the line did not move for that long | ask again later; tell an admin if it happens often |
 | An API call answers **429** | the key already has as many requests running as it may | wait for one to finish, or retry; an admin sets the limit (API requests at once, per key) |

@@ -222,7 +222,7 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
 
     /// <summary>
     /// Room for <paramref name="model"/>, which the watcher loads again (the model new chats use, unloaded by the engine
-    /// to load one an API key asked for): true when the engine has a place for it, or a model that may make room has
+    /// by its own choice to load another): true when the engine has a place for it, or a model that may make room has
     /// been idle each time it looked over the last <see cref="Quiet"/> and was unloaded.
     /// </summary>
     public async Task<bool> RoomForAsync(string model, CancellationToken ct) => await LookAsync(model, Quiet, ct) is Room.Free or Room.Made;

@@ -70,12 +70,18 @@ would be with them.
   one, then says the engine is full; when every loaded model is one of the
   three, it says so at once, and the chat's menu does not offer the others.
   The app never leaves the choice to the engine, which would unload the model
-  used least recently, whichever it is. An API key's request for such a model
-  does go to the engine, which then unloads the one used least recently: a
-  kept one comes back, and so does the one new chats use, once a model that
-  may make room has been idle for a minute (so an agent pausing between its
-  requests is not pushed out for it). After an admin's **Unload**, it stays
-  unloaded. In the chat such a model reads **Loads when asked**.
+  used least recently, whichever it is. An API key's request (a coding agent,
+  an IDE) gets room the same way: the gateway asks the app before sending it
+  (its guardrail), and the app makes room, or the request waits, or it is
+  refused with the reason. A place made for a model is its own until the
+  engine loads it, so two requests at once for two models take two places.
+  Should the engine still unload a model by its own choice (an admin's
+  **Load** at the limit, or a request let through while the app is down,
+  with the guardrail's `fail_open`), a kept one
+  comes back, and so does the one new chats use, once a model that may make
+  room has been idle for a minute (so an agent pausing between its requests
+  is not pushed out for it). After an admin's **Unload**, it stays unloaded.
+  In the chat such a model reads **Loads when asked**.
   When every place is kept, no other model loads on request, and the chat says
   so. A change of the kept list that flips this restarts llama-server (the kept
   models load again, one after another).
@@ -406,8 +412,11 @@ in a cost centre.
 **The gateway's guardrail.** `config/litellm.yaml` has LiteLLM's generic
 guardrail API call the app (`http://app:8080/internal/guardrail`, with the
 gateway's master key) before each request. The app answers in milliseconds:
-the credit, and the safeguards ([chat.md](chat.md#safeguards)) for API keys; the
-chat's own requests pass at once (the chat checked them). The path is not
+the credit, and the safeguards ([chat.md](chat.md#safeguards)) for API keys,
+then room in the engine for a model that is not loaded (see **Loaded on
+request** above: at the limit, the request may wait up to a minute for an idle
+model to make room, or is refused with the reason); the chat's own requests
+pass at once (the chat checked them, and made room). The path is not
 routed by Traefik: only the gateway, inside the network, reaches it. With
 `unreachable_fallback: fail_closed`, API requests are refused while the app is
 down (a restart); `fail_open` lets them through unchecked instead.

@@ -27,8 +27,10 @@ general_settings:
 
 # Before each request the gateway asks the app (http://app:8080, inside the network):
 # secrets, blocked words, the model's check and personal data (Settings → Safeguards,
-# and each group's own), and the credit, one over the chat and API keys, groups' too.
-# The app answers within milliseconds; the chat's own requests pass at once.
+# and each group's own), and the credit, one over the chat and API keys, groups' too;
+# then room in the engine for a model not loaded, so the engine never unloads the big
+# one for it. The app answers within milliseconds (at the engine's limit, it may wait up
+# to a minute for an idle model to make room); the chat's own requests pass at once.
 # fail_closed: while the app is down (a restart), API requests are refused rather than
 # go unchecked; fail_open lets them through instead.
 guardrails:

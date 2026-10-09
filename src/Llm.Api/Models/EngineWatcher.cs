@@ -9,8 +9,8 @@ namespace Llm.Api.Models;
 /// <summary>
 /// Keeps the engine as admins chose: the models kept loaded loaded (again after
 /// the engine restarts, or after a model loaded on request pushed one out), and
-/// with 2 or more at once the model new chats use too (after an API key's request
-/// for another had the engine unload it); the presets and the gateway in step with
+/// with 2 or more at once the model new chats use too (after the engine unloaded it
+/// by its own choice to load another); the presets and the gateway in step with
 /// the database, and Prometheus scraping whichever models are loaded. Checks every
 /// 10 seconds, every 3 while a model loads. A model that fails to load is tried
 /// again after a minute, then less and less often (not every few seconds); when
@@ -149,8 +149,9 @@ public sealed partial class EngineWatcher : BackgroundService
                     else if (options.Value.ModelsMax >= 2 && usual is { } back && !state.WasDropped(back) && (Status(back) == "unloaded" || state.MayRetry(back))
                         && await route.RoomForAsync(back, stoppingToken))
                     {
-                        // The model new chats use, unloaded by the engine to load another (an API key's request): back, in a
-                        // place left free or made by a model that may make room, idle a minute (never by the engine's own choice).
+                        // The model new chats use, unloaded by the engine to load another (an admin's Load at the limit, a request
+                        // that did not ask the app first): back, in a place left free or made by a model that may make room, idle
+                        // a minute (never by the engine's own choice).
                         LogBack(logger, back);
                         if (Status(back) == "failed")
                         {

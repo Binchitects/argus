@@ -403,7 +403,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
                     description: media
                       ? 'It loads on its own server, beside the chat models. A model not kept loaded unloads again after ten minutes unused.'
                       : full
-                      ? 'The engine is full: the model used least recently unloads to make room (a kept one comes back after). Answers wait until this one is loaded: seconds for a small model, minutes for a large one.'
+                      ? 'The engine is full: the model used least recently unloads to make room (a kept one, or the one new chats use, comes back after). Answers wait until this one is loaded: seconds for a small model, minutes for a large one.'
                       : 'It loads beside the models loaded now. Answers wait until it is loaded: seconds for a small model, minutes for a large one.',
                     confirm: 'Load',
                   })
