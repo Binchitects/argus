@@ -1025,18 +1025,64 @@ sub-agents too, and cap the big model's own tool rounds in research.
   a repository's own commands) and 36 smaller ones; all fixed with tests, each
   fix checked by a second reviewer.
 
-## Next (after v5.2.0)
+## v5.3.0 — People at once, what each prompt cost, and help everywhere (2026-10-10)
 
-1. **Deep research under 6 minutes** *(M)*: the report itself is the cost now
-   (about 400 s of writing at 10 tokens a second); a smaller model for the
-   report's draft, or a faster engine setting, is what is left.
-2. **The new packs in the bucket** *(S, the maintainer)*: the eight built
-   packs, checked against their digests.
-3. **Live against real platforms** *(S each, with access)*: Slack and Teams
-   bots, SAML with a real IdP, Confluence and SharePoint with an instance or a
-   sandbox, Helm on a cluster.
-4. **Code Arena on a real Mac and Windows** *(S, with the machines)*: the
-   terminals (the pty helper, ConPTY) and the launcher file there.
-5. **Laya's routing** *(S)*: it is good at clear categories and weak at
-   routing nuance (an outage with "connection refused to the database" went to
-   frontend); criteria in the questions, or a small fine-tune, to try.
+- **People at once**: proved first with a live load test on v5.2.0: people on
+  a small model waited 84–86 s in line and 2 of 6 of their answers failed to
+  load the model, chat answers waited 84–121 s for a first token while models
+  swapped. Fixed by a line per model, two models at once, room made only by an
+  idle model that is not the big one, and retries of a model that failed.
+- **The token cache, measured**: with four chats taking turns over the
+  engine's slots, today's turns grew 14 → 31 s (the chats overwrote each
+  other's cached history; llama.cpp's RAM cache cannot restore this hybrid
+  model). Each chat now keeps its own slot (`id_slot`, idle slots kept, 4
+  checkpoints a slot: 450 MiB of RAM instead of up to 3.6 GiB): 7–11 s a turn
+  whatever the history.
+- Prices for every model and medium, each prompt's cost for everyone; Argus
+  repositories (one copy whatever the token, search and batch changes,
+  schedules, progress and logs); LDAP test and try; voice per person; API rate
+  limits; deep research as a tool; Admin → Storage; arrow-key history; Code
+  Arena's connection to Argus and Arena MCP, compaction threshold and watched
+  commands; the sign-in eyes; the folding chat list; dashboards named from the
+  machine; a manual and help on every page.
+- Every package was reviewed adversarially and repaired before merging.
+
+## Next (after v5.3.0)
+
+1. **The model that seems stuck, and the gaps between tool calls** *(M)*: an
+   answer that never starts while the UI says the model is not loaded although
+   it is; the waits between a tool's result and the next round. Measure on the
+   live stack with the new per-model line and slot table, then fix.
+2. **A session cache in RAM** *(M)*: when GPU memory is short and several
+   people have long chats, save a chat's slot (llama.cpp's slot save and
+   restore, to RAM) when it leaves its slot and restore it when it returns;
+   size it from the host's free RAM, which is mostly unused today.
+3. **Existing accounts to the directory** *(S)*: switch people already here to
+   LDAP sign-in, keeping their account, email, chats and keys; only the
+   password check moves.
+4. **Every table sorts and filters** *(M)*: one table component across the app
+   and Argus's own.
+5. **The offline installer** *(M)*: one file per release with every image and
+   the deploy files; install, upgrade from v5.2.0 with a backup and automatic
+   rollback, repair, remove, status and verify.
+6. Carried over: the packs in the bucket (the maintainer), real platforms
+   (Slack, Teams, SAML IdP, Confluence, SharePoint, Helm on a cluster), Code
+   Arena's terminals on a real Mac and Windows, Laya's routing quality.
+
+## v5.4 plan (asked 2026-10-06 and 2026-10-09)
+
+- **Code Arena's chats sync with the web chat**, both ways: a session started
+  in Code Arena shows in the person's chat list and can be continued there,
+  and a web chat can be continued in Code Arena (local tools only on the
+  person's machine).
+- **Code Arena does all that Claude Code, Qwen Code, Hermes Agent and a
+  DeepSeek coding harness do**, from a feature-by-feature comparison first.
+- **A local sandbox** for the commands Code Arena runs, so they cannot harm
+  the person's system, and **advanced memory and context management**.
+
+## v5.5 plan (asked 2026-10-07)
+
+- **Argus across 200 repositories that affect each other**: a dependency graph
+  across repositories, symbols resolved across them, impact of a change, and
+  answers about any part of the whole system, measured on a 200-repository
+  test estate.

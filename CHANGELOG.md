@@ -12,6 +12,82 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.3.0 (2026-10-10)
+
+### :rocket: Epics and highlights
+
+- **People at once, and the token cache**: each model has its own line, so
+  people on a small model no longer wait behind the big one; two models are
+  loaded at once by default, and the big model everyone uses is never unloaded
+  for another (API keys' requests get room the same way); each chat keeps its
+  own engine slot (`id_slot`), so a follow-up turn reads only what is new:
+  7–11 s per turn with four people taking turns, where it grew to 31 s.
+  Measured live after the upgrade, four people at once: the one on a small
+  model got a first word in 6 s (was 84–88 s, and 2 of 6 answers failed to
+  load the model), the three on the big one 2–3 s on a follow-up (was 84–121 s)
+- **What each prompt cost**: every model has a price (its own or Settings →
+  Prices, cached input priced apart), pictures, video and speech too; every
+  answer shows its tokens and cost to everyone; Usage lists each prompt, and
+  admins can recalculate past costs recorded at nothing
+- **Argus repositories**: one repository whatever token lists it (the copies
+  an earlier token made are merged on upgrade), search, filters, sorting and
+  batch changes, reindexing on a schedule, and each repository's own progress
+  and a log people can read
+- **Help everywhere**: a manual in the app (Manual, Ctrl K), a **?** on every
+  page with that page's help, in Argus's own app and Code Arena's IDE too
+
+### :sparkles: New features & Enhancements
+
+- **Company directory (LDAP)**: the test goes step by step and says exactly
+  what to fix (the server's message, Active Directory's reasons, a DN with no
+  entry, which password it used); **Try a person's sign-in**; a setup guide and
+  OpenLDAP and Active Directory examples for every field
+- **Voice for each person**: the language they speak, a voice per language
+  from what the speech models offer, the speed and reading aloud in Talk, with
+  **Try it** (Your account → Voice; everyone's defaults in Settings → Speech);
+  API keys' speech without a voice or language uses the key's person's
+- **Rate limits for API keys**: requests and tokens a minute for the company,
+  a group or a person; 429 with Retry-After saying which limit; people see
+  their limits and use on their key card
+- **Deep research is a tool** in Admin → Tools (on/off, who, ask first); the
+  model can start one when allowed; Arena MCP serves it to agents
+- **Admin → Storage**: disks and what takes room (databases, files by person,
+  models, Argus, backups, logs, metrics) with trends and a disk alert; browse,
+  download and delete files (legal hold respected); clean-ups with a preview;
+  per-person storage room
+- **Arrow keys** bring back earlier messages in the chat and in Code Arena (its
+  terminal prompt is now edited in place, with a history per folder)
+- **Code Arena**: Arena MCP and Argus connect in the background and never hang
+  it (Argus answers at once however large GitLab is); the context use and the
+  compaction threshold are shown and set (`--compact-at`, `/context`, the IDE);
+  long commands can run with no time limit, watched until done, stopped only by
+  you
+- **Sign-in**: the Argus logo, then its hundred eyes open across the screen
+  and close again (a still logo when reduced motion is asked for)
+- **The chat list folds**, as a whole and group by group
+- **Dashboards** name drives, CPUs and GPUs from the machine they run on, open
+  on the last hour, and per-core temperature charts keep their rows in line
+
+### :bug: Bugs fixed
+
+- Postgres's health check logged "FATAL: database "arena" does not exist"
+  every ten seconds
+- Costs were 0 for every model but one, cached tokens were never priced, and
+  transcriptions and videos had no cost
+- People on different models waited for each other; a small model could be
+  stopped while loading and then never offered again
+- Changing Argus's GitLab token made a second copy of every repository
+- Coding agents waited up to 42 s (or forever) for Argus with many projects
+- Two drive names from the development machine were written into the
+  dashboards; per-core temperature panels stretched their rows
+
+### :boom: Breaking changes & Deprecations
+
+- Models loaded at once now defaults to 2 (a value an admin saved is kept);
+  the engine restarts once after the upgrade to apply the new presets
+  (`no-cache-idle-slots`, `ctx-checkpoints = 4` for hybrid models)
+- `Chat:EngineSlots` is gone (each model's own slots set its places)
+
 ## v5.2.0 (2026-10-06)
 
 ### :rocket: Epics and highlights
